@@ -66,6 +66,7 @@ struct ContentView: View {
                 }
             }
         }
+        .overlay { GitViewOverlay(gitView: store.gitView, config: store.config.gitView, placement: .window) }
         .overlay { CommandPaletteOverlay(palette: store.palette) }
         .overlay(alignment: .top) {
             ConfigProblemsBanner(store: store, configStore: configStore)
@@ -139,6 +140,12 @@ private struct HeaderBar: View {
             )
             .disabled(!store.canToggleMaximize)
             .accessibilityIdentifier("toggle-maximize")
+            TitlebarButton(
+                systemName: "arrow.triangle.branch",
+                help: help(store.gitView.isOpen ? "Hide Git View" : "Show Git View", .toggleGitView),
+                isOn: store.gitView.isOpen,
+                action: store.gitView.toggle
+            )
             TitlebarButton(
                 systemName: "sidebar.left",
                 help: help(store.sidebarShown ? "Hide Sidebar" : "Show Sidebar", .toggleSidebar),
@@ -281,6 +288,7 @@ private struct TerminalArea: View {
                 .background(Color(nsColor: .windowBackgroundColor))
                 .accessibilityIdentifier("empty-no-topic")
             }
+            GitViewOverlay(gitView: store.gitView, config: store.config.gitView, placement: .terminal)
         }
     }
 

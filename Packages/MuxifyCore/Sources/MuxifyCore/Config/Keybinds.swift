@@ -33,6 +33,7 @@ public enum ConfigAction: String, KeybindAction {
     case toggleSidebar = "toggle_sidebar"
     case toggleTerminal = "toggle_terminal"
     case toggleBrowser = "toggle_browser"
+    case toggleGitView = "toggle_git_view"
     case toggleMaximize = "toggle_maximize"
     case toggleMaximizeTerminal = "toggle_maximize_terminal"
     case toggleMaximizeBrowser = "toggle_maximize_browser"
@@ -95,6 +96,7 @@ public enum ConfigAction: String, KeybindAction {
         .toggleSidebar: ["cmd+s", "ctrl+cmd+s"],
         .toggleTerminal: ["cmd+j"],
         .toggleBrowser: ["cmd+b"],
+        .toggleGitView: ["cmd+g"],
         .toggleMaximize: ["shift+cmd+enter"],
         .toggleMaximizeTerminal: ["alt+cmd+j"],
         .toggleMaximizeBrowser: ["alt+cmd+b"],

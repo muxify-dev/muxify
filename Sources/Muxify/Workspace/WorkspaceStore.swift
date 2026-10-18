@@ -866,6 +866,8 @@ final class WorkspaceStore {
             rememberSelection()
             recordVisit()
             updateTopicSelection()
+            // The Git View belongs to the Window it opened on.
+            if gitView.isOpen, gitView.windowID != selectedWindowID { gitView.close() }
         }
     }
     private(set) var surface: TerminalSurfaceView?
@@ -886,6 +888,7 @@ final class WorkspaceStore {
     /// From the last look at `sessions.paths` on the Environment's machine.
     let palette = CommandPalette()
     let hintHold = HintHold()
+    let gitView = GitView()
     var isRemote: Bool { activeEnvironment != nil }
     var environmentName: String { activeEnvironment?.name ?? "Local" }
     /// The Ghostty theme's colors; the header and sidebar follow them.
@@ -1003,6 +1006,7 @@ final class WorkspaceStore {
         self.configStore = configStore
         activeEnvironment = environment
         palette.store = self
+        gitView.store = self
         // Browser state used to be kept here, keyed by window id; it now lives
         // on the tmux Windows (ADR 0003).
         UserDefaults.standard.removeObject(forKey: "browserURLs")
@@ -1164,6 +1168,7 @@ final class WorkspaceStore {
         generation = UUID()
         timer?.invalidate()
         timer = nil
+        gitView.close(restoringFocus: false)
         reconnectWork?.cancel()
         reconnectWork = nil
         persistWork.values.forEach { $0.cancel() }
@@ -1686,7 +1691,7 @@ final class WorkspaceStore {
 
     /// The current Window's Browser has Focus (its page or omnibox).
     var browserHasFocus: Bool {
-        !terminalHasFocus && panelLayout.shows(.browser)
+        !terminalHasFocus && !gitView.hasKeyFocus && panelLayout.shows(.browser)
     }
 
     private var focusedSide: PanelLayout.Side { browserHasFocus ? .browser : .terminal }
@@ -1877,6 +1882,22 @@ final class WorkspaceStore {
         }
     }
 
+    // MARK: - Git View
+
+    /// Runs a Git View script on the Environment's machine, like the
+    /// Session Paths scan.
+    func runGitScript(_ script: String, arguments: [String], completion: @escaping (Result<String, Error>) -> Void) {
+        guard let connection, !isTransitioning, !isRemote || isConnected else {
+            completion(.failure(GitViewError(message: "Not connected to \(environmentName).")))
+            return
+        }
+        let current = generation
+        connection.runScriptAsync(script, arguments: arguments, timeout: 30) { [weak self] result in
+            guard let self, self.generation == current else { return }
+            completion(result)
+        }
+    }
+
     // MARK: - Browser
 
     /// What the current Window shows of its Terminal and Browser.
@@ -1976,7 +1997,7 @@ final class WorkspaceStore {
     /// outside the terminal, where Ghostty/tmux bindings own the keys;
     /// clicking the menu item always works.
     func browserCommand(opensBrowser: Bool = false, _ body: (Browser) -> Void) {
-        if NSApp.currentEvent?.type == .keyDown, terminalHasFocus { return }
+        if NSApp.currentEvent?.type == .keyDown, terminalHasFocus || gitView.hasKeyFocus { return }
         if NSApp.currentEvent?.type == .keyDown, !opensBrowser, !panelLayout.shows(.browser) { return }
         guard let browser = currentBrowser else { return }
         if opensBrowser, !browser.layout.shows(.browser) { commitMaximize() }
@@ -2105,6 +2126,7 @@ final class WorkspaceStore {
         case .toggleSidebar: toggleSidebar()
         case .toggleTerminal: toggle(.terminal)
         case .toggleBrowser: toggle(.browser)
+        case .toggleGitView: gitView.toggle()
         case .toggleMaximize: toggleMaximize()
         case .toggleMaximizeTerminal: toggleMaximize(.terminal)
         case .toggleMaximizeBrowser: toggleMaximize(.browser)
@@ -2138,11 +2160,14 @@ final class WorkspaceStore {
     @discardableResult
     func performConfiguredShortcut(_ trigger: KeyTrigger) -> Bool {
         guard !isShuttingDown, let action = config.keybinds.action(for: trigger) else { return false }
+        // ⌘G, the Git View's, is Find Next while the Browser is finding.
+        if trigger == Self.findNext, browserHasFocus, currentBrowser?.activeTab?.isFindShown == true { return false }
         perform(action)
         return true
     }
 
     private static let closeTab = KeyTrigger(modifiers: .command, key: .character("w"))
+    private static let findNext = KeyTrigger(modifiers: .command, key: .character("g"))
 
     func handleKeyEvent(_ event: NSEvent) -> NSEvent? {
         guard !isShuttingDown, let window = terminalHost.window, event.window === window else { return event }
@@ -2158,6 +2183,7 @@ final class WorkspaceStore {
         receiveHintInput(.keyDown(event.keyCode))
         if let trigger = KeyTrigger(event) {
             if palette.handle(trigger, in: event) { return nil }
+            if gitView.handle(trigger, in: event) { return nil }
             let config = self.config
             if let target = config.commandPalettes.first(where: { $0.triggers.contains(trigger) }) {
                 palette.toggle(target)

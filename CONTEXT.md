@@ -257,6 +257,12 @@ _Avoid_: provider, category, section
 A palette step that collects Topics and Tags as chips in the search field, one pick at a time, before an Action on all the Topics they name. A Tag chip names every Topic that has the Tag. Snooze Topics starts with it.
 _Avoid_: choose rows, mark, multi-select, selection
 
+### Git
+
+**Git View**:
+A read-only view of the repository in the current Window's folder: its changed files, history and stashes in panels, with the selected one's diff and, for a commit or stash, its files. It opens as a popup over the App Window or in the terminal's place.
+_Avoid_: lazygit (when you mean ours), git panel, diff viewer
+
 ### Configuration
 
 **Config**:

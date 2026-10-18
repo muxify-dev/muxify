@@ -129,6 +129,8 @@ public struct Config: Equatable {
     public var commandPalettes = CommandPaletteConfig.defaults
     /// Typography of the Sidebar's Sessions and Agents, not the terminal.
     public var sidebarTypography = SidebarTypography()
+    /// How the Git View opens.
+    public var gitView = GitViewConfig()
     /// The Ghostty config file the terminal loads on top of Ghostty's
     /// default files, as an absolute path.
     public var ghosttyConfigFile: String?
@@ -193,6 +195,16 @@ public struct Config: Equatable {
         #     font_size: 12
         #     # system, or an installed macOS font family (case-insensitive).
         #     font_family: system
+        #
+        # git_view:
+        #   # The Git View (toggle_git_view, cmd+g) shows the current Window's
+        #   # repository: popup over the App Window, or fullscreen in the
+        #   # terminal's place.
+        #   display: popup
+        #   # The popup's share of the App Window, like tmux's
+        #   # display-popup -w 80% -h 80%: from 10% to 100%.
+        #   width: 80%
+        #   height: 80%
         #
         # sessions:
         #   # Folders where you open Sessions. A path may be a glob, and each
@@ -443,6 +455,7 @@ private struct ConfigReader {
         "ui": { $0.readUI($1) },
         "keybindings": { $0.readKeybindings($1) },
         "command_palettes": { $0.readCommandPalettes($1) },
+        "git_view": { $0.readGitView($1) },
         "sessions": { $0.readSessions($1) },
         "remote_environments": { $0.readRemoteEnvironments($1) },
     ]
@@ -649,6 +662,27 @@ private struct ConfigReader {
             case "done_enabled": config.notifications.doneEnabled = enabled
             case "failed_enabled": config.notifications.failedEnabled = enabled
             default: config.notifications.blockedEnabled = enabled
+            }
+        }
+    }
+
+    mutating func readGitView(_ node: Node) {
+        for (name, key, value) in entries(of: node, "git_view") {
+            switch name {
+            case "display":
+                guard let display = string(value).flatMap({ GitViewConfig.Display(rawValue: $0.trimmingCharacters(in: .whitespaces).lowercased()) }) else {
+                    problem(at: value, "git_view.display: expected popup or fullscreen")
+                    continue
+                }
+                config.gitView.display = display
+            case "width", "height":
+                guard let share = string(value).flatMap(GitViewConfig.share) else {
+                    problem(at: value, "git_view.\(name): expected a percentage from 10% to 100%")
+                    continue
+                }
+                if name == "width" { config.gitView.width = share } else { config.gitView.height = share }
+            default:
+                problem(at: key, "unknown key \"git_view.\(name)\"")
             }
         }
     }

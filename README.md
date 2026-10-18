@@ -31,7 +31,8 @@ muxify browser open localhost:3000
 muxify session open "my project"
 ```
 
-⌘B toggles the Browser; ⌘N opens another Local App Window.
+⌘B toggles the Browser; ⌘G shows the current Window's repository in the
+[Git View](docs/configuration.md#git-view); ⌘N opens another Local App Window.
 
 ## Projects and Worktrees
 

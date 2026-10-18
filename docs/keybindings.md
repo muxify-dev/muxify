@@ -27,6 +27,7 @@ address bar has Focus. All available `keybindings` actions are listed below.
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
 | `toggle_terminal` | ⌘J | Show or hide the current Window's Terminal. It does nothing while the Terminal is the only side shown |
 | `toggle_browser` | ⌘B | Show or hide the current Window's Browser. It does nothing while the Browser is the only side shown |
+| `toggle_git_view` | ⌘G | Show or hide the [Git View](configuration.md#git-view) of the current Window's repository. While the Browser has Focus with Find in Page open, ⌘G is Find Next |
 | `toggle_maximize` | ⇧⌘↩ | Maximize the side that has Focus: show it alone and hide the Sidebar. While the Window is Maximized, Restore it |
 | `toggle_maximize_terminal` | ⌥⌘J | Maximize the Terminal and move Focus to it. While the Terminal is Maximized, Restore the Window |
 | `toggle_maximize_browser` | ⌥⌘B | Maximize the Browser and move Focus to it, also when the Browser is hidden. While the Browser is Maximized, Restore the Window |
@@ -172,6 +173,7 @@ keybindings:
   toggle_sidebar: [cmd+s, ctrl+cmd+s]
   toggle_terminal: cmd+j
   toggle_browser: cmd+b
+  toggle_git_view: cmd+g
   toggle_maximize: shift+cmd+enter
   toggle_maximize_terminal: alt+cmd+j
   toggle_maximize_browser: alt+cmd+b
@@ -195,6 +197,7 @@ keybindings:
   select_tab_7: alt+7
   select_tab_8: alt+8
   select_tab_9: alt+9
+
   select_window_1: cmd+1
   select_window_2: cmd+2
   select_window_3: cmd+3
@@ -339,6 +342,41 @@ under `command_palette` shows a problem that names the new action.
 ⎋ and ⌘1–⌘5 (the Source buttons) are not configurable. With no results, ⌘C
 copies the search text.
 
+## Git View keys
+
+While the [Git View](configuration.md#git-view) has focus, it uses keys like
+lazygit's. They are not configurable, and keys it doesn't use, such as ⌘B or ⌘1,
+go on to the actions above.
+
+| Keys | What they do |
+| --- | --- |
+| 2, 4, 5 | Go to Changes, History or Stashes |
+| 1 | Show what the branch you're on changes, with its Diff files |
+| 3 | Open the branch menu; j / k or ↓ / ↑ and ↩ pick a branch to compare |
+| Tab / ⇧Tab | Next or previous panel, as in lazygit; empty ones are skipped |
+| j / k, ↓ / ↑ | Select the next or previous item; in the diff, the next or previous line |
+| < / > | First or last item; in the diff, the first or last line |
+| ↩ | On a folder, fold or open it; on a commit or stash, go into its Diff files; otherwise go to the diff |
+| Space | Fold or open a folder |
+| - / = | Fold or open every folder of the panel |
+| l / h, → / ← | Go to the diff, or back to the list; from Diff files, back to the commit or stash |
+| ⇧↓ / ⇧↑ | Select one more line below or above |
+| v | Start or end a range: moving then selects lines, as in lazygit |
+| a | Select the hunk |
+| y, ⌘C | Copy the selected lines' code, without + and −; in the list, the path, hash or branch |
+| J / K, ⌃D / ⌃U | Scroll the diff by three lines, or half a page |
+| ⌥↓ / ⌥↑ | Next or previous hunk |
+| ] / [ | Next or previous file: the next file in Changes or Diff files, or the next file of a commit, branch or stash |
+| / | Filter; ↓ / ↑ move through the matches, ↩ or ⎋ go back to the list |
+| R | Read the repository again |
+| ⎋ | Clear the selected range, leave the diff, leave Diff files, clear the filter, then close the Git View |
+| q | Close the Git View |
+
+Clicking selects an item, and a folder's chevron folds it. In the diff, a click
+selects a line, shift-click extends the selection and dragging selects lines; in
+a split diff, on the side you click. A commit's hash chip copies the full hash.
+
+## Built-in shortcuts
 ## Built-in shortcuts
 
 These shortcuts are not configurable as actions in Muxify's `keybindings`

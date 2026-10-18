@@ -1,0 +1,552 @@
+import Foundation
+import MuxifyCore
+
+/// What the Git View lists of a repository (CONTEXT.md): its status, changed
+/// files, local branches, commits and stashes.
+struct GitSnapshot: Equatable {
+    /// The worktree's top folder.
+    var root: String
+    var repositoryName: String
+    /// The folder of a linked worktree, when it isn't the repository's own.
+    var worktreeName: String?
+    /// The current branch, or the short commit of a detached HEAD.
+    var head: String
+    var isDetached = false
+    var upstream: String?
+    var ahead = 0
+    var behind = 0
+    /// The changed files, as `git status` lists them.
+    var changes: [GitChange] = []
+    /// What the toolbar's ↑/↓ count against: the upstream, else main.
+    var comparison: GitComparison?
+    var branches: [GitBranch] = []
+    var commits: [GitCommit] = []
+    /// The History graph, a row per commit.
+    var graph: [GitGraphRow] = []
+    var stashes: [GitStash] = []
+    /// `main` or `master`: what the current branch is compared with.
+    var mainBranch: String?
+}
+
+/// A changed file, from `git status`: the index's letter (staged) and the
+/// worktree's (unstaged), as lazygit shows them, and its line counts.
+struct GitChange: Equatable, Identifiable {
+    /// The diffs of a change, in the order the diff pane shows them:
+    /// unstaged first, as in lazygit.
+    enum Group: String, CaseIterable {
+        case unstaged, staged, untracked
+
+        var title: String { rawValue.capitalized }
+    }
+
+    /// `M`, `A`, `D`, `R`, `C`, `T`, `U` for a conflict, `?` when
+    /// untracked, or a space for no change.
+    let index: Character
+    let worktree: Character
+    let path: String
+    /// Where a renamed or copied file came from.
+    var originalPath: String?
+    /// Lines added and removed, staged and unstaged together; an untracked
+    /// file's line count. Nil for a binary file.
+    var additions: Int?
+    var deletions: Int?
+
+    var id: String { path }
+    var name: String { (path as NSString).lastPathComponent }
+    /// `MM`, `A `, `??`, as `git status --short` writes it.
+    var status: String { "\(index)\(worktree)" }
+    var isUntracked: Bool { index == "?" }
+    /// `UU`, `AA`, `DD`, or a `U` on one side.
+    var isConflict: Bool { index == "U" || worktree == "U" || (index == worktree && (index == "A" || index == "D")) }
+
+    var groups: [Group] {
+        if isUntracked { return [.untracked] }
+        if isConflict { return [.unstaged] }
+        return (worktree != " " ? [.unstaged] : []) + (index != " " ? [.staged] : [])
+    }
+
+    /// Nothing left to stage: lazygit shows it green, the rest red.
+    var isStaged: Bool { groups == [.staged] }
+}
+
+/// The current branch against its upstream, or against main without one.
+struct GitComparison: Equatable {
+    let base: String
+    let ahead: Int
+    let behind: Int
+}
+
+struct GitBranch: Equatable, Identifiable {
+    let name: String
+    let isHead: Bool
+    let upstream: String?
+    /// `ahead 1, behind 2`, `gone`, or empty when in sync.
+    let track: String
+    let date: Date?
+    /// Where the branch is checked out, if anywhere.
+    let worktreePath: String?
+    /// Commits the branch has that the current one doesn't, and the other
+    /// way round.
+    var ahead = 0
+    var behind = 0
+
+    var id: String { name }
+    var isInSync: Bool { upstream != nil && track.isEmpty }
+}
+
+struct GitCommit: Equatable, Identifiable {
+    /// Like lazygit: red until pushed, yellow until in the main branch, then green.
+    enum Status: Equatable { case unpushed, pushed, merged }
+
+    let sha: String
+    let author: String
+    let date: Date
+    let tags: [String]
+    /// The branches at it: local, like `master`, and remote, like
+    /// `origin/master`.
+    var refs: [String] = []
+    var remotes: [String] = []
+    var parents: [String] = []
+    let subject: String
+    var status = Status.merged
+
+    var id: String { sha }
+    var shortSHA: String { String(sha.prefix(8)) }
+    var isMerge: Bool { parents.count > 1 }
+
+    /// `Yauhen Karatkou` → `YK`.
+    var initials: String {
+        let words = author.split(whereSeparator: { $0 == " " || $0 == "-" || $0 == "." })
+        let letters = words.count > 1 ? words.prefix(2).compactMap(\.first) : Array(author.prefix(2))
+        return String(letters).uppercased()
+    }
+}
+
+/// What the diff pane's header card says about a commit.
+struct GitCommitDetail: Equatable {
+    let sha: String
+    let parents: [String]
+    let author: String
+    let email: String
+    let date: Date
+    let title: String
+    let body: String
+}
+
+struct GitStash: Equatable, Identifiable {
+    /// `stash@{0}`.
+    let ref: String
+    let sha: String
+    let date: Date
+    let message: String
+
+    var id: String { sha }
+}
+
+/// The git commands of the Git View, as /bin/sh scripts that run on the
+/// Environment's machine, like Session Paths (ADR 0009).
+enum GitRepository {
+    /// How many commits the Commits panel lists.
+    static let commitLimit = 300
+
+    /// Takes the folder. Prints sections, each a line `\x1E<name>` and then
+    /// its output; only `error` when the folder isn't in a repository.
+    static let snapshotScript = """
+    section() { printf '\\036%s\\n' "$1"; }
+    cd "$1" 2>/dev/null || { section error; printf 'No such folder: %s\\n' "$1"; exit 0; }
+    top=$(git rev-parse --show-toplevel 2>/dev/null) || { section error; printf 'Not a git repository: %s\\n' "$1"; exit 0; }
+    cd "$top" || exit 1
+    # Physical, like the common directory below, so a symlink isn't a worktree.
+    top=$(pwd -P)
+    export GIT_OPTIONAL_LOCKS=0
+    g() { git -c core.quotepath=off -c color.ui=never "$@"; }
+    section root; printf '%s\\n' "$top"
+    section common; (cd "$(g rev-parse --git-common-dir)" && pwd -P)
+    section head; g symbolic-ref -q --short HEAD || { printf 'detached '; g rev-parse -q --short HEAD; }
+    section status; g status --porcelain=v1 --branch -z --untracked-files=all
+    section unstaged; g diff --numstat -z --no-color --no-ext-diff 2>/dev/null
+    section staged; g diff --cached --numstat -z -M --no-color --no-ext-diff 2>/dev/null
+    section untracked; g ls-files -z --others --exclude-standard | xargs -0 wc -l 2>/dev/null
+    section branches
+    g for-each-ref --sort=-committerdate \\
+        --format='%(HEAD)%00%(refname:short)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:unix)%00%(worktreepath)' refs/heads
+    section commits
+    g log -n \(commitLimit) --topo-order --decorate=full --no-color --format='%H%x00%an%x00%at%x00%D%x00%P%x00%s' HEAD -- 2>/dev/null
+    section unpushed
+    if g rev-parse -q --verify '@{upstream}' >/dev/null 2>&1; then
+        g rev-list -n \(commitLimit) HEAD --not '@{upstream}' --
+    else
+        printf 'none\\n'
+    fi
+    main=
+    refs=
+    for name in main master; do
+        if [ -z "$main" ] && g show-ref -q --verify "refs/heads/$name"; then main=$name; fi
+    done
+    for ref in refs/remotes/origin/main refs/remotes/origin/master refs/heads/main refs/heads/master; do
+        if g show-ref -q --verify "$ref"; then refs="$refs $ref"; fi
+    done
+    section main; printf '%s\\n' "$main"
+    section comparison
+    if g rev-parse -q --verify '@{upstream}' >/dev/null 2>&1; then
+        printf '%s ' "$(g rev-parse --abbrev-ref '@{upstream}')"; g rev-list --left-right --count 'HEAD...@{upstream}' --
+    elif [ -n "$main" ] && [ "$main" != "$(g symbolic-ref -q --short HEAD)" ]; then
+        printf '%s ' "$main"; g rev-list --left-right --count "HEAD...$main" -- 2>/dev/null
+    fi
+    # Each branch against HEAD; git before 2.41 has no ahead-behind atom.
+    section divergence
+    g for-each-ref --format='%(refname:short) %(ahead-behind:HEAD)' refs/heads 2>/dev/null ||
+        for branch in $(g for-each-ref --format='%(refname:short)' refs/heads); do
+            printf '%s ' "$branch"; g rev-list --left-right --count "$branch...HEAD" -- 2>/dev/null || printf '\\n'
+        done
+    section unmerged
+    if [ -n "$refs" ]; then g rev-list -n \(commitLimit) HEAD --not $refs -- 2>/dev/null; else printf 'none\\n'; fi
+    section stashes; g stash list --no-color --format='%gd%x00%H%x00%ct%x00%gs' 2>/dev/null
+    exit 0
+    """
+
+    /// Takes the folder, then git's arguments.
+    static let gitScript = """
+    cd "$1" || exit 1
+    shift
+    export GIT_OPTIONAL_LOCKS=0
+    exec git -c core.quotepath=off -c color.ui=never -c diff.mnemonicPrefix=false -c diff.noprefix=false "$@"
+    """
+
+    /// Takes the folder, a file or folder of the worktree, the path a file
+    /// was renamed from, lines of context, and the groups to show, e.g.
+    /// `unstaged staged`. Prints each group's patch after a line
+    /// `\n\x1E<group>`.
+    static let changeScript = """
+    cd "$1" || exit 1
+    path=$2 from=$3 context=${4:-3} groups=$5
+    export GIT_OPTIONAL_LOCKS=0
+    set -- -c core.quotepath=off -c color.ui=never -c diff.mnemonicPrefix=false -c diff.noprefix=false \\
+        diff --no-color --no-ext-diff -U"$context"
+    for group in $groups; do
+        printf '\\n\\036%s\\n' "$group"
+        case $group in
+            unstaged) git "$@" -- "$path" ;;
+            staged) if [ -n "$from" ]; then git "$@" --cached -M -- "$from" "$path"; else git "$@" --cached -M -- "$path"; fi ;;
+            untracked) git ls-files -z --others --exclude-standard -- "$path" | xargs -0 -r -n 1 git "$@" --no-index -- /dev/null ;;
+        esac
+    done
+    exit 0
+    """
+
+    /// Takes the folder and a commit. Prints its fields, `\x1F`, then its
+    /// patch; a merge's against its first parent.
+    static let commitScript = """
+    cd "$1" || exit 1
+    export GIT_OPTIONAL_LOCKS=0
+    exec git -c core.quotepath=off -c color.ui=never -c diff.mnemonicPrefix=false -c diff.noprefix=false \\
+        show --no-color --no-ext-diff -M -m --first-parent --format='%H%x00%P%x00%an%x00%ae%x00%at%x00%B%x1F' "$2" --
+    """
+
+    /// Takes the folder, the base and the branch. Prints the commits the
+    /// branch has that the base doesn't, `\x1F`, then the changes since
+    /// the branch left the base.
+    static let branchScript = """
+    cd "$1" || exit 1
+    base=$2 branch=$3
+    export GIT_OPTIONAL_LOCKS=0
+    g() { git -c core.quotepath=off -c color.ui=never -c diff.mnemonicPrefix=false -c diff.noprefix=false "$@"; }
+    g log --no-color --format='%H%x00%an%x00%at%x00%s' -n 50 "$base..$branch" --
+    printf '\\037\\n'
+    g diff --no-color --no-ext-diff -M "$base...$branch" --
+    """
+
+    // MARK: Parsing
+
+    /// The snapshot, or what the Git View says instead of one.
+    static func parseSnapshot(_ output: String) -> Result<GitSnapshot, GitViewError> {
+        var sections: [String: String] = [:]
+        for chunk in output.components(separatedBy: "\u{1E}").dropFirst() {
+            let parts = chunk.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            sections[String(parts[0])] = parts.count > 1 ? String(parts[1]) : ""
+        }
+        if let error = sections["error"] {
+            return .failure(GitViewError(message: error.trimmingCharacters(in: .whitespacesAndNewlines)))
+        }
+        guard let root = sections["root"].map(trimmed), !root.isEmpty else {
+            return .failure(GitViewError(message: "Could not read the repository."))
+        }
+        let common = trimmed(sections["common"] ?? "")
+        let headLine = trimmed(sections["head"] ?? "")
+        let isDetached = headLine.hasPrefix("detached ")
+        var snapshot = GitSnapshot(
+            root: root,
+            repositoryName: repositoryName(root: root, commonDirectory: common),
+            worktreeName: worktreeName(root: root, commonDirectory: common),
+            head: isDetached ? String(headLine.dropFirst("detached ".count)) : headLine,
+            isDetached: isDetached
+        )
+        let status = parseStatus(sections["status"] ?? "")
+        snapshot.changes = counted(status.changes, staged: parseNumstat(sections["staged"] ?? ""),
+                                   unstaged: parseNumstat(sections["unstaged"] ?? ""),
+                                   untracked: parseLineCounts(sections["untracked"] ?? ""))
+        snapshot.upstream = status.upstream
+        snapshot.ahead = status.ahead
+        snapshot.behind = status.behind
+        // The current branch first, as lazygit lists it.
+        let divergence = parseDivergence(sections["divergence"] ?? "")
+        let branches = parseBranches(sections["branches"] ?? "").map { branch in
+            var branch = branch
+            (branch.ahead, branch.behind) = divergence[branch.name] ?? (0, 0)
+            return branch
+        }
+        snapshot.branches = branches.filter(\.isHead) + branches.filter { !$0.isHead }
+        snapshot.comparison = parseComparison(sections["comparison"] ?? "")
+        let main = trimmed(sections["main"] ?? "")
+        snapshot.mainBranch = main.isEmpty ? nil : main
+        snapshot.commits = parseCommits(sections["commits"] ?? "",
+                                        unpushed: shaSet(sections["unpushed"]),
+                                        unmerged: shaSet(sections["unmerged"]))
+        snapshot.graph = GitGraphRow.layout(snapshot.commits)
+        snapshot.stashes = parseStashes(sections["stashes"] ?? "")
+        return .success(snapshot)
+    }
+
+    /// `git status --porcelain=v1 --branch -z`.
+    static func parseStatus(_ output: String) -> (changes: [GitChange], upstream: String?, ahead: Int, behind: Int) {
+        var fields = output.components(separatedBy: "\0")[...]
+        var upstream: String?
+        var ahead = 0
+        var behind = 0
+        if let first = fields.first, first.hasPrefix("## ") {
+            fields = fields.dropFirst()
+            let line = first.dropFirst(3)
+            let names = line.split(separator: " ", maxSplits: 1).first ?? ""
+            if let range = names.range(of: "...") { upstream = String(names[range.upperBound...]) }
+            if let open = line.firstIndex(of: "["), let close = line.lastIndex(of: "]"), open < close {
+                for part in line[line.index(after: open)..<close].split(separator: ",") {
+                    let words = part.split(separator: " ")
+                    guard words.count == 2, let count = Int(words[1]) else { continue }
+                    if words[0] == "ahead" { ahead = count } else if words[0] == "behind" { behind = count }
+                }
+            }
+        }
+        var changes: [GitChange] = []
+        while let field = fields.popFirst() {
+            let characters = Array(field)
+            guard characters.count > 3 else { continue }
+            var change = GitChange(index: characters[0], worktree: characters[1], path: String(characters[3...]))
+            if "RC".contains(change.index) || "RC".contains(change.worktree) { change.originalPath = fields.popFirst() }
+            changes.append(change)
+        }
+        return (changes, upstream, ahead, behind)
+    }
+
+    /// The changes with their line counts: staged and unstaged added up,
+    /// nil when a side is binary.
+    static func counted(_ changes: [GitChange], staged: [String: (Int?, Int?)], unstaged: [String: (Int?, Int?)],
+                        untracked: [String: Int]) -> [GitChange] {
+        changes.map { change in
+            var change = change
+            if change.isUntracked {
+                change.additions = untracked[change.path]
+                change.deletions = 0
+                return change
+            }
+            let counts = change.groups.compactMap { ($0 == .staged ? staged : unstaged)[change.path] }
+            guard !counts.contains(where: { $0.0 == nil || $0.1 == nil }) else { return change }
+            change.additions = counts.reduce(0) { $0 + ($1.0 ?? 0) }
+            change.deletions = counts.reduce(0) { $0 + ($1.1 ?? 0) }
+            return change
+        }
+    }
+
+    /// `changeScript`'s output: each group's patch.
+    static func parseParts(_ output: String) -> [(group: GitChange.Group, patch: String)] {
+        output.components(separatedBy: "\n\u{1E}").dropFirst().compactMap { chunk in
+            let parts = chunk.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            guard let group = GitChange.Group(rawValue: String(parts[0])) else { return nil }
+            return (group, parts.count > 1 ? String(parts[1]) : "")
+        }
+    }
+
+    /// `git diff --numstat -z`: lines added and removed by path; nil for
+    /// a binary file's `-`.
+    static func parseNumstat(_ output: String) -> [String: (Int?, Int?)] {
+        var fields = output.components(separatedBy: "\0")[...]
+        var counts: [String: (Int?, Int?)] = [:]
+        while let field = fields.popFirst() {
+            let parts = field.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false)
+            guard parts.count == 3 else { continue }
+            var path = String(parts[2])
+            // A rename: the old path and the new one follow.
+            if path.isEmpty {
+                _ = fields.popFirst()
+                path = fields.popFirst() ?? ""
+            }
+            counts[path] = (Int(parts[0]), Int(parts[1]))
+        }
+        return counts
+    }
+
+    /// `wc -l` of the untracked files.
+    static func parseLineCounts(_ output: String) -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for line in output.split(separator: "\n") {
+            let parts = line.drop { $0 == " " }.split(separator: " ", maxSplits: 1)
+            guard parts.count == 2, let count = Int(parts[0]), parts[1] != "total" else { continue }
+            counts[String(parts[1])] = count
+        }
+        return counts
+    }
+
+    /// `master 2 14`: ahead and behind HEAD, by branch.
+    static func parseDivergence(_ output: String) -> [String: (Int, Int)] {
+        var counts: [String: (Int, Int)] = [:]
+        for line in output.split(separator: "\n") {
+            let words = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
+            guard words.count == 3, let ahead = Int(words[1]), let behind = Int(words[2]) else { continue }
+            counts[String(words[0])] = (ahead, behind)
+        }
+        return counts
+    }
+
+    static func parseComparison(_ output: String) -> GitComparison? {
+        let words = output.split(whereSeparator: { $0 == " " || $0 == "\t" || $0 == "\n" })
+        guard words.count == 3, let ahead = Int(words[1]), let behind = Int(words[2]) else { return nil }
+        return GitComparison(base: String(words[0]), ahead: ahead, behind: behind)
+    }
+
+    static func parseBranches(_ output: String) -> [GitBranch] {
+        output.split(separator: "\n").compactMap { line in
+            let fields = line.components(separatedBy: "\0")
+            guard fields.count >= 6, !fields[1].isEmpty else { return nil }
+            return GitBranch(
+                name: fields[1], isHead: fields[0] == "*",
+                upstream: fields[2].isEmpty ? nil : fields[2], track: fields[3],
+                date: TimeInterval(fields[4]).map(Date.init(timeIntervalSince1970:)),
+                worktreePath: fields[5].isEmpty ? nil : fields[5]
+            )
+        }
+    }
+
+    /// `unpushed` and `unmerged` are nil when there is no upstream or no
+    /// main branch to compare with.
+    static func parseCommits(_ output: String, unpushed: Set<String>?, unmerged: Set<String>?) -> [GitCommit] {
+        output.split(separator: "\n").compactMap { line in
+            let fields = line.components(separatedBy: "\0")
+            guard fields.count >= 6, fields[0].count >= 7 else { return nil }
+            let sha = fields[0]
+            let refs = decorations(fields[3])
+            var commit = GitCommit(
+                sha: sha, author: fields[1],
+                date: Date(timeIntervalSince1970: TimeInterval(fields[2]) ?? 0),
+                tags: refs.tags, refs: refs.branches, remotes: refs.remotes,
+                parents: fields[4].split(separator: " ").map(String.init),
+                subject: fields[5...].joined(separator: " ")
+            )
+            // Without an upstream, everything not yet in the main branch is unpushed.
+            if unpushed?.contains(sha) ?? (unmerged?.contains(sha) ?? true) {
+                commit.status = .unpushed
+            } else if unmerged?.contains(sha) ?? true {
+                commit.status = .pushed
+            }
+            return commit
+        }
+    }
+
+    /// `%D` with `--decorate=full`: `HEAD -> refs/heads/master,
+    /// tag: refs/tags/v1, refs/remotes/origin/master`. A detached `HEAD`
+    /// and `origin/HEAD` are left out.
+    static func decorations(_ text: String) -> (tags: [String], branches: [String], remotes: [String]) {
+        var refs: (tags: [String], branches: [String], remotes: [String]) = ([], [], [])
+        for decoration in text.components(separatedBy: ", ") where !decoration.isEmpty {
+            let name = decoration.hasPrefix("HEAD -> ") ? String(decoration.dropFirst("HEAD -> ".count)) : decoration
+            if name.hasPrefix("tag: ") {
+                let tag = name.dropFirst("tag: ".count)
+                refs.tags.append(String(tag.hasPrefix("refs/tags/") ? tag.dropFirst("refs/tags/".count) : tag))
+            } else if name.hasPrefix("refs/remotes/") {
+                if !name.hasSuffix("/HEAD") { refs.remotes.append(String(name.dropFirst("refs/remotes/".count))) }
+            } else if name.hasPrefix("refs/heads/") {
+                refs.branches.append(String(name.dropFirst("refs/heads/".count)))
+            } else if name != "HEAD", !name.hasSuffix("/HEAD") {
+                refs.branches.append(name)
+            }
+        }
+        return refs
+    }
+
+    static func parseStashes(_ output: String) -> [GitStash] {
+        output.split(separator: "\n").compactMap { line in
+            let fields = line.components(separatedBy: "\0")
+            guard fields.count >= 4 else { return nil }
+            return GitStash(ref: fields[0], sha: fields[1],
+                            date: Date(timeIntervalSince1970: TimeInterval(fields[2]) ?? 0),
+                            message: fields[3...].joined(separator: " "))
+        }
+    }
+
+    /// `git show` with `commitScript`'s format: the commit, then its patch.
+    static func parseCommitDetail(_ output: String) -> (detail: GitCommitDetail?, patch: String) {
+        guard let separator = output.firstIndex(of: "\u{1F}") else { return (nil, output) }
+        let fields = output[..<separator].components(separatedBy: "\0")
+        guard fields.count >= 6 else { return (nil, String(output[output.index(after: separator)...])) }
+        let message = fields[5...].joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        let lines = message.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+        let detail = GitCommitDetail(
+            sha: fields[0].trimmingCharacters(in: .whitespacesAndNewlines),
+            parents: fields[1].split(separator: " ").map(String.init),
+            author: fields[2], email: fields[3],
+            date: Date(timeIntervalSince1970: TimeInterval(fields[4]) ?? 0),
+            title: String(lines.first ?? ""),
+            body: lines.count > 1 ? lines[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        )
+        return (detail, String(output[output.index(after: separator)...]))
+    }
+
+    /// `branchScript`'s output: the commits, then the patch.
+    static func parseBranchDetail(_ output: String) -> (commits: [GitCommit], patch: String) {
+        let parts = output.split(separator: "\u{1F}", maxSplits: 1, omittingEmptySubsequences: false)
+        let commits = parts[0].split(separator: "\n").compactMap { line -> GitCommit? in
+            let fields = line.components(separatedBy: "\0")
+            guard fields.count >= 4 else { return nil }
+            return GitCommit(sha: fields[0], author: fields[1], date: Date(timeIntervalSince1970: TimeInterval(fields[2]) ?? 0),
+                             tags: [], subject: fields[3...].joined(separator: " "))
+        }
+        return (commits, parts.count > 1 ? String(parts[1]) : "")
+    }
+
+    /// lazygit's ages: `45s`, `3m`, `2h`, `5d`, `1w`, `4M`, `2y`.
+    static func age(of date: Date, now: Date = Date()) -> String {
+        let seconds = max(0, Int(now.timeIntervalSince(date)))
+        let units: [(String, Int)] = [("y", 31_536_000), ("M", 2_592_000), ("w", 604_800), ("d", 86_400), ("h", 3_600), ("m", 60)]
+        for (unit, length) in units where seconds >= length { return "\(seconds / length)\(unit)" }
+        return "\(seconds)s"
+    }
+
+    private static func trimmed(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func shaSet(_ section: String?) -> Set<String>? {
+        guard let section, trimmed(section) != "none" else { return nil }
+        return Set(section.split(separator: "\n").map(String.init))
+    }
+
+    /// The main worktree's folder: `.git`'s parent, or a bare repository's
+    /// own folder.
+    private static func repositoryName(root: String, commonDirectory: String) -> String {
+        guard !commonDirectory.isEmpty else { return (root as NSString).lastPathComponent }
+        let common = commonDirectory as NSString
+        let folder = common.lastPathComponent == ".git" ? common.deletingLastPathComponent : commonDirectory
+        let name = (folder as NSString).lastPathComponent
+        return name.hasSuffix(".git") && name.count > 4 ? String(name.dropLast(4)) : name
+    }
+
+    private static func worktreeName(root: String, commonDirectory: String) -> String? {
+        guard !commonDirectory.isEmpty, (commonDirectory as NSString).lastPathComponent == ".git" else { return nil }
+        let main = (commonDirectory as NSString).deletingLastPathComponent
+        let name = (root as NSString).lastPathComponent
+        return (root as NSString).standardizingPath == (main as NSString).standardizingPath ? nil : name
+    }
+}
+
+/// Why the Git View has nothing to list.
+struct GitViewError: Error, Equatable {
+    let message: String
+}

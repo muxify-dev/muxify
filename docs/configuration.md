@@ -287,6 +287,54 @@ value uses its default and appears with its line in the Config problems banner
 while valid sibling settings still apply. An unavailable family is also a
 problem and uses `system`. A YAML syntax error keeps the entire last good Config.
 
+## Git View
+
+The Git View (⌘G, `toggle_git_view`) is a read-only look at the repository of
+the current Window's folder, laid out like Xcode's source control navigator with
+lazygit's panels, and colored with the Ghostty theme. A toolbar shows the
+branch, whether this is a linked worktree, and the commits ahead of and behind
+the upstream (or `main` or `master` without one). Below it, the panels, stacked
+as in lazygit, and the selection's diff:
+
+| Panel | Lists | The diff shows |
+| --- | --- | --- |
+| Changes | Changed files as a folder tree, with lazygit's two letters: the staged change in green, the unstaged one in red (`M `, ` M`, `MM`, `??`). A file's name is green when all of it is staged, red otherwise | The file's unstaged changes, then its staged ones; an untracked file as new. A folder shows every change in it |
+| History | The last 300 commits with their graph: a lane per line of history, a ring for a merge, and the branches and tags at each commit | The commit's message, author, parents and changes; a merge against its first parent |
+| Stashes | `git stash list` | The stash's changes |
+| Diff files | The files of the selected commit or stash, as a tree, or of a branch picked in the toolbar | The file's changes, or the folder's |
+
+Diff files appears under a commit or stash when you select it; ↩ goes into it
+and ⎋ comes back. The branch menu in the toolbar (3) compares a branch with
+yours, and 1 compares yours with `main` or `master`: what it changes since it
+left (`git diff HEAD...branch`), the commits the other doesn't have, and its
+files in Diff files. The panel with the keys gets the most room, and tab goes to
+the next one.
+
+Diffs have line numbers, syntax highlighting, and the enclosing function in each
+hunk's header. The toolbar switches them between Unified and Split (side by
+side); the choice is remembered. A change's hunk headers show the whole file.
+Click, shift-click or drag to select lines, or use the keys; ⌘C or y copies
+their code. The filter field (/) narrows every panel at once.
+
+```yaml
+git_view:
+  display: popup      # or fullscreen
+  width: 80%
+  height: 80%
+```
+
+These are the defaults. `popup` floats over the whole App Window, Sidebar and
+Browser too, like `tmux display-popup -w 80% -h 80%`; `width` and `height` are
+its share of the App Window, from 10% to 100% (`80` means `80%`). `fullscreen`
+takes the terminal's place, leaving the Sidebar and Browser. Changes apply live; invalid
+values use the defaults and appear in the Config problems banner.
+
+The Git View reads the repository when it opens, every 10 seconds, when Muxify
+comes to the front and with R. It never changes the repository. On a Remote
+Environment, git runs on that machine. Code is sized from the terminal's font
+size, in the system's monospaced font. The Git View closes when you select another
+Window. Its keys are in [Keybindings](keybindings.md#git-view-keys).
+
 ## Command Palettes
 
 A Command Palette searches Topics, Sessions, Windows, Agents and Commands.

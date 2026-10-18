@@ -73,6 +73,16 @@ final class GhosttyRuntime {
 
     private init() {}
 
+    /// The terminal's `font-size` in points, so the Git View matches it.
+    /// Ghostty's C API has no `font-family`.
+    var fontSize: CGFloat? {
+        guard let config else { return nil }
+        var size: Float = 0
+        let key = "font-size"
+        guard key.withCString({ ghostty_config_get(config, &size, $0, UInt(key.utf8.count)) }), size > 0 else { return nil }
+        return CGFloat(size)
+    }
+
     /// Must run before any surface is created.
     func start(ghosttyConfigFile: String?) {
         guard app == nil else { return }
