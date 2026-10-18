@@ -350,29 +350,29 @@ go on to the actions above.
 
 | Keys | What they do |
 | --- | --- |
-| 2–5 | Go to Changes, Branches, History or Stashes; a folded panel opens while it has the keys |
-| 1 | Select the branch you're on: what it changes, with its Diff files |
-| Tab / ⇧Tab | Next or previous panel, as in lazygit; empty ones are skipped |
+| 1–4 | Go to Changes, History, Branches or Stashes, as you left it; the tab shown goes back to its own list |
+| Tab / ⇧Tab | Next or previous tab |
 | j / k, ↓ / ↑ | Select the next or previous item; in the diff, the next or previous line |
 | < / > | First or last item; in the diff, the first or last line |
-| ↩ | On a folder, fold or open it; on a branch, commit or stash, go into its Diff files; otherwise go to the diff |
+| ↩ | On a folder, fold or open it; on a branch, go into its commits; on a commit or stash, go into its Diff files; otherwise go to the diff |
 | Space | Fold or open a folder |
-| - / = | Fold or open every folder of the panel |
-| l / h, → / ← | Go to the diff, or back to the list; from Diff files, back to the branch, commit or stash |
+| - / = | Fold or open every folder of the list |
+| l / h, → / ← | Go to the diff (on a branch, into its commits), or back to the list; from a list you went into, back out |
 | ⇧↓ / ⇧↑ | Select one more line below or above |
 | v | Start or end a range: moving then selects lines, as in lazygit |
 | a | Select the hunk |
 | y, ⌘C | Copy the selected code, without + and −; in the list, the path, hash or branch |
 | J / K, ⌃D / ⌃U | Scroll the diff by three lines, or half a page |
 | ⌥↓ / ⌥↑ | Next or previous hunk |
-| ] / [ | Next or previous file: the next file in Changes or Diff files, or the next file of a commit, branch or stash |
-| / | Filter; ↓ / ↑ move through the matches, ↩ or ⎋ go back to the list |
+| ] / [ | Next or previous file: the next file in Changes or Diff files, or the next file in a commit's or stash's diff |
+| / | Filter the list shown; ↓ / ↑ move through the matches, ↩ or ⎋ go back to the list |
 | R | Read the repository again |
-| ⎋ | Clear the selected range, leave the diff, leave Diff files, clear the filter, then close the Git View |
+| ⎋ | Clear the selected range, leave the diff, clear the filter, go back out of Diff files or a branch's commits, then close the Git View |
 | q | Close the Git View |
 
-Clicking selects an item, a folder's chevron folds it, and a click on a panel's
-header folds or unfolds the panel. In the diff, dragging over code selects it by
+Clicking selects an item; on a branch, it goes into the branch's commits, and on a
+file of the Diff files, into the files. A folder's chevron folds it, and a click
+on a tab goes to it. In the diff, dragging over code selects it by
 the character, a double click selects a word, and a triple click or the line
 numbers select whole lines; shift-click extends the selection. In a split diff,
 the selection is on the side you click. A commit's hash chip copies the full

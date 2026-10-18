@@ -59,9 +59,8 @@ private struct Palette {
     var unstaged: Color { color(colors.removedText) }
 }
 
-/// Xcode's source control navigator, in the Ghostty theme, with lazygit's
-/// panels: a toolbar, the panels of changes, history, stashes and Diff
-/// files, and the selection's diff.
+/// Xcode's source control navigator, in the Ghostty theme: a toolbar, a
+/// sidebar of tabs, and the selection's diff.
 private struct GitNavigator: View {
     @Bindable var gitView: GitView
     let colors: GitColors
@@ -190,10 +189,20 @@ private struct GitToolbar: View {
         .help("Commits ahead of and behind \(comparison.base)")
     }
 
+    private var filterPrompt: String {
+        switch gitView.list {
+        case .changes: "Filter changes"
+        case .history, .branch: "Filter commits"
+        case .branches: "Filter branches"
+        case .stashes: "Filter stashes"
+        case .files: "Filter files"
+        }
+    }
+
     private var filterField: some View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass").font(.system(size: 13)).foregroundStyle(.tertiary)
-            TextField("", text: $gitView.filter, prompt: Text("Filter files, commits, stashes").foregroundColor(.secondary))
+            TextField("", text: $gitView.filter, prompt: Text(filterPrompt).foregroundColor(.secondary))
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($filterFocused)
@@ -225,145 +234,234 @@ private struct GitToolbar: View {
     }
 }
 
-// MARK: - Panels
+// MARK: - Sidebar
 
-/// lazygit's panels, stacked: the one with the keys gets the most room.
+/// One tab at a time: its list, the Diff files of the selected commit or
+/// stash under it, and the tabs along the bottom.
 private struct GitSidebar: View {
     let gitView: GitView
     let palette: Palette
 
-    static let headerHeight: CGFloat = 30
     static let rowHeight: CGFloat = 24
-    private static let padding: CGFloat = 8
 
     var body: some View {
-        GeometryReader { proxy in
-            let panels = gitView.panels
-            let rows = panels.map { gitView.rows(in: $0) }
-            // The History and Diff files take any room, so moving through
-            // commits doesn't resize the panels; Diff files saying "No
-            // changes" don't.
-            let heights = GitView.panelHeights(
-                wants: panels.indices.map { index in
-                    guard gitView.isShowing(panels[index]) else { return Self.headerHeight }
-                    let isNote = rows[index].count == 1 && rows[index][0].item == nil && rows[index][0].text != "Reading…"
-                    return (panels[index] == .history || panels[index] == .files) && !isNote
-                        ? nil : Self.headerHeight + CGFloat(max(1, rows[index].count)) * Self.rowHeight + Self.padding
-                },
-                weights: panels.map { $0 == gitView.panel ? 2 : 1 },
-                minimum: Self.headerHeight + 2 * Self.rowHeight + Self.padding,
-                total: proxy.size.height
-            )
-            VStack(spacing: 0) {
-                ForEach(panels, id: \.self) { panel in
-                    let index = panels.firstIndex(of: panel)!
-                    GitPanelView(gitView: gitView, panel: panel, rows: rows[index], palette: palette, isFirst: index == 0)
-                        .frame(height: max(0, heights[index]))
+        let listLevel = gitView.listLevel
+        let filesLevel = gitView.filesLevel
+        // The list above the Diff files takes what its rows need, up to a
+        // share that's smaller while the Diff files have the keys; moving
+        // through commits doesn't resize either.
+        let listShare: CGFloat = gitView.list == .files ? 0.4 : 0.6
+        let listNeeds = 36 + CGFloat(max(1, gitView.rows(for: listLevel).count)) * Self.rowHeight + 12
+        VStack(spacing: 0) {
+            GeometryReader { proxy in
+                VStack(spacing: 0) {
+                    VStack(spacing: 0) {
+                        GitListHeader(gitView: gitView, level: listLevel, palette: palette)
+                        GitListView(gitView: gitView, level: listLevel, palette: palette)
+                            // Another list starts at its top, on its selection.
+                            .id("\(gitView.tab.rawValue) \(listLevel.list.rawValue) \(listLevel.owner?.id ?? "")")
+                    }
+                    .frame(height: filesLevel == nil ? proxy.size.height : min(listNeeds, (proxy.size.height * listShare).rounded()))
+                    if let filesLevel {
+                        VStack(spacing: 0) {
+                            GitListHeader(gitView: gitView, level: filesLevel, palette: palette)
+                            GitListView(gitView: gitView, level: filesLevel, palette: palette)
+                                .id("files \(filesLevel.owner?.id ?? "")")
+                        }
+                        .frame(maxHeight: .infinity)
+                        .overlay(alignment: .top) { palette.separator.frame(height: 1) }
+                    }
                 }
-                Spacer(minLength: 0)
+                .animation(.easeOut(duration: 0.16), value: listShare)
             }
-            .animation(.easeOut(duration: 0.16), value: gitView.panel)
-            .animation(.easeOut(duration: 0.16), value: panels)
-            .animation(.easeOut(duration: 0.16), value: gitView.collapsedPanels)
+            GitTabBar(gitView: gitView, palette: palette)
         }
     }
 }
 
-private struct GitPanelView: View {
+/// Above a list: its tab's name, the way back out of a branch and its
+/// name, or the Diff files and whose they are; and how many items it has.
+private struct GitListHeader: View {
     let gitView: GitView
-    let panel: GitPanel
-    let rows: [GitView.Row]
+    let level: GitView.Level
     let palette: Palette
-    let isFirst: Bool
+
+    var body: some View {
+        let hasKeys = level.list == gitView.list
+        HStack(spacing: 6) {
+            if level.list == .files {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(hasKeys ? Color.accentColor : Color.secondary)
+                    .frame(width: 16)
+                    .padding(.leading, 4)
+                Text("Diff files").font(.system(size: 12, weight: .bold)).foregroundStyle(hasKeys ? Color.primary : Color.secondary)
+                if let owner = level.owner { ownerLabel(owner) }
+            } else if case .branch? = level.owner {
+                Button { gitView.goBack(from: .branch) } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 22, height: 22)
+                        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(palette.fill2))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Back to Branches (⎋)")
+                if let owner = level.owner { ownerLabel(owner) }
+            } else {
+                Text(gitView.tab.title)
+                    .font(.system(size: 12, weight: .bold))
+                    .padding(.leading, 6)
+            }
+            Spacer(minLength: 4)
+            Text(verbatim: "\(gitView.count(for: level))")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 7)
+                .frame(height: 18)
+                .background(Capsule().fill(palette.fill2))
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, 10)
+        .frame(height: 36)
+        .overlay(alignment: .bottom) { palette.softSeparator.frame(height: 1) }
+    }
+
+    /// The branch gone into, or the commit or stash the Diff files are of.
+    @ViewBuilder
+    private func ownerLabel(_ owner: GitView.Item) -> some View {
+        HStack(spacing: 6) {
+            switch owner {
+            case .branch(let branch):
+                Image(systemName: branch.isHead ? "checkmark" : "arrow.triangle.branch")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(branch.isHead ? Color.accentColor : Color.secondary)
+                Text(branch.name).font(.system(size: 12, weight: .bold)).truncationMode(.middle)
+            case .commit(let commit):
+                Text(String(commit.sha.prefix(7))).font(.system(size: 11, design: .monospaced)).foregroundStyle(.tertiary)
+            case .stash(let stash):
+                Text(stash.ref).font(.system(size: 11, design: .monospaced)).foregroundStyle(.tertiary)
+            default:
+                EmptyView()
+            }
+        }
+        .lineLimit(1)
+    }
+}
+
+/// The tabs along the sidebar's bottom, with their keys. A click on the tab
+/// shown goes back to its own list.
+private struct GitTabBar: View {
+    let gitView: GitView
+    let palette: Palette
+
+    private enum Style { case full, titles, symbols }
+
+    var body: some View {
+        // Titles go first when the sidebar is narrow, then symbols.
+        ViewThatFits(in: .horizontal) {
+            bar(.full)
+            bar(.titles)
+            bar(.symbols)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .top) { palette.separator.frame(height: 1) }
+    }
+
+    private func bar(_ style: Style) -> some View {
+        HStack(spacing: 2) {
+            ForEach(GitTab.allCases) { tab in button(tab, style: style) }
+        }
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(palette.fill2))
+    }
+
+    private func button(_ tab: GitTab, style: Style) -> some View {
+        let isSelected = gitView.tab == tab
+        return Button { gitView.selectTab(tab) } label: {
+            HStack(spacing: 5) {
+                if style != .titles {
+                    Image(systemName: tab.symbol)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                }
+                if style != .symbols {
+                    Text(tab.title).font(.system(size: 11.5, weight: isSelected ? .semibold : .medium))
+                }
+                if let badge = badge(tab) {
+                    Text(verbatim: "\(badge)")
+                        .font(.system(size: 10, weight: .bold))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5)
+                        .frame(height: 15)
+                        .background(Capsule().fill(palette.fill2))
+                }
+            }
+            .lineLimit(1)
+            .fixedSize()
+            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+            .padding(.horizontal, 6)
+            .frame(maxWidth: .infinity)
+            .frame(height: 24)
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(palette.background)
+                        .shadow(color: .black.opacity(0.18), radius: 1, y: 0.5)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("\(tab.title) (\(tab.key))")
+    }
+
+    /// The changes and stashes there are.
+    private func badge(_ tab: GitTab) -> Int? {
+        let count = switch tab {
+        case .changes: gitView.snapshot?.changes.count ?? 0
+        case .stashes: gitView.snapshot?.stashes.count ?? 0
+        case .history, .branches: 0
+        }
+        return count > 0 ? count : nil
+    }
+}
+
+/// A list's rows; the History's and a branch's with their graph.
+private struct GitListView: View {
+    let gitView: GitView
+    let level: GitView.Level
+    let palette: Palette
 
     private static let lane: CGFloat = 11
 
     var body: some View {
-        let isActive = gitView.panel == panel
-        let selection = gitView.selections[panel]
-        let hasKeys = isActive && gitView.focus == .list
+        let rows = gitView.rows(for: level)
+        let selection = level.selection
+        let hasKeys = gitView.focus == .list && level.list == gitView.list
         let lanes = min(8, rows.compactMap { $0.graph?.width }.max() ?? 0)
-        VStack(spacing: 0) {
-            header(isActive: isActive)
-            if gitView.isShowing(panel) {
-                rowList(selection: selection, hasKeys: hasKeys, lanes: lanes)
-            }
-        }
-        .overlay(alignment: .top) {
-            if !isFirst { palette.separator.frame(height: 1) }
-        }
-        .clipped()
-    }
-
-    private func rowList(selection: String?, hasKeys: Bool, lanes: Int) -> some View {
-            ScrollViewReader { proxy in
-                ScrollView(.vertical) {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(rows) { row in
-                            rowView(row, isSelected: row.item != nil && row.item?.id == selection, hasKeys: hasKeys,
-                                    graphWidth: CGFloat(lanes) * Self.lane)
-                        }
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(rows) { row in
+                        rowView(row, isSelected: row.item != nil && row.item?.id == selection, hasKeys: hasKeys,
+                                graphWidth: CGFloat(lanes) * Self.lane)
                     }
-                    .padding(.horizontal, 6)
-                    .padding(.bottom, 6)
                 }
-                .scrollIndicators(.automatic)
-                .onChange(of: selection) { _, id in
-                    if let id { withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id) } }
-                }
-                .onAppear {
-                    if let selection { proxy.scrollTo(selection) }
-                }
+                .padding(6)
             }
-    }
-
-    /// A click folds the panel, or unfolds it and gives it the keys.
-    private func header(isActive: Bool) -> some View {
-        let count = gitView.count(in: panel)
-        return HStack(spacing: 6) {
-            Image(systemName: "chevron.right")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(.tertiary)
-                .rotationEffect(.degrees(gitView.isShowing(panel) ? 90 : 0))
-                .frame(width: 10)
-            Image(systemName: panel.symbol)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-                .frame(width: 16)
-            Text(panel.title)
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(isActive ? Color.primary : Color.secondary)
-            if panel == .files, let owner = gitView.owner {
-                Text(ownerName(owner))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+            .scrollIndicators(.automatic)
+            .onChange(of: selection) { _, id in
+                if let id { withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(id) } }
             }
-            Spacer(minLength: 4)
-            Text(verbatim: "\(count)")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
-                .padding(.horizontal, 7)
-                .frame(height: 18)
-                .background(Capsule().fill(isActive ? Color.accentColor.opacity(0.15) : palette.fill2))
+            .onAppear {
+                if let selection { proxy.scrollTo(selection, anchor: .center) }
+            }
         }
-        .padding(.leading, 8)
-        .padding(.trailing, 10)
-        .frame(height: GitSidebar.headerHeight)
-        .contentShape(Rectangle())
-        .onTapGesture { withAnimation(.easeOut(duration: 0.16)) { gitView.toggleCollapsed(panel) } }
-        .help(panel.key.map { "\(panel.title) (\($0)); click to fold or unfold" }
-              ?? "The files of the selection (↩ on a branch, commit or stash; ⎋ goes back); click to fold or unfold")
-    }
-
-    private func ownerName(_ owner: GitView.Item) -> String {
-        switch owner {
-        case .commit(let commit): String(commit.sha.prefix(7))
-        case .stash(let stash): stash.ref
-        case .branch(let branch): branch.name
-        default: ""
-        }
+        .frame(maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -383,7 +481,7 @@ private struct GitPanelView: View {
                 .foregroundStyle(onAccent ? Color.white : Color.primary)
                 .environment(\.gitOnAccent, onAccent)
                 .contentShape(Rectangle())
-                .onTapGesture { gitView.select(item, in: panel) }
+                .onTapGesture { gitView.select(item, in: level) }
                 .id(row.id)
         } else {
             Text(row.text)
@@ -427,7 +525,7 @@ private struct GitPanelView: View {
                 Spacer(minLength: 4)
                 counts(change.additions, change.deletions, onAccent: onAccent)
             case .file(let path):
-                let file = gitView.ownerFiles?.first { $0.path == path }
+                let file = gitView.ownerFiles(for: level)?.first { $0.path == path }
                 let letter = Self.letter(file?.change)
                 Color.clear.frame(width: 12)
                 Text(letter.text)
@@ -475,6 +573,8 @@ private struct GitPanelView: View {
                 if let date = branch.date {
                     Text(GitRepository.age(of: date)).font(.system(size: 11)).foregroundStyle(secondary)
                 }
+                // A click goes into its commits.
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(secondary)
             }
         }
     }
@@ -727,7 +827,7 @@ private struct GitDiffPane: View {
 
     private var emptyState: some View {
         VStack(spacing: 8) {
-            if gitView.panel == .changes, gitView.snapshot?.changes.isEmpty == true {
+            if gitView.list == .changes, gitView.snapshot?.changes.isEmpty == true {
                 Image(systemName: "checkmark.circle").font(.system(size: 28, weight: .light)).foregroundStyle(.tertiary)
                 Text("Working tree clean").font(.system(size: 13)).foregroundStyle(.secondary)
             }
@@ -1041,12 +1141,12 @@ private struct GitDiffPane: View {
                 if let next = gitView.neighbor(forward: true) {
                     GitKeyCap(text: "]", palette: palette).padding(.leading, 10)
                     Text("next file:").foregroundStyle(.tertiary)
-                    Button(Self.name(next)) { gitView.select(next, in: gitView.panel) }.buttonStyle(.link)
+                    Button(Self.name(next)) { gitView.select(next) }.buttonStyle(.link)
                 }
                 if let previous = gitView.neighbor(forward: false) {
                     GitKeyCap(text: "[", palette: palette).padding(.leading, 10)
                     Text("previous:").foregroundStyle(.tertiary)
-                    Button(Self.name(previous)) { gitView.select(previous, in: gitView.panel) }.buttonStyle(.link)
+                    Button(Self.name(previous)) { gitView.select(previous) }.buttonStyle(.link)
                 }
             }
         }
@@ -1160,8 +1260,8 @@ private struct GitPathBar<Tags: View, Trailing: View>: View {
     }
 }
 
-/// Above a commit's, branch's, stash's or folder's files: what it is, who
-/// made it, and how much it changes.
+/// Above a commit's, stash's or folder's files: what it is, who made it,
+/// and how much it changes; a branch's latest commits.
 private struct GitCard: View {
     let gitView: GitView
     let content: GitView.Content
@@ -1172,8 +1272,8 @@ private struct GitCard: View {
             switch content.header {
             case .commit(let commit, let detail):
                 commitCard(commit, detail)
-            case .branch(let branch, let base, let commits):
-                branchCard(branch, base: base, commits: commits)
+            case .branch(let branch, let log):
+                branchCard(branch, log)
             case .stash(let stash):
                 stashCard(stash)
             case .folder(let path, let changes):
@@ -1223,7 +1323,9 @@ private struct GitCard: View {
         }
     }
 
-    private func branchCard(_ branch: GitBranch, base: String?, commits: [GitCommit]) -> some View {
+    /// What the branch is, and its latest commits; a click on one goes
+    /// into the branch's commits on it.
+    private func branchCard(_ branch: GitBranch, _ log: GitLog?) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: branch.isHead ? "checkmark" : "arrow.triangle.branch")
@@ -1233,35 +1335,69 @@ private struct GitCard: View {
                 if let upstream = branch.upstream {
                     GitTag(text: upstream, symbol: "cloud", style: branch.isInSync ? .tint(palette.colors.green) : .gray, palette: palette)
                 }
-            }
-            Text(subtitle(branch, base: base, count: commits.count))
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-            if !commits.isEmpty {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(commits.prefix(12)) { commit in
-                        HStack(spacing: 8) {
-                            avatar(commit.initials, name: commit.author, size: 16)
-                            Text(String(commit.sha.prefix(7))).font(.system(size: 11, design: .monospaced)).foregroundStyle(.tertiary)
-                            Text(commit.subject).font(.system(size: 13)).lineLimit(1)
-                            Spacer(minLength: 8)
-                            Text(GitRepository.age(of: commit.date)).font(.system(size: 11)).foregroundStyle(.tertiary)
-                        }
-                        .frame(height: 22)
-                    }
-                    if commits.count > 12 {
-                        Text(verbatim: "and \(commits.count - 12) more").font(.system(size: 12)).foregroundStyle(.tertiary).frame(height: 20)
-                    }
+                if branch.track == "gone" {
+                    GitTag(text: "gone", style: .tint(palette.colors.red), palette: palette).help("Its upstream was deleted")
                 }
             }
-            if base != nil { summary }
+            Text(subtitle(branch))
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+            if let error = log?.error {
+                Text(error).font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled)
+            } else if let log {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(log.commits.prefix(12)) { commit in
+                        Button { gitView.enter(.branch(branch), selecting: .commit(commit)) } label: {
+                            HStack(spacing: 8) {
+                                avatar(commit.initials, name: commit.author, size: 16)
+                                Text(String(commit.sha.prefix(7))).font(.system(size: 11, design: .monospaced)).foregroundStyle(.tertiary)
+                                Text(commit.subject).font(.system(size: 13)).lineLimit(1)
+                                Spacer(minLength: 8)
+                                Text(GitRepository.age(of: commit.date)).font(.system(size: 11)).foregroundStyle(.tertiary)
+                            }
+                            .frame(height: 22)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            } else {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Reading its history…").font(.system(size: 13)).foregroundStyle(.secondary)
+                }
+                .frame(height: 22)
+            }
+            Button { gitView.enter(.branch(branch)) } label: {
+                HStack(spacing: 6) {
+                    Text("Show its history").font(.system(size: 12, weight: .semibold))
+                    GitKeyCap(text: "↩", palette: palette)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(palette.fill2))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
-    private func subtitle(_ branch: GitBranch, base: String?, count: Int) -> String {
-        guard let base else { return "The branch you're on. Its latest commits:" }
-        let commits = count == 0 ? "No commits" : count == 1 ? "1 commit" : "\(count >= 50 ? "50+" : String(count)) commits"
-        return "\(commits) on \(branch.name) that \(base) doesn't have. Below, what \(branch.name) changes since it left \(base)."
+    /// How it stands against the branch you're on, and where else it's
+    /// checked out.
+    private func subtitle(_ branch: GitBranch) -> String {
+        guard !branch.isHead else { return "The branch you're on." }
+        let head = gitView.snapshot?.head ?? "HEAD"
+        func commits(_ count: Int) -> String { count == 1 ? "1 commit" : "\(count) commits" }
+        var text = switch (branch.ahead, branch.behind) {
+        case (0, 0): "Even with \(head)."
+        case (let ahead, 0): "\(commits(ahead)) ahead of \(head)."
+        case (0, let behind): "\(commits(behind)) behind \(head)."
+        case (let ahead, let behind): "\(commits(ahead)) ahead of and \(behind) behind \(head)."
+        }
+        if let path = branch.worktreePath {
+            text += " Checked out in \(Paths.tildify(path, home: gitView.store?.homeDirectory ?? Paths.home))."
+        }
+        return text
     }
 
     private func stashCard(_ stash: GitStash) -> some View {

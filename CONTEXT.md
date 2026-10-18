@@ -260,7 +260,7 @@ _Avoid_: choose rows, mark, multi-select, selection
 ### Git
 
 **Git View**:
-A read-only view of the repository in the current Window's folder: its changed files, branches, history and stashes in panels, with the selected one's diff and, for a branch, commit or stash, its files. It opens as a popup over the App Window or in the terminal's place.
+A read-only view of the repository in the current Window's folder: its changed files, history, branches and stashes in tabs, with the selected one's diff. A branch goes into its commits, and a selected commit or stash shows its files under them. It opens as a popup over the App Window or in the terminal's place.
 _Avoid_: lazygit (when you mean ours), git panel, diff viewer
 
 ### Configuration

@@ -290,25 +290,26 @@ problem and uses `system`. A YAML syntax error keeps the entire last good Config
 ## Git View
 
 The Git View (⌘G, `toggle_git_view`) is a read-only look at the repository of
-the current Window's folder, laid out like Xcode's source control navigator with
-lazygit's panels, and colored with the Ghostty theme. A toolbar shows the
-repository, whether this is a linked worktree, and the commits ahead of and
-behind the upstream (or `main` or `master` without one). Below it, the panels,
-stacked as in lazygit, and the selection's diff:
+the current Window's folder, laid out like Xcode's source control navigator and
+colored with the Ghostty theme. A toolbar shows the repository, whether this is
+a linked worktree, and the commits ahead of and behind the upstream (or `main`
+or `master` without one). Below it, a sidebar with four tabs along its bottom,
+and the selection's diff:
 
-| Panel | Lists | The diff shows |
+| Tab | Lists | The diff shows |
 | --- | --- | --- |
 | Changes | Changed files as a folder tree, with lazygit's two letters: the staged change in green, the unstaged one in red (`M `, ` M`, `MM`, `??`). A file's name is green when all of it is staged, red otherwise | The file's unstaged changes, then its staged ones; an untracked file as new. A folder shows every change in it |
-| Branches | Local branches, yours first with a check: other worktrees', gone upstreams, and commits ahead of and behind yours | What the branch changes since it left yours (`git diff HEAD...branch`), with the commits yours doesn't have. Yours is compared with `main` or `master` |
-| History | The last 300 commits with their graph: a lane per line of history, a ring for a merge, and the branches and tags at each commit | The commit's message, author, parents and changes; a merge against its first parent |
+| History | The last 300 commits of the branch you're on, with their graph: a lane per line of history, a ring for a merge, and the branches and tags at each commit | The commit's message, author, parents and changes; a merge against its first parent |
+| Branches | Local branches, yours first with a check: other worktrees', gone upstreams, and commits ahead of and behind yours | The branch and its latest commits. Clicking a branch, or ↩, goes into its last 300 commits, listed like the History |
 | Stashes | `git stash list` | The stash's changes |
-| Diff files | The files of the selected branch, commit or stash, as a tree | The file's changes, or the folder's |
 
-Diff files appears under a branch, commit or stash when you select it; ↩ goes
-into it and ⎋ comes back. The panel with the keys gets the most room, and tab
-goes to the next one. A click on a panel's header folds or unfolds it; Stashes
-starts folded, and Muxify remembers what you fold. A folded panel opens while it
-has the keys, and folds again when they leave.
+Under the History, a branch's commits and the Stashes, the Diff files list the
+selected commit's or stash's files as a tree. ↩, or a click on a file, goes into
+them, and the diff then shows one file, or a folder of them; ⎋ comes back to the
+commits. A branch's commits have a back button (or ⎋) to the Branches. The Git
+View opens on Changes every time; the other tabs are kept as you left them, each
+with its own filter, and clicking the tab shown goes back to its own list. The
+tabs count the changes and stashes.
 
 Diffs have line numbers, syntax highlighting, and the enclosing function in each
 hunk's header. The toolbar switches them between Unified and Split (side by
@@ -316,7 +317,7 @@ side); the choice is remembered. A change's hunk headers show the whole file.
 Long lines wrap at the pane's edge. Drag over code to select words or any
 part of it, double-click a word, triple-click or drag the line numbers for whole
 lines, or use the keys; ⌘C or y copies the code. The filter field (/) narrows
-every panel at once.
+the list shown.
 
 ```yaml
 git_view:

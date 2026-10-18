@@ -326,13 +326,6 @@ final class GitTreeAndGraphTests: XCTestCase {
         XCTAssertEqual(rows[3].edges.map(\.kind), [.into, .into])
         XCTAssertEqual(rows[3].edges.map(\.lane), [0, 1])
     }
-
-    func testPanelsGetWhatTheyNeedAndShareTheRest() {
-        // Two stashes need 80; after their minimum, Changes (focused) and History share the rest 2:1.
-        let heights = GitView.panelHeights(wants: [500, nil, 80], weights: [2, 1, 1], minimum: 86, total: 680)
-        XCTAssertEqual(heights.map { Int($0.rounded()) }, [371, 229, 80])
-        XCTAssertEqual(GitView.panelHeights(wants: [100, nil], weights: [1, 2], minimum: 86, total: 600).map { Int($0.rounded()) }, [100, 500])
-    }
 }
 
 final class GitHighlighterTests: XCTestCase {
@@ -477,10 +470,15 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(try change("nothing", "untracked").files, [])
     }
 
-    func testABranchIsComparedWithTheCurrentOne() throws {
-        let detail = GitRepository.parseBranchDetail(try run(GitRepository.branchScript, repository, "HEAD", "feature"))
-        XCTAssertEqual(detail.commits.map(\.subject), ["Add b"])
-        XCTAssertEqual(GitPatch.parse(detail.patch).files.map(\.path), ["b.swift"])
+    func testABranchHasItsOwnHistory() throws {
+        let log = GitRepository.parseLog(try run(GitRepository.logScript, repository, "feature"))
+        XCTAssertEqual(log.commits.map(\.subject), ["Add b", "First"])
+        XCTAssertEqual(log.commits.first?.refs, ["feature"])
+        // No upstream: what isn't in master yet is unpushed.
+        XCTAssertEqual(log.commits.map(\.status), [.unpushed, .merged])
+        XCTAssertEqual(log.graph.count, 2)
+        let snapshot = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get()
+        XCTAssertEqual(snapshot.branches.first { $0.name == "feature" }?.sha, log.commits.first?.sha)
     }
 
     func testACommitHasItsMessageAndParents() throws {
@@ -513,12 +511,13 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(try command("j", keyCode: 0x26), .down)
         XCTAssertEqual(try command("J", keyCode: 0x26, flags: .shift), .scroll(lines: 3))
         XCTAssertEqual(try command("<", keyCode: 0x2B, flags: .shift), .top)
-        XCTAssertEqual(try command("1", keyCode: 0x12), .status)
-        XCTAssertEqual(try command("3", keyCode: 0x14), .panel(.branches))
-        XCTAssertEqual(try command("4", keyCode: 0x15), .panel(.history))
+        XCTAssertEqual(try command("1", keyCode: 0x12), .tab(.changes))
+        XCTAssertEqual(try command("2", keyCode: 0x13), .tab(.history))
+        XCTAssertEqual(try command("3", keyCode: 0x14), .tab(.branches))
+        XCTAssertNil(try command("5", keyCode: 0x17))
         XCTAssertEqual(try command("\u{4}", keyCode: 0x02, flags: .control), .halfPage(1))
-        XCTAssertEqual(try command("\t", keyCode: 0x30), .nextPanel)
-        XCTAssertEqual(try command("\u{19}", keyCode: 0x30, flags: .shift), .previousPanel)
+        XCTAssertEqual(try command("\t", keyCode: 0x30), .nextTab)
+        XCTAssertEqual(try command("\u{19}", keyCode: 0x30, flags: .shift), .previousTab)
         XCTAssertEqual(try command("v", keyCode: 0x09), .range)
         XCTAssertEqual(try command("c", keyCode: 0x08, flags: .command), .copy)
         XCTAssertEqual(try command("-", keyCode: 0x1B), .collapseAll)
@@ -529,5 +528,123 @@ final class GitViewKeysTests: XCTestCase {
         // ⌘G goes on to toggle_git_view, ⌘B to the Browser.
         XCTAssertNil(try command("g", keyCode: 0x05, flags: .command))
         XCTAssertNil(try command("b", keyCode: 0x0B, flags: .command))
+    }
+
+    private func commit(_ sha: String, _ parents: [String] = []) -> GitCommit {
+        GitCommit(sha: sha, author: "A", date: Date(), tags: [], parents: parents, subject: "Subject \(sha)")
+    }
+
+    private func branch(_ name: String, at sha: String, isHead: Bool = false) -> GitBranch {
+        GitBranch(name: name, sha: sha, isHead: isHead, upstream: nil, track: "", date: nil, worktreePath: nil)
+    }
+
+    private var snapshot: GitSnapshot {
+        var snapshot = GitSnapshot(root: "/repo", repositoryName: "repo", head: "master")
+        snapshot.commits = [commit("c2", ["c1"]), commit("c1")]
+        snapshot.graph = GitGraphRow.layout(snapshot.commits)
+        snapshot.branches = [branch("master", at: "c2", isHead: true), branch("feature", at: "f1")]
+        snapshot.stashes = [GitStash(ref: "stash@{0}", sha: "s1", date: Date(), message: "On master: wip")]
+        return snapshot
+    }
+
+    func testABranchGoesIntoItsCommitsAndACommitIntoItsFiles() {
+        let gitView = GitView()
+        gitView.apply(snapshot)
+        // Nothing changed: Changes all the same, clean.
+        XCTAssertEqual(gitView.tab, .changes)
+        XCTAssertEqual(gitView.rows.map(\.text), ["Working tree clean"])
+        gitView.perform(.tab(.history))
+        XCTAssertEqual(gitView.level.selection, "commit:c2")
+        gitView.perform(.tab(.branches))
+        XCTAssertEqual(gitView.level.selection, "branch:master")
+        XCTAssertEqual(gitView.request()?.id, "branch:master:c2")
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .branch)
+        XCTAssertEqual(gitView.level.owner?.id, "branch:master")
+        XCTAssertEqual(gitView.level.selection, "commit:c2")
+        gitView.perform(.down)
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .files)
+        XCTAssertEqual(gitView.level.owner?.id, "commit:c1")
+        XCTAssertEqual(gitView.parentLevel?.selection, "commit:c1")
+        // The commits stay above their files.
+        XCTAssertEqual(gitView.listLevel.list, .branch)
+        XCTAssertEqual(gitView.filesLevel?.owner?.id, "commit:c1")
+        // A click on the other commit comes back out to it.
+        gitView.select(.commit(commit("c2", ["c1"])), in: gitView.listLevel)
+        XCTAssertEqual(gitView.list, .branch)
+        XCTAssertEqual(gitView.level.selection, "commit:c2")
+        XCTAssertEqual(gitView.filesLevel?.owner?.id, "commit:c2")
+        XCTAssertNil(gitView.filesLevel?.selection)
+        gitView.perform(.down)
+        gitView.perform(.enter)
+        // Each tab is kept as it was left.
+        gitView.perform(.tab(.history))
+        XCTAssertEqual(gitView.list, .history)
+        gitView.perform(.nextTab)
+        XCTAssertEqual(gitView.list, .files)
+        gitView.perform(.back)
+        XCTAssertEqual(gitView.list, .branch)
+        XCTAssertEqual(gitView.level.selection, "commit:c1")
+        gitView.perform(.focusList)
+        XCTAssertEqual(gitView.list, .branches)
+        XCTAssertEqual(gitView.level.selection, "branch:master")
+        XCTAssertNil(gitView.filesLevel)
+        // The branch's back button leaves its files too.
+        gitView.perform(.enter)
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .files)
+        gitView.goBack(from: .branch)
+        XCTAssertEqual(gitView.list, .branches)
+        // The tab shown goes back to its own list.
+        gitView.perform(.enter)
+        gitView.perform(.tab(.branches))
+        XCTAssertEqual(gitView.list, .branches)
+    }
+
+    func testAnotherBranchsCommitsAreReadAndEachListHasItsOwnFilter() {
+        let gitView = GitView()
+        gitView.apply(snapshot)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        // Not read yet: its card and its commits wait for its history.
+        XCTAssertEqual(gitView.request()?.id, "branch:feature:reading")
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .branch)
+        XCTAssertEqual(gitView.rows.map(\.text), ["Reading…"])
+        gitView.perform(.back)
+        gitView.perform(.tab(.history))
+        gitView.filter = "c1"
+        XCTAssertEqual(gitView.level.selection, "commit:c1")
+        XCTAssertEqual(gitView.count(for: gitView.level), 1)
+        gitView.perform(.tab(.stashes))
+        XCTAssertEqual(gitView.filter, "")
+        XCTAssertEqual(gitView.count(for: gitView.level), 1)
+    }
+
+    func testChangesAreOnTheirFirstFileOnceThereAreSome() {
+        let gitView = GitView()
+        gitView.apply(snapshot)
+        XCTAssertNil(gitView.level.selection)
+        var changed = snapshot
+        changed.changes = [GitChange(index: " ", worktree: "M", path: "Sources/b.swift"),
+                           GitChange(index: "?", worktree: "?", path: "a.txt")]
+        gitView.apply(changed)
+        XCTAssertEqual(gitView.tab, .changes)
+        XCTAssertEqual(gitView.level.selection, "change:Sources/b.swift")
+    }
+
+    func testAListWhoseStashIsGoneCloses() {
+        let gitView = GitView()
+        gitView.apply(snapshot)
+        gitView.perform(.tab(.stashes))
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .files)
+        var dropped = snapshot
+        dropped.stashes = []
+        gitView.apply(dropped)
+        XCTAssertEqual(gitView.list, .stashes)
+        XCTAssertNil(gitView.level.selection)
+        XCTAssertEqual(gitView.rows.map(\.text), ["No stashes"])
     }
 }

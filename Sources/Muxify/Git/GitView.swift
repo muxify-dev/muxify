@@ -2,56 +2,66 @@ import AppKit
 import Observation
 import MuxifyCore
 
-/// A panel of the Git View's sidebar. They are stacked as in lazygit, and
-/// tab goes from one to the next.
-enum GitPanel: String, CaseIterable {
-    case changes, branches, history, stashes
-    /// The files of the selected branch, commit or stash.
-    case files
+/// A tab of the Git View's sidebar. The tabs are along its bottom, and
+/// the sidebar shows one tab's list at a time.
+enum GitTab: String, CaseIterable, Identifiable {
+    case changes, history, branches, stashes
+
+    var id: String { rawValue }
 
     var title: String {
         switch self {
         case .changes: "Changes"
-        case .branches: "Branches"
         case .history: "History"
+        case .branches: "Branches"
         case .stashes: "Stashes"
-        case .files: "Diff files"
         }
     }
 
     var symbol: String {
         switch self {
         case .changes: "plusminus"
-        case .branches: "arrow.triangle.branch"
         case .history: "clock"
+        case .branches: "arrow.triangle.branch"
         case .stashes: "archivebox"
-        case .files: "doc.on.doc"
         }
     }
 
-    /// lazygit's number for the panel; 1 shows the current branch.
-    var key: Int? {
+    /// 1 to 4, in order.
+    var key: Int { Self.allCases.firstIndex(of: self)! + 1 }
+
+    /// Its own list, before going into anything.
+    var list: GitList {
         switch self {
-        case .changes: 2
-        case .branches: 3
-        case .history: 4
-        case .stashes: 5
-        case .files: nil
+        case .changes: .changes
+        case .history: .history
+        case .branches: .branches
+        case .stashes: .stashes
         }
     }
 }
 
+/// A list the sidebar shows: a tab's own, or one gone into from it. A
+/// branch goes into its commits, and a commit or stash into its files.
+enum GitList: String {
+    case changes, history, branches, stashes
+    /// A branch's commits.
+    case branch
+    /// The Diff files: a commit's or stash's files.
+    case files
+}
+
 /// The Git View of one App Window (CONTEXT.md): a read-only look at the
-/// repository in the current Window's folder, as a navigator. Panels of
-/// changed files, branches, commits, stashes and the selected one's files,
-/// and the selection's diff beside them.
+/// repository in the current Window's folder, as a navigator. Tabs of
+/// changed files, history, branches and stashes, and the selection's diff
+/// beside them.
 @MainActor @Observable
 final class GitView {
-    /// Something in a panel.
+    /// Something in a list.
     enum Item: Equatable, Identifiable {
         case change(GitChange)
         /// A folder of the Changes tree or of the Diff files.
-        case folder(GitPanel, String)
+        case folder(GitList, String)
         case commit(GitCommit)
         case stash(GitStash)
         case branch(GitBranch)
@@ -61,7 +71,7 @@ final class GitView {
         var id: String {
             switch self {
             case .change(let change): "change:\(change.path)"
-            case .folder(let panel, let path): "folder:\(panel.rawValue):\(path)"
+            case .folder(let list, let path): "folder:\(list.rawValue):\(path)"
             case .commit(let commit): "commit:\(commit.sha)"
             case .stash(let stash): "stash:\(stash.sha)"
             case .branch(let branch): "branch:\(branch.name)"
@@ -86,7 +96,7 @@ final class GitView {
         }
     }
 
-    /// A row of a panel as shown.
+    /// A row of a list as shown.
     struct Row: Identifiable {
         /// Nil for a note, like "Working tree clean".
         var item: Item?
@@ -100,6 +110,18 @@ final class GitView {
         var graph: GitGraphRow?
 
         var id: String { item?.id ?? "note:\(text)" }
+    }
+
+    /// A list as the sidebar shows it: what it was gone into from, what's
+    /// selected, and its filter.
+    struct Level: Equatable {
+        let list: GitList
+        /// The branch whose commits, or the commit or stash whose files,
+        /// it lists.
+        var owner: Item?
+        /// An item's id. None in Diff files shows all of them.
+        var selection: String?
+        var filter = ""
     }
 
     enum Focus { case list, diff }
@@ -161,9 +183,8 @@ final class GitView {
             /// A folder of the Changes tree, with its changes.
             case folder(String, [GitChange])
             case commit(GitCommit, GitCommitDetail?)
-            /// A branch against `base`, with the commits it has that `base`
-            /// doesn't. No base: the branch you're on, and nothing to compare.
-            case branch(GitBranch, base: String?, commits: [GitCommit])
+            /// A branch, with its history once read; no diff.
+            case branch(GitBranch, GitLog?)
             case stash(GitStash)
         }
 
@@ -238,9 +259,9 @@ final class GitView {
     /// lazygit's keys where they fit. They aren't configurable; only
     /// `toggle_git_view` is.
     enum Command: Equatable {
-        case status, panel(GitPanel)
+        case tab(GitTab)
         case down, up, top, bottom
-        case nextPanel, previousPanel, enter, focusDiff, focusList
+        case nextTab, previousTab, enter, focusDiff, focusList
         case scroll(lines: Int), halfPage(Int)
         case nextHunk, previousHunk, nextFile, previousFile
         case extend(Int), range, hunk, copy
@@ -255,27 +276,16 @@ final class GitView {
     private(set) var error: String?
     /// Reading on opening or after R, when the toolbar shows a spinner.
     private(set) var isReading = false
-    /// The panel the keys move in, whose selection the diff pane shows.
-    private(set) var panel = GitPanel.changes
+    /// The tab the sidebar shows.
+    private(set) var tab = GitTab.changes
+    /// Each tab's lists: its own, then each one gone into; the last one
+    /// is shown, and the rest keep where they were, as in lazygit.
+    private(set) var levels = GitView.rootLevels
     private(set) var focus = Focus.list
-    /// Each panel's selection by item id, kept while another panel has the
-    /// keys, as in lazygit. None in Diff files shows all of them.
-    private(set) var selections: [GitPanel: String] = [:]
-    /// The commit, stash or branch the Diff files are the files of.
-    private(set) var owner: Item?
     /// Folded folders of the Changes tree and of the Diff files.
-    private(set) var collapsedFolders: [GitPanel: Set<String>] = [:]
-    /// Folded panels show their header only, unless they have the keys.
-    /// Stashes start folded; the choice is remembered.
-    private(set) var collapsedPanels = Set((UserDefaults.standard.stringArray(forKey: "gitCollapsedPanels") ?? ["stashes"])
-        .compactMap(GitPanel.init(rawValue:))) {
-        didSet { UserDefaults.standard.set(collapsedPanels.map(\.rawValue).sorted(), forKey: "gitCollapsedPanels") }
-    }
-    /// A folded panel the keys went to, open until they leave it.
-    private(set) var peekingPanel: GitPanel?
-    var filter = "" {
-        didSet { if filter != oldValue { keepSelectionVisible() } }
-    }
+    private(set) var collapsedFolders: [GitList: Set<String>] = [:]
+    /// The branches' histories read, with the commit each branch was at.
+    private(set) var branchLogs: [String: (sha: String, log: GitLog)] = [:]
     /// The filter field has keyboard focus; the view keeps it current.
     var isFiltering = false
     /// Asks the view to put keyboard focus in the filter field.
@@ -319,6 +329,9 @@ final class GitView {
     @ObservationIgnored private var snapshotGeneration = 0
     @ObservationIgnored private var contentWork: DispatchWorkItem?
     @ObservationIgnored private var loadingID: String?
+    @ObservationIgnored private var logWork: DispatchWorkItem?
+    /// The branch and commit whose history is being read.
+    @ObservationIgnored private var readingLog: String?
     @ObservationIgnored private var shownScope = Scope.all
     /// v: moving the cursor extends the range, as in lazygit.
     @ObservationIgnored private var isRangeSelecting = false
@@ -351,8 +364,9 @@ final class GitView {
         if isOpen { close() } else { open() }
     }
 
-    /// Opens on the current Window's folder, where it was left when that is
-    /// the folder it last showed.
+    /// Opens on the current Window's folder, on Changes every time. The
+    /// other tabs are where they were left when that is the folder it last
+    /// showed.
     func open() {
         guard !isOpen, let store, let window = store.selectedWindow else { return }
         previousResponder = store.terminalHost.window?.firstResponder
@@ -364,17 +378,16 @@ final class GitView {
             content = nil
             diffRows = []
             fileHeader = nil
-            selections = [:]
-            owner = nil
-            panel = .changes
-            peekingPanel = nil
+            levels = Self.rootLevels
+            branchLogs = [:]
             collapsedFolders = [:]
-            filter = ""
-            focus = .list
             wholeFiles = []
             clearLineSelection()
         }
         isOpen = true
+        tab = .changes
+        focus = .list
+        if snapshot != nil { showSelection() }
         wantsFocus = true
         DispatchQueue.main.async { [weak self] in self?.focusKeyView() }
         refresh(showingProgress: true)
@@ -394,6 +407,8 @@ final class GitView {
         wantsFocus = false
         contentWork?.cancel()
         loadingID = nil
+        logWork?.cancel()
+        readingLog = nil
         refreshTimer?.invalidate()
         refreshTimer = nil
         if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
@@ -448,46 +463,71 @@ final class GitView {
         focusKeyView()
     }
 
-    // MARK: Panels
+    // MARK: Lists
 
-    /// The panels as shown, top to bottom. The Diff files go right under
-    /// the panel of the branch, commit or stash they're the files of.
-    var panels: [GitPanel] {
-        switch owner {
-        case .branch?: [.changes, .branches, .files, .history, .stashes]
-        case .commit?: [.changes, .branches, .history, .files, .stashes]
-        case .stash?: [.changes, .branches, .history, .stashes, .files]
-        default: [.changes, .branches, .history, .stashes]
+    private static var rootLevels: [GitTab: [Level]] {
+        Dictionary(uniqueKeysWithValues: GitTab.allCases.map { ($0, [Level(list: $0.list)]) })
+    }
+
+    /// The list shown: the tab's own, or the last one gone into.
+    var level: Level { levels[tab]?.last ?? Level(list: tab.list) }
+    var list: GitList { level.list }
+
+    /// The list the shown one was gone into from, which ⎋ goes back to.
+    var parentLevel: Level? {
+        guard let stack = levels[tab], stack.count > 1 else { return nil }
+        return stack[stack.count - 2]
+    }
+
+    /// The list above the Diff files: the shown one, or the commits or
+    /// stashes the Diff files were gone into from.
+    var listLevel: Level {
+        list == .files ? parentLevel ?? level : level
+    }
+
+    /// The Diff files under the History, a branch's commits and the
+    /// Stashes: the selected commit's or stash's, or those gone into.
+    var filesLevel: Level? {
+        if list == .files { return level }
+        guard list == .history || list == .branch || list == .stashes else { return nil }
+        switch selectedItem {
+        case .commit?, .stash?: return Level(list: .files, owner: selectedItem)
+        default: return nil
         }
     }
 
-    /// Whether a panel shows its rows: unfolded, or folded but with the keys.
-    func isShowing(_ panel: GitPanel) -> Bool {
-        !collapsedPanels.contains(panel) || peekingPanel == panel
-    }
-
-    /// A click on a panel's header folds it, or unfolds it and gives it the
-    /// keys.
-    func toggleCollapsed(_ panel: GitPanel) {
-        if isShowing(panel) {
-            collapsedPanels.insert(panel)
-            if peekingPanel == panel { peekingPanel = nil }
-        } else {
-            collapsedPanels.remove(panel)
-            activate(panel)
+    /// The shown list's filter; each list has its own.
+    var filter: String {
+        get { level.filter }
+        set {
+            guard newValue != level.filter else { return }
+            updateLevel { $0.filter = newValue }
+            keepSelectionVisible()
         }
     }
 
-    /// A panel's rows: the Changes and Diff files as trees, and the History
-    /// with its graph. A filter shows the matches with their folders open.
-    func rows(in panel: GitPanel) -> [Row] {
-        guard let snapshot else { return [] }
+    private func updateLevel(_ update: (inout Level) -> Void) {
+        var stack = levels[tab] ?? [Level(list: tab.list)]
+        update(&stack[stack.count - 1])
+        levels[tab] = stack
+    }
+
+    /// Whether an item has every word of a filter.
+    private static func matcher(_ filter: String) -> (Item) -> Bool {
         let words = filter.lowercased().split(separator: " ").map(String.init)
-        func matches(_ item: Item) -> Bool {
-            words.isEmpty || words.allSatisfy(item.text.lowercased().contains)
-        }
+        return { item in words.isEmpty || words.allSatisfy(item.text.lowercased().contains) }
+    }
+
+    var rows: [Row] { rows(for: level) }
+
+    /// A list's rows: the Changes and Diff files as trees, and commits with
+    /// their graph. A filter shows the matches with their folders open.
+    func rows(for level: Level) -> [Row] {
+        guard let snapshot else { return [] }
+        let matches = Self.matcher(level.filter)
+        let isFiltered = !level.filter.isEmpty
         func note(_ text: String) -> [Row] { [Row(text: text)] }
-        switch panel {
+        switch level.list {
         case .changes:
             let changes = snapshot.changes.filter { matches(.change($0)) }
             guard !changes.isEmpty else { return note(snapshot.changes.isEmpty ? "Working tree clean" : "No matches") }
@@ -499,221 +539,248 @@ final class GitView {
                     folder = (folder as NSString).deletingLastPathComponent
                 }
             }
-            return tree(changes.map(\.path), in: .changes, folding: words.isEmpty) { index in
+            return tree(changes.map(\.path), in: .changes, folding: !isFiltered) { index in
                 Row(item: .change(changes[index]), isStaged: changes[index].isStaged)
             } folder: { path in
                 !unstaged.contains(path)
             }
+        case .history, .branch:
+            guard let log = log(for: level) else { return note("Reading…") }
+            if let error = log.error { return note(error) }
+            let rows = log.commits.indices.compactMap { index -> Row? in
+                let commit = log.commits[index]
+                guard matches(.commit(commit)) else { return nil }
+                return Row(item: .commit(commit), graph: !isFiltered && log.graph.indices.contains(index) ? log.graph[index] : nil)
+            }
+            return rows.isEmpty ? note(log.commits.isEmpty ? "No commits yet" : "No matches") : rows
         case .branches:
             let rows = snapshot.branches.map(Item.branch).filter(matches).map { Row(item: $0) }
             return rows.isEmpty ? note(snapshot.branches.isEmpty ? "No branches yet" : "No matches") : rows
-        case .history:
-            let rows = snapshot.commits.indices.compactMap { index -> Row? in
-                let commit = snapshot.commits[index]
-                guard matches(.commit(commit)) else { return nil }
-                return Row(item: .commit(commit), graph: words.isEmpty && snapshot.graph.indices.contains(index) ? snapshot.graph[index] : nil)
-            }
-            return rows.isEmpty ? note(snapshot.commits.isEmpty ? "No commits yet" : "No matches") : rows
         case .stashes:
             let rows = snapshot.stashes.map(Item.stash).filter(matches).map { Row(item: $0) }
             return rows.isEmpty ? note(snapshot.stashes.isEmpty ? "No stashes" : "No matches") : rows
         case .files:
-            guard owner != nil else { return [] }
-            if let content, content.id == request()?.id, content.error != nil { return note("Could not read the files") }
-            guard let files = ownerFiles else { return note("Reading…") }
+            guard let owner = level.owner else { return [] }
+            if let content, content.id == request(for: owner)?.id, content.error != nil { return note("Could not read the files") }
+            guard let files = ownerFiles(for: level) else { return note("Reading…") }
             let shown = files.filter { matches(.file($0.path)) }
             guard !shown.isEmpty else { return note(files.isEmpty ? "No changes" : "No matches") }
-            return tree(shown.map(\.path), in: .files, folding: words.isEmpty) { index in
+            return tree(shown.map(\.path), in: .files, folding: !isFiltered) { index in
                 Row(item: .file(shown[index].path))
             } folder: { _ in false }
         }
     }
 
-    /// How many files, commits or stashes a panel has, folded or not; with
-    /// a filter, how many match.
-    func count(in panel: GitPanel) -> Int {
+    /// How many files, commits, branches or stashes a list has, folded or
+    /// not; with a filter, how many match.
+    func count(for level: Level) -> Int {
         guard let snapshot else { return 0 }
-        let words = filter.lowercased().split(separator: " ").map(String.init)
-        func matches(_ item: Item) -> Bool {
-            words.isEmpty || words.allSatisfy(item.text.lowercased().contains)
-        }
-        switch panel {
+        let matches = Self.matcher(level.filter)
+        switch level.list {
         case .changes: return snapshot.changes.filter { matches(.change($0)) }.count
+        case .history, .branch: return log(for: level)?.commits.filter { matches(.commit($0)) }.count ?? 0
         case .branches: return snapshot.branches.filter { matches(.branch($0)) }.count
-        case .history: return snapshot.commits.filter { matches(.commit($0)) }.count
         case .stashes: return snapshot.stashes.filter { matches(.stash($0)) }.count
-        case .files: return ownerFiles?.filter { matches(.file($0.path)) }.count ?? 0
+        case .files: return ownerFiles(for: level)?.filter { matches(.file($0.path)) }.count ?? 0
         }
     }
 
-    private func tree(_ paths: [String], in panel: GitPanel, folding: Bool, file: (Int) -> Row,
+    private func tree(_ paths: [String], in list: GitList, folding: Bool, file: (Int) -> Row,
                       folder isStaged: (String) -> Bool) -> [Row] {
-        GitTree.nodes(paths, collapsed: folding ? collapsedFolders[panel] ?? [] : []).map { node in
-            var row = node.file.map(file) ?? Row(item: .folder(panel, node.path), text: node.name, isStaged: isStaged(node.path))
+        GitTree.nodes(paths, collapsed: folding ? collapsedFolders[list] ?? [] : []).map { node in
+            var row = node.file.map(file) ?? Row(item: .folder(list, node.path), text: node.name, isStaged: isStaged(node.path))
             row.depth = node.depth
             return row
         }
     }
 
-    /// The items the selection moves through, in order.
-    func items(in panel: GitPanel) -> [Item] {
-        rows(in: panel).compactMap(\.item)
+    /// The commits a list shows: the current branch's, or the branch's it
+    /// was gone into from, once read.
+    func log(for level: Level) -> GitLog? {
+        if case .branch(let branch)? = level.owner { return log(of: branch) }
+        return snapshot?.log
     }
 
-    /// A panel's selection, also when a folded folder or the filter hides it.
-    func selectedItem(in panel: GitPanel) -> Item? {
-        guard let id = selections[panel], let snapshot else { return nil }
-        switch panel {
+    /// The branch you're on has the History's.
+    func log(of branch: GitBranch) -> GitLog? {
+        branch.isHead ? snapshot?.log : branchLogs[branch.name]?.log
+    }
+
+    /// The items the selection moves through, in order.
+    func items(for level: Level) -> [Item] {
+        rows(for: level).compactMap(\.item)
+    }
+
+    var items: [Item] { items(for: level) }
+
+    /// A list's selection, also when a folded folder or the filter hides it.
+    func selectedItem(for level: Level) -> Item? {
+        guard let id = level.selection, let snapshot else { return nil }
+        switch level.list {
         case .changes:
             if let change = snapshot.changes.first(where: { Item.change($0).id == id }) { return .change(change) }
             let path = String(id.dropFirst("folder:changes:".count))
             return id.hasPrefix("folder:changes:") && snapshot.changes.contains { GitTree.path($0.path, isIn: path) }
                 ? .folder(.changes, path) : nil
+        case .history, .branch:
+            return log(for: level)?.commits.first { Item.commit($0).id == id }.map(Item.commit)
         case .branches:
             return snapshot.branches.first { Item.branch($0).id == id }.map(Item.branch)
-        case .history:
-            return snapshot.commits.first { Item.commit($0).id == id }.map(Item.commit)
         case .stashes:
             return snapshot.stashes.first { Item.stash($0).id == id }.map(Item.stash)
         case .files:
-            guard let files = ownerFiles else { return nil }
+            guard let files = ownerFiles(for: level) else { return nil }
             if let file = files.first(where: { Item.file($0.path).id == id }) { return .file(file.path) }
             let path = String(id.dropFirst("folder:files:".count))
             return id.hasPrefix("folder:files:") && files.contains { GitTree.path($0.path, isIn: path) } ? .folder(.files, path) : nil
         }
     }
 
-    /// The Diff files, once the owner's diff has been read.
-    var ownerFiles: [GitPatchFile]? {
-        guard owner != nil, let content, content.error == nil, content.id == request()?.id else { return nil }
+    var selectedItem: Item? { selectedItem(for: level) }
+
+    /// The Diff files, once their owner's diff has been read.
+    var ownerFiles: [GitPatchFile]? { ownerFiles(for: level) }
+
+    func ownerFiles(for level: Level) -> [GitPatchFile]? {
+        guard level.list == .files, let owner = level.owner, let content, content.error == nil,
+              content.id == request(for: owner)?.id else { return nil }
         return content.patch.files
     }
 
-    /// What the diff pane shows the diff of: the change or folder in
-    /// Changes, else what the Diff files are of.
+    /// What the diff pane shows: the selection, or in the Diff files, what
+    /// they're the files of.
     var contentItem: Item? {
-        panel == .changes ? selectedItem(in: .changes) : owner
+        list == .files ? level.owner : selectedItem
     }
 
     var scope: Scope {
-        guard panel == .files else { return .all }
-        switch selectedItem(in: .files) {
+        guard list == .files else { return .all }
+        switch selectedItem {
         case .file(let path)?: return .file(path)
         case .folder(_, let path)?: return .folder(path)
         default: return .all
         }
     }
 
-    /// A click on a row.
-    func select(_ item: Item, in panel: GitPanel) {
+    /// A click on a row of a list: a branch's goes into its commits, and a
+    /// file of the selected commit or stash into its files; a commit above
+    /// the files gone into comes back out to it.
+    func select(_ item: Item, in level: Level) {
+        if case .branch = item { return enter(item) }
+        if level.list == .files, list != .files, let owner = level.owner { return enter(owner, selecting: item) }
+        if level.list != .files, list == .files { goBack() }
         focus = .list
-        choose(item, in: panel)
+        choose(item)
         focusKeyView()
     }
 
-    /// Gives `panel` the keys, on what it had selected, else its first item.
-    /// A folded panel opens until the keys leave it.
-    func activate(_ panel: GitPanel) {
+    func select(_ item: Item) {
+        select(item, in: level)
+    }
+
+    /// Shows a tab as it was left, the first time on its first item. The
+    /// tab shown goes back to its own list.
+    func selectTab(_ tab: GitTab) {
         focus = .list
-        let items = items(in: panel)
-        let kept = items.first { $0.id == selections[panel] }
-        if panel == .files {
-            // Into a commit's files, as enter in lazygit: on its first file.
-            let first = items.first { !$0.isFolder }
-            wantsFirstFile = kept == nil && first == nil
-            choose(kept ?? first, in: .files)
+        if tab == self.tab, let stack = levels[tab], stack.count > 1 {
+            levels[tab] = [stack[0]]
+            wantsFirstFile = false
+        }
+        self.tab = tab
+        if level.selection == nil, list != .files {
+            choose(items.first { !$0.isFolder } ?? items.first)
         } else {
-            choose(kept ?? items.first { !$0.isFolder } ?? items.first, in: panel)
+            showSelection()
         }
         focusKeyView()
     }
 
-    private func canActivate(_ panel: GitPanel) -> Bool {
-        panel == .files ? owner != nil : !items(in: panel).isEmpty
+    /// Goes into a branch's commits, or a commit's or stash's files, as ↩
+    /// in lazygit: on the first one, or on `selecting`.
+    func enter(_ item: Item, selecting: Item? = nil) {
+        let list: GitList
+        switch item {
+        case .branch: list = .branch
+        case .commit, .stash: list = .files
+        default: return
+        }
+        focus = .list
+        updateLevel { $0.selection = item.id }
+        levels[tab, default: [Level(list: tab.list)]].append(Level(list: list, owner: item))
+        // A branch's commits not read yet: the first once they are.
+        let first = selecting ?? items.first { !$0.isFolder }
+        wantsFirstFile = list == .files && first == nil
+        choose(first)
+        focusKeyView()
     }
 
-    /// Tab: the next panel down that has something in it, round to the top.
+    /// Back to the list the shown one was gone into from, on what it went
+    /// into; or out of `list` and what was gone into from it.
+    func goBack(from list: GitList? = nil) {
+        guard var stack = levels[tab], stack.count > 1 else { return }
+        let index = list.flatMap { list in stack.lastIndex { $0.list == list } } ?? stack.count - 1
+        guard index > 0 else { return }
+        stack.removeSubrange(index...)
+        levels[tab] = stack
+        focus = .list
+        wantsFirstFile = false
+        showSelection()
+        focusKeyView()
+    }
+
+    /// Tab: the next tab, round to the first.
     private func cycle(_ step: Int) {
-        let panels = panels
-        let start = panels.firstIndex(of: panel) ?? 0
-        for offset in 1..<panels.count {
-            let next = panels[((start + step * offset) % panels.count + panels.count) % panels.count]
-            if canActivate(next) {
-                activate(next)
-                return
-            }
-        }
+        let tabs = GitTab.allCases
+        selectTab(tabs[(tabs.firstIndex(of: tab)! + step + tabs.count) % tabs.count])
     }
 
-    /// Selects without moving keyboard focus. Changes have no Diff files;
-    /// a commit or stash has its own.
-    private func choose(_ item: Item?, in panel: GitPanel) {
-        self.panel = panel
-        peekingPanel = collapsedPanels.contains(panel) ? panel : nil
-        selections[panel] = item?.id
-        switch panel {
-        case .changes: setOwner(nil)
-        case .branches, .history, .stashes: setOwner(item)
-        case .files: break
-        }
+    /// Selects without moving keyboard focus.
+    private func choose(_ item: Item?) {
+        updateLevel { $0.selection = item?.id }
         showSelection()
     }
 
-    private func setOwner(_ item: Item?) {
-        if owner?.id != item?.id { selections[.files] = nil }
-        owner = item
-    }
-
     private func move(by delta: Int) {
-        let items = items(in: panel)
+        let items = items
         guard !items.isEmpty else { return }
-        let current = items.firstIndex { $0.id == selections[panel] } ?? (delta > 0 ? -1 : items.count)
+        let current = items.firstIndex { $0.id == level.selection } ?? (delta > 0 ? -1 : items.count)
         let next = min(max(current + delta, 0), items.count - 1)
-        guard items[next].id != selections[panel] else { return }
-        choose(items[next], in: panel)
+        guard items[next].id != level.selection else { return }
+        choose(items[next])
     }
 
-    /// Esc from the Diff files: back to the branch, commit or stash.
-    private func leaveFiles() {
-        switch owner {
-        case .branch?: choose(owner, in: .branches)
-        case .commit?: choose(owner, in: .history)
-        case .stash?: choose(owner, in: .stashes)
-        default: activate(.changes)
-        }
-    }
-
-    func toggleFolder(_ path: String, in panel: GitPanel) {
-        var folded = collapsedFolders[panel] ?? []
+    func toggleFolder(_ path: String, in list: GitList) {
+        var folded = collapsedFolders[list] ?? []
         if folded.remove(path) == nil { folded.insert(path) }
-        collapsedFolders[panel] = folded
+        collapsedFolders[list] = folded
     }
 
-    /// `-` folds every folder of the panel, `=` opens them, as in lazygit.
+    /// `-` folds every folder of the list, `=` opens them, as in lazygit.
     private func foldAll(_ folding: Bool) {
-        guard panel == .changes || panel == .files else { return }
+        guard list == .changes || list == .files else { return }
         guard folding else {
-            collapsedFolders[panel] = []
+            collapsedFolders[list] = []
             return
         }
-        let paths = panel == .changes ? snapshot?.changes.map(\.path) ?? [] : ownerFiles?.map(\.path) ?? []
-        collapsedFolders[panel] = Set(GitTree.nodes(paths).filter { $0.file == nil }.map(\.path))
+        let paths = list == .changes ? snapshot?.changes.map(\.path) ?? [] : ownerFiles?.map(\.path) ?? []
+        collapsedFolders[list] = Set(GitTree.nodes(paths).filter { $0.file == nil }.map(\.path))
         // A file now folded away: select its top folder.
-        if let id = selections[panel], !items(in: panel).contains(where: { $0.id == id }),
-           let top = items(in: panel).first(where: { item in
+        let items = items
+        if let id = level.selection, !items.contains(where: { $0.id == id }),
+           let top = items.first(where: { item in
                guard case .folder(_, let path) = item else { return false }
                return id.hasSuffix(":" + path) || id.contains(":\(path)/")
            }) {
-            choose(top, in: panel)
+            choose(top)
         }
     }
 
     /// A filter can take the selection away; select the first match.
     private func keepSelectionVisible() {
         guard !filter.isEmpty else { return }
-        let items = items(in: panel)
-        guard !items.isEmpty, !items.contains(where: { $0.id == selections[panel] }) else { return }
-        choose(items.first { !$0.isFolder } ?? items[0], in: panel)
+        let items = items
+        guard !items.isEmpty, !items.contains(where: { $0.id == level.selection }) else { return }
+        choose(items.first { !$0.isFolder } ?? items[0])
     }
 
     // MARK: Keys
@@ -750,9 +817,9 @@ final class GitView {
 
     static let commands: [KeyTrigger: Command] = {
         let spelling: KeyValuePairs<String, Command> = [
-            "1": .status, "2": .panel(.changes), "3": .panel(.branches), "4": .panel(.history), "5": .panel(.stashes),
+            "1": .tab(.changes), "2": .tab(.history), "3": .tab(.branches), "4": .tab(.stashes),
             "j": .down, "down": .down, "k": .up, "up": .up, "shift+comma": .top, "shift+period": .bottom,
-            "tab": .nextPanel, "shift+tab": .previousPanel, "enter": .enter,
+            "tab": .nextTab, "shift+tab": .previousTab, "enter": .enter,
             "l": .focusDiff, "right": .focusDiff, "h": .focusList, "left": .focusList,
             "shift+j": .scroll(lines: 3), "shift+k": .scroll(lines: -3), "ctrl+d": .halfPage(1), "ctrl+u": .halfPage(-1),
             "alt+down": .nextHunk, "alt+up": .previousHunk, "right_bracket": .nextFile, "left_bracket": .previousFile,
@@ -765,12 +832,8 @@ final class GitView {
 
     func perform(_ command: Command) {
         switch command {
-        case .status:
-            guard let head = snapshot?.branches.first(where: \.isHead) else { return }
-            focus = .list
-            choose(.branch(head), in: .branches)
-        case .panel(let panel):
-            activate(panel)
+        case .tab(let tab):
+            selectTab(tab)
         case .down, .up:
             let delta = command == .down ? 1 : -1
             if focus == .diff { moveCursor(by: delta) } else { move(by: delta) }
@@ -783,20 +846,20 @@ final class GitView {
             } else {
                 move(by: command == .top ? -Int.max / 2 : Int.max / 2)
             }
-        case .nextPanel, .previousPanel:
-            cycle(command == .nextPanel ? 1 : -1)
+        case .nextTab, .previousTab:
+            cycle(command == .nextTab ? 1 : -1)
         case .enter:
-            guard focus == .list else { return }
-            switch selectedItem(in: panel) {
-            case .folder(let tree, let path)?: toggleFolder(path, in: tree)
-            case .branch?, .commit?, .stash?: activate(.files)
-            case nil: if panel == .files { activate(.files) }
-            default: setFocus(.diff)
+            guard focus == .list, let item = selectedItem else { return }
+            switch item {
+            case .folder(let tree, let path): toggleFolder(path, in: tree)
+            case .branch, .commit, .stash: enter(item)
+            case .change, .file: setFocus(.diff)
             }
         case .focusDiff:
-            setFocus(.diff)
+            // A branch has no diff: → goes into its commits.
+            if focus == .list, let item = selectedItem, case .branch = item { enter(item) } else { setFocus(.diff) }
         case .focusList:
-            if focus == .diff { setFocus(.list) } else if panel == .files { leaveFiles() }
+            if focus == .diff { setFocus(.list) } else { goBack() }
         case .scroll(let lines):
             scrollDiff(by: lines)
         case .halfPage(let direction):
@@ -817,7 +880,7 @@ final class GitView {
         case .copy:
             copySelection()
         case .toggleFolder:
-            if focus == .list, case .folder(let tree, let path)? = selectedItem(in: panel) { toggleFolder(path, in: tree) }
+            if focus == .list, case .folder(let tree, let path)? = selectedItem { toggleFolder(path, in: tree) }
         case .collapseAll, .expandAll:
             if focus == .list { foldAll(command == .collapseAll) }
         case .filter:
@@ -825,10 +888,10 @@ final class GitView {
         case .back:
             if focus == .diff {
                 if anchor != nil { clearLineSelection(keepingCursor: true) } else { setFocus(.list) }
-            } else if panel == .files {
-                leaveFiles()
             } else if !filter.isEmpty {
                 filter = ""
+            } else if parentLevel != nil {
+                goBack()
             } else {
                 close()
             }
@@ -880,11 +943,11 @@ final class GitView {
         }
     }
 
-    /// For a single file, the next one in its panel; in a commit, branch or
-    /// stash, the next file's diff.
+    /// For a single file, the next one in its list; in a commit, stash or
+    /// folder, the next file's diff.
     func jumpToFile(forward: Bool) {
         if fileHeader != nil {
-            if let item = neighbor(forward: forward) { select(item, in: panel) }
+            if let item = neighbor(forward: forward) { select(item) }
             return
         }
         let top = topIndex
@@ -893,18 +956,18 @@ final class GitView {
         if let target { scrollRow = diffRows[target].id }
     }
 
-    /// The file after or before the selected one in its panel, for the
+    /// The file after or before the selected one in its list, for the
     /// end-of-file footer and `]`/`[`.
     func neighbor(forward: Bool) -> Item? {
-        guard panel == .changes || panel == .files else { return nil }
-        let files = items(in: panel).filter { !$0.isFolder }
-        guard let index = files.firstIndex(where: { $0.id == selections[panel] }) else { return nil }
+        guard list == .changes || list == .files else { return nil }
+        let files = items.filter { !$0.isFolder }
+        guard let index = files.firstIndex(where: { $0.id == level.selection }) else { return nil }
         let next = index + (forward ? 1 : -1)
         return files.indices.contains(next) ? files[next] : nil
     }
 
     func showWholeFile() {
-        guard panel == .changes, case .change(let change)? = selectedItem(in: .changes) else { return }
+        guard list == .changes, case .change(let change)? = selectedItem else { return }
         wholeFiles.insert(change.path)
         loadContent(reload: true)
     }
@@ -1095,7 +1158,7 @@ final class GitView {
     /// the selection's path, hash or name.
     private func copySelection() {
         guard focus == .diff else {
-            switch selectedItem(in: panel) ?? owner {
+            switch selectedItem ?? level.owner {
             case .change(let change)?: copy(change.path, title: "Copied Path")
             case .folder(_, let path)?, .file(let path)?: copy(path, title: "Copied Path")
             case .commit(let commit)?: copy(commit.sha, title: "Copied Hash", shown: commit.shortSHA)
@@ -1172,15 +1235,13 @@ final class GitView {
         let isChange = if case .change = content.header { true } else { false }
         let isSingleFile = isChange || { if case .file = scope { true } else { false } }()
         if !isSingleFile, scope == .all { add(.card) }
+        if case .branch = content.header { return rows }
         if let error = content.error {
             add(.message(error))
             return rows
         }
         let files = content.patch.files.filter { scope.contains($0.path) }
-        if files.isEmpty {
-            if case .branch(_, nil, _) = content.header { return rows }
-            add(.message("No changes"))
-        }
+        if files.isEmpty { add(.message("No changes")) }
         let groups = Set(files.compactMap(\.group))
         for file in files {
             if !isSingleFile {
@@ -1211,7 +1272,7 @@ final class GitView {
     // MARK: Loading
 
     /// Reads the repository again: on opening, with R, every 10 seconds
-    /// and when Muxify comes to the front. Each panel keeps its selection.
+    /// and when Muxify comes to the front. Each list keeps its selection.
     func refresh(showingProgress: Bool = false) {
         guard isOpen, let store else { return }
         snapshotGeneration += 1
@@ -1233,40 +1294,95 @@ final class GitView {
         }
     }
 
-    private func apply(_ next: GitSnapshot) {
-        let previous = Dictionary(uniqueKeysWithValues: [GitPanel.changes, .branches, .history, .stashes].map { ($0, items(in: $0).map(\.id)) })
+    /// Shows a read of the repository. Each list keeps its selection, else
+    /// selects what's now where it was; a list whose branch or stash is
+    /// gone closes.
+    func apply(_ next: GitSnapshot) {
+        let previous = levels.mapValues { $0.map { items(for: $0).map(\.id) } }
         error = nil
         if snapshot != next { snapshot = next }
-        if selections.isEmpty, owner == nil {
-            // The first read: the first change, else the latest commit.
-            if let change = items(in: .changes).first(where: { !$0.isFolder }) {
-                panel = .changes
-                selections[.changes] = change.id
-            } else if let commit = items(in: .history).first {
-                panel = .history
-                selections[.history] = commit.id
-                owner = commit
+        for (tab, stack) in levels {
+            levels[tab] = refreshed(stack, previous: previous[tab] ?? [])
+        }
+        // Changes, where it opens, are on a file whenever there is one.
+        if let changes = levels[.changes]?.first, changes.selection == nil,
+           let change = items(for: changes).first(where: { !$0.isFolder }) {
+            levels[.changes]?[0].selection = change.id
+        }
+        readBranchLog()
+        loadContent(reload: true)
+    }
+
+    /// A tab's lists after a read: those gone into on what was just read,
+    /// and each selection kept, else the item now where it was.
+    private func refreshed(_ stack: [Level], previous: [[String]]) -> [Level] {
+        var stack = stack
+        for index in stack.indices.dropFirst() {
+            guard let owner = stack[index].owner.flatMap(refreshed) else {
+                stack.removeSubrange(index...)
+                break
             }
-        } else {
-            // The same file, commit or stash, else the one now where it was.
-            for panel in previous.keys where selections[panel] != nil && selectedItem(in: panel) == nil {
-                let items = items(in: panel)
-                let old = previous[panel]?.firstIndex(of: selections[panel]!)
-                selections[panel] = old.flatMap { items.isEmpty ? nil : items[min($0, items.count - 1)].id }
-            }
-            switch panel {
-            case .changes: setOwner(nil)
-            case .branches, .history, .stashes: setOwner(selectedItem(in: panel))
-            case .files:
-                if let fresh = owner.flatMap(refreshed) {
-                    owner = fresh
-                } else {
-                    setOwner(nil)
-                    panel = .changes
-                }
+            stack[index].owner = owner
+        }
+        // The Diff files are read with their owner's diff, not here.
+        for index in stack.indices where stack[index].list != .files {
+            guard let id = stack[index].selection, selectedItem(for: stack[index]) == nil else { continue }
+            stack[index].selection = Self.neighbor(of: id, previous: previous.indices.contains(index) ? previous[index] : [],
+                                                   items: items(for: stack[index]))
+        }
+        return stack
+    }
+
+    /// The item now where `id` was.
+    private static func neighbor(of id: String, previous: [String], items: [Item]) -> String? {
+        guard let old = previous.firstIndex(of: id), !items.isEmpty else { return nil }
+        return items[min(old, items.count - 1)].id
+    }
+
+    /// Reads the history of the branch selected in Branches or gone into,
+    /// unless it's read at the commit the branch is at.
+    private func readBranchLog() {
+        let item = list == .branch ? level.owner : list == .branches ? selectedItem : nil
+        guard case .branch(let branch)? = item, !branch.isHead, branchLogs[branch.name]?.sha != branch.sha,
+              readingLog != "\(branch.name) \(branch.sha)" else { return }
+        logWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated { self?.runLog(of: branch) }
+        }
+        logWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.06, execute: work)
+    }
+
+    private func runLog(of branch: GitBranch) {
+        guard let store, let root = snapshot?.root else { return }
+        readingLog = "\(branch.name) \(branch.sha)"
+        store.runGitScript(GitRepository.logScript, arguments: [root, branch.name]) { [weak self] result in
+            guard let self, self.isOpen else { return }
+            switch result {
+            case .success(let output): self.didRead(GitRepository.parseLog(output), of: branch)
+            case .failure(let error): self.didRead(GitLog(error: Self.message(for: error)), of: branch)
             }
         }
-        loadContent(reload: true)
+    }
+
+    /// A branch's history was read: its card lists it, and its commits keep
+    /// their selection, else select the commit now where it was, or the
+    /// first.
+    private func didRead(_ log: GitLog, of branch: GitBranch) {
+        if readingLog == "\(branch.name) \(branch.sha)" { readingLog = nil }
+        let previous = levels[.branches].flatMap { $0.count > 1 ? items(for: $0[1]).map(\.id) : nil } ?? []
+        // Bounded, as the outputs are.
+        if branchLogs.count >= 50 { branchLogs.removeAll() }
+        branchLogs[branch.name] = (branch.sha, log)
+        if var stack = levels[.branches], stack.count > 1, case .branch(let owner)? = stack[1].owner, owner.name == branch.name {
+            let items = items(for: stack[1])
+            if let id = stack[1].selection, selectedItem(for: stack[1]) == nil {
+                stack[1].selection = Self.neighbor(of: id, previous: previous, items: items)
+            }
+            if stack[1].selection == nil { stack[1].selection = items.first?.id }
+            levels[.branches] = stack
+        }
+        if tab == .branches { showSelection() }
     }
 
     /// The owner as just read, or nil when it's gone.
@@ -1283,6 +1399,7 @@ final class GitView {
     /// Shows the selection: reads a new diff, or shows another part of the
     /// one read.
     private func showSelection() {
+        readBranchLog()
         loadContent()
         if let content, content.id == request()?.id, shownScope != scope {
             clearLineSelection()
@@ -1354,10 +1471,6 @@ final class GitView {
                 let parsed = GitRepository.parseCommitDetail(output)
                 header = .commit(commit, parsed.detail)
                 patch = GitPatch.parse(parsed.patch)
-            case .branch(let branch, let base?, _):
-                let parsed = GitRepository.parseBranchDetail(output)
-                header = .branch(branch, base: base, commits: parsed.commits)
-                patch = GitPatch.parse(parsed.patch)
             default:
                 patch = GitPatch.parse(output)
             }
@@ -1367,8 +1480,9 @@ final class GitView {
                 guard let self, self.isOpen, self.request()?.id == request.id else { return }
                 let isSame = self.content?.id == content.id
                 self.content = content
-                if self.wantsFirstFile, self.panel == .files, self.selections[.files] == nil {
-                    self.selections[.files] = self.items(in: .files).first { !$0.isFolder }?.id
+                if self.wantsFirstFile, self.list == .files, self.level.selection == nil {
+                    let first = self.items.first { !$0.isFolder }
+                    self.updateLevel { $0.selection = first?.id }
                 }
                 self.wantsFirstFile = false
                 self.rebuildDiffRows(keepingPosition: isSame)
@@ -1399,7 +1513,11 @@ final class GitView {
     }
 
     func request() -> Request? {
-        guard let snapshot, let item = contentItem else { return nil }
+        contentItem.flatMap(request(for:))
+    }
+
+    func request(for item: Item) -> Request? {
+        guard let snapshot else { return nil }
         let root = snapshot.root
         switch item {
         case .change(let change):
@@ -1415,15 +1533,10 @@ final class GitView {
             return Request(id: "\(item.id):\(names)", header: .folder(path, changes), script: GitRepository.changeScript,
                            arguments: [root, path, "", "3", names])
         case .branch(let branch):
-            // The branch you're on is compared with main; the others with it.
-            let base = branch.isHead ? snapshot.mainBranch.flatMap { $0 == branch.name ? nil : $0 } : "HEAD"
-            guard let base else {
-                return Request(id: item.id, header: .branch(branch, base: nil, commits: Array(snapshot.commits.prefix(20))),
-                               localOutput: "")
-            }
-            let name = base == "HEAD" ? snapshot.head : base
-            return Request(id: "\(item.id)...\(name)", header: .branch(branch, base: name, commits: []),
-                           script: GitRepository.branchScript, arguments: [root, base, branch.name])
+            // Its card: the latest commits, read with its history.
+            let log = log(of: branch)
+            return Request(id: "\(item.id):\(log?.commits.first?.sha ?? log?.error ?? "reading")", header: .branch(branch, log),
+                           localOutput: "")
         case .commit(let commit):
             return Request(id: item.id, header: .commit(commit, nil), script: GitRepository.commitScript,
                            arguments: [root, commit.sha], isFixed: true)
@@ -1436,39 +1549,12 @@ final class GitView {
         }
     }
 
-    // MARK: Panel heights
-
-    /// Splits the sidebar's height between the panels, top to bottom: each
-    /// needing less than its share, like two stashes, gets what it needs,
-    /// and the rest is shared by weight. A nil want takes any room.
-    nonisolated static func panelHeights(wants: [CGFloat?], weights: [CGFloat], minimum: CGFloat, total: CGFloat) -> [CGFloat] {
-        var heights = wants.map { min($0 ?? .infinity, minimum) }
-        var remaining = total - heights.reduce(0, +)
-        var open = wants.indices.filter { heights[$0] < wants[$0] ?? .infinity }
-        while remaining > 0.5, !open.isEmpty {
-            let weight = open.reduce(0) { $0 + weights[$1] }
-            var stillOpen: [Int] = []
-            var used: CGFloat = 0
-            for index in open {
-                let share = remaining * weights[index] / weight
-                let room = (wants[index] ?? .infinity) - heights[index]
-                heights[index] += min(share, room)
-                used += min(share, room)
-                if room > share { stillOpen.append(index) }
-            }
-            remaining -= used
-            if stillOpen.count == open.count { break }
-            open = stillOpen
-        }
-        return heights
-    }
-
     // MARK: Screenshots
 
     #if DEBUG
     /// Drives an instance without keystrokes, for screenshots of a build in
     /// the background: post `dev.muxify.git` with this process's pid as the
-    /// object and a `spec` such as "open=1;keys=4 j enter j;diff=1",
+    /// object and a `spec` such as "open=1;keys=3 enter j;diff=1",
     /// "layout=split", "filter=git", "shot=/tmp/a.png", or "close=1".
     private func observeDemoRequests() {
         demoObserver = DistributedNotificationCenter.default().addObserver(

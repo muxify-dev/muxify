@@ -26,6 +26,17 @@ struct GitSnapshot: Equatable {
     var stashes: [GitStash] = []
     /// `main` or `master`: what the current branch is compared with.
     var mainBranch: String?
+
+    /// The current branch's history.
+    var log: GitLog { GitLog(commits: commits, graph: graph) }
+}
+
+/// A branch's history, newest first, with its graph.
+struct GitLog: Equatable {
+    var commits: [GitCommit] = []
+    var graph: [GitGraphRow] = []
+    /// Why it couldn't be read.
+    var error: String?
 }
 
 /// A changed file, from `git status`: the index's letter (staged) and the
@@ -78,6 +89,8 @@ struct GitComparison: Equatable {
 
 struct GitBranch: Equatable, Identifiable {
     let name: String
+    /// The commit it's at.
+    let sha: String
     let isHead: Bool
     let upstream: String?
     /// `ahead 1, behind 2`, `gone`, or empty when in sync.
@@ -146,7 +159,7 @@ struct GitStash: Equatable, Identifiable {
 /// The git commands of the Git View, as /bin/sh scripts that run on the
 /// Environment's machine, like Session Paths (ADR 0009).
 enum GitRepository {
-    /// How many commits the Commits panel lists.
+    /// How many commits the History, or a branch's commits, list.
     static let commitLimit = 300
 
     /// Takes the folder. Prints sections, each a line `\x1E<name>` and then
@@ -169,23 +182,10 @@ enum GitRepository {
     section untracked; g ls-files -z --others --exclude-standard | xargs -0 wc -l 2>/dev/null
     section branches
     g for-each-ref --sort=-committerdate \\
-        --format='%(HEAD)%00%(refname:short)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:unix)%00%(worktreepath)' refs/heads
-    section commits
-    g log -n \(commitLimit) --topo-order --decorate=full --no-color --format='%H%x00%an%x00%at%x00%D%x00%P%x00%s' HEAD -- 2>/dev/null
-    section unpushed
-    if g rev-parse -q --verify '@{upstream}' >/dev/null 2>&1; then
-        g rev-list -n \(commitLimit) HEAD --not '@{upstream}' --
-    else
-        printf 'none\\n'
-    fi
-    main=
-    refs=
-    for name in main master; do
-        if [ -z "$main" ] && g show-ref -q --verify "refs/heads/$name"; then main=$name; fi
-    done
-    for ref in refs/remotes/origin/main refs/remotes/origin/master refs/heads/main refs/heads/master; do
-        if g show-ref -q --verify "$ref"; then refs="$refs $ref"; fi
-    done
+        --format='%(HEAD)%00%(refname:short)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:unix)%00%(worktreepath)%00%(objectname)' refs/heads
+    \(mainRefs)
+    rev=HEAD upstream='HEAD@{upstream}'
+    \(logSections)
     section main; printf '%s\\n' "$main"
     section comparison
     if g rev-parse -q --verify '@{upstream}' >/dev/null 2>&1; then
@@ -199,8 +199,6 @@ enum GitRepository {
         for branch in $(g for-each-ref --format='%(refname:short)' refs/heads); do
             printf '%s ' "$branch"; g rev-list --left-right --count "$branch...HEAD" -- 2>/dev/null || printf '\\n'
         done
-    section unmerged
-    if [ -n "$refs" ]; then g rev-list -n \(commitLimit) HEAD --not $refs -- 2>/dev/null; else printf 'none\\n'; fi
     section stashes; g stash list --no-color --format='%gd%x00%H%x00%ct%x00%gs' 2>/dev/null
     exit 0
     """
@@ -243,28 +241,53 @@ enum GitRepository {
         show --no-color --no-ext-diff -M -m --first-parent --format='%H%x00%P%x00%an%x00%ae%x00%at%x00%B%x1F' "$2" --
     """
 
-    /// Takes the folder, the base and the branch. Prints the commits the
-    /// branch has that the base doesn't, `\x1F`, then the changes since
-    /// the branch left the base.
-    static let branchScript = """
+    /// Takes the folder and a branch. Prints its history in the sections
+    /// the snapshot prints the current branch's in.
+    static let logScript = """
+    section() { printf '\\036%s\\n' "$1"; }
     cd "$1" || exit 1
-    base=$2 branch=$3
+    # `refs/heads/x@{upstream}` isn't a branch's upstream; `x@{upstream}` is.
+    rev=refs/heads/$2 upstream=$2@{upstream}
     export GIT_OPTIONAL_LOCKS=0
-    g() { git -c core.quotepath=off -c color.ui=never -c diff.mnemonicPrefix=false -c diff.noprefix=false "$@"; }
-    g log --no-color --format='%H%x00%an%x00%at%x00%s' -n 50 "$base..$branch" --
-    printf '\\037\\n'
-    g diff --no-color --no-ext-diff -M "$base...$branch" --
+    g() { git -c core.quotepath=off -c color.ui=never "$@"; }
+    \(mainRefs)
+    \(logSections)
+    exit 0
+    """
+
+    /// Sets `main` to `main` or `master`, and `refs` to the refs a commit
+    /// is merged once it's in.
+    private static let mainRefs = """
+    main=
+    refs=
+    for name in main master; do
+        if [ -z "$main" ] && g show-ref -q --verify "refs/heads/$name"; then main=$name; fi
+    done
+    for ref in refs/remotes/origin/main refs/remotes/origin/master refs/heads/main refs/heads/master; do
+        if g show-ref -q --verify "$ref"; then refs="$refs $ref"; fi
+    done
+    """
+
+    /// `$rev`'s commits, and which of them aren't in `$upstream` or merged
+    /// yet.
+    private static let logSections = """
+    section commits
+    g log -n \(commitLimit) --topo-order --decorate=full --no-color --format='%H%x00%an%x00%at%x00%D%x00%P%x00%s' "$rev" -- 2>/dev/null
+    section unpushed
+    if g rev-parse -q --verify "$upstream" >/dev/null 2>&1; then
+        g rev-list -n \(commitLimit) "$rev" --not "$upstream" --
+    else
+        printf 'none\\n'
+    fi
+    section unmerged
+    if [ -n "$refs" ]; then g rev-list -n \(commitLimit) "$rev" --not $refs -- 2>/dev/null; else printf 'none\\n'; fi
     """
 
     // MARK: Parsing
 
     /// The snapshot, or what the Git View says instead of one.
     static func parseSnapshot(_ output: String) -> Result<GitSnapshot, GitViewError> {
-        var sections: [String: String] = [:]
-        for chunk in output.components(separatedBy: "\u{1E}").dropFirst() {
-            let parts = chunk.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
-            sections[String(parts[0])] = parts.count > 1 ? String(parts[1]) : ""
-        }
+        let sections = sections(output)
         if let error = sections["error"] {
             return .failure(GitViewError(message: error.trimmingCharacters(in: .whitespacesAndNewlines)))
         }
@@ -299,12 +322,32 @@ enum GitRepository {
         snapshot.comparison = parseComparison(sections["comparison"] ?? "")
         let main = trimmed(sections["main"] ?? "")
         snapshot.mainBranch = main.isEmpty ? nil : main
-        snapshot.commits = parseCommits(sections["commits"] ?? "",
-                                        unpushed: shaSet(sections["unpushed"]),
-                                        unmerged: shaSet(sections["unmerged"]))
-        snapshot.graph = GitGraphRow.layout(snapshot.commits)
+        let log = log(sections)
+        snapshot.commits = log.commits
+        snapshot.graph = log.graph
         snapshot.stashes = parseStashes(sections["stashes"] ?? "")
         return .success(snapshot)
+    }
+
+    /// `logScript`'s output.
+    static func parseLog(_ output: String) -> GitLog {
+        log(sections(output))
+    }
+
+    /// Each section's output by name.
+    private static func sections(_ output: String) -> [String: String] {
+        var sections: [String: String] = [:]
+        for chunk in output.components(separatedBy: "\u{1E}").dropFirst() {
+            let parts = chunk.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            sections[String(parts[0])] = parts.count > 1 ? String(parts[1]) : ""
+        }
+        return sections
+    }
+
+    private static func log(_ sections: [String: String]) -> GitLog {
+        let commits = parseCommits(sections["commits"] ?? "", unpushed: shaSet(sections["unpushed"]),
+                                   unmerged: shaSet(sections["unmerged"]))
+        return GitLog(commits: commits, graph: GitGraphRow.layout(commits))
     }
 
     /// `git status --porcelain=v1 --branch -z`.
@@ -415,9 +458,9 @@ enum GitRepository {
     static func parseBranches(_ output: String) -> [GitBranch] {
         output.split(separator: "\n").compactMap { line in
             let fields = line.components(separatedBy: "\0")
-            guard fields.count >= 6, !fields[1].isEmpty else { return nil }
+            guard fields.count >= 7, !fields[1].isEmpty else { return nil }
             return GitBranch(
-                name: fields[1], isHead: fields[0] == "*",
+                name: fields[1], sha: fields[6], isHead: fields[0] == "*",
                 upstream: fields[2].isEmpty ? nil : fields[2], track: fields[3],
                 date: TimeInterval(fields[4]).map(Date.init(timeIntervalSince1970:)),
                 worktreePath: fields[5].isEmpty ? nil : fields[5]
@@ -497,18 +540,6 @@ enum GitRepository {
             body: lines.count > 1 ? lines[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
         )
         return (detail, String(output[output.index(after: separator)...]))
-    }
-
-    /// `branchScript`'s output: the commits, then the patch.
-    static func parseBranchDetail(_ output: String) -> (commits: [GitCommit], patch: String) {
-        let parts = output.split(separator: "\u{1F}", maxSplits: 1, omittingEmptySubsequences: false)
-        let commits = parts[0].split(separator: "\n").compactMap { line -> GitCommit? in
-            let fields = line.components(separatedBy: "\0")
-            guard fields.count >= 4 else { return nil }
-            return GitCommit(sha: fields[0], author: fields[1], date: Date(timeIntervalSince1970: TimeInterval(fields[2]) ?? 0),
-                             tags: [], subject: fields[3...].joined(separator: " "))
-        }
-        return (commits, parts.count > 1 ? String(parts[1]) : "")
     }
 
     /// lazygit's ages: `45s`, `3m`, `2h`, `5d`, `1w`, `4M`, `2y`.
