@@ -5,13 +5,14 @@ import MuxifyCore
 /// A panel of the Git View's sidebar. They are stacked as in lazygit, and
 /// tab goes from one to the next.
 enum GitPanel: String, CaseIterable {
-    case changes, history, stashes
-    /// The files of the selected commit, stash or branch.
+    case changes, branches, history, stashes
+    /// The files of the selected branch, commit or stash.
     case files
 
     var title: String {
         switch self {
         case .changes: "Changes"
+        case .branches: "Branches"
         case .history: "History"
         case .stashes: "Stashes"
         case .files: "Diff files"
@@ -21,17 +22,18 @@ enum GitPanel: String, CaseIterable {
     var symbol: String {
         switch self {
         case .changes: "plusminus"
+        case .branches: "arrow.triangle.branch"
         case .history: "clock"
         case .stashes: "archivebox"
         case .files: "doc.on.doc"
         }
     }
 
-    /// lazygit's number for the panel. 3, its branches, opens the branch
-    /// menu, and 1 shows the current branch.
+    /// lazygit's number for the panel; 1 shows the current branch.
     var key: Int? {
         switch self {
         case .changes: 2
+        case .branches: 3
         case .history: 4
         case .stashes: 5
         case .files: nil
@@ -41,11 +43,11 @@ enum GitPanel: String, CaseIterable {
 
 /// The Git View of one App Window (CONTEXT.md): a read-only look at the
 /// repository in the current Window's folder, as a navigator. Panels of
-/// changed files, commits, stashes and the selected commit's files, and the
-/// selection's diff beside them.
+/// changed files, branches, commits, stashes and the selected one's files,
+/// and the selection's diff beside them.
 @MainActor @Observable
 final class GitView {
-    /// Something in a panel, or a branch from the toolbar.
+    /// Something in a panel.
     enum Item: Equatable, Identifiable {
         case change(GitChange)
         /// A folder of the Changes tree or of the Diff files.
@@ -106,6 +108,37 @@ final class GitView {
 
     /// The side of a split diff whose lines are selected.
     enum Side { case old, new }
+
+    /// A place in the diff's code: a row of `diffRows` and a character of
+    /// its line as shown.
+    struct TextPoint: Comparable {
+        var row: Int
+        var offset = 0
+
+        static func < (lhs: TextPoint, rhs: TextPoint) -> Bool {
+            (lhs.row, lhs.offset) < (rhs.row, rhs.offset)
+        }
+    }
+
+    /// What a selection grows by: whole lines, as the keys and the line
+    /// numbers select, or characters, as dragging over code does.
+    enum Granularity { case line, character }
+
+    /// The part of a line that is selected.
+    enum LineSelection: Equatable {
+        case whole
+        case characters(Range<Int>)
+    }
+
+    /// Where the code is drawn, for finding the character under the mouse.
+    struct TextMetrics: Equatable {
+        let charWidth: CGFloat
+        let lineHeight: CGFloat
+        /// Characters a line of code shows before it wraps.
+        let columns: Int
+        /// The code's left edge: after the line numbers and the marker.
+        let codeX: CGFloat
+    }
 
     /// What of the content the diff pane shows: all of it, or a file or
     /// folder of the Diff files.
@@ -205,7 +238,7 @@ final class GitView {
     /// lazygit's keys where they fit. They aren't configurable; only
     /// `toggle_git_view` is.
     enum Command: Equatable {
-        case status, branches, panel(GitPanel)
+        case status, panel(GitPanel)
         case down, up, top, bottom
         case nextPanel, previousPanel, enter, focusDiff, focusList
         case scroll(lines: Int), halfPage(Int)
@@ -232,6 +265,14 @@ final class GitView {
     private(set) var owner: Item?
     /// Folded folders of the Changes tree and of the Diff files.
     private(set) var collapsedFolders: [GitPanel: Set<String>] = [:]
+    /// Folded panels show their header only, unless they have the keys.
+    /// Stashes start folded; the choice is remembered.
+    private(set) var collapsedPanels = Set((UserDefaults.standard.stringArray(forKey: "gitCollapsedPanels") ?? ["stashes"])
+        .compactMap(GitPanel.init(rawValue:))) {
+        didSet { UserDefaults.standard.set(collapsedPanels.map(\.rawValue).sorted(), forKey: "gitCollapsedPanels") }
+    }
+    /// A folded panel the keys went to, open until they leave it.
+    private(set) var peekingPanel: GitPanel?
     var filter = "" {
         didSet { if filter != oldValue { keepSelectionVisible() } }
     }
@@ -239,8 +280,6 @@ final class GitView {
     var isFiltering = false
     /// Asks the view to put keyboard focus in the filter field.
     var wantsFilterFocus = false
-    /// Asks the toolbar to open its branch menu.
-    var wantsBranches = false
     var layout = Layout(rawValue: UserDefaults.standard.string(forKey: "gitDiffLayout") ?? "") ?? .unified {
         didSet {
             UserDefaults.standard.set(layout.rawValue, forKey: "gitDiffLayout")
@@ -251,18 +290,24 @@ final class GitView {
     private(set) var content: Content?
     private(set) var diffRows: [DiffRow] = []
     private(set) var fileHeader: FileHeader?
-    /// The selected diff lines, as `diffRows` indexes: the line the keys
-    /// move, and the other end of a range.
-    private(set) var cursor: Int?
-    private(set) var anchor: Int?
+    /// The selection in the diff: where the keys or the mouse are, and the
+    /// other end of a range.
+    private(set) var cursor: TextPoint?
+    private(set) var anchor: TextPoint?
+    private(set) var granularity = Granularity.line
     private(set) var side = Side.new
     /// The diff row at the top of the pane; the view scrolls to it.
     var scrollRow: Int?
     /// The diff's scroll view, for paging and for finding the lines on it.
     @ObservationIgnored var diffHeight: CGFloat = 600
     @ObservationIgnored var diffWidth: CGFloat = 800
-    /// Where the diff lines on screen are, in the scroll view.
+    /// Where the diff lines on screen are, in the scroll view. Rows keep
+    /// their ids when the diff changes, and report only a frame that moved.
     @ObservationIgnored var lineFrames: [Int: CGRect] = [:]
+    /// How the diff draws its code now.
+    @ObservationIgnored var textMetrics = TextMetrics(charWidth: 7.2, lineHeight: 19, columns: 120, codeX: 110)
+    /// The mouse button went down here, and how many clicks it was.
+    @ObservationIgnored private var press: (point: TextPoint, location: CGPoint, inGutter: Bool, clicks: Int)?
 
     @ObservationIgnored weak var store: WorkspaceStore?
     /// Holds keyboard focus while the Git View has it (see `GitKeyCatcher`).
@@ -322,6 +367,7 @@ final class GitView {
             selections = [:]
             owner = nil
             panel = .changes
+            peekingPanel = nil
             collapsedFolders = [:]
             filter = ""
             focus = .list
@@ -344,7 +390,6 @@ final class GitView {
         guard isOpen else { return }
         isOpen = false
         isFiltering = false
-        wantsBranches = false
         windowID = nil
         wantsFocus = false
         contentWork?.cancel()
@@ -388,7 +433,7 @@ final class GitView {
 
     func setFocus(_ focus: Focus) {
         if focus == .diff, visibleCursor() == nil {
-            cursor = firstLine()
+            place(firstLine())
             anchor = nil
             isRangeSelecting = false
         }
@@ -406,13 +451,30 @@ final class GitView {
     // MARK: Panels
 
     /// The panels as shown, top to bottom. The Diff files go right under
-    /// the commit's or stash's panel, or on top for a branch.
+    /// the panel of the branch, commit or stash they're the files of.
     var panels: [GitPanel] {
         switch owner {
-        case .commit?: [.changes, .history, .files, .stashes]
-        case .stash?: [.changes, .history, .stashes, .files]
-        case .branch?: [.files, .changes, .history, .stashes]
-        default: [.changes, .history, .stashes]
+        case .branch?: [.changes, .branches, .files, .history, .stashes]
+        case .commit?: [.changes, .branches, .history, .files, .stashes]
+        case .stash?: [.changes, .branches, .history, .stashes, .files]
+        default: [.changes, .branches, .history, .stashes]
+        }
+    }
+
+    /// Whether a panel shows its rows: unfolded, or folded but with the keys.
+    func isShowing(_ panel: GitPanel) -> Bool {
+        !collapsedPanels.contains(panel) || peekingPanel == panel
+    }
+
+    /// A click on a panel's header folds it, or unfolds it and gives it the
+    /// keys.
+    func toggleCollapsed(_ panel: GitPanel) {
+        if isShowing(panel) {
+            collapsedPanels.insert(panel)
+            if peekingPanel == panel { peekingPanel = nil }
+        } else {
+            collapsedPanels.remove(panel)
+            activate(panel)
         }
     }
 
@@ -442,6 +504,9 @@ final class GitView {
             } folder: { path in
                 !unstaged.contains(path)
             }
+        case .branches:
+            let rows = snapshot.branches.map(Item.branch).filter(matches).map { Row(item: $0) }
+            return rows.isEmpty ? note(snapshot.branches.isEmpty ? "No branches yet" : "No matches") : rows
         case .history:
             let rows = snapshot.commits.indices.compactMap { index -> Row? in
                 let commit = snapshot.commits[index]
@@ -474,6 +539,7 @@ final class GitView {
         }
         switch panel {
         case .changes: return snapshot.changes.filter { matches(.change($0)) }.count
+        case .branches: return snapshot.branches.filter { matches(.branch($0)) }.count
         case .history: return snapshot.commits.filter { matches(.commit($0)) }.count
         case .stashes: return snapshot.stashes.filter { matches(.stash($0)) }.count
         case .files: return ownerFiles?.filter { matches(.file($0.path)) }.count ?? 0
@@ -503,6 +569,8 @@ final class GitView {
             let path = String(id.dropFirst("folder:changes:".count))
             return id.hasPrefix("folder:changes:") && snapshot.changes.contains { GitTree.path($0.path, isIn: path) }
                 ? .folder(.changes, path) : nil
+        case .branches:
+            return snapshot.branches.first { Item.branch($0).id == id }.map(Item.branch)
         case .history:
             return snapshot.commits.first { Item.commit($0).id == id }.map(Item.commit)
         case .stashes:
@@ -543,17 +611,8 @@ final class GitView {
         focusKeyView()
     }
 
-    /// A branch from the toolbar's menu, or 1 for the current one: what it
-    /// changes against main or the current branch, with its Diff files.
-    func select(_ branch: GitBranch) {
-        focus = .list
-        setOwner(.branch(branch))
-        panel = .files
-        showSelection()
-        focusKeyView()
-    }
-
     /// Gives `panel` the keys, on what it had selected, else its first item.
+    /// A folded panel opens until the keys leave it.
     func activate(_ panel: GitPanel) {
         focus = .list
         let items = items(in: panel)
@@ -590,10 +649,11 @@ final class GitView {
     /// a commit or stash has its own.
     private func choose(_ item: Item?, in panel: GitPanel) {
         self.panel = panel
+        peekingPanel = collapsedPanels.contains(panel) ? panel : nil
         selections[panel] = item?.id
         switch panel {
         case .changes: setOwner(nil)
-        case .history, .stashes: setOwner(item)
+        case .branches, .history, .stashes: setOwner(item)
         case .files: break
         }
         showSelection()
@@ -613,9 +673,10 @@ final class GitView {
         choose(items[next], in: panel)
     }
 
-    /// Esc from the Diff files: back to the commit or stash.
+    /// Esc from the Diff files: back to the branch, commit or stash.
     private func leaveFiles() {
         switch owner {
+        case .branch?: choose(owner, in: .branches)
         case .commit?: choose(owner, in: .history)
         case .stash?: choose(owner, in: .stashes)
         default: activate(.changes)
@@ -689,7 +750,7 @@ final class GitView {
 
     static let commands: [KeyTrigger: Command] = {
         let spelling: KeyValuePairs<String, Command> = [
-            "1": .status, "2": .panel(.changes), "3": .branches, "4": .panel(.history), "5": .panel(.stashes),
+            "1": .status, "2": .panel(.changes), "3": .panel(.branches), "4": .panel(.history), "5": .panel(.stashes),
             "j": .down, "down": .down, "k": .up, "up": .up, "shift+comma": .top, "shift+period": .bottom,
             "tab": .nextPanel, "shift+tab": .previousPanel, "enter": .enter,
             "l": .focusDiff, "right": .focusDiff, "h": .focusList, "left": .focusList,
@@ -705,9 +766,9 @@ final class GitView {
     func perform(_ command: Command) {
         switch command {
         case .status:
-            if let head = snapshot?.branches.first(where: \.isHead) { select(head) }
-        case .branches:
-            wantsBranches = true
+            guard let head = snapshot?.branches.first(where: \.isHead) else { return }
+            focus = .list
+            choose(.branch(head), in: .branches)
         case .panel(let panel):
             activate(panel)
         case .down, .up:
@@ -716,7 +777,7 @@ final class GitView {
         case .top, .bottom:
             if focus == .diff {
                 let lines = diffRows.indices.filter { diffRows[$0].isLine }
-                cursor = command == .top ? lines.first : lines.last
+                place(command == .top ? lines.first : lines.last)
                 anchor = isRangeSelecting ? anchor : nil
                 scrollRow = command == .top ? diffRows.first?.id : diffRows.last?.id
             } else {
@@ -728,7 +789,7 @@ final class GitView {
             guard focus == .list else { return }
             switch selectedItem(in: panel) {
             case .folder(let tree, let path)?: toggleFolder(path, in: tree)
-            case .commit?, .stash?: activate(.files)
+            case .branch?, .commit?, .stash?: activate(.files)
             case nil: if panel == .files { activate(.files) }
             default: setFocus(.diff)
             }
@@ -749,6 +810,7 @@ final class GitView {
         case .range:
             guard focus == .diff else { return }
             isRangeSelecting.toggle()
+            place(cursor?.row)
             anchor = isRangeSelecting ? cursor : nil
         case .hunk:
             if focus == .diff { selectHunk() }
@@ -798,21 +860,21 @@ final class GitView {
     /// Which of the hunks shown the cursor, or the top of the pane, is in.
     var hunkPosition: (current: Int, count: Int) {
         let hunks = diffRows.indices.filter { diffRows[$0].isHunk }
-        let reference = focus == .diff ? cursor ?? topIndex : topIndex
+        let reference = focus == .diff ? cursor?.row ?? topIndex : topIndex
         return ((hunks.lastIndex { $0 <= reference } ?? 0) + 1, hunks.count)
     }
 
     /// With the keys in the diff, the cursor goes to the hunk's first change.
     func jumpToHunk(forward: Bool) {
         let hunks = diffRows.indices.filter { diffRows[$0].isHunk }
-        let reference = focus == .diff ? cursor ?? topIndex : topIndex
+        let reference = focus == .diff ? cursor?.row ?? topIndex : topIndex
         let current = hunks.last { $0 <= reference }
         let target = forward ? hunks.first { $0 > reference } : hunks.last { $0 < (focus == .diff ? current ?? reference : reference) }
         guard let target else { return }
         scrollRow = diffRows[target].id
         if focus == .diff {
             let lines = diffRows.indices.dropFirst(target + 1).prefix { !diffRows[$0].isHunk }.filter { diffRows[$0].isLine }
-            cursor = lines.first { diffRows[$0].isChange } ?? lines.first ?? cursor
+            place(lines.first { diffRows[$0].isChange } ?? lines.first ?? cursor?.row)
             anchor = nil
             isRangeSelecting = false
         }
@@ -853,53 +915,143 @@ final class GitView {
         store?.palette.showCopied(title: title, value: shown ?? value)
     }
 
-    // MARK: Selecting lines
+    // MARK: Selecting
 
-    /// The diff rows selected: a range, or the cursor's line.
-    var selectedLines: ClosedRange<Int>? {
+    /// The selection's two ends, the first one first.
+    private var selectionBounds: (start: TextPoint, end: TextPoint)? {
         guard let cursor else { return nil }
         let anchor = anchor ?? cursor
-        return min(anchor, cursor)...max(anchor, cursor)
+        return anchor < cursor ? (anchor, cursor) : (cursor, anchor)
     }
 
-    func isLineSelected(_ row: Int) -> Bool {
-        focus == .diff && selectedLines?.contains(row) == true
+    /// What of a row is selected: the whole line, as the keys select, or
+    /// the characters dragged over.
+    func selection(inRow row: Int) -> LineSelection? {
+        guard focus == .diff, let bounds = selectionBounds, bounds.start.row <= row, row <= bounds.end.row,
+              diffRows.indices.contains(row), diffRows[row].isLine else { return nil }
+        guard granularity == .character else { return .whole }
+        let length = line(at: row)?.shown.count ?? 0
+        let lower = row == bounds.start.row ? min(bounds.start.offset, length) : 0
+        // A line the selection goes past takes its line break too.
+        let upper = row == bounds.end.row ? min(bounds.end.offset, length) : length + 1
+        return .characters(lower..<max(lower, upper))
     }
 
-    /// A click on a diff line, with shift to extend the selection to it.
-    func pressLine(_ row: Int, side: Side, extending: Bool) {
+    /// A row's line, on the selected side of a split diff.
+    func line(at row: Int) -> GitDiffLine? {
+        guard diffRows.indices.contains(row) else { return nil }
+        switch diffRows[row].kind {
+        case .line(let line): return line
+        case .pair(let old, let new): return side == .old ? old : new
+        default: return nil
+        }
+    }
+
+    /// The mouse went down on a line. In the line numbers it selects lines;
+    /// on code, a click puts the cursor there, a double click selects a
+    /// word and a triple click the line. Shift extends the selection.
+    func mouseDown(at location: CGPoint, row: Int, clicks: Int, extending: Bool) {
+        guard let frame = lineFrames[row] else { return }
+        focus = .diff
+        focusKeyView()
         isRangeSelecting = false
         if extending, let cursor {
             if anchor == nil { anchor = cursor }
-        } else {
-            anchor = nil
-            self.side = side
+            self.cursor = textPoint(at: location, in: row, frame: frame) ?? TextPoint(row: row)
+            press = nil
+            return
         }
-        cursor = row
-        focus = .diff
-        focusKeyView()
+        side = layout == .split && location.x < frame.minX + (frame.width + 1) / 2 ? .old : .new
+        let inGutter = location.x - codeLeft(in: frame) < 0
+        let point = textPoint(at: location, in: row, frame: frame) ?? TextPoint(row: row)
+        press = (point, location, inGutter, clicks)
+        anchor = nil
+        place(row)
+        if clicks == 2, !inGutter, let word = word(at: textPoint(at: location, in: row, frame: frame, rounding: false) ?? point) {
+            granularity = .character
+            anchor = TextPoint(row: row, offset: word.lowerBound)
+            cursor = TextPoint(row: row, offset: word.upperBound)
+        }
     }
 
-    /// Dragging from a line selects to the one under `point`.
-    func dragLine(to point: CGPoint) {
-        guard let row = lineFrames.first(where: { $0.value.minY <= point.y && point.y < $0.value.maxY })?.key,
-              row != cursor else { return }
-        if anchor == nil { anchor = cursor }
-        cursor = row
+    /// Dragging selects code by characters from where it began, or lines
+    /// from the line numbers.
+    func mouseDragged(to location: CGPoint) {
+        guard let press else { return }
+        // A click that hasn't moved yet stays a click.
+        if granularity == .line, hypot(location.x - press.location.x, location.y - press.location.y) < 3 { return }
+        guard let row = lineFrames.first(where: { row, frame in
+                  frame.minY <= location.y && location.y < frame.maxY && diffRows.indices.contains(row) && diffRows[row].isLine
+              })?.key,
+              let frame = lineFrames[row], let point = textPoint(at: location, in: row, frame: frame) else { return }
+        if press.inGutter || press.clicks >= 3 {
+            if anchor == nil { anchor = press.point }
+            place(row)
+        } else {
+            if granularity == .line {
+                granularity = .character
+                anchor = press.point
+            }
+            cursor = point
+        }
+    }
+
+    func mouseUp() {
+        press = nil
+    }
+
+    /// Where a row's code starts, on the selected side.
+    private func codeLeft(in frame: CGRect) -> CGFloat {
+        (layout == .split && side == .new ? frame.minX + (frame.width + 1) / 2 : frame.minX) + textMetrics.codeX
+    }
+
+    /// The character boundary nearest `location`, or with `rounding` off,
+    /// the character under it. Code is monospaced and wraps every
+    /// `columns` characters.
+    private func textPoint(at location: CGPoint, in row: Int, frame: CGRect, rounding: Bool = true) -> TextPoint? {
+        guard let line = line(at: row) else { return nil }
+        let metrics = textMetrics
+        let length = line.shown.count
+        let wraps = max(0, (length - 1) / metrics.columns)
+        let wrap = min(max(0, Int((location.y - frame.minY) / metrics.lineHeight)), wraps)
+        let x = (location.x - codeLeft(in: frame)) / metrics.charWidth
+        let column = min(max(0, Int(rounding ? x.rounded() : x.rounded(.down))), metrics.columns)
+        return TextPoint(row: row, offset: min(wrap * metrics.columns + column, length))
+    }
+
+    /// The word around a point: letters, digits and `_`; else the
+    /// character.
+    private func word(at point: TextPoint) -> Range<Int>? {
+        guard let characters = line(at: point.row).map({ Array($0.shown) }), !characters.isEmpty else { return nil }
+        let index = min(point.offset, characters.count - 1)
+        func isWord(_ character: Character) -> Bool { character.isLetter || character.isNumber || character == "_" }
+        guard isWord(characters[index]) else { return index..<(index + 1) }
+        var lower = index
+        var upper = index + 1
+        while lower > 0, isWord(characters[lower - 1]) { lower -= 1 }
+        while upper < characters.count, isWord(characters[upper]) { upper += 1 }
+        return lower..<upper
     }
 
     private func clearLineSelection(keepingCursor: Bool = false) {
-        if !keepingCursor { cursor = nil }
+        if keepingCursor { place(cursor?.row) } else { cursor = nil }
         anchor = nil
+        granularity = .line
         isRangeSelecting = false
     }
 
-    /// The cursor, unless scrolled out of sight; keys then start from the
-    /// top of the pane.
+    /// Puts the cursor on a line; the keys select whole lines.
+    private func place(_ row: Int?) {
+        cursor = row.map { TextPoint(row: $0) }
+        granularity = .line
+    }
+
+    /// The cursor's row, unless scrolled out of sight; keys then start from
+    /// the top of the pane.
     private func visibleCursor() -> Int? {
-        guard let cursor, diffRows.indices.contains(cursor), let frame = lineFrames[cursor],
+        guard let row = cursor?.row, diffRows.indices.contains(row), let frame = lineFrames[row],
               frame.maxY > 0, frame.minY < diffHeight else { return nil }
-        return cursor
+        return row
     }
 
     /// The first change on screen, as lazygit starts on the first change.
@@ -911,13 +1063,13 @@ final class GitView {
 
     private func moveCursor(by delta: Int, extending: Bool = false) {
         guard let start = visibleCursor() else {
-            cursor = firstLine()
+            place(firstLine())
             anchor = nil
             isRangeSelecting = false
             return
         }
         if extending || isRangeSelecting {
-            if anchor == nil { anchor = start }
+            if anchor == nil || granularity == .character { anchor = TextPoint(row: start) }
         } else {
             anchor = nil
         }
@@ -927,20 +1079,20 @@ final class GitView {
                                         : diffRows.indices.prefix(index).last { diffRows[$0].isLine }) else { break }
             index = next
         }
-        cursor = index
+        place(index)
     }
 
     /// a: the cursor's hunk, all of it.
     private func selectHunk() {
-        guard let cursor = visibleCursor() ?? firstLine(), let hunk = diffRows[cursor].hunk, let file = diffRows[cursor].file else { return }
+        guard let row = visibleCursor() ?? firstLine(), let hunk = diffRows[row].hunk, let file = diffRows[row].file else { return }
         let lines = diffRows.indices.filter { diffRows[$0].isLine && diffRows[$0].hunk == hunk && diffRows[$0].file == file }
-        anchor = lines.first
-        self.cursor = lines.last
+        anchor = lines.first.map { TextPoint(row: $0) }
+        place(lines.last)
         isRangeSelecting = false
     }
 
-    /// y or ⌘C: the selected lines' code, without the +/− markers; in the
-    /// list, the selection's path, hash or name.
+    /// y or ⌘C: the selected code, without the +/− markers; in the list,
+    /// the selection's path, hash or name.
     private func copySelection() {
         guard focus == .diff else {
             switch selectedItem(in: panel) ?? owner {
@@ -953,20 +1105,26 @@ final class GitView {
             }
             return
         }
-        guard let range = selectedLines else { return }
-        let lines = range.compactMap { index -> String? in
-            guard diffRows.indices.contains(index) else { return nil }
-            switch diffRows[index].kind {
-            case .line(let line): return line.kind == .note ? nil : line.text
-            case .pair(let old, let new):
-                guard let line = side == .old ? old : new, line.kind != .note else { return nil }
-                return line.text
-            default: return nil
+        guard let text = selectedText else { return }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).count
+        copy(text, title: granularity == .character ? "Copied Text" : lines == 1 ? "Copied Line" : "Copied \(lines) Lines",
+             shown: text.split(separator: "\n").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? text)
+    }
+
+    /// The code selected in the diff, with tabs as they are in the file.
+    var selectedText: String? {
+        guard let bounds = selectionBounds else { return nil }
+        var lines: [String] = []
+        for row in bounds.start.row...bounds.end.row {
+            guard let line = line(at: row), line.kind != .note else { continue }
+            switch selection(inRow: row) {
+            case .whole?: lines.append(line.text)
+            case .characters(let range)?: lines.append(line.text(in: range.lowerBound..<min(range.upperBound, line.shown.count)))
+            case nil: continue
             }
         }
-        guard let first = lines.first else { return }
-        copy(lines.joined(separator: "\n"), title: lines.count == 1 ? "Copied Line" : "Copied \(lines.count) Lines",
-             shown: first.trimmingCharacters(in: .whitespaces))
+        let text = lines.joined(separator: "\n")
+        return text.isEmpty ? nil : text
     }
 
     // MARK: Diff rows
@@ -975,7 +1133,6 @@ final class GitView {
         let kept = keepingPosition ? position : nil
         let scope = scope
         shownScope = scope
-        lineFrames = [:]
         guard let content else {
             diffRows = []
             fileHeader = nil
@@ -996,7 +1153,7 @@ final class GitView {
             }
         }
         diffRows = Self.diffRows(for: content, layout: layout, wholeFile: wholeFile, scope: scope)
-        if !keepingPosition || cursor.map({ !diffRows.indices.contains($0) || !diffRows[$0].isLine }) == true {
+        if !keepingPosition || cursor.map({ !diffRows.indices.contains($0.row) || !diffRows[$0.row].isLine }) == true {
             clearLineSelection()
         }
         if let kept, let row = diffRows.first(where: { $0.file == kept.file && $0.hunk == kept.hunk }) {
@@ -1004,7 +1161,7 @@ final class GitView {
         } else {
             scrollRow = diffRows.first?.id
         }
-        if focus == .diff, cursor == nil { cursor = firstLine() }
+        if focus == .diff, cursor == nil { place(firstLine()) }
     }
 
     static func diffRows(for content: Content, layout: Layout, wholeFile: Bool = false, scope: Scope = .all) -> [DiffRow] {
@@ -1077,7 +1234,7 @@ final class GitView {
     }
 
     private func apply(_ next: GitSnapshot) {
-        let previous = Dictionary(uniqueKeysWithValues: [GitPanel.changes, .history, .stashes].map { ($0, items(in: $0).map(\.id)) })
+        let previous = Dictionary(uniqueKeysWithValues: [GitPanel.changes, .branches, .history, .stashes].map { ($0, items(in: $0).map(\.id)) })
         error = nil
         if snapshot != next { snapshot = next }
         if selections.isEmpty, owner == nil {
@@ -1099,7 +1256,7 @@ final class GitView {
             }
             switch panel {
             case .changes: setOwner(nil)
-            case .history, .stashes: setOwner(selectedItem(in: panel))
+            case .branches, .history, .stashes: setOwner(selectedItem(in: panel))
             case .files:
                 if let fresh = owner.flatMap(refreshed) {
                     owner = fresh
@@ -1339,6 +1496,28 @@ final class GitView {
         }
         if fields["diff"] != nil { setFocus(.diff) }
         if let lines = fields["scroll"].flatMap(Int.init) { scrollDiff(by: lines) }
+        // `drag=2:4-3:10` drags from the 3rd line's 5th character to the
+        // 4th line's 11th; `word=2:6` double-clicks; `copyto=<path>` saves
+        // what ⌘C would copy.
+        func point(_ spec: Substring) -> (row: Int, location: CGPoint)? {
+            let numbers = spec.split(separator: ":").compactMap { Int($0) }
+            let lines = diffRows.indices.filter { diffRows[$0].isLine }
+            guard numbers.count == 2, lines.indices.contains(numbers[0]), let frame = lineFrames[lines[numbers[0]]] else { return nil }
+            let wrap = numbers[1] / textMetrics.columns
+            let left = layout == .split ? frame.minX + (frame.width + 1) / 2 : frame.minX
+            let x = left + textMetrics.codeX + (CGFloat(numbers[1] % textMetrics.columns) + 0.3) * textMetrics.charWidth
+            return (lines[numbers[0]], CGPoint(x: x, y: frame.minY + (CGFloat(wrap) + 0.5) * textMetrics.lineHeight))
+        }
+        if let ends = fields["drag"]?.split(separator: "-"), ends.count == 2, let from = point(ends[0]), let to = point(ends[1]) {
+            mouseDown(at: from.location, row: from.row, clicks: 1, extending: false)
+            mouseDragged(to: to.location)
+            mouseUp()
+        }
+        if let word = fields["word"].flatMap({ point(Substring($0)) }) {
+            mouseDown(at: word.location, row: word.row, clicks: 2, extending: false)
+            mouseUp()
+        }
+        if let path = fields["copyto"] { try? (selectedText ?? "").write(toFile: path, atomically: true, encoding: .utf8) }
         // `shot=<path>` saves the App Window as drawn, for shells that
         // aren't allowed to record the screen.
         if let path = fields["shot"], let view = store?.terminalHost.window?.contentView,

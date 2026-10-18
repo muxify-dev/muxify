@@ -221,6 +221,43 @@ struct GitDiffLine: Equatable {
     let old: Int?
     let new: Int?
     let text: String
-    /// `text` with syntax colors, from `GitHighlighter`.
+    /// `text` as shown: tabs as spaces to the next multiple of 4, so each
+    /// character is a column.
+    let shown: String
+    /// `shown` with syntax colors, from `GitHighlighter`.
     var styled: AttributedString?
+
+    init(kind: Kind, old: Int?, new: Int?, text: String) {
+        self.kind = kind
+        self.old = old
+        self.new = new
+        self.text = text
+        guard text.contains("\t") else {
+            shown = text
+            return
+        }
+        var shown = ""
+        for character in text {
+            if character == "\t" {
+                shown += String(repeating: " ", count: 4 - shown.count % 4)
+            } else {
+                shown.append(character)
+            }
+        }
+        self.shown = shown
+    }
+
+    /// The text of `shown`'s characters in `range`, with the tabs they
+    /// came from.
+    func text(in range: Range<Int>) -> String {
+        guard text.contains("\t") else { return String(shown.dropFirst(range.lowerBound).prefix(range.count)) }
+        var column = 0
+        var result = ""
+        for character in text {
+            let width = character == "\t" ? 4 - column % 4 : 1
+            if column + width > range.lowerBound, column < range.upperBound { result.append(character) }
+            column += width
+        }
+        return result
+    }
 }

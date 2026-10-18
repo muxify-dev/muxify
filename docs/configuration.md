@@ -292,29 +292,31 @@ problem and uses `system`. A YAML syntax error keeps the entire last good Config
 The Git View (⌘G, `toggle_git_view`) is a read-only look at the repository of
 the current Window's folder, laid out like Xcode's source control navigator with
 lazygit's panels, and colored with the Ghostty theme. A toolbar shows the
-branch, whether this is a linked worktree, and the commits ahead of and behind
-the upstream (or `main` or `master` without one). Below it, the panels, stacked
-as in lazygit, and the selection's diff:
+repository, whether this is a linked worktree, and the commits ahead of and
+behind the upstream (or `main` or `master` without one). Below it, the panels,
+stacked as in lazygit, and the selection's diff:
 
 | Panel | Lists | The diff shows |
 | --- | --- | --- |
 | Changes | Changed files as a folder tree, with lazygit's two letters: the staged change in green, the unstaged one in red (`M `, ` M`, `MM`, `??`). A file's name is green when all of it is staged, red otherwise | The file's unstaged changes, then its staged ones; an untracked file as new. A folder shows every change in it |
+| Branches | Local branches, yours first with a check: other worktrees', gone upstreams, and commits ahead of and behind yours | What the branch changes since it left yours (`git diff HEAD...branch`), with the commits yours doesn't have. Yours is compared with `main` or `master` |
 | History | The last 300 commits with their graph: a lane per line of history, a ring for a merge, and the branches and tags at each commit | The commit's message, author, parents and changes; a merge against its first parent |
 | Stashes | `git stash list` | The stash's changes |
-| Diff files | The files of the selected commit or stash, as a tree, or of a branch picked in the toolbar | The file's changes, or the folder's |
+| Diff files | The files of the selected branch, commit or stash, as a tree | The file's changes, or the folder's |
 
-Diff files appears under a commit or stash when you select it; ↩ goes into it
-and ⎋ comes back. The branch menu in the toolbar (3) compares a branch with
-yours, and 1 compares yours with `main` or `master`: what it changes since it
-left (`git diff HEAD...branch`), the commits the other doesn't have, and its
-files in Diff files. The panel with the keys gets the most room, and tab goes to
-the next one.
+Diff files appears under a branch, commit or stash when you select it; ↩ goes
+into it and ⎋ comes back. The panel with the keys gets the most room, and tab
+goes to the next one. A click on a panel's header folds or unfolds it; Stashes
+starts folded, and Muxify remembers what you fold. A folded panel opens while it
+has the keys, and folds again when they leave.
 
 Diffs have line numbers, syntax highlighting, and the enclosing function in each
 hunk's header. The toolbar switches them between Unified and Split (side by
 side); the choice is remembered. A change's hunk headers show the whole file.
-Click, shift-click or drag to select lines, or use the keys; ⌘C or y copies
-their code. The filter field (/) narrows every panel at once.
+Long lines wrap at the pane's edge. Drag over code to select words or any
+part of it, double-click a word, triple-click or drag the line numbers for whole
+lines, or use the keys; ⌘C or y copies the code. The filter field (/) narrows
+every panel at once.
 
 ```yaml
 git_view:

@@ -210,6 +210,14 @@ final class GitPatchTests: XCTestCase {
         XCTAssertEqual(patch.additions, 3)
     }
 
+    func testTabsAreShownAsSpacesAndCopiedAsTabs() {
+        let line = GitDiffLine(kind: .added, old: nil, new: 1, text: "\tlet a\t= 1")
+        XCTAssertEqual(line.shown, "    let a   = 1")
+        XCTAssertEqual(line.text(in: 4..<9), "let a")
+        XCTAssertEqual(line.text(in: 0..<10), "\tlet a\t")
+        XCTAssertEqual(GitDiffLine(kind: .context, old: 1, new: 1, text: "plain").text(in: 1..<3), "la")
+    }
+
     func testSplitPairsRemovedLinesWithTheAddedOnesAfterThem() {
         let hunk = GitPatch.parse(diff).files[0].hunks[0]
         let pairs = hunk.pairs.map { ($0.old?.text.trimmingCharacters(in: .whitespaces), $0.new?.text.trimmingCharacters(in: .whitespaces)) }
@@ -506,7 +514,7 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(try command("J", keyCode: 0x26, flags: .shift), .scroll(lines: 3))
         XCTAssertEqual(try command("<", keyCode: 0x2B, flags: .shift), .top)
         XCTAssertEqual(try command("1", keyCode: 0x12), .status)
-        XCTAssertEqual(try command("3", keyCode: 0x14), .branches)
+        XCTAssertEqual(try command("3", keyCode: 0x14), .panel(.branches))
         XCTAssertEqual(try command("4", keyCode: 0x15), .panel(.history))
         XCTAssertEqual(try command("\u{4}", keyCode: 0x02, flags: .control), .halfPage(1))
         XCTAssertEqual(try command("\t", keyCode: 0x30), .nextPanel)

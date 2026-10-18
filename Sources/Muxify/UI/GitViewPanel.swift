@@ -125,11 +125,9 @@ private struct GitToolbar: View {
     let palette: Palette
     let isCompact: Bool
     @FocusState private var filterFocused: Bool
-    @State private var showsBranches = false
 
     var body: some View {
         HStack(spacing: 10) {
-            branchPill
             HStack(spacing: 6) {
                 Image(systemName: "folder").font(.system(size: 13)).foregroundStyle(.secondary)
                 Text(snapshot.repositoryName).font(.system(size: 13, weight: .semibold))
@@ -170,46 +168,6 @@ private struct GitToolbar: View {
     private var closeHelp: String {
         let trigger = gitView.store?.config.keybinds.firstTrigger(for: .toggleGitView)
         return trigger.map { "Close (q, \($0.symbol))" } ?? "Close (q)"
-    }
-
-    /// The branch you're on; a click, or 3, lists the branches to compare.
-    private var branchPill: some View {
-        Button { showsBranches.toggle() } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "arrow.triangle.branch").font(.system(size: 14)).foregroundStyle(Color.accentColor)
-                Text(snapshot.isDetached ? "detached at \(snapshot.head)" : snapshot.head)
-                    .font(.system(size: 13, weight: .semibold))
-                    .lineLimit(1)
-                Image(systemName: "chevron.down").font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
-            }
-            .padding(.leading, 9)
-            .padding(.trailing, 10)
-            .frame(height: 28)
-            .background(Capsule().fill(palette.fill))
-            .overlay(Capsule().strokeBorder(palette.separator, lineWidth: 0.5))
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .help("Branches (3); what this one changes (1)")
-        .popover(isPresented: $showsBranches, arrowEdge: .bottom) {
-            GitBranchMenu(branches: snapshot.branches, current: currentBranch, palette: palette) { branch in
-                showsBranches = false
-                gitView.select(branch)
-            }
-        }
-        .onChange(of: gitView.wantsBranches) { _, wants in
-            guard wants else { return }
-            gitView.wantsBranches = false
-            showsBranches = true
-        }
-        .onChange(of: showsBranches) { _, shows in
-            if !shows { gitView.focusKeyView() }
-        }
-    }
-
-    private var currentBranch: String? {
-        if case .branch(let branch)? = gitView.owner { return branch.name }
-        return nil
     }
 
     private func aheadBehind(_ comparison: GitComparison) -> some View {
@@ -267,83 +225,6 @@ private struct GitToolbar: View {
     }
 }
 
-/// The local branches, the current one first; j/k or the arrows and enter
-/// pick one to compare.
-private struct GitBranchMenu: View {
-    let branches: [GitBranch]
-    let current: String?
-    let palette: Palette
-    let choose: (GitBranch) -> Void
-    @State private var highlighted = 0
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 2) {
-                    ForEach(Array(branches.enumerated()), id: \.element.id) { index, branch in
-                        row(branch, isHighlighted: index == highlighted)
-                            .id(index)
-                            .onHover { if $0 { highlighted = index } }
-                            .onTapGesture { choose(branch) }
-                    }
-                }
-                .padding(6)
-            }
-            .frame(width: 320, height: min(400, CGFloat(branches.count) * 26 + 12))
-            .focusable()
-            .focusEffectDisabled()
-            .focused($isFocused)
-            .onKeyPress(keys: [.downArrow, .upArrow, .return, "j", "k"]) { press in
-                guard !branches.isEmpty else { return .ignored }
-                switch press.key {
-                case .downArrow, "j": highlighted = min(highlighted + 1, branches.count - 1)
-                case .upArrow, "k": highlighted = max(highlighted - 1, 0)
-                default: choose(branches[highlighted])
-                }
-                proxy.scrollTo(highlighted)
-                return .handled
-            }
-            .onAppear {
-                highlighted = branches.firstIndex { $0.name == current } ?? 0
-                DispatchQueue.main.async { isFocused = true }
-            }
-        }
-    }
-
-    private func row(_ branch: GitBranch, isHighlighted: Bool) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: branch.isHead ? "checkmark" : "arrow.triangle.branch")
-                .font(.system(size: 12, weight: branch.isHead ? .bold : .regular))
-                .foregroundStyle(isHighlighted ? Color.white : branch.isHead ? Color.accentColor : Color.secondary)
-                .frame(width: 14)
-            Text(branch.name).fontWeight(branch.isHead ? .semibold : .regular).lineLimit(1)
-            if branch.worktreePath != nil, !branch.isHead {
-                GitTag(text: "worktree", style: .gray, palette: palette, height: 16, fontSize: 10, onAccent: isHighlighted)
-            }
-            Spacer(minLength: 16)
-            if branch.ahead > 0 || branch.behind > 0 {
-                Text(verbatim: "↑\(branch.ahead) ↓\(branch.behind)")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(isHighlighted ? Color.white.opacity(0.85) : Color.secondary)
-            }
-            if let date = branch.date {
-                Text(GitRepository.age(of: date))
-                    .font(.system(size: 11))
-                    .foregroundStyle(isHighlighted ? Color.white.opacity(0.85) : Color.secondary)
-                    .frame(minWidth: 24, alignment: .trailing)
-            }
-        }
-        .font(.system(size: 13))
-        .foregroundStyle(isHighlighted ? Color.white : Color.primary)
-        .padding(.horizontal, 8)
-        .frame(height: 24)
-        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(isHighlighted ? Color.accentColor : .clear))
-        .contentShape(Rectangle())
-        .help(branch.isHead ? "What \(branch.name) changes since it left main" : "What \(branch.name) has that your branch doesn't")
-    }
-}
-
 // MARK: - Panels
 
 /// lazygit's panels, stacked: the one with the keys gets the most room.
@@ -364,6 +245,7 @@ private struct GitSidebar: View {
             // changes" don't.
             let heights = GitView.panelHeights(
                 wants: panels.indices.map { index in
+                    guard gitView.isShowing(panels[index]) else { return Self.headerHeight }
                     let isNote = rows[index].count == 1 && rows[index][0].item == nil && rows[index][0].text != "Reading…"
                     return (panels[index] == .history || panels[index] == .files) && !isNote
                         ? nil : Self.headerHeight + CGFloat(max(1, rows[index].count)) * Self.rowHeight + Self.padding
@@ -382,6 +264,7 @@ private struct GitSidebar: View {
             }
             .animation(.easeOut(duration: 0.16), value: gitView.panel)
             .animation(.easeOut(duration: 0.16), value: panels)
+            .animation(.easeOut(duration: 0.16), value: gitView.collapsedPanels)
         }
     }
 }
@@ -402,6 +285,17 @@ private struct GitPanelView: View {
         let lanes = min(8, rows.compactMap { $0.graph?.width }.max() ?? 0)
         VStack(spacing: 0) {
             header(isActive: isActive)
+            if gitView.isShowing(panel) {
+                rowList(selection: selection, hasKeys: hasKeys, lanes: lanes)
+            }
+        }
+        .overlay(alignment: .top) {
+            if !isFirst { palette.separator.frame(height: 1) }
+        }
+        .clipped()
+    }
+
+    private func rowList(selection: String?, hasKeys: Bool, lanes: Int) -> some View {
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -421,16 +315,17 @@ private struct GitPanelView: View {
                     if let selection { proxy.scrollTo(selection) }
                 }
             }
-        }
-        .overlay(alignment: .top) {
-            if !isFirst { palette.separator.frame(height: 1) }
-        }
-        .clipped()
     }
 
+    /// A click folds the panel, or unfolds it and gives it the keys.
     private func header(isActive: Bool) -> some View {
         let count = gitView.count(in: panel)
         return HStack(spacing: 6) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.tertiary)
+                .rotationEffect(.degrees(gitView.isShowing(panel) ? 90 : 0))
+                .frame(width: 10)
             Image(systemName: panel.symbol)
                 .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
@@ -453,12 +348,13 @@ private struct GitPanelView: View {
                 .frame(height: 18)
                 .background(Capsule().fill(isActive ? Color.accentColor.opacity(0.15) : palette.fill2))
         }
-        .padding(.leading, 12)
+        .padding(.leading, 8)
         .padding(.trailing, 10)
         .frame(height: GitSidebar.headerHeight)
         .contentShape(Rectangle())
-        .onTapGesture { gitView.activate(panel) }
-        .help(panel.key.map { "\(panel.title) (\($0), tab for the next panel)" } ?? "The files of the selection (enter on a commit or stash, esc to go back)")
+        .onTapGesture { withAnimation(.easeOut(duration: 0.16)) { gitView.toggleCollapsed(panel) } }
+        .help(panel.key.map { "\(panel.title) (\($0)); click to fold or unfold" }
+              ?? "The files of the selection (↩ on a branch, commit or stash; ⎋ goes back); click to fold or unfold")
     }
 
     private func ownerName(_ owner: GitView.Item) -> String {
@@ -561,9 +457,42 @@ private struct GitPanelView: View {
                 Text(GitNavigatorText.stashTitle(stash.message)).font(.system(size: 13)).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
                 Text(GitRepository.age(of: stash.date)).font(.system(size: 11)).foregroundStyle(secondary)
-            case .branch:
-                EmptyView()
+            case .branch(let branch):
+                if branch.isHead {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(onAccent ? Color.white : Color.accentColor)
+                        .frame(width: 15)
+                } else {
+                    Image(systemName: "arrow.triangle.branch").font(.system(size: 12)).foregroundStyle(secondary).frame(width: 15)
+                }
+                Text(branch.name)
+                    .font(.system(size: 13, weight: branch.isHead ? .semibold : .regular))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                branchTags(branch, onAccent: onAccent)
+                Spacer(minLength: 4)
+                if let date = branch.date {
+                    Text(GitRepository.age(of: date)).font(.system(size: 11)).foregroundStyle(secondary)
+                }
             }
+        }
+    }
+
+    /// Another worktree's branch, a gone upstream, and commits ahead of and
+    /// behind the branch you're on.
+    @ViewBuilder
+    private func branchTags(_ branch: GitBranch, onAccent: Bool) -> some View {
+        if branch.worktreePath != nil, !branch.isHead {
+            GitTag(text: "worktree", symbol: "rectangle.split.2x1", style: .gray, palette: palette, height: 16, fontSize: 10, onAccent: onAccent)
+        }
+        if branch.track == "gone" {
+            GitTag(text: "gone", style: .tint(palette.colors.red), palette: palette, height: 16, fontSize: 10, onAccent: onAccent)
+                .help("Its upstream was deleted")
+        }
+        if !branch.isHead, branch.ahead > 0 || branch.behind > 0 {
+            GitTag(text: "↑\(branch.ahead) ↓\(branch.behind)", style: .gray, palette: palette, height: 16, fontSize: 10, onAccent: onAccent)
+                .help("\(branch.ahead) commits ahead of and \(branch.behind) behind the branch you're on")
         }
     }
 
@@ -720,12 +649,27 @@ private struct GitDiffPane: View {
     @Bindable var gitView: GitView
     let palette: Palette
     @State private var isDragging = false
+    /// The rows' width, which sets where long lines wrap.
+    @State private var contentWidth: CGFloat = 0
 
     private static let space = "gitDiff"
     private var fontSize: CGFloat { gitView.fontSize }
     private var lineHeight: CGFloat { (fontSize * 1.6).rounded() }
 
+    /// Code wraps every `columns` characters, so a character's place on
+    /// screen follows from its offset.
+    private var metrics: GitView.TextMetrics {
+        let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        let charWidth = ("0000000000" as NSString).size(withAttributes: [.font: font]).width / 10
+        let isSplit = gitView.layout == .split
+        let codeX: CGFloat = isSplit ? 64 : 110
+        let width = contentWidth > 0 ? contentWidth : gitView.diffWidth
+        let room = (isSplit ? (width - 1) / 2 : width) - codeX - 12
+        return GitView.TextMetrics(charWidth: charWidth, lineHeight: lineHeight, columns: max(10, Int(room / charWidth)), codeX: codeX)
+    }
+
     var body: some View {
+        let metrics = metrics
         VStack(spacing: 0) {
             if let header = gitView.fileHeader {
                 GitFileHeader(gitView: gitView, header: header, palette: palette)
@@ -737,10 +681,15 @@ private struct GitDiffPane: View {
                     ScrollView(.vertical) {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(gitView.diffRows) { row in
-                                rowView(row)
+                                rowView(row, metrics: metrics)
                             }
                         }
                         .scrollTargetLayout()
+                        .background(GeometryReader { geometry in
+                            Color.clear
+                                .onAppear { contentWidth = geometry.size.width }
+                                .onChange(of: geometry.size.width) { _, width in contentWidth = width }
+                        })
                     }
                     .scrollPosition(id: $gitView.scrollRow, anchor: .top)
                     .scrollIndicators(.automatic)
@@ -751,10 +700,12 @@ private struct GitDiffPane: View {
                             .onChange(of: geometry.size) { _, size in measure(size) }
                     })
                     // Keys moved the cursor out of sight: scroll just enough.
-                    .onChange(of: gitView.cursor) { _, cursor in
-                        guard let cursor, !isDragging else { return }
-                        if let frame = gitView.lineFrames[cursor], frame.minY >= 0, frame.maxY <= gitView.diffHeight { return }
-                        proxy.scrollTo(cursor)
+                    .onAppear { gitView.textMetrics = metrics }
+                    .onChange(of: metrics) { _, metrics in gitView.textMetrics = metrics }
+                    .onChange(of: gitView.cursor?.row) { _, row in
+                        guard let row, !isDragging else { return }
+                        if let frame = gitView.lineFrames[row], frame.minY >= 0, frame.maxY <= gitView.diffHeight { return }
+                        proxy.scrollTo(row)
                     }
                 }
                 .background(palette.background)
@@ -786,7 +737,7 @@ private struct GitDiffPane: View {
     }
 
     @ViewBuilder
-    private func rowView(_ row: GitView.DiffRow) -> some View {
+    private func rowView(_ row: GitView.DiffRow, metrics: GitView.TextMetrics) -> some View {
         switch row.kind {
         case .card:
             if let content = gitView.content { GitCard(gitView: gitView, content: content, palette: palette) }
@@ -802,13 +753,13 @@ private struct GitDiffPane: View {
                 hunkHeader(hunk)
             }
         case .line(let line):
-            selectable(row) { unifiedLine(line) }
+            selectable(row, metrics: metrics) { unifiedLine(line, metrics: metrics) }
         case .pair(let old, let new):
-            selectable(row) {
+            selectable(row, metrics: metrics) {
                 HStack(spacing: 0) {
-                    splitSide(old, number: old?.old)
+                    splitSide(old, number: old?.old, metrics: metrics)
                     palette.softSeparator.frame(width: 1)
-                    splitSide(new, number: new?.new)
+                    splitSide(new, number: new?.new, metrics: metrics)
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }
@@ -832,22 +783,13 @@ private struct GitDiffPane: View {
 
     // MARK: Selecting
 
-    /// A line that a click selects, shift-click extends and dragging
-    /// selects to; on a split diff, on the side clicked.
-    private func selectable<Line: View>(_ row: GitView.DiffRow, @ViewBuilder line: () -> Line) -> some View {
-        let isSplit = gitView.layout == .split
-        return line()
-            .overlay {
-                if gitView.isLineSelected(row.id) {
-                    HStack(spacing: 0) {
-                        if isSplit, gitView.side == .new { Color.clear }
-                        Color.accentColor.opacity(0.2)
-                            .overlay(alignment: .leading) { Color.accentColor.frame(width: 2) }
-                        if isSplit, gitView.side == .old { Color.clear }
-                    }
-                    .allowsHitTesting(false)
-                }
-            }
+    /// A line the mouse selects in: lines from the line numbers, code by
+    /// the character, a word with a double click; on a split diff, on the
+    /// side clicked.
+    private func selectable<Line: View>(_ row: GitView.DiffRow, metrics: GitView.TextMetrics,
+                                        @ViewBuilder line: () -> Line) -> some View {
+        line()
+            .overlay(alignment: .topLeading) { selection(row, metrics: metrics) }
             .contentShape(Rectangle())
             .onGeometryChange(for: CGRect.self) { geometry in
                 geometry.frame(in: .named(Self.space))
@@ -858,16 +800,69 @@ private struct GitDiffPane: View {
             .gesture(
                 DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.space))
                     .onChanged { value in
-                        if isDragging {
-                            gitView.dragLine(to: value.location)
-                        } else {
+                        if !isDragging {
                             isDragging = true
-                            let side: GitView.Side = isSplit && value.startLocation.x < gitView.diffWidth / 2 ? .old : .new
-                            gitView.pressLine(row.id, side: side, extending: NSEvent.modifierFlags.contains(.shift))
+                            gitView.textMetrics = metrics
+                            gitView.mouseDown(at: value.startLocation, row: row.id, clicks: Self.clicks(),
+                                              extending: NSEvent.modifierFlags.contains(.shift))
+                        }
+                        gitView.mouseDragged(to: value.location)
+                    }
+                    .onEnded { _ in
+                        isDragging = false
+                        gitView.mouseUp()
+                    }
+            )
+    }
+
+    /// 2 for a double click; only a mouse event has a count.
+    private static func clicks() -> Int {
+        guard let event = NSApp.currentEvent, [.leftMouseDown, .leftMouseDragged, .leftMouseUp].contains(event.type) else { return 1 }
+        return event.clickCount
+    }
+
+    @ViewBuilder
+    private func selection(_ row: GitView.DiffRow, metrics: GitView.TextMetrics) -> some View {
+        if let selection = gitView.selection(inRow: row.id) {
+            GeometryReader { geometry in
+                let isSplit = gitView.layout == .split
+                let width = isSplit ? (geometry.size.width - 1) / 2 : geometry.size.width
+                let left = isSplit && gitView.side == .new ? width + 1 : 0
+                switch selection {
+                case .whole:
+                    Color.accentColor.opacity(0.2)
+                        .overlay(alignment: .leading) { Color.accentColor.frame(width: 2) }
+                        .frame(width: width)
+                        .offset(x: left)
+                case .characters(let range):
+                    let length = gitView.line(at: row.id)?.shown.count ?? 0
+                    Path { path in
+                        for rect in Self.rects(for: range, length: length, metrics: metrics) {
+                            path.addRect(rect.offsetBy(dx: left + metrics.codeX, dy: 0))
                         }
                     }
-                    .onEnded { _ in isDragging = false }
-            )
+                    .fill(Color.accentColor.opacity(0.38))
+                }
+            }
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// The characters' boxes, a box per wrapped line; past the end, half a
+    /// character for the line break.
+    static func rects(for range: Range<Int>, length: Int, metrics: GitView.TextMetrics) -> [CGRect] {
+        var rects: [CGRect] = []
+        let wraps = max(0, (length - 1) / metrics.columns)
+        var start = range.lowerBound
+        while start < range.upperBound {
+            let wrap = min(start / metrics.columns, wraps)
+            let end = min(range.upperBound, (wrap + 1) * metrics.columns, max(length, start + 1))
+            let width = start >= length ? 0.5 : CGFloat(end - start)
+            rects.append(CGRect(x: CGFloat(start - wrap * metrics.columns) * metrics.charWidth, y: CGFloat(wrap) * metrics.lineHeight,
+                                width: width * metrics.charWidth, height: metrics.lineHeight))
+            start = max(end, start + 1)
+        }
+        return rects
     }
 
     // MARK: Lines
@@ -875,14 +870,13 @@ private struct GitDiffPane: View {
     private var codeFont: Font { .system(size: fontSize, design: .monospaced) }
     private var numberFont: Font { .system(size: fontSize - 1, design: .monospaced) }
 
-    private func unifiedLine(_ line: GitDiffLine) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 0) {
+    private func unifiedLine(_ line: GitDiffLine, metrics: GitView.TextMetrics) -> some View {
+        HStack(alignment: .top, spacing: 0) {
             number(line.old)
             number(line.new)
             marker(line.kind)
-            code(line)
+            code(line, metrics: metrics)
         }
-        .frame(minHeight: lineHeight)
         .background {
             HStack(spacing: 0) {
                 band(line.kind, gutter: true).frame(width: 92)
@@ -892,13 +886,13 @@ private struct GitDiffPane: View {
     }
 
     @ViewBuilder
-    private func splitSide(_ line: GitDiffLine?, number value: Int?) -> some View {
+    private func splitSide(_ line: GitDiffLine?, number value: Int?, metrics: GitView.TextMetrics) -> some View {
         Group {
             if let line {
-                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                HStack(alignment: .top, spacing: 0) {
                     number(line.kind == .note ? nil : value)
                     marker(line.kind)
-                    code(line)
+                    code(line, metrics: metrics)
                 }
                 .background {
                     HStack(spacing: 0) {
@@ -910,7 +904,7 @@ private struct GitDiffPane: View {
                 palette.fill
             }
         }
-        .frame(maxWidth: .infinity, minHeight: lineHeight, maxHeight: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, minHeight: lineHeight, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func number(_ value: Int?) -> some View {
@@ -919,24 +913,42 @@ private struct GitDiffPane: View {
             .foregroundStyle(palette.dim)
             .lineLimit(1)
             .padding(.trailing, 9)
-            .frame(width: 46, alignment: .trailing)
+            .frame(width: 46, height: lineHeight, alignment: .trailing)
     }
 
     private func marker(_ kind: GitDiffLine.Kind) -> some View {
         Text(kind == .added ? "+" : kind == .removed ? "−" : " ")
             .font(codeFont)
             .foregroundStyle(kind == .added ? palette.color(palette.colors.addedText) : palette.color(palette.colors.removedText))
-            .frame(width: 18)
+            .frame(width: 18, height: lineHeight)
     }
 
-    private func code(_ line: GitDiffLine) -> some View {
-        Text(line.kind == .note ? AttributedString(line.text) : line.styled ?? AttributedString(line.text))
-            .font(codeFont)
-            .italic(line.kind == .note)
-            .foregroundStyle(line.kind == .note ? palette.dim : palette.code)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.trailing, 12)
-            .padding(.vertical, (lineHeight - fontSize * 1.25) / 2)
+    /// The code, a line of `columns` characters at a time.
+    private func code(_ line: GitDiffLine, metrics: GitView.TextMetrics) -> some View {
+        let text = line.kind == .note ? AttributedString(line.shown) : line.styled ?? AttributedString(line.shown)
+        let wraps = max(1, (line.shown.count + metrics.columns - 1) / metrics.columns)
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(0..<wraps, id: \.self) { wrap in
+                Text(wraps == 1 ? text : Self.slice(text, from: wrap * metrics.columns, count: metrics.columns))
+                    .font(codeFont)
+                    .italic(line.kind == .note)
+                    .foregroundStyle(line.kind == .note ? palette.dim : palette.code)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .frame(height: metrics.lineHeight, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, 12)
+    }
+
+    private static func slice(_ text: AttributedString, from start: Int, count: Int) -> AttributedString {
+        let characters = text.characters
+        guard let lower = characters.index(characters.startIndex, offsetBy: start, limitedBy: characters.endIndex) else {
+            return AttributedString()
+        }
+        let upper = characters.index(lower, offsetBy: count, limitedBy: characters.endIndex) ?? characters.endIndex
+        return AttributedString(text[lower..<upper])
     }
 
     private func band(_ kind: GitDiffLine.Kind, gutter: Bool) -> Color {

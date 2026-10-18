@@ -86,7 +86,7 @@ struct GitHighlighter: @unchecked Sendable {
                 // Comments and strings carry over lines within a hunk only.
                 var state = SyntaxState()
                 for line in patch.files[file].hunks[hunk].lines.indices {
-                    let text = patch.files[file].hunks[hunk].lines[line].text
+                    let text = patch.files[file].hunks[hunk].lines[line].shown
                     patch.files[file].hunks[hunk].lines[line].styled = styled(text, language, &state)
                 }
             }
