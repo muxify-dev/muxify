@@ -43,6 +43,34 @@ struct GitViewOverlay: View {
     }
 }
 
+/// The Git View's symbol, in the header and on a sidebar Window whose Git
+/// View is open: three commits, one branching off. Drawn from a 16×16 SVG
+/// with a 1.5 stroke, in the foreground style.
+struct GitViewIcon: View {
+    var size: CGFloat = 14
+
+    var body: some View {
+        Outline()
+            .stroke(style: StrokeStyle(lineWidth: size * 1.5 / 16, lineCap: .round, lineJoin: .round))
+            .frame(width: size, height: size)
+    }
+
+    private struct Outline: Shape {
+        func path(in rect: CGRect) -> Path {
+            var path = Path()
+            for center in [CGPoint(x: 4.5, y: 3.5), CGPoint(x: 11.5, y: 3.5), CGPoint(x: 4.5, y: 12.5)] {
+                path.addEllipse(in: CGRect(x: center.x - 1.75, y: center.y - 1.75, width: 3.5, height: 3.5))
+            }
+            path.move(to: CGPoint(x: 5.25, y: 8.25))
+            path.addCurve(to: CGPoint(x: 11.25, y: 5.75), control1: CGPoint(x: 8.25, y: 8.25), control2: CGPoint(x: 11.25, y: 8.75))
+            path.move(to: CGPoint(x: 4.75, y: 10.25))
+            path.addLine(to: CGPoint(x: 4.75, y: 5.75))
+            let scale = min(rect.width, rect.height) / 16
+            return path.applying(CGAffineTransform(translationX: rect.minX, y: rect.minY).scaledBy(x: scale, y: scale))
+        }
+    }
+}
+
 /// The colors a Navigator view draws with, from the Ghostty theme.
 private struct Palette {
     let colors: GitColors
@@ -99,8 +127,13 @@ private struct GitNavigator: View {
                     GitCommitBox(gitView: gitView, snapshot: snapshot, palette: palette)
                         .transition(.opacity)
                 }
+                if let discard = gitView.discard {
+                    GitDiscardMenu(gitView: gitView, discard: discard, palette: palette)
+                        .transition(.opacity)
+                }
             }
             .animation(.easeOut(duration: 0.15), value: gitView.isCommitOpen)
+            .animation(.easeOut(duration: 0.15), value: gitView.discard != nil)
         }
         .background(GitKeyCatcher(gitView: gitView))
         .environment(\.colorScheme, colors.isDark ? .dark : .light)
@@ -337,24 +370,6 @@ private struct GitListHeader: View {
                 .padding(.horizontal, 7)
                 .frame(height: 18)
                 .background(Capsule().fill(palette.fill2))
-            if level.list == .changes, gitView.snapshot?.changes.isEmpty == false {
-                let canCommit = gitView.stagedCount > 0
-                Button { gitView.openCommit() } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark").font(.system(size: 9.5, weight: .bold))
-                        Text("Commit").font(.system(size: 11.5, weight: .semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 9)
-                    .frame(height: 22)
-                    .background(Capsule().fill(Color.accentColor))
-                    .opacity(canCommit ? 1 : 0.4)
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(!canCommit)
-                .help(canCommit ? "Commit what's staged (c)" : "Stage files to commit them: space, or a for everything")
-            }
         }
         .padding(.leading, 6)
         .padding(.trailing, 10)
@@ -1758,6 +1773,146 @@ private struct GitCommitBox: View {
         }
         .padding(.horizontal, 18)
         .frame(height: 58)
+        .background(Color.primary.opacity(palette.colors.isDark ? 0.03 : 0.025))
+        .overlay(alignment: .top) { palette.softSeparator.frame(height: 1) }
+    }
+}
+
+// MARK: - Discarding
+
+/// d: lazygit's Discard changes menu for a file or folder of Changes. x, or
+/// ↩ on it, discards everything; u only what isn't staged; ⎋ closes it.
+private struct GitDiscardMenu: View {
+    let gitView: GitView
+    let discard: GitView.Discard
+    let palette: Palette
+    @State private var isShown = false
+    @State private var hovered: GitView.Discard.Option?
+
+    private var red: Color { palette.color(palette.colors.strong(palette.colors.red)) }
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .top) {
+                Color.black.opacity(palette.colors.isDark ? 0.32 : 0.14)
+                    .contentShape(Rectangle())
+                    .onTapGesture { gitView.closeDiscard() }
+                card
+                    .frame(width: min(460, proxy.size.width - 48))
+                    .padding(.top, max(20, proxy.size.height * 0.16))
+                    .scaleEffect(isShown ? 1 : 0.97, anchor: .top)
+                    .offset(y: isShown ? 0 : -6)
+            }
+        }
+        .onAppear { withAnimation(.spring(duration: 0.28, bounce: 0.2)) { isShown = true } }
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 12)
+            VStack(spacing: 2) {
+                option(.all, key: "x", title: "Discard all changes",
+                       detail: "Back to the last commit. New and untracked files are deleted.")
+                option(.unstaged, key: "u", title: "Discard unstaged changes",
+                       detail: discard.canDiscardUnstaged ? "Keep what's staged." : "Only when some of it is staged and some isn't.")
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 8)
+            footer
+        }
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(palette.chrome))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(palette.separator))
+        .shadow(color: .black.opacity(0.35), radius: 32, y: 14)
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(red.gradient)
+                .frame(width: 30, height: 30)
+                .overlay(Image(systemName: "trash").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Discard changes").font(.system(size: 14.5, weight: .semibold))
+                HStack(spacing: 5) {
+                    if discard.isFolder {
+                        Image(systemName: "folder").font(.system(size: 11))
+                        Text(discard.path).fontWeight(.medium).lineLimit(1).truncationMode(.head)
+                        Text(verbatim: "·").foregroundStyle(.tertiary)
+                        Text(discard.changes.count == 1 ? "1 file" : "\(discard.changes.count) files")
+                    } else {
+                        GitFileTile(path: discard.path, size: 13)
+                        Text((discard.path as NSString).lastPathComponent).fontWeight(.medium).lineLimit(1)
+                        let folder = (discard.path as NSString).deletingLastPathComponent
+                        if !folder.isEmpty {
+                            Text(folder).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
+                        }
+                    }
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// ↩ picks the highlighted one; j and k move between them.
+    private func option(_ option: GitView.Discard.Option, key: String, title: String, detail: String) -> some View {
+        let isEnabled = option == .all || discard.canDiscardUnstaged
+        let isHighlighted = isEnabled && discard.option == option
+        return Button { gitView.confirmDiscard(option) } label: {
+            HStack(spacing: 10) {
+                GitKeyCap(text: key, palette: palette)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(option == .all ? red : Color.primary)
+                    Text(detail).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                if isHighlighted {
+                    Text(verbatim: "↩").font(.system(size: 11)).foregroundStyle(.tertiary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 48)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isHighlighted ? palette.fill2 : hovered == option && isEnabled ? palette.fill : .clear)
+            )
+            .opacity(isEnabled ? 1 : 0.45)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .onHover { hovered = $0 ? option : hovered == option ? nil : hovered }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle").font(.system(size: 11))
+            Text("This can't be undone.").font(.system(size: 11.5))
+            Spacer(minLength: 8)
+            Button { gitView.closeDiscard() } label: {
+                HStack(spacing: 6) {
+                    Text("Cancel").font(.system(size: 12.5, weight: .medium))
+                    Text(verbatim: "esc").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(palette.fill2))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close (⎋)")
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 16)
+        .frame(height: 48)
         .background(Color.primary.opacity(palette.colors.isDark ? 0.03 : 0.025))
         .overlay(alignment: .top) { palette.softSeparator.frame(height: 1) }
     }

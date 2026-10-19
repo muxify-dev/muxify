@@ -517,6 +517,28 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(try status(), [" M a.swift", "?? c.txt"])
     }
 
+    func testDiscardTakesEverythingOrOnlyWhatsUnstaged() throws {
+        // a.swift is staged and changed again: only the change goes.
+        try run(GitRepository.discardUnstagedScript, repository, "a.swift")
+        XCTAssertEqual(try status(), ["M  a.swift", "?? c.txt"])
+        // Everything: back to the last commit, and the untracked file deleted.
+        try run(GitRepository.discardScript, repository, "a.swift", "c.txt")
+        XCTAssertEqual(try status(), [])
+        XCTAssertEqual(try run("cat \"$1/a.swift\"", repository), "let a = 1\n")
+        // A rename goes back to its old path, and a new file is deleted.
+        try run("cd \"$1\" && git mv a.swift moved.swift && printf 'n\\n' > n.txt && git add n.txt", repository)
+        try run(GitRepository.discardScript, repository, "moved.swift", "a.swift")
+        try run(GitRepository.discardScript, repository, "n.txt")
+        XCTAssertEqual(try status(), [])
+        // Paths are literal: app/[id] isn't a pattern that takes app/i too.
+        try run("""
+        cd "$1" && mkdir -p 'app/[id]' app/i && printf 'r\\n' > 'app/[id]/p' && printf 'i\\n' > app/i/p
+        git add app && git commit -qm app && printf 'x\\n' >> 'app/[id]/p' && printf 'x\\n' >> app/i/p
+        """, repository)
+        try run(GitRepository.discardScript, repository, "app/[id]/p")
+        XCTAssertEqual(try status(), [" M app/i/p"])
+    }
+
     func testAStashIsShownWithGit() throws {
         let stash = try run(GitRepository.gitScript, repository, "stash", "show", "--patch", "--no-color", "stash@{0}")
         XCTAssertEqual(GitPatch.parse(stash).files.first?.hunks.first?.lines.last?.text, "stashed")
@@ -552,6 +574,7 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(try command("/", keyCode: 0x2C), .filter)
         XCTAssertEqual(try command(" ", keyCode: 0x31), .toggle)
         XCTAssertEqual(try command("c", keyCode: 0x08), .commit)
+        XCTAssertEqual(try command("d", keyCode: 0x02), .discard)
         // ⌘G goes on to toggle_git_view, ⌘B to the Browser.
         XCTAssertNil(try command("g", keyCode: 0x05, flags: .command))
         XCTAssertNil(try command("b", keyCode: 0x0B, flags: .command))
@@ -683,6 +706,30 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(gitView.list, .stashes)
         XCTAssertNil(gitView.level.selection)
         XCTAssertEqual(gitView.rows.map(\.text), ["No stashes"])
+    }
+
+    func testDiscardAsksAsLazygitDoes() {
+        let mixed = GitChange(index: "M", worktree: "M", path: "src/a.swift")
+        var renamed = GitChange(index: "R", worktree: " ", path: "src/new.swift")
+        renamed.originalPath = "old.swift"
+        let untracked = GitChange(index: "?", worktree: "?", path: "src/c.txt")
+        XCTAssertTrue(GitView.Discard(path: mixed.path, isFolder: false, changes: [mixed]).canDiscardUnstaged)
+        XCTAssertFalse(GitView.Discard(path: untracked.path, isFolder: false, changes: [untracked]).canDiscardUnstaged)
+        let folder = GitView.Discard(path: "src", isFolder: true, changes: [renamed, untracked])
+        XCTAssertTrue(folder.canDiscardUnstaged)
+        XCTAssertEqual(folder.paths(.all), ["src", "old.swift"])
+        XCTAssertEqual(folder.paths(.unstaged), ["src"])
+        // d asks about the selected change, and only in Changes.
+        let gitView = GitView(windowID: "@1")
+        var changed = snapshot
+        changed.changes = [mixed, untracked]
+        gitView.apply(changed)
+        gitView.perform(.discard)
+        XCTAssertEqual(gitView.discard?.path, "src/a.swift")
+        gitView.closeDiscard()
+        gitView.perform(.tab(.history))
+        gitView.perform(.discard)
+        XCTAssertNil(gitView.discard)
     }
 
     func testEachWindowKeepsItsOwnGitView() {

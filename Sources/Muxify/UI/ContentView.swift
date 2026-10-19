@@ -145,18 +145,20 @@ private struct HeaderBar: View {
             .disabled(!store.canToggleMaximize)
             .accessibilityIdentifier("toggle-maximize")
             TitlebarButton(
-                systemName: "arrow.triangle.branch",
-                help: help(store.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View", .toggleGitView),
-                isOn: store.currentGitView?.isOpen == true,
-                action: { store.currentGitView?.toggle() }
-            )
-            TitlebarButton(
                 systemName: "sidebar.left",
                 help: help(store.sidebarShown ? "Hide Sidebar" : "Show Sidebar", .toggleSidebar),
                 isOn: store.sidebarShown,
                 action: store.toggleSidebar
             )
             .accessibilityIdentifier("toggle-sidebar")
+            TitlebarButton(
+                help: help(store.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View", .toggleGitView),
+                isOn: store.currentGitView?.isOpen == true,
+                action: store.toggleGitView
+            ) {
+                GitViewIcon(size: 15)
+            }
+            .accessibilityIdentifier("toggle-git-view")
             TitlebarButton(
                 systemName: "terminal",
                 help: help(layout.shows(.terminal) ? "Hide Terminal" : "Show Terminal", .toggleTerminal),
@@ -388,18 +390,25 @@ enum TitlebarMetrics {
     static let trafficLightsWidth: CGFloat = 78
 }
 
-struct TitlebarButton: View {
-    let systemName: String
+struct TitlebarButton<Icon: View>: View {
     let help: String
     var isOn = false
     let action: () -> Void
+    @ViewBuilder let icon: () -> Icon
 
     @State private var hovering = false
     @Environment(\.isEnabled) private var isEnabled
 
+    init(help: String, isOn: Bool = false, action: @escaping () -> Void, @ViewBuilder icon: @escaping () -> Icon) {
+        self.help = help
+        self.isOn = isOn
+        self.action = action
+        self.icon = icon
+    }
+
     var body: some View {
         Button(action: action) {
-            Image(systemName: systemName)
+            icon()
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
                 .opacity(isEnabled ? 1 : 0.4)
@@ -415,6 +424,12 @@ struct TitlebarButton: View {
         .help(help)
         .accessibilityValue(isOn ? "on" : "off")
         .actsOnFirstClick()
+    }
+}
+
+extension TitlebarButton where Icon == Image {
+    init(systemName: String, help: String, isOn: Bool = false, action: @escaping () -> Void) {
+        self.init(help: help, isOn: isOn, action: action) { Image(systemName: systemName) }
     }
 }
 

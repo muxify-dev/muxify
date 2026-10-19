@@ -314,10 +314,12 @@ tabs count the changes and stashes.
 
 As in lazygit, space in Changes stages the file or folder, or unstages it once
 all of it is staged, and a stages or unstages everything; a click on a file's
-letters does the same. c, or the Commit button, opens a box for the commit's
-summary and description: ↩ in the summary or ⌘↩ commits, and ⎋ closes it,
-keeping what you wrote. A commit takes only what's staged; with nothing staged,
-c and the Commit button do nothing but say so.
+letters does the same. c opens a box for the commit's summary and description:
+↩ in the summary or ⌘↩ commits, and ⎋ closes it, keeping what you wrote. A
+commit takes only what's staged; with nothing staged, c does nothing but say so.
+d asks, as lazygit does, whether to discard all of a file's or folder's changes,
+back to the last commit, or only the unstaged ones, keeping what's staged. New and
+untracked files are deleted; it can't be undone.
 Hooks and signing run as they do in a terminal; when one fails, the box shows
 what it said.
 
@@ -347,8 +349,9 @@ comes to the front, with R, and after you stage or commit. On a Remote
 Environment, git runs on that machine. Code is sized from the terminal's font
 size, in the system's monospaced font. Each Window has its own Git View: select
 another Window and it stays open there, as you left it, until you come back; it
-isn't read again meanwhile. The Git Views go when Muxify quits. The Git View's
-keys are in [Keybindings](keybindings.md#git-view-keys).
+isn't read again meanwhile. A Window whose Git View is open shows its icon in the
+Sidebar. The Git Views go when Muxify quits. The Git View's keys are in
+[Keybindings](keybindings.md#git-view-keys).
 
 ## Command Palettes
 
@@ -439,12 +442,13 @@ front of the path. **Open Config** there opens the remote file in the remote's
 
 ## Browser and keybindings
 
-The top-right header has the Maximize button and toggles the Sidebar, Terminal and
-Browser. ⌘J toggles the current Window's Terminal and ⌘B its Browser; the toggle
-of the only side shown does nothing. Maximize (⇧⌘↩) shows the side that has Focus
-alone, with the Sidebar hidden. Press it again to Restore the Window. ⌘⇧J and
-⌘⇧B move Focus to the Terminal or the Browser and show that side if it is hidden.
-Each Window remembers its Browser Tabs, its toggles and its Maximize state.
+The top-right header has the Maximize button and toggles the Sidebar, the Git
+View, the Terminal and the Browser. ⌘J toggles the current Window's Terminal and
+⌘B its Browser; the toggle of the only side shown does nothing. Maximize (⇧⌘↩)
+shows the side that has Focus alone, with the Sidebar hidden. Press it again to
+Restore the Window. ⌘⇧J and ⌘⇧B move Focus to the Terminal or the Browser and
+show that side if it is hidden. Each Window remembers its Browser Tabs, its
+toggles and its Maximize state.
 Browser-opening requests (`muxify browser open …`, terminal Cmd-click links)
 reveal its Browser. The [Simulator](simulator.md) runs in a browser, not a native
 panel.

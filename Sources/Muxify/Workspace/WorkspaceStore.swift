@@ -966,8 +966,9 @@ final class WorkspaceStore {
     /// The record's `sessions` on disk when its pending snapshot was taken.
     @ObservationIgnored private var topicSnapshotBases: [String: [JSONValue]] = [:]
     @ObservationIgnored private var topicPersistWork: [String: DispatchWorkItem] = [:]
-    /// Each Window's Git View, kept while the Window lives.
-    @ObservationIgnored private var gitViews: [String: GitView] = [:]
+    /// Each Window's Git View, made when it first opens and kept while the
+    /// Window lives. Observed, for the sidebar's Git View icons.
+    private var gitViews: [String: GitView] = [:]
     @ObservationIgnored private var persistWork: [String: DispatchWorkItem] = [:]
     /// Keep changes dirty until tmux confirms the write, including commands
     /// already submitted when a window closes. Never flush unchanged Browsers
@@ -1916,8 +1917,20 @@ final class WorkspaceStore {
         return gitView
     }
 
+    /// The selected Window's Git View, once it has opened there. Views
+    /// don't make one, so `gitViews` changes only in actions.
     var currentGitView: GitView? {
-        selectedWindowID.map(gitView(for:))
+        selectedWindowID.flatMap { gitViews[$0] }
+    }
+
+    func toggleGitView() {
+        guard let id = selectedWindowID else { return }
+        gitView(for: id).toggle()
+    }
+
+    /// For the sidebar's Git View icon.
+    func isGitViewOpen(in windowID: String) -> Bool {
+        gitViews[windowID]?.isOpen == true
     }
 
     private func removeGitViews() {
@@ -1947,7 +1960,7 @@ final class WorkspaceStore {
             return parts.count == 2 ? (parts[0], parts[1]) : nil
         }, uniquingKeysWith: { _, last in last })
         if let id = fields["window"], let window = windows.first(where: { $0.id == id }) { select(window) }
-        currentGitView?.applyDemo(fields)
+        selectedWindowID.map(gitView(for:))?.applyDemo(fields)
     }
     #endif
 
@@ -2194,7 +2207,7 @@ final class WorkspaceStore {
         case .toggleSidebar: toggleSidebar()
         case .toggleTerminal: toggle(.terminal)
         case .toggleBrowser: toggle(.browser)
-        case .toggleGitView: currentGitView?.toggle()
+        case .toggleGitView: toggleGitView()
         case .toggleMaximize: toggleMaximize()
         case .toggleMaximizeTerminal: toggleMaximize(.terminal)
         case .toggleMaximizeBrowser: toggleMaximize(.browser)

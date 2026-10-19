@@ -391,7 +391,7 @@ private struct TopicItemRow: View {
         case .window(let window):
             Button { store.select(window) } label: {
                 WindowRow(window: window, content: store.sidebarWindowRow(window), isSelected: window.id == store.selectedWindowID,
-                          tabCount: store.tabCount(for: window), topicsView: true,
+                          tabCount: store.tabCount(for: window), isGitViewOpen: store.isGitViewOpen(in: window.id), topicsView: true,
                           usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
                               window, record: store.topicWatcher.records.first { $0.id == window.topicID }, projects: store.projects))
             }
@@ -907,6 +907,7 @@ private struct SessionsSection: View {
                 content: store.sidebarWindowRow(window),
                 isSelected: window.id == store.selectedWindowID,
                 tabCount: store.tabCount(for: window),
+                isGitViewOpen: store.isGitViewOpen(in: window.id),
                 usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
                     window, record: store.topicWatcher.records.first { $0.id == window.topicID },
                     projects: store.projects)
@@ -1043,6 +1044,7 @@ struct WindowRow: View {
     var content: SidebarFormats.WindowRowContent? = nil
     let isSelected: Bool
     let tabCount: Int
+    var isGitViewOpen = false
     var topicsView = false
     var usesMainWorkingCopy = false
     @Environment(\.sidebarTypography) private var typography
@@ -1081,6 +1083,12 @@ struct WindowRow: View {
             if window.hasBell && !topicsView {
                 BellMark()
                     .accessibilityIdentifier("window-bell-\(window.id)")
+            }
+            if isGitViewOpen {
+                GitViewIcon(size: 11)
+                    .foregroundStyle(secondaryStyle)
+                    .help("Git View open")
+                    .accessibilityIdentifier("window-git-view-\(window.id)")
             }
             if let right = content?.right {
                 if !right.isEmpty { customPart(right, side: "right") }

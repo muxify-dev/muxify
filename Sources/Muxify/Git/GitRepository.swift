@@ -302,6 +302,38 @@ enum GitRepository {
     exec git -c core.quotepath=off rm -q -r --cached --ignore-unmatch -- "$@"
     """
 
+    /// Takes the folder, then files and folders to discard every change in,
+    /// staged or not: tracked files go back to HEAD, and new and untracked
+    /// ones are deleted. Paths are literal, so `app/[id]` isn't a pattern
+    /// that takes `app/i` with it.
+    static let discardScript = """
+    cd "$1" || exit 1
+    shift
+    export GIT_LITERAL_PATHSPECS=1
+    if git rev-parse -q --verify HEAD >/dev/null; then
+        git reset -q -- "$@" || exit 1
+    else
+        git rm -q -r --cached --ignore-unmatch -- "$@" || exit 1
+    fi
+    for path in "$@"; do
+        if [ -n "$(git ls-files -- "$path")" ]; then git checkout -q -- "$path" || exit 1; fi
+    done
+    exec git clean -f -d -q -- "$@"
+    """
+
+    /// Takes the folder, then files and folders to discard the unstaged
+    /// changes in: tracked files go back to what's staged, and untracked
+    /// ones are deleted.
+    static let discardUnstagedScript = """
+    cd "$1" || exit 1
+    shift
+    export GIT_LITERAL_PATHSPECS=1
+    for path in "$@"; do
+        if [ -n "$(git ls-files -- "$path")" ]; then git checkout -q -- "$path" || exit 1; fi
+    done
+    exec git clean -f -d -q -- "$@"
+    """
+
     /// Takes the folder and the message; commits what's staged. Prints the
     /// new commit's short hash; hooks' output goes to stderr, where a
     /// failure shows it.

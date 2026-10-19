@@ -362,6 +362,7 @@ go on to the actions above.
 | v | Start or end a range: moving then selects lines, as in lazygit |
 | a | In the diff, select the hunk; in Changes, stage everything, or unstage it all once it all is |
 | c | Commit what's staged, once something is: write a summary and a description, then ↩ in the summary or ⌘↩; ⎋ keeps the message for later |
+| d | In Changes, discard the file's or folder's changes, as in lazygit: x (or ↩) discards all of them, u only the unstaged ones when some are staged; new and untracked files are deleted. ⎋ cancels |
 | y, ⌘C | Copy the selected code, without + and −; in the list, the path, hash or branch |
 | J / K, ⌃D / ⌃U | Scroll the diff by three lines, or half a page |
 | ⌥↓ / ⌥↑ | Next or previous hunk |

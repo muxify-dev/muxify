@@ -269,7 +269,7 @@ final class GitView {
         /// Space: stages or unstages in Changes, folds a folder of the
         /// Diff files.
         case toggle, collapseAll, expandAll
-        case commit, filter, back, close, refresh
+        case commit, discard, filter, back, close, refresh
     }
 
     private(set) var isOpen = false
@@ -290,6 +290,8 @@ final class GitView {
     var commitDescription = ""
     private(set) var commitError: String?
     private(set) var isCommitting = false
+    /// d in Changes: lazygit's Discard changes menu, on what it's for.
+    private(set) var discard: Discard?
     /// The tab the sidebar shows.
     private(set) var tab = GitTab.changes
     /// Each tab's lists: its own, then each one gone into; the last one
@@ -411,6 +413,7 @@ final class GitView {
         isFiltering = false
         isCommitOpen = false
         commitError = nil
+        discard = nil
         writeError = nil
         wantsFocus = false
         contentWork?.cancel()
@@ -433,6 +436,8 @@ final class GitView {
     /// reading the repository until its Window is selected again.
     func suspend() {
         isFiltering = false
+        // Asked again when it's wanted, never waiting to be confirmed.
+        discard = nil
         wantsFocus = false
         // What had focus before is gone with the Window; closing later
         // gives it to the terminal.
@@ -849,6 +854,19 @@ final class GitView {
             }
             return true
         }
+        // The Discard changes menu's keys, as lazygit's.
+        if let discard, event.window === keyView?.window {
+            switch trigger {
+            case Self.escape, Self.q: closeDiscard()
+            case Self.x: confirmDiscard(.all)
+            case Self.u: confirmDiscard(.unstaged)
+            case Self.enter: confirmDiscard(discard.option)
+            case Self.down, Self.j, Self.ctrlJ: moveDiscardOption(by: 1)
+            case Self.up, Self.k, Self.ctrlK: moveDiscardOption(by: -1)
+            default: return false
+            }
+            return true
+        }
         if isFiltering, event.window === keyView?.window {
             switch trigger {
             case Self.escape, Self.enter:
@@ -874,6 +892,11 @@ final class GitView {
     private static let ctrlJ = try! KeyTrigger("ctrl+j")
     private static let ctrlK = try! KeyTrigger("ctrl+k")
     private static let commandEnter = try! KeyTrigger("cmd+enter")
+    private static let j = try! KeyTrigger("j")
+    private static let k = try! KeyTrigger("k")
+    private static let q = try! KeyTrigger("q")
+    private static let u = try! KeyTrigger("u")
+    private static let x = try! KeyTrigger("x")
 
     static let commands: [KeyTrigger: Command] = {
         let spelling: KeyValuePairs<String, Command> = [
@@ -885,7 +908,7 @@ final class GitView {
             "alt+down": .nextHunk, "alt+up": .previousHunk, "right_bracket": .nextFile, "left_bracket": .previousFile,
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
             "space": .toggle, "minus": .collapseAll, "equal": .expandAll,
-            "c": .commit, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
+            "c": .commit, "d": .discard, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
         ]
         return Dictionary(uniqueKeysWithValues: spelling.map { (try! KeyTrigger($0), $1) })
     }()
@@ -949,6 +972,8 @@ final class GitView {
             }
         case .commit:
             openCommit()
+        case .discard:
+            if focus == .list, list == .changes, let item = selectedItem { askDiscard(item) }
         case .collapseAll, .expandAll:
             if focus == .list { foldAll(command == .collapseAll) }
         case .filter:
@@ -1000,6 +1025,63 @@ final class GitView {
     static func staging(_ changes: [GitChange], path: String) -> (stage: Bool, paths: [String]) {
         let stage = changes.contains { !$0.isStaged }
         return (stage, stage ? [path] : [path] + changes.compactMap(\.originalPath))
+    }
+
+    /// lazygit's Discard changes menu, for a file or folder of Changes.
+    struct Discard: Equatable {
+        enum Option: CaseIterable { case all, unstaged }
+
+        /// The file's path, or the folder's.
+        let path: String
+        let isFolder: Bool
+        /// The file's change, or each one in the folder.
+        let changes: [GitChange]
+        /// The option ↩ picks.
+        var option = Option.all
+
+        /// As in lazygit, only when some of it is staged and some isn't.
+        var canDiscardUnstaged: Bool {
+            changes.contains { $0.groups.contains(.staged) } && changes.contains { !$0.isStaged }
+        }
+
+        /// Discarding everything puts a renamed file back at its old path.
+        func paths(_ option: Option) -> [String] {
+            option == .all ? [path] + changes.compactMap(\.originalPath) : [path]
+        }
+    }
+
+    /// d: asks what to discard of a file or folder, as lazygit does.
+    func askDiscard(_ item: Item) {
+        guard let snapshot else { return }
+        switch item {
+        case .change(let change):
+            discard = Discard(path: change.path, isFolder: false, changes: [change])
+        case .folder(_, let folder):
+            discard = Discard(path: folder, isFolder: true, changes: snapshot.changes.filter { GitTree.path($0.path, isIn: folder) })
+        default:
+            return
+        }
+        writeError = nil
+    }
+
+    func closeDiscard() {
+        discard = nil
+    }
+
+    /// x, u, or ↩ or a click on an option. It can't be undone.
+    func confirmDiscard(_ option: Discard.Option) {
+        guard let discard, let snapshot, option == .all || discard.canDiscardUnstaged else { return }
+        self.discard = nil
+        write(option == .all ? GitRepository.discardScript : GitRepository.discardUnstagedScript,
+              arguments: [snapshot.root] + discard.paths(option))
+    }
+
+    private func moveDiscardOption(by step: Int) {
+        guard var discard else { return }
+        let options = discard.canDiscardUnstaged ? Discard.Option.allCases : [.all]
+        let index = (options.firstIndex(of: discard.option) ?? 0) + step
+        discard.option = options[min(max(index, 0), options.count - 1)]
+        self.discard = discard
     }
 
     /// The changes staged, which a commit takes.
