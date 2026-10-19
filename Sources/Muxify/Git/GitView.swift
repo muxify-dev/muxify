@@ -51,10 +51,11 @@ enum GitList: String {
     case files
 }
 
-/// The Git View of one App Window (CONTEXT.md): a read-only look at the
-/// repository in the current Window's folder, as a navigator. Tabs of
-/// changed files, history, branches and stashes, and the selection's diff
-/// beside them.
+/// The Git View of one tmux Window in an App Window (CONTEXT.md): a look at
+/// the repository in the Window's folder, as a navigator. Tabs of changed
+/// files, history, branches and stashes, and the selection's diff beside
+/// them. Changes can be staged and committed, as in lazygit. Selecting
+/// another Window leaves it open as it is, for when you come back.
 @MainActor @Observable
 final class GitView {
     /// Something in a list.
@@ -265,8 +266,10 @@ final class GitView {
         case scroll(lines: Int), halfPage(Int)
         case nextHunk, previousHunk, nextFile, previousFile
         case extend(Int), range, hunk, copy
-        case toggleFolder, collapseAll, expandAll
-        case filter, back, close, refresh
+        /// Space: stages or unstages in Changes, folds a folder of the
+        /// Diff files.
+        case toggle, collapseAll, expandAll
+        case commit, filter, back, close, refresh
     }
 
     private(set) var isOpen = false
@@ -276,6 +279,17 @@ final class GitView {
     private(set) var error: String?
     /// Reading on opening or after R, when the toolbar shows a spinner.
     private(set) var isReading = false
+    /// Staging, unstaging or committing; the toolbar shows a spinner.
+    private(set) var isWriting = false
+    /// What a stage, unstage or commit that failed said.
+    private(set) var writeError: String?
+    /// The commit message box is open; c opens it, as in lazygit.
+    private(set) var isCommitOpen = false
+    /// The message being written, kept when the box closes uncommitted.
+    var commitSummary = ""
+    var commitDescription = ""
+    private(set) var commitError: String?
+    private(set) var isCommitting = false
     /// The tab the sidebar shows.
     private(set) var tab = GitTab.changes
     /// Each tab's lists: its own, then each one gone into; the last one
@@ -322,14 +336,16 @@ final class GitView {
     @ObservationIgnored weak var store: WorkspaceStore?
     /// Holds keyboard focus while the Git View has it (see `GitKeyCatcher`).
     @ObservationIgnored weak var keyView: NSView?
-    /// The tmux Window it opened for; selecting another one closes it.
-    @ObservationIgnored private(set) var windowID: String?
+    /// The tmux Window it's of.
+    let windowID: String
     @ObservationIgnored private var previousResponder: NSResponder?
     @ObservationIgnored private var wantsFocus = false
     @ObservationIgnored private var snapshotGeneration = 0
     @ObservationIgnored private var contentWork: DispatchWorkItem?
     @ObservationIgnored private var loadingID: String?
     @ObservationIgnored private var logWork: DispatchWorkItem?
+    /// Git commands that change the repository, run one at a time.
+    @ObservationIgnored private var writes: [Write] = []
     /// The branch and commit whose history is being read.
     @ObservationIgnored private var readingLog: String?
     @ObservationIgnored private var shownScope = Scope.all
@@ -344,19 +360,17 @@ final class GitView {
     @ObservationIgnored private var fixedOutputs: [String: String] = [:]
     @ObservationIgnored private var refreshTimer: Timer?
     @ObservationIgnored private var activationObserver: Any?
-    #if DEBUG
-    @ObservationIgnored private var demoObserver: NSObjectProtocol?
-    #endif
 
     /// The terminal's size; code is in the system's monospaced font.
     var fontSize: CGFloat { max(11, (GhosttyRuntime.shared.fontSize ?? 13) - 1) }
     var colors: GitColors { GitColors(store?.theme) }
 
-    init() {
-        #if DEBUG
-        observeDemoRequests()
-        #endif
+    init(windowID: String) {
+        self.windowID = windowID
     }
+
+    /// Its Window is the one selected, so it's on screen when open.
+    var isCurrent: Bool { store?.selectedWindowID == windowID }
 
     // MARK: Opening and closing
 
@@ -364,13 +378,11 @@ final class GitView {
         if isOpen { close() } else { open() }
     }
 
-    /// Opens on the current Window's folder, on Changes every time. The
-    /// other tabs are where they were left when that is the folder it last
-    /// showed.
+    /// Opens on the Window's folder, on Changes every time. The other tabs
+    /// are where they were left when that is the folder it last showed.
     func open() {
-        guard !isOpen, let store, let window = store.selectedWindow else { return }
+        guard !isOpen, isCurrent, let store, let window = store.selectedWindow else { return }
         previousResponder = store.terminalHost.window?.firstResponder
-        windowID = window.id
         if folder != window.path {
             folder = window.path
             snapshot = nil
@@ -388,9 +400,57 @@ final class GitView {
         tab = .changes
         focus = .list
         if snapshot != nil { showSelection() }
-        wantsFocus = true
-        DispatchQueue.main.async { [weak self] in self?.focusKeyView() }
+        takeFocus()
         refresh(showingProgress: true)
+        startRefreshing()
+    }
+
+    func close(restoringFocus: Bool = true) {
+        guard isOpen else { return }
+        isOpen = false
+        isFiltering = false
+        isCommitOpen = false
+        commitError = nil
+        writeError = nil
+        wantsFocus = false
+        contentWork?.cancel()
+        loadingID = nil
+        logWork?.cancel()
+        readingLog = nil
+        stopRefreshing()
+        let responder = previousResponder
+        previousResponder = nil
+        guard restoringFocus, let store else { return }
+        DispatchQueue.main.async { [weak store] in
+            guard let store else { return }
+            if let responder, responder !== self.keyView,
+               let window = store.terminalHost.window, window.makeFirstResponder(responder) { return }
+            store.moveFocusIntoWindow()
+        }
+    }
+
+    /// Another Window was selected: it stays open as it is, but stops
+    /// reading the repository until its Window is selected again.
+    func suspend() {
+        isFiltering = false
+        wantsFocus = false
+        // What had focus before is gone with the Window; closing later
+        // gives it to the terminal.
+        previousResponder = nil
+        stopRefreshing()
+    }
+
+    /// Its Window is selected again: shown as it was left, with the keys,
+    /// and read again.
+    func resume() {
+        guard isOpen else { return }
+        takeFocus()
+        refresh()
+        startRefreshing()
+    }
+
+    private func startRefreshing() {
+        stopRefreshing()
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
@@ -399,29 +459,11 @@ final class GitView {
         ) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } }
     }
 
-    func close(restoringFocus: Bool = true) {
-        guard isOpen else { return }
-        isOpen = false
-        isFiltering = false
-        windowID = nil
-        wantsFocus = false
-        contentWork?.cancel()
-        loadingID = nil
-        logWork?.cancel()
-        readingLog = nil
+    private func stopRefreshing() {
         refreshTimer?.invalidate()
         refreshTimer = nil
         if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
         activationObserver = nil
-        let responder = previousResponder
-        previousResponder = nil
-        guard restoringFocus, let store else { return }
-        DispatchQueue.main.async { [weak store] in
-            guard let store else { return }
-            if let responder, responder !== self.keyView,
-               let window = store.terminalHost.window, window.makeFirstResponder(responder) { return }
-            store.focusTerminal()
-        }
     }
 
     // MARK: Focus
@@ -436,9 +478,17 @@ final class GitView {
     var hasKeyFocus: Bool { hasKeyFocus(in: keyView?.window) }
 
     func focusKeyView() {
-        guard isOpen, let keyView, let window = keyView.window else { return }
+        guard isOpen, isCurrent, let keyView, let window = keyView.window else { return }
         wantsFocus = false
         if !hasKeyFocus(in: window) { window.makeFirstResponder(keyView) }
+    }
+
+    /// Focus once the key view is on screen, as selecting its Window draws a
+    /// new one. The commit message box focuses its own field.
+    func takeFocus() {
+        guard !isCommitOpen else { return }
+        wantsFocus = true
+        DispatchQueue.main.async { [weak self] in self?.focusKeyView() }
     }
 
     /// The key view is in a window only once SwiftUI has shown the Git View.
@@ -790,6 +840,15 @@ final class GitView {
     /// ⌘B, go on to them.
     func handle(_ trigger: KeyTrigger, in event: NSEvent) -> Bool {
         guard isOpen else { return false }
+        // The commit message box's fields take the rest.
+        if isCommitOpen, event.window === keyView?.window {
+            switch trigger {
+            case Self.escape: closeCommit()
+            case Self.commandEnter: commit()
+            default: return false
+            }
+            return true
+        }
         if isFiltering, event.window === keyView?.window {
             switch trigger {
             case Self.escape, Self.enter:
@@ -814,6 +873,7 @@ final class GitView {
     private static let up = try! KeyTrigger("up")
     private static let ctrlJ = try! KeyTrigger("ctrl+j")
     private static let ctrlK = try! KeyTrigger("ctrl+k")
+    private static let commandEnter = try! KeyTrigger("cmd+enter")
 
     static let commands: [KeyTrigger: Command] = {
         let spelling: KeyValuePairs<String, Command> = [
@@ -824,8 +884,8 @@ final class GitView {
             "shift+j": .scroll(lines: 3), "shift+k": .scroll(lines: -3), "ctrl+d": .halfPage(1), "ctrl+u": .halfPage(-1),
             "alt+down": .nextHunk, "alt+up": .previousHunk, "right_bracket": .nextFile, "left_bracket": .previousFile,
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
-            "space": .toggleFolder, "minus": .collapseAll, "equal": .expandAll,
-            "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
+            "space": .toggle, "minus": .collapseAll, "equal": .expandAll,
+            "c": .commit, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
         ]
         return Dictionary(uniqueKeysWithValues: spelling.map { (try! KeyTrigger($0), $1) })
     }()
@@ -876,11 +936,19 @@ final class GitView {
             place(cursor?.row)
             anchor = isRangeSelecting ? cursor : nil
         case .hunk:
-            if focus == .diff { selectHunk() }
+            // In Changes, as in lazygit: everything.
+            if focus == .diff { selectHunk() } else if list == .changes { toggleStagedAll() }
         case .copy:
             copySelection()
-        case .toggleFolder:
-            if focus == .list, case .folder(let tree, let path)? = selectedItem { toggleFolder(path, in: tree) }
+        case .toggle:
+            guard focus == .list, let item = selectedItem else { return }
+            if list == .changes {
+                toggleStaged(item)
+            } else if case .folder(let tree, let path) = item {
+                toggleFolder(path, in: tree)
+            }
+        case .commit:
+            openCommit()
         case .collapseAll, .expandAll:
             if focus == .list { foldAll(command == .collapseAll) }
         case .filter:
@@ -899,6 +967,126 @@ final class GitView {
             close()
         case .refresh:
             refresh(showingProgress: true)
+        }
+    }
+
+    // MARK: Staging and committing
+
+    /// Space: stages a file or folder, all of it, unless it all is; then
+    /// unstages it.
+    func toggleStaged(_ item: Item) {
+        guard let snapshot else { return }
+        let staging: (stage: Bool, paths: [String])
+        switch item {
+        case .change(let change):
+            staging = Self.staging([change], path: change.path)
+        case .folder(_, let folder):
+            staging = Self.staging(snapshot.changes.filter { GitTree.path($0.path, isIn: folder) }, path: folder)
+        default:
+            return
+        }
+        write(staging.stage ? GitRepository.stageScript : GitRepository.unstageScript, arguments: [snapshot.root] + staging.paths)
+    }
+
+    /// a: stages every change, or once they all are, unstages them.
+    private func toggleStagedAll() {
+        guard let snapshot, !snapshot.changes.isEmpty else { return }
+        let staging = Self.staging(snapshot.changes, path: ".")
+        write(staging.stage ? GitRepository.stageScript : GitRepository.unstageScript, arguments: [snapshot.root] + staging.paths)
+    }
+
+    /// Whether to stage or unstage a file or folder with these changes, and
+    /// the paths to; a rename is unstaged from both of its paths.
+    static func staging(_ changes: [GitChange], path: String) -> (stage: Bool, paths: [String]) {
+        let stage = changes.contains { !$0.isStaged }
+        return (stage, stage ? [path] : [path] + changes.compactMap(\.originalPath))
+    }
+
+    /// The changes staged, which a commit takes.
+    var stagedCount: Int {
+        snapshot?.changes.filter { $0.groups.contains(.staged) }.count ?? 0
+    }
+
+    /// c: the commit message box, once something is staged.
+    func openCommit() {
+        guard let snapshot else { return }
+        guard stagedCount > 0 else {
+            writeError = snapshot.changes.isEmpty ? "Nothing to commit: the working tree is clean."
+                : "Nothing is staged. Stage files with space, or everything with a, to commit them."
+            return
+        }
+        writeError = nil
+        commitError = nil
+        isCommitOpen = true
+    }
+
+    func closeCommit() {
+        guard isCommitOpen else { return }
+        isCommitOpen = false
+        commitError = nil
+        focusKeyView()
+    }
+
+    /// ↩ in the summary or ⌘↩. Hooks and signing can take a while, or wait
+    /// for you.
+    func commit() {
+        let summary = commitSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isCommitOpen, !isCommitting, !summary.isEmpty, stagedCount > 0, let snapshot else { return }
+        let description = commitDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        isCommitting = true
+        commitError = nil
+        write(GitRepository.makeCommitScript,
+              arguments: [snapshot.root, description.isEmpty ? summary : summary + "\n\n" + description],
+              timeout: 600) { [weak self] result in
+            guard let self else { return }
+            self.isCommitting = false
+            switch result {
+            case .success(let output):
+                self.commitSummary = ""
+                self.commitDescription = ""
+                self.closeCommit()
+                self.store?.palette.showCopied(title: "Committed", value: output.trimmingCharacters(in: .whitespacesAndNewlines))
+            case .failure(let error):
+                // Closed while committing: the banner says it instead.
+                if self.isCommitOpen { self.commitError = Self.message(for: error) } else { self.writeError = Self.message(for: error) }
+            }
+        }
+    }
+
+    func dismissWriteError() {
+        writeError = nil
+    }
+
+    /// A git command that changes the repository.
+    private struct Write {
+        let script: String
+        let arguments: [String]
+        let timeout: TimeInterval
+        let completion: ((Result<String, Error>) -> Void)?
+    }
+
+    /// Runs commands that change the repository one at a time, so they
+    /// don't race for its index, and reads it again after the last.
+    private func write(_ script: String, arguments: [String], timeout: TimeInterval = 30,
+                       completion: ((Result<String, Error>) -> Void)? = nil) {
+        writeError = nil
+        writes.append(Write(script: script, arguments: arguments, timeout: timeout, completion: completion))
+        runNextWrite()
+    }
+
+    private func runNextWrite() {
+        guard !isWriting, let store, !writes.isEmpty else { return }
+        let write = writes.removeFirst()
+        isWriting = true
+        store.runGitScript(write.script, arguments: write.arguments, timeout: write.timeout) { [weak self] result in
+            guard let self else { return }
+            self.isWriting = false
+            if let completion = write.completion {
+                completion(result)
+            } else if case .failure(let error) = result {
+                self.writeError = Self.message(for: error)
+            }
+            if self.writes.isEmpty { self.refresh() } else { self.runNextWrite() }
         }
     }
 
@@ -1553,25 +1741,10 @@ final class GitView {
 
     #if DEBUG
     /// Drives an instance without keystrokes, for screenshots of a build in
-    /// the background: post `dev.muxify.git` with this process's pid as the
-    /// object and a `spec` such as "open=1;keys=3 enter j;diff=1",
-    /// "layout=split", "filter=git", "shot=/tmp/a.png", or "close=1".
-    private func observeDemoRequests() {
-        demoObserver = DistributedNotificationCenter.default().addObserver(
-            forName: Notification.Name("dev.muxify.git"),
-            object: String(ProcessInfo.processInfo.processIdentifier), queue: .main
-        ) { [weak self] note in
-            let spec = note.userInfo?["spec"] as? String ?? ""
-            MainActor.assumeIsolated { self?.applyDemo(spec) }
-        }
-    }
-
-    private func applyDemo(_ spec: String) {
-        guard store?.terminalHost.window?.isVisible == true else { return }
-        let fields = Dictionary(spec.split(separator: ";").compactMap { pair -> (String, String)? in
-            let parts = pair.split(separator: "=", maxSplits: 1).map(String.init)
-            return parts.count == 2 ? (parts[0], parts[1]) : nil
-        }, uniquingKeysWith: { _, last in last })
+    /// the background. WorkspaceStore hands it the `spec` of a `dev.muxify.git`
+    /// notification, such as "open=1;keys=3 enter j;diff=1", "layout=split",
+    /// "filter=git", "shot=/tmp/a.png", or "close=1".
+    func applyDemo(_ fields: [String: String]) {
         if fields["close"] != nil { close(); return }
         if fields["open"] != nil, !isOpen { open() }
         if let layout = fields["layout"].flatMap(Layout.init(rawValue:)) { self.layout = layout }
@@ -1604,6 +1777,11 @@ final class GitView {
             mouseUp()
         }
         if let path = fields["copyto"] { try? (selectedText ?? "").write(toFile: path, atomically: true, encoding: .utf8) }
+        // `summary=<text>` and `description=<text>` type a commit message
+        // (`\n` for a new line); `commitnow=1` commits it.
+        if let summary = fields["summary"] { commitSummary = summary }
+        if let description = fields["description"] { commitDescription = description.replacingOccurrences(of: "\\n", with: "\n") }
+        if fields["commitnow"] != nil { commit() }
         // `shot=<path>` saves the App Window as drawn, for shells that
         // aren't allowed to record the screen.
         if let path = fields["shot"], let view = store?.terminalHost.window?.contentView,

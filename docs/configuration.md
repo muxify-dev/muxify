@@ -289,8 +289,9 @@ problem and uses `system`. A YAML syntax error keeps the entire last good Config
 
 ## Git View
 
-The Git View (⌘G, `toggle_git_view`) is a read-only look at the repository of
-the current Window's folder, laid out like Xcode's source control navigator and
+The Git View (⌘G, `toggle_git_view`) is a look at the repository of the current
+Window's folder, where you can stage changes and commit them, laid out like
+Xcode's source control navigator and
 colored with the Ghostty theme. A toolbar shows the repository, whether this is
 a linked worktree, and the commits ahead of and behind the upstream (or `main`
 or `master` without one). Below it, a sidebar with four tabs along its bottom,
@@ -310,6 +311,15 @@ commits. A branch's commits have a back button (or ⎋) to the Branches. The Git
 View opens on Changes every time; the other tabs are kept as you left them, each
 with its own filter, and clicking the tab shown goes back to its own list. The
 tabs count the changes and stashes.
+
+As in lazygit, space in Changes stages the file or folder, or unstages it once
+all of it is staged, and a stages or unstages everything; a click on a file's
+letters does the same. c, or the Commit button, opens a box for the commit's
+summary and description: ↩ in the summary or ⌘↩ commits, and ⎋ closes it,
+keeping what you wrote. A commit takes only what's staged; with nothing staged,
+c and the Commit button do nothing but say so.
+Hooks and signing run as they do in a terminal; when one fails, the box shows
+what it said.
 
 Diffs have line numbers, syntax highlighting, and the enclosing function in each
 hunk's header. The toolbar switches them between Unified and Split (side by
@@ -333,10 +343,12 @@ takes the terminal's place, leaving the Sidebar and Browser. Changes apply live;
 values use the defaults and appear in the Config problems banner.
 
 The Git View reads the repository when it opens, every 10 seconds, when Muxify
-comes to the front and with R. It never changes the repository. On a Remote
+comes to the front, with R, and after you stage or commit. On a Remote
 Environment, git runs on that machine. Code is sized from the terminal's font
-size, in the system's monospaced font. The Git View closes when you select another
-Window. Its keys are in [Keybindings](keybindings.md#git-view-keys).
+size, in the system's monospaced font. Each Window has its own Git View: select
+another Window and it stays open there, as you left it, until you come back; it
+isn't read again meanwhile. The Git Views go when Muxify quits. The Git View's
+keys are in [Keybindings](keybindings.md#git-view-keys).
 
 ## Command Palettes
 

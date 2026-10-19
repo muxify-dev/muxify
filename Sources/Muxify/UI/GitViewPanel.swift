@@ -15,9 +15,12 @@ struct GitViewOverlay: View {
     var body: some View {
         if gitView.isOpen {
             let colors = gitView.colors
+            // Each Window's Git View is drawn afresh, with its own scroll
+            // positions and focus.
             switch (config.display, placement) {
             case (.fullscreen, .terminal):
                 GitNavigator(gitView: gitView, colors: colors)
+                    .id(gitView.windowID)
             case (.popup, .window):
                 GeometryReader { proxy in
                     ZStack {
@@ -26,6 +29,7 @@ struct GitViewOverlay: View {
                             .onTapGesture { gitView.close() }
                         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
                         GitNavigator(gitView: gitView, colors: colors)
+                            .id(gitView.windowID)
                             .clipShape(shape)
                             .overlay(shape.strokeBorder(Color(nsColor: colors.separator)))
                             .shadow(color: .black.opacity(0.25), radius: 24, y: 10)
@@ -84,6 +88,20 @@ private struct GitNavigator: View {
             }
         }
         .background(palette.background)
+        .overlay(alignment: .bottom) {
+            if let message = gitView.writeError {
+                GitWriteErrorBanner(gitView: gitView, message: message, palette: palette)
+            }
+        }
+        .overlay {
+            ZStack {
+                if gitView.isCommitOpen, let snapshot = gitView.snapshot {
+                    GitCommitBox(gitView: gitView, snapshot: snapshot, palette: palette)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.15), value: gitView.isCommitOpen)
+        }
         .background(GitKeyCatcher(gitView: gitView))
         .environment(\.colorScheme, colors.isDark ? .dark : .light)
     }
@@ -151,7 +169,7 @@ private struct GitToolbar: View {
             .labelsHidden()
             .fixedSize()
             .help("Show the diff unified or side by side")
-            if gitView.isReading {
+            if gitView.isReading || gitView.isWriting {
                 ProgressView().controlSize(.small).frame(width: 28, height: 28)
             } else {
                 GitIconButton(symbol: "arrow.clockwise", help: "Refresh (R)") { gitView.refresh(showingProgress: true) }
@@ -247,10 +265,9 @@ private struct GitSidebar: View {
     var body: some View {
         let listLevel = gitView.listLevel
         let filesLevel = gitView.filesLevel
-        // The list above the Diff files takes what its rows need, up to a
-        // share that's smaller while the Diff files have the keys; moving
-        // through commits doesn't resize either.
-        let listShare: CGFloat = gitView.list == .files ? 0.4 : 0.6
+        // The list above the Diff files takes what its rows need, up to
+        // half; neither resizes when the keys move between them or through
+        // the commits.
         let listNeeds = 36 + CGFloat(max(1, gitView.rows(for: listLevel).count)) * Self.rowHeight + 12
         VStack(spacing: 0) {
             GeometryReader { proxy in
@@ -261,7 +278,7 @@ private struct GitSidebar: View {
                             // Another list starts at its top, on its selection.
                             .id("\(gitView.tab.rawValue) \(listLevel.list.rawValue) \(listLevel.owner?.id ?? "")")
                     }
-                    .frame(height: filesLevel == nil ? proxy.size.height : min(listNeeds, (proxy.size.height * listShare).rounded()))
+                    .frame(height: filesLevel == nil ? proxy.size.height : min(listNeeds, (proxy.size.height / 2).rounded()))
                     if let filesLevel {
                         VStack(spacing: 0) {
                             GitListHeader(gitView: gitView, level: filesLevel, palette: palette)
@@ -272,7 +289,6 @@ private struct GitSidebar: View {
                         .overlay(alignment: .top) { palette.separator.frame(height: 1) }
                     }
                 }
-                .animation(.easeOut(duration: 0.16), value: listShare)
             }
             GitTabBar(gitView: gitView, palette: palette)
         }
@@ -321,6 +337,24 @@ private struct GitListHeader: View {
                 .padding(.horizontal, 7)
                 .frame(height: 18)
                 .background(Capsule().fill(palette.fill2))
+            if level.list == .changes, gitView.snapshot?.changes.isEmpty == false {
+                let canCommit = gitView.stagedCount > 0
+                Button { gitView.openCommit() } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark").font(.system(size: 9.5, weight: .bold))
+                        Text("Commit").font(.system(size: 11.5, weight: .semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 9)
+                    .frame(height: 22)
+                    .background(Capsule().fill(Color.accentColor))
+                    .opacity(canCommit ? 1 : 0.4)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(!canCommit)
+                .help(canCommit ? "Commit what's staged (c)" : "Stage files to commit them: space, or a for everything")
+            }
         }
         .padding(.leading, 6)
         .padding(.trailing, 10)
@@ -613,7 +647,8 @@ private struct GitListView: View {
         }
     }
 
-    /// `M ` green, ` M` red, `MM` both, `??` red: lazygit's letters.
+    /// `M ` green, ` M` red, `MM` both, `??` red: lazygit's letters. A
+    /// click stages or unstages, as space does.
     private func status(_ change: GitChange, onAccent: Bool) -> some View {
         HStack(spacing: 0) {
             Text(String(change.index))
@@ -622,14 +657,16 @@ private struct GitListView: View {
                 .foregroundStyle(onAccent ? Color.white : palette.unstaged)
         }
         .font(.system(size: 11.5, weight: .bold, design: .monospaced))
-        .frame(width: 16, alignment: .leading)
+        .frame(width: 16, height: 20, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture { gitView.toggleStaged(.change(change)) }
         .help(Self.statusHelp(change))
     }
 
     private static func statusHelp(_ change: GitChange) -> String {
-        if change.isUntracked { return "Untracked" }
-        if change.isConflict { return "Conflict" }
-        return change.groups.map { $0 == .staged ? "Staged" : "Unstaged" }.joined(separator: " and ")
+        let state = change.isUntracked ? "Untracked" : change.isConflict ? "Conflict"
+            : change.groups.map { $0 == .staged ? "Staged" : "Unstaged" }.joined(separator: " and ")
+        return "\(state). Click, or space, to \(change.isStaged ? "unstage" : "stage") it."
     }
 
     @ViewBuilder
@@ -799,8 +836,12 @@ private struct GitDiffPane: View {
                             .onAppear { measure(geometry.size) }
                             .onChange(of: geometry.size) { _, size in measure(size) }
                     })
+                    .onAppear {
+                        gitView.textMetrics = metrics
+                        // Its Window selected again: where it was left.
+                        if let row = gitView.scrollRow { proxy.scrollTo(row, anchor: .top) }
+                    }
                     // Keys moved the cursor out of sight: scroll just enough.
-                    .onAppear { gitView.textMetrics = metrics }
                     .onChange(of: metrics) { _, metrics in gitView.textMetrics = metrics }
                     .onChange(of: gitView.cursor?.row) { _, row in
                         guard let row, !isDragging else { return }
@@ -1474,6 +1515,280 @@ private struct GitCard: View {
         }
         .buttonStyle(.plain)
         .help("Copy \(sha)")
+    }
+}
+
+// MARK: - Committing
+
+/// c: the commit message box, as lazygit's: what the commit takes, its
+/// summary and description. ↩ in the summary or ⌘↩ commits; ⎋ closes it
+/// and keeps the message.
+private struct GitCommitBox: View {
+    @Bindable var gitView: GitView
+    let snapshot: GitSnapshot
+    let palette: Palette
+    @FocusState private var field: Field?
+    @State private var isShown = false
+
+    private enum Field { case summary, description }
+
+    private static let rowHeight: CGFloat = 24
+
+    var body: some View {
+        let staged = snapshot.changes.filter { $0.groups.contains(.staged) }
+        GeometryReader { proxy in
+            ZStack(alignment: .top) {
+                Color.black.opacity(palette.colors.isDark ? 0.32 : 0.14)
+                    .contentShape(Rectangle())
+                    .onTapGesture { gitView.closeCommit() }
+                card(staged: staged)
+                    .frame(width: min(620, proxy.size.width - 48))
+                    .padding(.top, max(20, proxy.size.height * 0.1))
+                    .scaleEffect(isShown ? 1 : 0.97, anchor: .top)
+                    .offset(y: isShown ? 0 : -6)
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(duration: 0.28, bounce: 0.2)) { isShown = true }
+            DispatchQueue.main.async { field = .summary }
+        }
+    }
+
+    private func card(staged: [GitChange]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header(staged: staged)
+                .padding(.horizontal, 18)
+                .padding(.top, 16)
+                .padding(.bottom, 14)
+            editor
+                .padding(.horizontal, 18)
+            fileList(staged)
+                .padding(.horizontal, 18)
+                .padding(.top, 16)
+            if let error = gitView.commitError {
+                errorCallout(error)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 12)
+            }
+            footer(canCommit: !staged.isEmpty)
+                .padding(.top, 16)
+        }
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(palette.chrome))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(palette.separator))
+        .shadow(color: .black.opacity(0.35), radius: 32, y: 14)
+    }
+
+    private func header(staged: [GitChange]) -> some View {
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.accentColor.gradient)
+                .frame(width: 32, height: 32)
+                .overlay(Image(systemName: "checkmark").font(.system(size: 14, weight: .bold)).foregroundStyle(.white))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Commit").font(.system(size: 15, weight: .semibold))
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.triangle.branch").font(.system(size: 10, weight: .semibold))
+                    Text(snapshot.head).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
+                    Text(verbatim: "·").foregroundStyle(.tertiary)
+                    Text(staged.count == 1 ? "1 staged file" : "\(staged.count) staged files")
+                }
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            GitIconButton(symbol: "xmark", help: "Close, keeping the message (⎋)") { gitView.closeCommit() }
+        }
+    }
+
+    /// The summary in large type over the description, in one field.
+    private var editor: some View {
+        let count = gitView.commitSummary.count
+        return VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                TextField("", text: $gitView.commitSummary, prompt: Text("Summary").foregroundColor(.secondary))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 15, weight: .semibold))
+                    .focused($field, equals: .summary)
+                    .onSubmit { gitView.commit() }
+                if count > 0 {
+                    // As lazygit counts it; past 72 it wraps in most tools.
+                    Text(verbatim: "\(count)")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundStyle(count > 72 ? AnyShapeStyle(palette.color(palette.colors.strong(palette.colors.yellow))) : AnyShapeStyle(.tertiary))
+                        .help("Summaries read best in 72 characters or fewer")
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 46)
+            palette.softSeparator.frame(height: 1).padding(.horizontal, 14)
+            ZStack(alignment: .topLeading) {
+                TextEditor(text: $gitView.commitDescription)
+                    .font(.system(size: 13))
+                    .scrollContentBackground(.hidden)
+                    .focused($field, equals: .description)
+                if gitView.commitDescription.isEmpty {
+                    Text("Description (optional)")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.tertiary)
+                        .padding(.leading, 5)
+                        .allowsHitTesting(false)
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 10)
+            .frame(height: 124)
+        }
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(palette.background))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(field == nil ? palette.softSeparator : Color.accentColor.opacity(0.8), lineWidth: field == nil ? 1 : 1.5)
+        )
+        .animation(.easeOut(duration: 0.12), value: field)
+    }
+
+    /// What the commit takes: the staged files. Unstaged since the box
+    /// opened, there's nothing to commit.
+    private func fileList(_ files: [GitChange]) -> some View {
+        let yellow = palette.color(palette.colors.strong(palette.colors.yellow))
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                if files.isEmpty {
+                    Image(systemName: "exclamationmark.circle.fill").foregroundStyle(yellow)
+                    Text("Nothing is staged anymore, so there's nothing to commit").foregroundStyle(yellow)
+                } else {
+                    Text("Staged").foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Text(verbatim: "\(files.count)")
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .frame(height: 17)
+                    .background(Capsule().fill(palette.fill2))
+            }
+            .font(.system(size: 11.5, weight: .semibold))
+            ScrollView(.vertical) {
+                VStack(spacing: 0) {
+                    ForEach(files) { change in fileRow(change) }
+                }
+            }
+            .frame(height: min(CGFloat(files.count), 4.5) * Self.rowHeight)
+            .scrollIndicators(.automatic)
+        }
+    }
+
+    private func fileRow(_ change: GitChange) -> some View {
+        let folder = (change.path as NSString).deletingLastPathComponent
+        return HStack(spacing: 8) {
+            HStack(spacing: 0) {
+                Text(String(change.index))
+                    .foregroundStyle(change.isUntracked || change.isConflict ? palette.unstaged : palette.staged)
+                Text(String(change.worktree)).foregroundStyle(palette.unstaged)
+            }
+            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .frame(width: 16, alignment: .leading)
+            GitFileTile(path: change.path, size: 14)
+            Text(change.name).font(.system(size: 12.5)).lineLimit(1)
+            if !folder.isEmpty {
+                Text(folder).font(.system(size: 11.5)).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(height: Self.rowHeight)
+    }
+
+    private func errorCallout(_ error: String) -> some View {
+        let red = palette.color(palette.colors.strong(palette.colors.red))
+        return HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "xmark.octagon.fill").font(.system(size: 13)).foregroundStyle(red)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("The commit failed").font(.system(size: 12, weight: .semibold)).foregroundStyle(red)
+                ScrollView(.vertical) {
+                    Text(error)
+                        .font(.system(size: 11.5, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 110)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(palette.color(palette.colors.tint(palette.colors.red))))
+    }
+
+    private func footer(canCommit hasStaged: Bool) -> some View {
+        let canCommit = hasStaged && !gitView.commitSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !gitView.isCommitting
+        return HStack(spacing: 10) {
+            Spacer(minLength: 0)
+            Button { gitView.closeCommit() } label: {
+                HStack(spacing: 6) {
+                    Text("Cancel").font(.system(size: 12.5, weight: .medium))
+                    Text(verbatim: "esc").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 30)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(palette.fill2))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close, keeping the message (⎋)")
+            Button { gitView.commit() } label: {
+                HStack(spacing: 7) {
+                    if gitView.isCommitting {
+                        ProgressView().controlSize(.mini).environment(\.colorScheme, .dark)
+                        Text("Committing…")
+                    } else {
+                        Text("Commit to \(snapshot.head)").lineLimit(1).truncationMode(.middle)
+                        Text(verbatim: "⌘↩").font(.system(size: 11)).foregroundStyle(.white.opacity(0.7))
+                    }
+                }
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 14)
+                .frame(height: 30)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.accentColor.gradient))
+                .opacity(canCommit || gitView.isCommitting ? 1 : 0.45)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canCommit)
+            .help("Commit (↩ in the summary, or ⌘↩)")
+        }
+        .padding(.horizontal, 18)
+        .frame(height: 58)
+        .background(Color.primary.opacity(palette.colors.isDark ? 0.03 : 0.025))
+        .overlay(alignment: .top) { palette.softSeparator.frame(height: 1) }
+    }
+}
+
+/// A stage, unstage or commit that failed, and what git said.
+private struct GitWriteErrorBanner: View {
+    let gitView: GitView
+    let message: String
+    let palette: Palette
+
+    var body: some View {
+        let red = palette.color(palette.colors.strong(palette.colors.red))
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 13)).foregroundStyle(red)
+            Text(message)
+                .font(.system(size: 12))
+                .lineLimit(6)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button { gitView.dismissWriteError() } label: {
+                Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary).frame(width: 18, height: 18)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .frame(maxWidth: 560)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(palette.header))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(red.opacity(0.5)))
+        .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
+        .padding(16)
     }
 }
 

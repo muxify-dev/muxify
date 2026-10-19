@@ -492,6 +492,31 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(child.detail?.author, "Yauhen Karatkou")
     }
 
+    private func status() throws -> [String] {
+        try run("cd \"$1\" && git status --porcelain --untracked-files=all", repository).split(separator: "\n").map(String.init)
+    }
+
+    func testSpaceStagesAndUnstages() throws {
+        try run(GitRepository.stageScript, repository, "c.txt", "a.swift")
+        XCTAssertEqual(try status(), ["M  a.swift", "A  c.txt"])
+        try run(GitRepository.unstageScript, repository, ".")
+        XCTAssertEqual(try status(), [" M a.swift", "?? c.txt"])
+        // A deleted file in a folder is staged with it.
+        try run("cd \"$1\" && mkdir sub && printf 'x\\n' > sub/x && git add sub && git commit -qm x && rm sub/x", repository)
+        try run(GitRepository.stageScript, repository, "sub")
+        XCTAssertEqual(try status(), [" M a.swift", "D  sub/x", "?? c.txt"])
+    }
+
+    func testCommitTakesWhatsStaged() throws {
+        let hash = try run(GitRepository.makeCommitScript, repository, "Stage a\n\nThe body.")
+        XCTAssertEqual(try run("cd \"$1\" && git log -1 --format='%h %s|%b'", repository).trimmingCharacters(in: .whitespacesAndNewlines),
+                       "\(hash.trimmingCharacters(in: .whitespacesAndNewlines)) Stage a|The body.")
+        XCTAssertEqual(try status(), [" M a.swift", "?? c.txt"])
+        // Nothing staged: git refuses, and nothing is staged for it.
+        XCTAssertThrowsError(try run(GitRepository.makeCommitScript, repository, "Again"))
+        XCTAssertEqual(try status(), [" M a.swift", "?? c.txt"])
+    }
+
     func testAStashIsShownWithGit() throws {
         let stash = try run(GitRepository.gitScript, repository, "stash", "show", "--patch", "--no-color", "stash@{0}")
         XCTAssertEqual(GitPatch.parse(stash).files.first?.hunks.first?.lines.last?.text, "stashed")
@@ -525,6 +550,8 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(try command("\u{F701}", keyCode: 0x7D, flags: .option), .nextHunk)
         XCTAssertEqual(try command("]", keyCode: 0x1E), .nextFile)
         XCTAssertEqual(try command("/", keyCode: 0x2C), .filter)
+        XCTAssertEqual(try command(" ", keyCode: 0x31), .toggle)
+        XCTAssertEqual(try command("c", keyCode: 0x08), .commit)
         // ⌘G goes on to toggle_git_view, ⌘B to the Browser.
         XCTAssertNil(try command("g", keyCode: 0x05, flags: .command))
         XCTAssertNil(try command("b", keyCode: 0x0B, flags: .command))
@@ -548,7 +575,7 @@ final class GitViewKeysTests: XCTestCase {
     }
 
     func testABranchGoesIntoItsCommitsAndACommitIntoItsFiles() {
-        let gitView = GitView()
+        let gitView = GitView(windowID: "@1")
         gitView.apply(snapshot)
         // Nothing changed: Changes all the same, clean.
         XCTAssertEqual(gitView.tab, .changes)
@@ -603,7 +630,7 @@ final class GitViewKeysTests: XCTestCase {
     }
 
     func testAnotherBranchsCommitsAreReadAndEachListHasItsOwnFilter() {
-        let gitView = GitView()
+        let gitView = GitView(windowID: "@1")
         gitView.apply(snapshot)
         gitView.perform(.tab(.branches))
         gitView.perform(.down)
@@ -623,7 +650,7 @@ final class GitViewKeysTests: XCTestCase {
     }
 
     func testChangesAreOnTheirFirstFileOnceThereAreSome() {
-        let gitView = GitView()
+        let gitView = GitView(windowID: "@1")
         gitView.apply(snapshot)
         XCTAssertNil(gitView.level.selection)
         var changed = snapshot
@@ -634,8 +661,18 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(gitView.level.selection, "change:Sources/b.swift")
     }
 
+    func testSpaceStagesUntilAllOfItIsStaged() {
+        let unstaged = GitChange(index: " ", worktree: "M", path: "src/a.swift")
+        let staged = GitChange(index: "M", worktree: " ", path: "src/b.swift")
+        var renamed = GitChange(index: "R", worktree: " ", path: "src/new.swift")
+        renamed.originalPath = "old.swift"
+        XCTAssertTrue(GitView.staging([unstaged, staged], path: "src") == (true, ["src"]))
+        XCTAssertTrue(GitView.staging([GitChange(index: "M", worktree: "M", path: "src/a.swift")], path: "src/a.swift").stage)
+        XCTAssertTrue(GitView.staging([staged, renamed], path: "src") == (false, ["src", "old.swift"]))
+    }
+
     func testAListWhoseStashIsGoneCloses() {
-        let gitView = GitView()
+        let gitView = GitView(windowID: "@1")
         gitView.apply(snapshot)
         gitView.perform(.tab(.stashes))
         gitView.perform(.enter)
@@ -646,5 +683,22 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(gitView.list, .stashes)
         XCTAssertNil(gitView.level.selection)
         XCTAssertEqual(gitView.rows.map(\.text), ["No stashes"])
+    }
+
+    func testEachWindowKeepsItsOwnGitView() {
+        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"))
+        let first = store.gitView(for: "@1")
+        XCTAssertTrue(store.gitView(for: "@1") === first)
+        XCTAssertFalse(store.gitView(for: "@2") === first)
+        first.apply(snapshot)
+        first.perform(.tab(.stashes))
+        first.perform(.enter)
+        // Another Window selected and this one again: as it was left.
+        first.suspend()
+        first.resume()
+        XCTAssertEqual(first.tab, .stashes)
+        XCTAssertEqual(first.list, .files)
+        XCTAssertEqual(first.level.owner?.id, "stash:s1")
+        XCTAssertEqual(store.gitView(for: "@2").tab, .changes)
     }
 }

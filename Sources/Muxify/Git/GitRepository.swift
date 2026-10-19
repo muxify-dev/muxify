@@ -283,6 +283,34 @@ enum GitRepository {
     if [ -n "$refs" ]; then g rev-list -n \(commitLimit) "$rev" --not $refs -- 2>/dev/null; else printf 'none\\n'; fi
     """
 
+    /// Takes the folder, then files and folders to stage, with everything
+    /// in them: new, changed and deleted files.
+    static let stageScript = """
+    cd "$1" || exit 1
+    shift
+    exec git -c core.quotepath=off add -A -- "$@"
+    """
+
+    /// Takes the folder, then files and folders to unstage. Before the
+    /// first commit there's no HEAD to reset them to.
+    static let unstageScript = """
+    cd "$1" || exit 1
+    shift
+    if git rev-parse -q --verify HEAD >/dev/null; then
+        exec git -c core.quotepath=off reset -q -- "$@"
+    fi
+    exec git -c core.quotepath=off rm -q -r --cached --ignore-unmatch -- "$@"
+    """
+
+    /// Takes the folder and the message; commits what's staged. Prints the
+    /// new commit's short hash; hooks' output goes to stderr, where a
+    /// failure shows it.
+    static let makeCommitScript = """
+    cd "$1" || exit 1
+    printf '%s\\n' "$2" | git -c color.ui=never commit -q -F - 1>&2 || exit 1
+    git rev-parse --short HEAD
+    """
+
     // MARK: Parsing
 
     /// The snapshot, or what the Git View says instead of one.

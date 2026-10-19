@@ -355,12 +355,13 @@ go on to the actions above.
 | j / k, ↓ / ↑ | Select the next or previous item; in the diff, the next or previous line |
 | < / > | First or last item; in the diff, the first or last line |
 | ↩ | On a folder, fold or open it; on a branch, go into its commits; on a commit or stash, go into its Diff files; otherwise go to the diff |
-| Space | Fold or open a folder |
+| Space | In Changes, stage the file or folder, or unstage it once all of it is staged; in Diff files, fold or open a folder |
 | - / = | Fold or open every folder of the list |
 | l / h, → / ← | Go to the diff (on a branch, into its commits), or back to the list; from a list you went into, back out |
 | ⇧↓ / ⇧↑ | Select one more line below or above |
 | v | Start or end a range: moving then selects lines, as in lazygit |
-| a | Select the hunk |
+| a | In the diff, select the hunk; in Changes, stage everything, or unstage it all once it all is |
+| c | Commit what's staged, once something is: write a summary and a description, then ↩ in the summary or ⌘↩; ⎋ keeps the message for later |
 | y, ⌘C | Copy the selected code, without + and −; in the list, the path, hash or branch |
 | J / K, ⌃D / ⌃U | Scroll the diff by three lines, or half a page |
 | ⌥↓ / ⌥↑ | Next or previous hunk |
