@@ -182,9 +182,14 @@ struct GitHunk: Equatable {
     /// Side by side: each run of removed lines next to the added lines
     /// that follow it, the shorter side padded with blanks.
     var pairs: [(old: GitDiffLine?, new: GitDiffLine?)] {
-        var pairs: [(old: GitDiffLine?, new: GitDiffLine?)] = []
-        var removed: [GitDiffLine] = []
-        var added: [GitDiffLine] = []
+        pairIndices.map { ($0.old.map { lines[$0] }, $0.new.map { lines[$0] }) }
+    }
+
+    /// `pairs`, as indexes of `lines`.
+    var pairIndices: [(old: Int?, new: Int?)] {
+        var pairs: [(old: Int?, new: Int?)] = []
+        var removed: [Int] = []
+        var added: [Int] = []
         func flush() {
             for index in 0..<max(removed.count, added.count) {
                 pairs.append((removed.indices.contains(index) ? removed[index] : nil,
@@ -193,20 +198,88 @@ struct GitHunk: Equatable {
             removed = []
             added = []
         }
-        for line in lines {
+        for (index, line) in lines.enumerated() {
             switch line.kind {
             case .removed:
                 if !added.isEmpty { flush() }
-                removed.append(line)
+                removed.append(index)
             case .added:
-                added.append(line)
+                added.append(index)
             case .context, .note:
                 flush()
-                pairs.append((line, line))
+                pairs.append((index, index))
             }
         }
         flush()
         return pairs
+    }
+
+    /// The hunk's lines in a patch of only the picked ones (indexes of
+    /// `lines`), and how many it has on each side; nil without a changed
+    /// line picked. The rest stay as they are: forward, a line not picked
+    /// isn't added and isn't removed; reversed, for taking the picked
+    /// lines back out, one isn't taken out and isn't put back.
+    func body(picking picked: Set<Int>, reversed: Bool) -> (text: String, old: Int, new: Int)? {
+        var text = ""
+        var old = 0
+        var new = 0
+        var hasChange = false
+        // A "No newline at end of file" goes with the line before it.
+        var isKept = false
+        for (index, line) in lines.enumerated() {
+            let marker: Character?
+            switch line.kind {
+            case .context: marker = " "
+            case .added: marker = picked.contains(index) ? "+" : reversed ? " " : nil
+            case .removed: marker = picked.contains(index) ? "-" : reversed ? nil : " "
+            case .note:
+                if isKept { text += "\\ \(line.text)\n" }
+                continue
+            }
+            isKept = marker != nil
+            guard let marker else { continue }
+            text += "\(marker)\(line.text)\n"
+            if marker != "+" { old += 1 }
+            if marker != "-" { new += 1 }
+            if marker != " " { hasChange = true }
+        }
+        return hasChange ? (text, old, new) : nil
+    }
+}
+
+extension GitPatchFile {
+    /// How many of the picked lines, by hunk, are added or removed.
+    func changedLines(picking picked: [Int: Set<Int>]) -> Int {
+        picked.reduce(0) { count, pick in
+            guard hunks.indices.contains(pick.key) else { return count }
+            let lines = hunks[pick.key].lines
+            return count + pick.value.filter { lines.indices.contains($0) && (lines[$0].kind == .added || lines[$0].kind == .removed) }.count
+        }
+    }
+
+    /// A patch of only the picked lines, by hunk, as lazygit stages lines:
+    /// forward, to apply to what the diff is from; reversed, to take them
+    /// back out of what it's to. It changes the file in place, even a new
+    /// or deleted one. Nil without a changed line picked.
+    func patch(picking picked: [Int: Set<Int>], reversed: Bool) -> String? {
+        var hunksText = ""
+        // How far the moving side's lines are from the fixed side's, after
+        // the hunks so far.
+        var shift = 0
+        for (index, hunk) in hunks.enumerated() {
+            guard let picks = picked[index], let body = hunk.body(picking: picks, reversed: reversed) else { continue }
+            // git finds a hunk by the side it applies to, which keeps all
+            // of its lines; the other moves with the hunks before it. An
+            // empty side starts at the line before.
+            let (start, count, otherCount) = reversed ? (hunk.newStart, body.new, body.old) : (hunk.oldStart, body.old, body.new)
+            let first = count == 0 ? start + 1 : start
+            let other = first + shift - (otherCount == 0 ? 1 : 0)
+            shift += otherCount - count
+            let (old, new) = reversed ? (other, start) : (start, other)
+            hunksText += "@@ -\(old),\(body.old) +\(new),\(body.new) @@\n" + body.text
+        }
+        guard !hunksText.isEmpty else { return nil }
+        return "diff --git a/\(path) b/\(path)\n--- a/\(path)\n+++ b/\(path)\n" + hunksText
     }
 }
 

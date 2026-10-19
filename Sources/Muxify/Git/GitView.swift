@@ -2,8 +2,8 @@ import AppKit
 import Observation
 import MuxifyCore
 
-/// A tab of the Git View's sidebar. The tabs are along its bottom, and
-/// the sidebar shows one tab's list at a time.
+/// A Git View tab (CONTEXT.md). The tabs are along the bottom of the list
+/// pane, which shows one tab's list at a time.
 enum GitTab: String, CaseIterable, Identifiable {
     case changes, history, branches, stashes
 
@@ -41,7 +41,7 @@ enum GitTab: String, CaseIterable, Identifiable {
     }
 }
 
-/// A list the sidebar shows: a tab's own, or one gone into from it. A
+/// A list the list pane shows: a tab's own, or one gone into from it. A
 /// branch goes into its commits, and a commit or stash into its files.
 enum GitList: String {
     case changes, history, branches, stashes
@@ -54,7 +54,8 @@ enum GitList: String {
 /// The Git View of one tmux Window in an App Window (CONTEXT.md): a look at
 /// the repository in the Window's folder, as a navigator. Tabs of changed
 /// files, history, branches and stashes, and the selection's diff beside
-/// them. Changes can be staged and committed, as in lazygit. Selecting
+/// them. Changes, or lines of them, can be staged, discarded and committed,
+/// as in lazygit. Selecting
 /// another Window leaves it open as it is, for when you come back.
 @MainActor @Observable
 final class GitView {
@@ -113,7 +114,7 @@ final class GitView {
         var id: String { item?.id ?? "note:\(text)" }
     }
 
-    /// A list as the sidebar shows it: what it was gone into from, what's
+    /// A list as the list pane shows it: what it was gone into from, what's
     /// selected, and its filter.
     struct Level: Equatable {
         let list: GitList
@@ -233,6 +234,8 @@ final class GitView {
         let kind: Kind
         let file: Int?
         let hunk: Int?
+        /// The indexes of its hunk's lines it shows, for staging them.
+        var lines: [Int] = []
 
         /// A line of code, which can be selected and copied.
         var isLine: Bool {
@@ -266,8 +269,8 @@ final class GitView {
         case scroll(lines: Int), halfPage(Int)
         case nextHunk, previousHunk, nextFile, previousFile
         case extend(Int), range, hunk, copy
-        /// Space: stages or unstages in Changes, folds a folder of the
-        /// Diff files.
+        /// Space: stages or unstages in Changes, and the selected lines in
+        /// a change's diff; folds a folder of the Diff files.
         case toggle, collapseAll, expandAll
         case commit, discard, filter, back, close, refresh
     }
@@ -292,7 +295,7 @@ final class GitView {
     private(set) var isCommitting = false
     /// d in Changes: lazygit's Discard changes menu, on what it's for.
     private(set) var discard: Discard?
-    /// The tab the sidebar shows.
+    /// The Git View tab the list pane shows.
     private(set) var tab = GitTab.changes
     /// Each tab's lists: its own, then each one gone into; the last one
     /// is shown, and the rest keep where they were, as in lazygit.
@@ -353,6 +356,12 @@ final class GitView {
     @ObservationIgnored private var shownScope = Scope.all
     /// v: moving the cursor extends the range, as in lazygit.
     @ObservationIgnored private var isRangeSelecting = false
+    /// Lines were staged or discarded here: the diff's next read puts the
+    /// cursor back, on what it shows, at this row with this one on top.
+    @ObservationIgnored private var keptCursor: (item: String, row: Int, top: Int)?
+    /// The repository the commit message was written in: the one read
+    /// last.
+    @ObservationIgnored private var messageRoot: String?
     /// Entering Diff files before they were read: select the first once
     /// they are.
     @ObservationIgnored private var wantsFirstFile = false
@@ -791,6 +800,7 @@ final class GitView {
 
     /// Selects without moving keyboard focus.
     private func choose(_ item: Item?) {
+        keptCursor = nil
         updateLevel { $0.selection = item?.id }
         showSelection()
     }
@@ -964,7 +974,11 @@ final class GitView {
         case .copy:
             copySelection()
         case .toggle:
-            guard focus == .list, let item = selectedItem else { return }
+            if focus == .diff {
+                if list == .changes { toggleStagedLines() }
+                return
+            }
+            guard let item = selectedItem else { return }
             if list == .changes {
                 toggleStaged(item)
             } else if case .folder(let tree, let path) = item {
@@ -973,7 +987,8 @@ final class GitView {
         case .commit:
             openCommit()
         case .discard:
-            if focus == .list, list == .changes, let item = selectedItem { askDiscard(item) }
+            guard list == .changes else { return }
+            if focus == .diff { askDiscardLines() } else if let item = selectedItem { askDiscard(item) }
         case .collapseAll, .expandAll:
             if focus == .list { foldAll(command == .collapseAll) }
         case .filter:
@@ -1027,7 +1042,29 @@ final class GitView {
         return (stage, stage ? [path] : [path] + changes.compactMap(\.originalPath))
     }
 
-    /// lazygit's Discard changes menu, for a file or folder of Changes.
+    /// Lines picked in a change's diff, as git takes them: the files all
+    /// of whose changed lines are picked, whole, and a patch of the rest.
+    struct LineWrite: Equatable {
+        enum Mode: String { case stage, unstage, discard }
+
+        /// Files to stage, unstage or discard the unstaged changes of, and
+        /// the paths renamed files came from.
+        var paths: [String] = []
+        var patch = ""
+        /// New files the patch has some lines of, which git is told of
+        /// before it stages them.
+        var newFiles: [String] = []
+        /// The changed lines picked.
+        var lines = 0
+        /// Lines of conflicted files were picked, which are only staged
+        /// whole.
+        var hasConflicts = false
+
+        var isEmpty: Bool { paths.isEmpty && patch.isEmpty }
+    }
+
+    /// lazygit's Discard changes menu, for a file or folder of Changes, or
+    /// for the lines picked in its diff.
     struct Discard: Equatable {
         enum Option: CaseIterable { case all, unstaged }
 
@@ -1036,12 +1073,14 @@ final class GitView {
         let isFolder: Bool
         /// The file's change, or each one in the folder.
         let changes: [GitChange]
+        /// d in the diff: the lines to discard, instead of the changes.
+        var lines: LineWrite?
         /// The option ↩ picks.
         var option = Option.all
 
         /// As in lazygit, only when some of it is staged and some isn't.
         var canDiscardUnstaged: Bool {
-            changes.contains { $0.groups.contains(.staged) } && changes.contains { !$0.isStaged }
+            lines == nil && changes.contains { $0.groups.contains(.staged) } && changes.contains { !$0.isStaged }
         }
 
         /// Discarding everything puts a renamed file back at its old path.
@@ -1072,8 +1111,115 @@ final class GitView {
     func confirmDiscard(_ option: Discard.Option) {
         guard let discard, let snapshot, option == .all || discard.canDiscardUnstaged else { return }
         self.discard = nil
+        if let lines = discard.lines {
+            keepCursor()
+            return write(lines, .discard, root: snapshot.root)
+        }
         write(option == .all ? GitRepository.discardScript : GitRepository.discardUnstagedScript,
               arguments: [snapshot.root] + discard.paths(option))
+    }
+
+    // MARK: Staging lines
+
+    /// The lines selected in a change's diff, else the cursor's: by file
+    /// of its patch, then by hunk, indexes of the hunk's lines.
+    private var pickedLines: [Int: [Int: Set<Int>]] {
+        guard let bounds = selectionBounds, diffRows.indices.contains(bounds.end.row) else { return [:] }
+        var picked: [Int: [Int: Set<Int>]] = [:]
+        for row in diffRows[bounds.start.row...bounds.end.row] where row.isLine {
+            guard let file = row.file, let hunk = row.hunk else { continue }
+            picked[file, default: [:]][hunk, default: []].formUnion(row.lines)
+        }
+        return picked
+    }
+
+    /// The picked lines of a patch's files in `groups`, as git takes them:
+    /// reversed to unstage or discard them.
+    static func lineWrite(picking picked: [Int: [Int: Set<Int>]], of patch: GitPatch, in groups: Set<GitChange.Group>,
+                          reversed: Bool, changes: [GitChange]) -> LineWrite {
+        var write = LineWrite()
+        for file in patch.files {
+            guard let group = file.group, groups.contains(group), let picks = picked[file.id] else { continue }
+            let count = file.changedLines(picking: picks)
+            guard count > 0 else { continue }
+            let change = changes.first { $0.path == file.path }
+            if change?.isConflict == true {
+                write.hasConflicts = true
+                continue
+            }
+            write.lines += count
+            // All of it: the file, as space in Changes takes it; a rename
+            // is unstaged from both of its paths.
+            if count == file.additions + file.deletions, patch.omittedLines == 0 {
+                write.paths.append(file.path)
+                if group == .staged, let from = change?.originalPath { write.paths.append(from) }
+            } else if let text = file.patch(picking: picks, reversed: reversed) {
+                write.patch += text
+                if group == .untracked { write.newFiles.append(file.path) }
+            }
+        }
+        return write
+    }
+
+    /// Space in a change's diff: stages the picked lines, and unstages
+    /// those in its Staged part, as lazygit does.
+    private func toggleStagedLines() {
+        guard let snapshot, let content, content.id == request()?.id else { return }
+        let picked = pickedLines
+        let stage = Self.lineWrite(picking: picked, of: content.patch, in: [.unstaged, .untracked], reversed: false,
+                                   changes: snapshot.changes)
+        let unstage = Self.lineWrite(picking: picked, of: content.patch, in: [.staged], reversed: true, changes: snapshot.changes)
+        guard !stage.isEmpty || !unstage.isEmpty else {
+            if stage.hasConflicts { writeError = "A conflicted file is staged whole: with space in Changes, once its conflict markers are gone." }
+            return
+        }
+        keepCursor()
+        write(stage, .stage, root: snapshot.root)
+        write(unstage, .unstage, root: snapshot.root)
+    }
+
+    /// d in a change's diff: asks whether to discard the picked lines of
+    /// its unstaged changes.
+    private func askDiscardLines() {
+        guard let snapshot, let content, content.id == request()?.id else { return }
+        let picked = pickedLines
+        let lines = Self.lineWrite(picking: picked, of: content.patch, in: [.unstaged, .untracked], reversed: true,
+                                   changes: snapshot.changes)
+        guard !lines.isEmpty else {
+            if lines.hasConflicts {
+                writeError = "A conflicted file's lines aren't discarded one by one: discard the file in Changes."
+            } else if !Self.lineWrite(picking: picked, of: content.patch, in: [.staged], reversed: true, changes: snapshot.changes).isEmpty {
+                writeError = "Only unstaged lines are discarded. Unstage these first, with space."
+            }
+            return
+        }
+        switch content.header {
+        case .change(let change): discard = Discard(path: change.path, isFolder: false, changes: [change], lines: lines)
+        case .folder(let path, let changes): discard = Discard(path: path, isFolder: true, changes: changes, lines: lines)
+        default: return
+        }
+        writeError = nil
+    }
+
+    private func write(_ lines: LineWrite, _ mode: LineWrite.Mode, root: String) {
+        if !lines.paths.isEmpty {
+            let script = switch mode {
+            case .stage: GitRepository.stageScript
+            case .unstage: GitRepository.unstageScript
+            case .discard: GitRepository.discardUnstagedScript
+            }
+            write(script, arguments: [root] + lines.paths)
+        }
+        if !lines.patch.isEmpty {
+            write(GitRepository.applyPatchScript, arguments: [root, mode.rawValue, lines.patch] + (mode == .stage ? lines.newFiles : []))
+        }
+    }
+
+    /// The diff read after lines are staged keeps the cursor where it was,
+    /// on the next change, as lazygit's does.
+    private func keepCursor() {
+        guard let row = cursor?.row else { return }
+        keptCursor = (contentItem?.id ?? "", row, topIndex)
     }
 
     private func moveDiscardOption(by step: Int) {
@@ -1089,16 +1235,32 @@ final class GitView {
         snapshot?.changes.filter { $0.groups.contains(.staged) }.count ?? 0
     }
 
-    /// c: the commit message box, once something is staged.
+    /// c: the commit message box, once something is staged, or to conclude
+    /// a merge once its conflicts are resolved. A rebase, cherry-pick or
+    /// revert goes on in the terminal.
     func openCommit() {
         guard let snapshot else { return }
-        guard stagedCount > 0 else {
+        if let block = snapshot.operation?.commitBlock {
+            writeError = block
+            return
+        }
+        if snapshot.isMerging, snapshot.changes.contains(where: \.isConflict) {
+            writeError = "Resolve the conflicts first: stage each conflicted file once its conflict markers are gone."
+            return
+        }
+        guard stagedCount > 0 || snapshot.isMerging else {
             writeError = snapshot.changes.isEmpty ? "Nothing to commit: the working tree is clean."
                 : "Nothing is staged. Stage files with space, or everything with a, to commit them."
             return
         }
         writeError = nil
         commitError = nil
+        // git's message for the merge, unless one is written already.
+        if snapshot.isMerging, commitSummary.isEmpty, commitDescription.isEmpty, let message = snapshot.mergeMessage {
+            let parts = message.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
+            commitSummary = String(parts.first ?? "")
+            commitDescription = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        }
         isCommitOpen = true
     }
 
@@ -1113,7 +1275,11 @@ final class GitView {
     /// for you.
     func commit() {
         let summary = commitSummary.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isCommitOpen, !isCommitting, !summary.isEmpty, stagedCount > 0, let snapshot else { return }
+        guard isCommitOpen, !isCommitting, !summary.isEmpty, let snapshot, stagedCount > 0 || snapshot.isMerging else { return }
+        if let block = snapshot.operation?.commitBlock {
+            commitError = block
+            return
+        }
         let description = commitDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         isCommitting = true
         commitError = nil
@@ -1494,13 +1660,20 @@ final class GitView {
         } else {
             scrollRow = diffRows.first?.id
         }
+        if let keptCursor, keptCursor.item == contentItem?.id, !diffRows.isEmpty {
+            self.keptCursor = nil
+            let lines = diffRows.indices.filter { diffRows[$0].isLine }
+            clearLineSelection()
+            place(lines.first { $0 >= keptCursor.row && diffRows[$0].isChange } ?? lines.last { $0 < keptCursor.row } ?? lines.first)
+            scrollRow = diffRows[min(keptCursor.top, diffRows.count - 1)].id
+        }
         if focus == .diff, cursor == nil { place(firstLine()) }
     }
 
     static func diffRows(for content: Content, layout: Layout, wholeFile: Bool = false, scope: Scope = .all) -> [DiffRow] {
         var rows: [DiffRow] = []
-        func add(_ kind: DiffRow.Kind, file: Int? = nil, hunk: Int? = nil) {
-            rows.append(DiffRow(id: rows.count, kind: kind, file: file, hunk: hunk))
+        func add(_ kind: DiffRow.Kind, file: Int? = nil, hunk: Int? = nil, lines: [Int] = []) {
+            rows.append(DiffRow(id: rows.count, kind: kind, file: file, hunk: hunk, lines: lines))
         }
         let isChange = if case .change = content.header { true } else { false }
         let isSingleFile = isChange || { if case .file = scope { true } else { false } }()
@@ -1524,9 +1697,12 @@ final class GitView {
                 add(.hunk(file: file.id, hunk: index), file: file.id, hunk: index)
                 switch layout {
                 case .unified:
-                    for line in hunk.lines { add(.line(line), file: file.id, hunk: index) }
+                    for (line, text) in hunk.lines.enumerated() { add(.line(text), file: file.id, hunk: index, lines: [line]) }
                 case .split:
-                    for pair in hunk.pairs { add(.pair(old: pair.old, new: pair.new), file: file.id, hunk: index) }
+                    for pair in hunk.pairIndices {
+                        add(.pair(old: pair.old.map { hunk.lines[$0] }, new: pair.new.map { hunk.lines[$0] }),
+                            file: file.id, hunk: index, lines: [pair.old, pair.new].compactMap { $0 })
+                    }
                 }
             }
         }
@@ -1570,6 +1746,13 @@ final class GitView {
     func apply(_ next: GitSnapshot) {
         let previous = levels.mapValues { $0.map { items(for: $0).map(\.id) } }
         error = nil
+        // A message written for one repository is never committed to
+        // another, as when the Window's folder is now in another one.
+        if let messageRoot, messageRoot != next.root {
+            commitSummary = ""
+            commitDescription = ""
+        }
+        messageRoot = next.root
         if snapshot != next { snapshot = next }
         for (tab, stack) in levels {
             levels[tab] = refreshed(stack, previous: previous[tab] ?? [])
@@ -1864,6 +2047,8 @@ final class GitView {
         if let summary = fields["summary"] { commitSummary = summary }
         if let description = fields["description"] { commitDescription = description.replacingOccurrences(of: "\\n", with: "\n") }
         if fields["commitnow"] != nil { commit() }
+        // `discardnow=1` picks the Discard changes menu's highlighted option.
+        if fields["discardnow"] != nil, let discard { confirmDiscard(discard.option) }
         // `shot=<path>` saves the App Window as drawn, for shells that
         // aren't allowed to record the screen.
         if let path = fields["shot"], let view = store?.terminalHost.window?.contentView,

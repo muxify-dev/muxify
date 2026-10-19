@@ -290,14 +290,15 @@ problem and uses `system`. A YAML syntax error keeps the entire last good Config
 ## Git View
 
 The Git View (⌘G, `toggle_git_view`) is a look at the repository of the current
-Window's folder, where you can stage changes and commit them, laid out like
-Xcode's source control navigator and
-colored with the Ghostty theme. A toolbar shows the repository, whether this is
+Window's folder, where you can stage, discard and commit changes, or lines of
+them, laid out like Xcode's source control navigator and colored with the
+Ghostty theme. A toolbar shows the repository, whether this is
 a linked worktree, and the commits ahead of and behind the upstream (or `main`
-or `master` without one). Below it, a sidebar with four tabs along its bottom,
-and the selection's diff:
+or `master` without one), and a merge, rebase, cherry-pick, revert or bisect in
+progress. Below it, the list pane, with four Git View tabs along its bottom, and
+the selection's diff:
 
-| Tab | Lists | The diff shows |
+| Git View tab | Lists | The diff shows |
 | --- | --- | --- |
 | Changes | Changed files as a folder tree, with lazygit's two letters: the staged change in green, the unstaged one in red (`M `, ` M`, `MM`, `??`). A file's name is green when all of it is staged, red otherwise | The file's unstaged changes, then its staged ones; an untracked file as new. A folder shows every change in it |
 | History | The last 300 commits of the branch you're on, with their graph: a lane per line of history, a ring for a merge, and the branches and tags at each commit | The commit's message, author, parents and changes; a merge against its first parent |
@@ -308,18 +309,29 @@ Under the History, a branch's commits and the Stashes, the Diff files list the
 selected commit's or stash's files as a tree. ↩, or a click on a file, goes into
 them, and the diff then shows one file, or a folder of them; ⎋ comes back to the
 commits. A branch's commits have a back button (or ⎋) to the Branches. The Git
-View opens on Changes every time; the other tabs are kept as you left them, each
-with its own filter, and clicking the tab shown goes back to its own list. The
-tabs count the changes and stashes.
+View opens on Changes every time; the other Git View tabs are kept as you left
+them, each with its own filter, and clicking the one shown goes back to its own
+list. The Git View tabs count the changes and stashes.
 
 As in lazygit, space in Changes stages the file or folder, or unstages it once
 all of it is staged, and a stages or unstages everything; a click on a file's
-letters does the same. c opens a box for the commit's summary and description:
-↩ in the summary or ⌘↩ commits, and ⎋ closes it, keeping what you wrote. A
-commit takes only what's staged; with nothing staged, c does nothing but say so.
-d asks, as lazygit does, whether to discard all of a file's or folder's changes,
-back to the last commit, or only the unstaged ones, keeping what's staged. New and
-untracked files are deleted; it can't be undone.
+letters does the same. d asks, as lazygit does, whether to discard all of a
+file's or folder's changes, back to the last commit, or only the unstaged ones,
+keeping what's staged. New and untracked files are deleted; it can't be undone.
+
+In a change's diff, space stages the line under the cursor, the lines selected
+with v, or the hunk selected with a; in its Staged part, it unstages them. d
+there discards the selected unstaged lines, after asking. A new file's lines are
+staged the same way. A conflicted file is staged whole, and only once it has no
+conflict markers left; `git add` in the terminal stages it anyway.
+
+c opens a box for the commit's summary and description: ↩ in the summary or ⌘↩
+commits, and ⎋ closes it, keeping what you wrote until the Window's folder is in
+another repository. A commit takes only what's staged; with nothing staged, c
+does nothing but say so. On a detached HEAD, the box warns that the commit won't
+be on any branch. During a merge, c concludes it once its conflicts are staged,
+with git's message for it unless you've written one; during a rebase,
+cherry-pick, revert or `git am`, c says to continue it in the terminal instead.
 Hooks and signing run as they do in a terminal; when one fails, the box shows
 what it said.
 

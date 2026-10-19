@@ -129,7 +129,7 @@ The web browsing view beside the Terminal. Each Window has its own Browser and T
 _Avoid_: webview, inspector, sidebar browser
 
 **Tab**:
-One page in a Window's Browser, with its own back/forward history. "Tab" never means a tmux Window.
+One page in a Window's Browser, with its own back/forward history. "Tab" never means a tmux Window or a Git View tab.
 _Avoid_: page (when you mean the Tab itself), browser window
 
 **Find in Page**:
@@ -212,7 +212,7 @@ A native macOS Muxify window, with its own Active Environment, selected tmux Win
 _Avoid_: instance, Window (without "App", when you mean the native window)
 
 **Sidebar**:
-The panel on the left of the Muxify window that lists Sessions, Windows and Agents.
+The panel on the left of the Muxify window that lists Sessions, Windows and Agents. The Git View's left pane is its List pane, never a sidebar.
 _Avoid_: left sidebar, left panel
 
 **Focus**:
@@ -260,8 +260,24 @@ _Avoid_: choose rows, mark, multi-select, selection
 ### Git
 
 **Git View**:
-A view of the repository in the current Window's folder: its changed files, history, branches and stashes in tabs, with the selected one's diff. Changes can be staged and committed from it. A branch goes into its commits, and a selected commit or stash shows its files under them. It opens as a popup over the App Window or in the terminal's place. Each Window has its own, kept as it was left while another Window is shown.
+A view of the repository in the current Window's folder: its Changes, history, branches and stashes in Git View tabs, with the selected one's diff. Changes, or lines of them, can be staged and discarded from it, and what's staged committed. A branch goes into its commits, and a selected commit or stash shows its Diff files under them. It opens as a popup over the App Window or in the terminal's place. Each Window has its own, kept as it was left while another Window is shown.
 _Avoid_: lazygit (when you mean ours), git panel, diff viewer
+
+**Git View tab**:
+One of the Git View's four lists: Changes, History, Branches and Stashes. Always qualified; a plain Tab is a Browser's.
+_Avoid_: Tab (alone), panel, section
+
+**List pane**:
+The Git View's left pane, holding its Git View tabs; the diff pane beside it shows the selection's diff.
+_Avoid_: sidebar, Git View sidebar
+
+**Changes**:
+The files that differ from the last commit, staged or not, as the Git View lists them.
+_Avoid_: working copy, status, modified files
+
+**Diff files**:
+The files the selected commit or stash changed, shown under it in the Git View.
+_Avoid_: commit files, changed files
 
 ### Configuration
 

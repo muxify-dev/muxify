@@ -233,6 +233,67 @@ final class GitPatchTests: XCTestCase {
         XCTAssertEqual(patch.files.first?.hunks.first?.lines.map(\.new), [1, 2, nil])
     }
 
+    func testAPatchOfPickedLinesLeavesTheRestAsTheyAre() throws {
+        let file = try XCTUnwrap(GitPatch.parse("""
+        diff --git a/f b/f
+        --- a/f
+        +++ b/f
+        @@ -1,4 +1,4 @@
+         a
+        -b
+        +B
+         c
+        -d
+        +D
+        @@ -10,3 +10,4 @@
+         j
+        +x
+         k
+         l
+        """).files.first)
+        let header = "diff --git a/f b/f\n--- a/f\n+++ b/f\n"
+        // Forward: a removed line not picked stays, an added one isn't added.
+        XCTAssertEqual(file.patch(picking: [0: [1, 2]], reversed: false), header + "@@ -1,4 +1,4 @@\n a\n-b\n+B\n c\n d\n")
+        // Reversed: an added line not picked stays, a removed one isn't put back.
+        XCTAssertEqual(file.patch(picking: [0: [2]], reversed: true), header + "@@ -1,3 +1,4 @@\n a\n+B\n c\n D\n")
+        // A later hunk's other side moves with the ones before it.
+        XCTAssertEqual(file.patch(picking: [0: [5], 1: [1]], reversed: false),
+                       header + "@@ -1,4 +1,5 @@\n a\n b\n c\n d\n+D\n@@ -10,3 +11,4 @@\n j\n+x\n k\n l\n")
+        XCTAssertNil(file.patch(picking: [0: [0, 3]], reversed: false))
+        XCTAssertEqual(file.changedLines(picking: [0: [0, 1, 2], 1: [1]]), 3)
+        // Some lines of a new file.
+        let new = try XCTUnwrap(GitPatch.parse("diff --git a/n b/n\nnew file mode 100644\n--- /dev/null\n+++ b/n\n@@ -0,0 +1,2 @@\n+hello\n+world\n").files.first)
+        XCTAssertEqual(new.patch(picking: [0: [0]], reversed: false), "diff --git a/n b/n\n--- a/n\n+++ b/n\n@@ -0,0 +1,1 @@\n+hello\n")
+        XCTAssertEqual(new.patch(picking: [0: [0]], reversed: true), "diff --git a/n b/n\n--- a/n\n+++ b/n\n@@ -1,1 +1,2 @@\n+hello\n world\n")
+    }
+
+    @MainActor
+    func testPickedLinesAreStagedWholeOnlyWhenAllOfAFileIs() throws {
+        var patch = GitPatch.joined([
+            (.unstaged, GitPatch.parse("diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n-a\n+A\n b\n")),
+            (.staged, GitPatch.parse("diff --git a/g b/g\n--- a/g\n+++ b/g\n@@ -1,2 +1,3 @@\n a\n+x\n+y\n")),
+        ])
+        var renamed = GitChange(index: "R", worktree: " ", path: "g")
+        renamed.originalPath = "old-g"
+        let changes = [GitChange(index: " ", worktree: "M", path: "f"), renamed]
+        let all = GitView.lineWrite(picking: [0: [0: [0, 1]], 1: [0: [1]]], of: patch, in: [.unstaged], reversed: false, changes: changes)
+        XCTAssertEqual(all.paths, ["f"])
+        XCTAssertEqual(all.patch, "")
+        XCTAssertEqual(all.lines, 2)
+        let some = GitView.lineWrite(picking: [0: [0: [0, 1]], 1: [0: [1]]], of: patch, in: [.staged], reversed: true, changes: changes)
+        XCTAssertEqual(some.paths, [])
+        XCTAssertEqual(some.patch, "diff --git a/g b/g\n--- a/g\n+++ b/g\n@@ -1,2 +1,3 @@\n a\n+x\n y\n")
+        let renaming = GitView.lineWrite(picking: [1: [0: [1, 2]]], of: patch, in: [.staged], reversed: true, changes: changes)
+        XCTAssertEqual(renaming.paths, ["g", "old-g"])
+        // A diff cut short isn't all of the file, and a conflict's lines are staged whole.
+        patch.omittedLines = 1
+        XCTAssertEqual(GitView.lineWrite(picking: [0: [0: [0, 1]]], of: patch, in: [.unstaged], reversed: false, changes: changes).paths, [])
+        let conflicted = GitView.lineWrite(picking: [0: [0: [0, 1]]], of: patch, in: [.unstaged], reversed: false,
+                                           changes: [GitChange(index: "U", worktree: "U", path: "f")])
+        XCTAssertTrue(conflicted.isEmpty)
+        XCTAssertTrue(conflicted.hasConflicts)
+    }
+
     @MainActor
     func testDiffRowsForAChangeAndForACommit() {
         let patch = GitPatch.parse(diff)
@@ -403,6 +464,11 @@ final class GitScriptTests: XCTestCase {
 
     @discardableResult
     private func run(_ script: String, _ arguments: String...) throws -> String {
+        try run(script, arguments)
+    }
+
+    @discardableResult
+    private func run(_ script: String, _ arguments: [String]) throws -> String {
         try CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", script, "muxify"] + arguments),
                                 environment: environment)
     }
@@ -537,6 +603,117 @@ final class GitScriptTests: XCTestCase {
         """, repository)
         try run(GitRepository.discardScript, repository, "app/[id]/p")
         XCTAssertEqual(try status(), [" M app/i/p"])
+    }
+
+    /// The changed lines of a file's diff with these texts, by hunk.
+    private func pick(_ file: GitPatchFile, _ texts: Set<String>) -> [Int: Set<Int>] {
+        var picked: [Int: Set<Int>] = [:]
+        for (index, hunk) in file.hunks.enumerated() {
+            for (line, diffLine) in hunk.lines.enumerated() where diffLine.kind != .context && texts.contains(diffLine.text) {
+                picked[index, default: []].insert(line)
+            }
+        }
+        return picked
+    }
+
+    /// Reversed to unstage or discard them.
+    @MainActor
+    private func lines(_ texts: Set<String>, of path: String, in group: GitChange.Group,
+                       reversed: Bool = false) throws -> GitView.LineWrite {
+        let patch = try change(path, group.rawValue)
+        let file = try XCTUnwrap(patch.files.first)
+        return GitView.lineWrite(picking: [file.id: pick(file, texts)], of: patch, in: [group], reversed: reversed, changes: [])
+    }
+
+    @MainActor
+    func testLinesAreStagedAndUnstagedOneByOne() throws {
+        try run("""
+        cd "$1" && printf '1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n10\\n11\\n12\\n' > n.txt && git add n.txt && git commit -qm n
+        sed -e 's/^2$/two/' -e 's/^11$/eleven/' n.txt > n.new && mv n.new n.txt
+        """, repository)
+        let two = try lines(["2", "two"], of: "n.txt", in: .unstaged)
+        XCTAssertEqual(two.lines, 2)
+        XCTAssertEqual(two.paths, [])
+        try run(GitRepository.applyPatchScript, repository, "stage", two.patch)
+        XCTAssertEqual(try run("cd \"$1\" && git diff --cached --no-color -U0 n.txt | grep '^[-+][^-+]'", repository), "-2\n+two\n")
+        // The rest of it is all of what's unstaged: the file is staged whole.
+        let rest = try lines(["11", "eleven"], of: "n.txt", in: .unstaged)
+        XCTAssertEqual(rest.paths, ["n.txt"])
+        try run(GitRepository.stageScript, repository, "n.txt")
+        // Unstaging takes them back out of what's staged.
+        let eleven = try lines(["eleven"], of: "n.txt", in: .staged, reversed: true)
+        try run(GitRepository.applyPatchScript, repository, "unstage", eleven.patch)
+        XCTAssertEqual(try run("cd \"$1\" && git diff --cached --no-color -U0 n.txt | grep '^[-+][^-+]'", repository), "-2\n+two\n-11\n")
+        XCTAssertEqual(try run("cd \"$1\" && git diff --no-color -U0 n.txt | grep '^[-+][^-+]'", repository), "+eleven\n")
+    }
+
+    @MainActor
+    func testLinesAreDiscardedAndANewFilesLinesStaged() throws {
+        try run("""
+        cd "$1" && printf '1\\n2\\n3\\n4\\n5\\n6\\n7\\n8\\n9\\n10\\n11\\n12\\n' > n.txt && git add n.txt && git commit -qm n
+        sed -e 's/^2$/two/' -e 's/^11$/eleven/' n.txt > n.new && mv n.new n.txt
+        """, repository)
+        let eleven = try lines(["11", "eleven"], of: "n.txt", in: .unstaged, reversed: true)
+        try run(GitRepository.applyPatchScript, repository, "discard", eleven.patch)
+        XCTAssertEqual(try run("sed -n '2p;11p' \"$1/n.txt\"", repository), "two\n11\n")
+        // A new file's lines: git is told it's coming, then they're staged.
+        let hello = try lines(["hello"], of: "c.txt", in: .untracked)
+        XCTAssertEqual(hello.newFiles, ["c.txt"])
+        try run(GitRepository.applyPatchScript, [repository, "stage", hello.patch] + hello.newFiles)
+        XCTAssertEqual(try run("cd \"$1\" && git show :c.txt", repository), "hello\n")
+        XCTAssertTrue(try status().contains("AM c.txt"))
+        // A patch that doesn't apply leaves the new file untracked.
+        try run("cd \"$1\" && git rm -q -f --cached c.txt", repository)
+        XCTAssertThrowsError(try run(GitRepository.applyPatchScript, [repository, "stage", "not a patch"] + hello.newFiles))
+        XCTAssertTrue(try status().contains("?? c.txt"))
+    }
+
+    func testAMergeInProgressIsReadAndItsConflictsStagedOnceResolved() throws {
+        let merging = directory.url.appendingPathComponent("merging").path
+        try run("""
+        cd "$1" && git init -q -b master merging && cd merging
+        printf 'one\\n' > f && git add f && git commit -qm base
+        git checkout -q -b theirs && printf 'theirs\\n' > f && git commit -qam theirs
+        git checkout -q master && printf 'ours\\n' > f && git commit -qam ours
+        git merge theirs >/dev/null 2>&1 || true
+        """, directory.url.path)
+        let snapshot = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, merging)).get()
+        let theirs = try XCTUnwrap(snapshot.branches.first { $0.name == "theirs" })
+        XCTAssertEqual(snapshot.operation, .merge([theirs.sha]))
+        XCTAssertEqual(snapshot.operationTitle, "Merging theirs")
+        XCTAssertEqual(snapshot.mergeMessage, "Merge branch 'theirs'")
+        XCTAssertEqual(snapshot.changes.map(\.status), ["UU"])
+        // Its conflict markers are still there: nothing is staged.
+        XCTAssertThrowsError(try run(GitRepository.stageScript, merging, ".")) { error in
+            guard case TmuxError.failed(_, let stderr) = error else { return XCTFail("\(error)") }
+            XCTAssertTrue(stderr.hasPrefix("Still has conflict markers, so nothing was staged:\nf\n"), stderr)
+        }
+        try run("printf 'resolved\\n' > \"$1/f\"", merging)
+        try run(GitRepository.stageScript, merging, ".")
+        XCTAssertEqual(try run("cd \"$1\" && git status --porcelain", merging), "M  f\n")
+    }
+
+    func testARebaseCherryPickOrBisectInProgressIsRead() throws {
+        let path = directory.url.appendingPathComponent("busy").path
+        try run("""
+        cd "$1" && git init -q -b master busy && cd busy
+        printf 'one\\n' > f && git add f && git commit -qm base
+        git checkout -q -b theirs && printf 'theirs\\n' > f && git commit -qam theirs
+        git checkout -q master && printf 'ours\\n' > f && git commit -qam ours
+        git cherry-pick theirs >/dev/null 2>&1 || true
+        """, directory.url.path)
+        func operation() throws -> GitOperation? {
+            try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, path)).get().operation
+        }
+        let theirs = try run("cd \"$1\" && git rev-parse theirs", path).trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(try operation(), .cherryPick(theirs))
+        try run("cd \"$1\" && git cherry-pick --abort && { git rebase theirs >/dev/null 2>&1 || true; }", path)
+        XCTAssertEqual(try operation(), .rebase(branch: "master", step: 1, steps: 1))
+        XCTAssertNotNil(try operation()?.commitBlock)
+        try run("cd \"$1\" && git rebase --abort && git bisect start", path)
+        XCTAssertEqual(try operation(), .bisect)
+        try run("cd \"$1\" && git bisect reset >/dev/null 2>&1", path)
+        XCTAssertNil(try operation())
     }
 
     func testAStashIsShownWithGit() throws {
@@ -730,6 +907,50 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.tab(.history))
         gitView.perform(.discard)
         XCTAssertNil(gitView.discard)
+    }
+
+    func testCommittingWaitsForARebaseAndConcludesAMerge() {
+        let gitView = GitView(windowID: "@1")
+        var rebasing = snapshot
+        rebasing.operation = .rebase(branch: "master", step: 1, steps: 2)
+        rebasing.changes = [GitChange(index: "M", worktree: " ", path: "a.swift")]
+        gitView.apply(rebasing)
+        gitView.perform(.commit)
+        XCTAssertFalse(gitView.isCommitOpen)
+        XCTAssertEqual(gitView.writeError, GitOperation.rebase(branch: nil, step: nil, steps: nil).commitBlock)
+        // A merge: once its conflicts are resolved, with nothing more staged.
+        var merging = snapshot
+        merging.operation = .merge(["f1"])
+        merging.mergeMessage = "Merge branch 'feature'\n\nThe body."
+        merging.changes = [GitChange(index: "U", worktree: "U", path: "a.swift")]
+        gitView.apply(merging)
+        gitView.perform(.commit)
+        XCTAssertFalse(gitView.isCommitOpen)
+        merging.changes = []
+        gitView.apply(merging)
+        XCTAssertEqual(merging.operationTitle, "Merging feature")
+        gitView.perform(.commit)
+        XCTAssertTrue(gitView.isCommitOpen)
+        XCTAssertEqual(gitView.commitSummary, "Merge branch 'feature'")
+        XCTAssertEqual(gitView.commitDescription, "The body.")
+        // A message already written stays.
+        gitView.closeCommit()
+        gitView.commitSummary = "Mine"
+        gitView.perform(.commit)
+        XCTAssertEqual(gitView.commitSummary, "Mine")
+    }
+
+    func testTheMessageIsDroppedInAnotherRepository() {
+        let gitView = GitView(windowID: "@1")
+        var changed = snapshot
+        changed.changes = [GitChange(index: "M", worktree: " ", path: "a.swift")]
+        gitView.apply(changed)
+        gitView.commitSummary = "Half written"
+        gitView.apply(changed)
+        XCTAssertEqual(gitView.commitSummary, "Half written")
+        changed.root = "/other"
+        gitView.apply(changed)
+        XCTAssertEqual(gitView.commitSummary, "")
     }
 
     func testEachWindowKeepsItsOwnGitView() {

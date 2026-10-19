@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 import MuxifyCore
 
-/// Hosts the Git View: a popup over the whole App Window, sidebar and
+/// Hosts the Git View: a popup over the whole App Window, Sidebar and
 /// Browser too, like `tmux display-popup`, or fullscreen in the terminal's
 /// place.
 struct GitViewOverlay: View {
@@ -43,7 +43,7 @@ struct GitViewOverlay: View {
     }
 }
 
-/// The Git View's symbol, in the header and on a sidebar Window whose Git
+/// The Git View's symbol, in the header and on a Sidebar Window whose Git
 /// View is open: three commits, one branching off. Drawn from a 16×16 SVG
 /// with a 1.5 stroke, in the foreground style.
 struct GitViewIcon: View {
@@ -91,8 +91,8 @@ private struct Palette {
     var unstaged: Color { color(colors.removedText) }
 }
 
-/// Xcode's source control navigator, in the Ghostty theme: a toolbar, a
-/// sidebar of tabs, and the selection's diff.
+/// Xcode's source control navigator, in the Ghostty theme: a toolbar, the
+/// list pane with its Git View tabs, and the selection's diff.
 private struct GitNavigator: View {
     @Bindable var gitView: GitView
     let colors: GitColors
@@ -104,7 +104,7 @@ private struct GitNavigator: View {
                 if let snapshot = gitView.snapshot {
                     GitToolbar(gitView: gitView, snapshot: snapshot, palette: palette, isCompact: proxy.size.width < 900)
                     HStack(spacing: 0) {
-                        GitSidebar(gitView: gitView, palette: palette)
+                        GitListPane(gitView: gitView, palette: palette)
                             .frame(width: min(380, max(240, proxy.size.width * 0.3)))
                             .background(palette.chrome)
                             .overlay(alignment: .trailing) { palette.separator.frame(width: 1) }
@@ -191,6 +191,10 @@ private struct GitToolbar: View {
                     GitTag(text: "no upstream", symbol: "cloud", style: .gray, palette: palette)
                 }
             }
+            if let title = snapshot.operationTitle {
+                GitTag(text: title, symbol: Self.symbol(for: snapshot.operation), style: .tint(palette.colors.yellow), palette: palette)
+                    .help(snapshot.operation?.commitBlock ?? title)
+            }
             if let comparison = snapshot.comparison { aheadBehind(comparison) }
             Spacer(minLength: 8)
             filterField
@@ -213,6 +217,16 @@ private struct GitToolbar: View {
         .frame(height: 48)
         .background(palette.chrome)
         .overlay(alignment: .bottom) { palette.separator.frame(height: 1) }
+    }
+
+    private static func symbol(for operation: GitOperation?) -> String {
+        switch operation {
+        case .merge?: "arrow.triangle.merge"
+        case .rebase?, .applying?: "arrow.triangle.2.circlepath"
+        case .cherryPick?: "arrow.uturn.forward"
+        case .revert?: "arrow.uturn.backward"
+        case .bisect?, nil: "magnifyingglass"
+        }
     }
 
     private var closeHelp: String {
@@ -285,11 +299,11 @@ private struct GitToolbar: View {
     }
 }
 
-// MARK: - Sidebar
+// MARK: - List pane
 
 /// One tab at a time: its list, the Diff files of the selected commit or
 /// stash under it, and the tabs along the bottom.
-private struct GitSidebar: View {
+private struct GitListPane: View {
     let gitView: GitView
     let palette: Palette
 
@@ -399,8 +413,8 @@ private struct GitListHeader: View {
     }
 }
 
-/// The tabs along the sidebar's bottom, with their keys. A click on the tab
-/// shown goes back to its own list.
+/// The Git View tabs along the list pane's bottom, with their keys. A
+/// click on the tab shown goes back to its own list.
 private struct GitTabBar: View {
     let gitView: GitView
     let palette: Palette
@@ -408,7 +422,7 @@ private struct GitTabBar: View {
     private enum Style { case full, titles, symbols }
 
     var body: some View {
-        // Titles go first when the sidebar is narrow, then symbols.
+        // Titles go first when the list pane is narrow, then symbols.
         ViewThatFits(in: .horizontal) {
             bar(.full)
             bar(.titles)
@@ -520,7 +534,7 @@ private struct GitListView: View {
             itemRow(item, row: row, onAccent: onAccent, graphWidth: graphWidth)
                 .padding(.leading, 6 + CGFloat(row.depth) * 14)
                 .padding(.trailing, 8)
-                .frame(height: GitSidebar.rowHeight)
+                .frame(height: GitListPane.rowHeight)
                 .background {
                     if isSelected {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -588,7 +602,7 @@ private struct GitListView: View {
             case .commit(let commit):
                 if let graph = row.graph {
                     GitGraphCell(row: graph, isMerge: commit.isMerge, palette: palette, lane: Self.lane)
-                        .frame(width: graphWidth, height: GitSidebar.rowHeight, alignment: .leading)
+                        .frame(width: graphWidth, height: GitListPane.rowHeight, alignment: .leading)
                         .clipped()
                 }
                 Text(String(commit.sha.prefix(7)))
@@ -1577,15 +1591,29 @@ private struct GitCommitBox: View {
                 .padding(.bottom, 14)
             editor
                 .padding(.horizontal, 18)
-            fileList(staged)
-                .padding(.horizontal, 18)
-                .padding(.top, 16)
+            if snapshot.isDetached {
+                notice("Detached at \(snapshot.head). This commit won't be on any branch.",
+                       symbol: "exclamationmark.triangle.fill", color: palette.colors.yellow)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 12)
+            }
+            if snapshot.isMerging, let title = snapshot.operationTitle {
+                notice("\(title): this commit concludes the merge.", symbol: "arrow.triangle.merge", color: palette.colors.blue)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 12)
+            }
+            // Concluding a merge can take nothing more than its resolutions.
+            if !staged.isEmpty || !snapshot.isMerging {
+                fileList(staged)
+                    .padding(.horizontal, 18)
+                    .padding(.top, 16)
+            }
             if let error = gitView.commitError {
                 errorCallout(error)
                     .padding(.horizontal, 18)
                     .padding(.top, 12)
             }
-            footer(canCommit: !staged.isEmpty)
+            footer(canCommit: !staged.isEmpty || snapshot.isMerging)
                 .padding(.top, 16)
         }
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(palette.chrome))
@@ -1712,6 +1740,22 @@ private struct GitCommitBox: View {
         .frame(height: Self.rowHeight)
     }
 
+    /// What's different about this commit: it's on a detached HEAD, or
+    /// concludes a merge.
+    private func notice(_ text: String, symbol: String, color: NSColor) -> some View {
+        let strong = palette.color(palette.colors.strong(color))
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: symbol).font(.system(size: 11.5))
+            Text(text).fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.system(size: 12, weight: .medium))
+        .foregroundStyle(strong)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(palette.color(palette.colors.tint(color))))
+    }
+
     private func errorCallout(_ error: String) -> some View {
         let red = palette.color(palette.colors.strong(palette.colors.red))
         return HStack(alignment: .top, spacing: 9) {
@@ -1780,8 +1824,9 @@ private struct GitCommitBox: View {
 
 // MARK: - Discarding
 
-/// d: lazygit's Discard changes menu for a file or folder of Changes. x, or
-/// ↩ on it, discards everything; u only what isn't staged; ⎋ closes it.
+/// d: lazygit's Discard changes menu for a file or folder of Changes, or
+/// for the lines picked in its diff. x, or ↩ on it, discards everything;
+/// u only what isn't staged; ⎋ closes it.
 private struct GitDiscardMenu: View {
     let gitView: GitView
     let discard: GitView.Discard
@@ -1814,10 +1859,17 @@ private struct GitDiscardMenu: View {
                 .padding(.top, 16)
                 .padding(.bottom, 12)
             VStack(spacing: 2) {
-                option(.all, key: "x", title: "Discard all changes",
-                       detail: "Back to the last commit. New and untracked files are deleted.")
-                option(.unstaged, key: "u", title: "Discard unstaged changes",
-                       detail: discard.canDiscardUnstaged ? "Keep what's staged." : "Only when some of it is staged and some isn't.")
+                if let lines = discard.lines {
+                    // All of a new file's lines: it's deleted, as the file's discard does.
+                    let deletes = discard.changes.contains { $0.isUntracked && lines.paths.contains($0.path) }
+                    option(.all, key: "x", title: lines.lines == 1 ? "Discard the line" : "Discard \(lines.lines) lines",
+                           detail: deletes ? "Back to what's staged. A new file with all of its lines picked is deleted." : "Back to what's staged.")
+                } else {
+                    option(.all, key: "x", title: "Discard all changes",
+                           detail: "Back to the last commit. New and untracked files are deleted.")
+                    option(.unstaged, key: "u", title: "Discard unstaged changes",
+                           detail: discard.canDiscardUnstaged ? "Keep what's staged." : "Only when some of it is staged and some isn't.")
+                }
             }
             .padding(.horizontal, 8)
             .padding(.bottom, 8)
@@ -1836,13 +1888,15 @@ private struct GitDiscardMenu: View {
                 .frame(width: 30, height: 30)
                 .overlay(Image(systemName: "trash").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white))
             VStack(alignment: .leading, spacing: 3) {
-                Text("Discard changes").font(.system(size: 14.5, weight: .semibold))
+                Text(discard.lines == nil ? "Discard changes" : "Discard lines").font(.system(size: 14.5, weight: .semibold))
                 HStack(spacing: 5) {
                     if discard.isFolder {
                         Image(systemName: "folder").font(.system(size: 11))
                         Text(discard.path).fontWeight(.medium).lineLimit(1).truncationMode(.head)
-                        Text(verbatim: "·").foregroundStyle(.tertiary)
-                        Text(discard.changes.count == 1 ? "1 file" : "\(discard.changes.count) files")
+                        if discard.lines == nil {
+                            Text(verbatim: "·").foregroundStyle(.tertiary)
+                            Text(discard.changes.count == 1 ? "1 file" : "\(discard.changes.count) files")
+                        }
                     } else {
                         GitFileTile(path: discard.path, size: 13)
                         Text((discard.path as NSString).lastPathComponent).fontWeight(.medium).lineLimit(1)

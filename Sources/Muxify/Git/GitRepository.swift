@@ -26,9 +26,62 @@ struct GitSnapshot: Equatable {
     var stashes: [GitStash] = []
     /// `main` or `master`: what the current branch is compared with.
     var mainBranch: String?
+    /// A merge, rebase or the like that git is in the middle of.
+    var operation: GitOperation?
+    /// git's message for the merge in progress, without its `#` lines.
+    var mergeMessage: String?
 
     /// The current branch's history.
     var log: GitLog { GitLog(commits: commits, graph: graph) }
+
+    /// A commit now concludes a merge.
+    var isMerging: Bool {
+        if case .merge? = operation { return true }
+        return false
+    }
+
+    /// The toolbar's "Merging feature" or "Rebasing feature 3/7".
+    var operationTitle: String? {
+        func name(_ sha: String) -> String { branches.first { $0.sha == sha }?.name ?? String(sha.prefix(7)) }
+        func progress(_ step: Int?, _ steps: Int?) -> String {
+            guard let step, let steps else { return "" }
+            return " \(step)/\(steps)"
+        }
+        switch operation {
+        case .merge(let shas)?: return "Merging " + shas.map(name).joined(separator: ", ")
+        case .rebase(let branch, let step, let steps)?: return "Rebasing" + (branch.map { " \($0)" } ?? "") + progress(step, steps)
+        case .applying(let step, let steps)?: return "Applying patches" + progress(step, steps)
+        case .cherryPick(let sha)?: return "Cherry-picking \(sha.prefix(7))"
+        case .revert(let sha)?: return "Reverting \(sha.prefix(7))"
+        case .bisect?: return "Bisecting"
+        case nil: return nil
+        }
+    }
+}
+
+/// What git is in the middle of: a merge, which a commit concludes, or a
+/// rebase, `git am`, cherry-pick or revert, which go on with their own
+/// command, or a bisect.
+enum GitOperation: Equatable {
+    /// The commits being merged in.
+    case merge([String])
+    /// The branch being rebased, and the step it's at of how many.
+    case rebase(branch: String?, step: Int?, steps: Int?)
+    case applying(step: Int?, steps: Int?)
+    case cherryPick(String)
+    case revert(String)
+    case bisect
+
+    /// Why c doesn't commit now, if it doesn't.
+    var commitBlock: String? {
+        switch self {
+        case .rebase: "A rebase is in progress: continue it in the terminal, with git rebase --continue."
+        case .applying: "git am is in progress: continue it in the terminal, with git am --continue."
+        case .cherryPick: "A cherry-pick is in progress: continue it in the terminal, with git cherry-pick --continue."
+        case .revert: "A revert is in progress: continue it in the terminal, with git revert --continue."
+        case .merge, .bisect: nil
+        }
+    }
 }
 
 /// A branch's history, newest first, with its graph.
@@ -200,6 +253,25 @@ enum GitRepository {
             printf '%s ' "$branch"; g rev-list --left-right --count "$branch...HEAD" -- 2>/dev/null || printf '\\n'
         done
     section stashes; g stash list --no-color --format='%gd%x00%H%x00%ct%x00%gs' 2>/dev/null
+    # What git is in the middle of, from the files it keeps for it.
+    section operation
+    dir=$(g rev-parse --absolute-git-dir)
+    fields() { for name in "$@"; do printf '%s\\n' "$(cat "$name" 2>/dev/null)"; done; }
+    if [ -d "$dir/rebase-merge" ]; then
+        printf 'rebase\\n'; fields "$dir/rebase-merge/head-name" "$dir/rebase-merge/msgnum" "$dir/rebase-merge/end"
+    elif [ -d "$dir/rebase-apply" ]; then
+        if [ -f "$dir/rebase-apply/applying" ]; then printf 'am\\n'; else printf 'rebase\\n'; fi
+        fields "$dir/rebase-apply/head-name" "$dir/rebase-apply/next" "$dir/rebase-apply/last"
+    elif [ -f "$dir/CHERRY_PICK_HEAD" ]; then
+        printf 'cherry-pick\\n'; cat "$dir/CHERRY_PICK_HEAD"
+    elif [ -f "$dir/REVERT_HEAD" ]; then
+        printf 'revert\\n'; cat "$dir/REVERT_HEAD"
+    elif [ -f "$dir/MERGE_HEAD" ]; then
+        printf 'merge\\n'; cat "$dir/MERGE_HEAD"
+        section merge_message; cat "$dir/MERGE_MSG" 2>/dev/null
+    elif [ -f "$dir/BISECT_LOG" ]; then
+        printf 'bisect\\n'
+    fi
     exit 0
     """
 
@@ -284,10 +356,19 @@ enum GitRepository {
     """
 
     /// Takes the folder, then files and folders to stage, with everything
-    /// in them: new, changed and deleted files.
+    /// in them: new, changed and deleted files. A conflicted file that
+    /// still has conflict markers isn't staged, nor is anything with it.
     static let stageScript = """
     cd "$1" || exit 1
     shift
+    export GIT_LITERAL_PATHSPECS=1
+    marked=$(git -c core.quotepath=off diff --name-only -z --diff-filter=U -- "$@" |
+        xargs -0 -r grep -l -E '^(<<<<<<<|>>>>>>>)( |$)|^=======$' -- 2>/dev/null)
+    if [ -n "$marked" ]; then
+        printf 'Still has conflict markers, so nothing was staged:\\n%s\\n' "$marked" >&2
+        printf 'Resolve them, or stage it anyway with git add in the terminal.\\n' >&2
+        exit 1
+    fi
     exec git -c core.quotepath=off add -A -- "$@"
     """
 
@@ -296,6 +377,7 @@ enum GitRepository {
     static let unstageScript = """
     cd "$1" || exit 1
     shift
+    export GIT_LITERAL_PATHSPECS=1
     if git rev-parse -q --verify HEAD >/dev/null; then
         exec git -c core.quotepath=off reset -q -- "$@"
     fi
@@ -332,6 +414,27 @@ enum GitRepository {
         if [ -n "$(git ls-files -- "$path")" ]; then git checkout -q -- "$path" || exit 1; fi
     done
     exec git clean -f -d -q -- "$@"
+    """
+
+    /// Takes the folder, `stage`, `unstage` or `discard`, a patch of some
+    /// of a change's lines, and the new files it takes lines of. Applies
+    /// it to the index, its reverse to the index, or its reverse to the
+    /// worktree. git is first told the new files are coming, and if the
+    /// patch doesn't apply, they're untracked again.
+    static let applyPatchScript = """
+    cd "$1" || exit 1
+    mode=$2 patch=$3
+    shift 3
+    case $mode in
+        stage) flags=--cached ;;
+        unstage) flags='--cached -R' ;;
+        *) flags=-R ;;
+    esac
+    export GIT_LITERAL_PATHSPECS=1
+    if [ $# -gt 0 ]; then git add -N -- "$@" || exit 1; fi
+    printf '%s' "$patch" | git apply --recount --whitespace=nowarn $flags - && exit 0
+    if [ $# -gt 0 ]; then git rm -q -f --cached -- "$@"; fi
+    exit 1
     """
 
     /// Takes the folder and the message; commits what's staged. Prints the
@@ -386,6 +489,8 @@ enum GitRepository {
         snapshot.commits = log.commits
         snapshot.graph = log.graph
         snapshot.stashes = parseStashes(sections["stashes"] ?? "")
+        snapshot.operation = parseOperation(sections["operation"] ?? "")
+        snapshot.mergeMessage = sections["merge_message"].map(parseMergeMessage)
         return .success(snapshot)
     }
 
@@ -582,6 +687,30 @@ enum GitRepository {
                             date: Date(timeIntervalSince1970: TimeInterval(fields[2]) ?? 0),
                             message: fields[3...].joined(separator: " "))
         }
+    }
+
+    /// The snapshot's `operation` section: what it is, then its fields a
+    /// line each.
+    static func parseOperation(_ output: String) -> GitOperation? {
+        let lines = output.split(separator: "\n", omittingEmptySubsequences: false).map { trimmed(String($0)) }
+        func field(_ index: Int) -> String? { lines.indices.contains(index) && !lines[index].isEmpty ? lines[index] : nil }
+        // `refs/heads/feature`, or `detached HEAD`.
+        let branch = field(1).flatMap { $0.hasPrefix("refs/heads/") ? String($0.dropFirst("refs/heads/".count)) : nil }
+        switch lines.first {
+        case "rebase": return .rebase(branch: branch, step: field(2).flatMap { Int($0) }, steps: field(3).flatMap { Int($0) })
+        case "am": return .applying(step: field(2).flatMap { Int($0) }, steps: field(3).flatMap { Int($0) })
+        case "cherry-pick": return field(1).map(GitOperation.cherryPick)
+        case "revert": return field(1).map(GitOperation.revert)
+        case "merge": return .merge(lines.dropFirst().filter { !$0.isEmpty })
+        case "bisect": return .bisect
+        default: return nil
+        }
+    }
+
+    /// `MERGE_MSG` without the lines git comments out, such as the
+    /// conflicts it lists.
+    static func parseMergeMessage(_ text: String) -> String {
+        trimmed(text.split(separator: "\n", omittingEmptySubsequences: false).filter { !$0.hasPrefix("#") }.joined(separator: "\n"))
     }
 
     /// `git show` with `commitScript`'s format: the commit, then its patch.
