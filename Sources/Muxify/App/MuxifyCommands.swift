@@ -72,7 +72,7 @@ import SwiftUI
                 .keyboardShortcut("i", modifiers: [.command, .option])
                 .disabled(store?.isBrowserVisible != true || store?.currentBrowser?.activeTab?.hasPage != true)
             Divider()
-            Button("Focus Terminal") { store?.focusTerminal() }
+            Button("Focus Terminal") { store?.showAndFocusTerminal() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .focusTerminal)?.shortcut)
                 .disabled(store == nil)
         }

@@ -10,7 +10,8 @@ address bar has focus. All available `keybindings` actions are listed below.
 | `new_app_window` | ⌘N | Open a new Local Muxify App Window |
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
 | `toggle_browser` | ⌘B | Show or hide the current Window's Browser |
-| `focus_terminal` | ⌃ + backquote | Focus the terminal in the current App Window |
+| `toggle_terminal` | Unbound | Hide the current Window's terminal so its open Browser fills the room, or show it again |
+| `focus_terminal` | ⌃ + backquote | Focus the terminal in the current App Window, showing it if hidden |
 | `select_window_1` | ⌘1 | Select the first Window in the current Session |
 | `select_window_2` | ⌘2 | Select the second Window |
 | `select_window_3` | ⌘3 | Select the third Window |
@@ -30,7 +31,8 @@ numbered position does not exist, the shortcut does nothing.
 
 Use **Muxify → Open Config** to open `~/.config/muxify/config.yaml` (or
 `$XDG_CONFIG_HOME/muxify/config.yaml`). This example lists every configurable
-action, keeps the default bindings, and assigns optional next/previous shortcuts:
+action, keeps the default bindings, and assigns optional Toggle Terminal and
+next/previous shortcuts:
 
 ```yaml
 keybindings:
@@ -47,10 +49,17 @@ keybindings:
   select_window_7: cmd+7
   select_window_8: cmd+8
   select_window_9: cmd+9
-  # These two actions are unbound by default.
+  # These three actions are unbound by default.
+  toggle_terminal: cmd+shift+b
   select_next_window: ctrl+cmd+right
   select_prev_window: ctrl+cmd+left
 ```
+
+Toggle Terminal only works while the current Window's Browser is shown; each
+Window remembers its own choice, and new Windows start with the terminal shown.
+Closing the Browser, or its last Tab, brings the terminal back. Hiding the
+terminal doesn't resize tmux, so Panes keep their layout. While it is hidden,
+the keyboard goes to the Browser page.
 
 Triggers use Ghostty-style names: `cmd`, `ctrl`, `alt` (Option), and `shift`,
 followed by a character or a named key such as `left`, `right`, `tab`, or

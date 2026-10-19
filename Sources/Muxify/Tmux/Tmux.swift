@@ -28,6 +28,8 @@ struct TmuxWindow: Identifiable, Hashable {
     var sourceID = ""
     /// The folder the Window's Session started in (`#{session_path}`).
     var sessionPath = ""
+    /// `@muxify_terminal` is `off`: the Browser has the room (ADR 0011).
+    var terminalHidden = false
 
     /// The pane title is what shells and TUIs set via OSC 0/2 (fish sets it to
     /// `~/w/project`), so it is the best human label. tmux defaults it to the
@@ -210,6 +212,8 @@ enum Tmux {
     /// One-shot: programs set it to open a Tab; Muxify consumes and clears it.
     static let openOption = "@muxify_open"
     static let lastWindowOption = "@muxify_last_window"
+    /// `off` while the Window's terminal is hidden behind its Browser.
+    static let terminalOption = "@muxify_terminal"
     // Pane options an Agent's Extension writes (ADR 0004).
     static let agentOption = "@muxify_agent"
     static let agentStatusOption = "@muxify_agent_status"
@@ -254,7 +258,7 @@ enum Tmux {
             "#{window_name}", "#{pane_title}", "#{pane_current_path}", "#{pane_current_command}",
             "#{window_active}", "#{window_panes}", "#{window_bell_flag}", "#{session_activity}",
             "#{\(tabsOption)}", "#{\(activeTabOption)}", "#{\(browserOpenOption)}", "#{\(openOption)}",
-            "#{\(lastWindowOption)}", "#{\(agentOption)}", "#{session_path}",
+            "#{\(lastWindowOption)}", "#{\(agentOption)}", "#{session_path}", "#{\(terminalOption)}",
         ].joined(separator: s)
         let clientFormat = ["C", "#{client_tty}", "#{session_id}", "#{window_id}", "#{client_pid}", "#{client_control_mode}"].joined(separator: s)
         let paneFormat = [
@@ -290,7 +294,8 @@ enum Tmux {
                     agent: f[18],
                     storedBrowser: StoredBrowser(tabs: f[13], activeTab: f[14], open: f[15]),
                     openRequests: f[16].split(separator: " ").map(String.init),
-                    sessionPath: f.count > 19 ? f[19] : ""
+                    sessionPath: f.count > 19 ? f[19] : "",
+                    terminalHidden: f.count > 20 && f[20] == "off"
                 ))
                 if !f[17].isEmpty { lastWindowID = f[17] }
             } else if f.first == "C", f.count >= 4 {

@@ -133,6 +133,8 @@ struct Config: Equatable {
         #   # ninth Windows in the current Session, not their tmux indices.
         #   # select_next_window and select_prev_window wrap within the Session
         #   # and have no keybindings until you assign them.
+        #   # toggle_terminal gives the current Window's open Browser the
+        #   # terminal's room; it has no keybinding until you assign one.
         #   # The defaults:
         \(spell(ConfigAction.defaultSpelling, indent: "   "))
         #   # While a Command Palette is open, these act instead:

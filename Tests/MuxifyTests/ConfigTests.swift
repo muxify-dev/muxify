@@ -329,6 +329,15 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.problems, [])
     }
 
+    func testToggleTerminalIsUnboundByDefaultAndCanTakeADefaultTrigger() throws {
+        XCTAssertNil(try load([:]).keybinds.firstTrigger(for: .toggleTerminal))
+        let config = try load("keybindings:\n  toggle_terminal: [cmd+shift+b, cmd+b]")
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+b")), .toggleTerminal)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b")), .toggleTerminal)
+        XCTAssertEqual(config.keybinds.triggers[.toggleBrowser], [])
+        XCTAssertEqual(config.problems, [])
+    }
+
     func testNextAndPreviousWindowActionsAcceptBindings() throws {
         let config = try load("""
         keybindings:

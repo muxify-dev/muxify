@@ -12,7 +12,8 @@ struct ContentView: View {
             let sidebar = store.sidebarVisible ? clamp(sidebarWidth, 180, 420) : 0
             let room = proxy.size.width - sidebar
             let browserMax = max(320, room - 360)
-            let browserWidth = clamp(browserShare * room, 320, browserMax)
+            let terminalVisible = store.isTerminalVisible
+            let browserWidth = terminalVisible ? clamp(browserShare * room, 320, browserMax) : room
             // Panels appear and disappear without animation, so switching
             // between Windows with and without a Browser is instant.
             HStack(spacing: 0) {
@@ -22,10 +23,15 @@ struct ContentView: View {
                         .chrome(theme: store.theme, material: .sidebar)
                     PanelResizeHandle(width: sidebar, range: 180...420, edge: .leading) { sidebarWidth = $0 }
                 }
+                // A hidden terminal stays in place at no width, which leaves
+                // its tmux size alone (ADR 0011).
                 TerminalArea(store: store)
+                    .frame(width: terminalVisible ? nil : 0)
                 if let browser = store.currentBrowser, browser.isOpen {
-                    PanelResizeHandle(width: browserWidth, range: 320...browserMax, edge: .trailing) {
-                        browserShare = $0 / room
+                    if terminalVisible {
+                        PanelResizeHandle(width: browserWidth, range: 320...browserMax, edge: .trailing) {
+                            browserShare = $0 / room
+                        }
                     }
                     BrowserPanel(browser: browser).id(browser.windowID)
                     .frame(width: browserWidth)
@@ -194,6 +200,9 @@ private struct TerminalArea: View {
             TerminalHostRepresentable(host: store.terminalHost)
             if store.surface == nil { placeholder }
         }
+        // Ghostty stops drawing a terminal nobody can see.
+        .onChange(of: store.isTerminalVisible) { _, visible in store.surface?.setVisible(visible) }
+        .onChange(of: store.surface) { _, surface in surface?.setVisible(store.isTerminalVisible) }
     }
 
     private var placeholder: some View {

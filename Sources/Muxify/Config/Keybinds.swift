@@ -16,6 +16,7 @@ enum ConfigAction: String, KeybindAction {
     case newAppWindow = "new_app_window"
     case toggleSidebar = "toggle_sidebar"
     case toggleBrowser = "toggle_browser"
+    case toggleTerminal = "toggle_terminal"
     case focusTerminal = "focus_terminal"
     case selectWindow1 = "select_window_1"
     case selectWindow2 = "select_window_2"
@@ -33,6 +34,7 @@ enum ConfigAction: String, KeybindAction {
         .newAppWindow: ["cmd+n"],
         .toggleSidebar: ["cmd+s", "ctrl+cmd+s"],
         .toggleBrowser: ["cmd+b"],
+        .toggleTerminal: [],
         .focusTerminal: ["ctrl+backquote"],
         .selectWindow1: ["cmd+1"],
         .selectWindow2: ["cmd+2"],

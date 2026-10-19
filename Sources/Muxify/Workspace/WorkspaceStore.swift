@@ -93,6 +93,7 @@ final class WorkspaceStore {
     @ObservationIgnored private var clientTTY: String?
     /// A click we sent to tmux that the next snapshots may not reflect yet.
     @ObservationIgnored private var pendingSelection: (windowID: String, deadline: Date)?
+    @ObservationIgnored private var pendingTerminal = PendingTerminalVisibility()
     /// A Session asked for by name (`muxify session open`) that the snapshot
     /// may not list yet: Muxify is just launching, or it was just created.
     @ObservationIgnored private var pendingSession: (name: String, deadline: Date)?
@@ -253,6 +254,7 @@ final class WorkspaceStore {
         serverID = nil
         pendingSelection = nil
         pendingSession = nil
+        pendingTerminal.removeAll()
         isRefreshing = false
         refreshAgain = false
         serverRunning = false
@@ -371,7 +373,8 @@ final class WorkspaceStore {
             dirtyBrowsers.removeAll()
         }
         let listedBefore = windows
-        if windows != snapshot.windows { windows = snapshot.windows }
+        let listed = pendingTerminal.apply(to: snapshot.windows)
+        if windows != listed { windows = listed }
         hasNoSessions = snapshot.windows.isEmpty
         let agents = snapshot.agents
         if self.agents != agents { self.agents = agents }
@@ -604,11 +607,51 @@ final class WorkspaceStore {
         !isTerminalFocused && isBrowserVisible
     }
 
+    /// While the terminal is hidden, its Browser's page takes the keyboard
+    /// instead, so typing never goes to a terminal you can't see.
     func focusTerminal() {
         DispatchQueue.main.async { [weak self] in
-            guard let surface = self?.surface else { return }
+            guard let self else { return }
+            if !self.isTerminalVisible, let page = self.currentBrowser?.activeTab?.webView {
+                page.window?.makeFirstResponder(page)
+                return
+            }
+            guard let surface = self.surface else { return }
             surface.window?.makeFirstResponder(surface)
         }
+    }
+
+    /// The Focus Terminal action brings a hidden terminal back first.
+    func showAndFocusTerminal() {
+        if let window = selectedWindow { setTerminalHidden(false, windowID: window.id) }
+        focusTerminal()
+    }
+
+    /// The terminal shows unless the current Window hid it behind its open
+    /// Browser (ADR 0011).
+    var isTerminalVisible: Bool {
+        selectedWindow?.terminalHidden != true || !isBrowserVisible
+    }
+
+    /// Gives the open Browser the terminal's room, or gives it back. Does
+    /// nothing while the Browser is hidden.
+    func toggleTerminal() {
+        guard let window = selectedWindow, isBrowserVisible else { return }
+        setTerminalHidden(!window.terminalHidden, windowID: window.id)
+        focusTerminal()
+    }
+
+    /// Shown right away, then written to the Window's `@muxify_terminal`.
+    /// Returns whether anything changed.
+    @discardableResult
+    private func setTerminalHidden(_ hidden: Bool, windowID: String) -> Bool {
+        guard let index = windows.firstIndex(where: { $0.id == windowID }),
+              windows[index].terminalHidden != hidden else { return false }
+        windows[index].terminalHidden = hidden
+        pendingTerminal.set(hidden, windowID: windowID, until: Date().addingTimeInterval(isRemote ? 10 : 2))
+        runAsync(hidden ? ["set-option", "-wq", "-t", windowID, Tmux.terminalOption, "off"]
+                        : ["set-option", "-wqu", "-t", windowID, Tmux.terminalOption])
+        return true
     }
 
     // MARK: - tmux commands
@@ -791,6 +834,11 @@ final class WorkspaceStore {
         browser.onChange = { [weak self] browser in
             guard let self, self.generation == current else { return }
             persistWindow(browser.windowID)
+            // Closing the Browser, however it happens, brings the terminal back.
+            if !browser.isOpen, setTerminalHidden(false, windowID: browser.windowID),
+               browser.windowID == selectedWindowID {
+                focusTerminal()
+            }
         }
         browser.onCopyURL = { [weak self] url in
             guard let self, self.generation == current else { return }
@@ -899,7 +947,8 @@ final class WorkspaceStore {
         case .newAppWindow: onNewAppWindow?()
         case .toggleSidebar: toggleSidebar()
         case .toggleBrowser: toggleBrowser()
-        case .focusTerminal: focusTerminal()
+        case .toggleTerminal: toggleTerminal()
+        case .focusTerminal: showAndFocusTerminal()
         case .selectWindow1: navigateWindows(.position(1))
         case .selectWindow2: navigateWindows(.position(2))
         case .selectWindow3: navigateWindows(.position(3))
