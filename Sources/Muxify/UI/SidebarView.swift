@@ -93,9 +93,7 @@ private struct TopicsSection: View {
     @Environment(\.sidebarTypography) private var typography
     let store: WorkspaceStore
     let model: TopicsModel
-    @State private var drag: LongPressDrag<TopicListID> = .idle
-    /// Each Topic and Locked card's frame in the list, for the drop position of a drag.
-    @State private var cardFrames: [TopicListID: CGRect] = [:]
+    @State private var drag = LongPressDrag<TopicListID>(spacing: 6)
     @State private var groupsHeight: CGFloat = 0
     /// The cards whose "N more…" the user pressed.
     @State private var showingAllRows: Set<TopicGroupID> = []
@@ -112,28 +110,22 @@ private struct TopicsSection: View {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(model.rows) { topic in
                             let order = orderedCardIDs(pinned: topic.isPinned)
-                            let onFrame = { (id: TopicListID, frame: CGRect) in if drag.translation(of: id) == nil { cardFrames[id] = frame } }
-                            let placement = { (id: TopicListID, y: CGFloat) in
-                                DropPlacement.at(y, frames: cardFrames.filter { order.contains($0.key) }, dragging: id)
-                            }
                             if case .locked(let sessionID) = topic.id {
                                 LockedCard(store: store, row: topic, sessionID: sessionID, titles: model.titles,
                                            holdsSelection: topic.id == model.activeTopic,
                                            showsAllRows: showingAllRows.contains(topic.id),
                                            onShowAllRows: { showingAllRows.insert(topic.id) },
-                                           drag: $drag, neighbors: neighbors(of: topic.id, in: order), onFrame: onFrame, placement: placement)
+                                           drag: drag, order: order, neighbors: neighbors(of: topic.id, in: order))
                             } else {
                                 TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
                                           showsAllRows: showingAllRows.contains(topic.id),
                                           onShowAllRows: { showingAllRows.insert(topic.id) },
-                                          drag: $drag, neighbors: neighbors(of: topic.id, in: order), rename: renameTopic,
-                                          onFrame: onFrame, placement: placement)
+                                          drag: drag, order: order, neighbors: neighbors(of: topic.id, in: order), rename: renameTopic)
                             }
                         }
                         if let opened = model.openedNoTopicSession { noTopicCard(opened) }
                     }
                     .padding(.horizontal, 6).padding(.vertical, 4)
-                    .coordinateSpace(.named(TopicCard.listSpace))
                 }
                 .coordinateSpace(.named(TopicCard.viewport))
                 .scrollIndicators(.never)
@@ -233,12 +225,6 @@ private struct TopicsSection: View {
 }
 
 private extension View {
-    /// A press in a window that is not key reaches this view's gestures, so a press or a long press works on the first click.
-    @ViewBuilder
-    func takesFirstClick() -> some View {
-        if #available(macOS 15, *) { allowsWindowActivationEvents(true) } else { self }
-    }
-
     /// The look of a Topic's own action (Settle, Unsnooze, Reopen): a link, so the row stays quiet.
     func topicLink() -> some View {
         buttonStyle(.link).font(.system(size: 11))
@@ -281,19 +267,17 @@ private struct TopicChildren: View {
 
 /// What a Session line of an open Topic card needs to move the Session within its Topic.
 private struct SessionOrdering {
-    let drag: Binding<LongPressDrag<String>>
-    /// The coordinate space of the card, in which `placement` reads a height.
-    let space: String
+    /// The drag of the card's Session blocks; the line starts it, and the whole block moves.
+    let drag: LongPressDrag<String>
     /// The Sessions right above and below this one, where Move Up and Move Down put it.
     let above: String?
     let below: String?
     /// The Topic keeps an order the user gave, which Sort Sessions by Creation ends.
     let isManual: Bool
-    let placement: (String, CGFloat) -> DropPlacement<String>?
 }
 
 /// The heading of one Session inside a Topic: its Project and pills. Pressing it goes to the Session's
-/// active Window. In an open Topic card a long press moves the Session within its Topic.
+/// active Window. In an open Topic card a long press moves the Session, with its rows, within its Topic.
 private struct SessionHeading: View {
     let store: WorkspaceStore
     let topic: TopicsModel.Row
@@ -330,12 +314,9 @@ private struct SessionHeading: View {
         .contentShape(Rectangle())
         if let ordering {
             let id = session.id.session
-            label
-                .longPressDrag(id, state: ordering.drag, in: ordering.space, isEnabled: !store.changingTopic,
-                               placement: { ordering.placement(id, $0) }, onTap: go) { drop in
-                    if let placement = drop.sessionPlacement { store.moveSession(id, to: placement) }
-                }
-                .longPressDragLook(id, state: ordering.drag.wrappedValue, lineOffset: 1)
+            label.longPressDrag(id, drag: ordering.drag, isEnabled: !store.changingTopic, onTap: go) { drop in
+                if let placement = drop.sessionPlacement { store.moveSession(id, to: placement) }
+            }
         } else {
             label.onTapGesture(perform: go)
         }
@@ -518,17 +499,13 @@ private struct TopicCard: View {
     let holdsSelection: Bool
     let showsAllRows: Bool
     let onShowAllRows: () -> Void
-    @Binding var drag: LongPressDrag<TopicListID>
+    let drag: LongPressDrag<TopicListID>
+    /// The Topic and Locked cards with this card's pin, in list order, among which it moves.
+    let order: [TopicListID]
     let neighbors: CardNeighbors
     let rename: (String, Bool) -> Void
-    let onFrame: (TopicListID, CGRect) -> Void
-    /// Where this Topic, dragged to a height in `listSpace`, would land.
-    let placement: (TopicListID, CGFloat) -> DropPlacement<TopicListID>?
-    @State private var sessionDrag: LongPressDrag<String> = .idle
-    /// Each Session line's frame in the card, by Session ID, for the drop position of a Session drag.
-    @State private var sessionFrames: [String: CGRect] = [:]
+    @State private var sessionDrag = LongPressDrag<String>(spacing: CardSpacing.block)
 
-    static let listSpace = "topics-list"
     /// The Topic list's scroll view, in which an open card's header sticks to the top.
     static let viewport = "topics-viewport"
 
@@ -541,18 +518,15 @@ private struct TopicCard: View {
                          return CardBlock(id: session.id.session, items: children.items)
                      },
                      identifier: topic.id.accessibilityID, selectedWindowID: store.selectedWindowID,
-                     showsAll: showsAllRows, onShowAll: onShowAllRows, reservesCorner: true) { block in
+                     showsAll: showsAllRows, onShowAll: onShowAllRows, reservesCorner: true,
+                     blockDrag: topic.kind == .open ? sessionDrag : nil, windows: store.windowRowDrag) { block in
                 if let session = topic.sessions.first(where: { $0.id.session == block.id }) {
                     SessionHeading(store: store, topic: topic, session: session, ordering: ordering(of: session.id.session))
-                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(sessionSpace)) } action: { frame in
-                            if sessionDrag.translation(of: block.id) == nil { sessionFrames[block.id] = frame }
-                        }
                 }
             } row: { item in
                 TopicItemRow(store: store, item: item, titles: titles, isDimmed: topic.kind != .open)
             }
         }
-        .coordinateSpace(.named(sessionSpace))
         .cardCorner {
             if case .topic(let id) = topic.id {
                 Button("Settle") { store.presentSettleTopic(id) }
@@ -562,23 +536,17 @@ private struct TopicCard: View {
                     .opacity(topic.hasNoLiveSession ? 0.55 : 1)
             }
         }
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.listSpace)) } action: { frame in
-            if let listID { onFrame(listID, frame) }
-        }
-        .longPressDragLook(listID ?? .topic(""), state: drag, lineOffset: 4)
+        .longPressDragItem(listID ?? .topic(""), drag: drag, shown: order, cornerRadius: 9)
     }
-
-    private var sessionSpace: String { "sessions-" + topic.id.accessibilityID }
 
     /// How a Session line moves within this Topic. A Snoozed or Settled Topic's lines do not move.
     private func ordering(of sessionID: String) -> SessionOrdering? {
         guard topic.kind == .open, case .topic(let id) = topic.id else { return nil }
         let order = topic.sessions.map(\.id.session)
         guard let index = order.firstIndex(of: sessionID) else { return nil }
-        return SessionOrdering(drag: $sessionDrag, space: sessionSpace,
+        return SessionOrdering(drag: sessionDrag,
                                above: index > 0 ? order[index - 1] : nil, below: index + 1 < order.count ? order[index + 1] : nil,
-                               isManual: store.topicWatcher.records.first { $0.id == id }?.hasManualSessionOrder ?? false,
-                               placement: { id, y in DropPlacement.at(y, frames: sessionFrames.filter { order.contains($0.key) }, dragging: id) })
+                               isManual: store.topicWatcher.records.first { $0.id == id }?.hasManualSessionOrder ?? false)
     }
 
     private var formatted: SidebarFormats.Text {
@@ -592,11 +560,9 @@ private struct TopicCard: View {
                    summary: formatted.summary, reservesCorner: true) {
             if let label = topic.idleLabel { Text(label).font(.system(size: 10)).foregroundStyle(.secondary) }
         }
-        .longPressDrag(listID ?? .topic(""), state: $drag, in: Self.listSpace, isEnabled: listID != nil && !store.changingTopic,
-                       placement: { placement(listID ?? .topic(""), $0) }, onTap: press) { drop in
+        .longPressDrag(listID ?? .topic(""), drag: drag, isEnabled: listID != nil && !store.changingTopic, onTap: press) { drop in
             if let listID { store.moveTopic(listID, to: drop.topicPlacement) }
         }
-        .takesFirstClick()
         .accessibilityAction(.default, press)
         .accessibilityIdentifier(topic.id.accessibilityID)
         .accessibilityActions {
@@ -721,10 +687,9 @@ private struct LockedCard: View {
     let holdsSelection: Bool
     let showsAllRows: Bool
     let onShowAllRows: () -> Void
-    @Binding var drag: LongPressDrag<TopicListID>
+    let drag: LongPressDrag<TopicListID>
+    let order: [TopicListID]
     let neighbors: CardNeighbors
-    let onFrame: (TopicListID, CGRect) -> Void
-    let placement: (TopicListID, CGFloat) -> DropPlacement<TopicListID>?
 
     private var id: TopicListID { .lock(sessionID: sessionID) }
     private var window: TmuxWindow? { row.sessions.first?.windows.first }
@@ -742,14 +707,13 @@ private struct LockedCard: View {
                          return CardBlock(id: session.id.session, items: children.items)
                      },
                      identifier: row.id.accessibilityID, selectedWindowID: store.selectedWindowID,
-                     showsAll: showsAllRows, onShowAll: onShowAllRows) { _ in
+                     showsAll: showsAllRows, onShowAll: onShowAllRows, windows: store.windowRowDrag) { _ in
                 EmptyView()
             } row: { item in
                 TopicItemRow(store: store, item: item, titles: titles, isDimmed: false)
             }
         }
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(TopicCard.listSpace)) } action: { onFrame(id, $0) }
-        .longPressDragLook(id, state: drag, lineOffset: 4)
+        .longPressDragItem(id, drag: drag, shown: order, cornerRadius: 9)
     }
 
     private var header: some View {
@@ -759,11 +723,9 @@ private struct LockedCard: View {
                 BellMark()
             }
         }
-        .longPressDrag(id, state: $drag, in: TopicCard.listSpace, isEnabled: !store.changingTopic,
-                       placement: { placement(id, $0) }, onTap: press) { drop in
+        .longPressDrag(id, drag: drag, isEnabled: !store.changingTopic, onTap: press) { drop in
             store.moveTopic(id, to: drop.topicPlacement)
         }
-        .takesFirstClick()
         .accessibilityAction(.default, press)
         .accessibilityIdentifier(row.id.accessibilityID)
         .accessibilityActions {
@@ -915,7 +877,6 @@ private struct SessionsSection: View {
                 .opacity(dimmed ? 0.45 : 1)
                 .accessibilityIdentifier("session-window-\(window.id)")
                 .accessibilityValue(window.id == store.selectedWindowID ? "selected" : "")
-                .onTapGesture { store.select(window) }
                 .contextMenu { menu(for: window) }
         case .pane(let row):
             PaneRow(store: store, row: row)
@@ -1000,7 +961,7 @@ private struct SessionCard<Row: View>: View {
         } content: {
             CardList(blocks: [CardBlock(id: session.id, items: model.sessionChildren[session.id]?.items ?? [])],
                      identifier: identifier, selectedWindowID: store.selectedWindowID,
-                     showsAll: showsAllRows, onShowAll: onShowAllRows) { _ in
+                     showsAll: showsAllRows, onShowAll: onShowAllRows, windows: store.windowRowDrag) { _ in
                 EmptyView()
             } row: { item in
                 row(item)

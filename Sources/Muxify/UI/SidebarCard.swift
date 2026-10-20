@@ -18,7 +18,12 @@ struct SidebarCard<Header: View, Content: View>: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.chromeTheme) private var chromeTheme
+    /// The card's frame in the viewport, kept as it was while a drag lifts the card, so the header does not stick to the
+    /// top of the viewport when the card is dragged past it.
     @State private var frame: CGRect = .zero
+    @Environment(\.isLiftedByDrag) private var isLifted
+    /// The card moved while lifted, so the header glides to its new place once the card lands.
+    @State private var movedWhileLifted = false
     @State private var headerHeight: CGFloat = 0
     @State private var turn: Double = 0
 
@@ -47,10 +52,12 @@ struct SidebarCard<Header: View, Content: View>: View {
                 .zIndex(1)
                 .accessibilitySortPriority(1)
             if isOpen {
-                VStack(alignment: .leading, spacing: 1) { content() }
+                VStack(alignment: .leading, spacing: CardSpacing.row) { content() }
                     .padding(.horizontal, 4)
                     .padding(.top, 3)
                     .padding(.bottom, 5)
+                    // A row dragged up stops at the bottom of the header that sticks to the top, not under it.
+                    .environment(\.dragTopInset, stuck > 0 ? max(0, frame.minY + stuck + headerHeight) : 0)
             }
         }
         .background {
@@ -82,7 +89,19 @@ struct SidebarCard<Header: View, Content: View>: View {
             turn = -150
             withAnimation(.timingCurve(0.18, 0.85, 0.25, 1, duration: 0.9)) { turn = 0 }
         }
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(viewport ?? "")) } action: { if viewport != nil { frame = $0 } }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(viewport ?? "")) } action: { frame in
+            guard viewport != nil else { return }
+            guard !isLifted else {
+                movedWhileLifted = true
+                return
+            }
+            if movedWhileLifted {
+                movedWhileLifted = false
+                withAnimation(.spring(duration: 0.3, bounce: 0.15)) { self.frame = frame }
+            } else {
+                self.frame = frame
+            }
+        }
     }
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 9, style: .continuous) }
@@ -231,8 +250,46 @@ struct CardBlock: Identifiable {
     let items: [TopicsModel.SessionChildren.Item]
 }
 
+/// The room between the rows of an open card, and between its Session blocks, where their divider is.
+enum CardSpacing {
+    static let row: CGFloat = 1
+    static let block: CGFloat = 9
+}
+
+/// What a click and a long press on a card's Window row do: a click selects the Window, and a long press moves it,
+/// with its Pane rows, before or after another Window of its Session.
+struct WindowRowDrag {
+    var isEnabled = true
+    let select: (TmuxWindow) -> Void
+    let move: (TmuxWindow, DropPlacement<String>) -> Void
+}
+
+/// A Window row and the Pane rows under it, which move together; or a Pane row that stands in for its Session's only
+/// Window row, which does not move.
+private struct WindowUnit: Identifiable {
+    let id: String
+    let window: TmuxWindow?
+    var items: [TopicsModel.SessionChildren.Item]
+
+    static func units(_ items: [TopicsModel.SessionChildren.Item]) -> [WindowUnit] {
+        var units: [WindowUnit] = []
+        for item in items {
+            switch item {
+            case .window(let window):
+                units.append(WindowUnit(id: window.id, window: window, items: [item]))
+            case .pane(let row) where row.isUnderWindowRow && units.last?.window?.id == row.window.id:
+                units[units.count - 1].items.append(item)
+            case .pane:
+                units.append(WindowUnit(id: item.id, window: nil, items: [item]))
+            }
+        }
+        return units
+    }
+}
+
 /// An open card's list: each block's heading and rows, cut at `CardRows.limit` with "N more…" below.
-/// A block whose rows are all cut loses its heading too.
+/// A block whose rows are all cut loses its heading too. A long press on a Window row moves the Window within its
+/// Session; with `blockDrag`, a long press on a heading moves its whole block.
 struct CardList<Heading: View, Row: View>: View {
     let blocks: [CardBlock]
     /// The card header's identifier; the button is `<identifier>-more`.
@@ -243,18 +300,42 @@ struct CardList<Heading: View, Row: View>: View {
     /// The card shows an action in its bottom-right corner, so the list ends with a footer line for it, beside
     /// "N more…" when that shows.
     var reservesCorner = false
+    /// The drag of whole blocks, which the headings start; nil while the blocks keep their order.
+    var blockDrag: LongPressDrag<String>? = nil
+    let windows: WindowRowDrag
     @ViewBuilder var heading: (CardBlock) -> Heading
     @ViewBuilder var row: (TopicsModel.SessionChildren.Item) -> Row
+
+    @State private var windowDrag = LongPressDrag<String>(spacing: CardSpacing.row)
 
     var body: some View {
         let total = blocks.reduce(0) { $0 + $1.items.count }
         let shown = CardRows.shownCount(blocks.flatMap(\.items), selectedWindowID: selectedWindowID, showsAll: showsAll)
         let starts = blocks.indices.map { index in blocks[..<index].reduce(0) { $0 + $1.items.count } }
-        ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
-            if starts[index] < shown {
-                if index > 0 { Divider().padding(.horizontal, 6).padding(.vertical, 3) }
-                heading(block)
-                ForEach(block.items.prefix(shown - starts[index])) { row($0) }
+        let visible = blocks.indices.filter { starts[$0] < shown }.map { index in
+            CardBlock(id: blocks[index].id, items: Array(blocks[index].items.prefix(shown - starts[index])))
+        }
+        let blockIDs = visible.map(\.id)
+        // The dividers stay with the blocks they top, so they hide while a block moves.
+        let movingBlock = blockDrag?.dragged != nil
+        VStack(alignment: .leading, spacing: CardSpacing.block) {
+            ForEach(Array(visible.enumerated()), id: \.element.id) { index, block in
+                let view = blockView(block)
+                    .overlay(alignment: .top) {
+                        if index > 0 {
+                            Divider().padding(.horizontal, 6).offset(y: -5)
+                                .opacity(movingBlock ? 0 : 1)
+                                .animation(.easeOut(duration: 0.15), value: movingBlock)
+                        }
+                    }
+                // A moving Window stays above the next block when it gives way past the end of its own.
+                let holdsMovingWindow = windowDrag.dragged.map { id in block.items.contains { $0.id == id } } ?? false
+                if let blockDrag {
+                    view.longPressDragItem(block.id, drag: blockDrag, shown: blockIDs, cornerRadius: 7)
+                        .zIndex(blockDrag.dragged == block.id ? 30 : holdsMovingWindow ? 20 : 0)
+                } else {
+                    view.zIndex(holdsMovingWindow ? 20 : 0)
+                }
             }
         }
         if shown < total {
@@ -271,6 +352,31 @@ struct CardList<Heading: View, Row: View>: View {
             .accessibilityIdentifier(identifier + "-more")
         } else if reservesCorner {
             Color.clear.frame(height: 16)
+        }
+    }
+
+    private func blockView(_ block: CardBlock) -> some View {
+        let units = WindowUnit.units(block.items)
+        let windowIDs = units.compactMap(\.window?.id)
+        return VStack(alignment: .leading, spacing: CardSpacing.row) {
+            heading(block)
+            ForEach(units) { unit in
+                if let window = unit.window {
+                    VStack(alignment: .leading, spacing: CardSpacing.row) {
+                        ForEach(unit.items) { item in
+                            if case .window = item {
+                                row(item).longPressDrag(window.id, drag: windowDrag, isEnabled: windows.isEnabled && windowIDs.count > 1,
+                                                        onTap: { windows.select(window) }) { windows.move(window, $0) }
+                            } else {
+                                row(item)
+                            }
+                        }
+                    }
+                    .longPressDragItem(window.id, drag: windowDrag, shown: windowIDs, cornerRadius: 6)
+                } else {
+                    ForEach(unit.items) { row($0) }
+                }
+            }
         }
     }
 }

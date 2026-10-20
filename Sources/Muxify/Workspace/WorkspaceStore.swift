@@ -1819,6 +1819,21 @@ final class WorkspaceStore {
         runAsync(["rename-window", "-t", window.id, name]) { [weak self] _ in self?.refresh() }
     }
 
+    /// Puts a Window before or after another Window of its Session, which keeps its current Window.
+    func moveWindow(_ window: TmuxWindow, to placement: DropPlacement<String>) {
+        guard windows.contains(where: { $0.id == window.id && $0.sourceID == window.sourceID }),
+              let anchor = windows.first(where: { $0.id == placement.anchor && $0.sourceID == window.sourceID }),
+              anchor.sessionID == window.sessionID, anchor.id != window.id else { return }
+        let side = if case .before = placement { "-b" } else { "-a" }
+        runAsync(["move-window", "-d", side, "-s", window.id, "-t", anchor.id]) { [weak self] _ in self?.refresh() }
+    }
+
+    /// A click on a card's Window row selects it, and a long press moves it within its Session.
+    var windowRowDrag: WindowRowDrag {
+        WindowRowDrag(isEnabled: !changingTopic, select: { [weak self] in self?.select($0) },
+                      move: { [weak self] in self?.moveWindow($0, to: $1) })
+    }
+
     /// Runs a tmux command against the pane our client currently has focused.
     private func runOnCurrentPane(_ makeArgs: @escaping (_ paneID: String, _ windowID: String) -> [String]) {
         // display-message's -c is a message recipient, not a dependable format

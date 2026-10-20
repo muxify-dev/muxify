@@ -28,17 +28,36 @@ final class TopicOrderTests: XCTestCase {
 
     private func shown(_ entries: [TopicListEntry]) -> [String] { ids(TopicOrder.sorted(entries)) }
 
-    func testDropPlacementFollowsTheHalfOfTheCardUnderTheDrag() {
-        let frames = ["a": CGRect(x: 0, y: 0, width: 200, height: 40),
-                      "b": CGRect(x: 0, y: 46, width: 200, height: 100),
-                      "c": CGRect(x: 0, y: 152, width: 200, height: 40)]
-        XCTAssertEqual(DropPlacement.at(60, frames: frames, dragging: "c"), .before("b"))
-        XCTAssertEqual(DropPlacement.at(120, frames: frames, dragging: "c"), .after("b"))
-        XCTAssertEqual(DropPlacement.at(43, frames: frames, dragging: "c"), .before("b"), "the gap above a card goes before it")
-        XCTAssertEqual(DropPlacement.at(-10, frames: frames, dragging: "c"), .before("a"))
-        XCTAssertEqual(DropPlacement.at(400, frames: frames, dragging: "a"), .after("c"), "below every card goes last")
-        XCTAssertNil(DropPlacement.at(60, frames: frames, dragging: "b"), "a card dropped on itself stays")
-        XCTAssertNil(DropPlacement.at(60, frames: [:], dragging: "b"))
+    func testADraggedCardPassesAnotherWhenItsLeadingEdgeCoversHalfOfIt() {
+        // a at 0–40, b at 46–146, c at 152–192.
+        let layout = StackLayout(heights: ["a": 40, "b": 100, "c": 40], spacing: 6)
+        let order = ["a", "b", "c"]
+        XCTAssertEqual(layout.top(of: "c", in: order), 152)
+        XCTAssertNil(layout.placement(of: "c", movedBy: -50, in: order), "c's top at 102 has not passed b's middle at 96")
+        XCTAssertEqual(layout.placement(of: "c", movedBy: -57, in: order), .before("b"))
+        XCTAssertEqual(layout.placement(of: "c", movedBy: -140, in: order), .before("a"), "c's top at 12 passed a's middle at 20")
+        XCTAssertEqual(layout.placement(of: "a", movedBy: 57, in: order), .after("b"), "a's bottom at 97 passed b's middle")
+        XCTAssertEqual(layout.placement(of: "a", movedBy: 400, in: order), .after("c"), "below every card goes last")
+        XCTAssertEqual(layout.placement(of: "b", movedBy: 80, in: order), .after("c"), "a tall card passes a short one at once")
+        XCTAssertNil(layout.placement(of: "b", movedBy: 20, in: order), "a card dropped on itself stays")
+        XCTAssertNil(layout.placement(of: "d", movedBy: 20, in: order))
+    }
+
+    func testADraggedCardStopsAtTheEndsOfItsListAndAtTheTopOfTheView() {
+        let layout = StackLayout(heights: ["a": 40, "b": 100, "c": 40], spacing: 6)
+        let order = ["a", "b", "c"]
+        XCTAssertEqual(layout.bounded(-30, of: "b", in: order), -30, "within the list it follows the pointer")
+        XCTAssertEqual(layout.bounded(1000, of: "b", in: order), 46, "it stops at the bottom of the last card")
+        XCTAssertEqual(layout.bounded(-1000, of: "b", in: order), -46, "it stops at the top of the first card")
+        XCTAssertEqual(layout.bounded(-1000, of: "b", in: order, headroom: 20), -20, "it stops at the top of the view first")
+        XCTAssertEqual(layout.bounded(-1000, of: "b", in: order, headroom: -15), 0, "a card already past the top does not go up")
+        XCTAssertEqual(layout.bounded(30, of: "b", in: order, headroom: -15), 30, "it still goes down")
+    }
+
+    func testAPlacementMovesTheItemNextToItsAnchor() {
+        XCTAssertEqual(DropPlacement.before("a").placing("c", in: ["a", "b", "c"]), ["c", "a", "b"])
+        XCTAssertEqual(DropPlacement.after("c").placing("a", in: ["a", "b", "c"]), ["b", "c", "a"])
+        XCTAssertEqual(DropPlacement.after("x").placing("a", in: ["a", "b"]), ["a", "b"], "an anchor that left keeps the list")
     }
 
     func testMovesUseOnlyTheMovedRankWhenThereIsAFiniteGap() throws {
