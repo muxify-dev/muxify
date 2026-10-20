@@ -709,7 +709,7 @@ A loop that the current object does not contain produces no text.
 | Object | Variables | Loops |
 | --- | --- | --- |
 | Topic | `topic_title`, `topic_pinned_flag`, `topic_dormant_flag`, `session_count`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | S, W, P |
-| Session | `session_name`, `project`, `branch`, `branch_label`, `home_flag`, `topic_title`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | W, P |
+| Session | `session_name`, `project`, `branch`, `topic_title`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | W, P |
 | Window | Its Session variables, plus `window_index`, `window_name`, `window_title`, `window_panes`, `pane_current_command`, `pane_current_path`, `tab_count`, `agent_kind`, `agent_status` | P |
 | Pane | Its Window and Session variables, plus `pane_index`, `pane_label`, `pane_title`, `pane_current_command`, `pane_current_path`, `pane_active_flag`, `agent_kind`, `agent_status`, `agent_unread_flag`, `agent_group` | None |
 | Agent | Its Pane variables, including its own Window, Session, and Topic values | None |
@@ -727,14 +727,13 @@ Counts include Panes even when Pane rows are hidden. Flags use `1` and `0`.
 `project` is the Session's display Project name. `branch` comes from the HEAD at the Session or Pane path.
 Muxify reads the repository files directly and caches each file read for one refresh. It does not start git.
 `branch` is empty on a Remote Environment or a detached HEAD.
-`branch_label` is the branch text used in the Session pill. It is empty when redundant or absent.
 
 The default Formats preserve the existing text. Window and Pane Summaries are empty.
 
 | Line | Default Format |
 | --- | --- |
 | Topic title | `#{topic_title}` |
-| Topic Summary | `#{?session_count,#{S:#{project}#{?branch_label, ⎇ #{branch_label},}#{?loop_last_flag,, · }} · #{window_count} #{?#{==:#{window_count},1},Window,Windows},No Sessions}` |
+| Topic Summary | `#{?session_count,#{S:#{project}#{?loop_last_flag,, · }} · #{window_count} #{?#{==:#{window_count},1},Window,Windows},No Sessions}` |
 | Session title | `#{session_name}` |
 | Session Summary | `#{window_count} #{?#{==:#{window_count},1},Window,Windows}` |
 | Window title | `#{window_title}` |

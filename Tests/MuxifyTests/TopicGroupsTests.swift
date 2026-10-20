@@ -22,7 +22,7 @@ final class TopicGroupsTests: XCTestCase {
         var record = TopicRecord(id: id, title: id.capitalized, homeProject: "/work/app")
         record.settledAt = at
         record.outcome = outcome
-        record.sessions = [.object(["project_path": .string("/work/app"), "worktree_path": .string("/trees/app/fix-links"), "branch": .string("fix"),
+        record.sessions = [.object(["project_path": .string("/work/app"), "worktree_path": .string("/trees/app/fix-links"),
                                     "windows": .array([.object(["name": .string("server"), "directory": .string("/work/app/srv")]),
                                                        .object(["name": .string("shell")])])])]
         return record
@@ -105,8 +105,6 @@ final class TopicGroupsTests: XCTestCase {
         XCTAssertFalse(group.topics[0].isDormant, "a Settled Topic is not Dormant, it is done")
         let session = group.topics[0].sessions[0]
         XCTAssertEqual(session.projectName, "app/fix-links")
-        XCTAssertTrue(session.isHome)
-        XCTAssertEqual(session.branch, "fix", "the branch differs from the Worktree folder, so the badge shows")
         guard case .remembered(let windows) = session.contents else { return XCTFail("remembered Windows expected") }
         XCTAssertEqual(windows.map(\.name), ["server", "shell"])
         XCTAssertEqual(windows.map(\.directory), ["/work/app/srv", "/work/app"])

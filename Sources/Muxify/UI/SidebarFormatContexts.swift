@@ -32,8 +32,6 @@ struct SidebarFormatContexts {
                 .session_name: first.sessionName,
                 .project: topicSession?.projectName ?? location?.project.name ?? remoteProjectName(first.sessionPath),
                 .branch: first.isRemote ? "" : branches[.local(first.sessionPath)] ?? "",
-                .branch_label: first.isRemote ? "" : topicSession?.branch ?? "",
-                .home_flag: location?.isHome == true ? "1" : "0",
                 .topic_title: first.isRemote ? "" : first.topicID.flatMap { model.titles[$0] } ?? "",
                 .window_count: String(members.count),
                 .pane_count: String(members.reduce(0) { $0 + $1.paneCount }),

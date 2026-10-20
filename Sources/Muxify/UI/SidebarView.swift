@@ -276,7 +276,7 @@ private struct SessionOrdering {
     let isManual: Bool
 }
 
-/// The heading of one Session inside a Topic: its Project and pills. Pressing it goes to the Session's
+/// The heading of one Session inside a Topic: its Project. Pressing it goes to the Session's
 /// active Window. In an open Topic card a long press moves the Session, with its rows, within its Topic.
 private struct SessionHeading: View {
     let store: WorkspaceStore
@@ -306,7 +306,6 @@ private struct SessionHeading: View {
     private var line: some View {
         let label = HStack(spacing: 6) {
             Text(session.projectName).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-            SessionPills(isHome: session.isHome, branch: session.branch)
             Spacer(minLength: 4)
         }
         .foregroundStyle(.secondary)
@@ -339,25 +338,6 @@ private struct SessionHeading: View {
 
     private func go() {
         if case .live = session.contents { store.goToSession(session.id.session) }
-    }
-}
-
-/// The "home" and branch pills of a Session.
-private struct SessionPills: View {
-    let isHome: Bool
-    let branch: String?
-
-    var body: some View {
-        if isHome {
-            Text("home").font(.system(size: 9)).foregroundStyle(.secondary)
-                .padding(.horizontal, 4).background(.quaternary, in: Capsule())
-        }
-        if let branch {
-            Text(branch).font(.system(size: 9)).foregroundStyle(.secondary)
-                .lineLimit(1).truncationMode(.middle).frame(maxWidth: 100)
-                .padding(.horizontal, 4).background(.quaternary, in: Capsule())
-                .help(branch)
-        }
     }
 }
 
@@ -935,9 +915,6 @@ private struct SessionCard<Row: View>: View {
                        notes: (isSnoozed ? ["snoozed"] : []) + (isLocked ? ["Locked"] : []),
                        summary: formatted.summary) {
                 if isSnoozed { Text("snoozed").font(.system(size: 10)).foregroundStyle(.secondary) }
-                if let topicSession = model.topicSessions[session.id] {
-                    SessionPills(isHome: topicSession.isHome, branch: topicSession.branch)
-                }
                 if !isOpen, session.windows.contains(where: \.hasBell) {
                     BellMark()
                 }

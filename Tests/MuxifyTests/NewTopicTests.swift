@@ -172,6 +172,5 @@ final class NewTopicTests: XCTestCase {
         let model = TopicsModel(records: [TopicRecord(id: "topic", title: "Fix", homeProject: "/work/game")],
                                 windows: [window], config: config, selection: TopicSelection())
         XCTAssertEqual(model.rows.first?.sessions.first?.projectName, "work/game")
-        XCTAssertEqual(model.rows.first?.sessions.first?.isHome, true)
     }
 }

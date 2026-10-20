@@ -820,7 +820,7 @@ final class WorkspaceStore {
         // Topic records and Projects are on this Mac; a Remote App Window shows Sessions only.
         if isRemote { config.sidebar.topics = false }
         return TopicsModel(records: topicWatcher.records, windows: windows, config: config,
-                           selection: selection, mode: sidebarMode, groups: topicGroups, branches: topicBranches, agents: agents,
+                           selection: selection, mode: sidebarMode, groups: topicGroups, agents: agents,
                            panes: panesVisible ? panes : nil, zen: isRemote ? nil : topicWatcher.zen)
     }
 

@@ -44,12 +44,12 @@ final class SidebarFormatTests: XCTestCase {
     }
 
     func testDefaultLinesAndEmptyTitleFallback() throws {
-        let session = SidebarFormat.Context(values: [.project: "proj", .branch: "real", .branch_label: "branch"])
+        let session = SidebarFormat.Context(values: [.project: "proj", .branch: "real"])
         let second = SidebarFormat.Context(values: [.project: "proj2"])
         let topic = SidebarFormat.Context(values: [.topic_title: "Title", .session_count: "2", .window_count: "3"],
                                           loops: [.sessions: [session, second]])
         let defaults = SidebarFormats.defaults
-        XCTAssertEqual(defaults.text(for: .topic, in: topic, mode: .topics).summary, "proj ⎇ branch · proj2 · 3 Windows")
+        XCTAssertEqual(defaults.text(for: .topic, in: topic, mode: .topics).summary, "proj · proj2 · 3 Windows")
         XCTAssertEqual(defaults.text(for: .topic, in: .init(), mode: .topics).summary, "No Sessions")
         XCTAssertEqual(defaults.text(for: .session, in: .init(values: [.window_count: "1"]), mode: .sessions).summary, "1 Window")
         var custom = defaults

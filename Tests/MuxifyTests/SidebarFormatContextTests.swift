@@ -9,7 +9,7 @@ final class SidebarFormatContextTests: XCTestCase {
                    isRemote: remote, topicID: "topic", sessionPath: "/trees/feature")
     }
 
-    func testContextsKeepRawBranchAndDefaultSummaryAndIncludeHiddenPanes() throws {
+    func testContextsKeepBranchAndDefaultSummaryAndIncludeHiddenPanes() throws {
         var record = TopicRecord(id: "topic", title: "Task", homeProject: "/app")
         record.sessions = [.object(["project_path": .string("/app"), "worktree_path": .string("/trees/feature")])]
         let window = window()
@@ -20,12 +20,12 @@ final class SidebarFormatContextTests: XCTestCase {
             $0 == "/trees/feature/.git/HEAD" ? "ref: refs/heads/feature" : nil
         }
         let model = TopicsModel(records: [record], windows: [window], config: Config(), selection: TopicSelection(),
-                                branches: branches, agents: agents, panes: nil)
+                                agents: agents, panes: nil)
         let contexts = SidebarFormatContexts(model: model, windows: [window], panes: [pane], agents: agents,
                                              branches: branches, records: [record], projects: [], tabCounts: ["@1": 4])
         let topic = try XCTUnwrap(contexts.topics[.topic("topic")])
         XCTAssertEqual(SidebarFormats.defaults.text(for: .topic, in: topic, mode: .topics).summary, "app/feature · 1 Window")
-        XCTAssertEqual(try SidebarFormat("#{S:#{branch}|#{branch_label}}").expand(in: topic), "feature|")
+        XCTAssertEqual(try SidebarFormat("#{S:#{branch}}").expand(in: topic), "feature")
         XCTAssertEqual(try SidebarFormat("#{P:#{session_name}/#{window_index}/#{pane_index}/#{branch}/#{tab_count}}").expand(in: topic),
                        "app-feature/2/3/feature/4")
         XCTAssertEqual(try SidebarFormat("#{pane_count}/#{agent_count}/#{agents_working}/#{agents_unread}").expand(in: topic), "1/1/1/1")

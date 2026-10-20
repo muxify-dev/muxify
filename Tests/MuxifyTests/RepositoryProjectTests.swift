@@ -198,24 +198,20 @@ final class RepositoryProjectTests: XCTestCase {
         XCTAssertEqual(shown(currentRows), ["app | /work/app · Also in Main owner | /work/app", "app/feat | /trees/app/feat | /trees/app/feat"])
     }
 
-    func testSessionInTheMainCheckoutIsLabelledAsTheProjectWithItsBranchAndALegacyOneWithoutABranch() {
+    func testSessionInTheMainCheckoutAndALegacyOneAreLabelledAsTheProject() {
         var topic = TopicRecord(id: "a", title: "Fix", homeProject: app.folder.path)
         topic.sessions = [.object(["project_path": .string(app.folder.path), "worktree_path": .string(app.folder.path), "branch": .string("main")])]
         var legacy = TopicRecord(id: "b", title: "Old", homeProject: app.folder.path)
         legacy.sessions = [.object(["project_path": .string(app.folder.path)])]
-        let files = ["/work/app/.git/HEAD": "ref: refs/heads/main"]
         var config = Config()
         config.projects = [app]
         func session(of record: TopicRecord) -> TopicsModel.Session? {
             let model = TopicsModel(records: [record], windows: [window("@1", session: "$1", topic: record.id, directory: app.folder.path)],
-                                    config: config, selection: TopicSelection(), groups: TopicGroupsState(),
-                                    branches: TopicBranches(records: [record]) { files[$0] })
+                                    config: config, selection: TopicSelection(), groups: TopicGroupsState())
             return model.rows.first?.sessions.first
         }
         XCTAssertEqual(session(of: topic)?.projectName, "app")
-        XCTAssertEqual(session(of: topic)?.branch, "main")
         XCTAssertEqual(session(of: legacy)?.projectName, "app")
-        XCTAssertNil(session(of: legacy)?.branch)
         XCTAssertFalse(TopicsModel.usesMainWorkingCopy(window("@1", session: "$1", topic: "a", directory: app.folder.path, path: app.folder.path + "/src"),
                                                        record: topic, projects: [app]))
     }
@@ -237,28 +233,22 @@ final class RepositoryProjectTests: XCTestCase {
         XCTAssertEqual(plain.record?.sessions.last?["worktree_path"]?.string, "/trees/app/t")
     }
 
-    func testSessionInAWorktreeIsLabelledRepoSlashFolderWithABadgeOnlyWhenTheBranchDiffers() {
+    func testSessionInAWorktreeIsLabelledRepoSlashFolder() {
         var topic = TopicRecord(id: "a", title: "Fix", homeProject: gameServer.folder.path)
         topic.sessions = [.object(["project_path": .string(gameServer.folder.path), "worktree_path": .string(main.folder.path), "branch": .string("main")]),
                           .object(["project_path": .string(notes.folder.path)])]
         var settled = TopicRecord(id: "b", title: "Done", homeProject: gameServer.folder.path)
         settled.sessions = [.object(["project_path": .string(gameServer.folder.path), "worktree_path": .string(release.folder.path), "branch": .string("release-line")])]
         settled.settledAt = "2026-10-01T00:00:00Z"
-        let files = [main.folder.path + "/.git": "gitdir: /work/game_server/worktrees/main",
-                     "/work/game_server/worktrees/main/HEAD": "ref: refs/heads/main",
-                     release.folder.path + "/.git": "gitdir: /work/game_server/worktrees/release",
-                     "/work/game_server/worktrees/release/HEAD": "ref: refs/heads/release-line"]
         var config = Config()
         config.projects = [gameServer, notes]
         let windows = [window("@1", session: "$1", topic: "a", directory: main.folder.path),
                        window("@2", session: "$2", topic: "a", directory: notes.folder.path)]
         let model = TopicsModel(records: [topic, settled], windows: windows, config: config, selection: TopicSelection(),
-                                groups: TopicGroupsState(), branches: TopicBranches(records: [topic]) { files[$0] })
+                                groups: TopicGroupsState())
         XCTAssertEqual(model.rows[0].sessions.map(\.projectName), ["game_server/main", "notes"])
-        XCTAssertEqual(model.rows[0].sessions.map(\.branch), [nil, nil])
         let remembered = model.groups.first { $0.kind == .settled }?.topics.first?.sessions.first
         XCTAssertEqual(remembered?.projectName, "game_server/release")
-        XCTAssertEqual(remembered?.branch, "release-line")
     }
 
     func testWindowInItsOwnWorktreeOfABareLayoutIsNotFlaggedAsMainWorkingCopy() {

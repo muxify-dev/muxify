@@ -1,11 +1,10 @@
 import Foundation
 
-/// Where a Window's Session belongs in its Topic: the Project it works on, whether that is the Home Project,
-/// and the Worktree when the record remembers one. The longest remembered directory that holds the Session
-/// directory decides; without one, the Config Project that holds it, else the directory itself.
+/// Where a Window's Session belongs in its Topic: the Project it works on, and the Worktree when the record
+/// remembers one. The longest remembered directory that holds the Session directory decides; without one,
+/// the Config Project that holds it, else the directory itself.
 public struct TopicLocation {
     public let project: Project
-    public let isHome: Bool
     public let worktree: Folder?
 
     /// Topics are local, so the record's paths and the Session directory resolve on this Mac.
@@ -25,7 +24,6 @@ public struct TopicLocation {
         let folder = match?.project ?? Project.containing(directory, in: projects)?.folder ?? directory
         let project = Project.named(at: folder, in: projects)
         self.project = project.name.isEmpty ? Project(folder: folder, name: "Unknown Project") : project
-        isHome = match.map { $0.project == home } ?? false
         worktree = match?.worktree
     }
 }

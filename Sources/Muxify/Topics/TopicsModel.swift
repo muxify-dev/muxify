@@ -204,8 +204,6 @@ struct TopicsModel {
 
         let id: TopicSessionID
         let projectName: String
-        let isHome: Bool
-        let branch: String?
         let contents: Contents
         var windows: [TmuxWindow] {
             if case .live(let children) = contents { return children.windows }
@@ -301,7 +299,7 @@ struct TopicsModel {
     let agentMarks: [String: AgentMark]
     /// The rows under each Session row in Sessions mode, by Session ID.
     let sessionChildren: [String: SessionChildren]
-    /// Each live Session as a Topic lists it, by Session ID, for its home and branch pills in Sessions mode.
+    /// Each live Session as a Topic lists it, by Session ID, for its Project name in the sidebar Formats.
     let topicSessions: [String: Session]
     let dueWakes: [Wake]
     /// The next Snooze deadline after `now`. From then on, a model built from the same inputs is different.
@@ -317,7 +315,7 @@ struct TopicsModel {
 
     init(records: [TopicRecord], windows: [TmuxWindow], config: Config, selection: TopicSelection,
          mode: SidebarMode = .topics, groups groupsState: TopicGroupsState = TopicGroupsState(),
-         branches: TopicBranches = TopicBranches(), agents: [Agent] = [], panes: [TmuxPane]? = nil, zen: ZenRecord? = nil,
+         agents: [Agent] = [], panes: [TmuxPane]? = nil, zen: ZenRecord? = nil,
          now: Date = Date()) {
         topicsEnabled = config.sidebar.topics
         sessionsEnabled = config.sidebar.sessions
@@ -381,10 +379,8 @@ struct TopicsModel {
             return ordered.map(\.sessionID).map { sessionID -> Session in
                 let windows = members.filter { $0.sessionID == sessionID }
                 let identity = TopicSessionID(topic: id, session: sessionID)
-                let project = TopicLocation(of: windows[0], record: record, projects: config.projects)
-                let label = Self.sessionLabel(project.project, worktree: project.worktree,
-                                              branch: project.worktree.flatMap { branches[$0] })
-                return Session(id: identity, projectName: label.projectName, isHome: project.isHome, branch: label.branch,
+                let location = TopicLocation(of: windows[0], record: record, projects: config.projects)
+                return Session(id: identity, projectName: Self.projectName(location.project, worktree: location.worktree),
                                contents: .live(children(windows)))
             }
         }
@@ -518,7 +514,6 @@ struct TopicsModel {
             if case .at(let date) = deadline { return date.formatted(date: .abbreviated, time: .omitted) }
             return nil
         }
-        let home = record.homeProject.map(Folder.local)
         let sessions = record.sessions.enumerated().compactMap { index, session -> Session? in
             guard let path = session["project_path"]?.string, !path.isEmpty else { return nil }
             let folder = Folder.local(path)
@@ -527,22 +522,18 @@ struct TopicsModel {
                 RememberedWindow(id: "\(record.id)-\(index)-\(position)", name: window["name"]?.string ?? "shell",
                                  directory: window["directory"]?.string ?? path)
             }
-            let label = sessionLabel(Project.named(at: folder, in: projects),
-                                     worktree: session["worktree_path"]?.string.map(Folder.local), branch: session["branch"]?.string)
-            return Session(id: identity, projectName: label.projectName, isHome: folder == home,
-                           branch: label.branch, contents: .remembered(windows))
+            return Session(id: identity, projectName: projectName(Project.named(at: folder, in: projects),
+                                                                  worktree: session["worktree_path"]?.string.map(Folder.local)),
+                           contents: .remembered(windows))
         }
         return Row(id: id, title: title, kind: .settled(detail: outcome.isEmpty ? settledOn ?? record.settledAt ?? "" : outcome),
                    mark: RowMark(unread: record.isUnread, agent: nil), isPinned: record.isPinned, sessions: sessions, isExpanded: expanded.contains(id),
                    tags: record.tags.sorted())
     }
 
-    /// A Session in a Worktree is named as the Project names that Worktree. Its branch badge shows only
-    /// when the branch says something the folder does not.
-    private static func sessionLabel(_ project: Project, worktree: Folder?, branch: String?) -> (projectName: String, branch: String?) {
-        guard let worktree else { return (project.displayName, nil) }
-        let folder = (worktree.path as NSString).lastPathComponent
-        return (project.displayName(ofWorktreeAt: worktree), branch == folder ? nil : branch)
+    /// A Session in a Worktree is named as the Project names that Worktree.
+    private static func projectName(_ project: Project, worktree: Folder?) -> String {
+        worktree.map(project.displayName(ofWorktreeAt:)) ?? project.displayName
     }
 
     /// A Window that left its Session's Worktree for the main working copy of the Project.

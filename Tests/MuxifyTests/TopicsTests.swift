@@ -38,7 +38,7 @@ final class TopicsTests: XCTestCase {
         XCTAssertTrue(store.records.isEmpty)
     }
 
-    func testGroupingProjectLabelsHomeWorktreeAndDormantTopics() {
+    func testGroupingProjectLabelsWorktreeAndDormantTopics() {
         var topic = TopicRecord(id: "a", title: "Fix reward", homeProject: "/work/app")
         topic.sessions = [.object(["project_path": .string("/work/app"), "worktree_path": .string("/trees/fix")]),
                           .object(["project_path": .string("/work/app/tools")])]
@@ -55,7 +55,6 @@ final class TopicsTests: XCTestCase {
         let model = TopicsModel(records: [topic, dormant, settled], windows: windows, config: Config(), selection: TopicSelection())
         XCTAssertEqual(model.rows.map(\.title), ["Fix reward", "Untitled 3"])
         XCTAssertEqual(model.rows[0].sessions.map(\.projectName), ["app/fix", "tools", "application"])
-        XCTAssertEqual(model.rows[0].sessions.map(\.isHome), [true, false, false])
         XCTAssertEqual(model.rows[0].sessions[0].windows.count, 2)
         XCTAssertFalse(model.rows[0].isDormant)
         XCTAssertTrue(model.rows[1].isDormant)

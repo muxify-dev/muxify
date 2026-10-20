@@ -72,47 +72,33 @@ final class WorktreeTests: XCTestCase {
                        directory.resolvingSymlinksInPath())
     }
 
-    private func model(head: String?, pointer: String = "gitdir: /repo/.git/worktrees/fix\n",
-                       sessionPath: String = "/trees/fix/src", remembered: Bool = true, topicID: String? = "topic") -> TopicsModel {
+    /// The branch read for the Worktree at /trees/fix, which a Topic record remembers unless `remembered` is false.
+    private func worktreeBranch(head: String?, pointer: String = "gitdir: /repo/.git/worktrees/fix\n", remembered: Bool = true) -> String? {
         var record = TopicRecord(id: "topic", title: "Fix", homeProject: "/repo")
         if remembered {
-            record.sessions = [.object(["project_path": .string("/repo"), "worktree_path": .string("/trees/fix"),
-                                        "branch": .string("original")])]
+            record.sessions = [.object(["project_path": .string("/repo"), "worktree_path": .string("/trees/fix")])]
         }
         var files = ["/trees/fix/.git": pointer]
         files["/repo/.git/worktrees/fix/HEAD"] = head
-        let branches = TopicBranches(records: [record]) { files[$0] }
-        let window = TmuxWindow(id: "@1", sessionID: "$1", sessionName: "renamed", index: 0,
-                                name: "shell", paneTitle: "", path: "/elsewhere", command: "zsh", isActive: true,
-                                paneCount: 1, hasBell: false, sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(),
-                                openRequests: [], topicID: topicID, sessionPath: sessionPath)
-        return TopicsModel(records: [record], windows: [window], config: Config(), selection: TopicSelection(), branches: branches)
+        return TopicBranches(records: [record]) { files[$0] }[.local("/trees/fix")]
     }
 
-    func testBranchBadgeReadsHeadNamesAndRelativeGitdir() {
-        // The Worktree folder is "fix", so the badge shows only a branch the folder does not name.
-        for (branch, badge) in [("fix", nil), ("feature/long-branch-name", "feature/long-branch-name"), ("another-branch", "another-branch")] {
-            let rows = model(head: "ref: refs/heads/\(branch)\n").rows
-            XCTAssertEqual(rows.first?.sessions.first?.branch, badge)
-            XCTAssertEqual(rows.first?.sessions.first?.projectName, "repo/fix")
-            XCTAssertEqual(rows.first?.sessions.first?.isHome, true)
+    func testBranchReadsHeadNamesAndRelativeGitdir() {
+        for branch in ["fix", "feature/long-branch-name"] {
+            XCTAssertEqual(worktreeBranch(head: "ref: refs/heads/\(branch)\n"), branch)
         }
-        XCTAssertEqual(model(head: "ref: refs/heads/feature/fix\n", pointer: "gitdir: ../../repo/.git/worktrees/fix\n")
-            .rows.first?.sessions.first?.branch, "feature/fix")
+        XCTAssertEqual(worktreeBranch(head: "ref: refs/heads/feature/fix\n", pointer: "gitdir: ../../repo/.git/worktrees/fix\n"), "feature/fix")
     }
 
-    func testBranchBadgeIsAbsentForDetachedMissingMalformedAndNormalSessions() {
+    func testBranchIsAbsentForDetachedMissingMalformedAndUnrememberedWorktrees() {
         for head in [nil, "", "123456789abcdef\n", "ref: refs/tags/v1\n", "ref: refs/heads/\n",
                      "ref: refs/heads/fix\nref: refs/heads/other", "ref: refs/heads/bad name"] {
-            XCTAssertNil(model(head: head).rows.first?.sessions.first?.branch, head ?? "missing")
+            XCTAssertNil(worktreeBranch(head: head), head ?? "missing")
         }
         for pointer in ["", "gitdir: ", "garbage", "gitdir: /missing", "gitdir: /repo\nother"] {
-            XCTAssertNil(model(head: "ref: refs/heads/feature/fix", pointer: pointer).rows.first?.sessions.first?.branch)
+            XCTAssertNil(worktreeBranch(head: "ref: refs/heads/feature/fix", pointer: pointer), pointer)
         }
-        XCTAssertNil(model(head: "ref: refs/heads/feature/fix", remembered: false).rows.first?.sessions.first?.branch)
-        XCTAssertNil(model(head: "ref: refs/heads/feature/fix", sessionPath: "/repo").rows.first?.sessions.first?.branch)
-        XCTAssertNil(model(head: "ref: refs/heads/feature/fix", sessionPath: "/trees/fix-other").rows.first?.sessions.first?.branch)
-        XCTAssertNil(model(head: "ref: refs/heads/feature/fix", topicID: nil).rows.last?.sessions.first?.branch)
+        XCTAssertNil(worktreeBranch(head: "ref: refs/heads/feature/fix", remembered: false))
     }
 
     func testGitFailureNamesGit() {
