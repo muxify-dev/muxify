@@ -1340,7 +1340,7 @@ private final class TopicSandbox {
     func git(_ arguments: [String], in directory: String) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid"] + arguments
+        process.arguments = ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgSign=false"] + arguments
         process.currentDirectoryURL = URL(fileURLWithPath: directory)
         let output = Pipe()
         process.standardOutput = output

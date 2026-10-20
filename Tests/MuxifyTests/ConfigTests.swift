@@ -273,6 +273,19 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    func testCardTitlesWrapUnlessTitlesWrapIsFalse() throws {
+        XCTAssertTrue(try load("").sidebar.wrapsTitles)
+        let config = try load("sidebar:\n  titles:\n    wrap: false")
+        XCTAssertFalse(config.sidebar.wrapsTitles)
+        XCTAssertEqual(config.problems, [])
+        XCTAssertTrue(Config.template.contains("#   titles:\n#     wrap: true"))
+        let bad = try load("sidebar:\n  titles:\n    wrap: 'false'\n    cut: true")
+        XCTAssertTrue(bad.sidebar.wrapsTitles)
+        XCTAssertEqual(bad.problems.map(\.message), ["sidebar.titles.wrap: expected a boolean", "unknown key \"sidebar.titles.cut\""])
+        XCTAssertEqual(bad.problems.map(\.line), [3, 4])
+        XCTAssertEqual(try load("sidebar:\n  titles: false").problems.map(\.message), ["sidebar.titles: expected a mapping"])
+    }
+
     func testMissingOrEmptyFileGivesTheDefaults() throws {
         for config in [try load([:]), try load(""), try load("# nothing here\n\n")] {
             XCTAssertEqual(config.keybinds.action(for: trigger("cmd+s")), .toggleSidebar)

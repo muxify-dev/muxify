@@ -1,5 +1,6 @@
 """Where the Sidebar puts its parts: the Snoozed and Settled groups at the bottom of the panel, under the Topics list,
-the Agents section and Pane rows that the Config can decide, and the accessibility elements of the card lists.
+the Agents section, Pane rows and card title lines that the Config can decide, and the accessibility elements of the
+card lists.
 
 This suite has its own sandbox with few Topics, so the Topics list is shorter than the Sidebar. In the
 topics_*_sidebar suites the list grows with every check, and a position would depend on the order of the checks.
@@ -107,6 +108,37 @@ class SidebarLayout(unittest.TestCase):
                     self.fail('Format rows: ' + json.dumps([r for r in self.s.rows() if any(
                         word in json.dumps(r) for word in ['Window ', 'Pane ', 'session-window-', 'session-$'])]))
                 self.assertTrue(formatted(rs))
+
+    def test_titles_wrap_false_keeps_a_long_card_title_on_one_line(self):
+        self.addCleanup(self.write_config, '')
+        self.addCleanup(self.show_view, 'topics')
+        tail = ' has a title long enough to need several lines in a card of the Sidebar'
+        long_titles = ("sidebar:\n  formats:\n    topic:\n      title: '#{topic_title}" + tail + "'\n"
+                       "    session:\n      title: '#{session_name}" + tail + "'\n")
+        def height(key, rs):
+            bottom, top = frame(self.s.row(key, rs))
+            return top - bottom
+        for mode, key in [('topics', 'topic-layout-other'), ('sessions', 'session-' + self.sessions[1])]:
+            self.show_view(mode)
+            self.write_config('')
+            rs = self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityLabel') == 'layout-other',
+                                  'the card %s does not show its default title' % key)
+            if self.s.row(key, rs).get('accessibilityValue', '').startswith('expanded'):
+                self.s.act('press', key)
+            rs = self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityValue', '').startswith('collapsed'),
+                                  'the card %s did not close' % key)
+            one_line = height(key, rs)
+            self.write_config(long_titles)
+            rs = self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityLabel') == 'layout-other' + tail
+                                  and height(key, rs) > one_line + 8,
+                                  'the long title of %s does not wrap by default' % key)
+            wrapped = height(key, rs)
+            self.write_config(long_titles + '  titles:\n    wrap: false\n')
+            rs = self.s.wait_rows(lambda rs: abs(height(key, rs) - one_line) < 1,
+                                  'titles.wrap: false keeps %s at %.0f points, not the %.0f of one line'
+                                  % (key, wrapped, one_line))
+            self.assertEqual(self.s.row(key, rs).get('accessibilityLabel'), 'layout-other' + tail,
+                             'the cut title of %s does not keep the whole title for accessibility' % key)
 
     def show_view(self, name):
         key = 'sidebar-view-' + name

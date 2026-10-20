@@ -85,6 +85,9 @@ public struct Config: Equatable {
         public var panes: Bool?
         public var agentsScope = PerMode(AgentsScope.active)
         public var formats = SidebarFormats()
+        /// `titles.wrap`: a Topic or Session card's title wraps onto as many lines as it needs.
+        /// False keeps it on one line and cuts it with "…".
+        public var wrapsTitles = true
 
         /// The mode the Sidebar shows when the user chose `chosen`; a mode that is off gives way to the other.
         public func shownMode(chosen: SidebarMode) -> SidebarMode {
@@ -267,6 +270,10 @@ public struct Config: Equatable {
         #   # agents_scope:
         #   #   topics: active
         #   #   sessions: all
+        #   # A long Topic or Session card title wraps onto more lines. false keeps
+        #   # it on one line and cuts it with "…" at the card's edge.
+        #   titles:
+        #     wrap: true
         #   # Titles and summaries set plain text. Each Format can have topics/sessions values.
         #   # An empty summary hides its line. An empty title uses its default.
         #   formats:
@@ -745,6 +752,18 @@ private struct ConfigReader {
                 }
             case "formats":
                 readSidebarFormats(value)
+            case "titles":
+                for (part, key, value) in entries(of: value, "sidebar.titles") {
+                    guard part == "wrap" else {
+                        problem(at: key, "unknown key \"sidebar.titles.\(part)\"")
+                        continue
+                    }
+                    guard value.tag == Yams.Tag(.bool), let wraps = value.bool else {
+                        problem(at: value, "sidebar.titles.wrap: expected a boolean")
+                        continue
+                    }
+                    config.sidebar.wrapsTitles = wraps
+                }
             case "agents_scope":
                 config.sidebar.agentsScope = perMode(value, "sidebar.agents_scope", config.sidebar.agentsScope,
                                                      expected: "active, window or all") { node in

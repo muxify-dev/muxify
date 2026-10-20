@@ -26,6 +26,18 @@ final class SidebarRenderingTests: XCTestCase {
         XCTAssertGreaterThan(large.height, baseline.height)
     }
 
+    @MainActor func testCardHeaderKeepsALongTitleOnOneLineWhenTitlesDoNotWrap() throws {
+        let long = CardHeader(title: "A Session name long enough to need several lines in a narrow Sidebar card",
+                              isOpen: true, mark: nil, summary: "") { EmptyView() }
+        let short = CardHeader(title: "AgM Session", isOpen: true, mark: nil, summary: "") { EmptyView() }
+        let oneLine = try render(short, typography: SidebarTypography(), scheme: .light)
+        let wrapped = try render(long, typography: SidebarTypography(), scheme: .light)
+        let cut = try render(long.environment(\.wrapsCardTitles, false), typography: SidebarTypography(), scheme: .light)
+        XCTAssertGreaterThan(wrapped.height, oneLine.height, "A long title wraps by default")
+        XCTAssertEqual(cut.height, oneLine.height, "titles.wrap: false keeps a long title on one line")
+        XCTAssertGreaterThan(cut.ink, 0)
+    }
+
     @MainActor func testHostedProductionSidebarObservesConfigEditsAndRecovery() throws {
         _ = NSApplication.shared
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-sidebar-tests-" + UUID().uuidString)

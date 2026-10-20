@@ -16,7 +16,7 @@ final class RepositoryProjectTests: XCTestCase {
     }
 
     private func git(_ arguments: [String], in directory: String) throws {
-        _ = try Shell.run("/usr/bin/git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid"] + arguments, directory: directory)
+        _ = try Shell.run("/usr/bin/git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgSign=false"] + arguments, directory: directory)
     }
 
     private func path(_ name: String) -> String { (root.appendingPathComponent(name).path as NSString).standardizingPath }

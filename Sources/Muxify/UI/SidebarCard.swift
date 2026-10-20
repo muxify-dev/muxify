@@ -122,8 +122,21 @@ extension EnvironmentValues {
     }
 }
 
-/// A card's header: the title on its own line, wrapped so it always shows whole, a line of details under it, and,
-/// on a closed card, a summary of what the card holds. The card gives it the press that opens or closes it.
+private struct WrapsCardTitlesKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    /// `sidebar.titles.wrap`: a card title wraps so it always shows whole. False keeps it on one line, cut with "…".
+    var wrapsCardTitles: Bool {
+        get { self[WrapsCardTitlesKey.self] }
+        set { self[WrapsCardTitlesKey.self] = newValue }
+    }
+}
+
+/// A card's header: the title on its own line, wrapped so it shows whole unless the Config keeps it on one line, a line
+/// of details under it, and, on a closed card, a summary of what the card holds. The card gives it the press that
+/// opens or closes it.
 struct CardHeader<Details: View>: View {
     let title: String
     let isOpen: Bool
@@ -140,6 +153,7 @@ struct CardHeader<Details: View>: View {
     var reservesCorner = false
     @ViewBuilder var details: () -> Details
     @Environment(\.sidebarTypography) private var typography
+    @Environment(\.wrapsCardTitles) private var wrapsTitle
     /// The title line's frame in the header, where a click tool such as Homerow clicks in place of the header's centre.
     @State private var titleLine: CGRect = .zero
 
@@ -151,6 +165,7 @@ struct CardHeader<Details: View>: View {
                 ZStack(alignment: .topLeading) {
                     Text(title)
                         .font(typography.font(for: .session))
+                        .lineLimit(wrapsTitle ? nil : 1)
                         .fixedSize(horizontal: false, vertical: true)
                     // One line of the title's font: its centre is the centre of the title's first line.
                     Text(" ").font(typography.font(for: .session)).hidden()

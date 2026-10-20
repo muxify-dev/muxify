@@ -768,7 +768,7 @@ final class TopicServiceTests: XCTestCase {
 
     @discardableResult
     private func git(_ arguments: [String], in directory: String) throws -> String {
-        try Shell.run("/usr/bin/git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid"] + arguments, directory: directory)
+        try Shell.run("/usr/bin/git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgSign=false"] + arguments, directory: directory)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 

@@ -608,6 +608,18 @@ sidebar:
     sessions: all
 ```
 
+### Card titles
+
+A long Topic or Session card title wraps onto as many lines as it needs, so it always shows whole.
+`sidebar.titles.wrap: false` keeps each card title on one line and cuts a long one with `…` at the card's edge.
+It defaults to `true`. The cut follows the Sidebar's width, which a Format's `#{=N:…}` cannot see.
+
+```yaml
+sidebar:
+  titles:
+    wrap: false
+```
+
 ### Formats
 
 `sidebar.formats` sets the title and Summary of Topic cards, Session cards, Window rows, Pane rows, and Agent rows.

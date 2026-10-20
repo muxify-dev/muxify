@@ -14,6 +14,7 @@ struct SidebarView: View {
 
     var body: some View {
         content.environment(\.sidebarTypography, typography)
+            .environment(\.wrapsCardTitles, store.config.sidebar.wrapsTitles)
     }
 
     @ViewBuilder
