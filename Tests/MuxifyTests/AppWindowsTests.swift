@@ -390,13 +390,15 @@ final class AppWindowsTests: XCTestCase {
             XCTAssertTrue(second.handleKeyEvent(held) === held)
             XCTAssertEqual(first.sidebarVisible, beforeHold)
             XCTAssertFalse(native.isKeyWindow)
-            let shown = expectation(description: "Only the event's App Window shows Hints")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-                XCTAssertEqual(first.hintHold.visibleModifiers, .control)
-                XCTAssertNil(second.hintHold.visibleModifiers)
-                shown.fulfill()
+            // Wait for the hold delay to pass rather than for a fixed time: a busy
+            // CI runner can wake the delay's timer late.
+            let deadline = Date().addingTimeInterval(2)
+            while first.hintHold.visibleModifiers == nil, Date() < deadline {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
             }
-            wait(for: [shown], timeout: 2)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            XCTAssertEqual(first.hintHold.visibleModifiers, .control, "Only the event's App Window shows Hints")
+            XCTAssertNil(second.hintHold.visibleModifiers)
             let release = try XCTUnwrap(NSEvent.keyEvent(with: .flagsChanged, location: .zero, modifierFlags: [],
                 timestamp: 1, windowNumber: native.windowNumber, context: nil, characters: "",
                 charactersIgnoringModifiers: "", isARepeat: false, keyCode: 59))
