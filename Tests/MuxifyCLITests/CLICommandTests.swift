@@ -3,7 +3,7 @@ import XCTest
 import MuxifyCore
 
 final class CLICommandTests: XCTestCase {
-    func testHelpDoesNotNeedTmuxOrSimulatorConfiguration() throws {
+    func testHelpDoesNotNeedTmux() throws {
         for arguments in [["--help"], ["-h"], ["help"], ["browser", "--help"],
                           ["browser", "open", "--help"], ["session", "-h"], ["session", "open", "--help"],
                           ["extensions", "--help"], ["extensions", "install", "--help"]] {
@@ -49,11 +49,6 @@ final class CLICommandTests: XCTestCase {
             XCTAssertEqual(try CLICommand(arguments: ["session", "open"] + arguments), .sessionOpen(name: "my project"))
         }
         XCTAssertEqual(try CLICommand(arguments: ["session", "open", "--", "--help"]), .sessionOpen(name: "--help"))
-    }
-
-    func testSimulatorArgumentsAreHandledByBuiltInServerCommand() throws {
-        let arguments = ["serve", "--port", "9000", "--origin", "https://mac.example"]
-        XCTAssertEqual(try CLICommand(arguments: ["simulator"] + arguments, environment: [:]), .simulator(arguments: arguments))
     }
 
     func testExtensionsInstallNeedsNoTmuxAndRejectsArguments() throws {

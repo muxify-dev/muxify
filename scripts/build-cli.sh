@@ -9,5 +9,3 @@ mkdir -p "$destination"
 cp "$binary_directory/muxify" "$destination/muxify.new"
 codesign --force --sign - "$destination/muxify.new"
 mv -f "$destination/muxify.new" "$destination/muxify"
-# Older builds distributed the Simulator as a separate helper executable.
-rm -f -- "$destination/muxify-simulator"

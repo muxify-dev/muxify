@@ -116,8 +116,7 @@ shasum -a 256 -c SHA256SUMS
 ```
 
 This checks file integrity, not the publisher's identity. No Ghostty, Zig or
-Xcode installation is needed to run the desktop beta; Simulator serving has
-[additional requirements](simulator.md#requirements-and-limits).
+Xcode installation is needed to run the desktop beta.
 
 ### Publish
 

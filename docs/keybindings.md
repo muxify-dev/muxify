@@ -498,10 +498,3 @@ Muxify's Tab from Safari's Develop menu instead.
 
 Other terminal keybindings come from your Ghostty config and tmux bindings,
 not the Muxify Config.
-
-**Simulator input** is handled by its web page after clicking the Device screen.
-Drag to swipe and type ordinary keys/modifiers; losing focus or disconnecting
-releases held input. Home, rotation, Start Device and Stop Device are web controls,
-not desktop menu actions. Browser/OS-reserved shortcuts and Muxify's configured
-bindings remain on the Mac. There is no `toggle_simulator` action or native phone
-toggle; open the Simulator Server's URL as an ordinary Browser Tab.

@@ -2,7 +2,7 @@
 import PackageDescription
 
 // The Topic code that the app and the command line tool share. A package of its own, so the app's Xcode
-// project links it without resolving the Simulator Server's dependencies.
+// project links it without the command line tool.
 let package = Package(
     name: "MuxifyCore",
     platforms: [.macOS(.v14)],

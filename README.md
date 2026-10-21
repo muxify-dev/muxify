@@ -1,8 +1,7 @@
 # Muxify
 
 A native macOS app for coding agents in tmux, locally or over SSH. Track Claude
-Code, Codex, OpenCode and Pi in a sidebar, give each Window its own Browser, and
-control simulated iPhones and iPads from any web browser.
+Code, Codex, OpenCode and Pi in a sidebar and give each Window its own Browser.
 
 ## Download the beta
 
@@ -43,16 +42,6 @@ Configure [`sessions.paths`](docs/configuration.md#projects) with the folders
 that hold your repositories. A repository is one Project, and Muxify asks Git
 for its Worktrees, wherever they live. Choosing a Project reuses its Session or
 creates one; a Worktree's Session is named `project/worktree-folder`.
-
-## Simulator Server
-
-```sh
-muxify simulator serve --port 8787
-```
-
-Run on the Mac that owns the Devices, with Xcode 27+ and an iOS runtime installed.
-Open the printed URL in any browser and keep its token secret.
-See the [Simulator guide](docs/simulator.md) for standalone builds and Tailscale/SSH access.
 
 ## Build from source
 

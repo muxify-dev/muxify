@@ -6,7 +6,7 @@ INSTALL_DIR ?= /Applications
 MUXIFY_SIGN_IDENTITY ?= -
 MUXIFY_DEVELOPMENT_TEAM ?=
 
-.PHONY: all setup tools project build cli test test-release verify run install release clean
+.PHONY: all setup tools project build test test-release verify run install release clean
 
 all: build
 
@@ -30,16 +30,10 @@ build: project
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
 
-# Build only the CLI, without desktop app dependencies.
-cli:
-	/bin/sh scripts/build-cli.sh build/bin
-	/bin/sh scripts/bundle-simulator-notices.sh build/bin/ThirdPartyNotices
-
 test: project
 	./scripts/check-folder-paths.sh
 	swift test
 	swift test --package-path Packages/MuxifyCore
-	node --test Tests/SimulatorWeb/*.test.mjs
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages test
 

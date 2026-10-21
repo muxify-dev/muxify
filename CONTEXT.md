@@ -1,6 +1,6 @@
 # Muxify
 
-A personal macOS front end for tmux with a Sidebar, Terminal and Browser. Muxify also provides a Simulator that can be opened in any web browser to interact with Devices on a local or remote Mac.
+A personal macOS front end for tmux with a Sidebar, Terminal and Browser.
 
 ## Language
 
@@ -143,20 +143,6 @@ _Avoid_: search (when you mean the page text), Find (alone)
 **Vim Keys**:
 The letter keys h, j, k, l, d, u, gg and G, which scroll the active Tab's page as the arrow keys, Page Down, Page Up, Home and End do, and H and L, which go back and forward as the Back and Forward buttons do, when the Browser has Focus and the page does not use the key itself. They are on by default and the Config can turn them off.
 _Avoid_: vim mode, keyboard navigation
-
-### Simulator
-
-**Simulator**:
-The browser-based interface for selecting, viewing and controlling Devices on a Mac. It is independent of tmux Windows and can be opened in Muxify's Browser or another web browser. Each browser tab chooses its own Device; multiple tabs may view and control the same Device, sharing its screen, orientation and running state.
-_Avoid_: Device Hub, mirror, simulator runtime
-
-**Device**:
-A simulated iPhone or iPad used to run and test apps, never a physical phone or tablet. Its selection and running state are independent: selecting or displaying it does not mean starting it.
-_Avoid_: simulator (when you mean the Device rather than its view), phone (when you also mean iPad)
-
-**Simulator Server**:
-The Muxify process on the Mac that makes its Devices available to the Simulator. Devices can keep running when the Simulator disconnects or the Simulator Server exits.
-_Avoid_: desktop streamer, remote desktop
 
 ### Agents
 

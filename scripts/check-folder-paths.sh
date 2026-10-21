@@ -3,7 +3,7 @@
 # Foundation's path normalizers compare spellings, not folders, and they drop /private where realpath and git keep it.
 cd "$(dirname "$0")/.." || exit 2
 found=$(rg -n --type swift 'standardizingPath|resolvingSymlinksInPath|standardizedFileURL|realpath\(' Sources Packages/MuxifyCore/Sources \
-    -g '!Folder.swift' -g '!CLICommand.swift' -g '!TestDriver.swift' -g '!XcodeInstallation.swift' \
+    -g '!Folder.swift' -g '!CLICommand.swift' -g '!TestDriver.swift' \
     -g '!ConfigFileSet.swift' -g '!Config.swift')
 if [ -n "$found" ]; then
     printf '%s\n' "$found"

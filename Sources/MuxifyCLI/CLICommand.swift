@@ -8,7 +8,6 @@ enum CLICommand: Equatable {
     case sessionOpen(name: String)
     case sessionLock(SessionInvocation)
     case extensionsInstall
-    case simulator(arguments: [String])
     case topic(TopicInvocation)
     case project(ProjectInvocation)
     case agent(AgentInvocation)
@@ -22,7 +21,6 @@ enum CLICommand: Equatable {
            muxify session lock [--session <name>] [--json]
            muxify session unlock [--session <name>] [--json]
            muxify extensions install
-           muxify simulator serve [--port <port>] [--origin <https://host>]
            muxify topic new ["title"] [--project <dir>] [--window <id> | --pane <id>] [--json]
            muxify topic add-project <dir> [--worktree [--base <ref>]] [--topic <id|label> | --window <id> | --pane <id>] [--json]
            muxify topic forget [--remove-worktrees] [--topic <id|label> | --window <id> | --pane <id>] [--json]
@@ -56,7 +54,6 @@ enum CLICommand: Equatable {
     session unlock Ends the Lock. The Session stays, in No Topic.
     extensions install
                    Installs or updates Extensions for Agents configured under HOME.
-    simulator serve  Serves Devices in any browser, independently of the desktop app.
     topic new      Without a title, moves this Pane into an Untitled Topic.
                    With a title, creates a Topic Session and keeps this Pane here.
     topic add-project
@@ -155,7 +152,6 @@ enum CLICommand: Equatable {
         var args = ArraySlice(arguments)
         switch args.popFirst() {
         case "-h", "--help", "help": self = .help
-        case "simulator": self = .simulator(arguments: Array(args))
         case "extensions":
             switch args.popFirst() {
             case "-h", "--help": self = .help
@@ -248,7 +244,6 @@ enum CLICommand: Equatable {
             print(result.rawValue)
             return result.exitCode
         case .help: print(Self.usage)
-        case .simulator(let arguments): try await SimulatorCommand.serve(arguments: arguments)
         case .extensionsInstall:
             // Installed links point into the app bundle. Resolve them before
             // locating the installer beside its bundled bin directory.

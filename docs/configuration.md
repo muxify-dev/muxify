@@ -522,8 +522,7 @@ Restore the Window. ⌘⇧J and ⌘⇧B move Focus to the Terminal or the Browse
 show that side if it is hidden. Each Window remembers its Browser Tabs, its
 toggles and its Maximize state.
 Browser-opening requests (`muxify browser open …`, terminal Cmd-click links)
-reveal its Browser. The [Simulator](simulator.md) runs in a browser, not a native
-panel.
+reveal its Browser.
 
 [Vim Keys](keybindings.md#vim-keys) scroll a Browser page with h, j, k, l, d,
 u, gg and G, and go back and forward with H and L. They are on by default. To turn them off:

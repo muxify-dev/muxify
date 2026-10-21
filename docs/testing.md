@@ -38,16 +38,8 @@ It creates and removes its own isolated remote tmux server; existing Sessions,
 Agent configuration and SSH setup are left alone. It does not exercise Ghostty
 rendering or the app's UI reconnect scheduler.
 
-## Simulator tests
+## Developer Tools test
 
-Run `make test` for CLI, server, browser-script and desktop tests, or `swift test`
-for CLI and server tests. `node --test Tests/SimulatorWeb/*.test.mjs` runs only
-the browser-script race and input tests (no npm dependencies).
-
-Set `MUXIFY_TEST_WEBKIT=1` when running `swift test` to include the
-embedded-browser integration test; it requires a graphical macOS login.
 Set `TEST_RUNNER_MUXIFY_TEST_WEBKIT=1` when running desktop tests to also check
 the real Developer Tools frontend, page-state preservation, docking across Tab
 host changes and inspector cleanup. This test opens disposable native windows.
-The opt-in [live Simulator test](../Tests/SimulatorSmoke/README.md) uses
-disposable Devices to validate real browser rendering, shared control and input.

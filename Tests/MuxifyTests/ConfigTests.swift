@@ -632,13 +632,6 @@ final class ConfigTests: XCTestCase {
         }
     }
 
-    func testRemovedSimulatorBindingIsReportedWithoutChangingBrowser() throws {
-        let config = try load("keybindings:\n  toggle_simulator: cmd+i")
-        XCTAssertNil(config.keybinds.action(for: trigger("cmd+i")))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b")), .toggleBrowser)
-        XCTAssertEqual(config.problems.map(\.message), ["unknown action \"toggle_simulator\""])
-    }
-
     func testNumberedWindowKeybindingsCanBeRemappedOrDisabled() throws {
         let config = try load("""
         keybindings:
