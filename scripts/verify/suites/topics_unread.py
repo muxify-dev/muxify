@@ -15,7 +15,7 @@ class TopicsUnread(TopicsSidebar):
         self.configure()
         self.addCleanup(self.config.write_text, self.config_text)
 
-    def configure(self, extra=''):
+    def configure(self, extra='', manual_read=True):
         self.config.write_text(self.config_text + '''command_palettes:
   - name: Commands
     keybinding: cmd+shift+p
@@ -23,7 +23,7 @@ class TopicsUnread(TopicsSidebar):
   - name: Read targets
     keybinding: cmd+p
     sources: [topics, sessions, windows, agents]
-''' + extra)
+''' + 'notifications:\n  manual_read: ' + ('true' if manual_read else 'false') + '\n' + extra)
         self.press_menu_item('Reload Config')
 
     def search(self, palette, query, key):
@@ -151,7 +151,7 @@ class TopicsUnread(TopicsSidebar):
         self.assertIn(topic, self.describe('empty-topic-title', self.s.rows()), 'the Empty Topic view closed with the server')
 
     def test_automatic_empty_topic_reads_only_on_next_visit(self):
-        self.configure('notifications:\n  manual_read: false\n')
+        self.configure(manual_read=False)
         for topic in ['empty-auto-target', 'empty-auto-away']:
             self.write_empty_topic(topic)
         self.enter_empty('empty-auto-target')
@@ -165,7 +165,7 @@ class TopicsUnread(TopicsSidebar):
         self.assert_unread('empty-auto-target', False)
 
     def test_automatic_live_topic_reads_its_record_on_next_visit(self):
-        self.configure('notifications:\n  manual_read: false\n')
+        self.configure(manual_read=False)
         topic = 'live-auto-target'
         self.write_topic(topic, topic, self.beta)
         _, window, _ = self.agent_session(topic, topic=topic, status='working')

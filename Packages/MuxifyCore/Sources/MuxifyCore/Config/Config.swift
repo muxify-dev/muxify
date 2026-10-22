@@ -73,7 +73,7 @@ public struct Config: Equatable {
     }
 
     public struct Notifications: Equatable {
-        public var manualRead = true
+        public var manualRead = false
         public var doneEnabled = true
         public var failedEnabled = true
         public var blockedEnabled = true
@@ -334,7 +334,7 @@ public struct Config: Equatable {
         #   vim_keys: true
         #
         # notifications:
-        #   manual_read: true
+        #   manual_read: false
         #   done_enabled: true
         #   failed_enabled: true
         #   blocked_enabled: true

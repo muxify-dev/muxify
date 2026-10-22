@@ -17,7 +17,7 @@ class AgentsUnread(TopicsSidebar):
         self.configure()
         self.addCleanup(self.config.write_text, self.config_text)
 
-    def configure(self, extra=''):
+    def configure(self, extra='', manual_read=True):
         self.config.write_text(self.config_text + '''command_palettes:
   - name: Commands
     keybinding: cmd+shift+p
@@ -28,7 +28,7 @@ class AgentsUnread(TopicsSidebar):
   - name: Read windows
     keybinding: cmd+alt+p
     sources: [windows]
-''' + extra)
+''' + 'notifications:\n  manual_read: ' + ('true' if manual_read else 'false') + '\n' + extra)
         self.press_menu_item('Reload Config')
 
     def unread(self, pane):
@@ -132,7 +132,7 @@ class AgentsUnread(TopicsSidebar):
         self.assertFalse(self.unread(outside))
 
     def test_disabling_manual_read_restores_topic_visit_reading(self):
-        self.configure('notifications:\n  manual_read: false\n')
+        self.configure(manual_read=False)
         self.write_topic('automatic-topic', 'Automatic topic', self.beta)
         _, _, one = self.agent_session('automatic-one', topic='automatic-topic', status='done', unread=True)
         _, _, two = self.agent_session('automatic-two', topic='automatic-topic', status='failed', unread=True)
@@ -183,7 +183,7 @@ class AgentsUnread(TopicsSidebar):
         self.assert_unread(one, other)
 
     def test_automatic_mark_unread_survives_until_next_visit(self):
-        self.configure('notifications:\n  manual_read: false\n')
+        self.configure(manual_read=False)
         _, window, pane = self.agent_session('unread-auto', status='done')
         _, away, _ = self.agent_session('unread-away', status='working')
         self.select_window(window)

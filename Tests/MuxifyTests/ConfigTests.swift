@@ -19,17 +19,17 @@ final class ConfigTests: XCTestCase {
 
     func testManualReadDefaultsAndConfigurableShortcut() throws {
         let defaults = try load("")
-        XCTAssertTrue(defaults.notifications.manualRead)
+        XCTAssertFalse(defaults.notifications.manualRead)
         XCTAssertEqual(defaults.keybinds.action(for: trigger("cmd+shift+r")), .markRead)
-        XCTAssertTrue(Config.template.contains("#   manual_read: true"))
+        XCTAssertTrue(Config.template.contains("#   manual_read: false"))
         XCTAssertTrue(Config.template.contains("#   mark_read: cmd+shift+r"))
-        let custom = try load("notifications:\n  manual_read: false\nkeybindings:\n  mark_read: ctrl+alt+r")
-        XCTAssertFalse(custom.notifications.manualRead)
+        let custom = try load("notifications:\n  manual_read: true\nkeybindings:\n  mark_read: ctrl+alt+r")
+        XCTAssertTrue(custom.notifications.manualRead)
         XCTAssertNil(custom.keybinds.action(for: trigger("cmd+shift+r")))
         XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+alt+r")), .markRead)
         XCTAssertTrue(custom.problems.isEmpty)
         let invalid = try load("notifications:\n  manual_read: sometimes")
-        XCTAssertTrue(invalid.notifications.manualRead)
+        XCTAssertFalse(invalid.notifications.manualRead)
         XCTAssertEqual(invalid.problems.map(\.message), ["notifications.manual_read: expected a boolean"])
         XCTAssertNil(try load("keybindings:\n  mark_read: []").keybinds.firstTrigger(for: .markRead))
     }

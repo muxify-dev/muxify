@@ -167,7 +167,7 @@ A Topic explicitly marked with Mark Unread, or an Agent with a done, failed or b
 _Avoid_: unseen, new
 
 **Manual Read**:
-The default behavior in which visiting a Window or Topic does not clear Unread, and Agent updates become Unread even while the user looks at their Window. The user can turn it off in the Config to restore automatic reading.
+A behavior the user turns on in the Config, in which visiting a Window or Topic does not clear Unread, and Agent updates become Unread even while the user looks at their Window. It is off by default, so a visit reads the Window or Topic.
 
 **Mark Read**:
 An Action that clears the Topic Unread mark and Unread for Agents in its target. Its Command and direct shortcut use the Active Topic, or the current Session when there is no Active Topic. It is available for every Topic, with or without Agents. A blocked Agent keeps its blocked Notification until its Status changes.

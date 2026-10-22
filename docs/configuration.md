@@ -235,14 +235,20 @@ Config changes its color.
 
 ```yaml
 notifications:
-  manual_read: true
+  manual_read: false
   done_enabled: true
   failed_enabled: true
   blocked_enabled: true
 ```
 
-Manual Read is on by default. A done, failed or blocked update becomes Unread
-even while you look at its Window. Visiting a Window or Topic does not clear it.
+By default, a new visit to a Window or Topic clears Unread. Mark Unread stays set while you continue to view the same
+Window or empty Topic, until the next visit. Updates in the Window being viewed do
+not become Unread.
+
+Set `manual_read: true` to turn on Manual Read. A done, failed or blocked update
+then becomes Unread even while you look at its Window, and a visit to a Window or
+Topic does not clear it.
+
 **Mark Read** clears the Active Topic, or the current Session when there is no
 Active Topic. Its default shortcut is ⌘⇧R. A palette row also offers Mark Read
 for that Topic, Session, Window or Agent. A blocked mark stays until the Agent
@@ -260,11 +266,6 @@ working Agents. This includes hidden, Snoozed and Settled Topics. It has no defa
 assign one. Use `keybindings.mark_unread` to change the Mark Unread shortcut.
 The palette row Action has no default shortcut. Set
 `keybindings.command_palette.mark_unread` to assign one.
-
-Set `manual_read: false` to restore automatic reading. A new visit to a Window or
-Topic clears Unread. Mark Unread stays set while you continue to view the same
-Window or empty Topic, until the next visit. Updates in the Window being viewed do not become
-Unread.
 
 Set a `*_enabled` key to `false` to turn off that type of Notification on every surface:
 cards, Pane rows, the Agents section, and the Command Palette's marks and
