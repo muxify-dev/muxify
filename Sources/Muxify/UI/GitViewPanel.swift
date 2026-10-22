@@ -21,6 +21,8 @@ struct GitViewOverlay: View {
             case (.fullscreen, .terminal):
                 GitNavigator(gitView: gitView, colors: colors)
                     .id(gitView.windowID)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("git-view")
             case (.popup, .window):
                 GeometryReader { proxy in
                     ZStack {
@@ -30,6 +32,8 @@ struct GitViewOverlay: View {
                         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
                         GitNavigator(gitView: gitView, colors: colors)
                             .id(gitView.windowID)
+                            .accessibilityElement(children: .contain)
+                            .accessibilityIdentifier("git-view")
                             .clipShape(shape)
                             .overlay(shape.strokeBorder(Color(nsColor: colors.separator)))
                             .shadow(color: .black.opacity(0.25), radius: 24, y: 10)

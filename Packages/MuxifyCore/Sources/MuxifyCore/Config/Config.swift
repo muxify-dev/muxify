@@ -139,6 +139,8 @@ public struct Config: Equatable {
     public var keybinds = Keybinds.defaults
     /// Height of the app's header in points; at least 24 to fit its buttons.
     public var headerHeight: Double = 30
+    /// `ui.status_line_header`: show the Session name and Window selector, independently of Git and panel controls.
+    public var statusLineHeader = true
     /// `ui.pulse`: every Working mark moves. False keeps them still.
     public var pulse = true
     /// `ui.agent_colors`.
@@ -199,6 +201,8 @@ public struct Config: Equatable {
         # ui:
         #   # Header height in points (minimum 24). Changes apply live.
         #   header_height: 30
+        #   # Show the Session name and Window selector. Git and other controls stay visible.
+        #   status_line_header: true
         #   # false keeps every Working mark still.
         #   pulse: true
         #   # The color of each Agent mark, in the Sidebar and the Command
@@ -985,6 +989,12 @@ private struct ConfigReader {
                     continue
                 }
                 config.headerHeight = height
+            case "status_line_header":
+                guard value.tag == Yams.Tag(.bool), let enabled = value.bool else {
+                    problem(at: value, "ui.status_line_header: expected a boolean")
+                    continue
+                }
+                config.statusLineHeader = enabled
             case "pulse":
                 guard value.tag == Yams.Tag(.bool), let pulse = value.bool else {
                     problem(at: value, "ui.pulse: expected a boolean")

@@ -299,6 +299,7 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+b")), .focusBrowser)
             XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("cmd+s"))
             XCTAssertEqual(config.headerHeight, 30)
+            XCTAssertTrue(config.statusLineHeader)
             XCTAssertEqual(config.sidebarTypography, SidebarTypography())
             XCTAssertNil(config.ghosttyConfigFile)
             XCTAssertEqual(config.problems, [])
@@ -312,6 +313,39 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(config.keybinds, .defaults)
             XCTAssertEqual(config.problems, [])
         }
+    }
+
+    func testStatusLineHeaderAcceptsBooleansAndDefaultsToVisible() throws {
+        for text in ["", "ui: {}", "ui:\n  header_height: 26", "ui:\n  status_line_header: true"] {
+            let config = try load(text)
+            XCTAssertTrue(config.statusLineHeader, text)
+            XCTAssertEqual(config.problems, [], text)
+        }
+        let hidden = try load("ui:\n  status_line_header: false\n  header_height: 26")
+        XCTAssertFalse(hidden.statusLineHeader)
+        XCTAssertEqual(hidden.headerHeight, 26)
+        XCTAssertEqual(hidden.problems, [])
+    }
+
+    func testInvalidStatusLineHeaderFallsBackWithoutBlockingOtherSettings() throws {
+        for value in ["", "null", "~", "0", "1", "wrong", "'false'", "'true'", "[]", "{}"] {
+            let config = try load("ui:\n  status_line_header: \(value)\n  header_height: 26")
+            XCTAssertTrue(config.statusLineHeader, value)
+            XCTAssertEqual(config.headerHeight, 26, value)
+            XCTAssertEqual(config.problems, [
+                ConfigProblem(path: root, line: 2, message: "ui.status_line_header: expected a boolean"),
+            ], value)
+        }
+    }
+
+    func testStatusLineHeaderTemplateShowsTheDefault() throws {
+        let shown = Config.template.split(separator: "\n").filter {
+            $0.hasPrefix("# ui:") || $0.hasPrefix("#   status_line_header:")
+        }.map { $0.dropFirst(2) }
+        XCTAssertEqual(shown.count, 2)
+        let config = try load(shown.joined(separator: "\n"))
+        XCTAssertEqual(config.statusLineHeader, Config().statusLineHeader)
+        XCTAssertEqual(config.problems, [])
     }
 
     func testSidebarTypographyDefaultsPreserveExistingConfig() throws {

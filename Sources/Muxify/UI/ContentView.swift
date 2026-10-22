@@ -122,8 +122,7 @@ struct ContentView: View {
     }
 }
 
-/// The fixed strip along the top: room for the traffic lights, the window's
-/// drag handle, Environment selector, Maximize and the panel toggles on the right.
+/// Session and Window navigation beside the traffic lights, with Git, Environment and panel controls on the right.
 private struct HeaderBar: View {
     let store: WorkspaceStore
     let keybinds: Keybinds
@@ -131,10 +130,32 @@ private struct HeaderBar: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            Spacer()
+            if store.config.statusLineHeader, let window = store.selectedWindow,
+               store.topics.emptyTopic == nil, !store.topicSelection.showsEmptyNoTopic {
+                Text(window.sessionName)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    // Keep the full name whenever it fits. The Window list can collapse first;
+                    // only the remaining titlebar width, not a fixed cap, truncates the name.
+                    .layoutPriority(1)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help(window.sessionName)
+                    .accessibilityIdentifier("header-session-name")
+                HeaderWindowSelector(store: store, current: window)
+                    .padding(.leading, 8)
+            }
+            Spacer(minLength: 12)
+            if let window = store.selectedWindow, store.topics.emptyTopic == nil, !store.topicSelection.showsEmptyNoTopic {
+                HeaderGitButton(store: store, window: window,
+                                help: help(store.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View", .toggleGitView))
+                    .id("\(window.sourceID):\(window.path)")
+                    .padding(.trailing, 8)
+            }
             EnvironmentSelector(environments: store.remoteEnvironments, activeEnvironment: store.activeEnvironment,
                                 isConnected: store.isConnected, hasConnectionError: store.terminalMessage != nil,
                                 status: store.environmentStatus, onSelect: store.selectEnvironment)
+                .accessibilityIdentifier("header-environment-selector")
             let layout = store.panelLayout
             TitlebarButton(
                 systemName: layout.maximized == nil ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left",
@@ -151,14 +172,6 @@ private struct HeaderBar: View {
                 action: store.toggleSidebar
             )
             .accessibilityIdentifier("toggle-sidebar")
-            TitlebarButton(
-                help: help(store.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View", .toggleGitView),
-                isOn: store.currentGitView?.isOpen == true,
-                action: store.toggleGitView
-            ) {
-                GitViewIcon(size: 15)
-            }
-            .accessibilityIdentifier("toggle-git-view")
             TitlebarButton(
                 systemName: "terminal",
                 help: help(layout.shows(.terminal) ? "Hide Terminal" : "Show Terminal", .toggleTerminal),
@@ -439,7 +452,7 @@ extension TitlebarButton where Icon == Image {
     }
 }
 
-private extension View {
+extension View {
     /// Like toolbar buttons: a click on an inactive window both activates it
     /// and presses the button.
     @ViewBuilder

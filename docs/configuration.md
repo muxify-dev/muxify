@@ -188,17 +188,26 @@ Session, in any card. The Session keeps its current Window, and tmux keeps the
 new order. Topic cards and Locked Session cards move the same way among the
 cards with their pin.
 
-## Header height
+## Header
 
 ```yaml
 ui:
   header_height: 30
+  status_line_header: true
 ```
 
 The height is in macOS points, defaults to 30, and must be a finite number of
 at least 24 so the buttons fit. Changes apply live. Removing the setting restores
 the default; invalid values use the default and appear in the Config problems
 banner. A YAML syntax error keeps the last good Config.
+
+`status_line_header` replaces tmux's status-line navigation with the current
+Session name and its Window selector, inline
+when the Window list fits and as a dropdown otherwise. It defaults to `true`.
+Set it to `false` to hide only those two controls; the Git/branch button,
+Environment selector and panel controls stay visible. Changes apply live.
+Removing the setting restores the default. Invalid values use the default and
+appear in the Config problems banner.
 
 ## Agent marks
 

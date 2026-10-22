@@ -252,6 +252,7 @@ final class CommandPaletteConfigTests: XCTestCase {
             username: me
         ui:
           header_height: 40
+          status_line_header: false
         sessions:
           paths:
             - path: ~/src
@@ -261,6 +262,7 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertNil(remote.ghosttyConfigFile)
         XCTAssertEqual(remote.remoteEnvironments, [])
         XCTAssertEqual(remote.headerHeight, 40)
+        XCTAssertFalse(remote.statusLineHeader)
         XCTAssertEqual(remote.sessionRoots, [SessionPathRoot(path: "~/src", depth: 1)])
         XCTAssertEqual(remote.problems, [])
 
