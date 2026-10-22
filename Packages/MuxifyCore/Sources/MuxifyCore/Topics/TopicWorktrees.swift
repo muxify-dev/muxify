@@ -39,11 +39,46 @@ enum TopicWorktrees {
         }
     }
 
-    /// Creates the Worktree on a new branch at `commit`.
-    public static func add(_ worktree: TopicPlan.WorktreeSpec, at commit: String) throws {
+    /// Creates the Worktree: on a new branch at its commit, or on the branch that exists.
+    public static func add(_ new: TopicPlan.NewWorktree) throws {
+        let worktree = new.worktree
         try FileManager.default.createDirectory(at: URL(fileURLWithPath: worktree.path).deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
-        _ = try Shell.run("/usr/bin/git", worktree.arguments + [commit], directory: worktree.repositoryPath)
+        let arguments = switch new.checkout {
+        case .newBranch: worktree.arguments + [new.commit]
+        case .existingBranch: ["worktree", "add", worktree.path, worktree.branch]
+        }
+        _ = try Shell.run("/usr/bin/git", arguments, directory: worktree.repositoryPath)
+    }
+
+    /// The commit of the local branch `branch`, which a new Worktree can check out. The service asks before it
+    /// changes anything, so git does not refuse halfway through a run.
+    public static func branchStart(_ branch: String, in base: Worktree) throws -> String {
+        guard let commit = try? Shell.run("/usr/bin/git", ["rev-parse", "--verify", "--quiet", "refs/heads/" + branch + "^{commit}"],
+                                          directory: base.folder.path).trimmingCharacters(in: .whitespacesAndNewlines) else {
+            throw TopicRequestError.branchUnavailable(branch: branch, worktree: base.folder.path)
+        }
+        if let path = try checkouts(in: base)[branch] { throw TopicRequestError.branchCheckedOut(branch: branch, worktree: path) }
+        return commit
+    }
+
+    /// The local branches of the repository of `base`, each with the Worktree that has it checked out.
+    public static func branches(in base: Worktree) throws -> [WorktreeStartChoice] {
+        let checkouts = try checkouts(in: base)
+        return try Shell.run("/usr/bin/git", ["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads"],
+                             directory: base.folder.path)
+            .split(separator: "\n").map { WorktreeStartChoice(branch: String($0), checkedOutAt: checkouts[String($0)]) }
+    }
+
+    /// Each checked-out branch and its Worktree, as `git worktree list --porcelain` gives them.
+    private static func checkouts(in base: Worktree) throws -> [String: String] {
+        var checkouts: [String: String] = [:]
+        var path: String?
+        for line in try Shell.run("/usr/bin/git", ["worktree", "list", "--porcelain"], directory: base.folder.path).split(separator: "\n") {
+            if line.hasPrefix("worktree ") { path = String(line.dropFirst("worktree ".count)) }
+            if line.hasPrefix("branch refs/heads/"), let path { checkouts[String(line.dropFirst("branch refs/heads/".count))] = path }
+        }
+        return checkouts
     }
 
     public static func isMerged(_ worktree: TopicPlan.WorktreeSpec) -> Bool {

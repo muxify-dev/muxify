@@ -1,21 +1,23 @@
 import Foundation
 import MuxifyCore
 
-/// One `muxify topic` command line. It runs the Topic service in this process, on the records under `paths`,
+/// One command line that sends a request through `EnvironmentService` in this process, on the records under `paths`,
 /// so it works without Muxify running. The service chooses what the request acts on: `target`, else `caller`.
-struct TopicInvocation: Equatable {
+struct RequestInvocation: Equatable {
     enum Command: Equatable {
-        /// A `sessionPath` is as typed; it resolves to a real directory when the command runs.
-        case new(title: String?, sessionPath: String?)
+        /// An Empty Topic.
+        case new(title: String, tags: [Tag])
         /// `directory` resolves to its row of the New Topic list. `newWorktree` asks for a new Worktree from that
-        /// row's Worktree, at its HEAD or at the ref `base`.
-        case addSession(directory: String, newWorktree: Bool, base: String?)
+        /// row's Worktree, which starts as it says.
+        case addSession(directory: String, newWorktree: WorktreeStart?)
         /// `removeWorktrees` removes each Worktree that the Settle sheet offers to remove, as if each box were selected.
         case settle(removeWorktrees: Bool, killSessions: Bool = false)
         case forget(removeWorktrees: Bool, killSessions: Bool = false)
         case list
         /// `conversations` also lists the conversation of each Agent that the Topic has or remembers.
         case show(conversations: Bool)
+        /// Shows the Topic in Muxify, as Jump To does. It finds the Topic as `topic show` does, then opens its URL.
+        case open
         /// `sessionPath` is as typed and limits the run to the Session that uses it. `command` is the argument vector
         /// after `--`; it runs once per live Session, never in a Pane.
         case exec(sessionPath: String?, timeout: TimeInterval, command: [String])
@@ -28,14 +30,64 @@ struct TopicInvocation: Equatable {
         case snooze(SnoozeSchedule, topics: [TopicRef])
         case unsnooze(topics: [TopicRef])
         case tag(TopicTagChange)
+        case rename(title: String)
+        /// A Dormant or Settled Topic has no Pane, so these take only `--topic`.
+        case reopen
+        case startFresh
+        case lock(Bool)
+        /// `topic` is an open Topic's id or label. `session` chooses its destination Session; `newSession` makes one.
+        case moveWindow(topic: String, session: String?, newSession: Bool)
+        /// Before or after another Window of the same Session.
+        case placeWindow(WindowPlacement)
+        case moveToNewTopic(title: String)
+        /// The caller's Pane, or the Pane that `--pane` names, into a new Window of its Session.
+        case moveToNewWindow(title: String)
+        /// `kill` stops the Session. `removeWorktree` also removes the clean Worktree that the Topic made for it.
+        case removeSessionFromTopic(kill: Bool, removeWorktree: Bool)
+        /// Into the No Topic Session that `session` names, or into a new one when nil.
+        case removeWindowFromTopic(session: String?)
+        /// `command` is the argument vector after `--`; nil starts the default shell.
+        case newWindow(command: [String]?)
+        /// `directory` is as typed; it resolves to a real directory when the command runs.
+        case newSession(directory: String, name: String?)
+        case renameSession(name: String)
+        case renameWindow(name: String)
+        case kill(session: Bool)
+        case pin(Bool)
+        /// The Topic's card, one place up or down.
+        case moveCard(CardMove)
+        /// The Session one place up or down among its Topic's Sessions, or a Locked Session's card.
+        case moveSession(TopicSessionPlacement)
+        case sortSessions
+        /// Zen keeps the target's Topic until the time, which becomes a time when the command runs.
+        case zen(SnoozeSchedule)
+        case endZen
+        /// Read or Unread for the `scope` of the target or of the caller's Pane.
+        case markRead(ReadChange, scope: ReadScope)
+        case markAllRead
 
-        /// The target options this command takes. A titled Topic in a SessionPath starts its own Session, so it takes none.
+        /// The target options this command takes. `topic new` makes an Empty Topic, so it takes none.
         var targets: [TargetOption] {
             switch self {
-            case .new(_?, _?): return []
-            case .new: return [.window, .pane]
-            case .addSession, .settle, .forget, .show, .exec, .status, .diff, .snooze, .unsnooze, .tag: return [.topic, .window, .pane]
-            case .list: return []
+            case .new: return []
+            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .snooze, .unsnooze, .tag, .rename, .pin, .moveCard, .sortSessions, .zen:
+                return [.topic, .window, .pane]
+            case .moveSession: return [.session, .pane]
+            case .reopen, .startFresh: return [.topic]
+            case .lock: return [.session]
+            case .moveWindow, .moveToNewTopic, .removeWindowFromTopic: return [.window, .pane]
+            case .moveToNewWindow: return [.pane]
+            case .newWindow: return [.topic, .session, .window, .pane]
+            case .newSession: return []
+            case .renameSession: return [.session, .window, .pane]
+            case .renameWindow, .placeWindow: return [.window, .pane]
+            case .kill(let session): return session ? [.session, .window, .pane] : [.window, .pane]
+            case .removeSessionFromTopic: return [.session, .pane]
+            case .markRead(_, .topic): return [.topic, .window, .pane]
+            case .markRead(_, .session): return [.session, .window, .pane]
+            case .markRead(_, .window): return [.window, .pane]
+            case .markRead(_, .pane): return [.pane]
+            case .list, .endZen, .markAllRead: return []
             }
         }
 
@@ -44,7 +96,7 @@ struct TopicInvocation: Equatable {
         /// exec, status and diff work in the Sessions that `topic show` gives.
         var showsTopic: Bool {
             switch self {
-            case .show, .exec, .status, .diff: return true
+            case .show, .open, .exec, .status, .diff: return true
             default: return false
             }
         }
@@ -52,7 +104,8 @@ struct TopicInvocation: Equatable {
         /// A Snooze or a Tag change needs no SessionPath, and a command that shows a Topic finds only the SessionPaths of its Sessions.
         var findsAllSessionPaths: Bool {
             switch self {
-            case .snooze, .unsnooze, .tag: return false
+            case .new, .snooze, .unsnooze, .tag, .lock, .pin, .moveCard, .moveSession, .sortSessions, .zen, .endZen, .markRead, .markAllRead,
+                 .placeWindow: return false
             default: return !showsTopic
             }
         }
@@ -60,19 +113,42 @@ struct TopicInvocation: Equatable {
         /// The command as the user typed it, for an error message.
         var phrase: String {
             switch self {
-            case .new(_?, _?): return "topic new with a title and --directory"
             case .new: return "topic new"
             case .addSession: return "topic add-session"
             case .settle: return "topic settle"
             case .forget: return "topic forget"
             case .list: return "topic list"
             case .show: return "topic show"
+            case .open: return "topic open"
             case .exec: return "topic exec"
             case .status: return "topic status"
             case .diff: return "topic diff"
             case .snooze: return "topic snooze"
             case .unsnooze: return "topic unsnooze"
             case .tag: return "topic tag"
+            case .rename: return "topic rename"
+            case .reopen: return "topic reopen"
+            case .startFresh: return "topic start-fresh"
+            case .lock(let locked): return locked ? "session lock" : "session unlock"
+            case .moveWindow: return "window move"
+            case .moveToNewTopic: return "window move --new-topic"
+            case .moveToNewWindow: return "window move --new-window"
+            case .removeSessionFromTopic: return "session remove-from-topic"
+            case .removeWindowFromTopic: return "window remove-from-topic"
+            case .newWindow: return "window new"
+            case .newSession: return "session new"
+            case .renameSession: return "session rename"
+            case .renameWindow: return "window rename"
+            case .placeWindow: return "window move"
+            case .kill(let session): return session ? "session kill" : "window kill"
+            case .pin(let pinned): return pinned ? "topic pin" : "topic unpin"
+            case .moveCard: return "topic move"
+            case .moveSession: return "session move"
+            case .sortSessions: return "topic sort-sessions"
+            case .zen: return "zen start"
+            case .endZen: return "zen end"
+            case .markRead(let change, let scope): return CLIVerbPath.markRead(change, scope: scope).rawValue
+            case .markAllRead: return "mark-all-read"
             }
         }
     }
@@ -81,16 +157,18 @@ struct TopicInvocation: Equatable {
         case topic = "--topic"
         case window = "--window"
         case pane = "--pane"
+        case session = "--session"
 
         var usage: String {
             switch self {
+            case .session: return "--session <name|id>"
             case .topic: return "--topic <id|label>"
             case .window: return "--window <id>"
             case .pane: return "--pane <id>"
             }
         }
 
-        func target(_ value: String) throws -> TopicTarget {
+        func target(_ value: String) throws -> EnvironmentTarget {
             switch self {
             case .topic:
                 return .topic(.named(try Self.topicName(value)))
@@ -100,6 +178,9 @@ struct TopicInvocation: Equatable {
             case .pane:
                 guard let id = PaneID(rawValue: value) else { throw CLIError("--pane takes a tmux Pane id, e.g. %3", exitCode: 2) }
                 return .pane(id)
+            case .session:
+                guard !value.isEmpty else { throw CLIError("--session takes the name or id of a tmux Session", exitCode: 2) }
+                return SessionID(rawValue: value).map(EnvironmentTarget.session) ?? .sessionName(value)
             }
         }
 
@@ -116,7 +197,7 @@ struct TopicInvocation: Equatable {
         let accepted: [TargetOption]
         /// Snooze and Unsnooze act on each Topic of a repeated `--topic` in one write.
         let repeatsTopic: Bool
-        private(set) var chosen: (option: TargetOption, target: TopicTarget)?
+        private(set) var chosen: (option: TargetOption, target: EnvironmentTarget)?
         /// Each `--topic`, in order.
         private(set) var topics: [TopicRef] = []
 
@@ -135,7 +216,7 @@ struct TopicInvocation: Equatable {
                 }
                 throw CLIError("give only one of " + names.dropLast().joined(separator: ", ") + " and " + names.last!, exitCode: 2)
             }
-            guard let value = args.popFirst() else { throw CLIError(CLICommand.usage, exitCode: 2) }
+            guard let value = args.popFirst() else { throw CLIError.usage }
             let target = try option.target(value)
             if case .topic(let ref) = target { topics.append(ref) }
             if chosen == nil { chosen = (option, target) }
@@ -149,7 +230,7 @@ struct TopicInvocation: Equatable {
             let caller = pane.flatMap(PaneID.init(rawValue:))
             if needed, chosen == nil, caller == nil {
                 let problem = pane.map { "TMUX_PANE \($0) is not a tmux Pane id" } ?? "not inside tmux"
-                throw CLIError(problem + TopicInvocation.choice(of: offered), exitCode: 2)
+                throw CLIError(problem + RequestInvocation.choice(of: offered), exitCode: 2)
             }
             return caller
         }
@@ -158,136 +239,34 @@ struct TopicInvocation: Equatable {
     enum Output: Equatable {
         /// Each changed Topic's id, the tab-separated lines of `topic list`, or a short `topic show`.
         case text
-        /// The whole `TopicResponse` as one JSON line.
+        /// The whole `EnvironmentResponse` as one JSON line.
         case json
     }
 
     var command: Command
-    var target: TopicTarget?
+    var target: EnvironmentTarget?
     var caller: PaneID?
     var output: Output
     var paths: MuxifyPaths
 }
 
-extension TopicInvocation {
-    /// Parses the words after `topic`. A command line that the commands cannot run is a usage error, status 2.
-    init(arguments: ArraySlice<String>, environment: [String: String]) throws {
-        let usageError = CLIError(CLICommand.usage, exitCode: 2)
-        var args = arguments
-        guard let name = args.popFirst() else { throw usageError }
-        var words: [String] = []
-        var sessionPath: String?
-        var session: String?
-        var newWorktree = false
-        var base: String?
-        var removeWorktrees = false
-        var killSessions = false
-        var timeout: TimeInterval?
-        var execArguments: [String]?
-        var stat = false
-        var conversations = false
-        var targets = TargetOptions(accepting: TargetOption.allCases, repeatsTopic: name == "snooze" || name == "unsnooze")
-        var output = Output.text
-        while let argument = args.popFirst() {
-            if try targets.take(argument, from: &args) {
-                continue
-            } else if argument == "--directory" {
-                guard sessionPath == nil, let value = args.popFirst(), !value.isEmpty, !value.hasPrefix("-") else { throw usageError }
-                sessionPath = value
-            } else if argument == "--session" {
-                guard session == nil, let value = args.popFirst(), !value.isEmpty else { throw usageError }
-                session = value
-            } else if argument == "--worktree" {
-                newWorktree = true
-            } else if argument == "--base" {
-                guard base == nil, let value = args.popFirst(), !value.isEmpty, !value.hasPrefix("-") else { throw usageError }
-                base = value
-            } else if argument == "--remove-worktrees" {
-                removeWorktrees = true
-            } else if argument == "--kill-sessions" {
-                killSessions = true
-            } else if argument == "--json" {
-                output = .json
-            } else if argument == "--timeout" {
-                guard timeout == nil, let value = args.popFirst(), let seconds = TimeInterval(value), seconds > 0, seconds.isFinite else {
-                    throw usageError
-                }
-                timeout = seconds
-            } else if argument == "--stat" {
-                stat = true
-            } else if argument == "--conversations" {
-                conversations = true
-            } else if argument == "--" {
-                execArguments = Array(args)
-                args = []
-            } else if argument.hasPrefix("-") {
-                throw usageError
-            } else {
-                words.append(argument)
-            }
-        }
-        if name != "add-session", newWorktree || base != nil { throw usageError }
-        if name != "settle", name != "forget", removeWorktrees { throw usageError }
-        if name != "settle", name != "forget", killSessions { throw usageError }
-        if name != "exec", timeout != nil || execArguments != nil { throw usageError }
-        if name != "diff", stat { throw usageError }
-        if name != "show", conversations { throw usageError }
-        if !["exec", "status", "diff"].contains(name), session != nil { throw usageError }
-        if name != "new", sessionPath != nil { throw usageError }
-        switch (name, words.count, sessionPath) {
-        case ("new", 0...1, _):
-            if let title = words.first, title.allSatisfy(\.isWhitespace) { throw usageError }
-            command = .new(title: words.first, sessionPath: sessionPath)
-        case ("add-session", 1, nil) where newWorktree || base == nil:
-            command = .addSession(directory: words[0], newWorktree: newWorktree, base: base)
-        case ("settle", 0, nil): command = .settle(removeWorktrees: removeWorktrees, killSessions: killSessions)
-        case ("forget", 0, nil): command = .forget(removeWorktrees: removeWorktrees, killSessions: killSessions)
-        case ("list", 0, nil): command = .list
-        case ("show", 0, nil): command = .show(conversations: conversations)
-        case ("exec", 0, _):
-            guard let execArguments, !execArguments.isEmpty else { throw usageError }
-            command = .exec(sessionPath: session, timeout: timeout ?? 60, command: execArguments)
-        case ("status", 0, _): command = .status(sessionPath: session)
-        case ("diff", 0, _): command = .diff(sessionPath: session, stat: stat)
-        case ("snooze", 1..., nil):
-            // Unquoted words join, so `topic snooze mon 9am` reads as the time step reads "mon 9am". The time step
-            // says "never", but on a command line `snooze never` reads as no Snooze, so the CLI says "forever".
-            let text = words.joined(separator: " ")
-            if text.lowercased() == "forever" {
-                command = .snooze(.never, topics: targets.topics)
-            } else if let schedule = SnoozeSchedule(text, typed: true), schedule != .never {
-                command = .snooze(schedule, topics: targets.topics)
-            } else {
-                throw CLIError("topic snooze takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever", exitCode: 2)
-            }
-        case ("unsnooze", 0, nil): command = .unsnooze(topics: targets.topics)
-        case ("tag", 1..., nil):
-            let tags = try words.dropFirst().map { word in
-                guard let tag = Tag(typed: word) else {
-                    throw CLIError("\(word) is not a Tag: use lower case letters, digits and -, e.g. backend", exitCode: 2)
-                }
-                return tag
-            }
-            switch words[0] {
-            case "set": command = .tag(.set(tags))
-            case "add" where !tags.isEmpty: command = .tag(.add(tags))
-            case "remove" where !tags.isEmpty: command = .tag(.remove(tags))
-            default: throw usageError
-            }
-        default: throw usageError
-        }
+extension RequestInvocation {
+    /// The command that a verb built, with the target options and the caller of its command line. A target
+    /// option that the command does not take is a usage error that names the options it takes.
+    init(_ command: Command, parsed: ParsedArguments) throws {
+        self.command = command
         let takes = command.targets
-        if let chosen = targets.chosen, !takes.contains(chosen.option) {
+        if let chosen = parsed.targets.chosen, !takes.contains(chosen.option) {
             throw CLIError("\(command.phrase) does not take \(chosen.option.rawValue)" + Self.choice(of: takes), exitCode: 2)
         }
-        caller = try targets.caller(environment: environment, needed: command.needsTarget, offered: takes)
+        caller = try parsed.targets.caller(environment: parsed.environment, needed: command.needsTarget, offered: takes)
         // Snooze and Unsnooze send their `--topic` options in the command, as a list.
         switch command {
-        case .snooze(_, let topics), .unsnooze(let topics): target = topics.isEmpty ? targets.chosen?.target : nil
-        default: target = targets.chosen?.target
+        case .snooze(_, let topics), .unsnooze(let topics): target = topics.isEmpty ? parsed.targets.chosen?.target : nil
+        default: target = parsed.targets.chosen?.target
         }
-        self.output = output
-        paths = MuxifyPaths(environment: environment, home: environment["HOME"] ?? NSHomeDirectory())
+        output = parsed.output
+        paths = parsed.paths
     }
 
     static func choice(of options: [TargetOption]) -> String {
@@ -298,19 +277,27 @@ extension TopicInvocation {
     }
 
     func run() async throws {
-        var response: TopicResponse
-        if command == .list {
-            response = TopicService(paths: paths).handle(TopicRequest(.list))
-        } else {
+        var response: EnvironmentResponse
+        switch command {
+        case .list:
+            response = EnvironmentService(paths: paths).handle(EnvironmentRequest(.list))
+        case .lock(let locked):
+            response = EnvironmentService(paths: paths).handle(EnvironmentRequest(locked ? .lock : .unlock, target: target,
+                                                                                caller: caller.map(TopicCaller.pane)))
+        default:
             let config = try await ConfigSessions.load(paths.configFile, within: command.findsAllSessionPaths ? nil : [])
-            func handle() throws -> TopicResponse {
-                let service = TopicService(paths: paths, server: .local, sessionPaths: config.sessionPaths, topics: config.topics)
+            func handle() throws -> EnvironmentResponse {
+                let service = EnvironmentService(paths: paths, server: TmuxServer.local, sessionPaths: config.sessionPaths, topics: config.topics)
                 // No client: no terminal switches to the result, because a command changes what the user sees only
                 // when they ask for it.
-                return service.handle(TopicRequest(try request(sessionPaths: config.sessionPaths, service: service), target: target,
-                                                   caller: caller.map(TopicCaller.pane)))
+                return service.handle(EnvironmentRequest(try request(sessionPaths: config.sessionPaths, service: service), target: target,
+                                                         caller: caller.map(TopicCaller.pane)))
             }
-            response = try handle()
+            do {
+                response = try handle()
+            } catch let answer as Answer {
+                response = answer.response
+            }
         }
         if case .topic(let topic) = response {
             switch command {
@@ -325,6 +312,8 @@ extension TopicInvocation {
                                                                    topic: topic, output: output)
             case .show(conversations: true):
                 return try reportConversations(of: topic)
+            case .open:
+                return try CLICommand.open("muxify://select?topic=\(CLICommand.percentEncoded(topic.id))")
             default: break
             }
         }
@@ -332,7 +321,7 @@ extension TopicInvocation {
     }
 
     /// Prints a response of the Topic service, and throws its failure so that the command exits with an error.
-    static func report(_ response: TopicResponse, output: Output) throws {
+    static func report(_ response: EnvironmentResponse, output: Output) throws {
         switch output {
         case .json:
             let encoder = JSONEncoder()
@@ -352,8 +341,10 @@ extension TopicInvocation {
                     print([session.name, session.baseName, session.directory,
                            session.worktree?.branch ?? ""].map(\.oneLineField).joined(separator: "\t"))
                 }
-            case .changed(let change): if let id = change.topicID { print(id) }
+            // A Topic change prints the Topic's id, a change of a Window the Window's id, and a Session rename the full name.
+            case .changed(let change): if let id = change.topicID ?? change.window?.rawValue ?? change.sessionName { print(id) }
             case .snoozeChanged(let change): for id in change.topicIDs { print(id) }
+            case .readChanged(let change): for id in change.topicIDs + change.paneIDs.map(\.rawValue) { print(id) }
             case .failed: break
             }
         }
@@ -389,29 +380,28 @@ extension TopicInvocation {
         }
     }
 
-    private func request(sessionPaths: [SessionPath], service: TopicService) throws -> TopicCommand {
+    private func request(sessionPaths: [SessionPath], service: EnvironmentService) throws -> EnvironmentCommand {
         switch command {
-        case .new(nil, let sessionPath): return .extract(sessionPath: try sessionPath.map(Self.directory)?.real)
-        case .new(let title?, let sessionPath): return .create(title: title, sessionPath: try sessionPath.map(Self.directory)?.real)
-        case .addSession(let path, let newWorktree, let base):
+        case .new(let title, let tags): return .create(title: title, tags: tags.isEmpty ? nil : tags)
+        case .addSession(let path, let newWorktree):
             let directory = try Self.directory(path)
             // A folder in no SessionPath goes to the service as typed, which fails with the Config's own words.
             guard let choice = SessionChoice.containing(directory, in: sessionPaths) else {
                 return .addSession(sessionPath: directory.real, workingCopy: .directory)
             }
-            if newWorktree, choice.worktree == nil {
+            if newWorktree != nil, choice.worktree == nil {
                 throw CLIError("--worktree needs a git repository, and \(choice.directory.path) is not one", exitCode: 2)
             }
             // The same choice as the Add Session sheet makes for this row.
-            return .addSession(sessionPath: choice.sessionPath.folder.path, workingCopy: choice.workingCopy(newWorktree: newWorktree, base: base), name: choice.name)
+            return .addSession(sessionPath: choice.sessionPath.folder.path, workingCopy: choice.workingCopy(newWorktree: newWorktree != nil, start: newWorktree ?? .head), name: choice.name)
         case .forget(let remove, let kill):
-            guard let target = target ?? caller.map(TopicTarget.pane),
+            guard let target = target ?? caller.map(EnvironmentTarget.pane),
                   var choices = try? service.forgetChoices(for: target).get() else { return .forget(choices: [], worktrees: []) }
             if kill { for index in choices.sessions.indices { choices.sessions[index].disposition = .kill } }
             return .forget(choices: choices.sessions, worktrees: remove ? choices.worktrees.filter { $0.canRemove(sessions: choices.sessions) }.map(\.id) : [])
         case .settle(let remove, let kill):
             // Choices that fail to load leave the defaults, so the request itself reports why the Topic cannot settle.
-            guard let settled = target ?? caller.map(TopicTarget.pane),
+            guard let settled = target ?? caller.map(EnvironmentTarget.pane),
                   var choices = try? service.settleChoices(for: settled).get() else { return .settle(choices: [], outcome: "") }
             for index in choices.indices {
                 if kill { choices[index].disposition = .kill }
@@ -423,10 +413,71 @@ extension TopicInvocation {
             guard let deadline = schedule.deadline(from: Date()) else { throw CLIError("that time has already passed", exitCode: 2) }
             return .snooze(until: deadline, topics: topics)
         case .unsnooze(let topics): return .unsnooze(topics: topics)
+        case .zen(let schedule):
+            guard let deadline = schedule.deadline(from: Date()) else { throw CLIError("that time has already passed", exitCode: 2) }
+            return .startZen(until: deadline)
+        case .endZen: return .endZen
+        case .markRead(let change, let scope): return .markRead(change, scope: scope)
+        case .markAllRead: return .markAllRead
         case .tag(let change): return .tags(change)
         case .list: return .list
-        case .show, .exec, .status, .diff: return .show
+        case .show, .open, .exec, .status, .diff: return .show
+        case .rename(let title): return .rename(title: title)
+        case .reopen: return .reopen
+        case .startFresh: return .startFresh
+        case .lock(let locked): return locked ? .lock : .unlock
+        case .moveWindow(let topic, let session, let newSession):
+            guard let session else { return .move(to: newSession ? .newSession(topic: .named(topic)) : .topic(.named(topic))) }
+            let response = service.handle(EnvironmentRequest(.show, target: .topic(.named(topic))))
+            guard case .topic(let detail) = response else { throw Answer(response) }
+            guard let chosen = detail.sessions.first(where: { $0.id == session || $0.name == session }),
+                  let id = SessionID(rawValue: chosen.id) else { throw CLIError("no live Session of the Topic \(detail.label) matches \(session)") }
+            return .move(to: .session(id))
+        case .moveToNewTopic(let title): return .move(to: .newTopic(title: title))
+        case .moveToNewWindow(let title): return .move(to: .newWindow(title: title))
+        case .removeSessionFromTopic(kill: false, _): return .removeFromTopic
+        case .removeSessionFromTopic(kill: true, let removeWorktree):
+            guard removeWorktree, let session = target ?? caller.map(EnvironmentTarget.pane) else { return .removeAndKill(worktrees: []) }
+            let worktree: TopicForgetChoices.Worktree?
+            switch service.removeAndKillWorktree(of: session) {
+            case .success(let made): worktree = made
+            case .failure(let failure): throw Answer(.failed(failure))
+            }
+            guard let worktree else { throw CLIError("The Session works in no Worktree that Muxify made. No changes were made.") }
+            guard worktree.isClean else {
+                throw CLIError(TopicRequestError.worktreeHasChanges(worktree.spec.path).description + " No changes were made.")
+            }
+            guard worktree.sessionIDs.count <= 1 else {
+                throw CLIError("Another live Session works in the Worktree \(worktree.spec.path). No changes were made.")
+            }
+            return .removeAndKill(worktrees: [worktree.id])
+        case .newWindow(let command): return .newWindow(command: command)
+        case .newSession(let path, let name): return .newSession(sessionPath: try Self.directory(path).real, name: name)
+        case .renameSession(let name): return .renameSession(name: name)
+        case .renameWindow(let name): return .renameWindow(name: name)
+        case .placeWindow(let placement): return .moveWindow(to: placement)
+        case .kill(let session): return session ? .killSession : .killWindow
+        case .pin(let pinned): return pinned ? .pin : .unpin
+        case .moveCard(let move): return .moveCard(move)
+        case .moveSession(let placement): return .moveSession(to: placement)
+        case .sortSessions: return .sortSessions
+        case .removeWindowFromTopic(nil): return .move(to: .newSession(topic: nil))
+        case .removeWindowFromTopic(let name?):
+            let records = try TopicStore(paths: paths).read().records
+            guard let window = TmuxServer.local.snapshot().windows.first(where: { $0.sessionID == name || $0.sessionName == name }),
+                  let id = SessionID(rawValue: window.sessionID) else { throw CLIError(TopicRequestError.sessionUnavailable(name).description) }
+            if let topic = records.first(where: { $0.id == window.topicID && $0.settledAt == nil }) {
+                throw CLIError("The Session \(window.sessionName) is in the Topic \(TopicSummary(record: topic).label). Name a No Topic Session, "
+                               + "or use window move --topic. No changes were made.")
+            }
+            return .move(to: .session(id))
         }
+    }
+
+    /// A response that ends the command before its request, such as the failure of a read that the request needs.
+    private struct Answer: Error {
+        let response: EnvironmentResponse
+        init(_ response: EnvironmentResponse) { self.response = response }
     }
 
     /// The directory `path` names. Its real path is where `cd -P` would reach it.
@@ -434,7 +485,7 @@ extension TopicInvocation {
         var isDirectory: ObjCBool = false
         let folder = Folder.local(path)
         guard FileManager.default.fileExists(atPath: folder.real, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw CLIError(CLICommand.usage, exitCode: 2)
+            throw CLIError.usage
         }
         return folder
     }
@@ -453,5 +504,21 @@ private struct TopicConversations: Encodable {
     init(topic: TopicDetail, conversations: [AgentConversation]) {
         self.topic = topic
         self.conversations = conversations.map { Conversation(kind: $0.kind, conversation: $0.id) }
+    }
+}
+
+extension CLIVerbPath {
+    /// The verb that marks this scope Read or Unread.
+    static func markRead(_ change: ReadChange, scope: ReadScope) -> CLIVerbPath {
+        switch (scope, change) {
+        case (.topic, .read): .topicMarkRead
+        case (.topic, .unread): .topicMarkUnread
+        case (.session, .read): .sessionMarkRead
+        case (.session, .unread): .sessionMarkUnread
+        case (.window, .read): .windowMarkRead
+        case (.window, .unread): .windowMarkUnread
+        case (.pane, .read): .agentMarkRead
+        case (.pane, .unread): .agentMarkUnread
+        }
     }
 }

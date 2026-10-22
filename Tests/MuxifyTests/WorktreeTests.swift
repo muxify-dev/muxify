@@ -36,7 +36,7 @@ final class WorktreeTests: XCTestCase {
         XCTAssertEqual(worktree.arguments, ["worktree", "add", "-b", "fix-links", "/work trees/team/game/fix-links"])
         XCTAssertEqual(plan.newWorktree, TopicPlan.NewWorktree(worktree: worktree, commit: "c0ffee"))
         XCTAssertEqual(Array(plan.commands.prefix(2)), [
-            .tmux(["new-session", "-d", "-s", "team/game/fix-links", "-c", worktree.path]),
+            .tmuxMaking(["new-session", "-d", "-s", "team/game/fix-links", "-c", worktree.path]),
             .tmux(["set-option", "-t", "=team/game/fix-links:", "@muxify_topic", "topic"]),
         ])
         var record = try XCTUnwrap(plan.record)
@@ -64,7 +64,7 @@ final class WorktreeTests: XCTestCase {
                                         workingCopy: .newWorktree(at: "c0ffee", root: "/state/muxify/worktrees"), windows: [], sessionPaths: [sessionPath]).edit
         let path = "/state/muxify/worktrees/game_server/fix-links"
         XCTAssertEqual(plan.newWorktree, TopicPlan.NewWorktree(worktree: .init(repositoryPath: sessionPath.folder.path, path: path, branch: "fix-links"), commit: "c0ffee"))
-        XCTAssertEqual(plan.commands.first, .tmux(["new-session", "-d", "-s", "game_server/fix-links", "-c", path]))
+        XCTAssertEqual(plan.commands.first, .tmuxMaking(["new-session", "-d", "-s", "game_server/fix-links", "-c", path]))
     }
 
     func testShellRunsInRequestedDirectory() throws {

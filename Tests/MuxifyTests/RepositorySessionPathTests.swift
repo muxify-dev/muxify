@@ -157,7 +157,7 @@ final class RepositorySessionPathTests: XCTestCase {
         XCTAssertEqual(choice.workingCopy(newWorktree: false), .worktree(path: release.folder.path))
         let added = try? TopicSessionPlan(topic: TopicRecord(id: "t", title: "T", slug: "t"),
                                           sessionPath: gameServer, workingCopy: .worktree(release), windows: [], sessionPaths: [gameServer, notes]).edit
-        XCTAssertEqual(added?.commands.first, .tmux(["new-session", "-d", "-s", "game_server/t", "-c", release.folder.path]))
+        XCTAssertEqual(added?.commands.first, .tmuxMaking(["new-session", "-d", "-s", "game_server/t", "-c", release.folder.path]))
         XCTAssertEqual(added?.record?.sessions.last?["worktree_path"], .string(release.folder.path))
         XCTAssertEqual(added?.record?.sessions.last?["worktree_created"], .bool(false))
     }
@@ -174,7 +174,7 @@ final class RepositorySessionPathTests: XCTestCase {
         XCTAssertEqual(rows[0].choice.workingCopy(newWorktree: false), .worktree(path: "/work/app"))
         let plan = try TopicSessionPlan(topic: TopicRecord(id: "fix", title: "Fix", slug: "fix"), sessionPath: app,
                                         workingCopy: .worktree(Worktree(path: "/work/app", branch: "main")), windows: [], sessionPaths: [app]).edit
-        XCTAssertEqual(plan.commands.first, .tmux(["new-session", "-d", "-s", "app/fix", "-c", "/work/app"]))
+        XCTAssertEqual(plan.commands.first, .tmuxMaking(["new-session", "-d", "-s", "app/fix", "-c", "/work/app"]))
         XCTAssertEqual(plan.record?.sessions.first?["directory"], .string("/work/app"))
         XCTAssertEqual(plan.record?.sessions.first?["worktree_created"], .bool(false))
     }
@@ -222,7 +222,7 @@ final class RepositorySessionPathTests: XCTestCase {
                                          windows: [], sessionPaths: [gameServer, notes]).edit
         let tree = TopicPlan.WorktreeSpec(repositoryPath: gameServer.folder.path, path: "/trees/game_server/t", branch: "t")
         XCTAssertEqual(added.newWorktree, TopicPlan.NewWorktree(worktree: tree, commit: "c0ffee"))
-        XCTAssertEqual(Array(added.commands.prefix(2)), [.tmux(["new-session", "-d", "-s", "game_server/t", "-c", "/trees/game_server/t"]),
+        XCTAssertEqual(Array(added.commands.prefix(2)), [.tmuxMaking(["new-session", "-d", "-s", "game_server/t", "-c", "/trees/game_server/t"]),
                                         .tmux(["set-option", "-t", "=game_server/t:", "@muxify_topic", "t"])])
         XCTAssertEqual(added.record?.sessions.last?["base"], .string("c0ffee"))
         XCTAssertEqual(added.record?.sessions.last?["worktree_created"], .bool(true))

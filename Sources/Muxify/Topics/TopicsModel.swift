@@ -296,18 +296,22 @@ struct TopicsModel {
         return rows[(index + 1)...].first(where: stays)?.id ?? rows[..<index].last(where: stays)?.id ?? .noTopic
     }
 
-    /// The Pinned Topic cards, or the Topic and Locked cards that are not Pinned, in list order: a drag or Move Up
-    /// and Move Down reorders a card among these only.
+    /// The cards of `rows`, as MuxifyCore orders them for the CLI too (`TopicCards`).
+    private let cards: [TopicListEntry]
+
+    /// The Pinned Topic cards, or the Topic and Locked cards that are not Pinned, in list order: a drag reorders a card
+    /// among these only.
     func cardOrder(pinned: Bool) -> [TopicListID] {
-        rows.compactMap { row in row.isPinned == pinned ? row.id.listID : nil }
+        cards.filter { $0.isPinned == pinned }.map(\.id)
     }
 
     /// The cards right above and below a card in the Topics list, among those with its Pin. None for a Topic outside it.
     func neighbors(of id: TopicGroupID) -> CardNeighbors {
-        guard let row = rows.first(where: { $0.id == id }), let listID = id.listID else { return CardNeighbors(above: nil, below: nil) }
-        let order = cardOrder(pinned: row.isPinned)
-        guard let index = order.firstIndex(of: listID) else { return CardNeighbors(above: nil, below: nil) }
-        return CardNeighbors(above: index > 0 ? order[index - 1] : nil, below: index + 1 < order.count ? order[index + 1] : nil)
+        guard let listID = id.listID else { return CardNeighbors(above: nil, below: nil) }
+        var above: TopicListID?, below: TopicListID?
+        if case .to(.before(let card)) = TopicCards.step(listID, .up, in: cards) { above = card }
+        if case .to(.after(let card)) = TopicCards.step(listID, .down, in: cards) { below = card }
+        return CardNeighbors(above: above, below: below)
     }
 
     /// Every live No Topic Session, Locked or not. The Command Palette reaches each of them.
@@ -374,6 +378,8 @@ struct TopicsModel {
         let shownLocks = zen == nil ? lockedSessionIDs : []
         let entries = TopicOrder.sorted(records.map(TopicListEntry.topic) + (zen == nil ? locks : []).map(TopicListEntry.lock))
         let open = entries.records
+        let cards = TopicCards.order(records: records, windows: windows, zen: zen, now: now)
+        self.cards = cards
         let ids = Set(open.map(\.id))
         let snoozedIDs = Set(open.filter { $0.isSnoozed(at: now) }.map(\.id))
         snoozedTopicIDs = snoozedIDs
@@ -491,7 +497,8 @@ struct TopicsModel {
         }
         let snoozedRows = rows.filter { if case .topic(let id) = $0.id { return snoozedIDs.contains(id) }; return false }
             .enumerated().sorted { (wake($0.element), $0.offset) < (wake($1.element), $1.offset) }.map(\.element)
-        let openRows = rows.filter { if case .topic(let id) = $0.id { return !snoozedIDs.contains(id) }; return true }
+        let rowsByCard = Dictionary(rows.compactMap { row in row.id.listID.map { ($0, row) } }, uniquingKeysWith: { first, _ in first })
+        let openRows = cards.compactMap { rowsByCard[$0.id] }
         self.rows = openRows
         self.snoozedRows = snoozedRows
         let settled = records.filter { $0.settledAt != nil }

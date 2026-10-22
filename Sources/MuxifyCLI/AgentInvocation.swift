@@ -8,40 +8,11 @@ struct AgentInvocation: Equatable {
     var topic: String?
     var status: AgentStatus?
     var unreadOnly: Bool
-    var output: TopicInvocation.Output
+    var output: RequestInvocation.Output
     var paths: MuxifyPaths
 }
 
 extension AgentInvocation {
-    /// Parses the words after `agent`. A command line that the command cannot run is a usage error, status 2.
-    init(arguments: ArraySlice<String>, environment: [String: String]) throws {
-        let usageError = CLIError(CLICommand.usage, exitCode: 2)
-        var args = arguments
-        guard args.popFirst() == "list" else { throw usageError }
-        var topic: String?
-        var status: AgentStatus?
-        var unreadOnly = false
-        var output = TopicInvocation.Output.text
-        while let argument = args.popFirst() {
-            switch argument {
-            case "--topic":
-                guard topic == nil, let value = args.popFirst() else { throw usageError }
-                topic = try TopicInvocation.TargetOption.topicName(value)
-            case "--status":
-                guard status == nil, let value = args.popFirst() else { throw usageError }
-                guard let parsed = AgentStatus(rawValue: value) else {
-                    throw CLIError("--status takes working, blocked, done or failed", exitCode: 2)
-                }
-                status = parsed
-            case "--unread": unreadOnly = true
-            case "--json": output = .json
-            default: throw usageError
-            }
-        }
-        self.init(topic: topic, status: status, unreadOnly: unreadOnly, output: output,
-                  paths: MuxifyPaths(environment: environment, home: environment["HOME"] ?? NSHomeDirectory()))
-    }
-
     func run() async throws {
         let records: [TopicRecord]
         do {
@@ -133,98 +104,65 @@ struct AgentConversationInvocation: Equatable {
     var selection: EntrySelection
     /// Print facts about the conversation, not its Entries.
     var info: Bool
-    var output: TopicInvocation.Output
+    var output: RequestInvocation.Output
     var roots: TranscriptRoots
 }
 
 extension AgentConversationInvocation {
-    /// Parses the words after `agent conversation`. A command line that the command cannot run is a usage error, status 2.
-    init(arguments: ArraySlice<String>, environment: [String: String], now: Date = Date()) throws {
-        let usageError = CLIError(CLICommand.usage, exitCode: 2)
-        func count(_ value: String?, from lowest: Int, _ option: String) throws -> Int {
-            guard let value, let number = Int(value), number >= lowest else {
+    /// The command line of `agent conversation`. A command line that the command cannot run is a usage error, status 2.
+    init(_ parsed: ParsedArguments) throws {
+        func count(_ option: String, from lowest: Int) throws -> Int? {
+            guard let value = try parsed.value(option) else { return nil }
+            guard let number = Int(value), number >= lowest else {
                 throw CLIError("\(option) takes a whole number" + (lowest > 0 ? " above 0" : ""), exitCode: 2)
             }
             return number
         }
-        var args = arguments
-        var pane: PaneID?
-        var conversation: String?
-        var transcript: String?
-        var kind: AgentKind?
-        var selection = EntrySelection()
-        var window: (option: String, window: EntrySelection.Window)?
-        var roles: Set<Entry.Role>?
-        var pattern: String?
-        var context: Int?
-        var maxChars: Int?
-        var full = false
-        var info = false
-        var output = TopicInvocation.Output.text
-        var selects = false
-        while let argument = args.popFirst() {
-            switch argument {
-            case "--conversation":
-                guard conversation == nil, let value = args.popFirst() else { throw usageError }
-                conversation = value
-            case "--kind":
-                guard kind == nil, let value = args.popFirst() else { throw usageError }
-                guard let parsed = AgentKind(rawValue: value) else { throw CLIError("--kind takes claude, codex, pi or opencode", exitCode: 2) }
-                kind = parsed
-            case "--transcript":
-                guard transcript == nil, let value = args.popFirst(), !value.isEmpty else { throw usageError }
-                transcript = value
-            case "--head", "--tail":
-                guard window == nil else { throw CLIError("give only one of --head, --tail and --range", exitCode: 2) }
-                let number = try count(args.popFirst(), from: 1, argument)
-                window = (argument, argument == "--head" ? .head(number) : .tail(number))
-            case "--range":
-                guard window == nil else { throw CLIError("give only one of --head, --tail and --range", exitCode: 2) }
-                window = (argument, try Self.range(args.popFirst()))
-            case "--after":
-                guard selection.after == nil else { throw usageError }
-                selection.after = try count(args.popFirst(), from: -1, argument)
-            case "--since":
-                guard selection.since == nil, let value = args.popFirst(),
-                      let since = EntrySelection.since(value, now: now) else {
-                    throw CLIError("--since takes a time, e.g. 2h, 30m, 17:30, mon 9am or 2026-10-18T09:00:00Z", exitCode: 2)
-                }
-                selection.since = since
-            case "--role", "--tools", "--tool":
-                guard roles == nil else { throw CLIError("give only one of --role, --tools and --tool", exitCode: 2) }
-                if argument == "--tools" {
-                    roles = Set(Entry.Role.allCases)
-                } else if argument == "--tool" {
-                    guard let value = args.popFirst(), !value.isEmpty else { throw usageError }
-                    roles = [.toolCall, .toolResult]
-                    selection.tools = Set(value.split(separator: ",").map(String.init))
-                } else {
-                    guard let value = args.popFirst(), let parsed = Self.roles(value) else {
-                        throw CLIError("--role takes user, assistant, tool_call, tool_result or all, separated by commas", exitCode: 2)
-                    }
-                    roles = parsed
-                }
-            case "--grep":
-                guard pattern == nil, let value = args.popFirst() else { throw usageError }
-                pattern = value
-            case "--context":
-                guard context == nil else { throw usageError }
-                context = try count(args.popFirst(), from: 0, argument)
-            case "--max-chars":
-                guard maxChars == nil else { throw usageError }
-                maxChars = try count(args.popFirst(), from: 1, argument)
-            case "--full": full = true
-            case "--info": info = true
-            case "--json": output = .json
-            default:
-                guard pane == nil, !argument.hasPrefix("-") else { throw usageError }
-                guard let id = PaneID(rawValue: argument) else { throw CLIError("agent conversation takes a tmux Pane id, e.g. %3", exitCode: 2) }
-                pane = id
-            }
-            if ["--head", "--tail", "--range", "--after", "--since", "--role", "--tools", "--tool", "--grep"].contains(argument) {
-                selects = true
-            }
+        let windows = ["--head", "--tail", "--range"], roleOptions = ["--role", "--tools", "--tool"]
+        guard parsed.count(of: windows) <= 1 else { throw CLIError("give only one of --head, --tail and --range", exitCode: 2) }
+        guard parsed.count(of: roleOptions) <= 1 else { throw CLIError("give only one of --role, --tools and --tool", exitCode: 2) }
+        guard parsed.operands.count <= 1 else { throw CLIError.usage }
+        let pane = try parsed.operands.first.map { word in
+            guard let id = PaneID(rawValue: word) else { throw CLIError("agent conversation takes a tmux Pane id, e.g. %3", exitCode: 2) }
+            return id
         }
+        let conversation = try parsed.value("--conversation")
+        let kind = try parsed.value("--kind").map { value in
+            guard let kind = AgentKind(rawValue: value) else { throw CLIError("--kind takes claude, codex, pi or opencode", exitCode: 2) }
+            return kind
+        }
+        let transcript = try parsed.value("--transcript")
+        if transcript?.isEmpty == true { throw CLIError.usage }
+        var selection = EntrySelection()
+        var window: EntrySelection.Window?
+        if let head = try count("--head", from: 1) { window = .head(head) }
+        if let tail = try count("--tail", from: 1) { window = .tail(tail) }
+        if let range = try parsed.value("--range") { window = try Self.range(range) }
+        selection.after = try count("--after", from: -1)
+        if let value = try parsed.value("--since") {
+            guard let since = EntrySelection.since(value, now: parsed.now) else {
+                throw CLIError("--since takes a time, e.g. 2h, 30m, 17:30, mon 9am or 2026-10-18T09:00:00Z", exitCode: 2)
+            }
+            selection.since = since
+        }
+        var roles: Set<Entry.Role>?
+        if parsed.flag("--tools") { roles = Set(Entry.Role.allCases) }
+        if let tools = try parsed.value("--tool") {
+            guard !tools.isEmpty else { throw CLIError.usage }
+            roles = [.toolCall, .toolResult]
+            selection.tools = Set(tools.split(separator: ",").map(String.init))
+        }
+        if let value = try parsed.value("--role") {
+            guard let parsed = Self.roles(value) else {
+                throw CLIError("--role takes user, assistant, tool_call, tool_result or all, separated by commas", exitCode: 2)
+            }
+            roles = parsed
+        }
+        let pattern = try parsed.value("--grep")
+        let context = try count("--context", from: 0)
+        let maxChars = try count("--max-chars", from: 1)
+        let full = parsed.flag("--full"), info = parsed.flag("--info")
+        let selects = parsed.count(of: windows + roleOptions + ["--after", "--since", "--grep"]) > 0
         let source: Source
         switch (pane, conversation, transcript) {
         case (let pane?, nil, nil):
@@ -256,16 +194,17 @@ extension AgentConversationInvocation {
             }
         }
         if let roles { selection.roles = roles }
-        selection.window = window?.window ?? (selects ? nil : .tail(20))
+        selection.window = window ?? (selects ? nil : .tail(20))
         selection.maxChars = full ? nil : maxChars ?? 2000
-        self.init(source: source, selection: selection, info: info, output: output,
-                  roots: TranscriptRoots(environment: environment, home: URL(fileURLWithPath: environment["HOME"] ?? NSHomeDirectory())))
+        self.init(source: source, selection: selection, info: info, output: parsed.output,
+                  roots: TranscriptRoots(environment: parsed.environment,
+                                         home: URL(fileURLWithPath: parsed.environment["HOME"] ?? NSHomeDirectory())))
     }
 
     /// A..B, -20..-1, 40.. or ..10.
-    private static func range(_ value: String?) throws -> EntrySelection.Window {
+    private static func range(_ value: String) throws -> EntrySelection.Window {
         let problem = CLIError("--range takes A..B, e.g. 40..60, -20..-1 or 40..", exitCode: 2)
-        guard let value, let dots = value.range(of: "..") else { throw problem }
+        guard let dots = value.range(of: "..") else { throw problem }
         func end(_ text: Substring) throws -> Int? {
             if text.isEmpty { return nil }
             guard let number = Int(text) else { throw problem }

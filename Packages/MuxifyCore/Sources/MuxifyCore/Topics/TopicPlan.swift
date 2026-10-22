@@ -41,6 +41,8 @@ enum TopicWorkingCopy: Equatable {
     /// A Worktree the Topic creates on the branch `<slug>` at `commit`, in `root/<sessionPath name>/<slug>` for a bare
     /// and a plain repository alike.
     case newWorktree(at: String, root: String)
+    /// A Worktree the Topic creates on the local branch `branch`, now at `commit`, in `root/<sessionPath name>/<branch>`.
+    case branchWorktree(branch: String, commit: String, root: String)
 }
 
 extension TopicWorkingCopy {
@@ -69,16 +71,35 @@ extension TopicWorkingCopy {
                 branch = "\(slug)-\(number)"; number += 1
             }
             let path = Folder.lexical((parent as NSString).appendingPathComponent(branch))
-            let worktree = TopicPlan.WorktreeSpec(repositoryPath: sessionPath.folder.path, path: path, branch: branch)
-            return SessionStart(directory: worktree.path,
-                                 worktreeFields: ["repository_path": .string(sessionPath.folder.path), "worktree_path": .string(worktree.path), "branch": .string(worktree.branch),
-                                                 TopicWorktrees.createdKey: .bool(true), TopicWorktrees.baseKey: .string(commit)],
-                                newWorktree: TopicPlan.NewWorktree(worktree: worktree, commit: commit))
+            return Self.made(TopicPlan.WorktreeSpec(repositoryPath: sessionPath.folder.path, path: path, branch: branch), commit: commit,
+                             checkout: .newBranch)
+        case .branchWorktree(let branch, let commit, let root):
+            let parent = (root as NSString).appendingPathComponent(sessionPath.name)
+            // A branch such as feature/x makes one folder, not two.
+            let name = branch.replacingOccurrences(of: "/", with: "-")
+            var folder = name
+            var number = 2
+            while FileManager.default.fileExists(atPath: (parent as NSString).appendingPathComponent(folder)) {
+                folder = "\(name)-\(number)"; number += 1
+            }
+            let path = Folder.lexical((parent as NSString).appendingPathComponent(folder))
+            return Self.made(TopicPlan.WorktreeSpec(repositoryPath: sessionPath.folder.path, path: path, branch: branch), commit: commit,
+                             checkout: .existingBranch)
         }
+    }
+
+    /// A Worktree that Muxify makes: the record says so and keeps the commit it started at, so Settle may remove it.
+    private static func made(_ worktree: TopicPlan.WorktreeSpec, commit: String, checkout: TopicPlan.NewWorktree.Checkout) -> SessionStart {
+        SessionStart(directory: worktree.path,
+                     worktreeFields: ["repository_path": .string(worktree.repositoryPath), "worktree_path": .string(worktree.path),
+                                      "branch": .string(worktree.branch), TopicWorktrees.createdKey: .bool(true),
+                                      TopicWorktrees.baseKey: .string(commit)],
+                     newWorktree: TopicPlan.NewWorktree(worktree: worktree, commit: commit, checkout: checkout))
     }
 }
 
-public struct TopicPlan: Sendable {
+/// The values that the Topic plans share: what git makes and what the executor runs.
+public enum TopicPlan {
     public struct WorktreeSpec: Codable, Hashable, Sendable {
         public let repositoryPath: String
         public let path: String
@@ -95,9 +116,16 @@ public struct TopicPlan: Sendable {
     /// A Worktree that git makes before Muxify saves the record and runs `commands`, so a git
     /// failure leaves no Topic and no recorded Session behind.
     public struct NewWorktree: Equatable, Sendable {
+        public enum Checkout: Equatable, Sendable {
+            /// git makes the branch at `commit`.
+            case newBranch
+            /// The branch exists; `commit` is where it is now.
+            case existingBranch
+        }
         public let worktree: WorktreeSpec
-        /// The full id of the commit the branch starts at.
+        /// The full id of the commit the Worktree starts at.
         public let commit: String
+        public var checkout = Checkout.newBranch
     }
 
     public enum Command: Equatable, Sendable {
@@ -107,34 +135,13 @@ public struct TopicPlan: Sendable {
         case removeCleanWorktree(WorktreeSpec)
         case reopenSession(name: String, directory: String, windowName: String)
         case tmux([String])
+        /// A `new-session` or `new-window` whose Session, Window and Pane go back to the caller in `TopicChange`.
+        /// The executor asks tmux to print their ids. A plan has at most one.
+        case tmuxMaking([String])
         /// Keys typed into the target's pane, `literal` as text rather than key names.
         case sendKeys(target: String, keys: [String], literal: Bool)
         case newTopicSession(name: String, directory: String)
         case removeTopicPlaceholder
-    }
-
-    public let record: TopicRecord
-    public let sessionName: String
-    public let commands: [Command]
-
-    init(title: String, sessionPath: SessionPath, records: [TopicRecord], sessionNames: Set<String>,
-         id: String = UUID().uuidString.lowercased(), now: Date = Date(), clientTTY: String? = nil) {
-        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let slug = TopicNaming.slug(title: title, records: records)
-        sessionName = SessionNaming.available(sessionPath.name, topic: slug, taken: sessionNames)
-        var record = TopicRecord(newTopic: id, title: title, slug: slug, now: now)
-        let sessionID = UUID().uuidString.lowercased()
-        record.sessions = [.object(["id": .string(sessionID), "name": .string(sessionName),
-            "base_name": .string(SessionNaming.base(of: sessionName, topic: record)), "directory": .string(sessionPath.folder.path)])]
-        self.record = record
-        let target = "=" + sessionName + ":"
-        var commands: [Command] = [
-            .tmux(["new-session", "-d", "-s", sessionName, "-c", sessionPath.folder.path]),
-            .tmux(["set-option", "-t", target, "@muxify_topic", id]),
-            .tmux(["set-option", "-t", target, "@muxify_session_id", sessionID]),
-        ]
-        if let clientTTY { commands.append(.tmux(["switch-client", "-c", clientTTY, "-t", target])) }
-        self.commands = commands
     }
 }
 

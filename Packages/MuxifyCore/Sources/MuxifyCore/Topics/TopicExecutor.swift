@@ -1,38 +1,59 @@
 import Foundation
 
+/// What one plan made in tmux, as tmux printed it: the ids that the request's answer gives to the next request.
+struct TmuxMade: Equatable {
+    /// The session name goes last, so a name with a tab still parses.
+    static let format = "#{session_id}\t#{window_id}\t#{pane_id}\t#{session_name}"
+
+    let session: SessionID
+    let window: WindowID
+    let pane: PaneID
+    let sessionName: String
+
+    init(output: String) throws {
+        let fields = output.trimmingCharacters(in: .newlines).split(separator: "\t", maxSplits: 3, omittingEmptySubsequences: false).map(String.init)
+        guard fields.count == 4, let session = SessionID(rawValue: fields[0]), let window = WindowID(rawValue: fields[1]),
+              let pane = PaneID(rawValue: fields[2]) else { throw TopicEditFailure.invalidTmuxResponse }
+        (self.session, self.window, self.pane, sessionName) = (session, window, pane, fields[3])
+    }
+}
+
 /// Runs a plan's commands on one tmux server, and finds the Pane or Window that a request or a plan names.
 struct TopicExecutor {
-    let server: TmuxServer
+    let server: any TmuxRunning
     /// Muxify's worktrees folder in the service's state folder. Settle removes a Worktree only inside it.
     let worktreesRoot: String
 
     /// `client` is the tmux client that types the keys of `sendKeys` commands. A Session that a failed run
-    /// reopened is killed again, so a failed Reopen leaves no half of the Topic behind.
-    func run(_ commands: [TopicPlan.Command], client: String?) throws {
+    /// reopened is killed again, so a failed Reopen leaves no half of the Topic behind. Returns what the plan's
+    /// `tmuxMaking` command made, or the first Session that a Reopen made.
+    @discardableResult
+    func run(_ commands: [TopicPlan.Command], client: String?) throws -> TmuxMade? {
         var placeholderWindowID: String?
         var reopenedSessionIDs: [String] = []
+        var made: TmuxMade?
         do {
             for command in commands {
                 switch command {
                 case .restoreWorktree(let worktree, let base):
                     try TopicWorktrees.restore(worktree, base: base)
                 case .removeCleanWorktree(let worktree):
-                    let snapshot = server.snapshot()
+                    let snapshot = try server.snapshot()
                     guard snapshot.serverRunning else { throw TmuxError.notReady }
                     try TopicWorktrees.removeClean(worktree, root: worktreesRoot, windows: snapshot.windows, panes: snapshot.panes)
                 case .removeMergedWorktree(let worktree):
-                    let snapshot = server.snapshot()
+                    let snapshot = try server.snapshot()
                     guard snapshot.serverRunning else { throw TmuxError.notReady }
                     try TopicWorktrees.removeMerged(worktree, root: worktreesRoot, windows: snapshot.windows, panes: snapshot.panes)
                 case .reopenSession(let name, let directory, let windowName):
-                    let output = try server.run(["new-session", "-d", "-P", "-F", "#{session_id}", "-s", name, "-c", directory, "-n", windowName])
-                    let id = output.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard id.hasPrefix("$"), !id.dropFirst().isEmpty, id.dropFirst().allSatisfy(\.isNumber) else {
-                        throw TopicEditFailure.invalidTmuxResponse
-                    }
-                    reopenedSessionIDs.append(id)
+                    let session = try TmuxMade(output: server.run(["new-session", "-d", "-P", "-F", TmuxMade.format, "-s", name, "-c", directory,
+                                                                    "-n", windowName]))
+                    reopenedSessionIDs.append(session.session.rawValue)
+                    made = made ?? session
                 case .tmux(let arguments):
                     try server.run(arguments)
+                case .tmuxMaking(let arguments):
+                    made = try TmuxMade(output: server.run(Array(arguments.prefix(1)) + ["-P", "-F", TmuxMade.format] + arguments.dropFirst()))
                 case .sendKeys(let target, let keys, let literal):
                     try server.run(Tmux.sendKeysArguments(target: target, keys: keys, literal: literal, client: client))
                 case .newTopicSession(let name, let directory):
@@ -51,6 +72,7 @@ struct TopicExecutor {
             for id in reopenedSessionIDs { _ = try? server.run(["kill-session", "-t", id]) }
             throw error
         }
+        return made
     }
 
     /// The Pane that `request` names, checked against a snapshot. tmux may answer for a Window that the
@@ -77,17 +99,17 @@ struct TopicExecutor {
             if matchesRequest, let source = try? identity.source(in: snapshot) {
                 return (source, snapshot)
             }
-            if attempt == 0 { snapshot = server.snapshot() }
+            if attempt == 0 { snapshot = try server.snapshot() }
         }
         throw TopicEditFailure.sourceUnavailable
     }
 
     /// Finds what a finished edit shows, and switches `client` to it when that client is on this server.
     func show(_ selection: TopicEdit.Selection, client: String?) throws -> TopicChange.Shown? {
-        var snapshot = server.snapshot()
+        var snapshot = try server.snapshot()
         let window: TmuxWindow?
         switch selection {
-        case .unchanged:
+        case .unchanged, .made:
             return nil
         case .emptyTopic(let id):
             return .emptyTopic(id: id)

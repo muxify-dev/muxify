@@ -103,6 +103,42 @@ enum PaletteCommand: String, CaseIterable {
         }
     }
 
+    /// The CLI verbs that make the same change (ADR 0039).
+    var mirror: CLIMirror {
+        switch self {
+        case .newTopic: .verb(.topicNew)
+        case .markRead: .verbs([.topicMarkRead, .sessionMarkRead])
+        case .markUnread: .verbs([.topicMarkUnread, .sessionMarkUnread])
+        case .markAllRead: .verb(.markAllRead)
+        case .movePane, .moveWindow, .moveSession, .movePaneWithTab: .verb(.windowMove)
+        case .addSession: .verb(.topicAddSession)
+        case .snoozeTopics, .snoozeTopic: .verb(.topicSnooze)
+        case .settleTopic: .verb(.topicSettle)
+        case .removeSessionFromTopic: .verb(.sessionRemoveFromTopic)
+        case .forgetTopic: .verb(.topicForget)
+        case .renameTopic: .verb(.topicRename)
+        case .editTags: .verb(.topicTag)
+        case .moveTopicUp, .moveTopicDown: .verbs([.topicMove, .sessionMove])
+        case .pinTopic: .verb(.topicPin)
+        case .unpinTopic: .verb(.topicUnpin)
+        case .unsnoozeTopics, .unsnoozeTopic: .verb(.topicUnsnooze)
+        case .lockSession: .verb(.sessionLock)
+        case .unlockSession: .verb(.sessionUnlock)
+        case .zen: .verb(.zenStart)
+        case .endZen: .verb(.zenEnd)
+        case .newWindow: .verb(.windowNew)
+        case .newSession: .verb(.sessionNew)
+        case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser, .showSidebar, .hideSidebar,
+             .showTerminal, .hideTerminal, .showBrowser, .hideBrowser, .nextSession, .previousSession, .nextTopic, .previousTopic,
+             .newAppWindow:
+            .noMirror("It changes only the view of one App Window.")
+        case .newTab, .closeTab, .openLocation, .nextTab, .previousTab, .back, .forward, .reloadPage, .copyURL, .developerTools:
+            .noMirror("It changes only the Browser of one App Window.")
+        case .openConfig, .reloadConfig, .installExtensions, .installCLI:
+            .noMirror("It sets up the app. An Agent edits the Config file directly.")
+        }
+    }
+
     /// What ⌘↩ on the row does in place of ↩, for a Command whose stronger form stops processes (ADR 0014).
     var commandReturnTitle: String? {
         switch self {
@@ -142,8 +178,8 @@ extension CommandPalette {
                 return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
                     && store.selectedWindow?.topicID == store.activeTopicID
             case .snoozeTopics: return canChangeTopics && store.topicWatcher.records.contains { $0.settledAt == nil }
-            case .moveTopicUp: return canChangeTopics && store.activeCardMove(.previous) != nil
-            case .moveTopicDown: return canChangeTopics && store.activeCardMove(.next) != nil
+            case .moveTopicUp: return canChangeTopics && store.canMoveActiveCard(.previous)
+            case .moveTopicDown: return canChangeTopics && store.canMoveActiveCard(.next)
             case .pinTopic, .unpinTopic:
                 guard canChangeTopics, let topic = store.pinnableActiveTopic else { return false }
                 return topic.isPinned == (command == .unpinTopic)

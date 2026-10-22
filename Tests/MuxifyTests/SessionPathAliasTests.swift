@@ -110,7 +110,6 @@ final class SessionPathAliasTests: XCTestCase {
         settled.sessions.append(.object(["id": .string("notes"), "name": .string("notes/write"), "base_name": .string("notes"), "directory": .string("/work/vault")]))
         XCTAssertEqual(TopicsModel.settledRow(settled, sessionPaths: [vault, game], tags: nil, expanded: []).sessions.map(\.baseName),
                         ["debug", "notes"])
-        let plan = TopicPlan(title: "Write notes", sessionPath: vault, records: [], sessionNames: [], id: "n")
-        XCTAssertEqual(plan.sessionName, "vault/write-notes")
+        XCTAssertEqual(SessionNaming.available(vault.name, topic: "write-notes", taken: []), "vault/write-notes")
     }
 }

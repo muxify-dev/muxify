@@ -326,9 +326,8 @@ final class TopicStoreTests: XCTestCase {
         pinned.isPinned = true
         try seed(pinned, record("a", order: 0))
         try store.write { try $0.create(record("new", order: nil)) }
-        let plan = TopicPlan(title: "Planned", sessionPath: SessionPath(path: "/work/app", name: "app"), records: try records(store),
-                             sessionNames: [], id: "planned")
-        try store.write { try $0.apply(TopicRecordChange(before: nil, after: plan.record)) }
+        let planned = TopicRecord(newTopic: "planned", title: "Planned", slug: "planned", now: Date())
+        try store.write { try $0.apply(TopicRecordChange(before: nil, after: planned)) }
         XCTAssertEqual(try shown(store), ["p", "a", "new", "planned"])
     }
 

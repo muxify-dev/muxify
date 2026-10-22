@@ -278,7 +278,7 @@ struct TopicGit {
 
     let report: Report
 
-    func run(_ targets: [TopicExec.Target], topic: TopicDetail, output: TopicInvocation.Output) throws {
+    func run(_ targets: [TopicExec.Target], topic: TopicDetail, output: RequestInvocation.Output) throws {
         switch report {
         case .status:
             let results = TopicExec.atOnce(targets) { target in

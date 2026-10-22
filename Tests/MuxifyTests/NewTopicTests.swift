@@ -50,40 +50,11 @@ final class NewTopicTests: XCTestCase {
         XCTAssertNil(SessionPath.containing(.local("/alphabet"), in: sessionPaths))
     }
 
-    func testNewTopicPlanWritesRecordAndExactCommands() {
-        var previous = TopicRecord(id: "previous", title: "Earlier")
-        previous.order = -4
-        let plan = TopicPlan(title: "Fix links", sessionPath: sessionPath, records: [previous],
-                             sessionNames: [], id: "new", now: Date(timeIntervalSince1970: 0), clientTTY: "/dev/ttys001")
-        XCTAssertEqual(plan.sessionName, "game/fix-links")
-        XCTAssertEqual(plan.record.title, "Fix links")
-        XCTAssertEqual(plan.record.sessions.first?["directory"], .string("/work/game"))
-        XCTAssertNil(plan.record.order)
-        XCTAssertEqual(plan.record.createdAt, "1970-01-01T00:00:00Z")
-        let savedID = plan.record.sessions.first?["id"]?.string ?? ""
-        XCTAssertFalse(savedID.isEmpty)
-        XCTAssertEqual(plan.commands, [
-            .tmux(["new-session", "-d", "-s", "game/fix-links", "-c", "/work/game"]),
-            .tmux(["set-option", "-t", "=game/fix-links:", "@muxify_topic", "new"]),
-            .tmux(["set-option", "-t", "=game/fix-links:", "@muxify_session_id", savedID]),
-            .tmux(["switch-client", "-c", "/dev/ttys001", "-t", "=game/fix-links:"]),
-        ])
-    }
-
     func testKeysAreTypedAsTheTerminalClientOrAsNoClient() {
         XCTAssertEqual(Tmux.sendKeysArguments(target: "=game/fix-links:", keys: ["printf 'hello world'"], literal: true, client: "/dev/ttys001"),
                        ["send-keys", "-c", "/dev/ttys001", "-l", "-t", "=game/fix-links:", "--", "printf 'hello world'"])
         XCTAssertEqual(Tmux.sendKeysArguments(target: "=game/fix-links:", keys: ["Enter"], literal: false, client: nil),
                        ["send-keys", "-c", "", "-t", "=game/fix-links:", "Enter"])
-    }
-
-    func testUntitledPlanOpensTheSessionAsUntitled() {
-        let plan = TopicPlan(title: " \n ", sessionPath: sessionPath, records: [], sessionNames: [], id: "untitled")
-        XCTAssertNil(plan.record.title)
-        XCTAssertEqual(Array(plan.commands.prefix(2)), [
-            ["new-session", "-d", "-s", "game/untitled-1", "-c", "/work/game"],
-            ["set-option", "-t", "=game/untitled-1:", "@muxify_topic", "untitled"],
-        ].map(TopicPlan.Command.tmux))
     }
 
     func testNewTopicHasNoSessionUntilOneIsAdded() throws {
@@ -99,7 +70,7 @@ final class NewTopicTests: XCTestCase {
 
         let added = try TopicSessionPlan(topic: topic, sessionPath: sessionPath, workingCopy: .directory, windows: [], sessionPaths: [sessionPath]).edit
         XCTAssertEqual(added.record?.sessions.first?["directory"], .string("/work/game"))
-        XCTAssertEqual(added.commands.first, .tmux(["new-session", "-d", "-s", "game/fix-links-2", "-c", "/work/game"]))
+        XCTAssertEqual(added.commands.first, .tmuxMaking(["new-session", "-d", "-s", "game/fix-links-2", "-c", "/work/game"]))
         XCTAssertEqual(added.selection, .sessionName("game/fix-links-2"))
     }
 

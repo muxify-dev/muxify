@@ -36,7 +36,7 @@ final class CreatedWorktreeTests: XCTestCase {
         try commit("local", in: work)
         let base = Worktree(path: work, branch: "main")
         let spec = TopicPlan.WorktreeSpec(repositoryPath: work, path: path("trees/work/fix-links"), branch: "fix-links")
-        try TopicWorktrees.add(spec, at: try TopicWorktrees.commit(nil, in: base))
+        try TopicWorktrees.add(TopicPlan.NewWorktree(worktree: spec, commit: try TopicWorktrees.commit(nil, in: base)))
         XCTAssertEqual(try git(["rev-parse", "HEAD"], in: spec.path), try git(["rev-parse", "HEAD"], in: work))
         XCTAssertNotEqual(try git(["rev-parse", "HEAD"], in: spec.path), try git(["rev-parse", "origin/main"], in: work))
         XCTAssertEqual(try git(["symbolic-ref", "--short", "HEAD"], in: spec.path), "fix-links")
@@ -49,7 +49,7 @@ final class CreatedWorktreeTests: XCTestCase {
         try commit("init", in: work)
         _ = try git(["branch", "clash"], in: work)
         let spec = TopicPlan.WorktreeSpec(repositoryPath: work, path: path("trees/clash"), branch: "clash")
-        XCTAssertThrowsError(try TopicWorktrees.add(spec, at: try git(["rev-parse", "HEAD"], in: work))) { error in
+        XCTAssertThrowsError(try TopicWorktrees.add(TopicPlan.NewWorktree(worktree: spec, commit: try git(["rev-parse", "HEAD"], in: work)))) { error in
             XCTAssertTrue(String(describing: error).contains("a branch named 'clash' already exists"), String(describing: error))
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: spec.path))

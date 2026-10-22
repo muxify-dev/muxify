@@ -117,6 +117,35 @@ final class CLICommandTests: XCTestCase {
         ])
     }
 
+    func testWindowOpenNamesTheWindowOfTheTargetOrOfTheCallerPane() throws {
+        XCTAssertEqual(try CLICommand(arguments: ["window", "open"], environment: ["TMUX_PANE": "%7"]), .windowOpen(target: "%7"))
+        XCTAssertEqual(try CLICommand(arguments: ["window", "open", "--window", "@12"], environment: ["TMUX_PANE": "%7"]), .windowOpen(target: "@12"))
+        XCTAssertEqual(try CLICommand(arguments: ["window", "open", "--pane", "%3"], environment: [:]), .windowOpen(target: "%3"))
+        for arguments in [["window", "open"], ["window", "open", "--topic", "Fix"], ["window", "open", "@12"]] {
+            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: [:]), "\(arguments)")
+        }
+    }
+
+    func testWindowOpenOpensTheURLOfTheWindowThatTmuxNames() async throws {
+        let runner = RecordingRunner(results: [.init(status: 0, output: "@12\n"), .init(status: 0, output: "")])
+        try await CLICommand.windowOpen(target: "%7").execute(using: runner)
+        XCTAssertEqual(runner.calls, [
+            .init(command: "tmux", arguments: ["list-panes", "-t", "%7", "-F", "#{window_id}"], quiet: true),
+            .init(command: "open", arguments: ["muxify://select?window=%40%31%32"], quiet: false),
+        ])
+    }
+
+    func testWindowOpenOfAMissingWindowDoesNotOpenTheApp() async {
+        let runner = RecordingRunner(results: [.init(status: 1, output: "")])
+        do {
+            try await CLICommand.windowOpen(target: "@404").execute(using: runner)
+            XCTFail("Expected missing Window error")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "no tmux Window or Pane '@404'")
+        }
+        XCTAssertEqual(runner.calls.count, 1)
+    }
+
     func testMissingSessionDoesNotOpenApp() async {
         let runner = RecordingRunner(results: [.init(status: 1, output: "")])
         do {
@@ -138,29 +167,77 @@ final class CLICommandTests: XCTestCase {
         }
     }
 
+    func testZenStartKeepsTheTargetsTopicAndZenEndTakesNoTarget() throws {
+        let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let paths = MuxifyPaths(environment: inside, home: "/home/me")
+        let caller = try XCTUnwrap(PaneID(rawValue: "%7"))
+        func zen(_ command: RequestInvocation.Command, target: EnvironmentTarget? = nil, caller: PaneID? = caller,
+                 output: RequestInvocation.Output = .text) -> CLICommand {
+            .request(RequestInvocation(command: command, target: target, caller: caller, output: output, paths: paths))
+        }
+        XCTAssertEqual(try CLICommand(arguments: ["zen", "start", "2h"], environment: inside), zen(.zen(try XCTUnwrap(SnoozeSchedule("2h", typed: true)))))
+        XCTAssertEqual(try CLICommand(arguments: ["zen", "start", "forever", "--topic", "Fix", "--json"], environment: inside),
+                       zen(.zen(.never), target: .topic(.named("Fix")), output: .json))
+        XCTAssertEqual(try CLICommand(arguments: ["zen", "end"], environment: [:]),
+                       .request(RequestInvocation(command: .endZen, target: nil, caller: nil, output: .text,
+                                                  paths: MuxifyPaths(environment: [:], home: NSHomeDirectory()))))
+        for (arguments, message) in [(["zen", "start"], nil), (["zen", "start", "soon"], "zen start takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever"),
+                                     (["zen", "end", "now"], nil), (["zen", "end", "--topic", "Fix"], nil)] {
+            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
+                if let message { XCTAssertEqual(error.localizedDescription, message, "\(arguments)") }
+            }
+        }
+    }
+
+    func testMarkReadVerbsSendTheirScopeWithTheTargetOrTheCallingPane() throws {
+        let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let paths = MuxifyPaths(environment: inside, home: "/home/me")
+        let caller = try XCTUnwrap(PaneID(rawValue: "%7"))
+        func read(_ command: RequestInvocation.Command, target: EnvironmentTarget? = nil, caller: PaneID? = caller) -> CLICommand {
+            .request(RequestInvocation(command: command, target: target, caller: caller, output: .text, paths: paths))
+        }
+        let cases: [([String], CLICommand)] = [
+            (["topic", "mark-read"], read(.markRead(.read, scope: .topic))),
+            (["topic", "mark-unread", "--topic", "Fix"], read(.markRead(.unread, scope: .topic), target: .topic(.named("Fix")))),
+            (["session", "mark-read", "--session", "gs/fix"], read(.markRead(.read, scope: .session), target: .sessionName("gs/fix"))),
+            (["window", "mark-unread", "--window", "@12"], read(.markRead(.unread, scope: .window), target: .window(WindowID(rawValue: "@12")!))),
+            (["agent", "mark-read", "--pane", "%3"], read(.markRead(.read, scope: .pane), target: .pane(PaneID(rawValue: "%3")!))),
+            (["mark-all-read"], read(.markAllRead)),
+        ]
+        for (arguments, expected) in cases {
+            XCTAssertEqual(try CLICommand(arguments: arguments, environment: inside), expected, "\(arguments)")
+        }
+        for arguments in [["agent", "mark-read", "--window", "@12"], ["window", "mark-read", "--session", "gs"], ["mark-all-read", "--pane", "%3"],
+                          ["topic", "mark-read", "now"]] {
+            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
+            }
+        }
+    }
+
     func testTopicCommandsTakeTheCallingPaneAndAtMostOneExplicitTarget() throws {
         let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
         let outside = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]
         let paths = MuxifyPaths(environment: inside, home: "/home/me")
         let caller = try XCTUnwrap(PaneID(rawValue: "%7"))
-        let window = TopicTarget.window(try XCTUnwrap(WindowID(rawValue: "@12")))
-        let pane = TopicTarget.pane(try XCTUnwrap(PaneID(rawValue: "%3")))
-        func topic(_ command: TopicInvocation.Command, target: TopicTarget? = nil, caller: PaneID? = caller,
-                   output: TopicInvocation.Output = .text) -> CLICommand {
-            .topic(TopicInvocation(command: command, target: target, caller: caller, output: output, paths: paths))
+        let window = EnvironmentTarget.window(try XCTUnwrap(WindowID(rawValue: "@12")))
+        let pane = EnvironmentTarget.pane(try XCTUnwrap(PaneID(rawValue: "%3")))
+        func topic(_ command: RequestInvocation.Command, target: EnvironmentTarget? = nil, caller: PaneID? = caller,
+                   output: RequestInvocation.Output = .text) -> CLICommand {
+            .request(RequestInvocation(command: command, target: target, caller: caller, output: output, paths: paths))
         }
         let cases: [([String], [String: String], CLICommand)] = [
-            (["new"], inside, topic(.new(title: nil, sessionPath: nil))),
-            (["new", "Fix reward", "--directory", "/work"], outside, topic(.new(title: "Fix reward", sessionPath: "/work"), caller: nil)),
-            (["new", "Fix reward", "--directory", "/work"], inside, topic(.new(title: "Fix reward", sessionPath: "/work"))),
-            (["new", "--pane", "%3", "Fix"], inside, topic(.new(title: "Fix", sessionPath: nil), target: pane)),
-            (["new", "--window", "@12"], outside, topic(.new(title: nil, sessionPath: nil), target: window, caller: nil)),
-            (["add-session", "tools"], inside, topic(.addSession(directory: "tools", newWorktree: false, base: nil))),
+            (["new", "Fix reward"], outside, topic(.new(title: "Fix reward", tags: []), caller: nil)),
+            (["new", "Fix reward", "--tag", "backend", "--tag", "#Release", "--json"], inside,
+             topic(.new(title: "Fix reward", tags: [Tag(name: "backend")!, Tag(name: "release")!]), output: .json)),
+            (["add-session", "tools"], inside, topic(.addSession(directory: "tools", newWorktree: nil))),
             (["add-session", "tools", "--topic", "Fix reward"], outside,
-             topic(.addSession(directory: "tools", newWorktree: false, base: nil), target: .topic(.named("Fix reward")), caller: nil)),
-            (["add-session", "tools", "--worktree"], inside, topic(.addSession(directory: "tools", newWorktree: true, base: nil))),
+             topic(.addSession(directory: "tools", newWorktree: nil), target: .topic(.named("Fix reward")), caller: nil)),
+            (["add-session", "tools", "--worktree"], inside, topic(.addSession(directory: "tools", newWorktree: .head))),
             (["add-session", "--base", "origin/main", "tools", "--worktree"], inside,
-             topic(.addSession(directory: "tools", newWorktree: true, base: "origin/main"))),
+             topic(.addSession(directory: "tools", newWorktree: .ref("origin/main")))),
+            (["add-session", "tools", "--worktree", "--branch", "fix"], inside, topic(.addSession(directory: "tools", newWorktree: .branch("fix")))),
             (["settle", "--window", "@12"], inside, topic(.settle(removeWorktrees: false), target: window)),
             (["settle", "--json", "--pane", "%3"], inside, topic(.settle(removeWorktrees: false), target: pane, output: .json)),
             (["settle", "--remove-worktrees"], inside, topic(.settle(removeWorktrees: true))),
@@ -198,15 +275,15 @@ final class CLICommandTests: XCTestCase {
         for (arguments, environment, expected) in cases {
             XCTAssertEqual(try CLICommand(arguments: ["topic"] + arguments, environment: environment), expected, "\(arguments)")
         }
-        XCTAssertThrowsError(try CLICommand(arguments: ["topic", "new"], environment: ["TMUX_PANE": "not-a-pane"]),
+        XCTAssertThrowsError(try CLICommand(arguments: ["topic", "settle"], environment: ["TMUX_PANE": "not-a-pane"]),
                              "a TMUX_PANE that is not a Pane id is no caller") { error in
             XCTAssertEqual((error as? CLIError)?.message,
-                           "TMUX_PANE not-a-pane is not a tmux Pane id; name the target with --window <id> or --pane <id>")
+                           "TMUX_PANE not-a-pane is not a tmux Pane id; name the target with --topic <id|label>, --window <id> or --pane <id>")
             XCTAssertEqual((error as? CLIError)?.exitCode, 2)
         }
         for (environment, topics) in [(["XDG_STATE_HOME": "/state"], "/state/muxify/topics"),
                                       (["HOME": "/home/me"], "/home/me/.local/state/muxify/topics")] {
-            guard case .topic(let invocation) = try CLICommand(arguments: ["topic", "list"], environment: environment) else {
+            guard case .request(let invocation) = try CLICommand(arguments: ["topic", "list"], environment: environment) else {
                 return XCTFail("\(environment): expected topic list")
             }
             XCTAssertEqual(invocation.paths.topics.path, topics)
@@ -231,23 +308,38 @@ final class CLICommandTests: XCTestCase {
         let outside = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]
         let paths = MuxifyPaths(environment: inside, home: "/home/me")
         let caller = try XCTUnwrap(PaneID(rawValue: "%7"))
-        func move(_ topic: String, target: TopicTarget? = nil, caller: PaneID? = caller,
-                  output: TopicInvocation.Output = .text) -> CLICommand {
-            .window(WindowInvocation(topic: topic, target: target, caller: caller, output: output, paths: paths))
+        func move(_ topic: String, target: EnvironmentTarget? = nil, caller: PaneID? = caller,
+                  output: RequestInvocation.Output = .text) -> CLICommand {
+            .request(RequestInvocation(command: .moveWindow(topic: topic, session: nil, newSession: false), target: target, caller: caller,
+                                       output: output, paths: paths))
         }
         let cases: [([String], [String: String], CLICommand)] = [
             (["--topic", "Fix reward"], inside, move("Fix reward")),
             (["--window", "@12", "--topic", "Fix"], outside, move("Fix", target: .window(try XCTUnwrap(WindowID(rawValue: "@12"))), caller: nil)),
             (["--topic", "Fix", "--pane", "%3", "--json"], inside, move("Fix", target: .pane(try XCTUnwrap(PaneID(rawValue: "%3"))), output: .json)),
+            (["--new-topic"], inside, .request(RequestInvocation(command: .moveToNewTopic(title: ""), target: nil, caller: caller, output: .text, paths: paths))),
+            (["--new-topic", "Fix", "--window", "@12"], outside,
+             .request(RequestInvocation(command: .moveToNewTopic(title: "Fix"), target: .window(try XCTUnwrap(WindowID(rawValue: "@12"))),
+                                        caller: nil, output: .text, paths: paths))),
+            (["--new-window", "logs"], inside, .request(RequestInvocation(command: .moveToNewWindow(title: "logs"), target: nil, caller: caller,
+                                                                           output: .text, paths: paths))),
         ]
         for (arguments, environment, expected) in cases {
             XCTAssertEqual(try CLICommand(arguments: ["window", "move"] + arguments, environment: environment), expected, "\(arguments)")
         }
         XCTAssertEqual(try CLICommand(arguments: ["window", "move", "--help"], environment: [:]), .help)
+        let oneDestination = "window move takes one destination: --topic <id|label>, --new-topic [\"title\"], --new-window [\"title\"], "
+            + "--before <window> or --after <window>"
         let errors: [([String], [String: String], String)] = [
             (["window"], inside, CLICommand.usage), (["window", "list"], inside, CLICommand.usage),
-            (["window", "move", "Fix"], inside, CLICommand.usage), (["window", "move", "--topic"], inside, CLICommand.usage),
-            (["window", "move"], inside, "window move takes the Topic to move to: --topic <id|label>"),
+            (["window", "move", "--topic"], inside, CLICommand.usage),
+            (["window", "move", "Fix"], inside, oneDestination),
+            (["window", "move"], inside, oneDestination),
+            (["window", "move", "--topic", "Fix", "--new-topic"], inside,
+             oneDestination),
+            (["window", "move", "--new-topic", "a", "b"], inside, CLICommand.usage),
+            (["window", "move", "--new-window", "--window", "@1"], inside,
+             "window move --new-window does not take --window; name the target with --pane <id>"),
             (["window", "move", "--topic", ""], inside, "--topic takes the id or label of an open Topic"),
             (["window", "move", "--topic", "Fix", "--window", "@1", "--pane", "%2"], inside, "give only one of --window and --pane"),
             (["window", "move", "--topic", "Fix", "--window", "%1"], inside, "--window takes a tmux Window id, e.g. @12"),
@@ -267,14 +359,14 @@ final class CLICommandTests: XCTestCase {
         let paths = MuxifyPaths(environment: inside, home: "/home/me")
         let caller = try XCTUnwrap(PaneID(rawValue: "%7"))
         XCTAssertEqual(try CLICommand(arguments: ["session", "lock"], environment: inside),
-                       .sessionLock(SessionInvocation(locked: true, target: nil, caller: caller, output: .text, paths: paths)))
+                       .request(RequestInvocation(command: .lock(true), target: nil, caller: caller, output: .text, paths: paths)))
         XCTAssertEqual(try CLICommand(arguments: ["session", "unlock", "--session", "my notes", "--json"], environment: outside),
-                       .sessionLock(SessionInvocation(locked: false, target: .sessionName("my notes"), caller: nil, output: .json, paths: paths)))
+                       .request(RequestInvocation(command: .lock(false), target: .sessionName("my notes"), caller: nil, output: .json, paths: paths)))
         XCTAssertEqual(try CLICommand(arguments: ["session", "lock", "--help"], environment: [:]), .help)
         let errors: [([String], [String: String], String)] = [
             (["session", "lock", "notes"], inside, CLICommand.usage),
             (["session", "lock", "--session"], inside, CLICommand.usage),
-            (["session", "lock"], outside, "not inside tmux; name the Session with --session <name>"),
+            (["session", "lock"], outside, "not inside tmux; name the target with --session <name|id>"),
         ]
         for (arguments, environment, message) in errors {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: environment), "\(arguments)") { error in
@@ -288,7 +380,7 @@ final class CLICommandTests: XCTestCase {
         let environment = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]
         let paths = MuxifyPaths(environment: environment, home: "/home/me")
         func agent(topic: String? = nil, status: AgentStatus? = nil, unreadOnly: Bool = false,
-                   output: TopicInvocation.Output = .text) -> CLICommand {
+                   output: RequestInvocation.Output = .text) -> CLICommand {
             .agent(AgentInvocation(topic: topic, status: status, unreadOnly: unreadOnly, output: output, paths: paths))
         }
         let cases: [([String], CLICommand)] = [
@@ -321,7 +413,7 @@ final class CLICommandTests: XCTestCase {
         let roots = TranscriptRoots(environment: environment, home: URL(fileURLWithPath: "/home/me"))
         let pane = try XCTUnwrap(PaneID(rawValue: "%12"))
         func read(_ source: AgentConversationInvocation.Source, _ selection: EntrySelection = EntrySelection(window: .tail(20)),
-                  info: Bool = false, output: TopicInvocation.Output = .text) -> AgentConversationInvocation {
+                  info: Bool = false, output: RequestInvocation.Output = .text) -> AgentConversationInvocation {
             AgentConversationInvocation(source: source, selection: selection, info: info, output: output, roots: roots)
         }
         let all = Set(Entry.Role.allCases)
@@ -340,8 +432,8 @@ final class CLICommandTests: XCTestCase {
             (["%12", "--since", "2h"], read(.pane(pane), EntrySelection(since: now.addingTimeInterval(-7200)))),
         ]
         for (arguments, expected) in cases {
-            XCTAssertEqual(try AgentConversationInvocation(arguments: ArraySlice(arguments), environment: environment, now: now), expected,
-                           "\(arguments)")
+            XCTAssertEqual(try CLICommand(arguments: ["agent", "conversation"] + arguments, environment: environment, now: now),
+                           .agentConversation(expected), "\(arguments)")
         }
         XCTAssertEqual(try CLICommand(arguments: ["agent", "conversation", "%12"], environment: environment),
                        .agentConversation(read(.pane(pane))))
@@ -380,11 +472,12 @@ final class CLICommandTests: XCTestCase {
     func testTopicCommandsRejectWhatTheShellToolRejected() {
         let inside = ["TMUX_PANE": "%7"]
         for arguments in [["topic"], ["topic", "close"], ["topic", "new", "a", "b"], ["topic", "new", " "],
-                          ["topic", "new", "--directory"], ["topic", "new", "--directory", "-x"], ["topic", "new", "--directory", ""],
+                          ["topic", "new", "--directory"],
                           ["topic", "new", "--other"], ["topic", "new", "--pane"], ["topic", "add-session"], ["topic", "add-session", "-x"],
                           ["topic", "add-session", "a", "--directory", "b"], ["topic", "add", "a"],
                           ["topic", "add-session", "a", "--base", "main"], ["topic", "add-session", "a", "--worktree", "--base"],
                           ["topic", "add-session", "a", "--worktree", "--base", "x", "--base", "y"],
+                          ["topic", "add-session", "a", "--branch", "x"], ["topic", "add-session", "a", "--worktree", "--base", "x", "--branch", "y"],
                           ["topic", "new", "--worktree"], ["topic", "settle", "--base", "main"],
                           ["topic", "add-session", "a", "--remove-worktrees"], ["topic", "move", "a"],
                           ["topic", "settle", "extra"], ["topic", "move", "a", "--window", "@12"],
@@ -420,11 +513,22 @@ final class CLICommandTests: XCTestCase {
             (["settle", "--pane", "@3"], inside, "--pane takes a tmux Pane id, e.g. %3"),
             (["new", "--pane", "7"], inside, "--pane takes a tmux Pane id, e.g. %3"),
             (["settle", "--topic", ""], inside, "--topic takes the id or label of an open Topic"),
-            (["new", "--topic", "Fix"], inside, "topic new does not take --topic; name the target with --window <id> or --pane <id>"),
+            (["new", "Fix", "--topic", "Fix"], inside, "topic new does not take --topic"),
             (["list", "--pane", "%3"], inside, "topic list does not take --pane"),
-            (["new", "Fix", "--directory", "/work", "--pane", "%3"], inside, "topic new with a title and --directory does not take --pane"),
-            (["new"], [:], "not inside tmux; name the target with --window <id> or --pane <id>"),
-            (["new", "Fix"], [:], "not inside tmux; name the target with --window <id> or --pane <id>"),
+            (["new"], [:], "topic new needs a title. To move this Pane into a new Topic, use: muxify window move --new-topic [\"title\"]"),
+            (["new", "--window", "@12"], inside, "topic new makes an Empty Topic and takes no Pane or Window. To move a Pane or Window "
+                + "into a new Topic, use: muxify window move --new-topic [\"title\"] [--window <id> | --pane <id>]"),
+            (["new", "Fix", "--pane", "%3"], inside, """
+                topic new makes an Empty Topic and takes no Pane or Window. To start a Session in the folder of a Pane, use two commands:
+                  id=$(muxify topic new "Fix" --json | jq -r .changed.topic_id)
+                  muxify topic add-session <dir> --topic "$id"
+                To move a Pane or Window into a new Topic, use: muxify window move --new-topic ["title"] [--window <id> | --pane <id>]
+                """),
+            (["new", "Fix", "--directory", "/work", "--pane", "%3"], inside, """
+                topic new makes an Empty Topic and no longer takes --directory. Use two commands:
+                  id=$(muxify topic new "Fix" --json | jq -r .changed.topic_id)
+                  muxify topic add-session /work --topic "$id"
+                """),
             (["add-session", "tools"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
             (["settle"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
             (["show"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),

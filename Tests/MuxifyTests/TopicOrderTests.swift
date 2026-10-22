@@ -113,9 +113,8 @@ final class TopicOrderTests: XCTestCase {
     func testNewTopicIsFirstAfterMovesAndAtFiniteLimits() throws {
         let original = [record("a", order: 0), record("b", order: 1), record("c", order: 2)].map(TopicListEntry.topic)
         let moved = applying(try TopicOrder.moving(.topic("c"), to: .before(.topic("a")), in: original), to: original)
-        let plan = TopicPlan(title: "New", sessionPath: SessionPath(path: "/work/app", name: "app"),
-                             records: moved.records, sessionNames: [], id: "new")
-        let placed = applying(TopicOrder.inserting(plan.record, at: .top, in: moved), to: moved)
+        let new = TopicRecord(newTopic: "new", title: "New", slug: "new", now: Date())
+        let placed = applying(TopicOrder.inserting(new, at: .top, in: moved), to: moved)
         XCTAssertEqual(shown(placed), ["new", "c", "a", "b"])
         let extreme = [record("a", order: -.greatestFiniteMagnitude), record("b", order: .greatestFiniteMagnitude)].map(TopicListEntry.topic)
         let inserted = applying(TopicOrder.inserting(record("new", order: nil), at: .top, in: extreme), to: extreme)

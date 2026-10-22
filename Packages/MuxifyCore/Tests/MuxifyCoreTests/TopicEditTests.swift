@@ -46,7 +46,7 @@ final class TopicEditTests: XCTestCase {
         XCTAssertEqual(first.selection, .sessionName("game+2/fix"))
         XCTAssertEqual(first.record?.sessions.first?["directory"], .string(path.folder.path))
         XCTAssertNotNil(first.record?.sessions.first?["id"]?.string)
-        XCTAssertEqual(first.commands.first, .tmux(["new-session", "-d", "-s", "game+2/fix", "-c", path.folder.path]))
+        XCTAssertEqual(first.commands.first, .tmuxMaking(["new-session", "-d", "-s", "game+2/fix", "-c", path.folder.path]))
         let second = try TopicSessionPlan(topic: topic, sessionPath: path, workingCopy: .directory, windows: [], sessionPaths: []).edit
         XCTAssertNotEqual(first.record?.sessions.first?["id"], second.record?.sessions.first?["id"])
     }

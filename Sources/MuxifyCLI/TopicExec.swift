@@ -44,7 +44,7 @@ struct TopicExec {
     }
 
     /// Runs the command in every target, prints each Session's output, and throws when a run did not exit with 0.
-    func run(_ targets: [Target], topic: TopicDetail, output: TopicInvocation.Output) throws {
+    func run(_ targets: [Target], topic: TopicDetail, output: RequestInvocation.Output) throws {
         let runs = runAll(targets)
         switch output {
         case .json:

@@ -24,11 +24,11 @@ public struct SessionChoice: Identifiable, Equatable, Sendable {
     /// A checkout in its own folder, not the SessionPath folder itself.
     public var isWorktree: Bool { directory != sessionPath.folder }
 
-    /// `newWorktree` asks for a new Worktree from this row's Worktree, at its HEAD or at the ref `base`; a plain
+    /// `newWorktree` asks for a new Worktree from this row's Worktree, which starts as `start` says; a plain
     /// directory has none to start from.
-    public func workingCopy(newWorktree: Bool, base: String? = nil) -> TopicWorkingCopyChoice {
+    public func workingCopy(newWorktree: Bool, start: WorktreeStart = .head) -> TopicWorkingCopyChoice {
         guard let worktree else { return .directory }
-        return newWorktree ? .newWorktree(from: worktree.folder.path, base: base) : .worktree(path: worktree.folder.path)
+        return newWorktree ? .newWorktree(from: worktree.folder.path, start: start) : .worktree(path: worktree.folder.path)
     }
 
     public static func choices(of sessionPath: SessionPath) -> [SessionChoice] {

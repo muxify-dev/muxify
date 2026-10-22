@@ -3,15 +3,8 @@ import MuxifyCore
 
 /// The same inventory as the palette: running Sessions and unused exact-named launch paths.
 struct SessionListInvocation: Equatable {
-    var output: TopicInvocation.Output
+    var output: RequestInvocation.Output
     var paths: MuxifyPaths
-
-    init(arguments: ArraySlice<String>, environment: [String: String]) throws {
-        var args = arguments
-        guard args.popFirst() == "list", args.allSatisfy({ $0 == "--json" }) else { throw CLIError(CLICommand.usage, exitCode: 2) }
-        output = args.isEmpty ? .text : .json
-        paths = MuxifyPaths(environment: environment, home: environment["HOME"] ?? NSHomeDirectory())
-    }
 
     struct Entry: Encodable {
         var id: String?

@@ -66,9 +66,29 @@ final class PaletteConfirmation {
     }
 }
 
+/// Add a Session with the new Worktree toggle on: where the new Worktree from `choice` starts (ADR 0039).
+@MainActor @Observable
+final class WorktreeStartDraft {
+    enum Starts {
+        case loading
+        case failed(String)
+        case ready([WorktreeStartChoice])
+    }
+    let topic: TopicRecord
+    let choice: SessionChoice
+    var starts: Starts = .loading
+
+    init(topic: TopicRecord, choice: SessionChoice) {
+        self.topic = topic
+        self.choice = choice
+    }
+}
+
 enum PaletteFlow {
     case move(MoveDraft)
     case addSession(TopicRecord)
+    /// A row for each start of the new Worktree, and a typed ref.
+    case worktreeStart(WorktreeStartDraft)
     /// Snooze Topics… or Unsnooze Topics…: check Topics, then go on with them.
     case check(CheckDraft)
     /// The "until" step of a Snooze of these Topics. ⌫ goes back to the check step with them checked.
@@ -90,6 +110,7 @@ enum PaletteFlow {
         case .check: "Topics or #Tags"
         case .move(let draft): draft.destination == .topics ? "Topic or new title" : "Destination Session"
         case .addSession: "Search Sessions and Session Paths"
+        case .worktreeStart: "Branch, or a ref to start at"
         case .unsnoozeTopic: "Search Snoozed Topics"
         case .snoozeUntil, .zen: "Choose a preset or type 2h, 1300, fri 10:00"
         case .text(.renameWindow): "Window name"
@@ -121,6 +142,7 @@ enum PaletteChoice: Equatable {
     case tag(Tag)
     case session(String)
     case worktree(String)
+    case worktreeStart(WorktreeStart)
     case accept
 }
 
@@ -131,6 +153,7 @@ extension CommandPalette {
         switch flow {
         case .move(let draft): return "\(draft.scope.rawValue) \(draft.window.displayTitle) › Move to"
         case .addSession(let topic): return "\(topicTitle(topic)) › Add a Session"
+        case .worktreeStart(let draft): return "\(topicTitle(draft.topic)) › Add a Session › \(draft.choice.displayName) › New Worktree from"
         case .check(let draft): return "\(draft.action.verb) Topics › check"
         case .snoozeUntil(let set):
             let ids = listOrder(set, .snooze)
@@ -170,6 +193,12 @@ extension CommandPalette {
             }
             return tagNote(field)
         case .text(.renameTopic): return "Leave it blank for an Untitled Topic."
+        case .worktreeStart(let draft):
+            switch draft.starts {
+            case .loading: return "Reading the branches…"
+            case .failed(let message): return message
+            case .ready: return "HEAD or a ref starts a new branch. Check out uses the branch, and Settle never deletes it."
+            }
         case .check(let draft): return checkNote(draft)
         case .snoozeUntil(let ids): return snoozeNote(listOrder(ids, .snooze))
         case .zen(let kept):
@@ -287,6 +316,7 @@ extension CommandPalette {
                 })
             })
             return PickList(sections: (catalog?.addSessionList(topic: topic.id, query: query).sections ?? []) + paths.sections)
+        case .worktreeStart(let draft): return worktreeStartRows(draft)
         case .snoozeUntil, .zen:
             let now = Date()
             var choices: [(String, String, SnoozeDeadline)] = []
@@ -304,6 +334,24 @@ extension CommandPalette {
         case .text: return .empty
         case .confirm(let draft): return confirmationRows(draft)
         }
+    }
+
+    /// A typed ref first, then HEAD, then each local branch. A branch that another Worktree has checked out cannot be
+    /// chosen: git checks out a branch in one Worktree only.
+    private func worktreeStartRows(_ draft: WorktreeStartDraft) -> PickList<PaletteItem> {
+        let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var top: [PickCandidate<PaletteItem>] = []
+        if !typed.isEmpty { top.append(choiceRow("typed", "Start at \(typed)", choice: .worktreeStart(.ref(typed)))) }
+        top.append(choiceRow("head", "HEAD of " + (draft.choice.worktree?.branch ?? draft.choice.displayName), choice: .worktreeStart(.head)))
+        guard case .ready(let branches) = draft.starts else { return fixed(top) }
+        let rows = branches.map { start in
+            PickCandidate(id: "branch-" + start.branch, title: "Check out \(start.branch)", fields: [.detail(start.checkedOutAt ?? "")],
+                          pick: start.checkedOutAt == nil ? .available(PaletteItem(kind: .command, ref: .choice(.worktreeStart(.branch(start.branch)))))
+                                                          : .blocked(reason: "Checked out"))
+        }
+        return FuzzyRanker.list([PickSectionInput(id: "start", rule: .fixed, candidates: top),
+                                 PickSectionInput(id: "branches", rule: .ranked(showsWhenEmpty: true), candidates: rows)],
+                                query: FuzzyQuery(typed))
     }
 
     private func choiceRow(_ id: String, _ title: String, detail: String = "", trailing: String = "",
@@ -367,15 +415,16 @@ extension CommandPalette {
     }
 
     func loadFlow() {
+        if case .worktreeStart(let draft) = flow { loadWorktreeStarts(draft); return }
         guard let store, case .confirm(let draft) = flow else { return }
-        let target: TopicTarget
+        let target: EnvironmentTarget
         let forget: Bool
         switch draft.target {
         case .killWindow(let window):
-            loadKill(window, session: false, draft: draft, submitting: false)
+            loadKill(window, session: false, draft: draft)
             return
         case .killSession(let window):
-            loadKill(window, session: true, draft: draft, submitting: false)
+            loadKill(window, session: true, draft: draft)
             return
         case .removeAndKill(let window):
             loadRemoveAndKill(window, draft: draft)
@@ -405,6 +454,20 @@ extension CommandPalette {
         }
     }
 
+    private func loadWorktreeStarts(_ draft: WorktreeStartDraft) {
+        guard let store, let worktree = draft.choice.worktree else { return }
+        let token = invocation
+        let service = store.topicService()
+        Task {
+            let result = await Task.detached { service.worktreeStarts(from: worktree.folder.path) }.value
+            guard self.invocation == token else { return }
+            switch result {
+            case .success(let starts): draft.starts = .ready(starts)
+            case .failure(let error): draft.starts = .failed(error.message)
+            }
+        }
+    }
+
     /// Cleanup is always opt-in, even for a clean Muxify-created Worktree.
     private func loadRemoveAndKill(_ window: TmuxWindow, draft: PaletteConfirmation) {
         guard let store, let session = SessionID(rawValue: window.sessionID) else { return }
@@ -412,7 +475,7 @@ extension CommandPalette {
         let token = invocation
         let service = store.topicService()
         Task {
-            let result = await Task.detached { service.removeAndKillWorktree(of: session) }.value
+            let result = await Task.detached { service.removeAndKillWorktree(of: .session(session)) }.value
             guard self.invocation == token else { return }
             switch result {
             case .success(let tree):
@@ -424,19 +487,18 @@ extension CommandPalette {
         }
     }
 
-    private func loadKill(_ window: TmuxWindow, session: Bool, draft: PaletteConfirmation, submitting: Bool) {
+    /// The review of the confirm step. After a `panes_changed` failure, `impactChanged` stays set, so the step says why
+    /// it asks again.
+    private func loadKill(_ window: TmuxWindow, session: Bool, draft: PaletteConfirmation) {
         guard let store else { return }
         let token = invocation
-        let expected = submitting ? draft.reviewedPaneIDs : nil
         draft.choices = .loading
-        store.checkKill(window, session: session, expectedPaneIDs: expected) { [weak self] result in
+        store.reviewKill(window, session: session) { [weak self] result in
             guard let self, self.invocation == token else { return }
             switch result {
-            case .success(nil): self.close()
-            case .success(.some(let impact)):
+            case .success(let impact):
                 draft.target = session ? .killSession(impact.window) : .killWindow(impact.window)
                 draft.reviewedPaneIDs = impact.paneIDs
-                draft.impactChanged = submitting
                 draft.choices = .ready([], [])
             case .failure(let error): draft.choices = .failed(error.localizedDescription)
             }
@@ -526,7 +588,13 @@ extension CommandPalette {
             close(restoringFocus: false)
             store.move(draft, to: destination)
         case (.addSession(let topic), .sessionPath(let sessionPath)):
-            store.addSession(sessionPath, toTopic: topic.id, newWorktree: newWorktree)
+            if newWorktree, sessionPath.worktree != nil {
+                begin(.worktreeStart(WorktreeStartDraft(topic: topic, choice: sessionPath)), keepingHistory: true)
+            } else {
+                store.addSession(sessionPath, toTopic: topic.id, newWorktree: nil)
+            }
+        case (.worktreeStart(let draft), .worktreeStart(let start)):
+            store.addSession(draft.choice, toTopic: draft.topic.id, newWorktree: start)
         case (.addSession(let topic), .session(let id)):
             guard let window = store.windows.first(where: { $0.sessionID == id }) else { return }
             store.changeTopic(.session(window), destination: topic)
@@ -578,8 +646,8 @@ extension CommandPalette {
             case .forget(let topic):
                 let removed = worktrees.filter { draft.removedWorktrees.contains($0.id) && $0.canRemove(sessions: sessions) }.map(\.id)
                 store.forgetTopic(topic.id, choices: sessions, worktrees: removed)
-            case .killWindow(let window): loadKill(window, session: false, draft: draft, submitting: true)
-            case .killSession(let window): loadKill(window, session: true, draft: draft, submitting: true)
+            case .killWindow(let window): store.kill(window, session: false, reviewed: draft.reviewedPaneIDs ?? [])
+            case .killSession(let window): store.kill(window, session: true, reviewed: draft.reviewedPaneIDs ?? [])
             case .removeAndKill(let window):
                 store.removeAndKill(window, worktrees: worktrees.filter { draft.removedWorktrees.contains($0.id) && draft.canRemove($0) }.map(\.id))
             }

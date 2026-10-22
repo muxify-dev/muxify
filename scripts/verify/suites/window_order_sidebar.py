@@ -77,6 +77,9 @@ class WindowOrderSidebar(unittest.TestCase):
         sid, windows = self.three_windows('order-topic', topic='window-order')
         self.show_view('topics')
         self.select_window(windows[0])
+        # The drag takes the rows' frames from one dump. The rows move when the app follows the client, so wait
+        # for that first, as the README asks after a client move.
+        s.wait_shown(windows[0])
         s.wait_rows(lambda rs: self.row_order('topic-window-', windows, rs) == windows,
                     'the Topic card does not list the Windows in tmux order: %s' % self.row_order('topic-window-', windows))
         s.act('drag', 'topic-window-' + windows[2], 'topic-window-' + windows[0], hold=0.7)
@@ -92,6 +95,7 @@ class WindowOrderSidebar(unittest.TestCase):
         self.addCleanup(self.show_view, 'topics')
         self.show_view('sessions')
         self.select_window(windows[1])
+        s.wait_shown(windows[1])
         s.wait_rows(lambda rs: self.row_order('session-window-', windows, rs) == windows,
                     'the Session card does not list the Windows in tmux order: %s' % self.row_order('session-window-', windows))
         s.act('drag', 'session-window-' + windows[0], 'session-window-' + windows[2], hold=0.7, edge='bottom')

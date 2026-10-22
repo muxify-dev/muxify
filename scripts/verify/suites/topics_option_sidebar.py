@@ -150,24 +150,31 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.assertEqual(order[-1], 'topic-' + record['id'],
                          'Topics view order %s; record orders %s' % (order, {i: r.get('order') for i, r in self.records().items()}))
 
-    def test_a_topic_url_from_an_automation_creates_the_topic_and_its_session(self):
+    def test_a_topic_url_from_an_automation_creates_an_empty_topic(self):
         # -a sends the URL to this run's app copy by its path, never to the user's Muxify; -g keeps it behind.
-        url = 'muxify://topic/new?title=' + quote('URL proof') + '&sessionPath=' + quote(str(self.beta), safe='')
+        sessions = self.s.tmux('list-sessions', '-F', '#{session_id}')
+        url = 'muxify://topic/new?title=' + quote('URL proof')
         subprocess.run(['open', '-g', '-a', str(self.s.app), url], check=True, capture_output=True)
         record = wait(lambda: next((r for r in self.records().values() if r.get('title') == 'URL proof'), None),
                       'no Topic record for the URL', seconds=10)
         self.addCleanup(remove_topic, self.topics_dir/(record['id'] + '.json'))
-        self.wait_session('beta/url-proof')
-        sid = self.s.tmux('display-message', '-p', '-t', '=beta/url-proof:', '#{session_id}')
-        self.addCleanup(self.end_session, sid)
-        # tmux starts the Session before the command that sets its Topic option.
-        wait(lambda: self.s.tmux_ok('show-options', '-v', '-t', sid, '@muxify_topic').stdout.strip() == record['id'],
-             'Session %s does not name the URL Topic' % sid, seconds=10)
-        rs = self.s.wait_rows(lambda rs: self.s.has('topic-%s-session-%s' % (record['id'], sid), rs),
-                              'the Session of the URL Topic is not on its card')
+        self.assertEqual(record.get('sessions', []), [], 'the URL Topic is not Empty')
+        rs = self.s.wait_rows(lambda rs: self.s.has('topic-' + record['id'], rs), 'no card for the URL Topic')
+        self.assertEqual(self.s.tmux('list-sessions', '-F', '#{session_id}'), sessions, 'the URL started a Session')
         # A second App Window would also get the next palette, and the driver would fill one and press the other.
         windows = [r.get('accessibilityFrame') for r in rs if r.get('accessibilityRole') == 'AXWindow']
         self.assertEqual(len(windows), 1, 'the URL opened another App Window: %s' % windows)
+
+    def test_a_select_topic_url_shows_the_window_of_that_topic(self):
+        here = self.new_session('select-here', self.beta, topic='select-here')
+        there = self.new_session('select-there', self.beta, topic='select-there')
+        self.write_topic('select-here', 'Select here', self.beta)
+        self.write_topic('select-there', 'Select there', self.beta)
+        self.select_window(here + ':')
+        window = self.s.tmux('display-message', '-p', '-t', there + ':', '#{window_id}')
+        # -a sends the URL to this run's app copy by its path, never to the user's Muxify; -g keeps it behind.
+        subprocess.run(['open', '-g', '-a', str(self.s.app), 'muxify://select?topic=select-there'], check=True, capture_output=True)
+        self.s.wait_shown(window)
 
     def test_a_long_press_drags_a_topic_card_and_a_quick_drag_does_not(self):
         # TestDriver `drag` hands the mouse events to the window, so the pointer stays with the user; `hold` keeps

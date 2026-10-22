@@ -30,17 +30,37 @@ class PaletteActions(unittest.TestCase):
         s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES'])
 
     def setUp(self):
+        # The last check's Close can still be closing the palette, so this Close is a request, not an assertion.
         if self.s.has('palette-search'):
-            self.s.act('action', 'palette-search', 'Close')
+            self.s.driver('action', 'palette-search', 'Close')
+            self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette of the last check stays open')
         self.session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}',
                                    '-s', self.id().rsplit('.', 1)[-1], '-c', str(self.project), SHELL)
         self.window = self.s.tmux('display-message', '-p', '-t', self.session + ':', '#{window_id}')
         self.pane = self.s.tmux('display-message', '-p', '-t', self.window, '#{pane_id}')
         self.other_pane = self.s.tmux('split-window', '-d', '-P', '-F', '#{pane_id}', '-t', self.window, SHELL)
-        for tty in self.s.tmux('list-clients', '-F', '#{client_tty} #{client_control_mode}').splitlines():
-            if tty.endswith(' 0'):
-                self.s.tmux('switch-client', '-c', tty.split()[0], '-t', self.window)
-        self.s.wait_shown(self.window)
+        self.show(self.window)
+
+    def show(self, window):
+        """Moves the app's client to the Window, as tmux navigation does, until the app shows it. The app finishes
+        the last check's navigation on its own time: the Window it falls back to after a kill, or the Window a
+        request opened. That move can land after this one, so the switch repeats until the app shows the Window."""
+        def shown():
+            for tty in self.s.tmux('list-clients', '-F', '#{client_tty} #{client_control_mode}').splitlines():
+                if tty.endswith(' 0'):
+                    self.s.tmux('switch-client', '-c', tty.split()[0], '-t', window)
+            try:
+                self.s.wait_shown(window, seconds=3)
+                return True
+            except AssertionError:
+                return False
+        wait(shown, 'the app does not show %s' % window, seconds=20)
+
+    def client_window(self):
+        """The Window that the app's terminal shows, as tmux reports it."""
+        for line in self.s.tmux('list-clients', '-F', '#{client_control_mode} #{window_id}').splitlines():
+            if line.startswith('0 '):
+                return line.split()[1]
 
     def open_move(self):
         wait(lambda: self.s.driver('press', 'Move Pane…')['pressed'], 'Move menu stayed disabled')
@@ -84,6 +104,7 @@ class PaletteActions(unittest.TestCase):
         created = wait(lambda: list(set(self.s.tmux('list-windows', '-t', self.session, '-F', '#{window_id}').splitlines()) - set(before)),
                        'The Command did not create a Window')
         self.assertEqual(len(created), 1)
+        wait(lambda: self.client_window() == created[0], 'The terminal did not go to the new Window')
         self.s.wait_shown(created[0])
 
     def test_cancel_keeps_panes_sessions_and_topics(self):

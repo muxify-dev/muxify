@@ -12,6 +12,9 @@ extension TmuxServer {
     }()
 }
 
+/// A Remote Environment's server for the requests that need no Topic record.
+extension TmuxConnection: TmuxRunning {}
+
 /// The tmux execution seam. Every operation captures this immutable target;
 /// changing the active Environment never retargets work already in flight.
 final class TmuxConnection: @unchecked Sendable {

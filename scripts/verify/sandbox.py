@@ -323,20 +323,28 @@ class Sandbox:
         """Waits until the app shows the tmux Window: the App Window's title names its Session, and its Sidebar row,
         in either mode, is selected when the dump has one. tmux moves a client at once; the app follows at its
         next read of tmux."""
-        window, session = self.tmux('display-message', '-p', '-t', target, '#{window_id}|#{session_name}').split('|', 1)
-        keys = ('topic-window-' + window, 'session-window-' + window)
+        window = session = ''
         last = {}
         def shown():
+            nonlocal window, session
+            # A Session that a request is still making has no Window yet, and tmux names neither.
+            if not window:
+                found = self.tmux_ok('display-message', '-p', '-t', target, '#{window_id}|#{session_name}').stdout.strip()
+                window, session = found.split('|', 1) if '|' in found else ('', '')
+                if not window:
+                    return False
+            keys = ('topic-window-' + window, 'session-window-' + window)
             rs = self.rows()
             title = next((r.get('accessibilityTitle') for r in rs if r.get('accessibilityRole') == 'AXWindow'), None)
             last.update(title=title, rows={r['accessibilityIdentifier']: r.get('accessibilityValue')
                                            for r in rs if r.get('accessibilityIdentifier') in keys})
             return title == session and all(value == 'selected' for value in last['rows'].values())
         try:
-            wait(shown, 'the app does not show %s of %s' % (window, session), seconds)
+            wait(shown, 'the app does not show ' + target, seconds)
         except AssertionError as error:
             clients = self.tmux_ok('list-clients', '-F', '#{client_control_mode} #{session_name} #{window_id}').stdout
-            raise AssertionError('%s: it shows %s; tmux clients: %s' % (error, last, clients.split('\n'))) from None
+            raise AssertionError('%s (%s of %s): it shows %s; tmux clients: %s'
+                                 % (error, window or 'no Window', session or 'no Session', last, clients.split('\n'))) from None
 
     def wait_rows(self, predicate, message, seconds=20):
         """The first UI dump for which predicate(rows) holds."""

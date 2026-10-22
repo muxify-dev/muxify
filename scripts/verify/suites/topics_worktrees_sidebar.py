@@ -18,15 +18,24 @@ from scripts.verify.topics_sidebar import TopicsSidebar, remembered_session
 class TopicsWorktreesSidebar(TopicsSidebar):
     def new_topic(self, title, directory, worktree=False):
         """Creates a Topic, then adds the Session Path or Worktree row at directory from the empty-Topic view; returns the
-        record once it remembers that Session. With worktree, the Session starts on a new Worktree from that row."""
+        record once it remembers that Session. With worktree, the Session starts on a new Worktree from the HEAD of that
+        row, the first row of the start step."""
         s = self.s
         topic_id = self.create_topic(title)['id']
         self.open_add_session()
         self.pick_project(directory, worktree)
         s.act('press', 'palette-accept')
+        if worktree:
+            self.start_at_head()
         s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add Session Path palette did not close', seconds=15)
         return wait(lambda: (lambda r: r if r and r.get('sessions') else None)(self.records().get(topic_id)),
                     'Topic %s remembers no Session' % topic_id, seconds=15)
+
+    def start_at_head(self):
+        """Accept with New Worktree on goes to the start step (ADR 0039); HEAD of the picked row is its first choice."""
+        s = self.s
+        s.wait_rows(lambda rs: s.has('palette-row-head', rs), 'New Worktree did not go on to the start step')
+        s.act('press', 'palette-row-head')
 
     def test_forget_removes_selected_clean_worktrees_with_and_without_live_sessions(self):
         s = self.s
@@ -81,6 +90,28 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         self.assertTrue(any(line.startswith(tuple(path + ' ' for path in paths)) and '[worktree-proof]' in line
                             for line in listing.splitlines()), 'git worktree list:\n' + listing)
 
+    def test_add_session_checks_out_an_existing_branch_in_a_new_worktree_from_the_start_step(self):
+        s = self.s
+        base = self.alpha_tree['worktree-base']
+        subprocess.run(['/usr/bin/git', '-C', str(base), 'branch', 'palette-branch'], check=True)
+        checked_out = subprocess.check_output(['/usr/bin/git', '-C', str(base), 'symbolic-ref', '--short', 'HEAD'], text=True).strip()
+        topic_id = self.create_topic('Branch start proof')['id']
+        self.open_add_session()
+        self.pick_project(base, True)
+        s.act('press', 'palette-accept')
+        s.wait_rows(lambda rs: s.has('palette-row-branch-palette-branch', rs), 'the start step lists no row for the branch')
+        rs = s.wait_rows(lambda rs: s.has('palette-row-branch-' + checked_out, rs), 'the start step lists no row for ' + checked_out)
+        self.assertEqual(s.row('palette-row-head', rs).get('accessibilityValue'), 'selected', 'HEAD is not the first choice')
+        s.act('press', 'palette-row-branch-palette-branch')
+        s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'the start step did not close')
+        record = wait(lambda: (lambda r: r if r and r.get('sessions') else None)(self.records().get(topic_id)),
+                      'the Topic remembers no Session', seconds=15)
+        session = record['sessions'][0]
+        self.assertEqual((session.get('branch'), session.get('worktree_created')), ('palette-branch', True), session)
+        tree = session['worktree_path']
+        self.assertEqual(subprocess.check_output(['/usr/bin/git', '-C', tree, 'symbolic-ref', '--short', 'HEAD'], text=True).strip(),
+                         'palette-branch')
+
     def test_worktree_topic_session_row_keeps_selected_base(self):
         record = self.new_topic('Worktree row proof', self.alpha_tree['worktree-row-base'], worktree=True)
         name = 'alpha/worktree-row-base/worktree-row-proof'
@@ -97,8 +128,9 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         self.create_topic('Bare rows proof')
         self.open_add_session()
         for folder in ['main', 'release']:
-            row = s.row(self.project_row(self.gamma/folder))
-            self.assertTrue(row.get('accessibilityLabel', '').startswith('gamma/' + folder), json.dumps(row))
+            key = self.project_row(self.gamma/folder)
+            s.wait_rows(lambda rs: s.row(key, rs).get('accessibilityLabel', '').startswith('gamma/' + folder),
+                        'the row of gamma/%s is not labelled gamma/%s' % (folder, folder))
         s.act('set', 'palette-search', 'gamma/main')
         rs = s.wait_rows(lambda rs: s.has('palette-row-' + os.path.realpath(self.gamma/'main'), rs), 'search by repo/folder found no gamma/main row')
         self.assertFalse(s.has('palette-row-' + os.path.realpath(self.gamma), rs), 'the bare folder itself is a row')
@@ -216,6 +248,7 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         subprocess.run(git + ['commit', '-q', '-m', 'add project base'], check=True)
         self.pick_project(base, worktree=True)
         s.act('press', 'palette-accept')
+        self.start_at_head()
         name = 'acme/base/add-worktree'
         expected = self.worktrees/'acme/add-worktree'
         self.wait_session(name)
@@ -239,6 +272,7 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Session Path palette did not open')
         self.pick_project(self.acme/'base', worktree=True)
         s.act('press', 'palette-accept')
+        self.start_at_head()
         self.wait_session('acme/base/add-reset')
         s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add Session Path palette did not close')
         s.act('action', 'topic-add-reset', 'Add a Session…')
@@ -263,6 +297,7 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Session Path palette did not open')
         self.pick_project(self.acme/'base', worktree=True)
         s.act('press', 'palette-accept')
+        self.start_at_head()
         self.wait_session('acme/base/add-clash')
         expected = self.worktrees/'acme/add-clash-2'
         self.assertTrue(expected.is_dir())

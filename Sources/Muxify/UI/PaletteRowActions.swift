@@ -2,13 +2,26 @@ import AppKit
 import MuxifyCore
 
 extension PaletteItem {
-    var readTarget: WorkspaceStore.ReadTarget? {
+    var readTarget: ReadPlan.Place? {
         switch ref {
         case .topic(let id, _): return .topic(id)
         case .session(let session): return .session(session.id)
         case .window(let window): return .window(window.id)
         case .agent(let agent): return .pane(agent.paneID)
         case .sessionPath, .choice, .command, .tag: return nil
+        }
+    }
+}
+
+extension ReadPlan.Place {
+    /// The request that `muxify <noun> mark-read` or `mark-all-read` also sends. Only Read applies to the Environment.
+    func request(_ change: ReadChange) -> EnvironmentRequest? {
+        switch self {
+        case .environment: return change == .read ? EnvironmentRequest(.markAllRead) : nil
+        case .topic(let id): return EnvironmentRequest(.markRead(change, scope: .topic), target: .topic(.id(id)))
+        case .session(let id): return SessionID(rawValue: id).map { EnvironmentRequest(.markRead(change, scope: .session), target: .session($0)) }
+        case .window(let id): return WindowID(rawValue: id).map { EnvironmentRequest(.markRead(change, scope: .window), target: .window($0)) }
+        case .pane(let id): return PaneID(rawValue: id).map { EnvironmentRequest(.markRead(change, scope: .pane), target: .pane($0)) }
         }
     }
 }

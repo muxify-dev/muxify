@@ -131,8 +131,4 @@ public struct TopicMembershipPlan: Sendable {
     static func openTopic(of window: TmuxWindow, records: [TopicRecord]) -> TopicRecord? {
         records.first { $0.id == window.topicID && $0.settledAt == nil }
     }
-
-    static func sourceRecord(for window: TmuxWindow, records: [TopicRecord]) -> TopicRecord? {
-        records.first { $0.id == window.topicID }
-    }
 }

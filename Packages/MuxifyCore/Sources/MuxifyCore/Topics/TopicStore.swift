@@ -248,7 +248,12 @@ public struct TopicTransaction {
         if current.settledAt != nil, record.settledAt == nil {
             return put(TopicOrder.inserting(record, at: insertPosition, in: entries))
         }
-        return put([.topic(record)])
+        // Zen keeps an open Topic, so Settling the kept Topic ends Zen in the same write.
+        var moved: [SessionLock] = []
+        if current.settledAt == nil, record.settledAt != nil, zen?.keptTopicID == record.id {
+            moved = try endZen(insertPosition: insertPosition).locks
+        }
+        return moved + put([.topic(record)])
     }
 
     /// Gives each Topic of `saves` the Snooze time in `saves`, and changes nothing else in it. A Topic whose Snooze ends
@@ -284,14 +289,24 @@ public struct TopicTransaction {
     public mutating func forget(_ id: String, insertPosition: TopicInsertPosition = .bottom, now: Date = Date()) throws -> [SessionLock] {
         guard records.contains(where: { $0.id == id }) else { throw Failure.topicUnavailable(id) }
         var moved: [SessionLock] = []
-        if let currentZen = zen, currentZen.keptTopicID == id {
-            moved = try setSnoozes(currentZen.end(records: records, now: now), insertPosition: insertPosition)
-            zen = nil
+        if zen?.keptTopicID == id {
+            moved = try endZen(insertPosition: insertPosition, now: now).locks
         } else {
             zen?.changes.removeAll { $0.topicID == id }
         }
         records.removeAll { $0.id == id }
         return moved
+    }
+
+    /// Ends Zen: each Topic that Zen Snoozed gets its earlier Snooze back, then the Zen record goes, so those Topics
+    /// keep their places. Returns the Topics whose Snooze changed. With no Zen it changes nothing.
+    @discardableResult
+    public mutating func endZen(insertPosition: TopicInsertPosition = .bottom, now: Date = Date()) throws -> (topicIDs: [String], locks: [SessionLock]) {
+        guard let current = zen else { return ([], []) }
+        let saves = current.end(records: records, now: now)
+        let moved = try setSnoozes(saves, insertPosition: insertPosition)
+        zen = nil
+        return (saves.map(\.id), moved)
     }
 
     @discardableResult

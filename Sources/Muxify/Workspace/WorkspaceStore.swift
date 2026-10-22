@@ -88,7 +88,7 @@ final class WorkspaceStore {
 
     /// Makes an open Topic with no Session and shows it, so the user adds its first SessionPath from there.
     func createTopic(title: String, tags: [Tag] = []) {
-        perform(TopicRequest(.create(title: title, sessionPath: nil, tags: tags.isEmpty ? nil : tags)), presenting: .newTopic)
+        perform(EnvironmentRequest(.create(title: title, tags: tags.isEmpty ? nil : tags)), presenting: .newTopic)
     }
 
     /// Edit Tags for an open Topic: one field with its Tags as chips.
@@ -102,7 +102,7 @@ final class WorkspaceStore {
 
     /// Tags go through the Topic service, as `muxify topic tag` does (ADR 0032).
     func setTags(of id: String, _ tags: [Tag]) {
-        perform(TopicRequest(.tags(.set(tags)), target: .topic(.id(id))))
+        perform(EnvironmentRequest(.tags(.set(tags)), target: .topic(.id(id))))
     }
 
     /// Puts a Topic with no live Session in place of the terminal and makes it the Active Topic: an empty Topic
@@ -126,7 +126,7 @@ final class WorkspaceStore {
     }
     private var topicEditGeneration = 0
     private var pendingNextTopic: TopicGroupID?
-    @ObservationIgnored private var topicRequests: [TopicRequest] = []
+    @ObservationIgnored private var topicRequests: [EnvironmentRequest] = []
 
     /// Move for the selected Window's Session, in the Command Palette's view. Nothing happens with Topics off.
     func presentMoveSession(keepingHistory: Bool = false) {
@@ -174,30 +174,18 @@ final class WorkspaceStore {
     /// Starts another Session, allocating +2, +3, etc. in the selected row's Topic or No Topic scope.
     func newSession(in target: OpenDirectory, topic: String? = nil) {
         if let topic, !isRemote {
-            perform(TopicRequest(.addSession(sessionPath: target.directory.path, workingCopy: .directory, name: target.name), target: .topic(.id(topic))))
+            perform(EnvironmentRequest(.addSession(sessionPath: target.directory.path, workingCopy: .directory, name: target.name), target: .topic(.id(topic))))
             return
         }
         guard pendingOpenings[target.directory] == nil else { return }
-        startSession(in: target.directory, named: SessionNaming.available(target.name, taken: Set(windows.map(\.sessionName))))
+        startSession(in: target.directory, named: target.name)
     }
 
-    /// Starts a tmux Session at `directory` and switches to it. tmux refusing a duplicate name means an
-    /// earlier press won the race, so that Session is selected instead; two presses end on one Session.
+    /// Starts a No Topic Session at `directory` and shows it. The service names it under the edit lock, so a name that
+    /// a Session has gets +2. A second press before the snapshot shows the Session does nothing.
     private func startSession(in directory: Folder, named name: String) {
         pendingOpenings[directory] = (name, Date().addingTimeInterval(5))
-        runAsync(["new-session", "-d", "-P", "-F", "#{session_id}:#{window_id}", "-s", name, "-c", directory.path]) { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success(let output):
-                let ids = output.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":").map(String.init)
-                guard ids.count == 2 else { return }
-                self.switchClient(to: Target(sessionID: ids[0], windowID: ids[1], path: directory.path))
-            case .failure(let error):
-                self.pendingOpenings[directory] = nil
-                if String(describing: error).contains("duplicate session") { self.selectSession(named: name) }
-                else { self.showGoFailure("Could not start a Session in \(directory.path). \(error)") }
-            }
-        }
+        perform(EnvironmentRequest(.newSession(sessionPath: directory.path, name: name)), presenting: .newSession(directory))
     }
 
     /// Goes to the Topic because the user asked to: a click, a Hint key, ↩ on its palette row or Go to Topic.
@@ -238,11 +226,11 @@ final class WorkspaceStore {
 
     func move(_ draft: MoveDraft, to destination: MoveDestination) {
         guard let window = windows.first(where: { $0.id == draft.window.id && $0.sourceID == draft.window.sourceID }) else { return }
-        let target: TopicTarget?
+        let target: EnvironmentTarget?
         switch draft.scope {
-        case .pane: target = PaneID(rawValue: draft.paneID).map(TopicTarget.pane)
-        case .window: target = WindowID(rawValue: window.id).map(TopicTarget.window)
-        case .session: target = SessionID(rawValue: window.sessionID).map(TopicTarget.session)
+        case .pane: target = PaneID(rawValue: draft.paneID).map(EnvironmentTarget.pane)
+        case .window: target = WindowID(rawValue: window.id).map(EnvironmentTarget.window)
+        case .session: target = SessionID(rawValue: window.sessionID).map(EnvironmentTarget.session)
         }
         guard let target else { return }
         let to: TopicDestination
@@ -257,7 +245,7 @@ final class WorkspaceStore {
         case .newWindow(let title): to = .newWindow(title: title)
         }
         let tab = draft.scope == .pane && draft.includesTab ? browser(for: window.id).activeTab : nil
-        perform(TopicRequest(.move(to: to), target: target), presenting: .move(source: window.id, tab: tab))
+        perform(EnvironmentRequest(.move(to: to), target: target), presenting: .move(source: window.id, tab: tab))
     }
 
     private func entryWindow(of id: TopicGroupID) -> TmuxWindow? {
@@ -283,38 +271,35 @@ final class WorkspaceStore {
         alert.runModal()
     }
 
+    /// The Sidebar drag: the card goes next to another card.
     func moveTopic(_ id: TopicListID, to placement: TopicPlacement) {
-        guard !changingTopic else { return }
-        do {
-            writeLocks(try topicWatcher.write(locks: liveLocks) { try $0.move(id, to: placement) })
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = "Could not move the Topic"
-            alert.informativeText = "Some Topic positions may have been saved. The Sidebar shows the saved order. \(error)"
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
+        guard let target = Self.target(of: id), let anchor = Self.ref(of: placement.anchorID) else { return }
+        let move: CardMove = if case .before = placement { .before(anchor) } else { .after(anchor) }
+        perform(EnvironmentRequest(.moveCard(move), target: target))
+    }
+
+    /// Move Up and Move Down: MuxifyCore finds the neighbor among the cards that the Topics list shows.
+    func moveCard(_ id: TopicListID, _ step: TopicCards.Step) {
+        guard let target = Self.target(of: id) else { return }
+        perform(EnvironmentRequest(.moveCard(step == .up ? .up : .down), target: target))
+    }
+
+    private static func target(of card: TopicListID) -> EnvironmentTarget? {
+        switch card {
+        case .topic(let id): return .topic(.id(id))
+        case .lock(let sessionID): return SessionID(rawValue: sessionID).map(EnvironmentTarget.session)
+        }
+    }
+
+    private static func ref(of card: TopicListID) -> TopicListRef? {
+        switch card {
+        case .topic(let id): return .topic(.id(id))
+        case .lock(let sessionID): return SessionID(rawValue: sessionID).map(TopicListRef.lock)
         }
     }
 
     func pinTopic(_ id: String, _ pinned: Bool) {
-        guard !changingTopic else { return }
-        do {
-            writeLocks(try topicWatcher.write(locks: liveLocks) { try $0.pin(id, pinned) })
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = pinned ? "Could not pin the Topic" : "Could not unpin the Topic"
-            alert.informativeText = "Some Topic positions may have been saved. The Sidebar shows the saved order. \(error)"
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
-        }
-    }
-
-    /// The Locked Sessions as the last tmux read gives them. A change of the Topic order includes them (ADR 0018).
-    private var liveLocks: [SessionLock] { isRemote ? [] : SessionLock.locks(in: windows, records: topicWatcher.records) }
-
-    /// tmux keeps a Lock's order, so a change of order that moved or renumbered Locks writes them there.
-    private func writeLocks(_ locks: [SessionLock]) {
-        for lock in locks { runAsync(lock.setOption) { [weak self] _ in self?.refresh() } }
+        perform(EnvironmentRequest(pinned ? .pin : .unpin, target: .topic(.id(id))))
     }
 
     /// Whether the Session is Locked; nil when it cannot be: it is in an open Topic, or Topics are off or Remote.
@@ -327,7 +312,7 @@ final class WorkspaceStore {
     /// Lock and Unlock go through the Topic service, as `muxify session lock` does (ADR 0032).
     func setLock(ofSession sessionID: String, _ locked: Bool) {
         guard lockState(ofSession: sessionID) != nil, let id = SessionID(rawValue: sessionID) else { return }
-        perform(TopicRequest(locked ? .lock : .unlock, target: .session(id)))
+        perform(EnvironmentRequest(locked ? .lock : .unlock, target: .session(id)))
     }
 
     func toggleLockOfCurrentSession() {
@@ -335,17 +320,17 @@ final class WorkspaceStore {
         setLock(ofSession: id, !locked)
     }
 
-    /// Where Move Topic Up (`previous`) or Down (`next`) puts the card of the Active Topic or Locked Session, as the
-    /// card's own Move Up and Move Down do. Nil at that end of the cards with its Pin, for No Topic, for a Snoozed or
+    /// Whether Move Topic Up (`previous`) or Down (`next`) can move the card of the Active Topic or Locked Session, as
+    /// the card's own Move Up and Move Down do. Not at that end of the cards with its Pin, for No Topic, for a Snoozed or
     /// Settled Topic, and outside Topics mode, where the cards do not show.
-    func activeCardMove(_ direction: StepDirection) -> (id: TopicListID, placement: TopicPlacement)? {
-        guard !isRemote, !changingTopic, topics.mode == .topics, let active = topics.activeTopic, let id = active.listID,
-              let placement = topics.neighbors(of: active).placement(direction) else { return nil }
-        return (id, placement)
+    func canMoveActiveCard(_ direction: StepDirection) -> Bool {
+        guard !isRemote, !changingTopic, topics.mode == .topics, let active = topics.activeTopic else { return false }
+        return topics.neighbors(of: active).placement(direction) != nil
     }
 
     func moveActiveCard(_ direction: StepDirection) {
-        if let move = activeCardMove(direction) { moveTopic(move.id, to: move.placement) }
+        guard canMoveActiveCard(direction), let id = topics.activeTopic?.listID else { return }
+        moveCard(id, direction == .previous ? .up : .down)
     }
 
     /// The Active Topic when it is open or Snoozed, which Pin Topic and Unpin Topic act on.
@@ -365,15 +350,15 @@ final class WorkspaceStore {
     }
 
     func changeTopic(_ source: TopicMembershipPlan.Source, destination: TopicRecord? = nil, title: String = "") {
-        let target: TopicTarget?
+        let target: EnvironmentTarget?
         switch source {
-        case .session(let window): target = SessionID(rawValue: window.sessionID).map(TopicTarget.session)
-        case .window(let window): target = WindowID(rawValue: window.id).map(TopicTarget.window)
+        case .session(let window): target = SessionID(rawValue: window.sessionID).map(EnvironmentTarget.session)
+        case .window(let window): target = WindowID(rawValue: window.id).map(EnvironmentTarget.window)
         case .pane(let pane, _): target = .pane(pane)
         }
         guard let target else { return }
         let to: TopicDestination = destination.map { .topic(.id($0.id)) } ?? .newTopic(title: title)
-        perform(TopicRequest(.move(to: to), target: target), presenting: .membership(selecting: source.window.id))
+        perform(EnvironmentRequest(.move(to: to), target: target), presenting: .membership(selecting: source.window.id))
     }
 
     func removeWindowFromTopic(_ window: TmuxWindow) {
@@ -384,13 +369,13 @@ final class WorkspaceStore {
 
     func removeFromTopic(_ window: TmuxWindow) {
         guard let session = SessionID(rawValue: window.sessionID) else { return }
-        perform(TopicRequest(.removeFromTopic, target: .session(session)), presenting: .membership(selecting: nil))
+        perform(EnvironmentRequest(.removeFromTopic, target: .session(session)), presenting: .membership(selecting: nil))
     }
 
     /// The Session leaves its Topic and stops. The palette shows the Topic's next Session, or the Empty Topic.
     func removeAndKill(_ window: TmuxWindow, worktrees: [String]) {
         guard let session = SessionID(rawValue: window.sessionID) else { return }
-        perform(TopicRequest(.removeAndKill(worktrees: worktrees), target: .session(session)))
+        perform(EnvironmentRequest(.removeAndKill(worktrees: worktrees), target: .session(session)))
     }
 
     func presentRenameTopic(keepingHistory: Bool = false) {
@@ -410,17 +395,17 @@ final class WorkspaceStore {
     }
 
     func renameTopic(_ id: String, to title: String) {
-        perform(TopicRequest(.rename(title: title), target: .topic(.id(id))))
+        perform(EnvironmentRequest(.rename(title: title), target: .topic(.id(id))))
     }
 
     /// Puts a Session before or after another Session of its Topic, which then keeps the order the user gave.
     func moveSession(_ sessionID: String, to placement: TopicSessionPlacement) {
         guard let session = SessionID(rawValue: sessionID) else { return }
-        perform(TopicRequest(.moveSession(to: placement), target: .session(session)))
+        perform(EnvironmentRequest(.moveSession(to: placement), target: .session(session)))
     }
 
     func sortSessionsByCreation(ofTopic id: String) {
-        perform(TopicRequest(.sortSessions, target: .topic(.id(id))))
+        perform(EnvironmentRequest(.sortSessions, target: .topic(.id(id))))
     }
 
     func suggestTopicTitle(for id: String, completion: @escaping (String) -> Void) {
@@ -478,14 +463,16 @@ final class WorkspaceStore {
         alert.runModal()
     }
 
-    /// `newWorktree` opens the Session on a new Worktree from the chosen one; it needs a repository row.
-    func addSession(_ choice: SessionChoice, toTopic id: String, newWorktree: Bool) {
-        perform(TopicRequest(.addSession(sessionPath: choice.sessionPath.folder.path, workingCopy: choice.workingCopy(newWorktree: newWorktree), name: choice.name),
+    /// `newWorktree` opens the Session on a new Worktree from the chosen one, which starts as it says; it needs a
+    /// repository row.
+    func addSession(_ choice: SessionChoice, toTopic id: String, newWorktree: WorktreeStart?) {
+        perform(EnvironmentRequest(.addSession(sessionPath: choice.sessionPath.folder.path,
+                                               workingCopy: choice.workingCopy(newWorktree: newWorktree != nil, start: newWorktree ?? .head), name: choice.name),
                              target: .topic(.id(id))))
     }
 
     /// Moves a Pane into a new Untitled Topic: the Pane that the terminal shows, or the Window's or Pane's id.
-    func presentMovePane(_ target: TopicTarget?, includesTab: Bool = false, keepingHistory: Bool = false) {
+    func presentMovePane(_ target: EnvironmentTarget?, includesTab: Bool = false, keepingHistory: Bool = false) {
         guard !isRemote, let window = selectedWindow else { return }
         switch target {
         case .window(let id):
@@ -541,55 +528,23 @@ final class WorkspaceStore {
         palette.begin(.unsnoozeTopic, keepingHistory: keepingHistory)
     }
 
-    /// One write for all of `ids`, so Topics whose Snooze ends together keep their order. Returns the open Topics
-    /// among them.
-    @discardableResult
-    private func clearSnoozes(_ ids: [String]) -> [String] {
-        guard !changingTopic, !ids.isEmpty else { return [] }
-        do {
-            let (cleared, moved) = try topicWatcher.write(locks: liveLocks) { transaction -> ([String], [SessionLock]) in
-                let saves = transaction.records.filter { ids.contains($0.id) && $0.settledAt == nil }.map { record in
-                    var save = record
-                    save.snoozedUntil = nil
-                    return save
-                }
-                return (saves.map(\.id), try transaction.setSnoozes(saves, insertPosition: topicConfig.insertPosition))
-            }
-            writeLocks(moved)
-            return cleared
-        } catch {
-            showTopicFailure(error)
-            return []
-        }
-    }
-
-    /// One write for the whole set. When the Active Topic is in the set, the Next Topic outside the set opens.
+    /// One request for the whole set. When the Active Topic is in the set, the Next Topic outside the set opens.
     func snoozeTopics(_ ids: [String], until deadline: SnoozeDeadline) {
-        guard !changingTopic else { return }
+        guard !changingTopic, !ids.isEmpty else { return }
         let next = activeTopicID.flatMap { ids.contains($0) ? nextTopic(after: $0, skipping: Set(ids)) : nil }
-        do {
-            let snoozed = try topicWatcher.write { transaction -> Bool in
-                let saves = SnoozeSet(ids, until: deadline, records: transaction.records).saves
-                try transaction.setSnoozes(saves)
-                return !saves.isEmpty
-            }
-            guard snoozed else { return }
-            palette.close()
-            if let next { showTopic(next) }
-        } catch { showTopicFailure(error) }
+        perform(EnvironmentRequest(.snooze(until: deadline, topics: ids.map(TopicRef.id))), presenting: .snooze(next: next))
     }
 
-    /// Unsnooze Topics…: one write for the whole set.
+    /// Unsnooze Topics…: one request for the whole set, so Topics whose Snooze ends together keep their order.
     func unsnoozeTopics(_ ids: [String]) {
-        guard !clearSnoozes(ids).isEmpty else { return }
-        palette.close()
+        guard !ids.isEmpty else { return }
+        perform(EnvironmentRequest(.unsnooze(topics: ids.map(TopicRef.id))), presenting: .unsnooze(showing: nil))
     }
 
     /// The Sidebar's Unsnooze: back to the Topics list, and to its Window when it has one. A Dormant
     /// Topic stays Dormant, because Unsnooze changes nothing in tmux.
     func unsnoozeTopic(_ id: String) {
-        guard !clearSnoozes([id]).isEmpty else { return }
-        if let window = entryWindow(of: .topic(id)) { select(window) }
+        perform(EnvironmentRequest(.unsnooze(topics: [.id(id)])), presenting: .unsnooze(showing: id))
     }
 
     /// The open Topic of the Window the user looks at, or of the empty-Topic view; nil for No Topic.
@@ -612,56 +567,50 @@ final class WorkspaceStore {
 
     var canToggleZenOfActiveTopic: Bool { topicWatcher.zen != nil || (activeTopicID != nil && topics.mode == .topics) }
 
-    /// One write: the store puts the Zen record down before the Snoozes, so a Topic Snoozed by Zen is always in it.
+    /// Zen is in the Topic records on this Mac, so it starts and ends there also from a Remote App Window.
     func startZen(keeping id: String, until deadline: SnoozeDeadline) {
-        guard !changingTopic else { return }
-        do {
-            let started = try topicWatcher.write { transaction -> Bool in
-                guard transaction.zen == nil else { return false }
-                let (zen, saves) = ZenRecord.start(keeping: id, until: deadline, records: transaction.records)
-                transaction.zen = zen
-                try transaction.setSnoozes(saves)
-                return true
-            }
-            if started { palette.close() }
-        } catch { showTopicFailure(error) }
+        perform(EnvironmentRequest(.startZen(until: deadline), target: .topic(.id(id))), presenting: .zen, onLocalServer: true)
     }
 
-    /// Ending twice is safe: a restored Topic no longer has Zen's Snooze, so a second end skips it.
+    /// Ending twice is safe: with no Zen the request changes nothing.
     func endZen() {
-        guard !changingTopic else { return }
-        do {
-            writeLocks(try topicWatcher.write(locks: liveLocks) { transaction -> [SessionLock] in
-                guard let zen = transaction.zen else { return [] }
-                let moved = try transaction.setSnoozes(zen.end(records: transaction.records, now: Date()),
-                                                       insertPosition: topicConfig.insertPosition)
-                transaction.zen = nil
-                return moved
-            })
-        } catch { showTopicFailure(error) }
+        perform(EnvironmentRequest(.endZen), presenting: .zen, onLocalServer: true)
     }
 
     /// Wakes the due Topics with one toast line each. When Zen's time comes, its Topics wake with them and
-    /// share one line. Settling the kept Topic, in any App Window or through `muxify topic`, ends Zen.
+    /// share one line. Settling the kept Topic ends Zen in the same write; a Zen whose kept Topic an older Muxify
+    /// Settled ends here.
     private func wakeTopics() {
         guard !changingTopic else { return }
         if let zen = topicWatcher.zen, !topicWatcher.records.contains(where: { $0.id == zen.keptTopicID && $0.settledAt == nil }) {
             endZen()
+            return
         }
         let endingZen = topicWatcher.zen.flatMap { $0.deadline?.isDue(at: Date()) == true ? $0 : nil }
-        let zenTopicIDs = Set(endingZen?.changes.map(\.topicID) ?? [])
+        guard !topics.dueWakes.isEmpty || endingZen != nil else { return }
+        // Another process can Settle or Unsnooze a due Topic; the request names only the Topics that are still due.
+        topicWatcher.reload()
         let wakes = topics.dueWakes
-        let woken = Set(clearSnoozes(wakes.map(\.id)))
+        guard !wakes.isEmpty else {
+            showWake([], of: [], endingZen: endingZen)
+            endZen()
+            return
+        }
+        // The Topic records are on this Mac, so a Remote App Window wakes them too.
+        perform(EnvironmentRequest(.unsnooze(topics: wakes.map { .id($0.id) })), presenting: .wake(wakes, endingZen: endingZen),
+                onLocalServer: true)
+    }
+
+    /// The wake toast: one line for each woken Topic, and one shared line for the Topics that Zen kept quiet.
+    private func showWake(_ woken: Set<String>, of wakes: [TopicsModel.Wake], endingZen: ZenRecord?) {
+        let zenTopicIDs = Set(endingZen?.changes.map(\.topicID) ?? [])
         var messages: [String] = []
         var zenWoken = 0
         for wake in wakes where woken.contains(wake.id) {
             if zenTopicIDs.contains(wake.id) { zenWoken += 1 } else { messages.append(wake.message) }
         }
         if endingZen != nil {
-            do {
-                try topicWatcher.write { $0.zen = nil }
-                messages.insert(zenWoken == 0 ? "Zen ended" : "Zen ended: \(zenWoken) Topic\(zenWoken == 1 ? " is" : "s are") back", at: 0)
-            } catch { NSLog("muxify: ending Zen: \(error)") }
+            messages.insert(zenWoken == 0 ? "Zen ended" : "Zen ended: \(zenWoken) Topic\(zenWoken == 1 ? " is" : "s are") back", at: 0)
         }
         guard !messages.isEmpty else { return }
         wakeToastDismiss?.cancel()
@@ -686,21 +635,21 @@ final class WorkspaceStore {
 
     func forgetTopic(_ id: String, choices: [TopicSettleSession], worktrees: [String]) {
         if topicSelection.emptyTopicID == id { topicSelection.emptyTopicID = nil }
-        perform(TopicRequest(.forget(choices: choices, worktrees: worktrees), target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id)))
+        perform(EnvironmentRequest(.forget(choices: choices, worktrees: worktrees), target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id)))
     }
 
     func settleTopic(_ id: String, choices: [TopicSettleSession], outcome: String) {
         let next = activeTopicID == id ? nextTopic(after: id) : nil
-        perform(TopicRequest(.settle(choices: choices, outcome: outcome), target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id)), presenting: .settle(next))
+        perform(EnvironmentRequest(.settle(choices: choices, outcome: outcome), target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id)), presenting: .settle(next))
     }
 
     func reopenTopic(_ id: String, _ choice: TopicReopening.Choice) {
-        let command: TopicCommand
+        let command: EnvironmentCommand
         switch choice {
         case .reopen: command = .reopen
         case .startFresh: command = .startFresh
         }
-        perform(TopicRequest(command, target: .topic(.id(id))))
+        perform(EnvironmentRequest(command, target: .topic(.id(id))))
     }
 
     /// The open Topic has a Session to create, the same test that makes the empty-Topic view offer the Reopen choice.
@@ -720,42 +669,61 @@ final class WorkspaceStore {
         }
     }
 
-    private func enqueueTopicRequest(_ request: TopicRequest) {
+    private func enqueueTopicRequest(_ request: EnvironmentRequest) {
         topicRequests.append(request)
         drainTopicRequests()
     }
 
     private func drainTopicRequests() {
         guard !changingTopic, !topicRequests.isEmpty else { return }
-        perform(topicRequests.removeFirst())
+        perform(topicRequests.removeFirst(), onLocalServer: true)
     }
 
     /// How the app shows a finished Topic request.
     enum TopicPresentation {
         case edit
         case newTopic
+        /// As `edit`; a failure lets the user press again at once for this folder.
+        case newSession(Folder)
+        /// The Next Topic opens when the Active Topic is in the Snoozed set.
+        case snooze(next: TopicGroupID?)
+        /// The Unsnoozed Topic shows its Window when it has one.
+        case unsnooze(showing: String?)
+        /// Due Topics woke; the toast names them. A due Zen then ends.
+        case wake([TopicsModel.Wake], endingZen: ZenRecord?)
+        /// Zen started or ended.
+        case zen
         /// A Session or Window that moved shows where it is now; nothing else changes.
         case membership(selecting: String?)
         case settle(TopicGroupID?)
         case move(source: String, tab: BrowserTab?)
     }
 
-    /// The one path for every Topic edit of the app. The app's unsaved memory goes to disk and to tmux first,
-    /// so the service reads the same truth as any other process.
-    func perform(_ request: TopicRequest, presenting presentation: TopicPresentation = .edit) {
-        guard !changingTopic else { return }
+    /// The one path for every Topic edit that the user asks for in the app. The app's unsaved memory goes to disk and to tmux first,
+    /// so the service reads the same truth as any other process. A request runs on the server that the App Window
+    /// shows; `onLocalServer` runs it on this Mac's server, for a request that is not about what the window shows.
+    /// `before` runs on the same server first, in one tmux call, so the request reads what those commands wrote.
+    /// False when the request did not start, because an edit runs or the server is gone.
+    @discardableResult
+    func perform(_ request: EnvironmentRequest, presenting presentation: TopicPresentation = .edit, onLocalServer: Bool = false,
+                 before: [[String]] = []) -> Bool {
+        guard !changingTopic else { return false }
         flushTopicMemory()
         let browserCommands = pendingBrowserCommands
         changingTopic = true
         topicEditGeneration += 1
         if case .membership(let windowID?) = presentation { pendingSelection = (windowID, Date().addingTimeInterval(5), false) }
-        let client = clientTTY ?? surface?.ttyName
-        let service = topicService()
+        let remote = isRemote && !onLocalServer
+        // A Remote Environment's client is on the remote server; the local terminal's tty names nothing there, and
+        // no client of the Local server shows this App Window.
+        let client = remote ? clientTTY : isRemote ? nil : clientTTY ?? surface?.ttyName
+        guard let service = remote ? remoteService() : topicService() else { changingTopic = false; return false }
         let environment = generation
         let invocation = palette.invocation
         Task { [weak self] in
             let response = await Task.detached(priority: .userInitiated) {
                 for arguments in browserCommands { _ = try? TmuxServer.app.run(arguments) }
+                if !before.isEmpty { _ = try? service.server.run(Array(before.joined(separator: [";"]))) }
                 return service.handle(request, client: client)
             }.value
             guard let self else { return }
@@ -767,25 +735,55 @@ final class WorkspaceStore {
             }
             self.present(response, as: presentation, invocation: invocation)
         }
+        return true
     }
 
     /// The service on the Local server, with the SessionPaths as git reported them last.
-    func topicService() -> TopicService {
-        TopicService(paths: topicWatcher.store.paths, server: .app, sessionPaths: sessionPaths, topics: topicConfig)
+    func topicService() -> EnvironmentService {
+        EnvironmentService(paths: topicWatcher.store.paths, server: TmuxServer.app, sessionPaths: sessionPaths, topics: topicConfig)
     }
 
-    private func present(_ response: TopicResponse, as presentation: TopicPresentation, invocation: UUID) {
+    /// The service on the Remote Environment that the App Window shows. It has no Topics, so it runs only the requests
+    /// that need no Topic record.
+    private func remoteService() -> EnvironmentService? {
+        guard let connection else { return nil }
+        return EnvironmentService(paths: topicWatcher.store.paths, server: connection, topics: topicConfig, topicsAvailable: false)
+    }
+
+    private func present(_ response: EnvironmentResponse, as presentation: TopicPresentation, invocation: UUID) {
         topicWatcher.reload()
         changingTopic = false
         let ownsPalette = palette.invocation == invocation
         switch response {
-        case .topics, .topic, .snoozeChanged:
+        case .topics, .topic:
             break
+        case .readChanged:
+            // A Read change is not shown until a snapshot after it, so the next change waits for that snapshot.
+            readGeneration += 1
+            readSnapshotPending = true
+        case .snoozeChanged(let change):
+            switch presentation {
+            case .snooze(let next):
+                if ownsPalette { palette.close() }
+                if let next { showTopic(next) }
+            case .unsnooze(let id):
+                if ownsPalette { palette.close() }
+                if let id, let window = entryWindow(of: .topic(id)) { select(window) }
+            case .wake(let wakes, let endingZen):
+                showWake(Set(change.topicIDs), of: wakes, endingZen: endingZen)
+                // The woken Topics no longer have Zen's Snooze, so End Zen now only removes the Zen record.
+                if endingZen != nil { endZen() }
+            case .zen:
+                if ownsPalette { palette.close() }
+            case .edit, .newTopic, .newSession, .membership, .settle, .move:
+                break
+            }
         case .failed(let failure):
             pendingSelection = nil
+            if case .newSession(let directory) = presentation { pendingOpenings[directory] = nil }
             if case .newTopic = presentation, failure.phase == .nothingChanged, ownsPalette {
                 newTopicFailure = "Could not save the Topic. \(failure.message)"
-            } else if failure.kind == .topicMembershipChanged, ownsPalette {
+            } else if failure.kind == .topicMembershipChanged || failure.kind == .panesChanged, ownsPalette {
                 if case .confirm(let draft) = palette.flow { draft.impactChanged = true }
                 palette.loadFlow()
             } else {
@@ -806,17 +804,20 @@ final class WorkspaceStore {
                     pendingSelection = (destination.rawValue, Date().addingTimeInterval(5), false)
                     selectedWindowID = destination.rawValue
                 }
-            case .edit, .newTopic:
+            case .snooze, .unsnooze, .wake, .zen:
+                break
+            case .edit, .newTopic, .newSession:
                 if ownsPalette { palette.close(restoringFocus: false) }
                 switch change.shown {
                 case .emptyTopic(let id)?:
                     showEmptyTopic(id)
                     if case .newTopic = presentation, ownsPalette { presentAddSession(toTopic: id) }
                 case .window(let id)?:
-                    pendingSession = nil
+                    pendingSelect = nil
                     pendingSelection = (id.rawValue, Date().addingTimeInterval(5), false)
                     selectedWindowID = id.rawValue
-                    sidebarMode = .topics
+                    // A new tmux Window or Session names no Topic and leaves the Sidebar in its mode.
+                    if change.topicID != nil { sidebarMode = .topics }
                     moveFocusIntoWindow()
                     if surface == nil || surface?.processExited == true,
                        let window = windows.first(where: { $0.id == id.rawValue })
@@ -828,7 +829,11 @@ final class WorkspaceStore {
                 }
             }
         }
-        refresh(attachIfNeeded: surface == nil)
+        // Only an edit can make a tmux Window to attach to. A Read or Snooze change on a stopped server leaves it
+        // stopped: an attach there would start the server with a new Session.
+        var changed = false
+        if case .changed = response { changed = true }
+        refresh(attachIfNeeded: changed && surface == nil)
     }
 
     /// Writes the remembered Sessions that wait for their write delay.
@@ -1063,7 +1068,7 @@ final class WorkspaceStore {
     private var pendingSelection: (windowID: String, deadline: Date, readsOnArrival: Bool)?
     /// A Session asked for by name (`muxify session open`) that the snapshot
     /// may not list yet: Muxify is just launching, or it was just created.
-    @ObservationIgnored private var pendingSession: (name: String, deadline: Date)?
+    @ObservationIgnored private var pendingSelect: (request: SelectRequest, deadline: Date)?
     /// Sessions a SessionPath row is creating, by directory, until a snapshot lists them or a few seconds pass.
     @ObservationIgnored private var pendingOpenings: [Folder: (name: String, deadline: Date)] = [:]
     @ObservationIgnored private var timer: Timer?
@@ -1249,7 +1254,7 @@ final class WorkspaceStore {
         clientTTY = nil
         serverID = nil
         pendingSelection = nil
-        pendingSession = nil
+        pendingSelect = nil
         isRefreshing = false
         refreshAgain = false
         serverRunning = false
@@ -1426,7 +1431,7 @@ final class WorkspaceStore {
         } else if !changingTopic, attachIfNeeded, surface == nil {
             rememberedWindowID = snapshot.lastWindowID
             let last = snapshot.lastWindowID.flatMap { id in snapshot.windows.first { $0.id == id } }
-            let requested = takePendingSession(in: snapshot.windows)
+            let requested = takePendingSelect(in: snapshot.windows)
             attach(to: (requested ?? last ?? Self.initialWindow(in: snapshot.windows)).map(Target.init))
         } else if !changingTopic, recoveryPending || windowRecovery.selectionDisappeared(in: windows) {
             let fallback = windowRecovery.fallback(in: windows, listedBefore: listedBefore)
@@ -1446,7 +1451,8 @@ final class WorkspaceStore {
             }
         } else if !changingTopic {
             followClient(snapshot.clients)
-            if surface != nil, let window = takePendingSession(in: windows) { select(window) }
+            if surface != nil, let window = takePendingSelect(in: windows) { select(window) }
+            if surface != nil, let topic = takePendingTopic() { goToTopic(.topic(topic)) }
         }
         updateTopicSelection()
         if let unresolvedSelectedWindowID, selectedWindow?.id == unresolvedSelectedWindowID {
@@ -1581,22 +1587,37 @@ final class WorkspaceStore {
         select(siblings[targetIndex])
     }
 
-    /// Shows the Session's current Window (`muxify session open <name>`).
-    func selectSession(named name: String) {
-        pendingSession = (name, Date().addingTimeInterval(5))
+    /// Shows what a `muxify://select` URL names (`muxify session open`, `window open`, `topic open`).
+    func select(_ request: SelectRequest) {
+        pendingSelect = (request, Date().addingTimeInterval(5))
         // Before the terminal exists, the first snapshot attaches to it.
         guard started, surface != nil else { return }
-        if let window = takePendingSession(in: windows) { select(window) } else { refresh() }
+        if let window = takePendingSelect(in: windows) { select(window) } else { refresh() }
     }
 
-    /// The requested Session's current Window once a snapshot lists it. The
-    /// request is dropped when found, or after a few seconds.
-    private func takePendingSession(in windows: [TmuxWindow]) -> TmuxWindow? {
-        guard let pending = pendingSession else { return nil }
-        let window = windows.first { $0.sessionName == pending.name && $0.isActive }
-            ?? windows.first { $0.sessionName == pending.name }
-        if window != nil || Date() > pending.deadline { pendingSession = nil }
+    /// The requested Session's or Window's Window once a snapshot lists it. The request is dropped when found, or
+    /// after a few seconds.
+    private func takePendingSelect(in windows: [TmuxWindow]) -> TmuxWindow? {
+        guard let pending = pendingSelect else { return nil }
+        let window: TmuxWindow?
+        switch pending.request {
+        case .session(let name):
+            window = windows.first { $0.sessionName == name && $0.isActive } ?? windows.first { $0.sessionName == name }
+        case .window(let id): window = windows.first { $0.id == id }
+        case .topic: return nil
+        }
+        if window != nil || Date() > pending.deadline { pendingSelect = nil }
         return window
+    }
+
+    /// The requested Topic, taken with a snapshot after the URL: the command line may have made the Topic and its
+    /// Sessions a moment before, and `goToTopic` Reopens a Dormant Topic whose Sessions this app does not list.
+    private func takePendingTopic() -> String? {
+        guard let pending = pendingSelect, case .topic(let id) = pending.request else { return nil }
+        topicWatcher.reload()
+        let found = topicWatcher.records.contains { $0.id == id && $0.settledAt == nil }
+        if found || Date() > pending.deadline { pendingSelect = nil }
+        return found ? id : nil
     }
 
     /// Switches to the Agent's Window with its Pane active. The Pane is
@@ -1618,84 +1639,35 @@ final class WorkspaceStore {
         select(pane.window)
     }
 
-    enum ReadTarget {
-        case environment
-        case topic(String)
-        case session(String)
-        case window(String)
-        case pane(String)
-    }
-
-    var currentReadTarget: ReadTarget? {
+    var currentReadTarget: ReadPlan.Place? {
         if let id = activeTopicID { return .topic(id) }
         return selectedWindow.map { .session($0.sessionID) }
-    }
-
-    private func agents(for change: ReadChange, in target: ReadTarget) -> [Agent] {
-        agents.filter { agent in
-            guard change.applies(unread: agent.unread, status: agent.status) else { return false }
-            switch target {
-            case .environment: return true
-            case .topic(let id): return windows.contains { $0.id == agent.windowID && $0.topicID == id }
-            case .session(let id): return agent.sessionID == id
-            case .window(let id): return agent.windowID == id
-            case .pane(let id): return agent.paneID == id
-            }
-        }
-    }
-
-    private func topicReadIDs(in target: ReadTarget) -> Set<String> {
-        guard !isRemote else { return [] }
-        switch target {
-        case .topic(let id): return topicWatcher.records.contains { $0.id == id } ? [id] : []
-        case .environment: return Set(topicWatcher.records.map(\.id))
-        default: return []
-        }
     }
 
     private var canWriteAgentRead: Bool {
         connection != nil && isConnected && pendingReads == 0 && !readSnapshotPending
     }
 
-    func canChangeRead(_ change: ReadChange, in target: ReadTarget?) -> Bool {
+    func canChangeRead(_ change: ReadChange, in target: ReadPlan.Place?) -> Bool {
         guard let target, !isTransitioning, pendingReadNavigations.isEmpty,
               pendingSelection == nil else { return false }
         if isConnected, pendingReads > 0 || readSnapshotPending { return false }
-        let ids = topicReadIDs(in: target)
-        if case .topic = target, !ids.isEmpty { return true }
-        if change == .read, topicWatcher.records.contains(where: { ids.contains($0.id) && $0.isUnread }) { return true }
-        return canWriteAgentRead && !agents(for: change, in: target).isEmpty
+        let records = isRemote ? [] : topicWatcher.records
+        if case .topic(let id) = target, records.contains(where: { $0.id == id }) { return true }
+        let changes = ReadPlan.changes(change, in: target, records: records, agents: canWriteAgentRead ? agents : [], windows: windows)
+        return !changes.topicIDs.isEmpty || !changes.paneIDs.isEmpty
     }
 
-    func changeRead(_ change: ReadChange, in target: ReadTarget?) {
-        guard let target, canChangeRead(change, in: target) else { return }
-        // Earlier visits must not clear a later explicit mark.
-        var commands = canWriteAgentRead ? unreadChanges(panes) : []
+    func changeRead(_ change: ReadChange, in target: ReadPlan.Place?) {
+        guard let target, canChangeRead(change, in: target), let request = target.request(change) else { return }
+        let visits = canWriteAgentRead ? unreadChanges(panes) : []
         if !canWriteAgentRead {
             explicitReadVisits = AgentReadVisits()
             unreadVisit = topicSelection.emptyTopicID == nil && NSApp.isActive && terminalHost.window?.isKeyWindow == true ? selectedWindowID : nil
         }
-        guard writeTopicUnread(change == .unread, ids: topicReadIDs(in: target)) else { return }
-        if canWriteAgentRead {
-            commands += agents(for: change, in: target).map { unreadCommand(change == .unread, paneID: $0.paneID) }
-            if !commands.isEmpty { writeUnread(commands) }
-        }
-    }
-
-    @discardableResult
-    private func writeTopicUnread(_ unread: Bool, ids: Set<String>) -> Bool {
-        guard !isRemote, !isTransitioning, !ids.isEmpty else { return true }
-        do {
-            try topicWatcher.write { transaction in
-                for record in transaction.records where ids.contains(record.id) && record.isUnread != unread {
-                    try transaction.update(record.id) { $0.isUnread = unread }
-                }
-            }
-            return true
-        } catch {
-            showTopicFailure(error)
-            return false
-        }
+        // Earlier visits must not clear a later explicit mark, so they go to tmux before the request. They go also
+        // when the request cannot start, because `unreadChanges` already counts them as written.
+        if !perform(request, before: visits), !visits.isEmpty { writeUnread(visits) }
     }
 
     func readActiveTopicOnEntry() {
@@ -1704,15 +1676,19 @@ final class WorkspaceStore {
         readTopicsOnVisit([id])
     }
 
+    /// A visit writes the Topic Unread here and not through `perform`: visits come with each navigation, and a
+    /// request would make the next edit wait until it ends.
     private func readTopicsOnVisit(_ ids: Set<String>) {
-        guard !config.notifications.manualRead else { return }
-        writeTopicUnread(false, ids: ids)
-    }
-
-    private func unreadCommand(_ unread: Bool, paneID: String) -> [String] {
-        unread
-            ? ["set-option", "-pq", "-t", paneID, Tmux.agentUnreadOption, "1"]
-            : ["set-option", "-pqu", "-t", paneID, Tmux.agentUnreadOption]
+        guard !config.notifications.manualRead, !isRemote, !isTransitioning, !ids.isEmpty else { return }
+        do {
+            try topicWatcher.write { transaction in
+                for record in transaction.records where ids.contains(record.id) && record.isUnread {
+                    try transaction.update(record.id) { $0.isUnread = false }
+                }
+            }
+        } catch {
+            showTopicFailure(error)
+        }
     }
 
     private func writeUnread(_ commands: [[String]]) {
@@ -1741,7 +1717,7 @@ final class WorkspaceStore {
             let change = AgentUnread.change(for: pane, previousStatus: agentStatuses[pane.id],
                                             reading: reading, manualRead: config.notifications.manualRead)
             agentStatuses[pane.id] = pane.agentStatus
-            if let unread = change { commands.append(unreadCommand(unread, paneID: pane.id)) }
+            if let unread = change { commands.append(AgentUnread.command(unread, paneID: pane.id)) }
         }
         let live = Set(panes.map(\.id))
         agentStatuses = agentStatuses.filter { live.contains($0.key) }
@@ -1849,13 +1825,8 @@ final class WorkspaceStore {
             newSession()
             return
         }
-        // -d, then switch only our client: other Sessions' current windows stay put.
-        let args = ["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "\(sessionID):", "-c", sibling.path]
-        runAsync(args) { [weak self] result in
-            guard let self, case .success(let output) = result else { return }
-            let windowID = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            self.switchClient(to: Target(sessionID: sessionID, windowID: windowID, path: sibling.path))
-        }
+        guard let window = WindowID(rawValue: sibling.id) else { return }
+        perform(EnvironmentRequest(.newWindow(command: nil), target: .window(window)))
     }
 
     func newSession() {
@@ -1866,17 +1837,13 @@ final class WorkspaceStore {
         newSession(in: OpenDirectory(directory: Folder(path: cwd, real: folders.folder(cwd).real), name: base), topic: topic?.id)
     }
 
-    /// Kills the Window, or its whole Session with `session`, only while its Panes are the ones the user reviewed.
-    /// Otherwise the completion gets the Window and Panes as they are now, for the user to review again.
-    func checkKill(_ window: TmuxWindow, session: Bool, expectedPaneIDs: Set<String>?,
-                    completion: @escaping (Result<(window: TmuxWindow, paneIDs: Set<String>)?, Error>) -> Void) {
+    /// The Window, or its whole Session with `session`, and its Panes as they are now: what the Kill confirm step
+    /// shows the user. It reads tmux and changes nothing.
+    func reviewKill(_ window: TmuxWindow, session: Bool, completion: @escaping (Result<(window: TmuxWindow, paneIDs: Set<String>), Error>) -> Void) {
         guard let connection else { completion(.failure(TmuxError.notReady)); return }
-        flushTopicMemory()
         let current = generation
-        let paths = topicWatcher.store.paths
-        let order = topicConfig.sessionOrder
         Task {
-            let result = await Task.detached { () -> Result<(window: TmuxWindow, paneIDs: Set<String>)?, Error> in
+            let result = await Task.detached { () -> Result<(window: TmuxWindow, paneIDs: Set<String>), Error> in
                 Result {
                     let snapshot = try connection.snapshot()
                     let members = snapshot.windows.filter {
@@ -1884,49 +1851,42 @@ final class WorkspaceStore {
                     }
                     guard let fresh = members.first(where: { $0.id == window.id }) ?? members.first else { throw TmuxError.notReady }
                     let windowIDs = Set(members.map(\.id))
-                    let paneIDs = Set(snapshot.panes.filter { windowIDs.contains($0.windowID) }.map(\.id))
-                    guard let expectedPaneIDs, expectedPaneIDs == paneIDs else { return (fresh, paneIDs) }
-                    _ = try connection.run(session ? ["kill-session", "-t", window.sessionID] : ["kill-window", "-t", window.id])
-                    if !connection.isRemote, let topicID = fresh.topicID {
-                        var remaining = snapshot
-                        remaining.windows.removeAll { session ? $0.sessionID == fresh.sessionID : $0.id == fresh.id }
-                        remaining.panes.removeAll { paneIDs.contains($0.id) }
-                        try TopicStore(paths: paths).write { transaction in
-                            try transaction.update(topicID) { record in
-                                if let updated = record.remembering(remaining, order: order, previously: snapshot.windows) { record = updated }
-                            }
-                        }
-                    }
-                    return nil
+                    return (fresh, Set(snapshot.panes.filter { windowIDs.contains($0.windowID) }.map(\.id)))
                 }
             }.value
             guard self.generation == current else { return }
-            self.topicWatcher.reload()
             completion(result)
-            self.refresh()
         }
     }
 
+    /// Kills the Window, or its whole Session, while its Panes are the `reviewed` ones. Otherwise the request fails
+    /// with `panes_changed`, and the confirm step shows the Panes again.
+    func kill(_ window: TmuxWindow, session: Bool, reviewed: Set<String>) {
+        let target: EnvironmentTarget? = session ? SessionID(rawValue: window.sessionID).map(EnvironmentTarget.session)
+                                                 : WindowID(rawValue: window.id).map(EnvironmentTarget.window)
+        guard let target else { return }
+        perform(EnvironmentRequest(session ? .killSession : .killWindow, target: target, expectedPaneIDs: Set(reviewed.compactMap(PaneID.init))))
+    }
+
     func renameSession(_ window: TmuxWindow, to name: String) {
-        guard windows.contains(where: { $0.sessionID == window.sessionID && $0.sourceID == window.sourceID }) else { return }
-        guard (try? SessionNaming.validate(name)) != nil else { return }
-        let topic = isRemote ? nil : topicWatcher.records.first { $0.id == window.topicID && $0.settledAt == nil }
-        let fullName = SessionNaming.available(name, topic: topic?.slug, taken: Set(windows.filter { $0.sessionID != window.sessionID }.map(\.sessionName)))
-        runAsync(["rename-session", "-t", window.sessionID, fullName]) { [weak self] _ in self?.refresh() }
+        guard windows.contains(where: { $0.sessionID == window.sessionID && $0.sourceID == window.sourceID }),
+              let session = SessionID(rawValue: window.sessionID) else { return }
+        perform(EnvironmentRequest(.renameSession(name: name), target: .session(session)))
     }
 
     func renameWindow(_ window: TmuxWindow, to name: String) {
-        guard windows.contains(where: { $0.id == window.id && $0.sourceID == window.sourceID }) else { return }
-        runAsync(["rename-window", "-t", window.id, name]) { [weak self] _ in self?.refresh() }
+        guard windows.contains(where: { $0.id == window.id && $0.sourceID == window.sourceID }), let id = WindowID(rawValue: window.id) else { return }
+        perform(EnvironmentRequest(.renameWindow(name: name), target: .window(id)))
     }
 
     /// Puts a Window before or after another Window of its Session, which keeps its current Window.
     func moveWindow(_ window: TmuxWindow, to placement: DropPlacement<String>) {
         guard windows.contains(where: { $0.id == window.id && $0.sourceID == window.sourceID }),
               let anchor = windows.first(where: { $0.id == placement.anchor && $0.sourceID == window.sourceID }),
-              anchor.sessionID == window.sessionID, anchor.id != window.id else { return }
-        let side = if case .before = placement { "-b" } else { "-a" }
-        runAsync(["move-window", "-d", side, "-s", window.id, "-t", anchor.id]) { [weak self] _ in self?.refresh() }
+              anchor.sessionID == window.sessionID, anchor.id != window.id,
+              let id = WindowID(rawValue: window.id), let anchorID = WindowID(rawValue: anchor.id) else { return }
+        let to: WindowPlacement = if case .before = placement { .before(anchorID) } else { .after(anchorID) }
+        perform(EnvironmentRequest(.moveWindow(to: to), target: .window(id)))
     }
 
     /// A click on a card's Window row selects it, and a long press moves it within its Session.
@@ -2414,6 +2374,7 @@ extension WorkspaceStore {
     /// Scriptable entry points, e.g. from a shell inside tmux:
     ///   open "muxify://open?url=localhost:3000&window=$(tmux display -p '#{window_id}')"
     ///   open "muxify://select?window=@12"
+    ///   open "muxify://select?topic=5c1e…"
     ///   open "muxify://toggle-browser"
     func handle(_ url: URL) {
         guard url.scheme == "muxify" else { return }
@@ -2422,14 +2383,12 @@ extension WorkspaceStore {
 
         switch url.host {
         case "topic":
-            do { enqueueTopicRequest(try TopicRequest(url: url)) }
+            do { enqueueTopicRequest(try EnvironmentRequest(url: url)) }
             catch { showTopicFailure(error) }
         case "select":
-            if let id = value("window") {
-                if let window = windows.first(where: { $0.id == id }) { select(window) }
-            } else if let name = value("session") {
-                selectSession(named: name)
-            }
+            if let id = value("window") { select(.window(id)) }
+            else if let name = value("session") { select(.session(name)) }
+            else if let id = value("topic") { select(.topic(id)) }
         case "open":
             guard let input = value("url"), let target = Omnibox.url(for: input) else { return }
             openInBrowser(target, windowID: value("window"))
@@ -2572,4 +2531,12 @@ final class TerminalHostView: NSView {
         view.autoresizingMask = [.width, .height]
         addSubview(view)
     }
+}
+
+/// What a `muxify://select` URL asks the app to show. It waits for a snapshot that lists it, for a few seconds.
+enum SelectRequest {
+    case session(String)
+    case window(String)
+    /// An open Topic's id.
+    case topic(String)
 }

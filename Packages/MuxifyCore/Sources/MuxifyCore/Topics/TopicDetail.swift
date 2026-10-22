@@ -101,11 +101,13 @@ public struct TopicDetail: Codable, Hashable, Sendable {
     }
 
     /// `branches` reads each Worktree's branch now; a Worktree it cannot read keeps the branch the record remembers.
-    public init(record: TopicRecord, snapshot: TmuxSnapshot, sessionPaths: [SessionPath], branches: TopicBranches) {
+    /// The Sessions are in the order that the Sidebar shows them.
+    public init(record: TopicRecord, snapshot: TmuxSnapshot, sessionPaths: [SessionPath], order: SessionOrder, branches: TopicBranches) {
         let windows = snapshot.windows.filter { $0.topicID == record.id }
-        let sessionIDs = windows.map(\.sessionID).reduce(into: [String]()) { ids, id in
-            if !ids.contains(id) { ids.append(id) }
+        let firsts = windows.reduce(into: [TmuxWindow]()) { firsts, window in
+            if !firsts.contains(where: { $0.sessionID == window.sessionID }) { firsts.append(window) }
         }
+        let sessionIDs = TopicSessionOrder.ordered(firsts, record: record, order: order, key: TopicSessionKey.init).map(\.sessionID)
         let sessions = sessionIDs.compactMap { sessionID -> Session? in
             let members = windows.filter { $0.sessionID == sessionID }
             guard let first = members.first else { return nil }

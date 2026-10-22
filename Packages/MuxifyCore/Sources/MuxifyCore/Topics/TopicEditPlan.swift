@@ -8,6 +8,8 @@ struct TopicEdit: Sendable {
         case paneID(String)
         /// An open Topic with no Session: the terminal area offers to add a SessionPath to it.
         case emptyTopic(String)
+        /// The Window that the plan's `tmuxMaking` command made, once tmux has printed its id.
+        case made
     }
 
     public let record: TopicRecord?
@@ -26,6 +28,7 @@ struct TopicEdit: Sendable {
     var completion: Completion?
 
     public init(record: TopicRecord?, newWorktree: TopicPlan.NewWorktree? = nil, commands: [TopicPlan.Command], selection: Selection, completion: Completion? = nil) {
+        precondition(commands.filter { if case .tmuxMaking = $0 { true } else { false } }.count <= 1, "a plan makes one tmux object")
         self.record = record
         self.newWorktree = newWorktree
         self.commands = commands
@@ -105,23 +108,33 @@ struct TopicRenamePlan {
 struct TopicSessionOrderPlan {
     public let edit: TopicEdit
 
-    /// Moves a live Session before or after another one, as the Topic lists them now, and keeps that order.
+    /// Moves a live Session before or after another one, or one place up or down, as the Topic lists them now, and
+    /// keeps that order.
     public init(moving sessionID: String, to placement: TopicSessionPlacement, topic: TopicRecord, windows: [TmuxWindow],
-                sessionPaths: [SessionPath], order: SessionOrder) throws {
+                order: SessionOrder) throws {
         let key = { (window: TmuxWindow) in TopicSessionKey(of: window) }
         let shown = TopicSessionOrder.ordered(TopicEditSessions.sessions(in: windows, topic: topic), record: topic, order: order, key: key)
-        guard let moved = shown.first(where: { $0.sessionID == sessionID }),
-              shown.contains(where: { $0.sessionID == placement.anchor.rawValue }) else { throw TopicEditFailure.sessionUnavailable }
-        guard sessionID != placement.anchor.rawValue else {
-            edit = TopicEdit(record: nil, commands: [], selection: .unchanged)
-            return
-        }
-        var ordered = shown.filter { $0.sessionID != sessionID }
-        let anchor = ordered.firstIndex { $0.sessionID == placement.anchor.rawValue }!
+        guard let from = shown.firstIndex(where: { $0.sessionID == sessionID }) else { throw TopicEditFailure.sessionUnavailable }
+        let moved = shown[from]
+        var ordered = shown
+        ordered.remove(at: from)
+        let to: Int
         switch placement {
-        case .before: ordered.insert(moved, at: anchor)
-        case .after: ordered.insert(moved, at: anchor + 1)
+        case .before(let anchor), .after(let anchor):
+            guard anchor.rawValue != sessionID else {
+                guard shown.contains(where: { $0.sessionID == anchor.rawValue }) else { throw TopicEditFailure.sessionUnavailable }
+                edit = TopicEdit(record: nil, commands: [], selection: .unchanged)
+                return
+            }
+            guard let index = ordered.firstIndex(where: { $0.sessionID == anchor.rawValue }) else { throw TopicEditFailure.sessionUnavailable }
+            if case .before = placement { to = index } else { to = index + 1 }
+        case .up, .down:
+            to = placement == .up ? from - 1 : from + 1
+            guard (0...ordered.count).contains(to) else {
+                throw TopicRequestError.sessionAtEnd(session: moved.sessionName, topic: TopicSummary(record: topic).label, up: placement == .up)
+            }
         }
+        ordered.insert(moved, at: to)
         let live = ordered.map(\.sessionRecordID)
         var record = topic
         record.sessions = ordered.map { window in topic.session(of: window) ?? .object([
@@ -159,7 +172,7 @@ struct TopicSessionPlan {
         session["directory"] = .string(start.directory)
         record.recordingNewSession(session, order: order)
         edit = TopicEdit(record: record, newWorktree: start.newWorktree, commands: [
-            .tmux(["new-session", "-d", "-s", name, "-c", start.directory]),
+            .tmuxMaking(["new-session", "-d", "-s", name, "-c", start.directory]),
             .tmux(["set-option", "-t", "=" + name + ":", "@muxify_topic", topic.id]),
             .tmux(["set-option", "-t", "=" + name + ":", "@muxify_session_id", id]),
         ], selection: .sessionName(name))
@@ -170,23 +183,4 @@ struct TopicPaneSource {
     public let paneID: String
     public let window: TmuxWindow
     var directory: String? = nil
-}
-
-struct TopicPanePlan {
-    public let edit: TopicEdit
-
-    public init(source: TopicPaneSource, sessionPath launchPath: SessionPath? = nil, title: String = "",
-         records: [TopicRecord], windows: [TmuxWindow], sessionPaths: [SessionPath],
-         id: String = UUID().uuidString.lowercased(), now: Date = Date(), clientTTY: String? = nil) throws {
-        let window = source.window
-        guard window.paneCount > 0, windows.contains(where: { $0.id == window.id && $0.sessionID == window.sessionID }),
-              source.paneID.hasPrefix("%") else { throw TopicEditFailure.sourceUnavailable }
-        guard let pane = PaneID(rawValue: source.paneID) else { throw TopicEditFailure.sourceUnavailable }
-        let plan = try TopicMembershipPlan(source: .pane(pane, window), title: title.trimmingCharacters(in: .whitespacesAndNewlines),
-            records: records, windows: windows, sessionPaths: sessionPaths, id: id, now: now, clientTTY: clientTTY,
-            launchDirectory: launchPath?.folder.path ?? source.directory)
-        var result = TopicEdit(record: plan.record, commands: plan.commands, selection: .paneID(source.paneID))
-        result.leftTopic = plan.leftTopic
-        edit = result
-    }
 }

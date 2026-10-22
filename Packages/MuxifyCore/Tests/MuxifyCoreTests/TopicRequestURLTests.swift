@@ -2,45 +2,44 @@ import XCTest
 @testable import MuxifyCore
 
 final class TopicRequestURLTests: XCTestCase {
-    private func request(_ string: String) throws -> TopicRequest {
-        try TopicRequest(url: try XCTUnwrap(URL(string: string)))
+    private func request(_ string: String) throws -> EnvironmentRequest {
+        try EnvironmentRequest(url: try XCTUnwrap(URL(string: string)))
     }
 
-    private let pane7 = TopicTarget.pane(PaneID(rawValue: "%7")!)
+    private let pane7 = EnvironmentTarget.pane(PaneID(rawValue: "%7")!)
 
-    func testTitledNewUsesExplicitSessionPathOrPane() throws {
-        XCTAssertEqual(try request("muxify://topic/new?title=Fix%20reward&sessionPath=%2Fwork%2Fgame"),
-                       TopicRequest(.create(title: "Fix reward", sessionPath: "/work/game")))
-        XCTAssertEqual(try request("muxify://topic/new?pane=%257&title=%20Caf%C3%A9%20"),
-                       TopicRequest(.create(title: "Café", sessionPath: nil), target: pane7))
-        XCTAssertEqual(try request("muxify://topic/new?pane=%257&title=Fix&sessionPath=%2Fwork%2Fgame"),
-                       TopicRequest(.create(title: "Fix", sessionPath: "/work/game")))
+    func testNewTakesOnlyATitleAndMakesAnEmptyTopic() throws {
+        XCTAssertEqual(try request("muxify://topic/new?title=%20Caf%C3%A9%20"), EnvironmentRequest(.create(title: "Café")))
     }
 
-    func testUntitledNewExtractsPaneWithOptionalHomeSessionPath() throws {
-        XCTAssertEqual(try request("muxify://topic/new?pane=%257"), TopicRequest(.extract(sessionPath: nil), target: pane7))
-        XCTAssertEqual(try request("muxify://topic/new?pane=%257&sessionPath=%2Fwork%2Fgame"),
-                       TopicRequest(.extract(sessionPath: "/work/game"), target: pane7))
+    func testTheOldFormsOfNewNameTheNewForms() {
+        for old in ["muxify://topic/new?pane=%257", "muxify://topic/new?pane=%257&sessionPath=%2Fwork%2Fgame",
+                    "muxify://topic/new?title=Fix%20reward&sessionPath=%2Fwork%2Fgame", "muxify://topic/new?pane=%257&title=Fix"] {
+            XCTAssertThrowsError(try request(old), old) { error in
+                XCTAssertTrue("\(error)".contains("muxify window move --new-topic"), "\(error)")
+                XCTAssertTrue("\(error)".contains("muxify topic add-session"), "\(error)")
+            }
+        }
     }
 
     func testForgetNamesATopicOrPane() throws {
-        XCTAssertEqual(try request("muxify://topic/forget?pane=%257"), TopicRequest(.forget(choices: [], worktrees: []), target: pane7))
+        XCTAssertEqual(try request("muxify://topic/forget?pane=%257"), EnvironmentRequest(.forget(choices: [], worktrees: []), target: pane7))
         XCTAssertEqual(try request("muxify://topic/forget?topic=settled"),
-                       TopicRequest(.forget(choices: [], worktrees: []), target: .topic(.named("settled"))))
+                       EnvironmentRequest(.forget(choices: [], worktrees: []), target: .topic(.named("settled"))))
         XCTAssertThrowsError(try request("muxify://topic/forget?topic=settled&pane=%257"))
     }
 
     func testMembershipAndLifecycleRequests() throws {
         XCTAssertEqual(try request("muxify://topic/add?pane=%257&sessionPath=%2Fwork%2Ftools"),
-                       TopicRequest(.addSession(sessionPath: "/work/tools", workingCopy: .directory), target: pane7))
-        XCTAssertEqual(try request("muxify://topic/settle?pane=%257"), TopicRequest(.settle(choices: [], outcome: ""), target: pane7))
+                       EnvironmentRequest(.addSession(sessionPath: "/work/tools", workingCopy: .directory), target: pane7))
+        XCTAssertEqual(try request("muxify://topic/settle?pane=%257"), EnvironmentRequest(.settle(choices: [], outcome: ""), target: pane7))
         XCTAssertEqual(try request("muxify://topic/move?pane=%257&topic=Fix%20reward"),
-                       TopicRequest(.move(to: .topic(.named("Fix reward"))), target: pane7))
+                       EnvironmentRequest(.move(to: .topic(.named("Fix reward"))), target: pane7))
     }
 
     func testLockAndUnlockNameTheSession() throws {
-        XCTAssertEqual(try request("muxify://topic/lock?session=my%20notes"), TopicRequest(.lock, target: .sessionName("my notes")))
-        XCTAssertEqual(try request("muxify://topic/unlock?session=notes"), TopicRequest(.unlock, target: .sessionName("notes")))
+        XCTAssertEqual(try request("muxify://topic/lock?session=my%20notes"), EnvironmentRequest(.lock, target: .sessionName("my notes")))
+        XCTAssertEqual(try request("muxify://topic/unlock?session=notes"), EnvironmentRequest(.unlock, target: .sessionName("notes")))
         XCTAssertThrowsError(try request("muxify://topic/lock?pane=%257"))
         XCTAssertThrowsError(try request("muxify://topic/unlock?session=notes&pane=%257"))
         XCTAssertThrowsError(try request("muxify://topic/lock?session="), "a Lock needs a Session name")
@@ -48,7 +47,7 @@ final class TopicRequestURLTests: XCTestCase {
 
     func testRejectsMissingDuplicateAndUnknownInputs() {
         let invalid = [
-            "muxify://topic/new?title=Fix", "muxify://topic/new?sessionPath=%2Fwork&pane=%257&title=",
+            "muxify://topic/new?title=", "muxify://topic/new?title=%20&extra=x",
             "muxify://topic/new?pane=%257&title=%20", "muxify://topic/add?pane=%257",
             "muxify://topic/settle", "muxify://topic/move?pane=%257&topic=",
             "muxify://topic/settle?pane=%257&pane=%257", "muxify://topic/settle?pane=%257&pane=%258",

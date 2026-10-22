@@ -1,6 +1,6 @@
 import Foundation
 
-extension TopicRequest {
+extension EnvironmentRequest {
     /// The muxify://topic transport, for automations that have no shell. Each verb maps onto one request and
     /// names its Pane in `pane`; the URL gives the sender no result. A new verb gets a URL form only when an
     /// automation needs it.
@@ -20,7 +20,7 @@ extension TopicRequest {
         func keys(_ expected: Set<String>) throws {
             guard Set(values.keys) == expected else { throw TopicRequestError.invalidURL }
         }
-        func pane(_ value: String?) throws -> TopicTarget {
+        func pane(_ value: String?) throws -> EnvironmentTarget {
             guard let id = value.flatMap(PaneID.init(rawValue:)) else { throw TopicRequestError.invalidURL }
             return .pane(id)
         }
@@ -32,18 +32,14 @@ extension TopicRequest {
         }
         switch parts.path {
         case "/new":
-            guard Set(values.keys).isSubset(of: ["title", "sessionPath", "pane"]) else { throw TopicRequestError.invalidURL }
-            let target = try values["pane"].map { try pane($0) }
-            let repositoryPath = try values["sessionPath"].map { try sessionPath($0) }
-            let title = values["title"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if title.isEmpty {
-                guard values["title"] == nil, let target else { throw TopicRequestError.invalidURL }
-                self.init(.extract(sessionPath: repositoryPath), target: target)
-            } else if let repositoryPath {
-                self.init(.create(title: title, sessionPath: repositoryPath))
-            } else if let target {
-                self.init(.create(title: title, sessionPath: nil), target: target)
-            } else { throw TopicRequestError.invalidURL }
+            if values["pane"] != nil || values["sessionPath"] != nil {
+                throw TopicRequestError.removedForm("muxify://topic/new makes an Empty Topic and takes only title. To start a Session in it, "
+                    + "run muxify topic add-session <dir> --topic <id>. To move a Pane into a new Topic, run muxify window move --new-topic --pane <id>.")
+            }
+            try keys(["title"])
+            let title = values["title"]!.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { throw TopicRequestError.invalidURL }
+            self.init(.create(title: title))
         case "/add":
             try keys(["pane", "sessionPath"])
             self.init(.addSession(sessionPath: try sessionPath(values["sessionPath"]), workingCopy: .directory), target: try pane(values["pane"]))

@@ -314,9 +314,9 @@ private struct SessionHeading: View {
     private var orderButtons: some View {
         if let ordering, case .topic(let topicID) = topic.id {
             let id = session.id.session
-            Button("Move Up") { if let above = ordering.above.flatMap(SessionID.init) { store.moveSession(id, to: .before(above)) } }
+            Button("Move Up") { store.moveSession(id, to: .up) }
                 .disabled(ordering.above == nil || store.changingTopic)
-            Button("Move Down") { if let below = ordering.below.flatMap(SessionID.init) { store.moveSession(id, to: .after(below)) } }
+            Button("Move Down") { store.moveSession(id, to: .down) }
                 .disabled(ordering.below == nil || store.changingTopic)
             if ordering.isManual {
                 Button("Sort Sessions by Creation") { store.sortSessionsByCreation(ofTopic: topicID) }
@@ -687,9 +687,9 @@ private struct CardMoveButtons: View {
     let neighbors: CardNeighbors
 
     var body: some View {
-        Button("Move Up") { if let placement = neighbors.placement(.previous) { store.moveTopic(id, to: placement) } }
+        Button("Move Up") { store.moveCard(id, .up) }
             .disabled(neighbors.above == nil || store.changingTopic)
-        Button("Move Down") { if let placement = neighbors.placement(.next) { store.moveTopic(id, to: placement) } }
+        Button("Move Down") { store.moveCard(id, .down) }
             .disabled(neighbors.below == nil || store.changingTopic)
     }
 }
@@ -1242,7 +1242,7 @@ private struct AgentsSection: View {
                                 .onTapGesture { store.select(agent) }
                                 .accessibilityIdentifier("agent-" + agent.paneID)
                                 .contextMenu {
-                                    Button("New Topic from this Pane") { store.presentMovePane(PaneID(rawValue: agent.paneID).map(TopicTarget.pane)) }
+                                    Button("New Topic from this Pane") { store.presentMovePane(PaneID(rawValue: agent.paneID).map(EnvironmentTarget.pane)) }
                                         .disabled(store.changingTopic)
                                 }
                         }
