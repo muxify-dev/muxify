@@ -3,7 +3,7 @@ import XCTest
 @testable import MuxifyCore
 
 final class TitleSuggestionTests: XCTestCase {
-    private let project = Project(path: "/work/game", name: "game")
+    private let sessionPath = SessionPath(path: "/work/game", name: "game")
 
     private func pane(kind: AgentKind = .codex, id: String = "conversation-1", command: String = "codex") -> TmuxPane {
         TmuxPane(id: "%1", windowID: "@1", command: command, agent: kind.rawValue,
@@ -19,9 +19,9 @@ final class TitleSuggestionTests: XCTestCase {
     }
 
     func testBuildsTheCompleteRequestFromLiveAndRememberedConversationIDs() throws {
-        var topic = TopicRecord(id: "topic", homeProject: project.folder.path)
+        var topic = TopicRecord(id: "topic")
         topic.sessions = [.object([
-            "project_path": .string(project.folder.path),
+            "repository_path": .string(sessionPath.folder.path),
             "windows": .array([
                 .object(["agent": .string("codex"), "agent_conversation": .string("conversation-1")]),
                 .object(["agent": .string("claude"), "agent_conversation": .string("conversation-2")]),
@@ -39,7 +39,7 @@ final class TitleSuggestionTests: XCTestCase {
             return .completed(status: 0, stdout: "  Suggested title  \nignored", stderr: "")
         })
 
-        XCTAssertEqual(try suggester.suggest(for: .topic(topic, snapshot, [project])), "Suggested title")
+        XCTAssertEqual(try suggester.suggest(for: .topic(topic, snapshot, [sessionPath])), "Suggested title")
         XCTAssertEqual(loaded, [
             TopicTitleSuggester.Conversation(kind: .codex, id: "conversation-1"),
             TopicTitleSuggester.Conversation(kind: .claude, id: "conversation-2"),
@@ -49,8 +49,8 @@ final class TitleSuggestionTests: XCTestCase {
         XCTAssertEqual(request?.prompt, """
         Give a short title for this work, at most 5 words. Return plain text on one line.
 
-        Projects:
-        - game
+        Sessions:
+        - game/topic
 
         Conversation excerpts:
         [Codex 1]
@@ -70,7 +70,7 @@ final class TitleSuggestionTests: XCTestCase {
             prompt = value
             return .completed(status: 0, stdout: "Title", stderr: "")
         })
-        _ = try suggester.suggest(for: .newTopic(pane(), project))
+        _ = try suggester.suggest(for: .newTopic(pane(), sessionPath))
         for kept in [1, 2, 3, 7, 8] { XCTAssertTrue(prompt.contains("message-\(kept)")) }
         for removed in [4, 5, 6] { XCTAssertFalse(prompt.contains("message-\(removed)")) }
         XCTAssertTrue(prompt.contains(String(repeating: "x", count: 500)))
@@ -154,8 +154,8 @@ final class TitleSuggestionTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 3)
     }
 
-    func testProjectMetadataCannotExceedTheCompletePromptLimit() {
-        let huge = Project(path: "/work", name: String(repeating: "p", count: 8_000))
+    func testSessionPathMetadataCannotExceedTheCompletePromptLimit() {
+        let huge = SessionPath(path: "/work", name: String(repeating: "p", count: 8_000))
         var calls = 0
         let suggester = TopicTitleSuggester(commands: ["model"], transcriptLoader: { _ in ["request"] },
                                             modelCall: { _, _, _ in

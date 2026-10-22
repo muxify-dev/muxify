@@ -44,8 +44,8 @@ final class SidebarFormatTests: XCTestCase {
     }
 
     func testDefaultLinesAndEmptyTitleFallback() throws {
-        let session = SidebarFormat.Context(values: [.project: "proj", .branch: "real"])
-        let second = SidebarFormat.Context(values: [.project: "proj2"])
+        let session = SidebarFormat.Context(values: [.session_base_name: "proj", .branch: "real"])
+        let second = SidebarFormat.Context(values: [.session_base_name: "proj2"])
         let topic = SidebarFormat.Context(values: [.topic_title: "Title", .session_count: "2", .window_count: "3"],
                                           loops: [.sessions: [session, second]])
         let defaults = SidebarFormats.defaults

@@ -33,19 +33,17 @@ public struct TopicSettleSession: Identifiable, Codable, Hashable, Sendable {
         case removeWorktree = "remove_worktree"
     }
 
-    public static func choices(topic: TopicRecord, snapshot: TmuxSnapshot, projects: [Project],
+    public static func choices(topic: TopicRecord, snapshot: TmuxSnapshot, sessionPaths: [SessionPath],
                         mergedWorktrees: Set<Folder> = []) -> [TopicSettleSession] {
         var seen: Set<String> = []
-        let byProject = topic.rememberedSessions(by: "project_path")
         return snapshot.windows.filter { $0.topicID == topic.id && seen.insert($0.sessionID).inserted }.map { window in
-            let location = TopicLocation(of: window, record: topic, projects: projects)
-            let working = snapshot.agents.contains { $0.sessionID == window.sessionID && $0.status == .working }
-            let remembered = byProject[location.project.folder]
-            let worktree = location.worktree.flatMap { folder -> TopicPlan.WorktreeSpec? in
-                guard mergedWorktrees.contains(folder), let branch = remembered?["branch"]?.string else { return nil }
-                return .init(projectPath: location.project.folder.path, path: folder.path, branch: branch)
+            let remembered = topic.session(of: window)
+            let worktree = remembered?["worktree_path"]?.string.flatMap { path -> TopicPlan.WorktreeSpec? in
+                guard mergedWorktrees.contains(.local(path)), let branch = remembered?["branch"]?.string,
+                      let repository = remembered?["repository_path"]?.string else { return nil }
+                return .init(repositoryPath: repository, path: path, branch: branch)
             }
-            return Self(id: window.sessionID, name: window.sessionName, disposition: working ? .keep : .kill,
+            return Self(id: window.sessionID, name: window.sessionName, disposition: .keep,
                         worktree: worktree, reviewedWindows: windows(in: window.sessionID, snapshot: snapshot))
         }
     }
@@ -60,25 +58,30 @@ public struct TopicSettleSession: Identifiable, Codable, Hashable, Sendable {
 struct TopicSettlePlan {
     public let edit: TopicEdit
 
-    public init(topic: TopicRecord, snapshot: TmuxSnapshot, projects: [Project], choices: [TopicSettleSession],
+    public init(topic: TopicRecord, snapshot: TmuxSnapshot, sessionPaths: [SessionPath], choices: [TopicSettleSession],
          outcome: String, mergedWorktrees: Set<Folder> = [], now: Date = Date(), order: SessionOrder = .oldestFirst) {
-        var record = topic.remembering(snapshot, projects: projects, order: order) ?? topic
+        var record = topic.remembering(snapshot, order: order) ?? topic
         record.settledAt = ISO8601DateFormatter().string(from: now)
         record.outcome = outcome.trimmingCharacters(in: .whitespacesAndNewlines)
         record.snoozedUntil = nil
-        let defaults = TopicSettleSession.choices(topic: record, snapshot: snapshot, projects: projects,
+        let defaults = TopicSettleSession.choices(topic: record, snapshot: snapshot, sessionPaths: sessionPaths,
                                                  mergedWorktrees: mergedWorktrees)
         var commands: [TopicPlan.Command] = []
+        var taken = Set(snapshot.windows.map(\.sessionName))
         for session in defaults {
             let choice = choices.first { $0.id == session.id } ?? session
             switch choice.disposition {
             case .kill: commands.append(.tmux(["kill-session", "-t", session.id]))
             case .keep:
-                commands.append(.tmux(["set-option", "-u", "-t", session.id, "@muxify_topic"]))
-                commands.append(.tmux(SessionLock.unsetOption(session.id)))
+                if let window = snapshot.windows.first(where: { $0.sessionID == session.id }) {
+                    commands += record.detachedCommands(for: window, taken: &taken)
+                }
             }
         }
-        let windows = snapshot.windows.map { (sessionID: $0.sessionID, folders: $0.folders) }
+        let windows = snapshot.windows.map { window in
+            (sessionID: window.sessionID, folders: window.folders + snapshot.panes.filter { $0.windowID == window.id }.map { Folder.local($0.path) })
+        }
+        var removedWorktrees: Set<Folder> = []
         for session in defaults {
             guard let choice = choices.first(where: { $0.id == session.id }), choice.disposition == .kill,
                   choice.removeWorktree, let worktree = session.worktree else { continue }
@@ -89,6 +92,7 @@ struct TopicSettlePlan {
             }
             let folder = Folder.local(worktree.path)
             guard !keptWindows.contains(where: { $0.folders.contains(where: folder.contains) }) else { continue }
+            guard removedWorktrees.insert(folder).inserted else { continue }
             commands.append(.removeMergedWorktree(worktree))
         }
         edit = TopicEdit(record: record, commands: commands, selection: .unchanged)
@@ -106,8 +110,9 @@ public struct TopicReopening: Hashable {
     }
 
     public struct Session: Hashable {
-        public let projectPath: String
-        public let projectName: String
+        public let id: String
+        public let repositoryPath: String?
+        public let baseName: String
         public let name: String
         public let directory: String
         public let branch: String?
@@ -151,43 +156,43 @@ public struct TopicReopening: Hashable {
         public let conversation: String
     }
 
-    /// Nil when the Topic remembers no Session and has no Home Project, so nothing is created.
+    /// Nil when the Topic remembers no Session, so nothing is created.
     public let slug: String?
     public let sessions: [Session]
 
-    public init(topic: TopicRecord, records: [TopicRecord], windows: [TmuxWindow], projects: [Project],
+    public init(topic: TopicRecord, records: [TopicRecord], windows: [TmuxWindow], sessionPaths: [SessionPath],
                 existingDirectories: Set<String>, choice: Choice) throws {
-        let remembered = topic.sessions.isEmpty ? topic.homeProject.map { [.object(["project_path": JSONValue.string($0)])] } ?? [] : topic.sessions
-        let locations = try remembered.map { session -> Project in
-            guard let path = session["project_path"]?.string, !path.isEmpty else { throw TopicEditFailure.invalidProject }
-            let folder = Folder.local(path)
-            let project = Project.containing(folder, in: projects) ?? Project(folder: folder, name: (folder.path as NSString).lastPathComponent)
-            guard !project.name.isEmpty, !project.name.contains(":"), !project.name.contains("."),
-                  project.name.rangeOfCharacter(from: .controlCharacters) == nil else { throw TopicEditFailure.invalidProject }
-            return project
-        }
-        guard let home = locations.first else {
+        guard !topic.sessions.isEmpty else {
             slug = nil
             sessions = []
             return
         }
-        guard Set(locations.map(\.folder)).count == locations.count else { throw TopicEditFailure.duplicateProject }
-        guard Set(locations.map(\.name)).count == locations.count else { throw TopicEditFailure.sessionNameInUse }
-        let slug = TopicNaming.slug(title: topic.title ?? "", project: home, records: records,
-                                    sessionNames: Set(windows.map(\.sessionName)), excludingTopicID: topic.id,
-                                    projectNames: Set(locations.map(\.name)))
+        let slug = topic.slug ?? TopicNaming.slug(title: topic.title ?? "", records: records, excludingTopicID: topic.id)
         self.slug = slug
-        sessions = try zip(remembered, locations).map { session, project in
-            let directory = session["worktree_path"]?.string ?? project.folder.path
+        let liveNames = Set(windows.map(\.sessionName))
+        var taken = liveNames.union(topic.sessions.compactMap { $0["name"]?.string })
+        var identities = Set(windows.map(\.sessionRecordID))
+        sessions = try topic.sessions.map { session in
+            guard let savedID = session["id"]?.string, !savedID.isEmpty, let savedName = session["name"]?.string,
+                  let directory = session["directory"]?.string, !directory.isEmpty else { throw TopicEditFailure.invalidSessionPath }
+            // Keep leaves the original alive. A recreated Session must not alias its identity.
+            let id = identities.contains(savedID) ? UUID().uuidString.lowercased() : savedID
+            identities.insert(id)
+            try SessionNaming.validate(savedName)
+            let name = liveNames.contains(savedName)
+                ? SessionNaming.available(SessionNaming.base(of: savedName, topic: topic),
+                    topic: savedName.hasSuffix("/" + slug) ? slug : nil, taken: taken)
+                : savedName
+            taken.insert(name)
             let createsWorktree = session["worktree_path"]?.string.map { !existingDirectories.contains($0) } ?? false
             let branch = session["branch"]?.string.flatMap { $0.isEmpty ? nil : $0 }
-            if createsWorktree, branch == nil { throw TopicEditFailure.invalidProject }
+            if createsWorktree, branch == nil { throw TopicEditFailure.invalidSessionPath }
             let saved = session["windows"]?.array ?? []
             let windows = choice == .startFresh || saved.isEmpty
                 ? [Window(name: "shell", directory: directory, browser: StoredBrowser(), layout: nil,
                           panes: [Pane(directory: directory, isActive: true, start: .shell)])]
                 : saved.map { Self.window($0, directory: directory) }
-            return Session(projectPath: project.folder.path, projectName: project.name, name: project.name + "/" + slug, directory: directory, branch: branch,
+            return Session(id: id, repositoryPath: session["repository_path"]?.string, baseName: SessionNaming.base(of: name, topic: topic), name: name, directory: directory, branch: branch,
                            createsWorktree: createsWorktree, base: session[TopicWorktrees.baseKey]?.string, windows: windows)
         }
     }
@@ -241,17 +246,15 @@ public struct TopicReopening: Hashable {
 struct TopicReopenPlan {
     public let edit: TopicEdit
 
-    public init(topic: TopicRecord, records: [TopicRecord], windows: [TmuxWindow], projects: [Project],
+    public init(topic: TopicRecord, records: [TopicRecord], windows: [TmuxWindow], sessionPaths: [SessionPath],
          existingDirectories: Set<String>, choice: TopicReopening.Choice = .reopen) throws {
         guard !windows.contains(where: { $0.topicID == topic.id }) else { throw TopicEditFailure.destinationUnavailable }
-        let reopening = try TopicReopening(topic: topic, records: records, windows: windows, projects: projects,
+        let reopening = try TopicReopening(topic: topic, records: records, windows: windows, sessionPaths: sessionPaths,
                                            existingDirectories: existingDirectories, choice: choice)
         guard let slug = reopening.slug, let home = reopening.sessions.first else {
             var reopened: TopicRecord?
             if topic.settledAt != nil {
                 var record = topic
-                record.slug = TopicNaming.slug(title: topic.title ?? "", project: nil, records: records, sessionNames: [],
-                                               excludingTopicID: topic.id)
                 record.settledAt = nil
                 record.snoozedUntil = nil
                 reopened = record
@@ -261,8 +264,8 @@ struct TopicReopenPlan {
         }
         var commands: [TopicPlan.Command] = []
         for session in reopening.sessions {
-            if session.createsWorktree, let branch = session.branch {
-                commands.append(.restoreWorktree(.init(projectPath: session.projectPath, path: session.directory, branch: branch),
+            if session.createsWorktree, let branch = session.branch, let repository = session.repositoryPath {
+                commands.append(.restoreWorktree(.init(repositoryPath: repository, path: session.directory, branch: branch),
                                                  base: session.base))
             }
             let target = "=" + session.name + ":"
@@ -272,6 +275,7 @@ struct TopicReopenPlan {
                 if index == 0 {
                     commands.append(.reopenSession(name: session.name, directory: session.directory, windowName: window.name))
                     commands.append(.tmux(["set-option", "-t", target, "@muxify_topic", topic.id]))
+                    commands.append(.tmux(["set-option", "-t", target, "@muxify_session_id", session.id]))
                     if first != session.directory {
                         commands.append(.tmux(["respawn-window", "-k", "-t", windowTarget, "-c", first]))
                     }
@@ -285,6 +289,14 @@ struct TopicReopenPlan {
         var reopened = topic
         reopened.slug = slug
         reopened.settledAt = nil
+        reopened.snoozedUntil = nil
+        for (index, session) in reopening.sessions.enumerated() {
+            guard var fields = reopened.sessions[index].object else { continue }
+            fields["id"] = .string(session.id)
+            fields["name"] = .string(session.name)
+            fields["base_name"] = .string(session.baseName)
+            reopened.sessions[index] = .object(fields)
+        }
         edit = TopicEdit(record: topic, commands: commands, selection: .sessionName(home.name), completion: .save(reopened))
     }
 }

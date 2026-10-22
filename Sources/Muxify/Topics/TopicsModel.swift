@@ -222,7 +222,7 @@ struct TopicsModel {
         }
 
         let id: TopicSessionID
-        let projectName: String
+        let baseName: String
         let contents: Contents
         var windows: [TmuxWindow] {
             if case .live(let children) = contents { return children.windows }
@@ -261,7 +261,7 @@ struct TopicsModel {
         func has(_ tag: Tag?) -> Bool { tag.map { tag in tags.contains { $0.tag == tag } } ?? true }
         /// No live Session, and Reopen makes the remembered ones again.
         var isDormant: Bool { hasNoLiveSession && remembersSessions }
-        /// "Dormant", or "Empty" for an open Topic that remembers no Session and offers Add a Project.
+        /// "Dormant", or "Empty" for an open Topic that remembers no Session and offers Add a Session.
         var idleLabel: String? { hasNoLiveSession ? (remembersSessions ? "Dormant" : "Empty") : nil }
     }
 
@@ -344,7 +344,7 @@ struct TopicsModel {
     let agentMarks: [String: AgentMark]
     /// The rows under each Session row in Sessions mode, by Session ID.
     let sessionChildren: [String: SessionChildren]
-    /// Each live Session as a Topic lists it, by Session ID, for its Project name in the sidebar Formats.
+    /// Each live Session as a Topic lists it, by Session ID, for its SessionPath name in the sidebar Formats.
     let topicSessions: [String: Session]
     let dueWakes: [Wake]
     /// The next Snooze deadline after `now`. From then on, a model built from the same inputs is different.
@@ -422,13 +422,12 @@ struct TopicsModel {
             var seen: Set<String> = []
             let firsts = members.filter { seen.insert($0.sessionID).inserted }
             let ordered = record == nil ? firsts : TopicSessionOrder.ordered(firsts, record: record, order: config.topics.sessionOrder) {
-                TopicSessionKey(of: $0, record: record, projects: config.projects)
+                TopicSessionKey(of: $0)
             }
             return ordered.map(\.sessionID).map { sessionID -> Session in
                 let windows = members.filter { $0.sessionID == sessionID }
                 let identity = TopicSessionID(topic: id, session: sessionID)
-                let location = TopicLocation(of: windows[0], record: record, projects: config.projects)
-                return Session(id: identity, projectName: Self.projectName(location.project, worktree: location.worktree),
+                return Session(id: identity, baseName: SessionNaming.base(of: windows[0].sessionName, topic: record),
                                contents: .live(children(windows)))
             }
         }
@@ -501,12 +500,12 @@ struct TopicsModel {
         if let id = emptyTopicID, let row = rows.first(where: { $0.id == .topic(id) }) {
             emptyTopic = row
         } else if let id = emptyTopicID, let record = settled.first(where: { $0.id == id }) {
-            emptyTopic = Self.settledRow(record, projects: config.projects, tags: config.topics.tags, expanded: openTopics)
+            emptyTopic = Self.settledRow(record, sessionPaths: config.sessionPaths, tags: config.topics.tags, expanded: openTopics)
         } else {
             emptyTopic = nil
         }
         let settledRows = settled.prefix(groupsState.settledPages * TopicGroupsState.pageSize)
-            .map { Self.settledRow($0, projects: config.projects, tags: config.topics.tags, expanded: openTopics) }
+            .map { Self.settledRow($0, sessionPaths: config.sessionPaths, tags: config.topics.tags, expanded: openTopics) }
         groups = self.mode == .topics ? [
             Group(kind: .snoozed, topics: snoozedRows, hiddenCount: 0, isExpanded: groupsState.open == .snoozed),
             Group(kind: .settled, topics: settledRows,
@@ -561,7 +560,7 @@ struct TopicsModel {
     }
 
     /// A Settled Topic's row, with the Sessions and Windows its record remembers.
-    static func settledRow(_ record: TopicRecord, projects: [Project], tags: ConfigTags?, expanded: Set<TopicGroupID>) -> Row {
+    static func settledRow(_ record: TopicRecord, sessionPaths: [SessionPath], tags: ConfigTags?, expanded: Set<TopicGroupID>) -> Row {
         let id = TopicGroupID.topic(record.id)
         let title = [record.title, record.slug].compactMap { $0 }
             .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "Untitled Topic"
@@ -571,15 +570,13 @@ struct TopicsModel {
             return nil
         }
         let sessions = record.sessions.enumerated().compactMap { index, session -> Session? in
-            guard let path = session["project_path"]?.string, !path.isEmpty else { return nil }
-            let folder = Folder.local(path)
-            let identity = TopicSessionID(topic: id, session: path)
+            guard let path = session["directory"]?.string, let savedID = session["id"]?.string else { return nil }
+            let identity = TopicSessionID(topic: id, session: savedID)
             let windows = (session["windows"]?.array ?? []).enumerated().map { position, window in
                 RememberedWindow(id: "\(record.id)-\(index)-\(position)", name: window["name"]?.string ?? "shell",
                                  directory: window["directory"]?.string ?? path)
             }
-            return Session(id: identity, projectName: projectName(Project.named(at: folder, in: projects),
-                                                                  worktree: session["worktree_path"]?.string.map(Folder.local)),
+            return Session(id: identity, baseName: session["base_name"]?.string ?? session["name"]?.string ?? "Session",
                            contents: .remembered(windows))
         }
         return Row(id: id, title: title, kind: .settled(detail: outcome.isEmpty ? settledOn ?? record.settledAt ?? "" : outcome),
@@ -587,18 +584,13 @@ struct TopicsModel {
                    tags: tags?.shown(record.tags) ?? [])
     }
 
-    /// A Session in a Worktree is named as the Project names that Worktree.
-    private static func projectName(_ project: Project, worktree: Folder?) -> String {
-        worktree.map(project.displayName(ofWorktreeAt:)) ?? project.displayName
-    }
-
-    /// A Window that left its Session's Worktree for the main working copy of the Project.
+    /// A Window that left its Session's Worktree for the main working copy of the SessionPath.
     /// It compares against the Session's own Worktree, so in a bare layout, where every
-    /// Worktree sits inside the Project folder, a Window in its own Worktree is not flagged.
-    static func usesMainWorkingCopy(_ window: TmuxWindow, record: TopicRecord?, projects: [Project]) -> Bool {
-        let location = TopicLocation(of: window, record: record, projects: projects)
-        guard let worktree = location.worktree else { return false }
+    /// Worktree sits inside the SessionPath folder, a Window in its own Worktree is not flagged.
+    static func usesMainWorkingCopy(_ window: TmuxWindow, record: TopicRecord?, sessionPaths: [SessionPath]) -> Bool {
+        guard let saved = record?.session(of: window), let worktree = saved["worktree_path"]?.string.map(Folder.local),
+              let repository = saved["repository_path"]?.string.map(Folder.local) else { return false }
         let folder = Folder.local(window.path)
-        return location.project.folder.contains(folder) && !worktree.contains(folder)
+        return repository.contains(folder) && !worktree.contains(folder)
     }
 }

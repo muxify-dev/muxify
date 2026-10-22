@@ -27,6 +27,6 @@ public struct MuxifyPaths: Equatable, Sendable {
     /// Empty, like the record lock. One Topic edit at a time holds it, from its read to its last tmux command,
     /// so a second edit sees the first one's Topic and Session names before it chooses its own.
     public var editLock: URL { state.appendingPathComponent("topic-edits.lock") }
-    /// Every new Worktree goes to `<worktrees>/<project name>/<slug>`. Settle removes only Worktrees inside it.
+    /// Every new Worktree goes to `<worktrees>/<sessionPath name>/<slug>`. Settle removes only Worktrees inside it.
     public var worktrees: URL { state.appendingPathComponent("worktrees", isDirectory: true) }
 }

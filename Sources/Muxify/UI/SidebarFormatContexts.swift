@@ -11,7 +11,7 @@ struct SidebarFormatContexts {
     var panes: [String: Context] = [:]
 
     init(model: TopicsModel, windows: [TmuxWindow], panes: [TmuxPane], agents: [Agent],
-         branches: TopicBranches, records: [TopicRecord], projects: [Project], tabCounts: [String: Int]) {
+         branches: TopicBranches, records: [TopicRecord], sessionPaths: [SessionPath], tabCounts: [String: Int]) {
         let panesByWindow = Dictionary(grouping: panes, by: \.windowID)
         let agentsByPane = Dictionary(agents.map { ($0.paneID, $0) }, uniquingKeysWith: { first, _ in first })
         let recordsByID = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -26,12 +26,11 @@ struct SidebarFormatContexts {
         for (sessionID, members) in Dictionary(grouping: windows, by: \.sessionID) {
             guard let first = members.first else { continue }
             let record = first.isRemote ? nil : first.topicID.flatMap { recordsByID[$0] }
-            let location = first.isRemote ? nil : TopicLocation(of: first, record: record, projects: projects)
             let topicSession = model.topicSessions[sessionID]
             let sessionAgents = agents.filter { $0.sessionID == sessionID }
             let sessionValues = merged(counts(sessionAgents), [
                 .session_name: first.sessionName,
-                .project: topicSession?.projectName ?? location?.project.name ?? remoteProjectName(first.sessionPath),
+                .session_base_name: topicSession?.baseName ?? SessionNaming.base(of: first.sessionName, topic: record),
                 .branch: first.isRemote ? "" : branches[.local(first.sessionPath)] ?? "",
                 .topic_title: first.isRemote ? "" : first.topicID.flatMap { model.titles[$0] } ?? "",
                 .topic_tags: topicTags(record.map { model.tags?.shown($0.tags) ?? [] } ?? []),
@@ -90,10 +89,4 @@ struct SidebarFormatContexts {
             topics[topic.id] = Context(values: values, loops: [.sessions: children, .windows: allWindows, .panes: allPanes, .tags: tags])
         }
     }
-}
-
-/// A Remote Session's Project, named after its folder as a Topic Session's Project is.
-private func remoteProjectName(_ sessionPath: String) -> String {
-    let name = Project.sessionName((sessionPath as NSString).lastPathComponent)
-    return name.isEmpty ? "Unknown Project" : name
 }

@@ -1,7 +1,7 @@
 import XCTest
 @testable import MuxifyCore
 
-final class ProjectDiscoveryTests: XCTestCase {
+final class SessionPathDiscoveryTests: XCTestCase {
     private func load(_ text: String, at path: String = "/cfg/muxify/config.yaml") throws -> Config {
         try Config.load(path: path) { _ in text }.get()
     }
@@ -12,28 +12,28 @@ final class ProjectDiscoveryTests: XCTestCase {
           paths:
             - path: ~/Dev/*/*
               display_depth: 2
-            - path: ~/projects
+            - path: ~/sessionPaths
               depth: 1
             - path: work
             - path: "~"
         """)
         XCTAssertEqual(config.problems, [])
-        XCTAssertEqual(config.projectRoots, [
-            ProjectRoot(path: "~/Dev/*/*", depth: 0, displayDepth: 2),
-            ProjectRoot(path: "~/projects", depth: 1, displayDepth: 1),
-            ProjectRoot(path: "/cfg/muxify/work", depth: 0, displayDepth: 1),
-            ProjectRoot(path: "~", depth: 0, displayDepth: 1),
+        XCTAssertEqual(config.sessionRoots, [
+            SessionPathRoot(path: "~/Dev/*/*", depth: 0, displayDepth: 2),
+            SessionPathRoot(path: "~/sessionPaths", depth: 1, displayDepth: 1),
+            SessionPathRoot(path: "/cfg/muxify/work", depth: 0, displayDepth: 1),
+            SessionPathRoot(path: "~", depth: 0, displayDepth: 1),
         ], "~ stays for the machine that looks; a relative path starts at the Config's folder")
-        XCTAssertEqual(config.projects, [], "loading never looks on disk")
+        XCTAssertEqual(config.sessionPaths, [], "loading never looks on disk")
     }
 
-    func testTheOldProjectsSectionsAreProblemsThatNameTheirNewPlace() throws {
-        for (text, message) in [("projects:\n  - path: ~/Dev/*", "projects: the list moved to sessions.paths"),
-                                ("projects:\n  paths: [{path: ~/src}]", "projects moved to sessions"),
-                                ("projects_aliases:\n  - ~/Dev/x: X", "projects_aliases moved to sessions.aliases")] {
+    func testTheOldSessionPathsSectionsAreProblemsThatNameTheirNewPlace() throws {
+        for (text, message) in [("sessionPaths:\n  - path: ~/Dev/*", "unknown section \"sessionPaths\""),
+                                ("projects:\n  paths: [{path: ~/src}]", "unknown section \"projects\""),
+                                ("projects_aliases:\n  - ~/Dev/x: X", "unknown section \"projects_aliases\"")] {
             let config = try load(text)
             XCTAssertEqual(config.problems.map(\.message), [message], text)
-            XCTAssertEqual(config.projectRoots, [], text)
+            XCTAssertEqual(config.sessionRoots, [], text)
         }
     }
 
@@ -44,7 +44,7 @@ final class ProjectDiscoveryTests: XCTestCase {
             let config = try load("sessions:\n  paths: [\(entry)]")
             XCTAssertEqual(config.problems.count, 1, entry)
             XCTAssertEqual(config.problems.first?.line, 2, entry)
-            XCTAssertEqual(config.projectRoots, [], entry)
+            XCTAssertEqual(config.sessionRoots, [], entry)
         }
         for text in ["sessions: 42", "sessions: [{path: /tmp}]", "sessions:\n  paths: {}", "sessions:\n  folders: []"] {
             XCTAssertFalse(try load(text).problems.isEmpty, text)
@@ -57,22 +57,22 @@ final class ProjectDiscoveryTests: XCTestCase {
             try FileManager.default.createDirectory(at: root.url.appendingPathComponent("work/" + name), withIntermediateDirectories: true)
         }
         try Data().write(to: root.url.appendingPathComponent("work/file"))
-        let roots = [ProjectRoot(path: root.url.path + "/work/*", displayDepth: 2), ProjectRoot(path: root.url.path + "/work/alpha")]
-        XCTAssertEqual(ProjectDiscovery.discover(roots, aliases: [:]).map(\.name), ["work/alpha", "work/beta"])
+        let roots = [SessionPathRoot(path: root.url.path + "/work/*", displayDepth: 2), SessionPathRoot(path: root.url.path + "/work/alpha")]
+        XCTAssertEqual(SessionPathDiscovery.discover(roots, aliases: [:]).map(\.name), ["work/alpha", "work/beta"])
         for name in ["gamma.app", "my notes"] {
             try FileManager.default.createDirectory(at: root.url.appendingPathComponent("work/" + name), withIntermediateDirectories: true)
         }
-        XCTAssertEqual(ProjectDiscovery.discover(roots, aliases: [:]).map(\.name),
+        XCTAssertEqual(SessionPathDiscovery.discover(roots, aliases: [:]).map(\.name),
                        ["work/alpha", "work/beta", "work/gamma_app", "work/mynotes"],
-                       "a folder made later is a Project, named as tmux takes it")
+                       "a folder made later is a SessionPath, named as tmux takes it")
     }
 
-    func testDepthListsSubfoldersAndARepositoryIsOneProjectWithItsWorktrees() throws {
+    func testDepthListsSubfoldersAndARepositoryIsOneSessionPathWithItsWorktrees() throws {
         let directory = try TestDirectory()
         // git prints real paths: /private/var, not /var.
         let home = String(cString: realpath(directory.url.path, nil))
         let fm = FileManager.default
-        for folder in ["projects/app/src", "projects/lib/nested/deep", "projects/.cache", "projects/lib/.hidden", "dotfiles", "trees"] {
+        for folder in ["sessionPaths/app/src", "sessionPaths/lib/nested/deep", "sessionPaths/.cache", "sessionPaths/lib/.hidden", "dotfiles", "trees"] {
             try fm.createDirectory(atPath: "\(home)/\(folder)", withIntermediateDirectories: true)
         }
         let git = { (args: [String]) in
@@ -80,52 +80,52 @@ final class ProjectDiscoveryTests: XCTestCase {
                                         environment: ["HOME": home, "PATH": "/usr/bin:/bin:/opt/homebrew/bin",
                                                       "GIT_CONFIG_NOSYSTEM": "1"])
         }
-        try git(["-C", "\(home)/projects/app", "init", "-q", "-b", "main"])
-        try git(["-C", "\(home)/projects/app", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"])
-        try git(["-C", "\(home)/projects/app", "worktree", "add", "-q", "\(home)/trees/fix", "-b", "fix"])
+        try git(["-C", "\(home)/sessionPaths/app", "init", "-q", "-b", "main"])
+        try git(["-C", "\(home)/sessionPaths/app", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"])
+        try git(["-C", "\(home)/sessionPaths/app", "worktree", "add", "-q", "\(home)/trees/fix", "-b", "fix"])
 
         let roots = [
-            ProjectRoot(path: "~/projects/", depth: 2),
-            ProjectRoot(path: "~/dotfiles"),
-            ProjectRoot(path: "~/missing", depth: 1),
-            ProjectRoot(path: "~/trees", depth: 1),
+            SessionPathRoot(path: "~/sessionPaths/", depth: 2),
+            SessionPathRoot(path: "~/dotfiles"),
+            SessionPathRoot(path: "~/missing", depth: 1),
+            SessionPathRoot(path: "~/trees", depth: 1),
         ]
         let output = try CommandRunner().run(
             CommandInvocation(executable: "/bin/sh",
-                              arguments: ["-c", ProjectDiscovery.script, "muxify"] + ProjectDiscovery.arguments(for: roots)),
+                              arguments: ["-c", SessionPathDiscovery.script, "muxify"] + SessionPathDiscovery.arguments(for: roots)),
             environment: ["HOME": home, "PATH": "/usr/bin:/bin:/opt/homebrew/bin"]
         )
-        let projects = ProjectDiscovery.projects(in: output, roots: roots, aliases: ["~/dotfiles": "Dotfiles"])
-        // A Project shows the Config's spelling, here through $HOME, so it keeps the /private that git gives too.
+        let sessionPaths = SessionPathDiscovery.sessionPaths(in: output, roots: roots, aliases: ["~/dotfiles": "Dotfiles"])
+        // A SessionPath shows the Config's spelling, here through $HOME, so it keeps the /private that git gives too.
         let shown = home
-        XCTAssertEqual(projects.map { $0.folder.path.replacingOccurrences(of: shown, with: "~") },
-                       ["~/projects/app", "~/projects/lib", "~/projects/lib/nested", "~/dotfiles"],
-                       "no repository subfolder, Worktree, hidden or missing folder is a Project")
-        XCTAssertEqual(projects[0].layout, .plainRepository([
-            Worktree(path: "\(shown)/projects/app", branch: "main"), Worktree(path: "\(shown)/trees/fix", branch: "fix"),
+        XCTAssertEqual(sessionPaths.map { $0.folder.path.replacingOccurrences(of: shown, with: "~") },
+                       ["~/sessionPaths/app", "~/sessionPaths/lib", "~/sessionPaths/lib/nested", "~/dotfiles"],
+                       "no repository subfolder, Worktree, hidden or missing folder is a SessionPath")
+        XCTAssertEqual(sessionPaths[0].layout, .plainRepository([
+            Worktree(path: "\(shown)/sessionPaths/app", branch: "main"), Worktree(path: "\(shown)/trees/fix", branch: "fix"),
         ]))
-        XCTAssertEqual(ProjectChoice.choices(of: projects[0]).map(\.name), ["app", "app/fix"])
-        XCTAssertEqual(projects[3].displayName, "Dotfiles", "an alias with ~ means the home folder of the machine that looks")
+        XCTAssertEqual(SessionChoice.choices(of: sessionPaths[0]).map(\.name), ["app", "app/fix"])
+        XCTAssertEqual(sessionPaths[3].displayName, "Dotfiles", "an alias with ~ means the home folder of the machine that looks")
     }
 
-    func testDiscoveryWithinFoldersFindsOnlyTheProjectsThatHoldThemAsTheFullRunDoes() throws {
+    func testDiscoveryWithinFoldersFindsOnlyTheSessionPathsThatHoldThemAsTheFullRunDoes() throws {
         let directory = try TestDirectory()
         let home = String(cString: realpath(directory.url.path, nil))
-        for folder in ["projects/app/src", "projects/lib/nested/deep", "projects/other", "dotfiles"] {
+        for folder in ["sessionPaths/app/src", "sessionPaths/lib/nested/deep", "sessionPaths/other", "dotfiles"] {
             try FileManager.default.createDirectory(atPath: "\(home)/\(folder)", withIntermediateDirectories: true)
         }
-        _ = try CommandRunner().run(CommandInvocation(executable: "/usr/bin/env", arguments: ["git", "-C", "\(home)/projects/app", "init", "-q"]),
+        _ = try CommandRunner().run(CommandInvocation(executable: "/usr/bin/env", arguments: ["git", "-C", "\(home)/sessionPaths/app", "init", "-q"]),
                                     environment: ["HOME": home, "PATH": "/usr/bin:/bin:/opt/homebrew/bin", "GIT_CONFIG_NOSYSTEM": "1"])
-        let roots = [ProjectRoot(path: "\(home)/projects", depth: 2), ProjectRoot(path: "\(home)/dotfiles")]
-        let all = ProjectDiscovery.discover(roots, aliases: [:])
-        let folders = ["\(home)/projects/app/src", "\(home)/projects/lib/nested/deep"]
-        let within = ProjectDiscovery.discover(roots, aliases: [:], within: folders)
+        let roots = [SessionPathRoot(path: "\(home)/sessionPaths", depth: 2), SessionPathRoot(path: "\(home)/dotfiles")]
+        let all = SessionPathDiscovery.discover(roots, aliases: [:])
+        let folders = ["\(home)/sessionPaths/app/src", "\(home)/sessionPaths/lib/nested/deep"]
+        let within = SessionPathDiscovery.discover(roots, aliases: [:], within: folders)
         XCTAssertEqual(within.map(\.name), ["app", "lib", "nested"])
-        XCTAssertEqual(within, all.filter { project in within.contains { $0.folder.path == project.folder.path } })
+        XCTAssertEqual(within, all.filter { sessionPath in within.contains { $0.folder.path == sessionPath.folder.path } })
         for folder in folders {
-            XCTAssertEqual(Project.containing(.local(folder), in: within), Project.containing(.local(folder), in: all), folder)
+            XCTAssertEqual(SessionPath.containing(.local(folder), in: within), SessionPath.containing(.local(folder), in: all), folder)
         }
-        XCTAssertEqual(ProjectDiscovery.discover(roots, aliases: [:], within: []), [])
+        XCTAssertEqual(SessionPathDiscovery.discover(roots, aliases: [:], within: []), [])
     }
 
     func testALinkedWorktreeThatSortsFirstIsARowOfItsRepository() throws {
@@ -141,15 +141,15 @@ final class ProjectDiscoveryTests: XCTestCase {
         try git(["-C", "\(home)/code/zzz", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"])
         try git(["-C", "\(home)/code/zzz", "worktree", "add", "-q", "\(home)/code/aaa-wt", "-b", "fix"])
 
-        let roots = [ProjectRoot(path: "\(home)/code/*")]
+        let roots = [SessionPathRoot(path: "\(home)/code/*")]
         let output = try CommandRunner().run(
             CommandInvocation(executable: "/bin/sh",
-                              arguments: ["-c", ProjectDiscovery.script, "muxify"] + ProjectDiscovery.arguments(for: roots)),
+                              arguments: ["-c", SessionPathDiscovery.script, "muxify"] + SessionPathDiscovery.arguments(for: roots)),
             environment: ["HOME": home, "PATH": "/usr/bin:/bin:/opt/homebrew/bin"]
         )
-        let projects = ProjectDiscovery.projects(in: output, roots: roots, aliases: [:])
-        XCTAssertEqual(projects.map(\.name), ["zzz"], "the repository is the Project, not its Worktree")
-        XCTAssertEqual(ProjectChoice.choices(of: projects[0]).map(\.name), ["zzz", "zzz/aaa-wt"])
+        let sessionPaths = SessionPathDiscovery.sessionPaths(in: output, roots: roots, aliases: [:])
+        XCTAssertEqual(sessionPaths.map(\.name), ["zzz"], "the repository is the SessionPath, not its Worktree")
+        XCTAssertEqual(SessionChoice.choices(of: sessionPaths[0]).map(\.name), ["zzz", "zzz/aaa-wt"])
     }
 
     func testRemoteConfigFileOutput() {

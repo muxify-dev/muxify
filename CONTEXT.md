@@ -21,8 +21,12 @@ _Avoid_: current host, active workspace
 ### tmux
 
 **Session**:
-A tmux session. Sessions group Windows in the Sidebar. Outside Topics there is usually one per Project; a Topic has at most one in each Project.
+A tmux session. Sessions group Windows in the Sidebar and can belong to a Topic.
 _Avoid_: project, workspace
+
+**Session base name**:
+A Session's name without its managed Topic suffix, such as `debug` in `debug/fix-payments`. It comes from the Session's own name, not its repository or folder, and can itself contain slashes.
+_Avoid_: Session Path name, repository name (when you mean the Session's name)
 
 **Window**:
 A tmux window: the item you pick in the sidebar. Opening it shows all of its Panes.
@@ -39,20 +43,20 @@ _Avoid_: attachment, connection, viewer
 ### Topics
 
 **Topic**:
-One thing the user wants to get done, such as "Fix reward drop bug in GS". It owns at most one Session in each Project it touches, and it is open or Settled.
+One thing the user wants to get done, such as "Fix reward drop bug in GS". It groups Sessions without a per-repository or per-folder limit, and it is open or Settled.
 _Avoid_: task, project, workspace, thread
 
-**Project**:
-A folder that the Config's projects.paths names, or one found below such a folder, where the user opens Sessions. It gives a Topic's Session its directory and the first part of its name. When the folder is a repository with several Worktrees, the repository is one Project, not one Project per Worktree. Any path that leads to the folder, through symlinks too, finds the Project, and Muxify shows it with the path that the Config wrote.
-_Avoid_: repo, workspace, Session Path, project directory, Session (when you mean the folder)
+**Topic slug**:
+A Topic's short name used as the suffix of its Sessions' names. It follows Topic renames and stays reserved while the Topic's record exists, including while Settled.
+_Avoid_: Session base name, branch name (when you mean the Topic's slug)
+
+**Session Path**:
+A folder offered as a place to start a Session, found through `sessions.paths` or Git's Worktrees. It is a launch location, not a running Session or a group of Sessions.
+_Avoid_: Session Path, workspace, Session (when you mean the folder)
 
 **Worktree**:
-One checkout of a Project's repository at its own path, such as a folder inside a bare repository's folder. A Topic's Session in a Project uses one Worktree, and no other open Topic can use it.
-_Avoid_: checkout, clone, Project (when you mean one checkout)
-
-**Home Project**:
-The Project a Topic starts in. Its first Session opens there.
-_Avoid_: base, root, main repo
+One checkout of a repository at its own path, such as a folder inside a bare repository's folder. Several Sessions, in the same Topic or different Topics, can use the same Worktree.
+_Avoid_: checkout, clone, Session Path (when you mean one checkout)
 
 **Untitled Topic**:
 A Topic that has no title yet. A rename or a title suggested from its Agents gives it one.
@@ -82,8 +86,12 @@ _Avoid_: close, archive, resolve, complete
 To bring a Settled or Dormant Topic back and create its remembered Sessions again, with their Windows, Panes, Tabs and Agents.
 _Avoid_: restore, unsettle, resume
 
+**Remembered Session**:
+A Topic's saved Session identity, name, launch directory and restoration details, retained so it can be Reopened. Several Remembered Sessions can have the same launch directory.
+_Avoid_: Session Path, Home Session, Home Session Path
+
 **Start Fresh**:
-To bring a Dormant or Settled Topic back with one new Session in each Project it remembers, each with one shell Window. Its remembered Windows, Tabs and Agents are not created again.
+To bring a Dormant or Settled Topic back with one new Session for each Session it remembers, each with one shell Window. Its remembered Windows, Tabs and Agents are not created again.
 _Avoid_: start anew, reset, new Topic
 
 **Forget**:
@@ -91,11 +99,11 @@ To remove a Topic for good, at any time, so that it can never be Reopened. Its l
 _Avoid_: archive, delete, purge
 
 **Dormant**:
-An open Topic that has no live Sessions but remembers Sessions, for example after a tmux restart or a Kill Session. It stays Dormant in the Sidebar until the user goes to it, which Reopens it, or Settles it.
+An open Topic that has no live Sessions but remembers Sessions, for example after a tmux restart. It stays Dormant in the Sidebar until the user goes to it, which Reopens it, or Settles it.
 _Avoid_: inactive, sleeping, suspended
 
 **Empty**:
-An open Topic that has no live Session and remembers no Session: the user removed its last Session or Window from it, or moved it to another Topic. Going to it offers Add a Project; nothing is Reopened.
+An open Topic that has no live Session and remembers no Session: the user stopped, removed or moved away its last Session or Window. Going to it offers Add a Session; nothing is Reopened.
 _Avoid_: Dormant (when it remembers no Session), blank, cleared
 
 **Snooze**:
@@ -240,7 +248,7 @@ A named search, opened by its own keybinding, over the Sources selected in it, w
 _Avoid_: switcher, launcher, finder, sessionizer, Go to Topic
 
 **Source**:
-One kind of thing a Command Palette searches: Topics, Sessions (a row for each Project with the Sessions in it, and a row for each Session outside every Project), Windows, Agents or Commands.
+One kind of thing a Command Palette searches: Topics, Sessions, Windows, Agents or Commands. Sessions offers every running Session and Session Paths for Sessions that are not running yet, regardless of Sidebar mode.
 _Avoid_: provider, category, section
 
 **Check step**:

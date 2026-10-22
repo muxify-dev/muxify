@@ -24,8 +24,8 @@ final class RememberedSessionsTests: XCTestCase {
     }
 
     func testSnapshotRecordsWindowAndConversationChanges() throws {
-        let record = TopicRecord(id: "topic", homeProject: "/work/a")
-        let first = try XCTUnwrap(record.remembering(snapshot(), projects: [], order: .oldestFirst))
+        let record = TopicRecord(id: "topic")
+        let first = try XCTUnwrap(record.remembering(snapshot(), order: .oldestFirst))
         XCTAssertEqual(first.sessions.count, 2)
         let fields = try windowFields(first)
         XCTAssertEqual(fields["directory"], .string("/work/a/src"))
@@ -36,7 +36,7 @@ final class RememberedSessionsTests: XCTestCase {
         XCTAssertEqual(fields["agent"], .string("codex"))
         XCTAssertEqual(fields["agent_conversation"], .string("conversation-1"))
         XCTAssertEqual(fields["browser_tabs"], .array([.string("https://example.com/issue")]))
-        let changed = try XCTUnwrap(first.remembering(snapshot(conversation: "conversation-2"), projects: [], order: .oldestFirst))
+        let changed = try XCTUnwrap(first.remembering(snapshot(conversation: "conversation-2"), order: .oldestFirst))
         XCTAssertEqual(try windowFields(changed)["agent_conversation"], .string("conversation-2"))
     }
 
@@ -48,46 +48,46 @@ final class RememberedSessionsTests: XCTestCase {
             writes.add()
             try data.write(to: url, options: .atomic)
         }
-        let record = try XCTUnwrap(TopicRecord(id: "topic").remembering(snapshot(), projects: [], order: .oldestFirst))
+        let record = try XCTUnwrap(TopicRecord(id: "topic").remembering(snapshot(), order: .oldestFirst))
         try store.write { try $0.create(record) }
         let loaded = try XCTUnwrap(store.read().records.first)
-        let change = loaded.remembering(snapshot(), projects: [], order: .oldestFirst)
+        let change = loaded.remembering(snapshot(), order: .oldestFirst)
         XCTAssertNil(change)
         if let change { try store.write { try $0.update(change.id) { $0 = change } } }
         XCTAssertEqual(writes.count, 1)
     }
 
     func testKilledSessionIsForgottenWhileAnotherLivesAndLastRemovalKeepsSet() throws {
-        let both = try XCTUnwrap(TopicRecord(id: "topic").remembering(snapshot(), projects: [], order: .oldestFirst))
-        let remaining = try XCTUnwrap(both.remembering(snapshot(["b"]), projects: [], order: .oldestFirst))
-        XCTAssertEqual(remaining.sessions.map { $0["project_path"]?.string }, ["/work/b"])
-        XCTAssertNil(remaining.remembering(snapshot([]), projects: [], order: .oldestFirst))
+        let both = try XCTUnwrap(TopicRecord(id: "topic").remembering(snapshot(), order: .oldestFirst))
+        let remaining = try XCTUnwrap(both.remembering(snapshot(["b"]), order: .oldestFirst, previously: snapshot().windows))
+        XCTAssertEqual(remaining.sessions.map { $0["directory"]?.string }, ["/work/b"])
+        XCTAssertNil(remaining.remembering(snapshot([]), order: .oldestFirst))
         XCTAssertEqual(remaining.sessions.count, 1)
-        XCTAssertNil(both.remembering(snapshot([]), projects: [], order: .oldestFirst))
+        XCTAssertNil(both.remembering(snapshot([]), order: .oldestFirst))
     }
 
     func testUnknownFieldsAndWorktreeBranchSurviveSnapshotUpdates() throws {
-        let data = Data(#"{"id":"topic","home_project":"/main","future_topic":true,"sessions":[{"project_path":"/main","worktree_path":"/work/a","branch":"fix","future_session":42,"windows":[{"window_id":"@a","future_window":{"large":18446744073709551615}}]}]}"#.utf8)
+        let data = Data(#"{"id":"topic","future_topic":true,"sessions":[{"id":"$a","name":"a","directory":"/work/a","repository_path":"/main","worktree_path":"/work/a","branch":"fix","future_session":42,"windows":[{"window_id":"@a","future_window":{"large":18446744073709551615}}]}]}"#.utf8)
         let original = try JSONDecoder().decode(TopicRecord.self, from: data)
-        let updated = try XCTUnwrap(original.remembering(snapshot(["a"]), projects: [], order: .oldestFirst))
+        let updated = try XCTUnwrap(original.remembering(snapshot(["a"]), order: .oldestFirst))
         XCTAssertEqual(updated.unknownFields, original.unknownFields)
-        XCTAssertEqual(updated.sessions[0]["project_path"], .string("/main"))
+        XCTAssertEqual(updated.sessions[0]["repository_path"], .string("/main"))
         XCTAssertEqual(updated.sessions[0]["worktree_path"], .string("/work/a"))
         XCTAssertEqual(updated.sessions[0]["branch"], .string("fix"))
         XCTAssertEqual(updated.sessions[0]["future_session"], .integer(42))
         XCTAssertEqual(try windowFields(updated)["future_window"]?["large"], .unsignedInteger(UInt64.max))
-        XCTAssertNil(updated.remembering(snapshot(["a"]), projects: [], order: .oldestFirst))
+        XCTAssertNil(updated.remembering(snapshot(["a"]), order: .oldestFirst))
     }
 
     func testActivePaneOwnsConversationAndShellClearsOldAgentFields() throws {
         var live = snapshot(["a"])
         live.panes.insert(TmuxPane(id: "%other", windowID: "@a", command: "claude", agent: "claude",
                                   agentStatus: "done", unread: true, agentConversation: "wrong-conversation"), at: 0)
-        let active = try XCTUnwrap(TopicRecord(id: "topic").remembering(live, projects: [], order: .oldestFirst))
+        let active = try XCTUnwrap(TopicRecord(id: "topic").remembering(live, order: .oldestFirst))
         XCTAssertEqual(try windowFields(active)["agent_conversation"], .string("conversation-1"))
         live.panes[1] = TmuxPane(id: "%a", windowID: "@a", command: "zsh", agent: "codex",
                                  agentStatus: "done", unread: false, agentConversation: "stale")
-        let shell = try XCTUnwrap(active.remembering(live, projects: [], order: .oldestFirst))
+        let shell = try XCTUnwrap(active.remembering(live, order: .oldestFirst))
         XCTAssertNil(try windowFields(shell)["agent"])
         XCTAssertNil(try windowFields(shell)["agent_conversation"])
     }

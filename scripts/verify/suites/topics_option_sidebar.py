@@ -114,7 +114,7 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.assertIsNotNone(latency, 'Topics view: Topic rows %s; Sessions view rows %s'
                              % (self.topic_rows(rs), [sid for sid in live if self.s.has('session-' + sid, rs)]))
 
-    def test_new_topic_is_empty_until_add_a_project_in_its_empty_view_opens_its_first_session(self):
+    def test_new_topic_stays_empty_until_adding_its_first_session_without_a_home(self):
         s = self.s
         record = self.create_topic('New Topic proof')
         self.assertNotIn('home_project', record, json.dumps(record))
@@ -122,10 +122,10 @@ class TopicsOptionSidebar(TopicsSidebar):
         key = 'topic-' + record['id']
         self.find(key)
         self.assertIn('Empty', self.describe(key, s.rows()), 'the new Topic card is not Empty')
-        self.open_add_project()
+        self.open_add_session()
         self.pick_project(self.alpha_tree['new-topic-base'], False)
         s.act('press', 'palette-accept')
-        name = 'alpha/new-topic-proof'
+        name = 'alpha/new-topic-base/new-topic-proof'
         self.wait_session(name)
         # tmux starts the Session before the command that sets its Topic option.
         session_path, topic = wait(lambda: (lambda fields: fields if fields[1] else None)(
@@ -134,8 +134,10 @@ class TopicsOptionSidebar(TopicsSidebar):
         base = self.alpha_tree['new-topic-base']
         self.assertIn(session_path, (str(base), os.path.realpath(base)), 'Session path')
         self.assertEqual(topic, record['id'], 'Session %s names the wrong Topic' % name)
-        home = wait(lambda: self.records()[record['id']].get('home_project'), 'the first Project did not become the Home Project')
-        self.assertIn(home, (str(self.alpha), os.path.realpath(self.alpha)), 'Home Project')
+        saved = wait(lambda: self.records()[record['id']].get('sessions'), 'first Session was not remembered')
+        self.assertEqual(saved[0]['name'], name)
+        self.assertIn(saved[0]['directory'], (str(base), os.path.realpath(base)))
+        self.assertNotIn('home_project', self.records()[record['id']])
         latency, rs = self.rows_until(lambda rs: not s.has('empty-topic-title', rs))
         self.assertIsNotNone(latency, 'the empty-Topic view stays after the first Session opened')
 
@@ -150,7 +152,7 @@ class TopicsOptionSidebar(TopicsSidebar):
 
     def test_a_topic_url_from_an_automation_creates_the_topic_and_its_session(self):
         # -a sends the URL to this run's app copy by its path, never to the user's Muxify; -g keeps it behind.
-        url = 'muxify://topic/new?title=' + quote('URL proof') + '&project=' + quote(str(self.beta), safe='')
+        url = 'muxify://topic/new?title=' + quote('URL proof') + '&sessionPath=' + quote(str(self.beta), safe='')
         subprocess.run(['open', '-g', '-a', str(self.s.app), url], check=True, capture_output=True)
         record = wait(lambda: next((r for r in self.records().values() if r.get('title') == 'URL proof'), None),
                       'no Topic record for the URL', seconds=10)

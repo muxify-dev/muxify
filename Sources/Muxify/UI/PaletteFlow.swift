@@ -5,11 +5,13 @@ import Observation
 struct MoveDraft {
     enum Scope: String, CaseIterable { case pane = "Pane", window = "Window", session = "Session" }
     enum Resolution { case loading, ready }
+    enum DestinationStep: Equatable { case topics, sessions(topic: String?) }
     let window: TmuxWindow
     let paneID: String
     var scope: Scope
     var includesTab = false
     var resolution: Resolution = .ready
+    var destination: DestinationStep = .topics
 }
 
 enum PaletteText {
@@ -66,7 +68,7 @@ final class PaletteConfirmation {
 
 enum PaletteFlow {
     case move(MoveDraft)
-    case addProject(TopicRecord)
+    case addSession(TopicRecord)
     /// Snooze Topics… or Unsnooze Topics…: check Topics, then go on with them.
     case check(CheckDraft)
     /// The "until" step of a Snooze of these Topics. ⌫ goes back to the check step with them checked.
@@ -86,8 +88,8 @@ enum PaletteFlow {
     @MainActor var placeholder: String {
         switch self {
         case .check: "Topics or #Tags"
-        case .move: "Topic or new title"
-        case .addProject: "Search Projects"
+        case .move(let draft): draft.destination == .topics ? "Topic or new title" : "Destination Session"
+        case .addSession: "Search Sessions and Session Paths"
         case .unsnoozeTopic: "Search Snoozed Topics"
         case .snoozeUntil, .zen: "Choose a preset or type 2h, 1300, fri 10:00"
         case .text(.renameWindow): "Window name"
@@ -109,7 +111,7 @@ enum PaletteFlow {
 
 enum PaletteChoice: Equatable {
     case move(MoveDestination)
-    case project(ProjectChoice)
+    case sessionPath(SessionChoice)
     case deadline(SnoozeDeadline)
     /// A row of a check step: Space or a click checks it, and ↩ goes on or checks (`CheckRow.returnOutcome`).
     case check(CheckRow)
@@ -128,7 +130,7 @@ extension CommandPalette {
         guard let flow else { return nil }
         switch flow {
         case .move(let draft): return "\(draft.scope.rawValue) \(draft.window.displayTitle) › Move to"
-        case .addProject(let topic): return "\(topicTitle(topic)) › Add a Project"
+        case .addSession(let topic): return "\(topicTitle(topic)) › Add a Session"
         case .check(let draft): return "\(draft.action.verb) Topics › check"
         case .snoozeUntil(let set):
             let ids = listOrder(set, .snooze)
@@ -164,7 +166,7 @@ extension CommandPalette {
         case .move(let draft) where draft.resolution == .loading: return "Reading the active Pane…"
         case .text(.tags(let field)):
             if case .newTopic = field.mode {
-                return store.newTopicFailure ?? tagNote(field) ?? "Makes an empty Topic. Its first Project comes next."
+                return store.newTopicFailure ?? tagNote(field) ?? "Makes an empty Topic. Its first Session comes next."
             }
             return tagNote(field)
         case .text(.renameTopic): return "Leave it blank for an Untitled Topic."
@@ -266,16 +268,17 @@ extension CommandPalette {
         switch flow {
         case .move(let draft):
             guard let catalog else { return .empty }
+            if case .sessions(let topic) = draft.destination { return catalog.destinationList(draft.window, topic: topic, query: query) }
             return catalog.moveList(draft.window, query: query, scope: draft.scope)
         case .check(let draft): return checkRows(draft)
         case .unsnoozeTopic: return unsnoozeRows()
-        case .addProject(let topic):
-            let list = store.projectList(query: query, addingTo: topic)
-            return PickList(sections: list.sections.map { section in
+        case .addSession(let topic):
+            let list = store.sessionPathList(query: query, addingTo: topic)
+            let paths = PickList(sections: list.sections.map { section in
                 PickSection(id: section.id, title: section.title, rows: section.rows.map { row in
                     let pick: Pick<PaletteItem>
                     switch row.pick {
-                    case .available(let choice): pick = .available(PaletteItem(kind: .project, ref: .choice(.project(choice))))
+                    case .available(let choice): pick = .available(PaletteItem(kind: .sessionPath, ref: .choice(.sessionPath(choice))))
                     case .blocked(let reason): pick = .blocked(reason: reason)
                     }
                     return PickRow(id: row.id, symbol: row.symbol, title: row.title, detail: row.detail,
@@ -283,6 +286,7 @@ extension CommandPalette {
                                    pick: pick, paste: nil, snooze: nil)
                 })
             })
+            return PickList(sections: (catalog?.addSessionList(topic: topic.id, query: query).sections ?? []) + paths.sections)
         case .snoozeUntil, .zen:
             let now = Date()
             var choices: [(String, String, SnoozeDeadline)] = []
@@ -401,7 +405,7 @@ extension CommandPalette {
         }
     }
 
-    /// The Worktree that the Topic made for the Session: a clean one starts as Remove.
+    /// Cleanup is always opt-in, even for a clean Muxify-created Worktree.
     private func loadRemoveAndKill(_ window: TmuxWindow, draft: PaletteConfirmation) {
         guard let store, let session = SessionID(rawValue: window.sessionID) else { return }
         draft.choices = .loading
@@ -413,7 +417,7 @@ extension CommandPalette {
             switch result {
             case .success(let tree):
                 let trees = tree.map { [$0] } ?? []
-                draft.removedWorktrees = Set(trees.filter(draft.canRemove).map(\.id))
+                draft.removedWorktrees = []
                 draft.choices = .ready([], trees)
             case .failure(let error): draft.choices = .failed(error.message)
             }
@@ -461,6 +465,7 @@ extension CommandPalette {
     func changeMoveScope(_ scope: MoveDraft.Scope) {
         guard case .move(var draft) = flow else { return }
         draft.scope = scope
+        draft.destination = .topics
         replaceFlow(.move(draft))
     }
 
@@ -496,12 +501,35 @@ extension CommandPalette {
     func accept(_ choice: PaletteChoice) {
         guard let store, let flow, !store.changingTopic else { return }
         switch (flow, choice) {
-        case (.move(let draft), .move(let destination)):
+        case (.move(var draft), .move(let destination)):
             guard draft.resolution == .ready else { return }
+            if draft.scope != .session {
+                let target: String?
+                switch destination {
+                case .topic(let id): target = id
+                case .noTopic: target = nil
+                default:
+                    close(restoringFocus: false)
+                    store.move(draft, to: destination)
+                    return
+                }
+                let open = Set(store.topicWatcher.records.filter { $0.settledAt == nil }.map(\.id))
+                let ids = Set(store.windows.filter {
+                    $0.topicID.flatMap { open.contains($0) ? $0 : nil } == target && $0.sessionID != draft.window.sessionID
+                }.map(\.sessionID))
+                if target == nil || ids.count > 1 {
+                    draft.destination = .sessions(topic: target)
+                    begin(.move(draft), keepingHistory: true)
+                    return
+                }
+            }
             close(restoringFocus: false)
             store.move(draft, to: destination)
-        case (.addProject(let topic), .project(let project)):
-            store.addProject(project, toTopic: topic.id, newWorktree: newWorktree)
+        case (.addSession(let topic), .sessionPath(let sessionPath)):
+            store.addSession(sessionPath, toTopic: topic.id, newWorktree: newWorktree)
+        case (.addSession(let topic), .session(let id)):
+            guard let window = store.windows.first(where: { $0.sessionID == id }) else { return }
+            store.changeTopic(.session(window), destination: topic)
         case (.snoozeUntil(let ids), .deadline(let deadline)): store.snoozeTopics(listOrder(ids, .snooze), until: deadline)
         case (.check, .check(let row)): returnOnCheck(row)
         case (.unsnoozeTopic, .unsnooze(let id)):
@@ -583,7 +611,7 @@ extension CommandPalette {
             case .chooseSession: changeMoveScope(.session)
             case .toggleIncludeTab: toggleTab()
             case .toggleNewWorktree:
-                if case .addProject = flow { newWorktree.toggle() }
+                if case .addSession = flow { newWorktree.toggle() }
             case .suggestTopicTitle: suggestTitle()
             default: return false
             }

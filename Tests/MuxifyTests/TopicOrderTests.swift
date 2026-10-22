@@ -3,11 +3,11 @@ import XCTest
 
 final class TopicOrderTests: XCTestCase {
     private func record(_ id: String, order: Double?) -> TopicRecord {
-        var record = TopicRecord(id: id, title: id, slug: "untitled-" + id, homeProject: "/work/app")
+        var record = TopicRecord(id: id, title: id, slug: "untitled-" + id)
         record.order = order
         record.createdAt = "1970-01-01T00:00:00Z"
         record.unknownFields = ["future": .object(["id": .string(id)])]
-        record.sessions = [.object(["project_path": .string("/work/app"), "future_session": .integer(42)])]
+        record.sessions = [.object(["repository_path": .string("/work/app"), "future_session": .integer(42)])]
         return record
     }
 
@@ -113,7 +113,7 @@ final class TopicOrderTests: XCTestCase {
     func testNewTopicIsFirstAfterMovesAndAtFiniteLimits() throws {
         let original = [record("a", order: 0), record("b", order: 1), record("c", order: 2)].map(TopicListEntry.topic)
         let moved = applying(try TopicOrder.moving(.topic("c"), to: .before(.topic("a")), in: original), to: original)
-        let plan = TopicPlan(title: "New", project: Project(path: "/work/app", name: "app"),
+        let plan = TopicPlan(title: "New", sessionPath: SessionPath(path: "/work/app", name: "app"),
                              records: moved.records, sessionNames: [], id: "new")
         let placed = applying(TopicOrder.inserting(plan.record, at: .top, in: moved), to: moved)
         XCTAssertEqual(shown(placed), ["new", "c", "a", "b"])

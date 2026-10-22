@@ -16,14 +16,9 @@ enum TopicNaming {
         return slug.isEmpty ? "topic" : slug
     }
 
-    /// `project` is nil for a Topic with no Session yet; its first Session checks the name when it opens.
-    public static func slug(title: String, project: Project?, records: [TopicRecord], sessionNames: Set<String>,
-                     excludingTopicID: String? = nil, projectNames: Set<String> = []) -> String {
-        let used = Set(records.filter { $0.settledAt == nil && $0.id != excludingTopicID }.compactMap(\.slug))
-        let names = projectNames.union(project.map { [$0.name] } ?? [])
-        func available(_ slug: String) -> Bool {
-            !used.contains(slug) && names.allSatisfy { !sessionNames.contains($0 + "/" + slug) }
-        }
+    public static func slug(title: String, records: [TopicRecord], excludingTopicID: String? = nil) -> String {
+        let used = Set(records.filter { $0.id != excludingTopicID }.compactMap(\.slug))
+        func available(_ slug: String) -> Bool { !used.contains(slug) }
         if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             var number = 1
             while !available("untitled-\(number)") { number += 1 }
@@ -39,11 +34,11 @@ enum TopicNaming {
 
 /// Where a Topic's first Session opens.
 enum TopicWorkingCopy: Equatable {
-    /// The Project folder of a plain directory.
-    case homeProject
-    /// A Worktree the user picked in the Project list.
+    /// The SessionPath folder of a plain directory.
+    case directory
+    /// A Worktree the user picked in the SessionPath list.
     case worktree(Worktree)
-    /// A Worktree the Topic creates on the branch `<slug>` at `commit`, in `root/<project name>/<slug>` for a bare
+    /// A Worktree the Topic creates on the branch `<slug>` at `commit`, in `root/<sessionPath name>/<slug>` for a bare
     /// and a plain repository alike.
     case newWorktree(at: String, root: String)
 }
@@ -51,25 +46,32 @@ enum TopicWorkingCopy: Equatable {
 extension TopicWorkingCopy {
     public struct SessionStart {
         public let directory: String
-        /// The remembered-Session fields that name the Worktree; empty for the Project folder.
+        /// The remembered-Session fields that name the Worktree; empty for the SessionPath folder.
         public let worktreeFields: [String: JSONValue]
         public let newWorktree: TopicPlan.NewWorktree?
     }
 
     /// `slug` names the branch and folder of a new Worktree.
-    public func sessionStart(in project: Project, slug: String) -> SessionStart {
+    public func sessionStart(in sessionPath: SessionPath, slug: String) -> SessionStart {
         switch self {
-        case .homeProject:
-            return SessionStart(directory: project.folder.path, worktreeFields: [:], newWorktree: nil)
+        case .directory:
+            return SessionStart(directory: sessionPath.folder.path, worktreeFields: [:], newWorktree: nil)
         case .worktree(let worktree):
-            var fields: [String: JSONValue] = ["worktree_path": .string(worktree.folder.path), TopicWorktrees.createdKey: .bool(false)]
+            var fields: [String: JSONValue] = ["repository_path": .string(sessionPath.folder.path), "worktree_path": .string(worktree.folder.path), TopicWorktrees.createdKey: .bool(false)]
             fields["branch"] = worktree.branch.map(JSONValue.string)
             return SessionStart(directory: worktree.folder.path, worktreeFields: fields, newWorktree: nil)
         case .newWorktree(let commit, let root):
-            let path = Folder.lexical(((root as NSString).appendingPathComponent(project.name) as NSString).appendingPathComponent(slug))
-            let worktree = TopicPlan.WorktreeSpec(projectPath: project.folder.path, path: path, branch: slug)
+            let parent = (root as NSString).appendingPathComponent(sessionPath.name)
+            let branches = Set((try? Shell.run("/usr/bin/git", ["for-each-ref", "--format=%(refname:short)", "refs/heads"], directory: sessionPath.folder.path))?.split(separator: "\n").map(String.init) ?? [])
+            var branch = slug
+            var number = 2
+            while branches.contains(branch) || FileManager.default.fileExists(atPath: (parent as NSString).appendingPathComponent(branch)) {
+                branch = "\(slug)-\(number)"; number += 1
+            }
+            let path = Folder.lexical((parent as NSString).appendingPathComponent(branch))
+            let worktree = TopicPlan.WorktreeSpec(repositoryPath: sessionPath.folder.path, path: path, branch: branch)
             return SessionStart(directory: worktree.path,
-                                worktreeFields: ["worktree_path": .string(worktree.path), "branch": .string(worktree.branch),
+                                 worktreeFields: ["repository_path": .string(sessionPath.folder.path), "worktree_path": .string(worktree.path), "branch": .string(worktree.branch),
                                                  TopicWorktrees.createdKey: .bool(true), TopicWorktrees.baseKey: .string(commit)],
                                 newWorktree: TopicPlan.NewWorktree(worktree: worktree, commit: commit))
         }
@@ -78,13 +80,13 @@ extension TopicWorkingCopy {
 
 public struct TopicPlan: Sendable {
     public struct WorktreeSpec: Codable, Hashable, Sendable {
-        public let projectPath: String
+        public let repositoryPath: String
         public let path: String
         public let branch: String
 
         private enum CodingKeys: String, CodingKey {
             case path, branch
-            case projectPath = "project_path"
+            case repositoryPath = "repository_path"
         }
 
         public var arguments: [String] { ["worktree", "add", "-b", branch, path] }
@@ -115,19 +117,21 @@ public struct TopicPlan: Sendable {
     public let sessionName: String
     public let commands: [Command]
 
-    init(title: String, project: Project, records: [TopicRecord], sessionNames: Set<String>,
+    init(title: String, sessionPath: SessionPath, records: [TopicRecord], sessionNames: Set<String>,
          id: String = UUID().uuidString.lowercased(), now: Date = Date(), clientTTY: String? = nil) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let slug = TopicNaming.slug(title: title, project: project, records: records, sessionNames: sessionNames)
-        sessionName = project.name + "/" + slug
+        let slug = TopicNaming.slug(title: title, records: records)
+        sessionName = SessionNaming.available(sessionPath.name, topic: slug, taken: sessionNames)
         var record = TopicRecord(newTopic: id, title: title, slug: slug, now: now)
-        record.homeProject = project.folder.path
-        record.sessions = [.object(["project_path": .string(project.folder.path)])]
+        let sessionID = UUID().uuidString.lowercased()
+        record.sessions = [.object(["id": .string(sessionID), "name": .string(sessionName),
+            "base_name": .string(SessionNaming.base(of: sessionName, topic: record)), "directory": .string(sessionPath.folder.path)])]
         self.record = record
         let target = "=" + sessionName + ":"
         var commands: [Command] = [
-            .tmux(["new-session", "-d", "-s", sessionName, "-c", project.folder.path]),
+            .tmux(["new-session", "-d", "-s", sessionName, "-c", sessionPath.folder.path]),
             .tmux(["set-option", "-t", target, "@muxify_topic", id]),
+            .tmux(["set-option", "-t", target, "@muxify_session_id", sessionID]),
         ]
         if let clientTTY { commands.append(.tmux(["switch-client", "-c", clientTTY, "-t", target])) }
         self.commands = commands
@@ -135,7 +139,7 @@ public struct TopicPlan: Sendable {
 }
 
 extension TopicRecord {
-    /// An open Topic with no Session or Home Project. The transaction gives it a place in the list.
+    /// An open Topic with no Session. The transaction gives it a place in the list.
     public init(newTopic id: String, title: String, slug: String, now: Date) {
         self.init(id: id, title: title.isEmpty ? nil : title, slug: slug)
         createdAt = ISO8601DateFormatter().string(from: now)

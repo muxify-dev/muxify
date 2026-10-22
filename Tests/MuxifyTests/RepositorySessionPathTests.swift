@@ -1,9 +1,9 @@
 import XCTest
 @testable import MuxifyCore
 
-/// A repository with several Worktrees is one Project. Real git in a temp folder for the
+/// A repository with several Worktrees is one SessionPath. Real git in a temp folder for the
 /// layout detection, plain models for the rows and labels.
-final class RepositoryProjectTests: XCTestCase {
+final class RepositorySessionPathTests: XCTestCase {
     private var root: URL!
 
     override func setUpWithError() throws {
@@ -34,13 +34,13 @@ final class RepositoryProjectTests: XCTestCase {
         return plain
     }
 
-    func testBareDotGitRepositoryIsOneProjectWhoseWorktreesLeaveOutTheBareEntry() throws {
+    func testBareDotGitRepositoryIsOneSessionPathWhoseWorktreesLeaveOutTheBareEntry() throws {
         let plain = try makePlainRepository()
         let bare = path("game_server")
         try git(["clone", "-q", "--bare", plain, bare], in: root.path)
         try git(["worktree", "add", "-q", bare + "/main", "main"], in: bare)
         try git(["worktree", "add", "-q", bare + "/release", "-b", "release-line"], in: bare)
-        XCTAssertEqual(ProjectLayout.detect(at: bare), .bareRepository([
+        XCTAssertEqual(RepositoryLayout.detect(at: bare), .bareRepository([
             Worktree(path: bare + "/main", branch: "main"),
             Worktree(path: bare + "/release", branch: "release-line"),
         ]))
@@ -53,12 +53,12 @@ final class RepositoryProjectTests: XCTestCase {
         try git(["clone", "-q", "--bare", plain, repository + "/.bare"], in: root.path)
         try "gitdir: ./.bare\n".write(toFile: repository + "/.git", atomically: true, encoding: .utf8)
         try git(["worktree", "add", "-q", repository + "/main", "main"], in: repository)
-        XCTAssertEqual(ProjectLayout.detect(at: repository), .bareRepository([Worktree(path: repository + "/main", branch: "main")]))
+        XCTAssertEqual(RepositoryLayout.detect(at: repository), .bareRepository([Worktree(path: repository + "/main", branch: "main")]))
     }
 
     func testPlainRepositoryListsItsMainCheckoutAndLinkedWorktreesWithoutPrunableOnes() throws {
         let plain = try makePlainRepository()
-        XCTAssertEqual(ProjectLayout.detect(at: plain), .plainRepository([
+        XCTAssertEqual(RepositoryLayout.detect(at: plain), .plainRepository([
             Worktree(path: plain, branch: "main"),
             Worktree(path: path("plain-feat"), branch: "feat"),
         ]))
@@ -71,11 +71,11 @@ final class RepositoryProjectTests: XCTestCase {
         try git(["worktree", "add", "-q", bare + "/main", "main"], in: bare)
         let link = path("link")
         try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: root.path)
-        XCTAssertEqual(ProjectLayout.detect(at: link + "/plain"), .plainRepository([
+        XCTAssertEqual(RepositoryLayout.detect(at: link + "/plain"), .plainRepository([
             Worktree(path: link + "/plain", branch: "main"),
             Worktree(path: path("plain-feat"), branch: "feat"),
         ]))
-        XCTAssertEqual(ProjectLayout.detect(at: link + "/game_server"),
+        XCTAssertEqual(RepositoryLayout.detect(at: link + "/game_server"),
                        .bareRepository([Worktree(path: link + "/game_server/main", branch: "main")]))
     }
 
@@ -83,9 +83,9 @@ final class RepositoryProjectTests: XCTestCase {
         let plain = try makePlainRepository()
         try FileManager.default.createDirectory(atPath: plain + "/sub", withIntermediateDirectories: true)
         try FileManager.default.createDirectory(atPath: path("notes"), withIntermediateDirectories: true)
-        XCTAssertEqual(ProjectLayout.detect(at: path("notes")), .directory)
-        XCTAssertEqual(ProjectLayout.detect(at: plain + "/sub"), .directory)
-        XCTAssertEqual(ProjectLayout.detect(at: path("missing")), .directory)
+        XCTAssertEqual(RepositoryLayout.detect(at: path("notes")), .directory)
+        XCTAssertEqual(RepositoryLayout.detect(at: plain + "/sub"), .directory)
+        XCTAssertEqual(RepositoryLayout.detect(at: path("missing")), .directory)
     }
 
     func testDetachedWorktreeHasNoBranch() {
@@ -102,18 +102,18 @@ final class RepositoryProjectTests: XCTestCase {
         detached
 
         """
-        XCTAssertEqual(ProjectLayout.parse(worktreeList: listed, resolver: .local),
+        XCTAssertEqual(RepositoryLayout.parse(worktreeList: listed, resolver: .local),
                        [Worktree(path: "/repo/main", branch: "main"), Worktree(path: "/repo/pinned", branch: nil)])
     }
 
     private let main = Worktree(path: "/work/game_server/main", branch: "main")
     private let release = Worktree(path: "/work/game_server/release", branch: "release-line")
-    private var gameServer: Project {
-        var project = Project(path: "/work/game_server", name: "game_server")
-        project.layout = .bareRepository([main, release])
-        return project
+    private var gameServer: SessionPath {
+        var sessionPath = SessionPath(path: "/work/game_server", name: "game_server")
+        sessionPath.layout = .bareRepository([main, release])
+        return sessionPath
     }
-    private var notes: Project { Project(path: "/work/notes", name: "notes") }
+    private var notes: SessionPath { SessionPath(path: "/work/notes", name: "notes") }
 
     private func window(_ id: String, session: String, topic: String?, directory: String, path: String? = nil) -> TmuxWindow {
         TmuxWindow(id: id, sessionID: session, sessionName: "s" + session, index: 0,
@@ -123,140 +123,140 @@ final class RepositoryProjectTests: XCTestCase {
     }
 
     func testListShowsOneRowPerWorktreeNamedRepoSlashFolderAndNoRowForTheBareFolder() {
-        let rows = ProjectRows.build(projects: [gameServer, notes], windows: [], records: [], titles: [:])
+        let rows = SessionPathRows.build(sessionPaths: [gameServer, notes], windows: [], records: [], titles: [:])
         XCTAssertEqual(rows.map(\.choice.name), ["game_server/main", "game_server/release", "notes"])
         XCTAssertEqual(rows.map(\.choice.directory.path), [main.folder.path, release.folder.path, notes.folder.path])
-        XCTAssertEqual(ProjectRows.list(rows, query: "game_server/rel", visits: VisitLog()).rows.map(\.title.text), ["game_server/release"])
+        XCTAssertEqual(SessionPathRows.list(rows, query: "game_server/rel", visits: VisitLog()).rows.map(\.title.text), ["game_server/release"])
     }
 
-    private func shown(_ rows: [ProjectRow]) -> [String] {
-        ProjectRows.list(rows, query: "", visits: VisitLog()).rows.map { "\($0.title.text) | \($0.detail.text) | \($0.pick.payload?.id ?? "blocked")" }
+    private func shown(_ rows: [SessionPathRow]) -> [String] {
+        SessionPathRows.list(rows, query: "", visits: VisitLog()).rows.map { "\($0.title.text) | \($0.detail.text) | \($0.pick.payload?.id ?? "blocked")" }
     }
 
     func testWorktreeOfLiveSessionsInOtherOpenTopicsCanBePickedAndSaysAlsoInThoseTopics() {
-        var other = TopicRecord(id: "other", title: "Fix drops", homeProject: gameServer.folder.path)
-        other.sessions = [.object(["project_path": .string(gameServer.folder.path), "worktree_path": .string(main.folder.path), "branch": .string("main")])]
-        var third = TopicRecord(id: "third", title: "Polish UI", homeProject: gameServer.folder.path)
+        var other = TopicRecord(id: "other", title: "Fix drops")
+        other.sessions = [.object(["repository_path": .string(gameServer.folder.path), "worktree_path": .string(main.folder.path), "branch": .string("main")])]
+        var third = TopicRecord(id: "third", title: "Polish UI")
         third.sessions = other.sessions
-        var settled = TopicRecord(id: "settled", title: "Old", homeProject: gameServer.folder.path)
+        var settled = TopicRecord(id: "settled", title: "Old")
         settled.sessions = other.sessions
         settled.settledAt = "2026-10-01T00:00:00Z"
         let windows = [window("@1", session: "$1", topic: "third", directory: main.folder.path),
                        window("@2", session: "$2", topic: "other", directory: main.folder.path, path: main.folder.path + "/src"),
                        window("@3", session: "$3", topic: "settled", directory: release.folder.path)]
-        let rows = ProjectRows.build(projects: [gameServer], windows: windows, records: [other, third, settled],
+        let rows = SessionPathRows.build(sessionPaths: [gameServer], windows: windows, records: [other, third, settled],
                                      titles: ["other": "Fix drops", "third": "Polish UI"])
         XCTAssertEqual(shown(rows), ["game_server/main | /work/game_server/main · Also in Fix drops, Polish UI | /work/game_server/main",
                                      "game_server/release | /work/game_server/release | /work/game_server/release"])
-        XCTAssertEqual(ProjectRows.build(projects: [gameServer], windows: windows, records: [other], titles: [:], addingTo: other).count, 0,
-                       "Add Project offers no row of a Project the Topic already has a Session in")
+        XCTAssertEqual(SessionPathRows.build(sessionPaths: [gameServer], windows: windows, records: [other], titles: [:], addingTo: other).count, 2,
+                       "Add a Session keeps paths available even when the Topic uses them")
     }
 
     func testPickedWorktreeOpensTheSessionThereAndIsRememberedWithItsBranchAsNotCreated() {
-        let choice = ProjectChoice(project: gameServer, worktree: release)
+        let choice = SessionChoice(sessionPath: gameServer, worktree: release)
         XCTAssertEqual(choice.workingCopy(newWorktree: false), .worktree(path: release.folder.path))
-        let added = try? TopicProjectPlan(topic: TopicRecord(id: "t", title: "T", slug: "t", homeProject: notes.folder.path),
-                                          project: gameServer, workingCopy: .worktree(release), windows: [], projects: [gameServer, notes]).edit
+        let added = try? TopicSessionPlan(topic: TopicRecord(id: "t", title: "T", slug: "t"),
+                                          sessionPath: gameServer, workingCopy: .worktree(release), windows: [], sessionPaths: [gameServer, notes]).edit
         XCTAssertEqual(added?.commands.first, .tmux(["new-session", "-d", "-s", "game_server/t", "-c", release.folder.path]))
-        XCTAssertEqual(added?.record?.sessions.last, .object(["project_path": .string(gameServer.folder.path), "worktree_path": .string(release.folder.path),
-                                                              "branch": .string("release-line"), "worktree_created": .bool(false)]))
+        XCTAssertEqual(added?.record?.sessions.last?["worktree_path"], .string(release.folder.path))
+        XCTAssertEqual(added?.record?.sessions.last?["worktree_created"], .bool(false))
     }
 
-    private var app: Project {
-        var project = Project(path: "/work/app", name: "app")
-        project.layout = .plainRepository([Worktree(path: "/work/app", branch: "main"), Worktree(path: "/trees/app/feat", branch: "feat")])
-        return project
+    private var app: SessionPath {
+        var sessionPath = SessionPath(path: "/work/app", name: "app")
+        sessionPath.layout = .plainRepository([Worktree(path: "/work/app", branch: "main"), Worktree(path: "/trees/app/feat", branch: "feat")])
+        return sessionPath
     }
 
     func testMainCheckoutOfAPlainRepositoryIsAWorktreeTheTopicPicksAndNeverCreated() throws {
-        let rows = ProjectRows.build(projects: [app], windows: [], records: [], titles: [:])
-        XCTAssertEqual(rows.map(\.choice.name), ["app", "app/feat"], "the main checkout is the Project folder, so it keeps the Project name")
+        let rows = SessionPathRows.build(sessionPaths: [app], windows: [], records: [], titles: [:])
+        XCTAssertEqual(rows.map(\.choice.name), ["app", "app/feat"], "the main checkout is the SessionPath folder, so it keeps the SessionPath name")
         XCTAssertEqual(rows[0].choice.workingCopy(newWorktree: false), .worktree(path: "/work/app"))
-        let plan = try TopicProjectPlan(topic: TopicRecord(id: "fix", title: "Fix", slug: "fix"), project: app,
-                                        workingCopy: .worktree(Worktree(path: "/work/app", branch: "main")), windows: [], projects: [app]).edit
+        let plan = try TopicSessionPlan(topic: TopicRecord(id: "fix", title: "Fix", slug: "fix"), sessionPath: app,
+                                        workingCopy: .worktree(Worktree(path: "/work/app", branch: "main")), windows: [], sessionPaths: [app]).edit
         XCTAssertEqual(plan.commands.first, .tmux(["new-session", "-d", "-s", "app/fix", "-c", "/work/app"]))
-        XCTAssertEqual(plan.record?.sessions, [.object(["project_path": .string("/work/app"), "worktree_path": .string("/work/app"),
-                                                       "branch": .string("main"), "worktree_created": .bool(false)])])
+        XCTAssertEqual(plan.record?.sessions.first?["directory"], .string("/work/app"))
+        XCTAssertEqual(plan.record?.sessions.first?["worktree_created"], .bool(false))
     }
 
-    func testALiveSessionInTheProjectFolderIsAlsoInItsTopicForTheMainCheckoutAndForAPlainDirectory() {
-        var legacy = TopicRecord(id: "legacy", title: "Legacy owner", homeProject: app.folder.path)
-        legacy.sessions = [.object(["project_path": .string(app.folder.path)])]
-        var noteTaker = TopicRecord(id: "notes", title: "Note taker", homeProject: notes.folder.path)
-        noteTaker.sessions = [.object(["project_path": .string(notes.folder.path)])]
-        let legacyRows = ProjectRows.build(projects: [app, notes], windows: [
+    func testALiveSessionInTheSessionPathFolderIsAlsoInItsTopicForTheMainCheckoutAndForAPlainDirectory() {
+        var legacy = TopicRecord(id: "legacy", title: "Legacy owner")
+        legacy.sessions = [.object(["repository_path": .string(app.folder.path)])]
+        var noteTaker = TopicRecord(id: "notes", title: "Note taker")
+        noteTaker.sessions = [.object(["repository_path": .string(notes.folder.path)])]
+        let legacyRows = SessionPathRows.build(sessionPaths: [app, notes], windows: [
             window("@1", session: "$1", topic: "legacy", directory: app.folder.path + "/src"),
             window("@2", session: "$2", topic: "notes", directory: notes.folder.path),
         ], records: [legacy, noteTaker], titles: [:])
         XCTAssertEqual(shown(legacyRows), ["app | /work/app · Also in Legacy owner | /work/app", "app/feat | /trees/app/feat | /trees/app/feat",
                                            "notes | /work/notes · Also in Note taker | /work/notes"])
 
-        var current = TopicRecord(id: "current", title: "Main owner", homeProject: app.folder.path)
-        current.sessions = [.object(["project_path": .string(app.folder.path), "worktree_path": .string(app.folder.path), "branch": .string("main")])]
-        let currentRows = ProjectRows.build(projects: [app], windows: [window("@1", session: "$1", topic: "current", directory: app.folder.path)],
+        var current = TopicRecord(id: "current", title: "Main owner")
+        current.sessions = [.object(["repository_path": .string(app.folder.path), "worktree_path": .string(app.folder.path), "branch": .string("main")])]
+        let currentRows = SessionPathRows.build(sessionPaths: [app], windows: [window("@1", session: "$1", topic: "current", directory: app.folder.path)],
                                             records: [current], titles: [:])
         XCTAssertEqual(shown(currentRows), ["app | /work/app · Also in Main owner | /work/app", "app/feat | /trees/app/feat | /trees/app/feat"])
     }
 
-    func testSessionInTheMainCheckoutAndALegacyOneAreLabelledAsTheProject() {
-        var topic = TopicRecord(id: "a", title: "Fix", homeProject: app.folder.path)
-        topic.sessions = [.object(["project_path": .string(app.folder.path), "worktree_path": .string(app.folder.path), "branch": .string("main")])]
-        var legacy = TopicRecord(id: "b", title: "Old", homeProject: app.folder.path)
-        legacy.sessions = [.object(["project_path": .string(app.folder.path)])]
+    func testSessionInTheMainCheckoutAndALegacyOneAreLabelledAsTheSessionPath() {
+        var topic = TopicRecord(id: "a", title: "Fix")
+        topic.sessions = [.object(["repository_path": .string(app.folder.path), "worktree_path": .string(app.folder.path), "branch": .string("main")])]
+        var legacy = TopicRecord(id: "b", title: "Old")
+        legacy.sessions = [.object(["repository_path": .string(app.folder.path)])]
         var config = Config()
-        config.projects = [app]
+        config.sessionPaths = [app]
         func session(of record: TopicRecord) -> TopicsModel.Session? {
             let model = TopicsModel(records: [record], windows: [window("@1", session: "$1", topic: record.id, directory: app.folder.path)],
                                     config: config, selection: TopicSelection(), groups: TopicGroupsState())
             return model.rows.first?.sessions.first
         }
-        XCTAssertEqual(session(of: topic)?.projectName, "app")
-        XCTAssertEqual(session(of: legacy)?.projectName, "app")
+        XCTAssertEqual(session(of: topic)?.baseName, "s$1")
+        XCTAssertEqual(session(of: legacy)?.baseName, "s$1")
         XCTAssertFalse(TopicsModel.usesMainWorkingCopy(window("@1", session: "$1", topic: "a", directory: app.folder.path, path: app.folder.path + "/src"),
-                                                       record: topic, projects: [app]))
+                                                       record: topic, sessionPaths: [app]))
     }
 
-    func testAddProjectWithANewWorktreeCreatesItFromThePickedBaseAndRemembersItAsCreated() throws {
-        let topic = TopicRecord(id: "t", title: "T", slug: "t", homeProject: notes.folder.path)
-        let added = try TopicProjectPlan(topic: topic, project: gameServer, workingCopy: .newWorktree(at: "c0ffee", root: "/trees"),
-                                         windows: [], projects: [gameServer, notes]).edit
-        let tree = TopicPlan.WorktreeSpec(projectPath: gameServer.folder.path, path: "/trees/game_server/t", branch: "t")
+    func testAddSessionWithANewWorktreeCreatesItFromThePickedBaseAndRemembersItAsCreated() throws {
+        let topic = TopicRecord(id: "t", title: "T", slug: "t")
+        let added = try TopicSessionPlan(topic: topic, sessionPath: gameServer, workingCopy: .newWorktree(at: "c0ffee", root: "/trees"),
+                                         windows: [], sessionPaths: [gameServer, notes]).edit
+        let tree = TopicPlan.WorktreeSpec(repositoryPath: gameServer.folder.path, path: "/trees/game_server/t", branch: "t")
         XCTAssertEqual(added.newWorktree, TopicPlan.NewWorktree(worktree: tree, commit: "c0ffee"))
-        XCTAssertEqual(added.commands, [.tmux(["new-session", "-d", "-s", "game_server/t", "-c", "/trees/game_server/t"]),
+        XCTAssertEqual(Array(added.commands.prefix(2)), [.tmux(["new-session", "-d", "-s", "game_server/t", "-c", "/trees/game_server/t"]),
                                         .tmux(["set-option", "-t", "=game_server/t:", "@muxify_topic", "t"])])
-        XCTAssertEqual(added.record?.sessions.last, .object(["project_path": .string(gameServer.folder.path), "worktree_path": .string("/trees/game_server/t"),
-                                                             "branch": .string("t"), "worktree_created": .bool(true), "base": .string("c0ffee")]))
-        let plain = try TopicProjectPlan(topic: topic, project: app, workingCopy: .newWorktree(at: "c0ffee", root: "/trees"),
-                                         windows: [], projects: [app, notes]).edit
-        XCTAssertEqual(plain.newWorktree, TopicPlan.NewWorktree(worktree: .init(projectPath: app.folder.path, path: "/trees/app/t", branch: "t"),
+        XCTAssertEqual(added.record?.sessions.last?["base"], .string("c0ffee"))
+        XCTAssertEqual(added.record?.sessions.last?["worktree_created"], .bool(true))
+        let plain = try TopicSessionPlan(topic: topic, sessionPath: app, workingCopy: .newWorktree(at: "c0ffee", root: "/trees"),
+                                         windows: [], sessionPaths: [app, notes]).edit
+        XCTAssertEqual(plain.newWorktree, TopicPlan.NewWorktree(worktree: .init(repositoryPath: app.folder.path, path: "/trees/app/t", branch: "t"),
                                                                 commit: "c0ffee"))
         XCTAssertEqual(plain.record?.sessions.last?["worktree_path"]?.string, "/trees/app/t")
     }
 
     func testSessionInAWorktreeIsLabelledRepoSlashFolder() {
-        var topic = TopicRecord(id: "a", title: "Fix", homeProject: gameServer.folder.path)
-        topic.sessions = [.object(["project_path": .string(gameServer.folder.path), "worktree_path": .string(main.folder.path), "branch": .string("main")]),
-                          .object(["project_path": .string(notes.folder.path)])]
-        var settled = TopicRecord(id: "b", title: "Done", homeProject: gameServer.folder.path)
-        settled.sessions = [.object(["project_path": .string(gameServer.folder.path), "worktree_path": .string(release.folder.path), "branch": .string("release-line")])]
+        var topic = TopicRecord(id: "a", title: "Fix")
+        topic.sessions = [.object(["id": .string("$1"), "name": .string("s$1"), "base_name": .string("s$1"), "directory": .string(main.folder.path)]),
+                          .object(["id": .string("$2"), "name": .string("s$2"), "base_name": .string("s$2"), "directory": .string(notes.folder.path)])]
+        var settled = TopicRecord(id: "b", title: "Done")
+        settled.sessions = [.object(["id": .string("remembered"), "name": .string("debug"), "base_name": .string("debug"), "directory": .string(release.folder.path)])]
         settled.settledAt = "2026-10-01T00:00:00Z"
         var config = Config()
-        config.projects = [gameServer, notes]
+        config.sessionPaths = [gameServer, notes]
         let windows = [window("@1", session: "$1", topic: "a", directory: main.folder.path),
                        window("@2", session: "$2", topic: "a", directory: notes.folder.path)]
         let model = TopicsModel(records: [topic, settled], windows: windows, config: config, selection: TopicSelection(),
                                 groups: TopicGroupsState())
-        XCTAssertEqual(model.rows[0].sessions.map(\.projectName), ["game_server/main", "notes"])
+        XCTAssertEqual(model.rows[0].sessions.map(\.baseName), ["s$1", "s$2"])
         let remembered = model.groups.first { $0.kind == .settled }?.topics.first?.sessions.first
-        XCTAssertEqual(remembered?.projectName, "game_server/release")
+        XCTAssertEqual(remembered?.baseName, "debug")
     }
 
     func testWindowInItsOwnWorktreeOfABareLayoutIsNotFlaggedAsMainWorkingCopy() {
-        var topic = TopicRecord(id: "a", title: "Fix", homeProject: gameServer.folder.path)
-        topic.sessions = [.object(["project_path": .string(gameServer.folder.path), "worktree_path": .string(release.folder.path), "branch": .string("release-line")])]
+        var topic = TopicRecord(id: "a", title: "Fix")
+        topic.sessions = [.object(["id": .string("$1"), "repository_path": .string(gameServer.folder.path), "worktree_path": .string(release.folder.path), "branch": .string("release-line")])]
         func flagged(_ path: String) -> Bool {
             TopicsModel.usesMainWorkingCopy(window("@1", session: "$1", topic: "a", directory: release.folder.path, path: path),
-                                            record: topic, projects: [gameServer])
+                                            record: topic, sessionPaths: [gameServer])
         }
         XCTAssertFalse(flagged(release.folder.path))
         XCTAssertFalse(flagged(release.folder.path + "/src"))

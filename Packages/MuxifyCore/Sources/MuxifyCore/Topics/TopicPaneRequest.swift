@@ -30,6 +30,7 @@ struct TopicPaneIdentity {
         }), snapshot.panes.contains(where: { $0.id == paneID && $0.windowID == windowID }) else {
             throw TopicEditFailure.sourceUnavailable
         }
-        return TopicPaneSource(paneID: paneID, window: window)
+        let path = snapshot.panes.first { $0.id == paneID }?.path
+        return TopicPaneSource(paneID: paneID, window: window, directory: path.flatMap { $0.isEmpty ? nil : $0 })
     }
 }

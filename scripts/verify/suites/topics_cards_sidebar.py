@@ -14,7 +14,7 @@ import time
 import unittest
 
 from scripts.verify.sandbox import frame, wait
-from scripts.verify.topics_sidebar import REFRESH_LIMIT, SHELL, TopicsSidebar
+from scripts.verify.topics_sidebar import REFRESH_LIMIT, SHELL, TopicsSidebar, remembered_session
 
 AGENT_WINDOW = ('#{session_name}|#{@muxify_topic}|#{window_id}|#{pane_id}|#{pane_pid}|#{pane_current_command}|'
                 '#{@muxify_agent}|#{@muxify_agent_status}|#{@muxify_agent_conversation}|#{@muxify_tabs}|'
@@ -67,8 +67,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_window_moved_to_topic_keeps_its_panes_agent_and_browser(self):
         s = self.s
-        self.write_topic('move-target', 'Move target', self.alpha, created_at='2026-10-07T00:00:00Z', order=0,
-                         sessions=[dict(project_path=str(self.alpha))])
+        self.write_topic('move-target', 'Move target', self.alpha, created_at='2026-10-07T00:00:00Z', order=0)
         self.new_session('alpha/move-target', self.alpha, topic='move-target')
         session, window, pane, pane_pid = s.tmux(
             'new-session', '-d', '-P', '-F', '#{session_id} #{window_id} #{pane_id} #{pane_pid}', '-s', 'agent-src',
@@ -475,7 +474,7 @@ class TopicsCardsSidebar(TopicsSidebar):
     def test_pressing_a_dormant_topic_card_reopens_it_without_the_reopen_choice(self):
         s = self.s
         self.write_topic('dormant-first', 'First', self.beta, order=0)
-        self.write_topic('click-dormant', 'Click dormant', self.alpha, order=1, sessions=[dict(project_path=str(self.alpha), windows=[
+        self.write_topic('click-dormant', 'Click dormant', self.alpha, order=1, sessions=[remembered_session(self.alpha, 'click-dormant', windows=[
             dict(directory=str(self.alpha), name='edit'), dict(directory=str(self.alpha), name='logs')])])
         self.find('topic-click-dormant')
         s.act('press', 'topic-click-dormant')
@@ -498,7 +497,7 @@ class TopicsCardsSidebar(TopicsSidebar):
                 if split:
                     panes[0].update(agent='claude', agent_conversation='verify-reopen')
                     panes.append(dict(directory=str(self.alpha), active=False))
-                self.write_topic(topic, topic, self.alpha, sessions=[dict(project_path=str(self.alpha), windows=[
+                self.write_topic(topic, topic, self.alpha, sessions=[remembered_session(self.alpha, topic, windows=[
                     dict(directory=str(directory), name='browser', panes=panes,
                          browser_tabs=tabs, browser_active_tab=1, browser_open=True, terminal_open=not split)])])
                 self.find('topic-' + topic)
@@ -540,7 +539,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         # Reopen reaches each Pane by its place, not its index, so a pane-base-index the user changed must not matter.
         s.tmux('set-option', '-g', 'pane-base-index', '1')
         self.addCleanup(s.tmux, 'set-option', '-gu', 'pane-base-index')
-        self.write_topic('split-dormant', 'Split dormant', self.alpha, sessions=[dict(project_path=str(self.alpha))])
+        self.write_topic('split-dormant', 'Split dormant', self.alpha)
         sid = self.new_session('alpha/split-dormant', self.alpha, topic='split-dormant')
         # Each split goes right after the first Pane, which stays active: shell, sleep, shell.
         s.tmux('split-window', '-d', '-t', sid + ':', '-c', str(self.alpha), SHELL)
@@ -551,7 +550,11 @@ class TopicsCardsSidebar(TopicsSidebar):
             panes = windows[0].get('panes', []) if windows else []
             return len(panes) == 3 and any(pane.get('command') == 'sleep 6061' for pane in panes)
         wait(remembered, 'the Topic did not remember three Panes and the program: %s' % self.records().get('split-dormant'))
+        saved = self.records()['split-dormant']
         s.tmux('kill-session', '-t', sid)
+        wait(lambda: self.records()['split-dormant'].get('sessions') == [], 'confirmed closure did not empty the Topic')
+        # A deliberate saved-layout fixture; individually stopped Sessions no longer reopen themselves.
+        (self.topics_dir/'split-dormant.json').write_text(json.dumps(saved))
         self.find('topic-split-dormant')
         s.wait_rows(lambda rs: 'Dormant' in self.describe('topic-split-dormant', rs), 'the Topic did not become Dormant')
 
@@ -576,8 +579,8 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.write_topic('choice-active', 'Choice active', self.beta, order=-2001)
         sid = self.new_session('beta/choice-active', self.beta, topic='choice-active')
         self.write_topic('choice-dormant', 'Choice dormant', self.alpha, order=-2000, sessions=[
-            dict(project_path=str(self.alpha), windows=[dict(directory=str(self.alpha), name='edit'), agent]),
-            dict(project_path=str(self.beta), windows=[dict(directory=str(self.beta), name='logs')])])
+            remembered_session(self.alpha, 'choice-dormant', windows=[dict(directory=str(self.alpha), name='edit'), agent]),
+            remembered_session(self.beta, 'choice-dormant', windows=[dict(directory=str(self.beta), name='logs')])])
         self.find('topic-choice-dormant')
         self.select_window(sid + ':')
         s.wait_shown(sid + ':')
@@ -593,12 +596,12 @@ class TopicsCardsSidebar(TopicsSidebar):
         reopen = self.describe('reopen-session-alpha', rs)
         for text in ['edit', 'agent', '1 Tab', 'resumes Claude Code']:
             self.assertIn(text, reopen, 'the Reopen column does not say ' + text)
-        self.assertIn('logs', self.describe('reopen-session-beta', rs), 'the Reopen column misses the second Project')
+        self.assertIn('logs', self.describe('reopen-session-beta', rs), 'the Reopen column misses the second Session Path')
         fresh = self.describe('start-fresh-session-alpha', rs)
         self.assertIn('shell', fresh, 'the Start Fresh column does not list its shell Window')
         for text in ['edit', 'Tab', 'resumes']:
             self.assertNotIn(text, fresh, 'the Start Fresh column says ' + text)
-        self.assertTrue(s.has('start-fresh-session-beta', rs), 'the Start Fresh column misses the second Project')
+        self.assertTrue(s.has('start-fresh-session-beta', rs), 'the Start Fresh column misses the second Session Path')
         for name in ['alpha/choice-dormant', 'beta/choice-dormant']:
             self.assertNotEqual(s.tmux_ok('has-session', '-t', '=' + name).returncode, 0, 'showing the choice created ' + name)
 

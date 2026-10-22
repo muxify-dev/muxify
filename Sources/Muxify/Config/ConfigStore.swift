@@ -42,11 +42,11 @@ final class ConfigStore {
         filesStamp = stampFiles()
     }
 
-    /// Takes the Projects found for `source`'s `sessions`, unless that section changed while they were found.
-    func updateProjects(_ projects: [Project], foundFor source: Config) {
-        guard config.projectRoots == source.projectRoots, config.projectAliases == source.projectAliases,
-              config.projects != projects else { return }
-        loaded.update(projects: projects)
+    /// Takes the SessionPaths found for `source`'s `sessions`, unless that section changed while they were found.
+    func updateSessionPaths(_ sessionPaths: [SessionPath], foundFor source: Config) {
+        guard config.sessionRoots == source.sessionRoots, config.sessionAliases == source.sessionAliases,
+              config.sessionPaths != sessionPaths else { return }
+        loaded.update(sessionPaths: sessionPaths)
     }
 
     /// Opens the Config in the app registered for YAML, or the plain-text

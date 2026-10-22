@@ -113,7 +113,7 @@ struct PickCandidate<Payload: Equatable> {
     var isCurrent = false
     /// A Pinned Topic: first on an empty query, in candidate order.
     var isPinned = false
-    /// A Project or Worktree with no Session yet. On a tie it goes after the rows you can go to.
+    /// A SessionPath or Worktree with no Session yet. On a tie it goes after the rows you can go to.
     var unopened = false
     /// The Session's last activity in tmux, which breaks a tie after the last visit.
     var activity = 0
@@ -181,6 +181,7 @@ struct PickSectionInput<Payload: Equatable> {
     var title: String? = nil
     let rule: SectionRule
     let candidates: [PickCandidate<Payload>]
+    var currentLast = false
 }
 
 /// The one ranking pipeline: match, drop non-matches, sort by score, then a row you can go to before an
@@ -209,7 +210,10 @@ enum FuzzyRanker {
                     }
                 let pinned = ranked.filter { $0.1.isPinned }.sorted { $0.0 < $1.0 }
                 let others = ranked.filter { !$0.1.isPinned }
-                let shown = query.isEmpty ? pinned + others.filter { $0.1.isCurrent } + others.filter { !$0.1.isCurrent } : ranked
+                let emptyOrder = section.currentLast
+                    ? others.filter { !$0.1.isCurrent && !$0.1.unopened } + others.filter { $0.1.isCurrent } + others.filter { $0.1.unopened }
+                    : others.filter { $0.1.isCurrent } + others.filter { !$0.1.isCurrent }
+                let shown = query.isEmpty ? pinned + emptyOrder : ranked
                 rows = shown.map { row($0.1, match: query.isEmpty ? nil : $0.2) }
             case .fixed:
                 rows = section.candidates.map { row($0, match: nil) }

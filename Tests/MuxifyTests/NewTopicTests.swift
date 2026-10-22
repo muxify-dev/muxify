@@ -2,7 +2,7 @@ import XCTest
 @testable import MuxifyCore
 
 final class NewTopicTests: XCTestCase {
-    private let project = Project(path: "/work/game", name: "game")
+    private let sessionPath = SessionPath(path: "/work/game", name: "game")
 
     func testSlugifyUsesWordsAndHandlesEmptyAndLongWords() {
         XCTAssertEqual(TopicNaming.slugify("Fix reward drop bug in GS!"), "fix-reward-drop-bug-in-gs")
@@ -14,28 +14,27 @@ final class NewTopicTests: XCTestCase {
 
     func testUntitledUsesSmallestFreeNumberAndNamedSlugsAvoidOpenTopicsAndSessions() {
         let records = [TopicRecord(id: "one", slug: "untitled-1"), TopicRecord(id: "three", slug: "untitled-3")]
-        XCTAssertEqual(TopicNaming.slug(title: "  ", project: project, records: records, sessionNames: []), "untitled-2")
-        XCTAssertEqual(TopicNaming.slug(title: "", project: project, records: records, sessionNames: ["game/untitled-2"]), "untitled-4")
+        XCTAssertEqual(TopicNaming.slug(title: "  ", records: records), "untitled-2")
+        XCTAssertEqual(TopicNaming.slug(title: "", records: records), "untitled-2")
         var settled = TopicRecord(id: "settled", slug: "fix-links")
         settled.settledAt = "2026-10-06T00:00:00Z"
-        XCTAssertEqual(TopicNaming.slug(title: "Fix links", project: project, records: [settled], sessionNames: []), "fix-links")
+        XCTAssertEqual(TopicNaming.slug(title: "Fix links", records: [settled]), "fix-links-2")
         let open = TopicRecord(id: "open", slug: "fix-links")
-        XCTAssertEqual(TopicNaming.slug(title: "Fix links", project: project, records: [open], sessionNames: []), "fix-links-2")
-        XCTAssertEqual(TopicNaming.slug(title: "Fix links", project: project, records: [open], sessionNames: ["game/fix-links-2"]), "fix-links-3")
+        XCTAssertEqual(TopicNaming.slug(title: "Fix links", records: [open]), "fix-links-2")
     }
 
-    func testProjectOrderUsesScoreThenLastVisitThenConfigOrderAndTypingWins() {
-        let projects = ["alpha", "bravo", "charlie", "delta"].map { Project(path: "/" + $0, name: $0) }
+    func testSessionPathOrderUsesScoreThenLastVisitThenConfigOrderAndTypingWins() {
+        let sessionPaths = ["alpha", "bravo", "charlie", "delta"].map { SessionPath(path: "/" + $0, name: $0) }
         func window(_ directory: String) -> TmuxWindow {
             TmuxWindow(id: "@1", sessionID: "$1", sessionName: "s", index: 0, name: "shell", paneTitle: "", path: directory + "/src",
                        command: "zsh", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
                        storedBrowser: StoredBrowser(), openRequests: [], topicID: nil, sessionPath: directory)
         }
         var visits = VisitLog()
-        _ = visits.record(window("/bravo"), group: .noTopic, projects: projects, folders: .local, at: Date(timeIntervalSince1970: 10))
-        _ = visits.record(window("/charlie"), group: .noTopic, projects: projects, folders: .local, at: Date(timeIntervalSince1970: 20))
+        _ = visits.record(window("/bravo"), group: .noTopic, sessionPaths: sessionPaths, folders: .local, at: Date(timeIntervalSince1970: 10))
+        _ = visits.record(window("/charlie"), group: .noTopic, sessionPaths: sessionPaths, folders: .local, at: Date(timeIntervalSince1970: 20))
         func order(_ query: String, visits: VisitLog = visits) -> [String] {
-            ProjectRows.list(ProjectRows.build(projects: projects, windows: [window("/delta")], records: [], titles: [:]),
+            SessionPathRows.list(SessionPathRows.build(sessionPaths: sessionPaths, windows: [window("/delta")], records: [], titles: [:]),
                              query: query, visits: visits).rows.map(\.title.text)
         }
         XCTAssertEqual(order(""), ["charlie", "bravo", "alpha", "delta"], "last visit, then Config order; a live Session does not rank")
@@ -43,28 +42,30 @@ final class NewTopicTests: XCTestCase {
         XCTAssertEqual(order("alp"), ["alpha"])
         XCTAssertTrue(order("unmatched").isEmpty)
         XCTAssertEqual(order("brv").first, "bravo")
-        let byDirectory = ProjectRows.list(ProjectRows.build(projects: [project], windows: [], records: [], titles: [:]),
+        let byDirectory = SessionPathRows.list(SessionPathRows.build(sessionPaths: [sessionPath], windows: [], records: [], titles: [:]),
                                            query: "work", visits: VisitLog())
-        XCTAssertEqual(byDirectory.rows.compactMap { $0.pick.payload?.project }, [project], "the directory matches too")
+        XCTAssertEqual(byDirectory.rows.compactMap { $0.pick.payload?.sessionPath }, [sessionPath], "the directory matches too")
         XCTAssertEqual(byDirectory.rows.first?.detail, Highlighted(text: "/work/game", marks: [1, 2, 3, 4]))
-        XCTAssertEqual(Project.containing(.local("/alpha/subdir"), in: projects), projects[0])
-        XCTAssertNil(Project.containing(.local("/alphabet"), in: projects))
+        XCTAssertEqual(SessionPath.containing(.local("/alpha/subdir"), in: sessionPaths), sessionPaths[0])
+        XCTAssertNil(SessionPath.containing(.local("/alphabet"), in: sessionPaths))
     }
 
     func testNewTopicPlanWritesRecordAndExactCommands() {
         var previous = TopicRecord(id: "previous", title: "Earlier")
         previous.order = -4
-        let plan = TopicPlan(title: "Fix links", project: project, records: [previous],
+        let plan = TopicPlan(title: "Fix links", sessionPath: sessionPath, records: [previous],
                              sessionNames: [], id: "new", now: Date(timeIntervalSince1970: 0), clientTTY: "/dev/ttys001")
         XCTAssertEqual(plan.sessionName, "game/fix-links")
         XCTAssertEqual(plan.record.title, "Fix links")
-        XCTAssertEqual(plan.record.homeProject, "/work/game")
+        XCTAssertEqual(plan.record.sessions.first?["directory"], .string("/work/game"))
         XCTAssertNil(plan.record.order)
         XCTAssertEqual(plan.record.createdAt, "1970-01-01T00:00:00Z")
-        XCTAssertEqual(plan.record.sessions, [.object(["project_path": .string("/work/game")])])
+        let savedID = plan.record.sessions.first?["id"]?.string ?? ""
+        XCTAssertFalse(savedID.isEmpty)
         XCTAssertEqual(plan.commands, [
             .tmux(["new-session", "-d", "-s", "game/fix-links", "-c", "/work/game"]),
             .tmux(["set-option", "-t", "=game/fix-links:", "@muxify_topic", "new"]),
+            .tmux(["set-option", "-t", "=game/fix-links:", "@muxify_session_id", savedID]),
             .tmux(["switch-client", "-c", "/dev/ttys001", "-t", "=game/fix-links:"]),
         ])
     }
@@ -77,39 +78,34 @@ final class NewTopicTests: XCTestCase {
     }
 
     func testUntitledPlanOpensTheSessionAsUntitled() {
-        let plan = TopicPlan(title: " \n ", project: project, records: [], sessionNames: [], id: "untitled")
+        let plan = TopicPlan(title: " \n ", sessionPath: sessionPath, records: [], sessionNames: [], id: "untitled")
         XCTAssertNil(plan.record.title)
-        XCTAssertEqual(plan.commands, [
+        XCTAssertEqual(Array(plan.commands.prefix(2)), [
             ["new-session", "-d", "-s", "game/untitled-1", "-c", "/work/game"],
             ["set-option", "-t", "=game/untitled-1:", "@muxify_topic", "untitled"],
         ].map(TopicPlan.Command.tmux))
     }
 
-    func testNewTopicHasNoSessionUntilItsFirstProjectWhichBecomesItsHome() throws {
+    func testNewTopicHasNoSessionUntilOneIsAdded() throws {
         var previous = TopicRecord(id: "previous", slug: "fix-links")
         previous.order = 2
-        let slug = TopicNaming.slug(title: "Fix links", project: nil, records: [previous], sessionNames: [])
+        let slug = TopicNaming.slug(title: "Fix links", records: [previous])
         let topic = TopicRecord(newTopic: "new", title: "Fix links", slug: slug, now: Date(timeIntervalSince1970: 0))
         XCTAssertEqual(topic.slug, "fix-links-2", "an open Topic already uses the slug")
         XCTAssertEqual(topic.title, "Fix links")
-        XCTAssertNil(topic.homeProject)
         XCTAssertEqual(topic.sessions, [])
         XCTAssertNil(topic.order)
         XCTAssertEqual(topic.createdAt, "1970-01-01T00:00:00Z")
 
-        let added = try TopicProjectPlan(topic: topic, project: project, workingCopy: .homeProject, windows: [], projects: [project]).edit
-        XCTAssertEqual(added.record?.homeProject, "/work/game")
+        let added = try TopicSessionPlan(topic: topic, sessionPath: sessionPath, workingCopy: .directory, windows: [], sessionPaths: [sessionPath]).edit
+        XCTAssertEqual(added.record?.sessions.first?["directory"], .string("/work/game"))
         XCTAssertEqual(added.commands.first, .tmux(["new-session", "-d", "-s", "game/fix-links-2", "-c", "/work/game"]))
         XCTAssertEqual(added.selection, .sessionName("game/fix-links-2"))
-        var homed = topic
-        homed.homeProject = "/elsewhere"
-        let second = try TopicProjectPlan(topic: homed, project: project, workingCopy: .homeProject, windows: [], projects: [project]).edit
-        XCTAssertEqual(second.record?.homeProject, "/elsewhere", "a later Project leaves the Home Project")
     }
 
     func testAnEmptyTopicTheUserLooksAtIsTheActiveTopicUntilItHasAWindow() {
         var config = Config()
-        config.projects = [project]
+        config.sessionPaths = [sessionPath]
         let topic = TopicRecord(newTopic: "empty", title: "Plan", slug: "plan", now: Date())
         func window(topic: String?) -> TmuxWindow {
             TmuxWindow(id: "@1", sessionID: "$1", sessionName: "game", index: 0, name: "shell", paneTitle: "", path: "/work/game",
@@ -142,7 +138,7 @@ final class NewTopicTests: XCTestCase {
 
     func testReopeningATopicWithNoSessionShowsItAndOnlyASettledOneMoves() throws {
         let open = TopicRecord(newTopic: "empty", title: "Plan", slug: "plan", now: Date())
-        let shown = try TopicReopenPlan(topic: open, records: [open], windows: [], projects: [project], existingDirectories: []).edit
+        let shown = try TopicReopenPlan(topic: open, records: [open], windows: [], sessionPaths: [sessionPath], existingDirectories: []).edit
         XCTAssertEqual(shown.commands, [])
         XCTAssertEqual(shown.selection, .emptyTopic("empty"))
         XCTAssertNil(shown.record)
@@ -152,7 +148,7 @@ final class NewTopicTests: XCTestCase {
         settled.settledAt = "2026-10-01T00:00:00Z"
         var first = TopicRecord(id: "first", slug: "other")
         first.order = 0
-        let reopened = try TopicReopenPlan(topic: settled, records: [first, settled], windows: [], projects: [project],
+        let reopened = try TopicReopenPlan(topic: settled, records: [first, settled], windows: [], sessionPaths: [sessionPath],
                                            existingDirectories: []).edit
         XCTAssertEqual(reopened.selection, .emptyTopic("empty"))
         guard case .save(let record)? = reopened.completion else {
@@ -162,15 +158,15 @@ final class NewTopicTests: XCTestCase {
         XCTAssertNil(record.order)
     }
 
-    func testTopicsUseConfiguredProjectLabel() {
+    func testTopicsUseConfiguredSessionPathLabel() {
         let window = TmuxWindow(id: "@1", sessionID: "$1", sessionName: "renamed", index: 0,
                                 name: "shell", paneTitle: "", path: "/elsewhere", command: "zsh",
                                 isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
                                 storedBrowser: StoredBrowser(), openRequests: [], topicID: "topic", sessionPath: "/work/game")
         var config = Config()
-        config.projects = [Project(path: "/work/game", name: "work/game")]
-        let model = TopicsModel(records: [TopicRecord(id: "topic", title: "Fix", homeProject: "/work/game")],
+        config.sessionPaths = [SessionPath(path: "/work/game", name: "work/game")]
+        let model = TopicsModel(records: [TopicRecord(id: "topic", title: "Fix")],
                                 windows: [window], config: config, selection: TopicSelection())
-        XCTAssertEqual(model.rows.first?.sessions.first?.projectName, "work/game")
+        XCTAssertEqual(model.rows.first?.sessions.first?.baseName, "renamed")
     }
 }

@@ -13,7 +13,7 @@ struct ReopenChoiceView: View {
         VStack(spacing: 16) {
             HStack(alignment: .top, spacing: 16) {
                 column(.reopen, reopen, title: "Reopen", summary: "The remembered Windows, Panes, Tabs and Agents.")
-                column(.startFresh, startFresh, title: "Start Fresh", summary: "One shell Window in each Project.")
+                column(.startFresh, startFresh, title: "Start Fresh", summary: "One shell Window in each remembered Session.")
             }
             .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 12) {
@@ -36,7 +36,7 @@ struct ReopenChoiceView: View {
             ForEach(reopening.sessions, id: \.name) { session in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
-                        Text(session.projectName).fontWeight(.semibold)
+                        Text(session.baseName).fontWeight(.semibold)
                         if let branch = session.branch {
                             Text(branch).font(.caption.monospaced()).foregroundStyle(.secondary)
                         }
@@ -51,7 +51,7 @@ struct ReopenChoiceView: View {
                     }
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityIdentifier("\(id)-session-\(session.projectName)")
+                .accessibilityIdentifier("\(id)-session-\(session.baseName)")
             }
         }
         .padding(14)

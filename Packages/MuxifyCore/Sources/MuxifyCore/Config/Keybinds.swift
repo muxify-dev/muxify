@@ -18,7 +18,7 @@ public enum ConfigAction: String, KeybindAction {
     case movePane = "move_pane"
     case moveWindow = "move_window"
     case moveSession = "move_session"
-    case addProjectToTopic = "add_project_to_topic"
+    case addSessionToTopic = "add_session_to_topic"
     case snoozeTopic = "snooze_topic"
     case snoozeTopics = "snooze_topics"
     case toggleZen = "toggle_zen"
@@ -86,7 +86,7 @@ public enum ConfigAction: String, KeybindAction {
         .movePane: ["cmd+shift+t"],
         .moveWindow: [],
         .moveSession: ["cmd+shift+m"],
-        .addProjectToTopic: ["cmd+shift+a"],
+        .addSessionToTopic: ["cmd+shift+a"],
         .settleTopic: [],
         .removeSessionFromTopic: [],
         .forgetTopic: [],
@@ -168,7 +168,7 @@ public enum PaletteAction: String, KeybindAction {
     case snoozeTopic = "snooze_topic"
 
     case move
-    case addProjectToTopic = "add_project_to_topic"
+    case addSessionToTopic = "add_session_to_topic"
     case rename
     case editTags = "edit_tags"
     case suggestTopicTitle = "suggest_topic_title"
@@ -207,7 +207,7 @@ public enum PaletteAction: String, KeybindAction {
         .pasteFolder: ["ctrl+y"],
         .snoozeTopic: ["ctrl+s"],
         .move: [],
-        .addProjectToTopic: [],
+        .addSessionToTopic: [],
         .rename: [],
         .editTags: [],
         .suggestTopicTitle: ["alt+s"],

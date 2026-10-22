@@ -8,7 +8,7 @@ extension PaletteItem {
         case .session(let session): return .session(session.id)
         case .window(let window): return .window(window.id)
         case .agent(let agent): return .pane(agent.paneID)
-        case .project, .choice, .command, .tag: return nil
+        case .sessionPath, .choice, .command, .tag: return nil
         }
     }
 }
@@ -36,7 +36,7 @@ extension CommandPalette {
             case .forgetTopic: begin(.confirm(PaletteConfirmation(.forget(topic))), keepingHistory: true)
             case .rename: begin(.text(.renameTopic(topic)), text: topic.title ?? "", keepingHistory: true)
             case .editTags: store.presentEditTags(of: id, keepingHistory: true)
-            case .addProjectToTopic: store.refreshProjects(); begin(.addProject(topic), keepingHistory: true)
+            case .addSessionToTopic: store.refreshSessionPaths(); begin(.addSession(topic), keepingHistory: true)
             case .suggestTopicTitle:
                 close()
                 store.suggestTopicTitle(for: id) { store.renameTopic(id, to: $0) }
@@ -64,7 +64,8 @@ extension CommandPalette {
             if let window { begin(.move(MoveDraft(window: window, paneID: paneID ?? window.activePaneID, scope: scope)), keepingHistory: true) }
         case .rename:
             guard let window else { break }
-            if scope == .session { begin(.text(.renameSession(window)), text: window.sessionName, keepingHistory: true) }
+            if scope == .session { begin(.text(.renameSession(window)), text: SessionNaming.base(of: window.sessionName,
+                topic: store.topicWatcher.records.first { $0.id == window.topicID }), keepingHistory: true) }
             else { begin(.text(.renameWindow(window)), text: window.name, keepingHistory: true) }
         case .killWindow:
             if let window { begin(.confirm(PaletteConfirmation(.killWindow(window))), keepingHistory: true) }

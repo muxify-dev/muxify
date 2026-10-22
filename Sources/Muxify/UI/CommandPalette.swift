@@ -20,7 +20,7 @@ final class CommandPalette {
     private(set) var presentation: Presentation?
     var history: [PreviousStep] = []
     var invocation = UUID()
-    /// Add a Project's New Worktree option. Each step starts with it off, so one Project's choice never carries to the next.
+    /// Add a Session's New Worktree option. Each step starts with it off, so one SessionPath's choice never carries to the next.
     var newWorktree = false
     var current: CommandPaletteConfig? {
         if case .search(let config, _) = presentation { return config }
@@ -109,7 +109,7 @@ final class CommandPalette {
 
     var catalog: PaletteCatalog? {
         guard let store else { return nil }
-        return PaletteCatalog(windows: store.windows, agents: store.agents, projects: store.projects, folders: store.folders,
+        return PaletteCatalog(windows: store.windows, agents: store.agents, sessionPaths: store.sessionPaths, folders: store.folders,
                               selectedWindowID: store.selectedWindowID, homeDirectory: store.homeDirectory,
                               topics: store.isRemote ? nil : store.topics, records: store.topicWatcher.records,
                               lastWindowByGroup: store.topicSelection.lastWindowByGroup, visits: store.visits, commands: commands,
@@ -143,7 +143,7 @@ final class CommandPalette {
                 actions += topic.snoozedUntil == nil ? [.snoozeTopic] : [.unsnoozeTopic]
                 // Zen starts only in Topics mode; while it is on, the action ends it.
                 actions += store.topics.mode == .topics || store.topicWatcher.zen != nil ? [.startZen] : []
-                actions += [.settleTopic, .addProjectToTopic, .rename] + (store.topicConfig.tags == nil ? [] : [.editTags])
+                actions += [.settleTopic, .addSessionToTopic, .rename] + (store.topicConfig.tags == nil ? [] : [.editTags])
                     + [.suggestTopicTitle, topic.isPinned ? .unpinTopic : .pinTopic]
             }
             if topic.settledAt != nil || (!topic.sessions.isEmpty && !store.windows.contains(where: { $0.topicID == id })) {
@@ -156,13 +156,13 @@ final class CommandPalette {
                 if session.windows.first?.topicID != nil { actions += [.removeFromTopic, .removeFromTopicAndKill] }
             }
             if let locked = store?.lockState(ofSession: session.id) { actions += [locked ? .unlockSession : .lockSession] }
-            actions += [.rename, .newWindow, .killSession]
+            actions += [.newSession, .rename, .newWindow, .killSession]
         case .window(let window):
             if store?.isRemote == false { actions += [.move]; if window.topicID != nil { actions += [.removeFromTopic] } }
             actions += [.rename, .newWindow, .killWindow]
         case .agent:
             if store?.isRemote == false { actions += [.move] }
-        case .project: actions += [.newSession]
+        case .sessionPath: actions += [.newSession]
         case .choice, .command, .tag: break
         }
         if !item.path.isEmpty { actions += [.copyFolder]; if store?.isRemote == false { actions += [.revealFolder] } }
@@ -184,8 +184,8 @@ final class CommandPalette {
             case .settledTopic: return "Reopen Topic"
             case .tag: return flow == nil ? "Show its Topics" : "Choose Tag"
             case .session: return "Switch to Session"
-            // A Project row's target is the Session ↩ goes to; without one, ↩ starts it.
-            case .project, .worktree: return item.target == nil ? "Open as Session" : "Switch to Session"
+            // A SessionPath row's target is the Session ↩ goes to; without one, ↩ starts it.
+            case .sessionPath, .worktree: return item.target == nil ? "Open as Session" : "Switch to Session"
             case .window: return "Open Window"
             case .agent: return "Jump to Agent"
             case .command: return "Run"
@@ -198,7 +198,7 @@ final class CommandPalette {
         case .pasteFolder: return "Paste Path"
         case .snoozeTopic: return item.kind == .tag ? "Snooze its Topics…" : "Snooze Topic"
         case .move: return "Move to…"
-        case .addProjectToTopic: return "Add a Project"
+        case .addSessionToTopic: return "Add a Session"
         case .rename: return "Rename"
         case .editTags: return "Edit Tags…"
         case .suggestTopicTitle: return "Suggest title from Agents"
@@ -343,15 +343,22 @@ final class CommandPalette {
             case .window(let window): store.select(window)
             case .session(let session):
                 if let window = EntryWindow.ofSession(session.windows) { store.select(window) }
-            case .project(let target): store.openDirectory(target)
+            case .sessionPath(let target): store.openDirectory(target)
             case .tag: break
             case .choice: break
             case .command: break
             }
         case .newSession:
-            guard case .project(let target) = item.ref else { return }
             close(restoringFocus: false)
-            store.newSession(in: target)
+            switch item.ref {
+            case .sessionPath(let target): store.newSession(in: target)
+            case .session(let session):
+                guard let window = EntryWindow.ofSession(session.windows) else { return }
+                let topic = store.isRemote ? nil : store.topicWatcher.records.first { $0.id == window.topicID && $0.settledAt == nil }
+                store.newSession(in: OpenDirectory(directory: store.folders.folder(window.sessionPath.isEmpty ? window.path : window.sessionPath),
+                    name: SessionNaming.base(of: window.sessionName, topic: topic)), topic: topic?.id)
+            default: break
+            }
         case .copyFolder:
             copy(item.path, title: "Copied Path", shown: Paths.tildify(item.path, home: store.homeDirectory))
         case .copyTmuxTarget:

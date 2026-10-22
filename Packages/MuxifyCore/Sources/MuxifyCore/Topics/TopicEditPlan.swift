@@ -6,7 +6,7 @@ struct TopicEdit: Sendable {
         case sessionID(String)
         case sessionName(String)
         case paneID(String)
-        /// An open Topic with no Session: the terminal area offers to add a Project to it.
+        /// An open Topic with no Session: the terminal area offers to add a SessionPath to it.
         case emptyTopic(String)
     }
 
@@ -35,33 +35,27 @@ struct TopicEdit: Sendable {
 }
 
 enum TopicEditFailure: Error, CustomStringConvertible {
-    case destinationUnavailable, sourceUnavailable, duplicateProject, invalidProject
-    case sessionNameInUse, invalidTmuxResponse, sessionUnavailable
+    case destinationUnavailable, sourceUnavailable, invalidSessionPath
+    case invalidTmuxResponse, sessionUnavailable
 
     public var description: String {
         switch self {
         case .destinationUnavailable: return "The Topic is no longer open."
         case .sourceUnavailable: return "The source Pane or Window is no longer available."
-        case .duplicateProject: return "The Topic has more than one Session in the same Project."
-        case .invalidProject: return "The Project needs a directory and a name that tmux accepts."
-        case .sessionNameInUse: return "The Topic's Session name is already in use."
+        case .invalidSessionPath: return "The Session needs a directory and a name that tmux accepts."
         case .invalidTmuxResponse: return "tmux did not return the expected Pane or Window identity."
         case .sessionUnavailable: return "The Session is no longer in the Topic."
         }
     }
 }
 
-private enum TopicEditProjects {
-    public static func validate(_ project: Project) throws {
-        guard !project.folder.path.isEmpty, !project.name.isEmpty,
-              !project.name.contains("."), !project.name.contains(":"),
-              !project.name.contains("\n"), !project.name.contains("\0") else {
-            throw TopicEditFailure.invalidProject
+private enum TopicEditSessions {
+    public static func validate(_ sessionPath: SessionPath) throws {
+        guard !sessionPath.folder.path.isEmpty, !sessionPath.name.isEmpty,
+              !sessionPath.name.contains("."), !sessionPath.name.contains(":"),
+              !sessionPath.name.contains("\n"), !sessionPath.name.contains("\0") else {
+            throw TopicEditFailure.invalidSessionPath
         }
-    }
-
-    public static func project(at folder: Folder, projects: [Project]) -> Project {
-        Project.containing(folder, in: projects) ?? Project(folder: folder, name: (folder.path as NSString).lastPathComponent)
     }
 
     public static func sessions(in windows: [TmuxWindow], topic: TopicRecord) -> [TmuxWindow] {
@@ -73,32 +67,35 @@ private enum TopicEditProjects {
 struct TopicRenamePlan {
     public let edit: TopicEdit
 
-    public init(topic: TopicRecord, title: String, records: [TopicRecord], windows: [TmuxWindow], projects: [Project]) throws {
-        let members = TopicEditProjects.sessions(in: windows, topic: topic)
-        let locations = members.map { TopicLocation(of: $0, record: topic, projects: projects).project }
-        guard Set(locations.map(\.folder)).count == locations.count else {
-            throw TopicEditFailure.duplicateProject
-        }
-        guard Set(locations.map(\.name)).count == locations.count else {
-            throw TopicEditFailure.sessionNameInUse
-        }
-        var affected = locations
-        if let home = topic.homeProject { affected.append(TopicEditProjects.project(at: .local(home), projects: projects)) }
-        for session in topic.sessions {
-            if let path = session["project_path"]?.string { affected.append(TopicEditProjects.project(at: .local(path), projects: projects)) }
-        }
-        for project in affected { try TopicEditProjects.validate(project) }
-        let home = affected.first ?? Project(path: "/", name: "topic")
-        let memberIDs = Set(members.map(\.sessionID))
-        let names = Set(windows.filter { !memberIDs.contains($0.sessionID) }.map(\.sessionName))
+    public init(topic: TopicRecord, title: String, records: [TopicRecord], windows: [TmuxWindow], sessionPaths: [SessionPath]) throws {
+        let members = TopicEditSessions.sessions(in: windows, topic: topic)
+        var names = Set(windows.map(\.sessionName))
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let slug = TopicNaming.slug(title: title, project: home, records: records, sessionNames: names,
-                                   excludingTopicID: topic.id, projectNames: Set(affected.map(\.name)))
+        let slug = TopicNaming.slug(title: title, records: records, excludingTopicID: topic.id)
         var record = topic
         record.title = title.isEmpty ? nil : title
         record.slug = slug
-        let commands = zip(members, locations).map { window, project in
-            TopicPlan.Command.tmux(["rename-session", "-t", window.sessionID, project.name + "/" + slug])
+        var commands: [TopicPlan.Command] = []
+        for window in members {
+            names.remove(window.sessionName)
+            let name = SessionNaming.available(topic.baseName(of: window), topic: slug, taken: names)
+            names.insert(name)
+            commands.append(.tmux(["rename-session", "-t", window.sessionID, name]))
+            if let index = record.sessions.firstIndex(where: { $0["id"]?.string == window.sessionRecordID }),
+               var fields = record.sessions[index].object {
+                fields["name"] = .string(name)
+                fields["base_name"] = .string(SessionNaming.base(of: name, topic: record))
+                record.sessions[index] = .object(fields)
+            }
+        }
+        let live = Set(members.map(\.sessionRecordID))
+        for index in record.sessions.indices where !live.contains(record.sessions[index]["id"]?.string ?? "") {
+            guard var fields = record.sessions[index].object, let base = fields["base_name"]?.string else { continue }
+            let name = SessionNaming.available(base, topic: slug, taken: names)
+            names.insert(name)
+            fields["name"] = .string(name)
+            fields["base_name"] = .string(SessionNaming.base(of: name, topic: record))
+            record.sessions[index] = .object(fields)
         }
         edit = TopicEdit(record: record, commands: commands, selection: .unchanged)
     }
@@ -110,9 +107,9 @@ struct TopicSessionOrderPlan {
 
     /// Moves a live Session before or after another one, as the Topic lists them now, and keeps that order.
     public init(moving sessionID: String, to placement: TopicSessionPlacement, topic: TopicRecord, windows: [TmuxWindow],
-                projects: [Project], order: SessionOrder) throws {
-        let key = { (window: TmuxWindow) in TopicSessionKey(of: window, record: topic, projects: projects) }
-        let shown = TopicSessionOrder.ordered(TopicEditProjects.sessions(in: windows, topic: topic), record: topic, order: order, key: key)
+                sessionPaths: [SessionPath], order: SessionOrder) throws {
+        let key = { (window: TmuxWindow) in TopicSessionKey(of: window) }
+        let shown = TopicSessionOrder.ordered(TopicEditSessions.sessions(in: windows, topic: topic), record: topic, order: order, key: key)
         guard let moved = shown.first(where: { $0.sessionID == sessionID }),
               shown.contains(where: { $0.sessionID == placement.anchor.rawValue }) else { throw TopicEditFailure.sessionUnavailable }
         guard sessionID != placement.anchor.rawValue else {
@@ -125,12 +122,12 @@ struct TopicSessionOrderPlan {
         case .before: ordered.insert(moved, at: anchor)
         case .after: ordered.insert(moved, at: anchor + 1)
         }
-        let live = ordered.map { key($0).project }
-        let entries = topic.sessions.map { (session: $0, project: $0["project_path"]?.string.map(Folder.local)) }
+        let live = ordered.map(\.sessionRecordID)
         var record = topic
-        // A remembered entry with no live Session keeps its place after the live ones.
-        record.sessions = live.map { folder in entries.first { $0.project == folder }?.session ?? .object(["project_path": .string(folder.path)]) }
-            + entries.filter { $0.project.map { !live.contains($0) } ?? true }.map(\.session)
+        record.sessions = ordered.map { window in topic.session(of: window) ?? .object([
+            "id": .string(window.sessionRecordID), "name": .string(window.sessionName),
+            "base_name": .string(topic.baseName(of: window)), "directory": .string(window.sessionPath)]) }
+            + topic.sessions.filter { !live.contains($0["id"]?.string ?? "") }
         record.hasManualSessionOrder = true
         edit = TopicEdit(record: record, commands: [], selection: .unchanged)
     }
@@ -143,36 +140,28 @@ struct TopicSessionOrderPlan {
     }
 }
 
-struct TopicProjectPlan {
+struct TopicSessionPlan {
     public let edit: TopicEdit
 
-    public init(topic: TopicRecord, project: Project, workingCopy: TopicWorkingCopy, windows: [TmuxWindow], projects: [Project],
-                order: SessionOrder = .oldestFirst) throws {
-        try TopicEditProjects.validate(project)
-        let members = TopicEditProjects.sessions(in: windows, topic: topic).filter {
-            TopicLocation(of: $0, record: topic, projects: projects).project.folder == project.folder
-        }
-        guard members.count <= 1 else { throw TopicEditFailure.duplicateProject }
-        if let existing = members.first {
-            edit = TopicEdit(record: nil, commands: [], selection: .sessionID(existing.sessionID))
-            return
-        }
+    public init(topic: TopicRecord, sessionPath: SessionPath, workingCopy: TopicWorkingCopy, windows: [TmuxWindow], sessionPaths: [SessionPath],
+                order: SessionOrder = .oldestFirst, baseName: String? = nil) throws {
+        try TopicEditSessions.validate(sessionPath)
+        if let baseName { try SessionNaming.validate(baseName) }
         let slug = topic.slug ?? TopicNaming.slugify(topic.title ?? "topic")
-        let name = project.name + "/" + slug
-        guard !windows.contains(where: { $0.sessionName == name }) else { throw TopicEditFailure.sessionNameInUse }
+        let name = SessionNaming.available(baseName ?? sessionPath.name, topic: slug, taken: Set(windows.map(\.sessionName)))
         var record = topic
-        if record.homeProject == nil { record.homeProject = project.folder.path }
-        let remembered = record.rememberedSessions(by: "project_path")[project.folder]
-        var session: [String: JSONValue] = [:]
-        if case .object(let fields)? = remembered { session = fields }
-        let start = workingCopy.sessionStart(in: project, slug: slug)
-        for key in ["worktree_path", "branch", TopicWorktrees.createdKey, TopicWorktrees.baseKey] { session[key] = nil }
-        session.merge(start.worktreeFields) { _, new in new }
-        session["project_path"] = .string(project.folder.path)
+        let start = workingCopy.sessionStart(in: sessionPath, slug: slug)
+        let id = UUID().uuidString.lowercased()
+        var session = start.worktreeFields
+        session["id"] = .string(id)
+        session["name"] = .string(name)
+        session["base_name"] = .string(SessionNaming.base(of: name, topic: record))
+        session["directory"] = .string(start.directory)
         record.recordingNewSession(session, order: order)
         edit = TopicEdit(record: record, newWorktree: start.newWorktree, commands: [
             .tmux(["new-session", "-d", "-s", name, "-c", start.directory]),
             .tmux(["set-option", "-t", "=" + name + ":", "@muxify_topic", topic.id]),
+            .tmux(["set-option", "-t", "=" + name + ":", "@muxify_session_id", id]),
         ], selection: .sessionName(name))
     }
 }
@@ -180,34 +169,24 @@ struct TopicProjectPlan {
 struct TopicPaneSource {
     public let paneID: String
     public let window: TmuxWindow
+    var directory: String? = nil
 }
 
 struct TopicPanePlan {
     public let edit: TopicEdit
 
-    public init(source: TopicPaneSource, project homeProject: Project? = nil, title: String = "",
-         records: [TopicRecord], windows: [TmuxWindow], projects: [Project],
+    public init(source: TopicPaneSource, sessionPath launchPath: SessionPath? = nil, title: String = "",
+         records: [TopicRecord], windows: [TmuxWindow], sessionPaths: [SessionPath],
          id: String = UUID().uuidString.lowercased(), now: Date = Date(), clientTTY: String? = nil) throws {
         let window = source.window
         guard window.paneCount > 0, windows.contains(where: { $0.id == window.id && $0.sessionID == window.sessionID }),
               source.paneID.hasPrefix("%") else { throw TopicEditFailure.sourceUnavailable }
-        let record = TopicMembershipPlan.sourceRecord(for: window, records: records)
-        let project = homeProject ?? TopicLocation(of: window, record: record, projects: projects).project
-        try TopicEditProjects.validate(project)
-        let topic = TopicPlan(title: title.trimmingCharacters(in: .whitespacesAndNewlines), project: project, records: records,
-                              sessionNames: Set(windows.map(\.sessionName)), id: id, now: now)
-        let target = "=" + topic.sessionName + ":"
-        var commands: [TopicPlan.Command] = [
-            .newTopicSession(name: topic.sessionName, directory: project.folder.path),
-            .tmux(["set-option", "-t", target, "@muxify_topic", topic.record.id]),
-        ]
-        if let clientTTY { commands.append(.tmux(["switch-client", "-c", clientTTY, "-t", target])) }
-        if window.paneCount == 1 {
-            commands.append(.tmux(["move-window", "-d", "-s", window.sessionID + ":" + window.id, "-t", target]))
-        } else {
-            commands.append(.tmux(["break-pane", "-d", "-s", source.paneID, "-t", target]))
-        }
-        commands.append(.removeTopicPlaceholder)
-        edit = TopicEdit(record: topic.record, commands: commands, selection: .paneID(source.paneID))
+        guard let pane = PaneID(rawValue: source.paneID) else { throw TopicEditFailure.sourceUnavailable }
+        let plan = try TopicMembershipPlan(source: .pane(pane, window), title: title.trimmingCharacters(in: .whitespacesAndNewlines),
+            records: records, windows: windows, sessionPaths: sessionPaths, id: id, now: now, clientTTY: clientTTY,
+            launchDirectory: launchPath?.folder.path ?? source.directory)
+        var result = TopicEdit(record: plan.record, commands: plan.commands, selection: .paneID(source.paneID))
+        result.leftTopic = plan.leftTopic
+        edit = result
     }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-/// One checkout of a Project's repository, as `git worktree list` reports it.
+/// One checkout of a SessionPath's repository, as `git worktree list` reports it.
 public struct Worktree: Hashable, Sendable {
     public let folder: Folder
     /// Nil when HEAD is detached.
@@ -17,8 +17,8 @@ public struct Worktree: Hashable, Sendable {
     }
 }
 
-/// What git says a Project directory is. Read with `detect`, never from folder names.
-public enum ProjectLayout: Equatable, Sendable {
+/// What git says a SessionPath directory is. Read with `detect`, never from folder names.
+public enum RepositoryLayout: Equatable, Sendable {
     case directory
     case plainRepository([Worktree])
     case bareRepository([Worktree])
@@ -30,10 +30,10 @@ public enum ProjectLayout: Equatable, Sendable {
         }
     }
 
-    /// What `ProjectDiscovery` finds at `path` alone. A folder inside somebody else's checkout is a plain
-    /// directory, so a Project that is a subfolder of a repository does not list that repository's Worktrees.
-    public static func detect(at path: String) -> ProjectLayout {
-        ProjectDiscovery.discover([ProjectRoot(path: path)], aliases: [:]).first?.layout ?? .directory
+    /// What `SessionPathDiscovery` finds at `path` alone. A folder inside somebody else's checkout is a plain
+    /// directory, so a SessionPath that is a subfolder of a repository does not list that repository's Worktrees.
+    public static func detect(at path: String) -> RepositoryLayout {
+        SessionPathDiscovery.discover([SessionPathRoot(path: path)], aliases: [:]).first?.layout ?? .directory
     }
 
     /// The layout the discovery script reports for a folder of `kind`.

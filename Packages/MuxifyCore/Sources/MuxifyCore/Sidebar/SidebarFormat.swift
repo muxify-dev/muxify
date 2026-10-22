@@ -5,7 +5,7 @@ public struct SidebarFormat: Equatable {
     public enum Variable: String, CaseIterable {
         case topic_title, topic_pinned_flag, topic_dormant_flag, topic_tags, tag_count, tag
         case session_count, window_count, pane_count, agent_count, agents_working, agents_unread
-        case session_name, project, branch
+        case session_name, session_base_name, branch
         case window_index, window_name, window_title, window_panes, tab_count
         case pane_index, pane_label, pane_title, pane_current_command, pane_current_path, pane_active_flag
         case agent_kind, agent_status, agent_unread_flag, agent_group

@@ -153,7 +153,7 @@ class PaletteTags(PaletteFixture):
                     'New Topic did not write a record')
         self.addCleanup(remove_topic, self.topics/(made['id'] + '.json'))
         self.assertEqual((made.get('title'), made.get('tags')), ('Ship it', ['docs', 'qa']), made)
-        self.s.wait_rows(lambda rs: 'Add a Project' in self.text('palette-breadcrumb', rs), 'New Topic did not go on to Add a Project')
+        self.s.wait_rows(lambda rs: 'Add a Session' in self.text('palette-breadcrumb', rs), 'New Topic did not go on to Add a Session')
         self.s.act('action', 'palette-search', 'Close')
 
     def test_edit_tags_opens_with_the_tags_of_the_active_topic_as_chips(self):
@@ -271,7 +271,7 @@ class PaletteTags(PaletteFixture):
                     'New Topic did not write a record with Tags off')
         self.addCleanup(remove_topic, self.topics/(made['id'] + '.json'))
         self.assertEqual((made.get('title'), made.get('tags')), ('Fix #123 #ops', None), made)
-        self.s.wait_rows(lambda rs: 'Add a Project' in self.text('palette-breadcrumb', rs), 'New Topic did not go on to Add a Project')
+        self.s.wait_rows(lambda rs: 'Add a Session' in self.text('palette-breadcrumb', rs), 'New Topic did not go on to Add a Session')
         self.s.act('action', 'palette-search', 'Close')
         self.select(self.topic('off-active', 31, session=True, tags=['ops']))
         self.search('Edit Tags')

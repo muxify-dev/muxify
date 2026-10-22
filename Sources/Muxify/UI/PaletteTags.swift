@@ -125,7 +125,7 @@ extension CommandPalette {
         case .newTopic:
             guard !tags.isEmpty else { return nil }
             let title = text.title.isEmpty ? "Untitled" : text.title
-            return "Title: \(title) · Tags: \(list(tags)) · ↩ makes the Topic. Its first Project comes next."
+            return "Title: \(title) · Tags: \(list(tags)) · ↩ makes the Topic. Its first Session comes next."
         case .editTags(let topic):
             let changes = [("Removes", topic.tags.sorted().filter { !tags.contains($0) }), ("Adds", tags.filter { !topic.tags.contains($0) })]
                 .filter { !$0.1.isEmpty }.map { "\($0.0): \(list($0.1))" }

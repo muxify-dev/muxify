@@ -41,7 +41,7 @@ When a driver command times out, read `logs/app.log` and `driver/stall-<n>.txt` 
 3. Write one `unittest.TestCase` class.
 4. In `setUpClass`, make the sandbox with the module name: `Sandbox(__name__.rsplit('.', 1)[-1])`. Two suites with different names can run at the same time.
 5. Call `cls.addClassCleanup(sandbox.teardown)` on the next line. `tearDownClass` does not run when `setUpClass` fails.
-6. Make the fixture that all checks share, for example the Config and the Projects. Then launch the app once.
+6. Make the fixture that all checks share, for example the Config and the Session Paths. Then launch the app once.
 
 `make verify` waits for the slowest suite, so keep each suite under about a minute. When a suite grows past that, split it by feature. If the parts share a fixture, put it in a `TestCase` without checks in a module beside `sandbox.py`, not in `suites/`, and make the Sandbox with `Sandbox(cls.__module__.rsplit('.', 1)[-1])`. Example: `topics_sidebar.py` and the `topics_*_sidebar` suites.
 

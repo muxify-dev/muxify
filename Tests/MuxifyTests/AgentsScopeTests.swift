@@ -2,8 +2,8 @@ import XCTest
 @testable import MuxifyCore
 
 final class AgentsScopeTests: XCTestCase {
-    private let alpha = TopicRecord(id: "a", title: "Alpha", homeProject: "/work/app")
-    private let beta = TopicRecord(id: "b", title: "Beta", homeProject: "/work/app")
+    private let alpha = TopicRecord(id: "a", title: "Alpha")
+    private let beta = TopicRecord(id: "b", title: "Beta")
 
     private func window(_ id: String, session: String, topic: String?) -> TmuxWindow {
         TmuxWindow(id: id, sessionID: session, sessionName: "name-" + session, index: 0, name: "agent",

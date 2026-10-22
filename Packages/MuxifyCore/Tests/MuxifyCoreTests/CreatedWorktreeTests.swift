@@ -35,7 +35,7 @@ final class CreatedWorktreeTests: XCTestCase {
         _ = try git(["push", "-q", "-u", "origin", "main"], in: work)
         try commit("local", in: work)
         let base = Worktree(path: work, branch: "main")
-        let spec = TopicPlan.WorktreeSpec(projectPath: work, path: path("trees/work/fix-links"), branch: "fix-links")
+        let spec = TopicPlan.WorktreeSpec(repositoryPath: work, path: path("trees/work/fix-links"), branch: "fix-links")
         try TopicWorktrees.add(spec, at: try TopicWorktrees.commit(nil, in: base))
         XCTAssertEqual(try git(["rev-parse", "HEAD"], in: spec.path), try git(["rev-parse", "HEAD"], in: work))
         XCTAssertNotEqual(try git(["rev-parse", "HEAD"], in: spec.path), try git(["rev-parse", "origin/main"], in: work))
@@ -48,7 +48,7 @@ final class CreatedWorktreeTests: XCTestCase {
         _ = try git(["init", "-q", "-b", "main", work], in: root.path)
         try commit("init", in: work)
         _ = try git(["branch", "clash"], in: work)
-        let spec = TopicPlan.WorktreeSpec(projectPath: work, path: path("trees/clash"), branch: "clash")
+        let spec = TopicPlan.WorktreeSpec(repositoryPath: work, path: path("trees/clash"), branch: "clash")
         XCTAssertThrowsError(try TopicWorktrees.add(spec, at: try git(["rev-parse", "HEAD"], in: work))) { error in
             XCTAssertTrue(String(describing: error).contains("a branch named 'clash' already exists"), String(describing: error))
         }
@@ -65,14 +65,14 @@ final class CreatedWorktreeTests: XCTestCase {
             _ = try git(["worktree", "add", "-q", "-b", branch, folder], in: work)
         }
         func session(_ branch: String, _ folder: String, created: JSONValue?) -> JSONValue {
-            var fields: [String: JSONValue] = ["project_path": .string(work), "worktree_path": .string(folder), "branch": .string(branch)]
+            var fields: [String: JSONValue] = ["repository_path": .string(work), "worktree_path": .string(folder), "branch": .string(branch)]
             fields["worktree_created"] = created
             return .object(fields)
         }
-        var topic = TopicRecord(id: "topic", homeProject: work)
+        var topic = TopicRecord(id: "topic")
         topic.sessions = [session("created", inside("created"), created: .bool(true)), session("picked", inside("picked"), created: .bool(false)),
                           session("legacy", inside("legacy"), created: nil), session("outside", path("outside"), created: .bool(true))]
-        XCTAssertEqual(Set(TopicWorktrees.merged(in: topic, root: path("worktrees")).map(\.path)), [inside("created"), inside("legacy")],
+        XCTAssertEqual(Set(TopicWorktrees.merged(in: topic, root: path("worktrees")).map(\.path)), [inside("created")],
                        "a picked Worktree and one outside Muxify's folder are never removed")
     }
 }

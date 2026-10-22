@@ -6,21 +6,21 @@ import Foundation
 public struct TopicService: Sendable {
     public let paths: MuxifyPaths
     public let server: TmuxServer
-    /// The Projects a request may name, with the layouts that git reported.
-    public let projects: [Project]
+    /// The SessionPaths a request may name, with the layouts that git reported.
+    public let sessionPaths: [SessionPath]
     /// The Config's `topics`: where a new Session and a new Topic go, and the Tags a request may add.
     public let topics: Config.Topics
     private let store: TopicStore
     private let editLockTimeout: TimeInterval
 
-    public init(paths: MuxifyPaths, server: TmuxServer = .local, projects: [Project] = [], topics: Config.Topics = Config.Topics()) {
-        self.init(paths: paths, server: server, projects: projects, topics: topics, editLockTimeout: 10)
+    public init(paths: MuxifyPaths, server: TmuxServer = .local, sessionPaths: [SessionPath] = [], topics: Config.Topics = Config.Topics()) {
+        self.init(paths: paths, server: server, sessionPaths: sessionPaths, topics: topics, editLockTimeout: 10)
     }
 
-    init(paths: MuxifyPaths, server: TmuxServer, projects: [Project], topics: Config.Topics = Config.Topics(), editLockTimeout: TimeInterval) {
+    init(paths: MuxifyPaths, server: TmuxServer, sessionPaths: [SessionPath], topics: Config.Topics = Config.Topics(), editLockTimeout: TimeInterval) {
         self.paths = paths
         self.server = server
-        self.projects = projects
+        self.sessionPaths = sessionPaths
         self.topics = topics
         self.editLockTimeout = editLockTimeout
         store = TopicStore(paths: paths)
@@ -30,9 +30,9 @@ public struct TopicService: Sendable {
     /// It is a fact of the host, not of the request, so it is not on the wire. Nil switches nothing.
     /// A failure is returned, never thrown: its phase says how far the request got.
     public func handle(_ request: TopicRequest, client: String? = nil) -> TopicResponse {
-        guard request.version <= TopicRequest.currentVersion else {
+        guard request.version == TopicRequest.currentVersion else {
             return .failed(TopicFailure(kind: .unsupported, phase: .nothingChanged,
-                                        message: "The Topic request has version \(request.version). This Muxify reads version \(TopicRequest.currentVersion) or earlier."))
+                                        message: "The Topic request has version \(request.version). This Muxify reads version \(TopicRequest.currentVersion)."))
         }
         if case .list = request.command { return list() }
         if case .show = request.command { return show(request, client: client) }
@@ -59,8 +59,8 @@ public struct TopicService: Sendable {
             let records = try store.read().records
             let snapshot = server.snapshot()
             let topic = try openTopic(target, caller: nil, records: records, snapshot: snapshot, client: nil)
-            let record = topic.remembering(snapshot, projects: projects, order: topics.sessionOrder) ?? topic
-            return .success(TopicSettleSession.choices(topic: record, snapshot: snapshot, projects: projects,
+            let record = topic.remembering(snapshot, order: topics.sessionOrder) ?? topic
+            return .success(TopicSettleSession.choices(topic: record, snapshot: snapshot, sessionPaths: sessionPaths,
                                                        mergedWorktrees: TopicWorktrees.merged(in: record, root: paths.worktrees.path)))
         } catch {
             return .failure(failure(error, phase: .nothingChanged))
@@ -72,7 +72,7 @@ public struct TopicService: Sendable {
             let records = try store.read().records
             let snapshot = server.snapshot()
             let topic = try forgetTopic(target, caller: nil, records: records, snapshot: snapshot, client: nil)
-            return .success(TopicForgetChoices(topic: topic, snapshot: snapshot, projects: projects, root: paths.worktrees.path))
+            return .success(TopicForgetChoices(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, root: paths.worktrees.path))
         } catch { return .failure(failure(error, phase: .nothingChanged)) }
     }
 
@@ -89,8 +89,8 @@ public struct TopicService: Sendable {
     }
 
     private func madeWorktree(of window: TmuxWindow, topic: TopicRecord, snapshot: TmuxSnapshot) -> TopicForgetChoices.Worktree? {
-        guard let worktree = TopicLocation(of: window, record: topic, projects: projects).worktree else { return nil }
-        return TopicForgetChoices(topic: topic, snapshot: snapshot, projects: projects, root: paths.worktrees.path)
+        guard let worktree = topic.session(of: window)?["worktree_path"]?.string.map(Folder.local) else { return nil }
+        return TopicForgetChoices(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, root: paths.worktrees.path)
             .worktrees.first { Folder.local($0.spec.path) == worktree }
     }
 
@@ -122,7 +122,7 @@ public struct TopicService: Sendable {
             let snapshot = server.snapshot()
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             let branches = TopicBranches(records: [topic]) { try? String(contentsOfFile: $0, encoding: .utf8) }
-            return .topic(TopicDetail(record: topic, snapshot: snapshot, projects: projects, branches: branches))
+            return .topic(TopicDetail(record: topic, snapshot: snapshot, sessionPaths: sessionPaths, branches: branches))
         } catch {
             return .failed(failure(error, phase: .nothingChanged))
         }
@@ -252,37 +252,39 @@ public struct TopicService: Sendable {
         switch request.command {
         case .list, .show, .lock, .unlock, .snooze, .unsnooze, .tags:
             throw TopicRequestError.noTarget
-        case .create(let title, let projectPath, let tags):
+        case .create(let title, let repositoryPath, let tags):
             let tags = Set(tags ?? [])
             try checkDefined(.add(Array(tags)), on: [])
             let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let home: Project
-            if let projectPath {
-                home = try project(at: projectPath)
+            let launch: SessionPath
+            if let repositoryPath {
+                launch = try sessionPath(at: repositoryPath)
             } else if paneRequest(request.target, caller: request.caller) != nil {
                 let (pane, _) = try source()
-                home = TopicLocation(of: pane.window, record: TopicMembershipPlan.sourceRecord(for: pane.window, records: records), projects: projects).project
+                let directory = Folder.local(pane.directory ?? pane.window.path)
+                launch = SessionPath(folder: directory, name: SessionNaming.base(of: pane.window.sessionName,
+                    topic: TopicMembershipPlan.sourceRecord(for: pane.window, records: records)))
             } else {
-                let slug = TopicNaming.slug(title: title, project: nil, records: records, sessionNames: [])
+                let slug = TopicNaming.slug(title: title, records: records)
                 var record = TopicRecord(newTopic: UUID().uuidString.lowercased(), title: title, slug: slug, now: Date())
                 record.tags = tags
                 return Planned(edit: TopicEdit(record: record, commands: [], selection: .emptyTopic(record.id)))
             }
-            let plan = TopicPlan(title: title, project: home, records: records,
+            let plan = TopicPlan(title: title, sessionPath: launch, records: records,
                                  sessionNames: Set(snapshot.windows.map(\.sessionName)), clientTTY: client)
             var record = plan.record
             record.tags = tags
             return Planned(edit: TopicEdit(record: record, commands: plan.commands, selection: .sessionName(plan.sessionName)))
-        case .extract(let projectPath, let title):
+        case .extract(let repositoryPath, let title):
             let (pane, fresh) = try source()
-            let home = try projectPath.map { try project(at: $0) }
-            return Planned(edit: try TopicPanePlan(source: pane, project: home, title: title ?? "", records: records, windows: fresh.windows,
-                                                   projects: projects, clientTTY: client).edit)
-        case .addProject(let projectPath, let choice):
+            let launch = try repositoryPath.map { try sessionPath(at: $0) }
+            return Planned(edit: try TopicPanePlan(source: pane, sessionPath: launch, title: title ?? "", records: records, windows: fresh.windows,
+                                                   sessionPaths: sessionPaths, clientTTY: client).edit)
+        case .addSession(let repositoryPath, let choice, let name):
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
-            let project = try project(at: projectPath)
-            return Planned(edit: try TopicProjectPlan(topic: topic, project: project, workingCopy: workingCopy(choice, of: project),
-                                                      windows: snapshot.windows, projects: projects, order: topics.sessionOrder).edit)
+            let sessionPath = try sessionPath(at: repositoryPath)
+            return Planned(edit: try TopicSessionPlan(topic: topic, sessionPath: sessionPath, workingCopy: workingCopy(choice, of: sessionPath),
+                                                      windows: snapshot.windows, sessionPaths: sessionPaths, order: topics.sessionOrder, baseName: name).edit)
         case .settle(let choices, let outcome):
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             try checkMembership(request.expectedSessionIDs, choices: choices, topic: topic, snapshot: snapshot)
@@ -290,13 +292,13 @@ public struct TopicService: Sendable {
             snapshot.commandLines = PaneCommandLines().updating(for: snapshot) {
                 try? CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", PaneCommandLines.script]))
             }
-            return Planned(edit: TopicSettlePlan(topic: topic, snapshot: snapshot, projects: projects, choices: choices, outcome: outcome,
+            return Planned(edit: TopicSettlePlan(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, choices: choices, outcome: outcome,
                                                  mergedWorktrees: TopicWorktrees.merged(in: topic, root: paths.worktrees.path),
                                                  order: topics.sessionOrder).edit)
         case .forget(let choices, let worktrees):
             let topic = try forgetTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             try checkMembership(request.expectedSessionIDs, choices: choices, topic: topic, snapshot: snapshot)
-            return Planned(edit: TopicForgetPlan(topic: topic, snapshot: snapshot, projects: projects, choices: choices,
+            return Planned(edit: TopicForgetPlan(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, choices: choices,
                                                   worktrees: worktrees, root: paths.worktrees.path).edit)
         case .move(let destination):
             if case .newWindow(let title) = destination {
@@ -317,64 +319,46 @@ public struct TopicService: Sendable {
             let moved: TopicMembershipPlan.Source
             let selection: TopicEdit.Selection
             let windows: [TmuxWindow]
+            let directory: String?
             if case .session(let id) = request.target {
                 guard let window = snapshot.windows.first(where: { $0.sessionID == id.rawValue }) else { throw TopicEditFailure.sourceUnavailable }
                 (moved, selection, windows) = (.session(window), .unchanged, snapshot.windows)
+                directory = nil
             } else {
                 let (pane, fresh) = try source()
                 let paneTarget: Bool
                 if case .window = request.target { paneTarget = false } else { paneTarget = true }
                 guard let paneID = PaneID(rawValue: pane.paneID) else { throw TopicEditFailure.invalidTmuxResponse }
                 (moved, selection, windows) = (paneTarget ? .pane(paneID, pane.window) : .window(pane.window),
-                                                paneTarget ? .paneID(pane.paneID) : .unchanged, fresh.windows)
+                                                 paneTarget ? .paneID(pane.paneID) : .unchanged, fresh.windows)
+                directory = paneTarget ? pane.directory : nil
             }
             let plan: TopicMembershipPlan
             switch destination {
             case .newWindow: throw TopicRequestError.noTarget
+            case .session(let id):
+                guard let target = windows.first(where: { $0.sessionID == id.rawValue }) else { throw TopicMembershipPlan.Failure.destinationUnavailable }
+                let topic = records.first { $0.id == target.topicID && $0.settledAt == nil }
+                plan = try TopicMembershipPlan(source: moved, destination: topic, records: records, windows: windows,
+                    sessionPaths: sessionPaths, clientTTY: client, order: topics.sessionOrder, destinationSession: id.rawValue, launchDirectory: directory)
+            case .newSession(let ref):
+                let topic = try ref?.resolve(in: records, open: true)
+                plan = try TopicMembershipPlan(source: moved, destination: topic, records: records, windows: windows,
+                    sessionPaths: sessionPaths, clientTTY: client, order: topics.sessionOrder, createSession: true, launchDirectory: directory)
             case .topic(let ref):
                 plan = try TopicMembershipPlan(source: moved, destination: ref.resolve(in: records, open: true), records: records,
-                                               windows: windows, projects: projects, clientTTY: client, order: topics.sessionOrder)
+                                               windows: windows, sessionPaths: sessionPaths, clientTTY: client, order: topics.sessionOrder, launchDirectory: directory)
             case .newTopic(let title):
                 plan = try TopicMembershipPlan(source: moved, title: title, records: records, windows: windows,
-                                               projects: projects, clientTTY: client, order: topics.sessionOrder)
+                                               sessionPaths: sessionPaths, clientTTY: client, order: topics.sessionOrder, launchDirectory: directory)
             }
             var edit = TopicEdit(record: plan.record, commands: plan.commands, selection: selection)
             edit.leftTopic = plan.leftTopic
             return Planned(edit: edit, shown: WindowID(rawValue: moved.window.id).map { .window($0) }, replacedLockOf: plan.endedLockOf)
         case .removeFromTopic:
-            if case .window = request.target {
-                let (pane, fresh) = try source()
-                let window = pane.window
-                guard window.topicID != nil else {
-                    return Planned(edit: TopicEdit(record: nil, commands: [], selection: .paneID(pane.paneID)))
-                }
-                let home = TopicMembershipPlan.project(of: window, records: records, projects: projects)
-                let existing = fresh.windows.first {
-                    $0.topicID == nil && TopicMembershipPlan.project(of: $0, records: records, projects: projects).folder == home.folder
-                }
-                let target: String
-                var commands: [TopicPlan.Command] = []
-                if let existing {
-                    target = existing.sessionID + ":"
-                } else {
-                    guard !home.folder.path.isEmpty, !home.name.isEmpty, !home.name.contains("."),
-                          !home.name.contains(":"), !home.name.contains("\n") else { throw TopicEditFailure.invalidProject }
-                    let names = Set(fresh.windows.map(\.sessionName))
-                    var name = home.name
-                    var number = 2
-                    while names.contains(name) { name = "\(home.name)-\(number)"; number += 1 }
-                    target = "=" + name + ":"
-                    commands.append(.newTopicSession(name: name, directory: home.folder.path))
-                }
-                if let client { commands.append(.tmux(["switch-client", "-c", client, "-t", target])) }
-                commands.append(.tmux(["move-window", "-d", "-s", window.sessionID + ":" + window.id, "-t", target]))
-                if existing == nil { commands.append(.removeTopicPlaceholder) }
-                let record = TopicMembershipPlan.ends(.window(window), windows: fresh.windows)
-                    ? TopicMembershipPlan.openTopic(of: window, records: records)?.forgetting(window, projects: projects) : nil
-                return Planned(edit: TopicEdit(record: record, commands: commands, selection: .paneID(pane.paneID)))
-            }
+            if case .window = request.target { throw TopicRequestError.noTarget }
             let plan = TopicMembershipPlan(removingSession: try sessionWindow(request.target, caller: request.caller, snapshot: snapshot, client: client),
-                                           records: records, projects: projects)
+                                           records: records, sessionPaths: sessionPaths, windows: snapshot.windows)
             return Planned(edit: TopicEdit(record: plan.record, commands: plan.commands, selection: .unchanged))
         case .removeAndKill(let worktrees):
             let window = try sessionWindow(request.target, caller: request.caller, snapshot: snapshot, client: client)
@@ -388,12 +372,12 @@ public struct TopicService: Sendable {
                worktrees.contains(tree.id) {
                 commands.append(.removeCleanWorktree(tree.spec))
             }
-            return Planned(edit: TopicEdit(record: topic.forgetting(window, projects: projects), commands: commands,
+            return Planned(edit: TopicEdit(record: topic.forgetting(window), commands: commands,
                                            selection: next.map { .sessionID($0.sessionID) } ?? .emptyTopic(topic.id)))
         case .rename(let title):
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             return Planned(edit: try TopicRenamePlan(topic: topic, title: title, records: records,
-                                                     windows: snapshot.windows, projects: projects).edit)
+                                                     windows: snapshot.windows, sessionPaths: sessionPaths).edit)
         case .moveSession(let placement):
             guard case .session(let id) = request.target else { throw TopicRequestError.noTarget }
             guard let topic = snapshot.windows.first(where: { $0.sessionID == id.rawValue })
@@ -401,14 +385,14 @@ public struct TopicService: Sendable {
                 throw TopicEditFailure.sessionUnavailable
             }
             return Planned(edit: try TopicSessionOrderPlan(moving: id.rawValue, to: placement, topic: topic, windows: snapshot.windows,
-                                                           projects: projects, order: topics.sessionOrder).edit)
+                                                           sessionPaths: sessionPaths, order: topics.sessionOrder).edit)
         case .sortSessions:
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             return Planned(edit: TopicSessionOrderPlan(sortingByCreation: topic).edit)
         case .reopen, .startFresh:
             guard case .topic(let ref) = request.target else { throw TopicRequestError.noTarget }
             let topic = try ref.resolve(in: records, open: false)
-            return Planned(edit: try TopicReopenPlan(topic: topic, records: records, windows: snapshot.windows, projects: projects,
+            return Planned(edit: try TopicReopenPlan(topic: topic, records: records, windows: snapshot.windows, sessionPaths: sessionPaths,
                                                      existingDirectories: TopicReopening.existingWorktrees(of: topic),
                                                      choice: request.command == .startFresh ? .startFresh : .reopen).edit)
         }
@@ -495,24 +479,26 @@ public struct TopicService: Sendable {
     }
 
     /// `path` is a request's, given on this Mac, so it may reach the Config's folder through a symlink.
-    private func project(at path: String) throws -> Project {
+    private func sessionPath(at path: String) throws -> SessionPath {
         let folder = Folder.local(path)
-        guard let match = projects.first(where: { $0.folder == folder }) else {
-            throw TopicRequestError.projectUnavailable(path)
+        if let match = sessionPaths.first(where: { $0.folder == folder }) { return match }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            throw TopicRequestError.sessionPathUnavailable(path)
         }
-        return match
+        return SessionPath(folder: folder, name: SessionPath.sessionName((folder.path as NSString).lastPathComponent), layout: RepositoryLayout.detect(at: folder.path))
     }
 
-    private func workingCopy(_ choice: TopicWorkingCopyChoice, of project: Project) throws -> TopicWorkingCopy {
+    private func workingCopy(_ choice: TopicWorkingCopyChoice, of sessionPath: SessionPath) throws -> TopicWorkingCopy {
         func worktree(at path: String) throws -> Worktree {
             let folder = Folder.local(path)
-            guard let match = project.layout.worktrees.first(where: { $0.folder == folder }) else {
-                throw TopicRequestError.projectUnavailable(path)
+            guard let match = sessionPath.layout.worktrees.first(where: { $0.folder == folder }) else {
+                throw TopicRequestError.sessionPathUnavailable(path)
             }
             return match
         }
         switch choice {
-        case .project: return .homeProject
+        case .directory: return .directory
         case .worktree(let path): return .worktree(try worktree(at: path))
         case .newWorktree(let path, let base):
             return .newWorktree(at: try TopicWorktrees.commit(base, in: try worktree(at: path)), root: paths.worktrees.path)
@@ -555,7 +541,7 @@ public struct TopicService: Sendable {
             case .invalidURL, .targetAndTopics: return .unsupported
             case .undefinedTags: return .tagUndefined
             case .noTarget: return .noTarget
-            case .projectUnavailable: return .projectUnavailable
+            case .sessionPathUnavailable: return .sessionPathUnavailable
             case .sourceHasNoTopic: return .sourceHasNoTopic
             case .topicUnavailable: return .topicUnavailable
             case .topicAmbiguous: return .topicAmbiguous
@@ -568,18 +554,14 @@ public struct TopicService: Sendable {
             switch error {
             case .destinationUnavailable: return .topicUnavailable
             case .sourceUnavailable, .sessionUnavailable: return .sourceUnavailable
-            case .duplicateProject: return .duplicateProject
-            case .invalidProject: return .projectUnavailable
-            case .sessionNameInUse: return .sessionNameInUse
+            case .invalidSessionPath: return .sessionPathUnavailable
             case .invalidTmuxResponse: return .tmuxFailed
             }
         case let error as TopicMembershipPlan.Failure:
             switch error {
-            case .occupiedProject: return .duplicateProject
-            case .sessionNameInUse: return .sessionNameInUse
-            case .invalidProject: return .projectUnavailable
             case .sourceUnavailable: return .sourceUnavailable
             case .destinationUnavailable: return .topicUnavailable
+            case .chooseSession: return .unsupported
             }
         case is TopicTransaction.Failure: return .topicUnavailable
         case is FileLock.Busy: return .storeBusy
@@ -612,7 +594,7 @@ extension TopicRef {
 public enum TopicRequestError: Error, CustomStringConvertible {
     case invalidURL
     case noTarget
-    case projectUnavailable(String)
+    case sessionPathUnavailable(String)
     case sourceHasNoTopic
     case topicUnavailable(String)
     case topicAmbiguous(String)
@@ -629,7 +611,7 @@ public enum TopicRequestError: Error, CustomStringConvertible {
         switch self {
         case .invalidURL: return "The Topic URL is invalid."
         case .noTarget: return "The request names no Topic, Window or Pane, and it does not come from a Pane."
-        case .projectUnavailable(let path): return "The Config has no Project at \(path)."
+        case .sessionPathUnavailable(let path): return "No launch directory is available at \(path)."
         case .sourceHasNoTopic: return "The Pane is not in an open Topic."
         case .topicUnavailable(let value): return "No open Topic matches \(value)."
         case .topicMembershipChanged: return "The Topic Sessions, Windows or Panes changed. Review them and confirm again."

@@ -1,0 +1,13 @@
+# The Sessions Source lists Sessions individually and launches Session Paths by exact name
+
+Every running tmux Session has its own row in the Sessions Source, including Sessions in Topics, regardless of whether the Sidebar shows Topics or Sessions. Session Paths offer their exact-named Sessions: if that name is running, use its existing Session row without a duplicate; otherwise offer a launch row that starts that exact name in the path's folder. A differently named Session in the same folder does not occupy the launch row, and a matching name in another folder still identifies the existing Session.
+
+This deliberately replaces folder-based matching from [ADR 0009](0009-command-palettes-are-defined-in-the-config.md) and [ADR 0011](0011-projects-come-from-sessions-paths.md), and the Session aggregation and mode-dependent filtering in [ADR 0012](0012-topics-are-a-source-of-the-command-palette.md). Searching for a Session must lead to that Session, not a shared folder row whose most recently visited Session can be somebody else.
+
+Next/Previous Session is a navigation command, not a search of this Source, and remains mode-dependent: it traverses only the Active Topic's Sessions in Topics mode, and all Sessions in Sessions mode. Other expanded Topics, card collapse and scrolling do not change that boundary.
+
+Keep glob, depth, display-depth, symlink, bare-repository and Git Worktree discovery, flattening its results into Session Paths rather than repository-owned groups. Generated launch names stay `repo` for a main checkout and `repo/worktree` for another checkout. `sessions.aliases` remains display-only; running Session names are primary. If two folders generate the same launch name, the first configured entry wins and a visible diagnostic identifies the collision; the user can use `display_depth` to distinguish them without discovery-order auto-renaming.
+
+The explicit New Session action (`⌘↩`) is available on both running Session and unopened Session Path rows and uses `+2`, `+3` and so on. In the general palette it creates a No Topic Session; the Add a Session flow creates within its target Topic. The CLI's `session list` mirrors the merged running/launchable inventory with an explicit distinction between those states, and Topic operations use an exact Session name or ID through `--session`, not a folder selector. Sidebar formats keep `#{session_name}` for the full tmux name and replace the old folder-derived `#{project}` role with `#{session_base_name}`, including in Topic summaries.
+
+With an empty query, list other running Sessions by recent visits/activity, then the current Session last among running Sessions, then unopened Session Paths. Typed queries continue to use fuzzy ranking.

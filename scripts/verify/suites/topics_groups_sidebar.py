@@ -146,7 +146,7 @@ class TopicsGroupsSidebar(TopicsSidebar):
 
     def test_settled_group_lists_settled_topic_with_remembered_windows_and_its_reopen_choice_rebuilds_it(self):
         self.write_topic('group-settled', 'Group settled', self.alpha, settled_at='2031-01-01T10:00:00Z', outcome='Shipped proof',
-                         sessions=[dict(project_path=str(self.alpha), windows=[dict(directory=str(self.alpha), name='shell')])])
+                         sessions=[dict(id='saved', name='alpha/group-settled', base_name='alpha', directory=str(self.alpha), windows=[dict(directory=str(self.alpha), name='shell')])])
         self.expand('settled-topics')
         latency, rs = self.rows_until(lambda rs: self.grouped('topic-group-settled', 'settled-topics', rs))
         self.assertIsNotNone(latency, 'Topic is not in the Settled group; Topic rows %s' % self.topic_rows(rs))
@@ -214,4 +214,3 @@ class TopicsGroupsSidebar(TopicsSidebar):
         self.s.reveal('settled-show-more')
         latency, rs = self.rows_until(lambda rs: len(self.settled_rows(rs)) == 15)
         self.assertIsNotNone(latency, 'collapsing did not reset the Settled group to 15 rows; rows %s' % self.settled_rows(rs))
-

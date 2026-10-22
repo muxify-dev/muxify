@@ -19,10 +19,10 @@ final class TopicGroupsTests: XCTestCase {
     }
 
     private func settled(_ id: String, at: String, outcome: String? = nil) -> TopicRecord {
-        var record = TopicRecord(id: id, title: id.capitalized, homeProject: "/work/app")
+        var record = TopicRecord(id: id, title: id.capitalized)
         record.settledAt = at
         record.outcome = outcome
-        record.sessions = [.object(["project_path": .string("/work/app"), "worktree_path": .string("/trees/app/fix-links"),
+        record.sessions = [.object(["id": .string("saved"), "name": .string("app/fix-links"), "base_name": .string("app/fix-links"), "directory": .string("/work/app"),
                                     "windows": .array([.object(["name": .string("server"), "directory": .string("/work/app/srv")]),
                                                        .object(["name": .string("shell")])])])]
         return record
@@ -63,7 +63,7 @@ final class TopicGroupsTests: XCTestCase {
     func testSnoozedRowsShowWakeTimeAndDormancy() {
         let wake = SnoozeDeadline.at(now.addingTimeInterval(3600))
         var second = snoozed("second", until: .never, order: 2)
-        second.sessions = [.object(["project_path": .string("/work/app")])]
+        second.sessions = [.object(["repository_path": .string("/work/app")])]
         let records = [second, snoozed("first", until: wake, order: 1)]
         let topics = model(records, windows: [window("@1", session: "$1", topic: "first")])
         let group = topics.groups.first { $0.kind == .snoozed }!
@@ -122,7 +122,7 @@ final class TopicGroupsTests: XCTestCase {
         XCTAssertTrue(group.topics[0].isExpanded)
         XCTAssertFalse(group.topics[0].isDormant, "a Settled Topic is not Dormant, it is done")
         let session = group.topics[0].sessions[0]
-        XCTAssertEqual(session.projectName, "app/fix-links")
+        XCTAssertEqual(session.baseName, "app/fix-links")
         guard case .remembered(let windows) = session.contents else { return XCTFail("remembered Windows expected") }
         XCTAssertEqual(windows.map(\.name), ["server", "shell"])
         XCTAssertEqual(windows.map(\.directory), ["/work/app/srv", "/work/app"])

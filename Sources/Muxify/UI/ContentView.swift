@@ -206,7 +206,7 @@ private struct ConfigProblemsBanner: View {
     }
 
     var body: some View {
-        if !local.isEmpty || !remote.isEmpty { banner(theme: store.theme) }
+        if !local.isEmpty || !remote.isEmpty || !store.sessionPathWarnings.isEmpty && !store.sessionPathWarningsDismissed { banner(theme: store.theme) }
     }
 
     private func banner(theme: TerminalTheme?) -> some View {
@@ -216,6 +216,11 @@ private struct ConfigProblemsBanner: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Problems in the Muxify Config")
                     .font(.callout.weight(.semibold))
+                if !store.sessionPathWarningsDismissed {
+                    ForEach(store.sessionPathWarnings, id: \.self) { warning in
+                        Text(warning).font(.caption).textSelection(.enabled)
+                    }
+                }
                 ForEach(Array((remote + local).enumerated()), id: \.offset) { _, problem in
                     Text("\((problem.path as NSString).abbreviatingWithTildeInPath):\(problem.line): \(problem.message)")
                         .font(.caption.monospaced())
@@ -237,6 +242,7 @@ private struct ConfigProblemsBanner: View {
             Button {
                 configStore.problemsDismissed = true
                 store.remoteProblemsDismissed = true
+                store.sessionPathWarningsDismissed = true
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .semibold))
@@ -323,11 +329,11 @@ private struct TerminalArea: View {
                             .disabled(store.changingTopic)
                             .accessibilityIdentifier("reopen-choice-reopen")
                     } else {
-                        Text("Open a Project to start this Topic.").foregroundStyle(.secondary)
-                        Button("Add a Project…") { store.presentAddProject(toTopic: id) }
+                        Text("Add a Session to start this Topic.").foregroundStyle(.secondary)
+                        Button("Add a Session…") { store.presentAddSession(toTopic: id) }
                             .keyboardShortcut(.defaultAction)
                             .disabled(store.changingTopic)
-                            .accessibilityIdentifier("empty-topic-add-project")
+                            .accessibilityIdentifier("empty-topic-add-session")
                     }
                 }
             }
@@ -338,7 +344,7 @@ private struct TerminalArea: View {
         .environment(\.colorScheme, store.theme.map { $0.isDark ? .dark : .light } ?? systemColorScheme)
     }
 
-    /// A Settled Topic, or a Dormant one that remembers a Session, offers Reopen; an empty open Topic offers Add a Project.
+    /// A Settled Topic, or a Dormant one that remembers a Session, offers Reopen; an empty open Topic offers Add a Session.
     private func offersReopen(_ topic: TopicsModel.Row) -> Bool {
         if case .settled = topic.kind { return true }
         guard topic.remembersSessions, case .topic(let id) = topic.id, case .success(let reopening)? = store.reopening(id, .reopen) else { return false }

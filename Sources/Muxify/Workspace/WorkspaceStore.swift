@@ -28,49 +28,56 @@ final class WorkspaceStore {
     private var pendingReadNavigations: Set<UUID> = []
 
     private(set) var newTopicFailure: String?
-    /// When each Topic, Session and Project was last looked at; the lists rank by it.
+    /// When each Topic, Session and SessionPath was last looked at; the lists rank by it.
     private(set) var visits = VisitLog(defaults: .standard)
-    /// The Projects on this App Window's Environment, as `refreshProjects` found them last.
-    private(set) var projects: [Project] = []
-    /// Resolves a path on this App Window's Environment: with `realpath` on this Mac, else through the Projects found there.
-    var folders: FolderResolver { isRemote ? .remote(projects) : .local }
+    /// The SessionPaths on this App Window's Environment, as `refreshSessionPaths` found them last.
+    private(set) var sessionPaths: [SessionPath] = []
+    private(set) var sessionPathWarnings: [String] = []
+    var sessionPathWarningsDismissed = false
+    /// Resolves a path on this App Window's Environment: with `realpath` on this Mac, else through the SessionPaths found there.
+    var folders: FolderResolver { isRemote ? .remote(sessionPaths) : .local }
     var topicConfig: Config.Topics { configStore.config.topics }
 
-    /// Looks for the Config's Projects again, on the Environment's machine and off the main thread. A sheet
+    /// Looks for the Config's SessionPaths again, on the Environment's machine and off the main thread. A sheet
     /// or palette opens at once, and a folder made since the last look joins it a moment later. Topics read
-    /// the Local Projects from the Config, so a Local App Window hands them over.
-    func refreshProjects() {
+    /// the Local SessionPaths from the Config, so a Local App Window hands them over.
+    func refreshSessionPaths() {
         let config = self.config
-        let found = { [weak self] (projects: [Project]) in
-            guard let self, self.config.projectRoots == config.projectRoots, self.config.projectAliases == config.projectAliases else { return }
-            if self.projects != projects { self.projects = projects }
-            if !self.isRemote { self.configStore.updateProjects(projects, foundFor: config) }
+        let found = { [weak self] (sessionPaths: [SessionPath]) in
+            guard let self, self.config.sessionRoots == config.sessionRoots, self.config.sessionAliases == config.sessionAliases else { return }
+            if self.sessionPaths != sessionPaths { self.sessionPaths = sessionPaths }
+            let warnings = SessionPathDiscovery.warnings(in: sessionPaths)
+            if self.sessionPathWarnings != warnings {
+                self.sessionPathWarnings = warnings
+                self.sessionPathWarningsDismissed = false
+            }
+            if !self.isRemote { self.configStore.updateSessionPaths(sessionPaths, foundFor: config) }
         }
         guard isRemote else {
-            let roots = config.projectRoots, aliases = config.projectAliases
+            let roots = config.sessionRoots, aliases = config.sessionAliases
             DispatchQueue.global(qos: .userInitiated).async {
-                let projects = ProjectDiscovery.discover(roots, aliases: aliases)
-                DispatchQueue.main.async { found(projects) }
+                let sessionPaths = SessionPathDiscovery.discover(roots, aliases: aliases)
+                DispatchQueue.main.async { found(sessionPaths) }
             }
             return
         }
         guard let connection else { return }
-        guard !config.projectRoots.isEmpty else { return found([]) }
+        guard !config.sessionRoots.isEmpty else { return found([]) }
         let current = generation
-        connection.runScriptAsync(ProjectDiscovery.script, arguments: ProjectDiscovery.arguments(for: config.projectRoots)) { [weak self] result in
+        connection.runScriptAsync(SessionPathDiscovery.script, arguments: SessionPathDiscovery.arguments(for: config.sessionRoots)) { [weak self] result in
             guard let self, self.generation == current else { return }
             switch result {
-            case .success(let output): found(ProjectDiscovery.projects(in: output, roots: config.projectRoots, aliases: config.projectAliases))
-            case .failure(let error): NSLog("muxify: Projects: \(error)")
+            case .success(let output): found(SessionPathDiscovery.sessionPaths(in: output, roots: config.sessionRoots, aliases: config.sessionAliases))
+            case .failure(let error): NSLog("muxify: SessionPaths: \(error)")
             }
         }
     }
 
-    /// The New Topic list, or the Add Project list of `topic`, ranked for `query`.
-    func projectList(query: String, addingTo topic: TopicRecord? = nil) -> PickList<ProjectChoice> {
-        let rows = ProjectRows.build(projects: projects, windows: windows, records: topicWatcher.records, titles: topics.titles,
+    /// The New Topic list, or the Add Session list of `topic`, ranked for `query`.
+    func sessionPathList(query: String, addingTo topic: TopicRecord? = nil) -> PickList<SessionChoice> {
+        let rows = SessionPathRows.build(sessionPaths: sessionPaths, windows: windows, records: topicWatcher.records, titles: topics.titles,
                                      addingTo: topic)
-        return ProjectRows.list(rows, query: query, visits: visits)
+        return SessionPathRows.list(rows, query: query, visits: visits)
     }
 
     func presentNewTopic(keepingHistory: Bool = false) {
@@ -79,9 +86,9 @@ final class WorkspaceStore {
         palette.begin(.text(.tags(TagField(mode: .newTopic, defined: topicConfig.tags))), keepingHistory: keepingHistory)
     }
 
-    /// Makes an open Topic with no Session and shows it, so the user adds its first Project from there.
+    /// Makes an open Topic with no Session and shows it, so the user adds its first SessionPath from there.
     func createTopic(title: String, tags: [Tag] = []) {
-        perform(TopicRequest(.create(title: title, project: nil, tags: tags.isEmpty ? nil : tags)), presenting: .newTopic)
+        perform(TopicRequest(.create(title: title, sessionPath: nil, tags: tags.isEmpty ? nil : tags)), presenting: .newTopic)
     }
 
     /// Edit Tags for an open Topic: one field with its Tags as chips.
@@ -99,7 +106,7 @@ final class WorkspaceStore {
     }
 
     /// Puts a Topic with no live Session in place of the terminal and makes it the Active Topic: an empty Topic
-    /// offers Add a Project, a Dormant or Settled one offers Reopen and Start Fresh. Selecting a Window ends it.
+    /// offers Add a Session, a Dormant or Settled one offers Reopen and Start Fresh. Selecting a Window ends it.
     func showEmptyTopic(_ id: String) {
         let entering = topicSelection.emptyTopicID != id
         topicSelection.showsEmptyNoTopic = false
@@ -160,20 +167,18 @@ final class WorkspaceStore {
     /// Goes to the Session in `target.directory`, or starts one there in No Topic. A second press while the
     /// first Session is still being created does nothing.
     func openDirectory(_ target: OpenDirectory) {
-        guard pendingOpenings[target.directory] == nil else { return }
-        let openTopicIDs = Set(topicWatcher.records.filter { $0.settledAt == nil }.map(\.id))
-        let resolver = SessionResolver(windows: windows, openTopicIDs: openTopicIDs, projects: projects, folders: folders, visits: visits)
-        switch resolver.target(directory: target.directory, name: target.name, reach: target.reach) {
-        case .go(let window): select(window)
-        case .create(let name): startSession(in: target.directory, named: name)
-        }
+        if let window = EntryWindow.ofSession(windows.filter { $0.sessionName == target.name }) { select(window) }
+        else if !pendingOpenings.values.contains(where: { $0.name == target.name }) { startSession(in: target.directory, named: target.name) }
     }
 
-    /// Starts another Session in `target.directory` even when one runs there, named after the row with
-    /// "-2", "-3", ... as needed. It is in No Topic, as one that `openDirectory` starts.
-    func newSession(in target: OpenDirectory) {
+    /// Starts another Session, allocating +2, +3, etc. in the selected row's Topic or No Topic scope.
+    func newSession(in target: OpenDirectory, topic: String? = nil) {
+        if let topic, !isRemote {
+            perform(TopicRequest(.addSession(sessionPath: target.directory.path, workingCopy: .directory, name: target.name), target: .topic(.id(topic))))
+            return
+        }
         guard pendingOpenings[target.directory] == nil else { return }
-        startSession(in: target.directory, named: SessionResolver.sessionName(target.name, taken: Set(windows.map(\.sessionName))))
+        startSession(in: target.directory, named: SessionNaming.available(target.name, taken: Set(windows.map(\.sessionName))))
     }
 
     /// Starts a tmux Session at `directory` and switches to it. tmux refusing a duplicate name means an
@@ -243,6 +248,11 @@ final class WorkspaceStore {
         let to: TopicDestination
         switch destination {
         case .topic(let id): to = .topic(.id(id))
+        case .noTopic: to = .newSession(topic: nil)
+        case .session(let id):
+            guard let session = SessionID(rawValue: id) else { return }
+            to = .session(session)
+        case .newSession(let topic): to = .newSession(topic: topic.map(TopicRef.id))
         case .newTopic(let title): to = .newTopic(title: title)
         case .newWindow(let title): to = .newWindow(title: title)
         }
@@ -367,8 +377,9 @@ final class WorkspaceStore {
     }
 
     func removeWindowFromTopic(_ window: TmuxWindow) {
-        guard let id = WindowID(rawValue: window.id) else { return }
-        perform(TopicRequest(.removeFromTopic, target: .window(id)))
+        var draft = MoveDraft(window: window, paneID: window.activePaneID, scope: .window)
+        draft.destination = .sessions(topic: nil)
+        palette.begin(.move(draft), keepingHistory: true)
     }
 
     func removeFromTopic(_ window: TmuxWindow) {
@@ -389,13 +400,13 @@ final class WorkspaceStore {
         palette.begin(.text(.renameTopic(topic)), text: topic.title ?? "", keepingHistory: keepingHistory)
     }
 
-    func presentAddProject(toTopic id: String? = nil, keepingHistory: Bool = false) {
+    func presentAddSession(toTopic id: String? = nil, keepingHistory: Bool = false) {
         topicWatcher.reload()
         let selected = id ?? activeTopicID
         guard let topic = topicWatcher.records.first(where: { $0.id == selected && $0.settledAt == nil }),
               !changingTopic, !isRemote else { return }
-        palette.begin(.addProject(topic), keepingHistory: keepingHistory)
-        refreshProjects()
+        palette.begin(.addSession(topic), keepingHistory: keepingHistory)
+        refreshSessionPaths()
     }
 
     func renameTopic(_ id: String, to title: String) {
@@ -420,10 +431,10 @@ final class WorkspaceStore {
         }
         topic.sessions = rememberedTopics[id]?.sessions ?? topic.sessions
         let commands = topicConfig.titleCommandFallbacks
-        let projects = projects
+        let sessionPaths = sessionPaths
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let result = Result {
-                try TopicTitleSuggester(commands: commands).suggest(for: .topic(topic, TmuxServer.app.snapshot(), projects))
+                try TopicTitleSuggester(commands: commands).suggest(for: .topic(topic, TmuxServer.app.snapshot(), sessionPaths))
             }
             RunLoop.main.perform(inModes: [.default, .modalPanel]) {
                 MainActor.assumeIsolated {
@@ -468,8 +479,8 @@ final class WorkspaceStore {
     }
 
     /// `newWorktree` opens the Session on a new Worktree from the chosen one; it needs a repository row.
-    func addProject(_ choice: ProjectChoice, toTopic id: String, newWorktree: Bool) {
-        perform(TopicRequest(.addProject(project: choice.project.folder.path, workingCopy: choice.workingCopy(newWorktree: newWorktree)),
+    func addSession(_ choice: SessionChoice, toTopic id: String, newWorktree: Bool) {
+        perform(TopicRequest(.addSession(sessionPath: choice.sessionPath.folder.path, workingCopy: choice.workingCopy(newWorktree: newWorktree), name: choice.name),
                              target: .topic(.id(id))))
     }
 
@@ -693,7 +704,7 @@ final class WorkspaceStore {
     }
 
     /// The open Topic has a Session to create, the same test that makes the empty-Topic view offer the Reopen choice.
-    /// An Empty Topic remembers no Session, so going to it offers Add a Project, not a Session in its Home Project.
+    /// An Empty Topic remembers no Session, so going to it offers Add a Session and creates nothing implicitly.
     private func reopensOnArrival(_ id: String) -> Bool {
         guard topicWatcher.records.contains(where: { $0.id == id && $0.settledAt == nil && !$0.sessions.isEmpty }),
               case .success(let reopening)? = reopening(id, .reopen) else { return false }
@@ -704,7 +715,7 @@ final class WorkspaceStore {
     func reopening(_ id: String, _ choice: TopicReopening.Choice) -> Result<TopicReopening, Error>? {
         guard let topic = topicWatcher.records.first(where: { $0.id == id }) else { return nil }
         return Result {
-            try TopicReopening(topic: topic, records: topicWatcher.records, windows: windows, projects: projects,
+            try TopicReopening(topic: topic, records: topicWatcher.records, windows: windows, sessionPaths: sessionPaths,
                                existingDirectories: TopicReopening.existingWorktrees(of: topic), choice: choice)
         }
     }
@@ -758,9 +769,9 @@ final class WorkspaceStore {
         }
     }
 
-    /// The service on the Local server, with the Projects as git reported them last.
+    /// The service on the Local server, with the SessionPaths as git reported them last.
     func topicService() -> TopicService {
-        TopicService(paths: topicWatcher.store.paths, server: .app, projects: projects, topics: topicConfig)
+        TopicService(paths: topicWatcher.store.paths, server: .app, sessionPaths: sessionPaths, topics: topicConfig)
     }
 
     private func present(_ response: TopicResponse, as presentation: TopicPresentation, invocation: UUID) {
@@ -800,7 +811,7 @@ final class WorkspaceStore {
                 switch change.shown {
                 case .emptyTopic(let id)?:
                     showEmptyTopic(id)
-                    if case .newTopic = presentation, ownsPalette { presentAddProject(toTopic: id) }
+                    if case .newTopic = presentation, ownsPalette { presentAddSession(toTopic: id) }
                 case .window(let id)?:
                     pendingSession = nil
                     pendingSelection = (id.rawValue, Date().addingTimeInterval(5), false)
@@ -854,7 +865,7 @@ final class WorkspaceStore {
         } ?? .noTopic
         // A mutating call on `visits` notifies its readers even when it records nothing, and this runs on each refresh.
         var log = visits
-        guard log.record(window, group: group, projects: projects, folders: folders, at: Date()) else { return }
+        guard log.record(window, group: group, sessionPaths: sessionPaths, folders: folders, at: Date()) else { return }
         visits = log
         visits.save(to: .standard)
     }
@@ -877,7 +888,7 @@ final class WorkspaceStore {
         var selection = topicSelection
         selection.windowID = selectedWindowID
         var config = self.config
-        // Topic records and Projects are on this Mac; a Remote App Window shows Sessions only.
+        // Topic records and SessionPaths are on this Mac; a Remote App Window shows Sessions only.
         if isRemote { config.sidebar.topics = false }
         return TopicsModel(records: topicWatcher.records, windows: windows, config: config,
                            selection: selection, mode: sidebarMode, groups: topicGroups, agents: agents,
@@ -887,7 +898,7 @@ final class WorkspaceStore {
     var sidebarFormatContexts: SidebarFormatContexts { sidebarFormatsCache.value }
     @ObservationIgnored private lazy var sidebarFormatsCache = ObservedCache { [unowned self] in
         SidebarFormatContexts(model: topics, windows: windows, panes: panes, agents: agents,
-                              branches: topicBranches, records: topicWatcher.records, projects: projects,
+                              branches: topicBranches, records: topicWatcher.records, sessionPaths: sessionPaths,
                               tabCounts: Dictionary(windows.map { ($0.id, tabCount(for: $0)) },
                                                     uniquingKeysWith: { first, _ in first }))
     }
@@ -1034,6 +1045,7 @@ final class WorkspaceStore {
     @ObservationIgnored private var rememberedTopics: [String: TopicRecord] = [:]
     /// The record's `sessions` on disk when its pending snapshot was taken.
     @ObservationIgnored private var topicSnapshotBases: [String: [JSONValue]] = [:]
+    @ObservationIgnored private var memoryServerID: String?
     @ObservationIgnored private var topicPersistWork: [String: DispatchWorkItem] = [:]
     /// Each Window's Git View, made when it first opens and kept while the
     /// Window lives. Observed, for the sidebar's Git View icons.
@@ -1052,7 +1064,7 @@ final class WorkspaceStore {
     /// A Session asked for by name (`muxify session open`) that the snapshot
     /// may not list yet: Muxify is just launching, or it was just created.
     @ObservationIgnored private var pendingSession: (name: String, deadline: Date)?
-    /// Sessions a Project row is creating, by directory, until a snapshot lists them or a few seconds pass.
+    /// Sessions a SessionPath row is creating, by directory, until a snapshot lists them or a few seconds pass.
     @ObservationIgnored private var pendingOpenings: [Folder: (name: String, deadline: Date)] = [:]
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var keyMonitor: Any?
@@ -1106,7 +1118,7 @@ final class WorkspaceStore {
         // Topics live on this Mac, so a Remote App Window leaves them alone.
         if !isRemote {
             topicWatcher.start()
-            refreshProjects()
+            refreshSessionPaths()
         }
         theme = GhosttyRuntime.shared.theme
         guard GhosttyRuntime.shared.app != nil else {
@@ -1149,7 +1161,7 @@ final class WorkspaceStore {
         if next != activeEnvironment {
             remoteConfig = nil
             remoteConfigPath = nil
-            projects = []
+            sessionPaths = []
         }
         activeEnvironment = next
         attachmentTarget = target
@@ -1347,6 +1359,7 @@ final class WorkspaceStore {
                     self.apply(snapshot, attachIfNeeded: attachIfNeeded)
                 case .failure(let error):
                     self.isConnected = false
+                    self.memoryServerID = nil
                     if !self.isRemote, self.surface == nil { self.terminalMessage = String(describing: error) }
                     if error as? TmuxError != .notReady {
                         self.environmentStatus = "Waiting for \(self.environmentName): \(error)"
@@ -1847,15 +1860,21 @@ final class WorkspaceStore {
 
     func newSession() {
         let cwd = selectedWindow?.path ?? homeDirectory
-        startSession(in: Folder(path: cwd, real: folders.folder(cwd).real), named: SessionResolver.sessionName((cwd as NSString).lastPathComponent, taken: Set(windows.map(\.sessionName))))
+        let topic = isRemote ? nil : topicWatcher.records.first { $0.id == selectedWindow?.topicID && $0.settledAt == nil }
+        let base = selectedWindow.map { SessionNaming.base(of: $0.sessionName, topic: topic) }
+            ?? SessionPath.sessionName((cwd as NSString).lastPathComponent)
+        newSession(in: OpenDirectory(directory: Folder(path: cwd, real: folders.folder(cwd).real), name: base), topic: topic?.id)
     }
 
     /// Kills the Window, or its whole Session with `session`, only while its Panes are the ones the user reviewed.
     /// Otherwise the completion gets the Window and Panes as they are now, for the user to review again.
     func checkKill(_ window: TmuxWindow, session: Bool, expectedPaneIDs: Set<String>?,
-                   completion: @escaping (Result<(window: TmuxWindow, paneIDs: Set<String>)?, Error>) -> Void) {
+                    completion: @escaping (Result<(window: TmuxWindow, paneIDs: Set<String>)?, Error>) -> Void) {
         guard let connection else { completion(.failure(TmuxError.notReady)); return }
+        flushTopicMemory()
         let current = generation
+        let paths = topicWatcher.store.paths
+        let order = topicConfig.sessionOrder
         Task {
             let result = await Task.detached { () -> Result<(window: TmuxWindow, paneIDs: Set<String>)?, Error> in
                 Result {
@@ -1868,10 +1887,21 @@ final class WorkspaceStore {
                     let paneIDs = Set(snapshot.panes.filter { windowIDs.contains($0.windowID) }.map(\.id))
                     guard let expectedPaneIDs, expectedPaneIDs == paneIDs else { return (fresh, paneIDs) }
                     _ = try connection.run(session ? ["kill-session", "-t", window.sessionID] : ["kill-window", "-t", window.id])
+                    if !connection.isRemote, let topicID = fresh.topicID {
+                        var remaining = snapshot
+                        remaining.windows.removeAll { session ? $0.sessionID == fresh.sessionID : $0.id == fresh.id }
+                        remaining.panes.removeAll { paneIDs.contains($0.id) }
+                        try TopicStore(paths: paths).write { transaction in
+                            try transaction.update(topicID) { record in
+                                if let updated = record.remembering(remaining, order: order, previously: snapshot.windows) { record = updated }
+                            }
+                        }
+                    }
                     return nil
                 }
             }.value
             guard self.generation == current else { return }
+            self.topicWatcher.reload()
             completion(result)
             self.refresh()
         }
@@ -1879,7 +1909,10 @@ final class WorkspaceStore {
 
     func renameSession(_ window: TmuxWindow, to name: String) {
         guard windows.contains(where: { $0.sessionID == window.sessionID && $0.sourceID == window.sourceID }) else { return }
-        runAsync(["rename-session", "-t", window.sessionID, name]) { [weak self] _ in self?.refresh() }
+        guard (try? SessionNaming.validate(name)) != nil else { return }
+        let topic = isRemote ? nil : topicWatcher.records.first { $0.id == window.topicID && $0.settledAt == nil }
+        let fullName = SessionNaming.available(name, topic: topic?.slug, taken: Set(windows.filter { $0.sessionID != window.sessionID }.map(\.sessionName)))
+        runAsync(["rename-session", "-t", window.sessionID, fullName]) { [weak self] _ in self?.refresh() }
     }
 
     func renameWindow(_ window: TmuxWindow, to name: String) {
@@ -1955,10 +1988,10 @@ final class WorkspaceStore {
     }
 
     /// A Remote Environment's Config is read again whenever a palette opens,
-    /// and the Projects are looked for again (the last ones show meanwhile).
+    /// and the SessionPaths are looked for again (the last ones show meanwhile).
     func paletteDidOpen(_ palette: CommandPaletteConfig) {
         if !isRemote { topicWatcher.reload() }
-        if isRemote { loadRemoteConfig { [weak self] in self?.refreshProjects() } } else { refreshProjects() }
+        if isRemote { loadRemoteConfig { [weak self] in self?.refreshSessionPaths() } } else { refreshSessionPaths() }
     }
 
     /// Opens the Config this App Window uses. A Remote Environment's own
@@ -2222,10 +2255,13 @@ final class WorkspaceStore {
     }
 
     private func rememberTopics(in snapshot: TmuxSnapshot) {
+        let continuous = snapshot.serverRunning && snapshot.serverID != nil && snapshot.serverID == memoryServerID
+        memoryServerID = snapshot.serverRunning ? snapshot.serverID : nil
         for record in topicWatcher.records {
             var previous = record
             previous.sessions = rememberedTopics[record.id]?.sessions ?? record.sessions
-            if let updated = previous.remembering(snapshot, projects: projects, order: topicConfig.sessionOrder, branches: topicBranches) {
+            if let updated = previous.remembering(snapshot, order: topicConfig.sessionOrder,
+                branches: topicBranches, previously: continuous ? windows : []) {
                 rememberedTopics[record.id] = updated
                 topicSnapshots[record.id] = snapshot
                 topicSnapshotBases[record.id] = record.sessions
@@ -2249,16 +2285,12 @@ final class WorkspaceStore {
     /// When another writer changed the Sessions after the snapshot, as `muxify topic remove` does, the snapshot
     /// is stale and is dropped: it would put a removed Session back, and the Topic would be Dormant, not Empty.
     private func persistRememberedTopic(_ id: String) {
-        guard let pending = topicSnapshots[id] else { return }
+        guard let updated = rememberedTopics[id] else { return }
         let base = topicSnapshotBases[id]
-        let projects = projects
-        let branches = topicBranches
-        let order = topicConfig.sessionOrder
         do {
             try topicWatcher.write { transaction in
-                guard let current = transaction.records.first(where: { $0.id == id }), current.sessions == base,
-                      let updated = current.remembering(pending, projects: projects, order: order, branches: branches) else { return }
-                try transaction.update(id) { $0 = updated }
+                guard let current = transaction.records.first(where: { $0.id == id }), current.sessions == base else { return }
+                try transaction.update(id) { $0.sessions = updated.sessions }
             }
             rememberedTopics[id] = nil
             topicSnapshots[id] = nil
@@ -2275,7 +2307,7 @@ final class WorkspaceStore {
         case .movePane: if !isRemote { presentMovePane(nil) }
         case .moveWindow: presentMoveWindow()
         case .moveSession: if !isRemote { presentMoveSession() }
-        case .addProjectToTopic: if !isRemote { presentAddProject() }
+        case .addSessionToTopic: if !isRemote { presentAddSession() }
         case .snoozeTopic: if !isRemote, let id = activeTopicID { presentSnooze(id) }
         case .snoozeTopics: if !isRemote { presentCheck(CheckDraft(action: .snooze)) }
         case .unsnoozeTopics: if !isRemote { presentCheck(CheckDraft(action: .unsnooze)) }

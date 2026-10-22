@@ -2,17 +2,6 @@ import Foundation
 
 /// One open Topic as `topic show` reports it: its record, and its live Sessions with their Windows and Panes.
 public struct TopicDetail: Codable, Hashable, Sendable {
-    public struct ProjectEntry: Codable, Hashable, Sendable {
-        /// The Config's alias, else the Project's name.
-        public var label: String
-        public var path: String
-
-        public init(label: String, path: String) {
-            self.label = label
-            self.path = path
-        }
-    }
-
     public struct WorktreeEntry: Codable, Hashable, Sendable {
         public var path: String
         /// Nil when HEAD is detached or the branch is unknown.
@@ -56,15 +45,17 @@ public struct TopicDetail: Codable, Hashable, Sendable {
     public struct Session: Codable, Hashable, Sendable {
         public var id: String
         public var name: String
-        public var project: ProjectEntry
-        /// Nil when the Session uses the Project folder.
+        public var baseName: String
+        public var directory: String
+        /// Nil when the Session uses the SessionPath folder.
         public var worktree: WorktreeEntry?
         public var windows: [Window]
 
-        public init(id: String, name: String, project: ProjectEntry, worktree: WorktreeEntry?, windows: [Window]) {
+        public init(id: String, name: String, baseName: String, directory: String, worktree: WorktreeEntry?, windows: [Window]) {
             self.id = id
             self.name = name
-            self.project = project
+            self.baseName = baseName
+            self.directory = directory
             self.worktree = worktree
             self.windows = windows
         }
@@ -73,12 +64,16 @@ public struct TopicDetail: Codable, Hashable, Sendable {
             var values = encoder.container(keyedBy: CodingKeys.self)
             try values.encode(id, forKey: .id)
             try values.encode(name, forKey: .name)
-            try values.encode(project, forKey: .project)
+            try values.encode(baseName, forKey: .baseName)
+            try values.encode(directory, forKey: .directory)
             try values.encode(worktree, forKey: .worktree)
             try values.encode(windows, forKey: .windows)
         }
 
-        private enum CodingKeys: String, CodingKey { case id, name, project, worktree, windows }
+        private enum CodingKeys: String, CodingKey {
+            case id, name, directory, worktree, windows
+            case baseName = "base_name"
+        }
     }
 
     public var id: String
@@ -86,7 +81,6 @@ public struct TopicDetail: Codable, Hashable, Sendable {
     public var label: String
     public var title: String?
     public var slug: String?
-    public var homeProject: String?
     public var createdAt: String?
     public var snoozedUntil: String?
     /// A→Z.
@@ -94,13 +88,12 @@ public struct TopicDetail: Codable, Hashable, Sendable {
     /// The Sessions whose `@muxify_topic` names this Topic, in tmux order. Empty for a Dormant Topic.
     public var sessions: [Session]
 
-    public init(id: String, label: String, title: String?, slug: String?, homeProject: String?, createdAt: String?,
+    public init(id: String, label: String, title: String?, slug: String?, createdAt: String?,
                 snoozedUntil: String?, tags: [Tag] = [], sessions: [Session]) {
         self.id = id
         self.label = label
         self.title = title
         self.slug = slug
-        self.homeProject = homeProject
         self.createdAt = createdAt
         self.snoozedUntil = snoozedUntil
         self.tags = tags
@@ -108,23 +101,21 @@ public struct TopicDetail: Codable, Hashable, Sendable {
     }
 
     /// `branches` reads each Worktree's branch now; a Worktree it cannot read keeps the branch the record remembers.
-    public init(record: TopicRecord, snapshot: TmuxSnapshot, projects: [Project], branches: TopicBranches) {
+    public init(record: TopicRecord, snapshot: TmuxSnapshot, sessionPaths: [SessionPath], branches: TopicBranches) {
         let windows = snapshot.windows.filter { $0.topicID == record.id }
         let sessionIDs = windows.map(\.sessionID).reduce(into: [String]()) { ids, id in
             if !ids.contains(id) { ids.append(id) }
         }
-        let byWorktree = record.rememberedSessions(by: "worktree_path")
         let sessions = sessionIDs.compactMap { sessionID -> Session? in
             let members = windows.filter { $0.sessionID == sessionID }
             guard let first = members.first else { return nil }
-            let location = TopicLocation(of: first, record: record, projects: projects)
-            let worktree = location.worktree.map { folder in
-                let remembered = byWorktree[folder]
+            let remembered = record.session(of: first)
+            let worktree = remembered?["worktree_path"]?.string.map(Folder.local).map { folder in
                 return WorktreeEntry(path: folder.path, branch: branches[folder] ?? remembered?["branch"]?.string,
                                      base: remembered?[TopicWorktrees.baseKey]?.string)
             }
             return Session(id: sessionID, name: first.sessionName,
-                           project: ProjectEntry(label: location.project.displayName, path: location.project.folder.path),
+                           baseName: record.baseName(of: first), directory: first.sessionPath.isEmpty ? first.path : first.sessionPath,
                            worktree: worktree,
                            windows: members.map { window in
                                Window(id: window.id, index: window.index, name: window.name, active: window.isActive,
@@ -132,7 +123,7 @@ public struct TopicDetail: Codable, Hashable, Sendable {
                            })
         }
         self.init(id: record.id, label: TopicSummary(record: record).label, title: record.title, slug: record.slug,
-                  homeProject: record.homeProject, createdAt: record.createdAt, snoozedUntil: record.snoozedUntil,
+                  createdAt: record.createdAt, snoozedUntil: record.snoozedUntil,
                   tags: record.tags.sorted(), sessions: sessions)
     }
 
@@ -143,7 +134,6 @@ public struct TopicDetail: Codable, Hashable, Sendable {
         try values.encode(label, forKey: .label)
         try values.encode(title, forKey: .title)
         try values.encode(slug, forKey: .slug)
-        try values.encode(homeProject, forKey: .homeProject)
         try values.encode(createdAt, forKey: .createdAt)
         try values.encode(snoozedUntil, forKey: .snoozedUntil)
         try values.encode(tags, forKey: .tags)
@@ -152,6 +142,6 @@ public struct TopicDetail: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, label, title, slug, tags, sessions
-        case homeProject = "home_project", createdAt = "created_at", snoozedUntil = "snoozed_until"
+        case createdAt = "created_at", snoozedUntil = "snoozed_until"
     }
 }

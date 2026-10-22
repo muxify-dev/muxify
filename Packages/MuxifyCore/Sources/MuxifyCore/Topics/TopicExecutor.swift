@@ -17,9 +17,13 @@ struct TopicExecutor {
                 case .restoreWorktree(let worktree, let base):
                     try TopicWorktrees.restore(worktree, base: base)
                 case .removeCleanWorktree(let worktree):
-                    try TopicWorktrees.removeClean(worktree, root: worktreesRoot, windows: server.snapshot().windows)
+                    let snapshot = server.snapshot()
+                    guard snapshot.serverRunning else { throw TmuxError.notReady }
+                    try TopicWorktrees.removeClean(worktree, root: worktreesRoot, windows: snapshot.windows, panes: snapshot.panes)
                 case .removeMergedWorktree(let worktree):
-                    try TopicWorktrees.removeMerged(worktree, root: worktreesRoot, windows: server.snapshot().windows)
+                    let snapshot = server.snapshot()
+                    guard snapshot.serverRunning else { throw TmuxError.notReady }
+                    try TopicWorktrees.removeMerged(worktree, root: worktreesRoot, windows: snapshot.windows, panes: snapshot.panes)
                 case .reopenSession(let name, let directory, let windowName):
                     let output = try server.run(["new-session", "-d", "-P", "-F", "#{session_id}", "-s", name, "-c", directory, "-n", windowName])
                     let id = output.trimmingCharacters(in: .whitespacesAndNewlines)

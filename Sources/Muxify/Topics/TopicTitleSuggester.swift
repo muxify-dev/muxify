@@ -4,8 +4,8 @@ import MuxifyCore
 
 struct TopicTitleSuggester {
     enum Source {
-        case topic(TopicRecord, TmuxSnapshot, [Project])
-        case newTopic(TmuxPane?, Project?)
+        case topic(TopicRecord, TmuxSnapshot, [SessionPath])
+        case newTopic(TmuxPane?, SessionPath?)
     }
 
     typealias Conversation = AgentConversation
@@ -34,7 +34,7 @@ struct TopicTitleSuggester {
             case .noConversationText:
                 return "No user messages were found in the Topic's Agent conversations."
             case .promptMetadataTooLong:
-                return "The Project names and prompt instructions exceed 8,000 characters."
+                return "The Session names and prompt instructions exceed 8,000 characters."
             case .commandsFailed(let failures):
                 return failures.map { "\($0.command): \($0.detail)" }.joined(separator: "\n")
             }
@@ -72,7 +72,7 @@ struct TopicTitleSuggester {
             if !excerpt.messages.isEmpty { excerpts.append(excerpt) }
         }
         guard !excerpts.isEmpty else { throw Failure.noConversationText }
-        let prompt = try makePrompt(projectNames: request.projectNames, excerpts: &excerpts)
+        let prompt = try makePrompt(baseNames: request.baseNames, excerpts: &excerpts)
         var failures: [CommandFailure] = []
         for command in commands {
             switch modelCall(command, prompt, commandTimeout) {
@@ -100,7 +100,7 @@ struct TopicTitleSuggester {
     }
 
     private struct RequestContext {
-        let projectNames: [String]
+        let baseNames: [String]
         let conversations: [Conversation]
     }
 
@@ -129,35 +129,30 @@ struct TopicTitleSuggester {
 
     private func requestContext(for source: Source) -> RequestContext {
         switch source {
-        case .newTopic(let pane, let project):
+        case .newTopic(let pane, let sessionPath):
             let conversations = pane.flatMap(AgentConversation.init(in:)).map { [$0] } ?? []
-            return RequestContext(projectNames: project.map { [$0.name] } ?? [], conversations: conversations)
-        case .topic(let topic, let snapshot, let projects):
+            return RequestContext(baseNames: sessionPath.map { [$0.name] } ?? [], conversations: conversations)
+        case .topic(let topic, let snapshot, _):
             let windows = snapshot.windows.filter { $0.topicID == topic.id }
             let conversations = topic.agentConversations(in: snapshot)
 
             var names: [String] = []
-            func project(at path: String) -> Project {
-                let folder = Folder.local(path)
-                return projects.first { $0.folder == folder } ?? Project(folder: folder, name: URL(fileURLWithPath: path).lastPathComponent)
+            func append(_ name: String?) {
+                guard let name, !names.contains(name) else { return }
+                names.append(name)
             }
-            func append(_ project: Project?) {
-                guard let project, !names.contains(project.displayName) else { return }
-                names.append(project.displayName)
-            }
-            append(topic.homeProject.map(project(at:)))
-            for window in windows { append(TopicLocation(of: window, record: topic, projects: projects).project) }
+            for window in windows { append(topic.baseName(of: window)) }
             for session in topic.sessions {
-                append(session["project_path"]?.string.map(project(at:)))
+                append(session["base_name"]?.string)
             }
-            return RequestContext(projectNames: names, conversations: conversations)
+            return RequestContext(baseNames: names, conversations: conversations)
         }
     }
 
-    private func makePrompt(projectNames: [String], excerpts: inout [ConversationExcerpt]) throws -> String {
+    private func makePrompt(baseNames: [String], excerpts: inout [ConversationExcerpt]) throws -> String {
         func render() -> String {
-            var lines = [Self.instruction, "", "Projects:"]
-            lines += projectNames.isEmpty ? ["- (none)"] : projectNames.map { "- \($0)" }
+            var lines = [Self.instruction, "", "Sessions:"]
+            lines += baseNames.isEmpty ? ["- (none)"] : baseNames.map { "- \($0)" }
             lines += ["", "Conversation excerpts:"]
             for (index, excerpt) in excerpts.enumerated() {
                 lines.append("[\(excerpt.conversation.kind.displayName) \(index + 1)]")

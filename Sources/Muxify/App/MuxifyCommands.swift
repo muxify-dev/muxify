@@ -62,8 +62,8 @@ import MuxifyCore
             Button("Move Session…") { store?.presentMoveSession() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .moveSession)?.shortcut)
                 .disabled(!topicsAvailable || store?.topics.topicsEnabled != true || store?.selectedWindow == nil)
-            Button("Add a Project to Topic…") { store?.presentAddProject() }
-                .keyboardShortcut(keybinds.firstTrigger(for: .addProjectToTopic)?.shortcut)
+            Button("Add a Session to Topic…") { store?.presentAddSession() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .addSessionToTopic)?.shortcut)
                 .disabled(!topicsAvailable || store?.activeTopicID == nil)
             Button("Settle Topic…") { store?.presentSettleTopic() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .settleTopic)?.shortcut)

@@ -9,7 +9,6 @@ The filename must match the `id` field. The id must be a nonempty filename witho
   "id": "reward-drop",
   "title": "Fix reward drop",
   "slug": "reward-drop",
-  "home_project": "/work/game_server",
   "created_at": "2026-10-06T20:00:00Z",
   "settled_at": null,
   "outcome": null,
@@ -19,8 +18,14 @@ The filename must match the `id` field. The id must be a nonempty filename witho
   "tags": ["backend", "release"],
   "sessions": [
     {
-      "project_path": "/work/game_server",
+      "id": "78199a21-e769-41c6-97e0-70843149f16f",
+      "name": "debug/reward-drop",
+      "base_name": "debug",
+      "directory": "/worktrees/game_server/reward-drop",
+      "repository_path": "/work/game_server",
       "worktree_path": "/worktrees/game_server/reward-drop",
+      "worktree_created": true,
+      "base": "full-starting-commit-id",
       "branch": "reward-drop",
       "windows": [
         {
@@ -83,34 +88,40 @@ Live membership comes only from the tmux Session option. For example:
 tmux set-option -t my-session @muxify_topic reward-drop
 ```
 
-The view never parses Session names. It matches `session_path` against the Home
-Project and the remembered `project_path` and `worktree_path` directories. The
-longest directory match determines the Project label. A matched Home Project
-gets the home badge. Without a match, the Session directory's final component
-is the label, with no home badge. The remembered Sessions do not establish live
-membership.
+Remembered Sessions have independent `id`, `name`, `base_name` and `directory` fields.
+Folders do not identify Sessions: several members can use the same directory.
+Muxify-created, restored and moved members carry their remembered `id` in the Session
+option `@muxify_session_id`. An existing unmarked Session initially uses a key made
+from the server incarnation, tmux Session ID and creation time. External renames keep
+that identity and membership. The Sidebar shows the actual name, stripping only the
+known Topic suffix for `#{session_base_name}`. There is no home folder or home Session.
+If a kept original still uses a remembered identity, Reopen gives the recreated Session
+a fresh identity; two live Sessions must never share it.
 
 The order of `sessions` is the Topic's order of its Sessions. Without
 `session_order`, Muxify lists the Sessions by their tmux creation time in the
 order that the Config's `topics.session_order` names, and records them oldest
 first, so Reopen creates them in their old order. `"session_order": "manual"`
 means the user moved a Session: Muxify then lists the Sessions in the order of
-`sessions`, matched by `project_path`, and puts a live Session that `sessions`
+`sessions`, matched by `id`, and puts a live Session that `sessions`
 does not name at the end that `topics.session_order` gives new Sessions. Sort
 Sessions by Creation removes the field. Another value counts as absent.
 
 Muxify records the live Sessions after a 0.3 second write delay. An unchanged
-snapshot does not write a file. If some Sessions disappear, the record keeps
-only the live Sessions. If all Sessions disappear, it keeps the last live set,
-including a change that is still waiting for its write delay.
+snapshot does not write a file. Confirmed Muxify closures and removals observed
+between complete inventories of the same running server remove the stopped Session
+or Window. A confirmed last closure leaves an Empty Topic. An absent server,
+failed read, initial reconnect inventory or a different server incarnation does not
+prove closure: unknown disappearances preserve the last saved layout. Settle saves
+the layout before its explicit Kill choices, so Reopen can restore it.
 
 Remove from Topic, Remove from Topic and Kill, and a Move of a Session take
 the Session out of the record's `sessions` in the same edit that changes tmux.
 Removing or moving the last Window of a Session does the same, because tmux ends
 the Session. A Topic whose `sessions` is then empty is Empty: going to it
-offers Add a Project and creates nothing. A Session that ends while it is still
-in the Topic (Kill Session, a tmux restart, a shell that exits) stays in
-`sessions`, so the Topic is Dormant and going to it Reopens the Session. When
+offers Add a Session and creates nothing. A Topic with a saved layout but no live
+members is Dormant; Reopen preserves each remembered name, allocating `+2`, `+3`, etc.
+before its Topic suffix only when occupied. It never adopts an unrelated Session. When
 another writer changed `sessions` while the app's write delay ran, the app drops
 that pending write, so it cannot put a removed Session back. Plain Remove from
 Topic keeps the Worktree for the Session that now has no Topic. Remove from
@@ -118,8 +129,8 @@ Topic and Kill removes the clean Worktree that the Topic made for the Session
 when the request names it, as Forget does: Git removes it without force and
 keeps its branch.
 
-A remembered Session stores its `project_path`. A worktree Session also stores
-`worktree_path` and `branch`, and `worktree_created` is true when the Topic made
+A remembered Session always stores its launch `directory`. Worktree launches also store
+`repository_path`, `worktree_path` and `branch`, and `worktree_created` is true when Muxify made
 the Worktree. A Worktree that the Topic made also stores `base`, the full id of
 the commit that its branch started at. Muxify reads this commit before it makes
 the Worktree, so a branch that moves later does not change `base`. A record from
@@ -127,11 +138,11 @@ before this field has no `base`. When Reopen makes a Worktree again because its
 folder is gone, it checks out the branch if the branch still exists. If the
 branch is gone too, the new branch starts at `base`, so `base` stays true. If
 the repository no longer has that commit, Reopen fails and changes nothing.
-Without `base`, the new branch starts at the Project's HEAD. `muxify topic diff`
+Without `base`, the new branch starts at the repository's HEAD. `muxify topic diff`
 shows a Worktree Session's work since `base`, and since the merge base with the
 default branch when there is no `base`. Settle removes only a Worktree that the Topic made inside
 `$XDG_STATE_HOME/muxify/worktrees/`. If a Worktree that Settle would remove
-has modified or untracked files, Settle fails and changes nothing: the Topic
+has modified or untracked files, an explicit cleanup request fails and changes nothing: the Topic
 stays open and its Sessions stay live. Each Window stores its active Pane's `directory`
 and `start_command`, its tmux `name`, its Browser Tab URLs
 in `browser_tabs` and the active Tab's index in `browser_active_tab`. `browser_open` and `terminal_open` hold the
@@ -159,7 +170,7 @@ A Window without `panes`, from an older record, gets one Pane with the Window's
 `window_id` matches a live Window to its record so that renaming or reordering
 Windows retains unknown fields. It is not a target for Reopen after a restart.
 
-Start Fresh reads only `project_path`, `worktree_path` and `branch` from each
+Start Fresh keeps the identity, name, directory and Worktree provenance of each
 remembered Session. It makes one shell Window there, with no Tabs and no Agent.
 When the new Sessions are live, the record remembers them in place of the old
 Windows.
@@ -223,6 +234,9 @@ the kept Topic also ends Zen.
 Forget removes `topics/<id>.json` after it kills or detaches the Topic's live Sessions.
 The Topic cannot be Reopened. Forget applies to open, Dormant, Snoozed, and Settled Topics.
 Each live Session uses the same Kill or Keep with no Topic choice as Settle.
+Every Session defaults to Keep; keeping restores its base name, with `+x` on collision.
+Every Worktree defaults to Keep. Missing `worktree_created` is not permission to delete.
+Cleanup checks all live Sessions and all Panes, not just active Panes, and never deletes branches.
 
 Forget can remove each clean Worktree that the Topic made inside
 `$XDG_STATE_HOME/muxify/worktrees/`, even if its branch is not merged.
@@ -237,3 +251,22 @@ Both use the Topic service. They keep Worktrees unless the request selects them.
 Forget ends Zen if Zen keeps that Topic. The record transaction restores the other Topics' Snoozes.
 A stale record update or remembered-Session write cannot create the removed Topic again.
 Only an explicit creation with no previous record can create a Topic file.
+
+## One-off beta migration
+
+Quit Muxify and stop Topic CLI edits before migrating. There is no legacy record reader.
+The Bash entry point requires Python 3 and reads tmux without changing Sessions:
+
+```sh
+bash scripts/migrate-topic-sessions.sh --dry-run
+bash scripts/migrate-topic-sessions.sh --apply
+```
+
+Use `--state-dir /path/to/muxify` for another state directory and `--socket /path/to/socket`
+to inspect a particular server. Use `--no-tmux` to explicitly accept folder-derived names
+when inventory is unavailable. Live members recover their exact names and stable identities;
+inactive names cannot be recovered from the old files, so every fallback is reported.
+The script removes the old home field, preserves unknown fields and explicit Worktree
+provenance, backs up all changed records before replacement, and is idempotent. It does
+not invent a Session for an Empty Topic. Backups stay beside `topics/`, outside the files
+the app reads. Review the dry-run and keep that backup until restoration is verified.

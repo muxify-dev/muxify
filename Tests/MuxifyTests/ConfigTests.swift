@@ -86,8 +86,8 @@ final class ConfigTests: XCTestCase {
         XCTAssertFalse(Config.template.contains("open_switcher"))
         XCTAssertEqual(config.keybinds.firstTrigger(for: .moveSession), trigger("cmd+shift+m"))
         XCTAssertTrue(Config.template.contains("#   move_session: cmd+shift+m"))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+a")), .addProjectToTopic)
-        XCTAssertTrue(Config.template.contains("#   add_project_to_topic: cmd+shift+a"))
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+a")), .addSessionToTopic)
+        XCTAssertTrue(Config.template.contains("#   add_session_to_topic: cmd+shift+a"))
         XCTAssertTrue(config.problems.isEmpty)
         let old = try load("keybindings:\n  open_switcher: cmd+p")
         XCTAssertEqual(old.problems.map(\.message),

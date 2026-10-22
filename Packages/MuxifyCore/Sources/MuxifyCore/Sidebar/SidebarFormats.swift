@@ -31,7 +31,7 @@ public struct SidebarFormats: Equatable {
 
     private static let windowCount = "#{window_count} #{?#{==:#{window_count},1},Window,Windows}"
     public static let defaults = SidebarFormats()
-    public var topic = Lines(title: "#{topic_title}", summary: "#{?session_count,#{S:#{project}#{?loop_last_flag,, · }} · " + windowCount + ",No Sessions}")
+    public var topic = Lines(title: "#{topic_title}", summary: "#{?session_count,#{S:#{session_base_name}#{?loop_last_flag,, · }} · " + windowCount + ",No Sessions}")
     public var session = Lines(title: "#{session_name}", summary: windowCount)
     public var window = Lines(title: "#{window_title}")
     public var windowParts = WindowParts()

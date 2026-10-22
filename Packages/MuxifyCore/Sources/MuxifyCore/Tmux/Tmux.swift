@@ -28,6 +28,9 @@ public struct TmuxWindow: Identifiable, Hashable {
     /// Connection/server ownership, so a stale UI item cannot address reused IDs.
     public var sourceID = ""
     public var topicID: String? = nil
+    /// Durable remembered identity. New/restored Sessions carry it in a Session option.
+    public var savedSessionID = ""
+    public var sessionRecordID: String { savedSessionID.isEmpty ? sessionID : savedSessionID }
     /// The Session's `@muxify_lock`: its place in the Topics list while it is Locked (ADR 0018).
     public var lockOrder: Double? = nil
     public var sessionPath: String = ""
@@ -39,7 +42,7 @@ public struct TmuxWindow: Identifiable, Hashable {
     public var layout = ""
 
     /// The pane title is what shells and TUIs set via OSC 0/2 (fish sets it to
-    /// `~/w/project`), so it is the best human label. tmux defaults it to the
+    /// `~/w/sessionPath`), so it is the best human label. tmux defaults it to the
     /// hostname, in which case we fall back to the window name or the path.
     public var displayTitle: String {
         let visibleTitle = command == "codex" ? CodexReports.titleForDisplay(paneTitle) : paneTitle
@@ -337,7 +340,7 @@ public enum Tmux {
             "#{window_active}", "#{window_panes}", "#{window_bell_flag}", "#{session_activity}",
             "#{\(tabsOption)}", "#{\(activeTabOption)}", "#{\(shownOption)}", "#{\(openOption)}",
             "#{\(lastWindowOption)}", "#{\(agentOption)}", "#{@muxify_topic}", "#{session_path}", "#{pane_id}", "#{pane_start_command}",
-            "#{\(maximizeOption)}", "#{session_created}", "#{window_layout}", "#{@muxify_lock}",
+            "#{\(maximizeOption)}", "#{session_created}", "#{window_layout}", "#{@muxify_lock}", "#{@muxify_session_id}",
         ].joined(separator: s)
         let clientFormat = ["C", "#{client_tty}", "#{session_id}", "#{window_id}", "#{client_pid}", "#{client_control_mode}"].joined(separator: s)
         let paneFormat = [
@@ -350,7 +353,7 @@ public enum Tmux {
             "list-windows", "-a", "-F", windowFormat,
             ";", "list-clients", "-F", clientFormat,
             ";", "list-panes", "-a", "-F", paneFormat,
-            ";", "display-message", "-p", "-F", "S\(s)#{pid}",
+            ";", "display-message", "-p", "-F", "S\(s)#{pid}:#{start_time}",
         ]
     }
 
@@ -377,7 +380,7 @@ public enum Tmux {
                     agent: f[18],
                     storedBrowser: StoredBrowser(tabs: f[13], activeTab: f[14], shown: f[15], maximized: field(23)),
                     openRequests: f[16].split(separator: " ").map(String.init),
-                    topicID: field(19).isEmpty ? nil : field(19), lockOrder: Double(field(26)).flatMap { $0.isFinite ? $0 : nil },
+                    topicID: field(19).isEmpty ? nil : field(19), savedSessionID: field(27), lockOrder: Double(field(26)).flatMap { $0.isFinite ? $0 : nil },
                     sessionPath: field(20),
                     activePaneID: field(21), startCommand: field(22), sessionCreated: Int(field(24)) ?? 0,
                     layout: field(25)
@@ -398,6 +401,9 @@ public enum Tmux {
             } else if f.first == "D", f.count == 2 {
                 codexReports.append(f[1])
             }
+        }
+        for index in windows.indices where windows[index].savedSessionID.isEmpty {
+            windows[index].savedSessionID = "tmux:\(serverID ?? "unknown"):\(windows[index].sessionID):\(windows[index].sessionCreated)"
         }
         var snapshot = TmuxSnapshot(
             windows: windows, clients: clients, panes: panes,

@@ -39,7 +39,7 @@ class PaletteCurrentCommands(PaletteFixture):
     def test_topic_steps_keep_back_and_cancel_without_writes(self):
         path = self.current_topic('current-commands')
         before = path.read_text()
-        for title, step in [('Add a Project', 'Add a Project'), ('Snooze Topic', 'Snooze'),
+        for title, step in [('Add a Session', 'Add a Session'), ('Snooze Topic', 'Snooze'),
                             ('Settle Topic', 'Settle'), ('Zen', 'Zen'), ('Forget Topic', 'Forget'), ('Rename Topic', 'Rename')]:
             self.run_command(title)
             self.s.wait_rows(lambda rs: step in self.text('palette-breadcrumb', rs), title + ' did not open its step')
@@ -79,7 +79,7 @@ class PaletteCurrentCommands(PaletteFixture):
                                 'the Topic card does not show Empty')
         self.assertNotIn('Dormant', self.s.row('topic-' + name, card).get('accessibilityValue', ''))
         self.s.act('press', 'topic-' + name)
-        self.s.wait_rows(lambda rs: self.s.has('empty-topic-add-project', rs), 'going to the Topic did not offer Add a Project')
+        self.s.wait_rows(lambda rs: self.s.has('empty-topic-add-session', rs), 'going to the Topic did not offer Add a Session Path')
         self.assertEqual(self.s.tmux('list-sessions', '-F', '#{session_name}').split(), sessions, 'going to the Topic made a Session')
 
     def test_remove_session_from_topic_leaves_the_topic_empty_and_the_session_live(self):
@@ -106,7 +106,7 @@ class PaletteCurrentCommands(PaletteFixture):
         self.assert_empty_topic('remove-kill', path, self.s.tmux('list-sessions', '-F', '#{session_name}').split())
 
     def test_commands_omit_unavailable_topic_and_tab_actions(self):
-        for title in ['Add a Project', 'Snooze Topic', 'Settle Topic', 'Zen', 'Move Pane with Active Tab',
+        for title in ['Add a Session', 'Snooze Topic', 'Settle Topic', 'Zen', 'Move Pane with Active Tab',
                       'Remove Session from Topic', 'Forget Topic', 'Rename Topic', 'Move Topic Up', 'Move Topic Down',
                       'Pin Topic', 'Unsnooze Topic', 'Unsnooze Topics…']:
             self.search(title)

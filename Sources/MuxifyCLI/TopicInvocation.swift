@@ -5,36 +5,36 @@ import MuxifyCore
 /// so it works without Muxify running. The service chooses what the request acts on: `target`, else `caller`.
 struct TopicInvocation: Equatable {
     enum Command: Equatable {
-        /// A `project` is as typed; it resolves to a real directory when the command runs.
-        case new(title: String?, project: String?)
+        /// A `sessionPath` is as typed; it resolves to a real directory when the command runs.
+        case new(title: String?, sessionPath: String?)
         /// `directory` resolves to its row of the New Topic list. `newWorktree` asks for a new Worktree from that
         /// row's Worktree, at its HEAD or at the ref `base`.
-        case addProject(directory: String, newWorktree: Bool, base: String?)
+        case addSession(directory: String, newWorktree: Bool, base: String?)
         /// `removeWorktrees` removes each Worktree that the Settle sheet offers to remove, as if each box were selected.
-        case settle(removeWorktrees: Bool)
-        case forget(removeWorktrees: Bool)
+        case settle(removeWorktrees: Bool, killSessions: Bool = false)
+        case forget(removeWorktrees: Bool, killSessions: Bool = false)
         case list
         /// `conversations` also lists the conversation of each Agent that the Topic has or remembers.
         case show(conversations: Bool)
-        /// `project` is as typed and limits the run to the Session that uses it. `command` is the argument vector
+        /// `sessionPath` is as typed and limits the run to the Session that uses it. `command` is the argument vector
         /// after `--`; it runs once per live Session, never in a Pane.
-        case exec(project: String?, timeout: TimeInterval, command: [String])
-        /// The git status of each live Session, or of the one that uses `project`.
-        case status(project: String?)
+        case exec(sessionPath: String?, timeout: TimeInterval, command: [String])
+        /// The git status of each live Session, or of the one that uses `sessionPath`.
+        case status(sessionPath: String?)
         /// One changeset across the live Sessions since each one's base. `stat` prints a summary, not the patch.
-        case diff(project: String?, stat: Bool)
+        case diff(sessionPath: String?, stat: Bool)
         /// The time as the time step of Snooze Topic reads typed text. It becomes a time when the command runs.
         /// `topics` are the `--topic` options; empty is the target or the caller Pane's Topic.
         case snooze(SnoozeSchedule, topics: [TopicRef])
         case unsnooze(topics: [TopicRef])
         case tag(TopicTagChange)
 
-        /// The target options this command takes. A titled Topic in a Project starts its own Session, so it takes none.
+        /// The target options this command takes. A titled Topic in a SessionPath starts its own Session, so it takes none.
         var targets: [TargetOption] {
             switch self {
             case .new(_?, _?): return []
             case .new: return [.window, .pane]
-            case .addProject, .settle, .forget, .show, .exec, .status, .diff, .snooze, .unsnooze, .tag: return [.topic, .window, .pane]
+            case .addSession, .settle, .forget, .show, .exec, .status, .diff, .snooze, .unsnooze, .tag: return [.topic, .window, .pane]
             case .list: return []
             }
         }
@@ -49,8 +49,8 @@ struct TopicInvocation: Equatable {
             }
         }
 
-        /// A Snooze or a Tag change needs no Project, and a command that shows a Topic finds only the Projects of its Sessions.
-        var findsAllProjects: Bool {
+        /// A Snooze or a Tag change needs no SessionPath, and a command that shows a Topic finds only the SessionPaths of its Sessions.
+        var findsAllSessionPaths: Bool {
             switch self {
             case .snooze, .unsnooze, .tag: return false
             default: return !showsTopic
@@ -60,9 +60,9 @@ struct TopicInvocation: Equatable {
         /// The command as the user typed it, for an error message.
         var phrase: String {
             switch self {
-            case .new(_?, _?): return "topic new with a title and --project"
+            case .new(_?, _?): return "topic new with a title and --directory"
             case .new: return "topic new"
-            case .addProject: return "topic add-project"
+            case .addSession: return "topic add-session"
             case .settle: return "topic settle"
             case .forget: return "topic forget"
             case .list: return "topic list"
@@ -176,10 +176,12 @@ extension TopicInvocation {
         var args = arguments
         guard let name = args.popFirst() else { throw usageError }
         var words: [String] = []
-        var project: String?
+        var sessionPath: String?
+        var session: String?
         var newWorktree = false
         var base: String?
         var removeWorktrees = false
+        var killSessions = false
         var timeout: TimeInterval?
         var execArguments: [String]?
         var stat = false
@@ -189,9 +191,12 @@ extension TopicInvocation {
         while let argument = args.popFirst() {
             if try targets.take(argument, from: &args) {
                 continue
-            } else if argument == "--project" {
-                guard project == nil, let value = args.popFirst(), !value.isEmpty, !value.hasPrefix("-") else { throw usageError }
-                project = value
+            } else if argument == "--directory" {
+                guard sessionPath == nil, let value = args.popFirst(), !value.isEmpty, !value.hasPrefix("-") else { throw usageError }
+                sessionPath = value
+            } else if argument == "--session" {
+                guard session == nil, let value = args.popFirst(), !value.isEmpty else { throw usageError }
+                session = value
             } else if argument == "--worktree" {
                 newWorktree = true
             } else if argument == "--base" {
@@ -199,6 +204,8 @@ extension TopicInvocation {
                 base = value
             } else if argument == "--remove-worktrees" {
                 removeWorktrees = true
+            } else if argument == "--kill-sessions" {
+                killSessions = true
             } else if argument == "--json" {
                 output = .json
             } else if argument == "--timeout" {
@@ -219,26 +226,29 @@ extension TopicInvocation {
                 words.append(argument)
             }
         }
-        if name != "add-project", newWorktree || base != nil { throw usageError }
+        if name != "add-session", newWorktree || base != nil { throw usageError }
         if name != "settle", name != "forget", removeWorktrees { throw usageError }
+        if name != "settle", name != "forget", killSessions { throw usageError }
         if name != "exec", timeout != nil || execArguments != nil { throw usageError }
         if name != "diff", stat { throw usageError }
         if name != "show", conversations { throw usageError }
-        switch (name, words.count, project) {
+        if !["exec", "status", "diff"].contains(name), session != nil { throw usageError }
+        if name != "new", sessionPath != nil { throw usageError }
+        switch (name, words.count, sessionPath) {
         case ("new", 0...1, _):
             if let title = words.first, title.allSatisfy(\.isWhitespace) { throw usageError }
-            command = .new(title: words.first, project: project)
-        case ("add-project", 1, nil) where newWorktree || base == nil:
-            command = .addProject(directory: words[0], newWorktree: newWorktree, base: base)
-        case ("settle", 0, nil): command = .settle(removeWorktrees: removeWorktrees)
-        case ("forget", 0, nil): command = .forget(removeWorktrees: removeWorktrees)
+            command = .new(title: words.first, sessionPath: sessionPath)
+        case ("add-session", 1, nil) where newWorktree || base == nil:
+            command = .addSession(directory: words[0], newWorktree: newWorktree, base: base)
+        case ("settle", 0, nil): command = .settle(removeWorktrees: removeWorktrees, killSessions: killSessions)
+        case ("forget", 0, nil): command = .forget(removeWorktrees: removeWorktrees, killSessions: killSessions)
         case ("list", 0, nil): command = .list
         case ("show", 0, nil): command = .show(conversations: conversations)
         case ("exec", 0, _):
             guard let execArguments, !execArguments.isEmpty else { throw usageError }
-            command = .exec(project: project, timeout: timeout ?? 60, command: execArguments)
-        case ("status", 0, _): command = .status(project: project)
-        case ("diff", 0, _): command = .diff(project: project, stat: stat)
+            command = .exec(sessionPath: session, timeout: timeout ?? 60, command: execArguments)
+        case ("status", 0, _): command = .status(sessionPath: session)
+        case ("diff", 0, _): command = .diff(sessionPath: session, stat: stat)
         case ("snooze", 1..., nil):
             // Unquoted words join, so `topic snooze mon 9am` reads as the time step reads "mon 9am". The time step
             // says "never", but on a command line `snooze never` reads as no Snooze, so the CLI says "forever".
@@ -292,34 +302,26 @@ extension TopicInvocation {
         if command == .list {
             response = TopicService(paths: paths).handle(TopicRequest(.list))
         } else {
-            // Finding every Project runs git in each repository under sessions.paths, so a command that shows a
-            // Topic finds the Topic first and then looks only at its folders.
-            let showsTopic = command.showsTopic
-            var config = try await ConfigProjects.load(paths.configFile, within: command.findsAllProjects ? nil : [])
+            let config = try await ConfigSessions.load(paths.configFile, within: command.findsAllSessionPaths ? nil : [])
             func handle() throws -> TopicResponse {
-                let service = TopicService(paths: paths, server: .local, projects: config.projects, topics: config.topics)
+                let service = TopicService(paths: paths, server: .local, sessionPaths: config.sessionPaths, topics: config.topics)
                 // No client: no terminal switches to the result, because a command changes what the user sees only
                 // when they ask for it.
-                return service.handle(TopicRequest(try request(projects: config.projects, service: service), target: target,
+                return service.handle(TopicRequest(try request(sessionPaths: config.sessionPaths, service: service), target: target,
                                                    caller: caller.map(TopicCaller.pane)))
             }
             response = try handle()
-            if showsTopic, case .topic(let topic) = response {
-                config.projects = ProjectDiscovery.discover(config.projectRoots, aliases: config.projectAliases,
-                                                            within: topic.sessions.map(\.project.path))
-                response = try handle()
-            }
         }
         if case .topic(let topic) = response {
             switch command {
-            case .exec(let project, let timeout, let arguments):
-                let sessions = try TopicExec.sessions(of: topic, project: project.map(Self.directory))
+            case .exec(let sessionPath, let timeout, let arguments):
+                let sessions = try TopicExec.sessions(of: topic, session: sessionPath)
                 return try TopicExec(arguments: arguments, timeout: timeout).run(sessions, topic: topic, output: output)
-            case .status(let project):
-                return try TopicGit(report: .status).run(try TopicExec.sessions(of: topic, project: project.map(Self.directory)),
+            case .status(let sessionPath):
+                return try TopicGit(report: .status).run(try TopicExec.sessions(of: topic, session: sessionPath),
                                                          topic: topic, output: output)
-            case .diff(let project, let stat):
-                return try TopicGit(report: .diff(stat: stat)).run(try TopicExec.sessions(of: topic, project: project.map(Self.directory)),
+            case .diff(let sessionPath, let stat):
+                return try TopicGit(report: .diff(stat: stat)).run(try TopicExec.sessions(of: topic, session: sessionPath),
                                                                    topic: topic, output: output)
             case .show(conversations: true):
                 return try reportConversations(of: topic)
@@ -347,7 +349,7 @@ extension TopicInvocation {
                 // One line for the Topic, then one for each live Session, with tab-separated fields as in topic list.
                 print(Self.line(id: topic.id, label: topic.label, tags: topic.tags))
                 for session in topic.sessions {
-                    print([session.name, session.project.label, session.worktree?.path ?? session.project.path,
+                    print([session.name, session.baseName, session.directory,
                            session.worktree?.branch ?? ""].map(\.oneLineField).joined(separator: "\t"))
                 }
             case .changed(let change): if let id = change.topicID { print(id) }
@@ -387,31 +389,34 @@ extension TopicInvocation {
         }
     }
 
-    private func request(projects: [Project], service: TopicService) throws -> TopicCommand {
+    private func request(sessionPaths: [SessionPath], service: TopicService) throws -> TopicCommand {
         switch command {
-        case .new(nil, let project): return .extract(project: try project.map(Self.directory)?.real)
-        case .new(let title?, let project): return .create(title: title, project: try project.map(Self.directory)?.real)
-        case .addProject(let path, let newWorktree, let base):
+        case .new(nil, let sessionPath): return .extract(sessionPath: try sessionPath.map(Self.directory)?.real)
+        case .new(let title?, let sessionPath): return .create(title: title, sessionPath: try sessionPath.map(Self.directory)?.real)
+        case .addSession(let path, let newWorktree, let base):
             let directory = try Self.directory(path)
-            // A folder in no Project goes to the service as typed, which fails with the Config's own words.
-            guard let choice = ProjectChoice.containing(directory, in: projects) else {
-                return .addProject(project: directory.real, workingCopy: .project)
+            // A folder in no SessionPath goes to the service as typed, which fails with the Config's own words.
+            guard let choice = SessionChoice.containing(directory, in: sessionPaths) else {
+                return .addSession(sessionPath: directory.real, workingCopy: .directory)
             }
             if newWorktree, choice.worktree == nil {
                 throw CLIError("--worktree needs a git repository, and \(choice.directory.path) is not one", exitCode: 2)
             }
-            // The same choice as the Add Project sheet makes for this row.
-            return .addProject(project: choice.project.folder.path, workingCopy: choice.workingCopy(newWorktree: newWorktree, base: base))
-        case .forget(let remove):
-            guard remove, let target = target ?? caller.map(TopicTarget.pane),
-                  let choices = try? service.forgetChoices(for: target).get() else { return .forget(choices: [], worktrees: []) }
-            return .forget(choices: choices.sessions, worktrees: choices.worktrees.filter(\.isClean).map(\.id))
-        case .settle(false): return .settle(choices: [], outcome: "")
-        case .settle(true):
+            // The same choice as the Add Session sheet makes for this row.
+            return .addSession(sessionPath: choice.sessionPath.folder.path, workingCopy: choice.workingCopy(newWorktree: newWorktree, base: base), name: choice.name)
+        case .forget(let remove, let kill):
+            guard let target = target ?? caller.map(TopicTarget.pane),
+                  var choices = try? service.forgetChoices(for: target).get() else { return .forget(choices: [], worktrees: []) }
+            if kill { for index in choices.sessions.indices { choices.sessions[index].disposition = .kill } }
+            return .forget(choices: choices.sessions, worktrees: remove ? choices.worktrees.filter { $0.canRemove(sessions: choices.sessions) }.map(\.id) : [])
+        case .settle(let remove, let kill):
             // Choices that fail to load leave the defaults, so the request itself reports why the Topic cannot settle.
             guard let settled = target ?? caller.map(TopicTarget.pane),
                   var choices = try? service.settleChoices(for: settled).get() else { return .settle(choices: [], outcome: "") }
-            for index in choices.indices where choices[index].worktree != nil { choices[index].removeWorktree = true }
+            for index in choices.indices {
+                if kill { choices[index].disposition = .kill }
+                choices[index].removeWorktree = remove && choices[index].worktree != nil
+            }
             return .settle(choices: choices, outcome: "")
         case .snooze(let schedule, let topics):
             // Only a time later today can be past, e.g. today 8:00 at 9:00.

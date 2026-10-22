@@ -10,7 +10,7 @@ struct SearchableSelect<Payload: Equatable>: View {
     var emptyMessage = "No matches"
     let list: PickList<Payload>
     var listHeight: CGFloat = 160
-    var accessibilityPrefix = "project"
+    var accessibilityPrefix = "sessionPath"
     var focusSearchOnAppear = false
     var acceptsOnClick = true
     @Binding var query: String

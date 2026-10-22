@@ -26,12 +26,12 @@ public enum SidebarMode: String {
 /// The Config: how Muxify itself behaves, read from a YAML file.
 public struct Config: Equatable {
     public var sidebar = Sidebar()
-    /// What `ProjectDiscovery` found for `projectRoots` last. Loading a Config never fills it.
-    public var projects: [Project] = []
+    /// What `SessionPathDiscovery` found for `sessionRoots` last. Loading a Config never fills it.
+    public var sessionPaths: [SessionPath] = []
     /// `sessions.paths`, in Config order.
-    public var projectRoots: [ProjectRoot] = []
-    /// A Project path as the Config wrote it, `~` included, to its alias, from `sessions.aliases`.
-    public var projectAliases: [String: String] = [:]
+    public var sessionRoots: [SessionPathRoot] = []
+    /// A SessionPath path as the Config wrote it, `~` included, to its alias, from `sessions.aliases`.
+    public var sessionAliases: [String: String] = [:]
     public var topics = Topics()
     public var notifications = Notifications()
     public var hints = Hints()
@@ -231,23 +231,23 @@ public struct Config: Equatable {
         #   # folder it matches is a root. depth 0 (the default) is the root
         #   # itself; 1 lists its subfolders, 2 goes two levels deep. Hidden
         #   # folders are skipped, and so are folders this machine doesn't
-        #   # have. A repository is one Project, with its Worktrees as rows.
-        #   # display_depth is how many trailing folder names name a Project.
+        #   # have. A repository is one SessionPath, with its Worktrees as rows.
+        #   # display_depth is how many trailing folder names name a SessionPath.
         #   paths:
         #     - path: ~/Dev/*/*
         #       display_depth: 2
-        #     - path: ~/projects
+        #     - path: ~/sessionPaths
         #       depth: 1
         #     - path: ~/.dotfiles
-        #   # The name lists and the Sidebar show for a Project, by its path.
+        #   # The name lists and the Sidebar show for a SessionPath, by its path.
         #   # tmux Sessions keep the folder name, and typing it still finds
-        #   # the Project.
+        #   # the SessionPath.
         #   aliases:
         #     - ~/Dev/obsidian_vaults/notes: My Notes
         #
         # command_palettes:
         #   # A palette opens with its sources selected: topics, sessions (with
-        #   # the Projects above), windows, agents or commands. Cmd+1–Cmd+5
+        #   # the SessionPaths above), windows, agents or commands. Cmd+1–Cmd+5
         #   # select the others too. The defaults are Commands on cmd+shift+p
         #   # and Go to… on cmd+p. An empty list removes both palettes.
         #   - name: Commands
@@ -410,8 +410,8 @@ public struct LoadedConfig: Equatable {
 
     public init() {}
 
-    public mutating func update(projects: [Project]) {
-        config.projects = projects
+    public mutating func update(sessionPaths: [SessionPath]) {
+        config.sessionPaths = sessionPaths
     }
 
     public mutating func update(with result: Result<Config, ConfigSyntaxError>) {
@@ -481,8 +481,6 @@ private struct ConfigReader {
     }
 
     static let sections: [String: (inout ConfigReader, Node) -> Void] = [
-        "projects": { $0.problem(at: $1, $1.sequence == nil ? "projects moved to sessions" : "projects: the list moved to sessions.paths") },
-        "projects_aliases": { $0.problem(at: $1, "projects_aliases moved to sessions.aliases") },
         "topics": { $0.readTopics($1) },
         "notifications": { $0.readNotifications($1) },
         "hints": { $0.readHints($1) },
@@ -520,14 +518,14 @@ private struct ConfigReader {
     public mutating func readSessions(_ node: Node) {
         for (name, key, value) in entries(of: node, "sessions") {
             switch name {
-            case "paths": readProjectPaths(value)
-            case "aliases": readProjectAliases(value)
+            case "paths": readSessionPaths(value)
+            case "aliases": readSessionPathAliases(value)
             default: problem(at: key, "unknown key \"sessions.\(name)\"")
             }
         }
     }
 
-    mutating func readProjectPaths(_ node: Node) {
+    mutating func readSessionPaths(_ node: Node) {
         guard let sequence = node.sequence else {
             problem(at: node, "sessions.paths: expected a list")
             return
@@ -553,7 +551,7 @@ private struct ConfigReader {
             let depth = count(values["depth"], "sessions.paths.depth", atLeast: 0) ?? 0
             let displayDepth = count(values["display_depth"], "sessions.paths.display_depth", atLeast: 1) ?? 1
             guard config.problems.count == problemCount, let path else { continue }
-            config.projectRoots.append(ProjectRoot(path: written(path), depth: depth, displayDepth: displayDepth))
+            config.sessionRoots.append(SessionPathRoot(path: written(path), depth: depth, displayDepth: displayDepth))
         }
     }
 
@@ -573,18 +571,18 @@ private struct ConfigReader {
         return ConfigFileSet.resolve(path, relativeTo: (self.path as NSString).deletingLastPathComponent)
     }
 
-    mutating func readProjectAliases(_ node: Node) {
+    mutating func readSessionPathAliases(_ node: Node) {
         guard let sequence = node.sequence else {
             problem(at: node, "sessions.aliases: expected a list")
             return
         }
         for entry in sequence {
             guard let pair = entry.mapping, pair.count == 1, let (key, value) = pair.first else {
-                problem(at: entry, "sessions.aliases: expected one Project path mapped to its alias")
+                problem(at: entry, "sessions.aliases: expected one SessionPath path mapped to its alias")
                 continue
             }
             guard key.tag == Yams.Tag(.str), let pattern = key.string, !pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                problem(at: key, "sessions.aliases: expected a Project path")
+                problem(at: key, "sessions.aliases: expected a SessionPath path")
                 continue
             }
             guard value.tag == Yams.Tag(.str), let alias = value.string?.trimmingCharacters(in: .whitespaces), !alias.isEmpty,
@@ -592,13 +590,13 @@ private struct ConfigReader {
                 problem(at: value, "sessions.aliases.\(pattern): expected a nonempty one-line alias")
                 continue
             }
-            let projectPath = written(pattern.trimmingCharacters(in: .whitespacesAndNewlines))
-            let written = projectPath.hasPrefix("~/") ? "~/" + (String(projectPath.dropFirst(2)) as NSString).standardizingPath : projectPath
-            guard config.projectAliases[written] == nil else {
+            let repositoryPath = written(pattern.trimmingCharacters(in: .whitespacesAndNewlines))
+            let written = repositoryPath.hasPrefix("~/") ? "~/" + (String(repositoryPath.dropFirst(2)) as NSString).standardizingPath : repositoryPath
+            guard config.sessionAliases[written] == nil else {
                 problem(at: key, "sessions.aliases: \(pattern) already has an alias")
                 continue
             }
-            config.projectAliases[written] = alias
+            config.sessionAliases[written] = alias
         }
     }
 
@@ -1056,7 +1054,7 @@ private struct ConfigReader {
     /// valid `keybindings` actions, so each scope keeps its own table.
     static let removedPaletteActions: [String: PaletteAction] = [
         "snooze": .snoozeTopic,
-        "add_project": .addProjectToTopic,
+        "add_session": .addSessionToTopic,
         "zen": .startZen,
         "settle": .settleTopic,
         "forget": .forgetTopic,

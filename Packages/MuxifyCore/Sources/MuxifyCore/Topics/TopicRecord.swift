@@ -51,7 +51,6 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public var title: String?
     public var slug: String?
-    public var homeProject: String?
     public var createdAt: String?
     public var settledAt: String?
     public var outcome: String?
@@ -78,16 +77,15 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
 
     public var snoozeDeadline: SnoozeDeadline? { snoozedUntil.flatMap(SnoozeDeadline.init(stored:)) }
 
-    public init(id: String, title: String? = nil, slug: String? = nil, homeProject: String? = nil) {
+    public init(id: String, title: String? = nil, slug: String? = nil) {
         self.id = id
         self.title = title
         self.slug = slug
-        self.homeProject = homeProject
     }
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case id, title, slug, outcome, order, sessions
-        case homeProject = "home_project", createdAt = "created_at", settledAt = "settled_at"
+        case createdAt = "created_at", settledAt = "settled_at"
         case snoozedUntil = "snoozed_until", sessionOrder = "session_order", pinned, unread, tags
     }
 
@@ -106,7 +104,6 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         }
         title = try values.decodeIfPresent(String.self, forKey: .title)
         slug = try values.decodeIfPresent(String.self, forKey: .slug)
-        homeProject = try values.decodeIfPresent(String.self, forKey: .homeProject)
         createdAt = try values.decodeIfPresent(String.self, forKey: .createdAt)
         settledAt = try values.decodeIfPresent(String.self, forKey: .settledAt)
         outcome = try values.decodeIfPresent(String.self, forKey: .outcome)
@@ -139,7 +136,6 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         try values.encode(id, forKey: .id)
         try values.encodeIfPresent(title, forKey: .title)
         try values.encodeIfPresent(slug, forKey: .slug)
-        try values.encodeIfPresent(homeProject, forKey: .homeProject)
         try values.encodeIfPresent(createdAt, forKey: .createdAt)
         try values.encodeIfPresent(settledAt, forKey: .settledAt)
         try values.encodeIfPresent(outcome, forKey: .outcome)

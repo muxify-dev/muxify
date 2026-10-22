@@ -9,7 +9,7 @@ enum CLICommand: Equatable {
     case sessionLock(SessionInvocation)
     case extensionsInstall
     case topic(TopicInvocation)
-    case project(ProjectInvocation)
+    case sessionList(SessionListInvocation)
     case agent(AgentInvocation)
     case agentConversation(AgentConversationInvocation)
     case window(WindowInvocation)
@@ -21,20 +21,20 @@ enum CLICommand: Equatable {
            muxify session lock [--session <name>] [--json]
            muxify session unlock [--session <name>] [--json]
            muxify extensions install
-           muxify topic new ["title"] [--project <dir>] [--window <id> | --pane <id>] [--json]
-           muxify topic add-project <dir> [--worktree [--base <ref>]] [--topic <id|label> | --window <id> | --pane <id>] [--json]
-           muxify topic forget [--remove-worktrees] [--topic <id|label> | --window <id> | --pane <id>] [--json]
-           muxify topic settle [--remove-worktrees] [--topic <id|label> | --window <id> | --pane <id>] [--json]
+           muxify topic new ["title"] [--directory <dir>] [--window <id> | --pane <id>] [--json]
+           muxify topic add-session <dir> [--worktree [--base <ref>]] [--topic <id|label> | --window <id> | --pane <id>] [--json]
+           muxify topic forget [--kill-sessions] [--remove-worktrees] [--topic <id|label> | --window <id> | --pane <id>] [--json]
+           muxify topic settle [--kill-sessions] [--remove-worktrees] [--topic <id|label> | --window <id> | --pane <id>] [--json]
            muxify topic snooze <time> [--topic <id|label>... | --window <id> | --pane <id>] [--json]
            muxify topic unsnooze [--topic <id|label>... | --window <id> | --pane <id>] [--json]
            muxify topic tag (add | remove | set) [<tag>...] [--topic <id|label> | --window <id> | --pane <id>] [--json]
            muxify topic list [--json]
            muxify topic show [--conversations] [--topic <id|label> | --window <id> | --pane <id>] [--json]
-           muxify topic status [--project <dir>] [--topic <id|label> | --window <id> | --pane <id>] [--json]
-           muxify topic diff [--stat] [--project <dir>] [--topic <id|label> | --window <id> | --pane <id>] [--json]
-           muxify topic exec [--project <dir>] [--timeout <seconds>] [--topic <id|label> | --window <id> | --pane <id>] [--json] -- <command> [<argument>...]
-           muxify window move --topic <id|label> [--window <id> | --pane <id>] [--json]
-           muxify project list [--json]
+           muxify topic status [--session <name|id>] [--topic <id|label> | --window <id> | --pane <id>] [--json]
+           muxify topic diff [--stat] [--session <name|id>] [--topic <id|label> | --window <id> | --pane <id>] [--json]
+           muxify topic exec [--session <name|id>] [--timeout <seconds>] [--topic <id|label> | --window <id> | --pane <id>] [--json] -- <command> [<argument>...]
+           muxify window move --topic <id|label> [--session <name|id> | --new-session] [--window <id> | --pane <id>] [--json]
+           muxify session list [--json]
            muxify agent list [--topic <id|label>] [--status <status>] [--unread] [--json]
            muxify agent conversation (<pane> | --conversation <id> --kind <kind> | --transcript <path> [--kind <kind>])
                                      [--head <n> | --tail <n> | --range <a>..<b>] [--after <index>] [--since <time>]
@@ -46,7 +46,7 @@ enum CLICommand: Equatable {
     browser open   Opens each URL as a Tab in this tmux Window's Browser.
                      --window <id>   open in another Window instead, e.g. --window @12
     session open   Shows the tmux Session in Muxify. The name may contain spaces,
-                   quoted or not: muxify session open my project
+                   quoted or not: muxify session open my session
     session lock   Locks this Pane's tmux Session, or the Session that --session names:
                    it keeps a card with a number in the Topics list, after the Topics
                    that are not Pinned. Only a Session in No Topic can be Locked. A
@@ -56,12 +56,13 @@ enum CLICommand: Equatable {
                    Installs or updates Extensions for Agents configured under HOME.
     topic new      Without a title, moves this Pane into an Untitled Topic.
                    With a title, creates a Topic Session and keeps this Pane here.
-    topic add-project
-                   Adds the Project or Worktree at <dir> to this Pane's Topic.
+    topic add-session
+                   Creates another Session at <dir> in this Pane's Topic, even if that folder is already used.
                      --worktree      start a new Worktree from it on the Topic's branch
                      --base <ref>    start the new Worktree at <ref>, not at HEAD
-    topic forget   Removes this Topic for good. --remove-worktrees removes its clean Worktrees.
-    topic settle   Settles this Pane's Topic using the default Session choices.
+    topic forget   Removes this Topic for good. Sessions stay running, without the Topic.
+    topic settle   Settles this Pane's Topic. Sessions and Worktrees are kept by default.
+                     --kill-sessions    explicitly stop the Topic's Sessions (also for forget)
                      --remove-worktrees  also remove each Worktree that the Topic made
                                          and that is merged, as the Settle sheet offers.
                                          If one has uncommitted work, nothing changes.
@@ -79,7 +80,7 @@ enum CLICommand: Equatable {
                    becomes lower case. The # is optional, and the shell reads an unquoted # as a comment.
     topic list     Prints each open Topic's id, label and Tags without starting Muxify.
     topic show     Prints this Pane's Topic: its id, label and Tags, then a line for each live
-                   Session: its name, Project, folder and branch. With --json, also its
+                   Session: its name, base name, folder and branch. With --json, also its
                    Windows and Panes, and the Agent, Status, Unread and conversation of each Pane.
                      --conversations      also a line for the conversation of each Agent that
                                           the Topic has or remembers: its kind and id
@@ -88,23 +89,25 @@ enum CLICommand: Equatable {
                    "==> <session> <==" line.
                    With --json, also each Session's upstream, ahead, behind and base.
                    A Session whose folder is in no repository has "git": null.
-                     --project <dir>      only the Session that uses <dir>
+                     --session <name|id>   only this exact Session
     topic diff     Prints one patch of the Topic's work in all its live Sessions. Each
                    path starts with the Session's name. A Session's work is its commits,
                    changes and untracked files since its base: the commit its Worktree
                    started at, else the merge base with origin/HEAD, main or master.
                      --stat               print a summary, not the patch
-                     --project <dir>      only the Session that uses <dir>
+                     --session <name|id>   only this exact Session
     topic exec     Runs <command> once in the folder of each live Session of this Pane's
                    Topic, all at the same time, and prints each Session's output under
                    a "==> <session> <==" line. It types nothing into a Pane. It exits
                    with 1 when a run does not exit with 0.
-                     --project <dir>      run only in the Session that uses <dir>
+                     --session <name|id>   run only in this exact Session
                      --timeout <seconds>  stop a run after this time (default 60)
     window move    Moves this Pane's Window, or the Window that --window or --pane
                    names, into the open Topic that --topic names by id or exact label.
-    project list   Prints a line for each row of the New Topic list: its folder, its
-                   label and the open Topics whose live Sessions use it.
+                     --session <name|id>   choose a destination when several Sessions exist
+                     --new-session         create a destination instead of reusing one
+    session list   Prints every running Session and each unused exact-named launch path,
+                   with running or launchable, its directory, and Topic label when present.
     agent list     Prints a line for each Agent: its Pane, kind, Status, "unread" when it
                    is Unread, and the label of its Topic and the name of its Session.
                      --topic <id|label>  only the Agents in this open Topic
@@ -142,7 +145,7 @@ enum CLICommand: Equatable {
                      --topic <id|label>  an open Topic, e.g. --topic "Fix login"
                      --window <id>       a tmux Window, e.g. --window @12
                      --pane <id>         a tmux Pane, e.g. --pane %3
-    new, add-project, settle, snooze, unsnooze and window move print the id of each Topic that they change.
+    new, add-session, settle, snooze, unsnooze and window move print the id of each Topic that they change.
                      --json              print the full result as one line of JSON
 
     Optional tmux binding: bind T run-shell 'muxify topic new --pane #{pane_id} >/dev/null'
@@ -174,9 +177,6 @@ enum CLICommand: Equatable {
         case "topic":
             if args.contains(where: { $0 == "-h" || $0 == "--help" }) { self = .help; return }
             self = .topic(try TopicInvocation(arguments: args, environment: environment))
-        case "project":
-            if args.contains(where: { $0 == "-h" || $0 == "--help" }) { self = .help; return }
-            self = .project(try ProjectInvocation(arguments: args, environment: environment))
         case "window":
             if args.contains(where: { $0 == "-h" || $0 == "--help" }) { self = .help; return }
             self = .window(try WindowInvocation(arguments: args, environment: environment))
@@ -189,6 +189,7 @@ enum CLICommand: Equatable {
             }
         case "session":
             switch args.popFirst() {
+            case "list": self = .sessionList(try SessionListInvocation(arguments: ["list"] + args, environment: environment))
             case "-h", "--help": self = .help
             case "open":
                 if args.first == "-h" || args.first == "--help" { self = .help; return }
@@ -267,7 +268,7 @@ enum CLICommand: Equatable {
             guard result.status == 0 else { throw CLIError("no tmux session '\(name)'") }
             try open("muxify://select?session=\(Self.percentEncoded(name))", using: runner)
         case .topic(let invocation): try await invocation.run()
-        case .project(let invocation): try await invocation.run()
+        case .sessionList(let invocation): try await invocation.run()
         case .agent(let invocation): try await invocation.run()
         case .agentConversation(let invocation): try invocation.run(using: runner)
         case .window(let invocation): try await invocation.run()

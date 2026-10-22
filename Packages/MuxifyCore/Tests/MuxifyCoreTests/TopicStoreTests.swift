@@ -47,7 +47,7 @@ final class TopicStoreTests: XCTestCase {
             for record in started.saves { try transaction.update(record.id) { $0 = record } }
         }
         var remembered = kept
-        remembered.sessions = [.object(["project_path": .string("/project")])]
+        remembered.sessions = [.object(["repository_path": .string("/sessionPath")])]
         try store.write { try $0.forget(kept.id) }
         let contents = try store.read()
         XCTAssertNil(contents.zen)
@@ -169,7 +169,7 @@ final class TopicStoreTests: XCTestCase {
     }
 
     func testRecordRoundTripPreservesUnknownNestedValuesAndLargeIntegers() throws {
-        let data = Data(#"{"id":"test","title":"Before","slug":"test","home_project":"/work/app","created_at":"2026-10-06T20:00:00Z","settled_at":null,"outcome":null,"order":2,"snoozed_until":"never","future":{"large":18446744073709551615,"items":[true,null,0.125]},"sessions":[{"project_path":"/work/app","future_session":42,"windows":[{"future_window":{"key":"kept"}}]}]}"#.utf8)
+        let data = Data(#"{"id":"test","title":"Before","slug":"test","home_project":"/work/app","created_at":"2026-10-06T20:00:00Z","settled_at":null,"outcome":null,"order":2,"snoozed_until":"never","future":{"large":18446744073709551615,"items":[true,null,0.125]},"sessions":[{"repository_path":"/work/app","future_session":42,"windows":[{"future_window":{"key":"kept"}}]}]}"#.utf8)
         let record = try JSONDecoder().decode(TopicRecord.self, from: data)
         let store = TopicStore(paths: paths)
         try seed(record)
@@ -326,7 +326,7 @@ final class TopicStoreTests: XCTestCase {
         pinned.isPinned = true
         try seed(pinned, record("a", order: 0))
         try store.write { try $0.create(record("new", order: nil)) }
-        let plan = TopicPlan(title: "Planned", project: Project(path: "/work/app", name: "app"), records: try records(store),
+        let plan = TopicPlan(title: "Planned", sessionPath: SessionPath(path: "/work/app", name: "app"), records: try records(store),
                              sessionNames: [], id: "planned")
         try store.write { try $0.apply(TopicRecordChange(before: nil, after: plan.record)) }
         XCTAssertEqual(try shown(store), ["p", "a", "new", "planned"])
@@ -346,13 +346,13 @@ final class TopicStoreTests: XCTestCase {
 
         let topic = try XCTUnwrap(records(store).first { $0.id == "t" })
         let settle = TopicSettlePlan(topic: topic, snapshot: TmuxSnapshot(windows: [], clients: [], panes: [], serverRunning: true),
-                                     projects: [], choices: [], outcome: "").edit
+                                     sessionPaths: [], choices: [], outcome: "").edit
         try store.write { try $0.apply(TopicRecordChange(before: topic, after: XCTUnwrap(settle.record))) }
         XCTAssertEqual(try shown(store), ["p", "a"])
         let settled = try XCTUnwrap(records(store).first { $0.id == "t" })
         XCTAssertTrue(settled.isPinned, "Settle keeps the Pin")
 
-        let reopen = try TopicReopenPlan(topic: settled, records: try records(store), windows: [], projects: [],
+        let reopen = try TopicReopenPlan(topic: settled, records: try records(store), windows: [], sessionPaths: [],
                                          existingDirectories: []).edit
         try store.write { try $0.apply(TopicRecordChange(before: settled, after: XCTUnwrap(reopen.savedCompletionRecord))) }
         XCTAssertEqual(try shown(store), ["p", "t", "a"], "Reopen brings the Topic back last among the Pinned Topics")
@@ -388,9 +388,9 @@ final class TopicStoreTests: XCTestCase {
                             var topic = record("returning", order: 1)
                             topic.isPinned = pinned
                             topic.settledAt = settled ? "2026-10-01T00:00:00Z" : nil
-                            if remembered { topic.homeProject = "/work/app" }
+                            if remembered { topic.sessions = [.object(["id": .string("s"), "name": .string("app"), "directory": .string("/work/app")])] }
                             let initial = [first, topic, last]
-                            let plan = try TopicReopenPlan(topic: topic, records: initial, windows: [], projects: [],
+                            let plan = try TopicReopenPlan(topic: topic, records: initial, windows: [], sessionPaths: [],
                                                           existingDirectories: [], choice: choice).edit
                             var transaction = TopicTransaction(records: initial, zen: nil, topics: paths.topics)
                             if let saved = plan.savedCompletionRecord {

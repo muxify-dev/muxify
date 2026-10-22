@@ -1,4 +1,4 @@
-"""The fixture and helpers of the palette suites that start Commands: one Project, Topic records and live Sessions.
+"""The fixture and helpers of the palette suites that start Commands: one Session Path, Topic records and live Sessions.
 
 PaletteFixture has no checks. Each suite subclasses it, so each suite makes its own Sandbox and app.
 
@@ -56,7 +56,7 @@ class PaletteFixture(unittest.TestCase):
     def topic(self, name, order=None, session=False, **fields):
         """A Topic record, and with `session` a live Session in it; returns that Session's Window."""
         path = self.topics/(name + '.json')
-        record = dict(id=name, title=name, slug=name, home_project=str(self.project))
+        record = dict(id=name, title=name, slug=name)
         if order is not None:
             record['order'] = order
         path.write_text(json.dumps(dict(record, **fields)))

@@ -45,8 +45,8 @@ final class CLICommandTests: XCTestCase {
     }
 
     func testSessionNamesMayBeQuotedUnquotedOrStartWithAnOption() throws {
-        for arguments in [["my project"], ["my", "project"]] {
-            XCTAssertEqual(try CLICommand(arguments: ["session", "open"] + arguments), .sessionOpen(name: "my project"))
+        for arguments in [["my sessionPath"], ["my", "sessionPath"]] {
+            XCTAssertEqual(try CLICommand(arguments: ["session", "open"] + arguments), .sessionOpen(name: "my sessionPath"))
         }
         XCTAssertEqual(try CLICommand(arguments: ["session", "open", "--", "--help"]), .sessionOpen(name: "--help"))
     }
@@ -150,17 +150,17 @@ final class CLICommandTests: XCTestCase {
             .topic(TopicInvocation(command: command, target: target, caller: caller, output: output, paths: paths))
         }
         let cases: [([String], [String: String], CLICommand)] = [
-            (["new"], inside, topic(.new(title: nil, project: nil))),
-            (["new", "Fix reward", "--project", "/work"], outside, topic(.new(title: "Fix reward", project: "/work"), caller: nil)),
-            (["new", "Fix reward", "--project", "/work"], inside, topic(.new(title: "Fix reward", project: "/work"))),
-            (["new", "--pane", "%3", "Fix"], inside, topic(.new(title: "Fix", project: nil), target: pane)),
-            (["new", "--window", "@12"], outside, topic(.new(title: nil, project: nil), target: window, caller: nil)),
-            (["add-project", "tools"], inside, topic(.addProject(directory: "tools", newWorktree: false, base: nil))),
-            (["add-project", "tools", "--topic", "Fix reward"], outside,
-             topic(.addProject(directory: "tools", newWorktree: false, base: nil), target: .topic(.named("Fix reward")), caller: nil)),
-            (["add-project", "tools", "--worktree"], inside, topic(.addProject(directory: "tools", newWorktree: true, base: nil))),
-            (["add-project", "--base", "origin/main", "tools", "--worktree"], inside,
-             topic(.addProject(directory: "tools", newWorktree: true, base: "origin/main"))),
+            (["new"], inside, topic(.new(title: nil, sessionPath: nil))),
+            (["new", "Fix reward", "--directory", "/work"], outside, topic(.new(title: "Fix reward", sessionPath: "/work"), caller: nil)),
+            (["new", "Fix reward", "--directory", "/work"], inside, topic(.new(title: "Fix reward", sessionPath: "/work"))),
+            (["new", "--pane", "%3", "Fix"], inside, topic(.new(title: "Fix", sessionPath: nil), target: pane)),
+            (["new", "--window", "@12"], outside, topic(.new(title: nil, sessionPath: nil), target: window, caller: nil)),
+            (["add-session", "tools"], inside, topic(.addSession(directory: "tools", newWorktree: false, base: nil))),
+            (["add-session", "tools", "--topic", "Fix reward"], outside,
+             topic(.addSession(directory: "tools", newWorktree: false, base: nil), target: .topic(.named("Fix reward")), caller: nil)),
+            (["add-session", "tools", "--worktree"], inside, topic(.addSession(directory: "tools", newWorktree: true, base: nil))),
+            (["add-session", "--base", "origin/main", "tools", "--worktree"], inside,
+             topic(.addSession(directory: "tools", newWorktree: true, base: "origin/main"))),
             (["settle", "--window", "@12"], inside, topic(.settle(removeWorktrees: false), target: window)),
             (["settle", "--json", "--pane", "%3"], inside, topic(.settle(removeWorktrees: false), target: pane, output: .json)),
             (["settle", "--remove-worktrees"], inside, topic(.settle(removeWorktrees: true))),
@@ -184,16 +184,16 @@ final class CLICommandTests: XCTestCase {
             (["show", "--topic", "Fix reward", "--json"], outside, topic(.show(conversations: false), target: .topic(.named("Fix reward")), caller: nil, output: .json)),
             (["show", "--pane", "%3"], inside, topic(.show(conversations: false), target: pane)),
             (["show", "--conversations", "--json"], inside, topic(.show(conversations: true), output: .json)),
-            (["exec", "--", "git", "status", "--short"], inside, topic(.exec(project: nil, timeout: 60, command: ["git", "status", "--short"]))),
-            (["exec", "--topic", "Fix reward", "--project", "tools", "--timeout", "2.5", "--json", "--", "make", "--", "-j"], outside,
-             topic(.exec(project: "tools", timeout: 2.5, command: ["make", "--", "-j"]), target: .topic(.named("Fix reward")),
+            (["exec", "--", "git", "status", "--short"], inside, topic(.exec(sessionPath: nil, timeout: 60, command: ["git", "status", "--short"]))),
+            (["exec", "--topic", "Fix reward", "--session", "tools", "--timeout", "2.5", "--json", "--", "make", "--", "-j"], outside,
+             topic(.exec(sessionPath: "tools", timeout: 2.5, command: ["make", "--", "-j"]), target: .topic(.named("Fix reward")),
                    caller: nil, output: .json)),
-            (["status"], inside, topic(.status(project: nil))),
-            (["status", "--project", "tools", "--topic", "Fix reward", "--json"], outside,
-             topic(.status(project: "tools"), target: .topic(.named("Fix reward")), caller: nil, output: .json)),
-            (["diff"], inside, topic(.diff(project: nil, stat: false))),
-            (["diff", "--stat", "--window", "@12"], inside, topic(.diff(project: nil, stat: true), target: window)),
-            (["exec", "--pane", "%3", "--", "pwd", "--json"], inside, topic(.exec(project: nil, timeout: 60, command: ["pwd", "--json"]), target: pane)),
+            (["status"], inside, topic(.status(sessionPath: nil))),
+            (["status", "--session", "tools", "--topic", "Fix reward", "--json"], outside,
+             topic(.status(sessionPath: "tools"), target: .topic(.named("Fix reward")), caller: nil, output: .json)),
+            (["diff"], inside, topic(.diff(sessionPath: nil, stat: false))),
+            (["diff", "--stat", "--window", "@12"], inside, topic(.diff(sessionPath: nil, stat: true), target: window)),
+            (["exec", "--pane", "%3", "--", "pwd", "--json"], inside, topic(.exec(sessionPath: nil, timeout: 60, command: ["pwd", "--json"]), target: pane)),
         ]
         for (arguments, environment, expected) in cases {
             XCTAssertEqual(try CLICommand(arguments: ["topic"] + arguments, environment: environment), expected, "\(arguments)")
@@ -213,14 +213,13 @@ final class CLICommandTests: XCTestCase {
         }
     }
 
-    func testProjectListTakesOnlyJson() throws {
+    func testSessionListTakesOnlyJson() throws {
         let environment = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]
         let paths = MuxifyPaths(environment: environment, home: "/home/me")
-        XCTAssertEqual(try CLICommand(arguments: ["project", "list"], environment: environment),
-                       .project(ProjectInvocation(output: .text, paths: paths)))
-        XCTAssertEqual(try CLICommand(arguments: ["project", "list", "--json"], environment: environment),
-                       .project(ProjectInvocation(output: .json, paths: paths)))
-        for arguments in [["project"], ["project", "show"], ["project", "list", "extra"], ["project", "list", "--pane", "%3"]] {
+        guard case .sessionList(let invocation) = try CLICommand(arguments: ["session", "list", "--json"], environment: environment) else { return XCTFail("expected Session list") }
+        XCTAssertEqual(invocation.paths, paths)
+        XCTAssertEqual(invocation.output, .json)
+        for arguments in [["session"], ["session", "show"], ["session", "list", "extra"], ["session", "list", "--pane", "%3"], ["project", "list"]] {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: [:]), "\(arguments)") { error in
                 XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
             }
@@ -381,13 +380,13 @@ final class CLICommandTests: XCTestCase {
     func testTopicCommandsRejectWhatTheShellToolRejected() {
         let inside = ["TMUX_PANE": "%7"]
         for arguments in [["topic"], ["topic", "close"], ["topic", "new", "a", "b"], ["topic", "new", " "],
-                          ["topic", "new", "--project"], ["topic", "new", "--project", "-x"], ["topic", "new", "--project", ""],
-                          ["topic", "new", "--other"], ["topic", "new", "--pane"], ["topic", "add-project"], ["topic", "add-project", "-x"],
-                          ["topic", "add-project", "a", "--project", "b"], ["topic", "add", "a"],
-                          ["topic", "add-project", "a", "--base", "main"], ["topic", "add-project", "a", "--worktree", "--base"],
-                          ["topic", "add-project", "a", "--worktree", "--base", "x", "--base", "y"],
+                          ["topic", "new", "--directory"], ["topic", "new", "--directory", "-x"], ["topic", "new", "--directory", ""],
+                          ["topic", "new", "--other"], ["topic", "new", "--pane"], ["topic", "add-session"], ["topic", "add-session", "-x"],
+                          ["topic", "add-session", "a", "--directory", "b"], ["topic", "add", "a"],
+                          ["topic", "add-session", "a", "--base", "main"], ["topic", "add-session", "a", "--worktree", "--base"],
+                          ["topic", "add-session", "a", "--worktree", "--base", "x", "--base", "y"],
                           ["topic", "new", "--worktree"], ["topic", "settle", "--base", "main"],
-                          ["topic", "add-project", "a", "--remove-worktrees"], ["topic", "move", "a"],
+                          ["topic", "add-session", "a", "--remove-worktrees"], ["topic", "move", "a"],
                           ["topic", "settle", "extra"], ["topic", "move", "a", "--window", "@12"],
                           ["topic", "list", "extra"], ["topic", "show", "Fix"],
                           ["topic", "exec"], ["topic", "exec", "--"], ["topic", "exec", "pwd"], ["topic", "exec", "pwd", "--", "ls"],
@@ -395,9 +394,9 @@ final class CLICommandTests: XCTestCase {
                           ["topic", "exec", "--timeout", "-1", "--", "pwd"], ["topic", "show", "--", "pwd"],
                           ["topic", "show", "--timeout", "5"], ["topic", "status", "--stat"], ["topic", "status", "x"],
                           ["topic", "diff", "x"], ["topic", "diff", "--", "pwd"], ["topic", "show", "--stat"],
-                          ["topic", "snooze"], ["topic", "snooze", "2h", "--project", "tools"], ["topic", "snooze", "2h", "--stat"],
+                          ["topic", "snooze"], ["topic", "snooze", "2h", "--directory", "tools"], ["topic", "snooze", "2h", "--stat"],
                           ["topic", "tag"], ["topic", "tag", "add"], ["topic", "tag", "remove"], ["topic", "tag", "rename", "a"],
-                          ["topic", "tag", "add", "a", "--project", "tools"],
+                          ["topic", "tag", "add", "a", "--directory", "tools"],
                           ["topic", "unsnooze", "2h"], ["topic", "unsnooze", "--remove-worktrees"], ["topic", "snooze", "2h", "--topic"]] {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
                 XCTAssertEqual((error as? CLIError)?.exitCode, 2)
@@ -423,10 +422,10 @@ final class CLICommandTests: XCTestCase {
             (["settle", "--topic", ""], inside, "--topic takes the id or label of an open Topic"),
             (["new", "--topic", "Fix"], inside, "topic new does not take --topic; name the target with --window <id> or --pane <id>"),
             (["list", "--pane", "%3"], inside, "topic list does not take --pane"),
-            (["new", "Fix", "--project", "/work", "--pane", "%3"], inside, "topic new with a title and --project does not take --pane"),
+            (["new", "Fix", "--directory", "/work", "--pane", "%3"], inside, "topic new with a title and --directory does not take --pane"),
             (["new"], [:], "not inside tmux; name the target with --window <id> or --pane <id>"),
             (["new", "Fix"], [:], "not inside tmux; name the target with --window <id> or --pane <id>"),
-            (["add-project", "tools"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
+            (["add-session", "tools"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
             (["settle"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
             (["show"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
             (["snooze", "2h"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),

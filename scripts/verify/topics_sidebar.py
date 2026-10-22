@@ -1,10 +1,10 @@
 """The fixture and helpers of the topics_*_sidebar suites: Topics in the Sidebar.
 
-TopicsSidebar has no checks. Each suite subclasses it, so each suite makes its own Sandbox, Projects and app.
+TopicsSidebar has no checks. Each suite subclasses it, so each suite makes its own Sandbox, Session Paths and app.
 
-The open-Topic row in UI/SidebarView.swift gives "Add a Project…" as an accessibility action, so open_add_project
-reaches the Add Project palette without the row's context menu. New Topic opens Add Project. The helper closes it
-to test the empty-Topic view and its Add a Project button.
+The open-Topic row in UI/SidebarView.swift gives "Add a Session…" as an accessibility action, so open_add_session
+reaches the Add Session palette without the row's context menu. New Topic opens Add Session. The helper closes it
+to test the empty-Topic view and its Add a Session button.
 """
 
 import json
@@ -18,6 +18,13 @@ from scripts.verify.sandbox import Sandbox, remove_topic, wait
 # The app reads tmux and the Topic files once per second.
 REFRESH_LIMIT = 2.0
 SHELL = '/bin/zsh -f'
+
+
+def remembered_session(directory, topic, base=None, **fields):
+    """A current-schema restoration fixture, with identity independent of its launch directory."""
+    base = base or directory.name
+    name = base + '/' + topic
+    return dict(id='saved:' + name, name=name, base_name=base, directory=str(directory), **fields)
 
 
 class TopicsSidebar(unittest.TestCase):
@@ -35,7 +42,7 @@ class TopicsSidebar(unittest.TestCase):
         cls.epsilon = s.root/'projects/epsilon'
         # A bare repository with one Worktree folder per branch, as ~/Dev/work/game_server is.
         cls.gamma = s.root/'projects/gamma'
-        # A bare repository that sorts first in the Project list, used only by the Add Project check, whose rows
+        # A bare repository that sorts first in the Session Path list, used only by the Add Session Path check, whose rows
         # show without a search.
         cls.acme = s.root/'projects/acme'
         bin_dir = s.root/'bin'
@@ -62,7 +69,7 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
             subprocess.run(git + ['commit', '-q', '-m', 'init'], check=True)
         # Linked Worktrees of alpha, each the base of exactly one check. Many checks open live Topic Sessions in alpha
         # itself, so its main-checkout row says Also in those Topics, and no check picks that row. They sit outside projects/, so the
-        # projects glob does not list them as Projects.
+        # projects glob does not list them as Session Paths.
         cls.alpha_tree = {name: s.root/'alpha-trees'/name
                           for name in ['new-topic-base', 'worktree-base', 'worktree-row-base']}
         for name, path in cls.alpha_tree.items():
@@ -107,6 +114,9 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
         self.addCleanup(self.end_session, sid)
         if topic:
             self.s.tmux('set-option', '-t', sid, '@muxify_topic', topic)
+            saved = next((row for row in self.records().get(topic, {}).get('sessions', []) if row.get('name') == name), None)
+            if saved:
+                self.s.tmux('set-option', '-t', sid, '@muxify_session_id', saved['id'])
         return sid
 
     def end_session(self, sid):
@@ -122,7 +132,7 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
         path = self.topics_dir/(topic_id + '.json')
         self.addCleanup(remove_topic, path)
         with open(path, 'w') as handle:
-            handle.write(json.dumps(dict(id=topic_id, title=title, slug=topic_id, home_project=str(home), **fields)))
+            handle.write(json.dumps(dict(id=topic_id, title=title, slug=topic_id, **fields)))
 
     def records(self):
         out = {}
@@ -179,7 +189,7 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
                 if key.startswith('no-topic-session-') and not key.endswith('-more')]
 
     def project_row(self, directory):
-        """The New Topic or Add Project row of a Project or Worktree directory. Worktree rows follow git, a moment after the palette opens.
+        """The New Topic or Add Session Path row of a Session Path or Worktree directory. Worktree rows follow git, a moment after the palette opens.
         The list builds only the rows it shows, so a row further down is found through the search.
         A row's id is its folder's real path, which differs from the Config spelling under /tmp."""
         key = 'palette-row-' + os.path.realpath(directory)
@@ -191,7 +201,7 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
             self.s.act('focus', 'palette-search')
             self.s.act('set', 'palette-search', str(directory))
             return self.rows_until(lambda rs: self.s.has(key, rs), seconds=3)[0] is not None
-        wait(searched, 'no Project row ' + key, seconds=20)
+        wait(searched, 'no Session Path row ' + key, seconds=20)
         return key
 
     def open_new_topic(self):
@@ -215,20 +225,20 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
         record = wait(lambda: [r for i, r in self.records().items() if i not in before and r.get('title') == title],
                       'no new Topic record for %r' % title, seconds=15)[0]
         self.addCleanup(remove_topic, self.topics_dir/(record['id'] + '.json'))
-        s.wait_rows(lambda rs: 'Add a Project' in self.describe('palette-breadcrumb', rs),
-                    'New Topic did not open Add a Project', seconds=15)
+        s.wait_rows(lambda rs: 'Add a Session' in self.describe('palette-breadcrumb', rs),
+                    'New Topic did not open Add a Session', seconds=15)
         s.act('press', 'palette-cancel')
-        s.wait_rows(lambda rs: not s.has('palette-search', rs), 'Add Project palette did not close')
+        s.wait_rows(lambda rs: not s.has('palette-search', rs), 'Add Session Path palette did not close')
         s.wait_rows(lambda rs: s.row('empty-topic-title', rs).get('accessibilityValue') == title,
                     'the empty-Topic view does not show %r' % title)
         return record
 
-    def open_add_project(self):
-        """Opens the Add Project palette from the Add a Project button of the empty-Topic view."""
+    def open_add_session(self):
+        """Opens the Add Session Path palette from the Add a Session Path button of the empty-Topic view."""
         s = self.s
         self.addCleanup(lambda: s.has('palette-accept') and s.act('press', 'palette-cancel'))
-        s.act('press', 'empty-topic-add-project')
-        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Project palette did not open')
+        s.act('press', 'empty-topic-add-session')
+        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Session Path palette did not open')
 
     def pick_project(self, directory, worktree):
         """Selects the repository with an exact path query and sets New Worktree before the caller accepts it."""
@@ -237,7 +247,7 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
         s.act('set', 'palette-search', str(directory))
         key = self.project_row(directory)
         s.wait_rows(lambda rs: s.row(key, rs).get('accessibilityValue') == 'selected',
-                    'the exact Project path did not select its row')
+                    'the exact Session Path path did not select its row')
         want = 'on' if worktree else 'off'
         s.wait_rows(lambda rs: s.has('palette-new-worktree', rs),
                     'no New Worktree option for the repository row ' + str(directory))

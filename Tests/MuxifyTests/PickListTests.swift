@@ -58,10 +58,10 @@ final class PickListTests: XCTestCase {
     }
 
     func testSectionsHideOnAnEmptyQueryOrStayFixedAndEmptyOnesDropOut() {
-        let hidden = list([candidate("a", "alpha")], "", rule: .ranked(showsWhenEmpty: false), title: "Projects")
+        let hidden = list([candidate("a", "alpha")], "", rule: .ranked(showsWhenEmpty: false), title: "SessionPaths")
         XCTAssertEqual(hidden.sections, [])
-        let shown = list([candidate("a", "alpha")], "al", rule: .ranked(showsWhenEmpty: false), title: "Projects")
-        XCTAssertEqual(shown.sections.map(\.title), ["Projects"])
+        let shown = list([candidate("a", "alpha")], "al", rule: .ranked(showsWhenEmpty: false), title: "SessionPaths")
+        XCTAssertEqual(shown.sections.map(\.title), ["SessionPaths"])
         let fixed = list([candidate("new", "New Topic"), candidate("b", "beta", current: true)], "zzz", rule: .fixed)
         XCTAssertEqual(fixed.rows.map(\.id), ["new", "b"], "a fixed section is neither filtered nor sorted")
         XCTAssertEqual(list([candidate("a", "alpha")], "zzz").sections, [])

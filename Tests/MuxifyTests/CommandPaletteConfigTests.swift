@@ -38,7 +38,7 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertEqual(keys.action(for: trigger("alt+t")), .toggleIncludeTab)
         XCTAssertEqual(keys.action(for: trigger("alt+w")), .toggleNewWorktree)
         XCTAssertEqual(keys.action(for: trigger("alt+s")), .suggestTopicTitle)
-        XCTAssertEqual(config.projectRoots, [])
+        XCTAssertEqual(config.sessionRoots, [])
         XCTAssertEqual(config.problems, [])
     }
 
@@ -51,7 +51,7 @@ final class CommandPaletteConfigTests: XCTestCase {
 
         sessions:
           paths:
-            - path: ~/projects
+            - path: ~/sessionPaths
               depth: 1
             - path: ~/.dotfiles
 
@@ -64,7 +64,7 @@ final class CommandPaletteConfigTests: XCTestCase {
             sources: [agents]
         """)
         XCTAssertEqual(config.problems, [])
-        XCTAssertEqual(config.projectRoots, [ProjectRoot(path: "~/projects", depth: 1), ProjectRoot(path: "~/.dotfiles")])
+        XCTAssertEqual(config.sessionRoots, [SessionPathRoot(path: "~/sessionPaths", depth: 1), SessionPathRoot(path: "~/.dotfiles")])
         XCTAssertEqual(config.commandPalettes, [
             CommandPaletteConfig(name: "Sessions", triggers: [trigger("cmd+p")], sources: [.sessions, .windows]),
             CommandPaletteConfig(name: "Agents", triggers: [trigger("cmd+shift+o")], sources: [.agents]),
@@ -261,7 +261,7 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertNil(remote.ghosttyConfigFile)
         XCTAssertEqual(remote.remoteEnvironments, [])
         XCTAssertEqual(remote.headerHeight, 40)
-        XCTAssertEqual(remote.projectRoots, [ProjectRoot(path: "~/src", depth: 1)])
+        XCTAssertEqual(remote.sessionRoots, [SessionPathRoot(path: "~/src", depth: 1)])
         XCTAssertEqual(remote.problems, [])
 
         let local = try load(text)

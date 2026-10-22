@@ -38,12 +38,12 @@ final class TopicsTests: XCTestCase {
         XCTAssertTrue(store.records.isEmpty)
     }
 
-    func testGroupingProjectLabelsWorktreeAndDormantTopics() {
-        var topic = TopicRecord(id: "a", title: "Fix reward", homeProject: "/work/app")
-        topic.sessions = [.object(["project_path": .string("/work/app"), "worktree_path": .string("/trees/fix")]),
-                          .object(["project_path": .string("/work/app/tools")])]
+    func testGroupingSessionPathLabelsWorktreeAndDormantTopics() {
+        var topic = TopicRecord(id: "a", title: "Fix reward")
+        topic.sessions = [.object(["repository_path": .string("/work/app"), "worktree_path": .string("/trees/fix")]),
+                          .object(["repository_path": .string("/work/app/tools")])]
         var dormant = TopicRecord(id: "b", slug: "untitled-3")
-        dormant.sessions = [.object(["project_path": .string("/work/app")])]
+        dormant.sessions = [.object(["id": .string("saved"), "name": .string("debug/untitled-3"), "base_name": .string("debug"), "directory": .string("/work/app")])]
         var settled = TopicRecord(id: "settled", title: "Done")
         settled.settledAt = "2026-10-06T20:00:00Z"
         let windows = [window("@1", session: "$1", topic: "a", path: "/trees/fix/src"),
@@ -54,7 +54,7 @@ final class TopicsTests: XCTestCase {
                        window("@7", session: "$6", topic: "settled")]
         let model = TopicsModel(records: [topic, dormant, settled], windows: windows, config: Config(), selection: TopicSelection())
         XCTAssertEqual(model.rows.map(\.title), ["Fix reward", "Untitled 3"])
-        XCTAssertEqual(model.rows[0].sessions.map(\.projectName), ["app/fix", "tools", "application"])
+        XCTAssertEqual(model.rows[0].sessions.map(\.baseName), ["renamed-by-hand", "renamed-by-hand", "renamed-by-hand"])
         XCTAssertEqual(model.rows[0].sessions[0].windows.count, 2)
         XCTAssertFalse(model.rows[0].isDormant)
         XCTAssertTrue(model.rows[1].isDormant)

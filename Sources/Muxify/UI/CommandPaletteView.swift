@@ -174,8 +174,8 @@ private struct SpotlightPalette: View {
                         .accessibilityValue(draft.includesTab ? "on" : "off")
                 }
             }
-            if case .addProject = palette.flow,
-               case .choice(.project(let project)) = selected?.pick.payload?.ref, project.worktree != nil {
+            if case .addSession = palette.flow,
+               case .choice(.sessionPath(let sessionPath)) = selected?.pick.payload?.ref, sessionPath.worktree != nil {
                 Button(controlTitle((palette.newWorktree ? "✓ " : "") + "New Worktree", .toggleNewWorktree)) { palette.newWorktree.toggle() }
                     .buttonStyle(.bordered)
                     .tint(palette.newWorktree ? .accentColor : .secondary)
@@ -402,7 +402,7 @@ private struct SelectedRowBounds: PreferenceKey {
 
 /// App-icon sized: Agents and Windows as a little terminal with the
 /// program's logo (and the Agent's Status as a badge), Topics as a diamond,
-/// Sessions as a folder, Projects as an empty folder and Worktrees as a
+/// Sessions as a folder, SessionPaths as an empty folder and Worktrees as a
 /// branch, actions as a tile in a theme color.
 struct PaletteIcon: View {
     enum Source {
@@ -422,7 +422,7 @@ struct PaletteIcon: View {
                 .font(.system(size: size * 0.78))
                 .foregroundStyle(theme.cyan.gradient)
                 .frame(width: size, height: size)
-        case .item(let item) where item.kind == .project || item.kind == .worktree:
+        case .item(let item) where item.kind == .sessionPath || item.kind == .worktree:
             Image(systemName: item.kind == .worktree ? "arrow.triangle.branch" : "folder")
                 .font(.system(size: size * (item.kind == .worktree ? 0.6 : 0.72)))
                 .foregroundStyle(theme.cyan)

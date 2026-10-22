@@ -136,7 +136,7 @@ extension CommandPalette {
             var kind = PaletteItem.Kind.topic
             if case .snoozed(let wake) = row.kind { trailing = "until " + wake; kind = .snoozedTopic }
             return PickCandidate(id: row.id.accessibilityID, title: row.title,
-                                 fields: (row.idleLabel.map { [.detail($0)] } ?? []) + row.sessions.map { .label($0.projectName) }
+                                 fields: (row.idleLabel.map { [.detail($0)] } ?? []) + row.sessions.map { .label($0.baseName) }
                                     + SearchField.tags(row.tags),
                                  trailing: trailing, mark: row.mark,
                                  pick: .available(PaletteItem(kind: kind, ref: .choice(.check(.topic(id))))))
@@ -266,7 +266,7 @@ extension CommandPalette {
             var trailing = ""
             if case .snoozed(let wake) = row.kind { trailing = "until " + wake }
             return PickCandidate(id: row.id.accessibilityID, title: row.title,
-                                 fields: row.sessions.map { .label($0.projectName) } + SearchField.tags(row.tags),
+                                 fields: row.sessions.map { .label($0.baseName) } + SearchField.tags(row.tags),
                                  trailing: trailing, mark: row.mark,
                                  pick: .available(PaletteItem(kind: .snoozedTopic, ref: .choice(.unsnooze(id)))))
         }

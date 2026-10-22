@@ -52,7 +52,7 @@ public struct Folder: Hashable, Sendable, CustomStringConvertible {
 }
 
 /// The part of `path` below `folder`, empty for `folder` itself, or nil when `path` is not inside it. An empty path,
-/// such as a record's missing `project_path`, names no folder, so it holds nothing.
+/// such as a record's missing `repository_path`, names no folder, so it holds nothing.
 private func relative(_ path: String, to folder: String) -> String? {
     guard !folder.isEmpty else { return nil }
     if path == folder { return "" }
@@ -66,9 +66,9 @@ public enum FolderResolver: Sendable {
     case local
     case known([Folder])
 
-    /// A Remote Environment's resolver: its Projects' folders and their Worktrees' folders, as discovery found them.
-    public static func remote(_ projects: [Project]) -> FolderResolver {
-        .known(projects.flatMap { [$0.folder] + $0.layout.worktrees.map(\.folder) })
+    /// A Remote Environment's resolver: its SessionPaths' folders and their Worktrees' folders, as discovery found them.
+    public static func remote(_ sessionPaths: [SessionPath]) -> FolderResolver {
+        .known(sessionPaths.flatMap { [$0.folder] + $0.layout.worktrees.map(\.folder) })
     }
 
     /// `path` in either spelling: the nearest known folder that holds it, by its shown path or by its real path,

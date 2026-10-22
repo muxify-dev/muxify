@@ -2,10 +2,10 @@ import XCTest
 @testable import MuxifyCore
 
 final class PaletteCatalogTests: XCTestCase {
-    private let game = Project(path: "/work/game", name: "game",
+    private let game = SessionPath(path: "/work/game", name: "game",
                                layout: .bareRepository([Worktree(path: "/work/game/main", branch: "main"),
                                                         Worktree(path: "/work/game/release", branch: "release")]))
-    private let notes = Project(path: "/work/notes", name: "notes")
+    private let notes = SessionPath(path: "/work/notes", name: "notes")
     private let now = Date(timeIntervalSince1970: 10_000)
 
     private func window(_ id: String, session: String, directory: String, topic: String? = nil, active: Bool = true,
@@ -17,21 +17,21 @@ final class PaletteCatalogTests: XCTestCase {
 
     /// A Topic whose Session is remembered in the main Worktree of game, as the app remembers it.
     private func topic(_ id: String, _ title: String) -> TopicRecord {
-        var record = TopicRecord(id: id, title: title, homeProject: "/work/game")
-        record.sessions = [.object(["project_path": .string("/work/game"), "worktree_path": .string("/work/game/main")])]
+        var record = TopicRecord(id: id, title: title)
+        record.sessions = [.object(["repository_path": .string("/work/game"), "worktree_path": .string("/work/game/main")])]
         return record
     }
 
     private func catalog(records: [TopicRecord], windows: [TmuxWindow], selected: String? = nil, visits: VisitLog = VisitLog(),
                          lastWindow: [TopicGroupID: String] = [:], agents: [Agent] = [], zen: ZenRecord? = nil,
-                         mode: SidebarMode = .topics, projects: [Project]? = nil) -> PaletteCatalog {
+                         mode: SidebarMode = .topics, sessionPaths: [SessionPath]? = nil) -> PaletteCatalog {
         var config = Config()
-        config.projects = projects ?? [game, notes]
+        config.sessionPaths = sessionPaths ?? [game, notes]
         var selection = TopicSelection()
         selection.windowID = selected
         let model = TopicsModel(records: records, windows: windows, config: config, selection: selection, mode: mode,
                                 agents: agents, zen: zen, now: now)
-        return PaletteCatalog(windows: windows, agents: agents, projects: config.projects, selectedWindowID: selected,
+        return PaletteCatalog(windows: windows, agents: agents, sessionPaths: config.sessionPaths, selectedWindowID: selected,
                               homeDirectory: "/home", topics: model, records: records, lastWindowByGroup: lastWindow,
                               visits: visits, now: now, agentMarks: model.agentMarks)
     }
@@ -42,7 +42,7 @@ final class PaletteCatalogTests: XCTestCase {
             let window = window("@v", session: { if case .session(let name) = key { return name }; return "v" }(),
                                 directory: { if case .directory(let path) = key { return path }; return "/elsewhere" }())
             let group: TopicGroupID = { if case .topic(let group) = key { return group }; return .noTopic }()
-            _ = log.record(window, group: group, projects: [game, notes], folders: .local, at: Date(timeIntervalSince1970: seconds))
+            _ = log.record(window, group: group, sessionPaths: [game, notes], folders: .local, at: Date(timeIntervalSince1970: seconds))
         }
         return log
     }
@@ -82,54 +82,40 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(ids(list), ["session:$old-scratch-2", "topic-z", "topic-s"])
     }
 
-    func testTopicsModeListsEveryProjectWithItsNoTopicSessionAndTheSessionsOutsideProjects() {
+    func testEveryRunningSessionHasItsOwnRowInBothModesAndDifferentNamesDoNotOccupyPaths() {
         let records = [topic("a", "Alpha")]
         let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
                        window("@2", session: "notes-2", directory: "/work/notes"),
                        window("@3", session: "scratch", directory: "/tmp/scratch")]
-        let catalog = catalog(records: records, windows: windows)
-        let sessions = catalog.list([.sessions], query: "").rows
-        XCTAssertEqual(Set(sessions.map(\.id)), ["project:/work/notes", "session:$scratch",
-                                                 "project:/work/game/main", "project:/work/game/release"],
-                       "the Topic's Session is left out, and its Worktree is offered for a No Topic Session")
-        XCTAssertEqual(sessions.first { $0.id == "project:/work/game/main" }?.pick.payload?.ref,
-                       .project(OpenDirectory(directory: .local("/work/game/main"), name: "game/main", reach: .noTopicOnly)))
-        let notes = sessions.first { $0.id == "project:/work/notes" }
-        XCTAssertEqual(notes?.symbol, "■")
-        XCTAssertEqual(notes?.pick.payload?.target, "notes-2", "Copy tmux Target names the Session ↩ goes to")
-        XCTAssertEqual(ids(catalog.list(goTo, query: "notes-2")), ["project:/work/notes"], "a joined Session's name finds its Project")
-        let typed = catalog.list(goTo, query: "scratch")
-        XCTAssertEqual(ids(typed), ["session:$scratch"])
-        XCTAssertEqual(typed.rows[0].pick.payload?.ref, .session(SessionGroup(id: "$scratch", name: "scratch", windows: [windows[2]])))
-        XCTAssertEqual(ids(catalog.list(goTo, query: "sess scr")), ["session:$scratch"], "the type word finds it")
+        for mode in [SidebarMode.topics, .sessions] {
+            let catalog = catalog(records: records, windows: windows, mode: mode)
+            XCTAssertEqual(Set(ids(catalog.list([.sessions], query: ""))), ["session-path:/work/notes", "session:$scratch", "session:$notes-2", "session:$game/alpha",
+                "session-path:/work/game/main", "session-path:/work/game/release"])
+            XCTAssertEqual(ids(catalog.list([.sessions], query: "notes-2")), ["session:$notes-2"])
+        }
     }
 
-    func testSessionsModeHoldsEverySessionInsideAProjectInThatProjectsRow() {
+    func testExactNameSuppressesLaunchEvenElsewhereAndCurrentSessionRanksLastAmongRunning() {
         let records = [topic("a", "Fix")]
         let windows = [window("@1", session: "game/fix", directory: "/work/game/main/src", topic: "a", activity: 3),
-                       window("@2", session: "game/release", directory: "/work/game/release", activity: 9),
+                       window("@2", session: "game/release", directory: "/elsewhere", activity: 9),
                        window("@3", session: "scratch", directory: "/tmp/scratch", activity: 5)]
         let list = catalog(records: records, windows: windows, selected: "@2", mode: .sessions).list(goTo, query: "")
         XCTAssertEqual(list.sections.map(\.id), ["topics", "sessions"])
         let rows = list.sections.last?.rows ?? []
-        XCTAssertEqual(rows.map(\.id),
-                       ["project:/work/game/release", "session:$scratch", "project:/work/game/main", "project:/work/notes"],
-                       "the current Session's Project first, then by activity, then the Project with no Session")
-        XCTAssertEqual(rows[0].trailing, "Current")
-        XCTAssertEqual(rows[2].pick.payload?.ref,
-                       .project(OpenDirectory(directory: .local("/work/game/main"), name: "game/main", reach: .anySession)),
-                       "a Topic's Session joins its Project row")
-        XCTAssertEqual(rows.last?.pick.payload?.ref, .project(OpenDirectory(directory: .local("/work/notes"), name: "notes", reach: .anySession)))
+        XCTAssertEqual(rows.map(\.id), ["session:$scratch", "session:$game/fix", "session:$game/release", "session-path:/work/game/main", "session-path:/work/notes"])
+        XCTAssertEqual(rows[2].trailing, "Current")
+        XCTAssertEqual(rows.last?.pick.payload?.ref, .sessionPath(OpenDirectory(directory: .local("/work/notes"), name: "notes")))
         XCTAssertEqual(rows.last?.trailing, "↩ open")
         XCTAssertNil(rows.last?.pick.payload?.target)
     }
 
-    func testOnATieARunningSessionComesBeforeAProjectThenTheMoreRecent() {
+    func testOnATieARunningSessionComesBeforeASessionPathThenTheMoreRecent() {
         let windows = [window("@1", session: "note", directory: "/q/note", activity: 1),
                        window("@2", session: "note-b", directory: "/q/b", activity: 7)]
-        let projects = [Project(path: "/q/notes", name: "note")]
-        let list = catalog(records: [], windows: windows, mode: .sessions, projects: projects).list([.sessions], query: "note")
-        XCTAssertEqual(ids(list), ["session:$note-b", "session:$note", "project:/q/notes"])
+        let sessionPaths = [SessionPath(path: "/q/notes", name: "note-c")]
+        let list = catalog(records: [], windows: windows, mode: .sessions, sessionPaths: sessionPaths).list([.sessions], query: "note")
+        XCTAssertEqual(ids(list), ["session:$note-b", "session:$note", "session-path:/q/notes"])
     }
 
     func testRowsShowTheAgentMarkOfTheirSidebarCard() {
@@ -171,11 +157,11 @@ final class PaletteCatalogTests: XCTestCase {
                        window("@2", session: "scratch", directory: "/elsewhere/my notes")]
         let rows = catalog(records: records, windows: windows).sections(goTo + [.windows]).flatMap(\.candidates)
         XCTAssertEqual(Dictionary(uniqueKeysWithValues: rows.compactMap { row in row.snooze.map { (row.id, $0) } }),
-                       ["topic-a": "a", "topic-d": "d", "topic-z": "z"], "the Settled Topic, Session and Project rows Snooze nothing")
+                       ["topic-a": "a", "topic-d": "d", "topic-z": "z"], "the Settled Topic, Session and SessionPath rows Snooze nothing")
         let pastes = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.paste) })
         XCTAssertEqual(pastes["topic-a"], .some(nil), "a Topic pastes nothing")
         XCTAssertEqual(pastes["session:$scratch"], "/elsewhere/my notes", "the path stays raw until a terminal gets it")
-        XCTAssertEqual(pastes["project:/work/notes"], "/work/notes")
+        XCTAssertEqual(pastes["session-path:/work/notes"], "/work/notes")
         XCTAssertEqual(pastes["window:@1"], "/work/game/main")
     }
 
@@ -203,7 +189,7 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(list.sections[2].rows[0].trailing, "Reopen")
         XCTAssertEqual(list.sections[2].rows[0].detail.text, "until never")
         XCTAssertEqual(list.sections[3].rows[0].detail.text, "Shipped the GS reward cap")
-        XCTAssertEqual(list.sections[1].rows.first?.id, "session:$game-scratch", "a running Session before the Projects")
+        XCTAssertEqual(list.sections[1].rows.first?.id, "session:$game/fix", "all running Sessions, including Topic members, are searchable")
         let byOutcome = catalog.list(goTo, query: "sett gs")
         XCTAssertEqual(ids(byOutcome), ["topic-s"], "one word on the type word, one on the outcome")
         XCTAssertEqual(byOutcome.rows[0].title.marks, [5, 6, 7, 8])
@@ -211,7 +197,7 @@ final class PaletteCatalogTests: XCTestCase {
                        "a type word shows when it is what matched")
     }
 
-    func testATopicRowShowsButNeverMatchesTheProjectNamesOfItsSessions() {
+    func testATopicRowShowsButNeverMatchesTheBaseNamesOfItsSessions() {
         let records = [topic("a", "Alpha")]
         let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a")]
         let catalog = catalog(records: records, windows: windows)
@@ -230,13 +216,13 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(row.snooze, "z")
     }
 
-    func testAPlainRepositoryIsNamedAfterTheProjectAndItsOutsideWorktreeAfterTheFolder() {
-        let chezmoi = Project(path: "/home/.local/share/chezmoi", name: "chezmoi",
+    func testAPlainRepositoryIsNamedAfterTheSessionPathAndItsOutsideWorktreeAfterTheFolder() {
+        let chezmoi = SessionPath(path: "/home/.local/share/chezmoi", name: "chezmoi",
                               layout: .plainRepository([Worktree(path: "/home/.local/share/chezmoi", branch: "master"),
                                                         Worktree(path: "/home/.cache/git-pile/98400b", branch: nil)]))
-        let list = catalog(records: [], windows: [], projects: [chezmoi]).list([.sessions], query: "chez")
+        let list = catalog(records: [], windows: [], sessionPaths: [chezmoi]).list([.sessions], query: "chez")
         XCTAssertEqual(list.rows.map(\.title.text), ["chezmoi", "chezmoi/98400b"])
-        XCTAssertEqual(list.rows.map { $0.pick.payload?.kind }, [.project, .worktree])
+        XCTAssertEqual(list.rows.map { $0.pick.payload?.kind }, [.sessionPath, .worktree])
     }
 
     func testARemoteAppWindowHasNoTopicsSource() {
@@ -256,14 +242,14 @@ final class PaletteCatalogTests: XCTestCase {
                        window("@4", session: "scratch", directory: "/work/game/release")]
         let catalog = catalog(records: records, windows: windows, selected: "@4")
         let list = catalog.moveList(windows[3], query: "")
-        XCTAssertEqual(ids(list), ["topic-a", "topic-b", "topic-c", "new-topic"], "No Topic and the Snoozed Topic are not targets")
-        XCTAssertEqual(list.rows[0].pick, .blocked(reason: "has a game Session"))
+        XCTAssertEqual(ids(list), ["topic-a", "topic-b", "topic-c", "new-topic", "no-topic"])
+        XCTAssertNotNil(list.rows[0].pick.payload, "folders never block membership")
         XCTAssertEqual(list.rows[2].pick.payload?.ref, .choice(.move(.topic(id: "c"))))
         XCTAssertEqual(list.rows[3].detail.text, "Untitled")
         let typed = catalog.moveList(windows[3], query: " Reward cap ")
         XCTAssertEqual(ids(typed), ["new-topic"], "a query no Topic matches leaves only New Topic")
         XCTAssertEqual(typed.rows[0].pick.payload?.ref, .choice(.move(.newTopic(title: "Reward cap"))))
-        XCTAssertEqual(ids(catalog.moveList(windows[0], query: "")), ["topic-b", "topic-c", "new-topic"],
+        XCTAssertEqual(ids(catalog.moveList(windows[0], query: "")), ["topic-b", "topic-c", "new-topic", "no-topic"],
                        "the source's own Topic is not a target")
     }
 

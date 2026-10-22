@@ -27,21 +27,23 @@ From a tmux Pane:
 
 ```sh
 muxify browser open localhost:3000
-muxify session open "my project"
+muxify session open "debug"
 ```
 
 ⌘B toggles the Browser; ⌘G shows the current Window's repository in the
 [Git View](docs/configuration.md#git-view); ⌘N opens another Local App Window.
 
-## Projects and Worktrees
+## Session Paths and Worktrees
 
-A Session groups tmux Windows, usually for one Project or Worktree. Open
-**Go to…** (⇧⌘P by default) to go to a Topic, switch Sessions or start one in a Project.
+A Session groups tmux Windows, usually for one Session Path or Worktree. Open
+**Go to…** (⇧⌘P by default) to go to a Topic, switch Sessions or start one in a Session Path.
 
-Configure [`sessions.paths`](docs/configuration.md#projects) with the folders
-that hold your repositories. A repository is one Project, and Muxify asks Git
-for its Worktrees, wherever they live. Choosing a Project reuses its Session or
-creates one; a Worktree's Session is named `project/worktree-folder`.
+Configure [`sessions.paths`](docs/configuration.md#session-paths) with the folders
+that hold your repositories. A repository is one Session Path, and Muxify asks Git
+for its Worktrees, wherever they live. A Session Path launches its exact name (or
+reuses that name wherever it runs); Worktree launch names use `repo/worktree-folder`.
+Every running Session has its own palette row. Topics group arbitrary Sessions,
+including several in the same folder. ⌘↩ creates another with `+2`, `+3`, etc.
 
 ## Build from source
 

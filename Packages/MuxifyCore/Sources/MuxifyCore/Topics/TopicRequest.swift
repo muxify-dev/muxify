@@ -118,10 +118,10 @@ public enum TopicCaller: Codable, Hashable, Sendable {
     }
 }
 
-/// Which working copy of a Project a new Session opens.
+/// Which working copy of a SessionPath a new Session opens.
 public enum TopicWorkingCopyChoice: Codable, Hashable, Sendable {
-    /// The Project folder.
-    case project
+    /// The SessionPath folder.
+    case directory
     /// The Worktree at this path.
     case worktree(path: String)
     /// A new Worktree on the Topic's branch, from the HEAD of the Worktree at this path, or from the commit that
@@ -129,7 +129,7 @@ public enum TopicWorkingCopyChoice: Codable, Hashable, Sendable {
     case newWorktree(from: String, base: String? = nil)
 
     private enum CodingKeys: String, CodingKey {
-        case project, worktree
+        case directory, worktree
         case newWorktree = "new_worktree"
     }
 }
@@ -137,13 +137,16 @@ public enum TopicWorkingCopyChoice: Codable, Hashable, Sendable {
 /// Where `move` puts its target.
 public enum TopicDestination: Codable, Hashable, Sendable {
     case topic(TopicRef)
+    case session(SessionID)
+    case newSession(topic: TopicRef?)
     /// A new Topic with this title.
     case newTopic(title: String)
     /// A new Window in the source Pane's Session.
     case newWindow(title: String)
 
     private enum CodingKeys: String, CodingKey {
-        case topic
+        case topic, session
+        case newSession = "new_session"
         case newTopic = "new_topic"
         case newWindow = "new_window"
     }
@@ -171,13 +174,13 @@ public enum TopicCommand: Codable, Hashable, Sendable {
     case list
     /// The target's open Topic, with its live Sessions, Windows, Panes and Agents. It changes nothing.
     case show
-    /// A new Topic. With a Project, it starts a Session there. Without one, it uses the target's Project, and
+    /// A new Topic. With a SessionPath, it starts a Session there. Without one, it uses the target's SessionPath, and
     /// with no target it has no Session.
-    case create(title: String, project: String?, tags: [Tag]? = nil)
-    /// Moves the target Pane into a new Topic, with a Session in `project` or in the Pane's Project.
-    case extract(project: String?, title: String? = nil)
-    /// Adds a Session for `project` to the target's Topic.
-    case addProject(project: String, workingCopy: TopicWorkingCopyChoice)
+    case create(title: String, sessionPath: String?, tags: [Tag]? = nil)
+    /// Moves the target Pane into a new Topic, with a Session in `sessionPath` or in the Pane's SessionPath.
+    case extract(sessionPath: String?, title: String? = nil)
+    /// Adds a Session for `sessionPath` to the target's Topic.
+    case addSession(sessionPath: String, workingCopy: TopicWorkingCopyChoice, name: String? = nil)
     /// Empty `choices` take the default choice for each Session.
     case settle(choices: [TopicSettleSession], outcome: String)
     case forget(choices: [TopicSettleSession], worktrees: [String])
@@ -191,7 +194,7 @@ public enum TopicCommand: Codable, Hashable, Sendable {
     case rename(title: String)
     /// Creates the remembered Sessions, Windows, Tabs and Agents of a Dormant or Settled Topic again.
     case reopen
-    /// Creates one Session with one shell Window in each Project that a Dormant or Settled Topic remembers.
+    /// Creates one Session with one shell Window in each SessionPath that a Dormant or Settled Topic remembers.
     case startFresh
     /// Puts the target Session before or after another Session of its Topic. From then on the Topic keeps its
     /// Sessions in the order the user gave them.
@@ -216,13 +219,14 @@ public enum TopicCommand: Codable, Hashable, Sendable {
         case startFresh = "start_fresh"
         case moveSession = "move_session"
         case sortSessions = "sort_sessions"
-        case addProject = "add_project"
+        case addSession = "add_session"
         case removeFromTopic = "remove_from_topic"
         case removeAndKill = "remove_and_kill"
     }
 
-    private enum AddProjectCodingKeys: String, CodingKey {
-        case project
+    private enum AddSessionCodingKeys: String, CodingKey {
+        case sessionPath = "directory"
+        case name
         case workingCopy = "working_copy"
     }
 
@@ -231,7 +235,7 @@ public enum TopicCommand: Codable, Hashable, Sendable {
 
 public struct TopicRequest: Codable, Hashable, Sendable {
     /// Raised only for a change that an older reader would misread.
-    public static let currentVersion = 1
+    public static let currentVersion = 2
 
     public var version: Int
     public var command: TopicCommand
@@ -346,9 +350,8 @@ public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConv
         public static let sessionInTopic = Kind(rawValue: "session_in_topic")
         public static let noTarget = Kind(rawValue: "no_target")
         public static let unsupported = Kind(rawValue: "unsupported")
-        public static let projectUnavailable = Kind(rawValue: "project_unavailable")
-        public static let duplicateProject = Kind(rawValue: "duplicate_project")
-        public static let sessionNameInUse = Kind(rawValue: "session_name_in_use")
+        public static let sessionPathUnavailable = Kind(rawValue: "session_path_unavailable")
+        public static let duplicateSession = Kind(rawValue: "duplicate_session")
         public static let tmuxFailed = Kind(rawValue: "tmux_failed")
         public static let gitFailed = Kind(rawValue: "git_failed")
         public static let storeBusy = Kind(rawValue: "store_busy")

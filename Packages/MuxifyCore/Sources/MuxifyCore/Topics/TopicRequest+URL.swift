@@ -24,7 +24,7 @@ extension TopicRequest {
             guard let id = value.flatMap(PaneID.init(rawValue:)) else { throw TopicRequestError.invalidURL }
             return .pane(id)
         }
-        func project(_ value: String?) throws -> String {
+        func sessionPath(_ value: String?) throws -> String {
             guard let value, value.hasPrefix("/"), !value.contains("\0"), !value.contains("\n") else {
                 throw TopicRequestError.invalidURL
             }
@@ -32,21 +32,21 @@ extension TopicRequest {
         }
         switch parts.path {
         case "/new":
-            guard Set(values.keys).isSubset(of: ["title", "project", "pane"]) else { throw TopicRequestError.invalidURL }
+            guard Set(values.keys).isSubset(of: ["title", "sessionPath", "pane"]) else { throw TopicRequestError.invalidURL }
             let target = try values["pane"].map { try pane($0) }
-            let projectPath = try values["project"].map { try project($0) }
+            let repositoryPath = try values["sessionPath"].map { try sessionPath($0) }
             let title = values["title"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if title.isEmpty {
                 guard values["title"] == nil, let target else { throw TopicRequestError.invalidURL }
-                self.init(.extract(project: projectPath), target: target)
-            } else if let projectPath {
-                self.init(.create(title: title, project: projectPath))
+                self.init(.extract(sessionPath: repositoryPath), target: target)
+            } else if let repositoryPath {
+                self.init(.create(title: title, sessionPath: repositoryPath))
             } else if let target {
-                self.init(.create(title: title, project: nil), target: target)
+                self.init(.create(title: title, sessionPath: nil), target: target)
             } else { throw TopicRequestError.invalidURL }
         case "/add":
-            try keys(["pane", "project"])
-            self.init(.addProject(project: try project(values["project"]), workingCopy: .project), target: try pane(values["pane"]))
+            try keys(["pane", "sessionPath"])
+            self.init(.addSession(sessionPath: try sessionPath(values["sessionPath"]), workingCopy: .directory), target: try pane(values["pane"]))
         case "/settle":
             try keys(["pane"])
             self.init(.settle(choices: [], outcome: ""), target: try pane(values["pane"]))

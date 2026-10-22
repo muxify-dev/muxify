@@ -265,7 +265,7 @@ private struct SessionOrdering {
     let isManual: Bool
 }
 
-/// The heading of one Session inside a Topic: its Project. Pressing it goes to the Session's
+/// The heading of one Session inside a Topic: its SessionPath. Pressing it goes to the Session's
 /// active Window. In an open Topic card a long press moves the Session, with its rows, within its Topic.
 private struct SessionHeading: View {
     let store: WorkspaceStore
@@ -294,7 +294,7 @@ private struct SessionHeading: View {
     @ViewBuilder
     private var line: some View {
         let label = HStack(spacing: 6) {
-            Text(session.projectName).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+            Text(session.baseName).font(.system(size: 11, weight: .semibold)).lineLimit(1)
             Spacer(minLength: 4)
         }
         .foregroundStyle(.secondary)
@@ -344,7 +344,7 @@ private struct TopicItemRow: View {
                 WindowRow(window: window, content: store.sidebarWindowRow(window), isSelected: window.id == store.selectedWindowID,
                           tabCount: store.tabCount(for: window), isGitViewOpen: store.isGitViewOpen(in: window.id), topicsView: true,
                           usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
-                              window, record: store.topicWatcher.records.first { $0.id == window.topicID }, projects: store.projects))
+                              window, record: store.topicWatcher.records.first { $0.id == window.topicID }, sessionPaths: store.sessionPaths))
             }
             .buttonStyle(.plain)
             .opacity(isDimmed ? 0.5 : 1)
@@ -573,7 +573,7 @@ private struct TopicCard: View {
                 DispatchQueue.main.async { list.rename(id, false) }
             }
             .disabled(store.changingTopic)
-            Button("Add a Project…") { store.presentAddProject(toTopic: id) }
+            Button("Add a Session…") { store.presentAddSession(toTopic: id) }
                 .disabled(store.changingTopic)
             Button(store.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store.toggleZen(keeping: id) }
                 .disabled(store.changingTopic)
@@ -612,8 +612,8 @@ private struct TopicCard: View {
             Button("Rename Topic…") { list.rename(id, false) }
                 .accessibilityIdentifier("rename-topic")
                 .disabled(store.changingTopic)
-            Button("Add a Project…") { store.presentAddProject(toTopic: id) }
-                .accessibilityIdentifier("add-topic-project")
+            Button("Add a Session…") { store.presentAddSession(toTopic: id) }
+                .accessibilityIdentifier("add-topic-sessionPath")
                 .disabled(store.changingTopic)
             Divider()
             pinButton(id)
@@ -696,7 +696,7 @@ private struct CardMoveButtons: View {
 
 /// A Locked Session among the Topic cards (ADR 0018). It has a Topic card's shape and its place in the order, but it
 /// is a No Topic Session: its title and Summary come from the Session card Formats, its rows are its Windows with no
-/// Project heading, and it offers only what a Session can do.
+/// SessionPath heading, and it offers only what a Session can do.
 private struct LockedCard: View {
     let store: WorkspaceStore
     let row: TopicsModel.Row
@@ -890,7 +890,7 @@ private struct SessionsSection: View {
                 isGitViewOpen: store.isGitViewOpen(in: window.id),
                 usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
                     window, record: store.topicWatcher.records.first { $0.id == window.topicID },
-                    projects: store.projects)
+                    sessionPaths: store.sessionPaths)
             )
                 .opacity(dimmed ? 0.45 : 1)
                 .accessibilityIdentifier("session-window-\(window.id)")

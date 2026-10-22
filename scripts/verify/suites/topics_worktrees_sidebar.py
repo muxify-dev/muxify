@@ -1,4 +1,4 @@
-"""Topics in the Sidebar: Worktrees in New Topic and Add Project, bare repositories and the main checkout.
+"""Topics in the Sidebar: Worktrees in New Topic and Add Session Path, bare repositories and the main checkout.
 
 The fixture and the helpers that several suites use are in scripts/verify/topics_sidebar.py.
 
@@ -12,25 +12,21 @@ import subprocess
 import unittest
 
 from scripts.verify.sandbox import wait
-from scripts.verify.topics_sidebar import TopicsSidebar
+from scripts.verify.topics_sidebar import TopicsSidebar, remembered_session
 
 
 class TopicsWorktreesSidebar(TopicsSidebar):
     def new_topic(self, title, directory, worktree=False):
-        """Creates a Topic, then adds the Project or Worktree row at directory from the empty-Topic view; returns the
+        """Creates a Topic, then adds the Session Path or Worktree row at directory from the empty-Topic view; returns the
         record once it remembers that Session. With worktree, the Session starts on a new Worktree from that row."""
         s = self.s
         topic_id = self.create_topic(title)['id']
-        self.open_add_project()
+        self.open_add_session()
         self.pick_project(directory, worktree)
         s.act('press', 'palette-accept')
-        s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add Project palette did not close', seconds=15)
+        s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add Session Path palette did not close', seconds=15)
         return wait(lambda: (lambda r: r if r and r.get('sessions') else None)(self.records().get(topic_id)),
                     'Topic %s remembers no Session' % topic_id, seconds=15)
-
-    def alert_shows(self, text, rs):
-        return any(text in r.get(field, '') for r in rs
-                   for field in ('accessibilityValue', 'accessibilityLabel', 'accessibilityTitle'))
 
     def test_forget_removes_selected_clean_worktrees_with_and_without_live_sessions(self):
         s = self.s
@@ -42,14 +38,19 @@ class TopicsWorktreesSidebar(TopicsSidebar):
                 subprocess.run(['/usr/bin/git', '-C', str(self.alpha), 'worktree', 'add', '-q', str(path), '-b', path.name], check=True)
             (dirty/'draft').write_text('untracked work')
             self.write_topic(topic, topic, self.alpha, sessions=[
-                dict(project_path=str(self.alpha), worktree_path=str(path), branch=path.name, worktree_created=True)
+                remembered_session(path, topic, base='alpha' if path == tree else 'dirty',
+                                   repository_path=str(self.alpha), worktree_path=str(path), branch=path.name, worktree_created=True)
                 for path in [tree, dirty]
             ])
             if live:
-                self.new_session('alpha/' + topic, tree, topic=topic)
+                sid = self.new_session('alpha/' + topic, tree, topic=topic)
             self.find('topic-' + topic)
             # SidebarView exposes Forget as an accessibility action so the context menu stays closed.
             s.act('action', 'topic-' + topic, 'Forget Topic…')
+            if live:
+                kill = 'palette-row-session-' + sid
+                s.wait_rows(lambda rows: s.has(kill, rows), 'Forget did not offer the live Session')
+                s.act('press', kill)
             key = 'palette-row-worktree-' + str(tree)
             s.wait_rows(lambda rows: s.has(key, rows), 'Forget did not offer the clean Worktree')
             s.act('press', key)
@@ -63,7 +64,7 @@ class TopicsWorktreesSidebar(TopicsSidebar):
 
     def test_new_worktree_topic_opens_session_in_git_worktree_on_its_branch(self):
         record = self.new_topic('Worktree proof', self.alpha_tree['worktree-base'], worktree=True)
-        name = 'alpha/worktree-proof'
+        name = 'alpha/worktree-base/worktree-proof'
         expected = str(self.worktrees/'alpha/worktree-proof')
         paths = (expected, os.path.realpath(expected))
         self.wait_session(name)
@@ -80,21 +81,21 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         self.assertTrue(any(line.startswith(tuple(path + ' ' for path in paths)) and '[worktree-proof]' in line
                             for line in listing.splitlines()), 'git worktree list:\n' + listing)
 
-    def test_worktree_topic_session_row_is_labelled_repo_slash_folder(self):
+    def test_worktree_topic_session_row_keeps_selected_base(self):
         record = self.new_topic('Worktree row proof', self.alpha_tree['worktree-row-base'], worktree=True)
-        name = 'alpha/worktree-row-proof'
+        name = 'alpha/worktree-row-base/worktree-row-proof'
         self.wait_session(name)
         sid = self.s.tmux('display-message', '-p', '-t', '=' + name + ':', '#{session_id}')
         key = 'topic-%s-session-%s' % (record['id'], sid)
-        labelled = lambda rs: self.s.row(key, rs).get('accessibilityLabel') == 'alpha/worktree-row-proof'
+        labelled = lambda rs: self.s.row(key, rs).get('accessibilityLabel') == 'alpha/worktree-row-base'
         self.find(key)
         latency, rs = self.rows_until(labelled)
         self.assertIsNotNone(latency, 'Topic Session row %s: %s' % (key, json.dumps(self.s.row(key, rs))))
 
-    def test_add_project_list_shows_one_row_per_worktree_of_a_bare_repository(self):
+    def test_add_session_list_shows_one_row_per_worktree_of_a_bare_repository(self):
         s = self.s
         self.create_topic('Bare rows proof')
-        self.open_add_project()
+        self.open_add_session()
         for folder in ['main', 'release']:
             row = s.row(self.project_row(self.gamma/folder))
             self.assertTrue(row.get('accessibilityLabel', '').startswith('gamma/' + folder), json.dumps(row))
@@ -107,21 +108,20 @@ class TopicsWorktreesSidebar(TopicsSidebar):
 
     def test_worktree_of_another_open_topic_says_also_in_it_and_can_be_picked(self):
         s = self.s
-        self.write_topic('shared-owner', 'Shared owner', self.gamma, created_at='2026-10-07T00:00:00Z', order=0,
-                         sessions=[dict(project_path=str(self.gamma), worktree_path=str(self.gamma/'main'), branch='main')])
+        self.write_topic('shared-owner', 'Shared owner', self.gamma, created_at='2026-10-07T00:00:00Z', order=0)
         self.new_session('gamma/shared-owner', self.gamma/'main', topic='shared-owner')
         s.wait_rows(lambda rs: s.has('topic-shared-owner', rs), 'no row for Topic shared-owner')
         record = self.create_topic('Shared picker')
-        self.open_add_project()
+        self.open_add_session()
         s.act('focus', 'palette-search')
         s.act('set', 'palette-search', str(self.gamma/'main'))
         key = self.project_row(self.gamma/'main')
         s.wait_rows(lambda rs: 'Also in Shared owner' in s.row(key, rs).get('accessibilityLabel', ''),
                     'the Worktree row does not say Also in Shared owner')
-        name = 'gamma/shared-picker'
+        name = 'gamma/main/shared-picker'
         self.pick_project(self.gamma/'main', worktree=False)
         s.act('press', 'palette-accept')
-        s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add a Project did not take the shared Worktree row', seconds=15)
+        s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add a Session Path did not take the shared Worktree row', seconds=15)
         self.wait_session(name)
         # The client is on the new Session. Killing it first would start the App Window's Window recovery,
         # which can pull the client back while the cleanup moves it to base.
@@ -136,7 +136,7 @@ class TopicsWorktreesSidebar(TopicsSidebar):
 
     def test_topic_on_a_picked_worktree_opens_its_session_there_under_the_worktrees_name(self):
         record = self.new_topic('Release worktree proof', self.gamma/'release')
-        name = 'gamma/release-worktree-proof'
+        name = 'gamma/release/release-worktree-proof'
         self.wait_session(name)
         sid, session_path = self.s.tmux('display-message', '-p', '-t', '=' + name + ':', '#{session_id}|#{session_path}').split('|')
         self.assertIn(session_path, (str(self.gamma/'release'), os.path.realpath(self.gamma/'release')), 'Session path')
@@ -156,8 +156,8 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         base_head = subprocess.check_output(git + ['rev-parse', 'HEAD'], text=True).strip()
         record = self.new_topic('Base proof', base, worktree=True)
         expected = str(self.worktrees/'gamma/base-proof')
-        self.wait_session('gamma/base-proof')
-        session_path = self.s.tmux('display-message', '-p', '-t', '=gamma/base-proof:', '#{session_path}')
+        self.wait_session('gamma/base/base-proof')
+        session_path = self.s.tmux('display-message', '-p', '-t', '=gamma/base/base-proof:', '#{session_path}')
         self.assertIn(session_path, (expected, os.path.realpath(expected)), 'Session path')
         self.assertEqual(subprocess.check_output(['/usr/bin/git', '-C', expected, 'rev-parse', 'HEAD'], text=True).strip(), base_head,
                          'the new Worktree does not start at the base HEAD')
@@ -183,32 +183,30 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         latency, rs = self.rows_until(named)
         self.assertIsNotNone(latency, 'Topic Session row %s: %s' % (key, json.dumps(s.row(key, rs))))
         self.create_topic('Main checkout picker')
-        self.open_add_project()
+        self.open_add_session()
         row = self.project_row(self.epsilon)
         s.wait_rows(lambda rs: 'Also in Main checkout proof' in s.row(row, rs).get('accessibilityLabel', ''),
                     'the main checkout of epsilon does not say Also in Main checkout proof')
 
     def test_live_session_of_an_older_topic_in_the_project_folder_shows_on_the_main_checkout(self):
         s = self.s
-        self.write_topic('legacy-owner', 'Legacy owner', self.delta, created_at='2026-10-07T00:00:00Z', order=0,
-                         sessions=[dict(project_path=str(self.delta))])
+        self.write_topic('legacy-owner', 'Legacy owner', self.delta, created_at='2026-10-07T00:00:00Z', order=0)
         self.new_session('delta/legacy-owner', self.delta, topic='legacy-owner')
         s.wait_rows(lambda rs: s.has('topic-legacy-owner', rs), 'no row for Topic legacy-owner')
         self.create_topic('Legacy picker')
-        self.open_add_project()
+        self.open_add_session()
         key = self.project_row(self.delta)
         s.wait_rows(lambda rs: 'Also in Legacy owner' in s.row(key, rs).get('accessibilityLabel', ''),
                     'the main checkout of delta does not say Also in Legacy owner')
 
-    def test_add_project_with_new_worktree_opens_the_session_in_a_worktree_from_the_picked_base(self):
+    def test_add_session_with_new_worktree_opens_the_session_in_a_worktree_from_the_picked_base(self):
         s = self.s
-        self.write_topic('add-worktree', 'Add worktree proof', self.beta, created_at='2026-10-07T00:00:00Z', order=0,
-                         sessions=[dict(project_path=str(self.beta))])
+        self.write_topic('add-worktree', 'Add worktree proof', self.beta, created_at='2026-10-07T00:00:00Z', order=0)
         self.new_session('beta/add-worktree', self.beta, topic='add-worktree')
         s.wait_rows(lambda rs: s.has('topic-add-worktree', rs), 'no row for Topic add-worktree')
         self.addCleanup(lambda: s.has('palette-accept') and s.act('press', 'palette-cancel'))
-        s.act('action', 'topic-add-worktree', 'Add a Project…')
-        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Project palette did not open')
+        s.act('action', 'topic-add-worktree', 'Add a Session…')
+        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Session Path palette did not open')
         base = self.acme/'base'
         git = ['/usr/bin/git', '-C', str(base), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid']
         (base/'ADD-PROJECT-NOTES').write_text('add project base\n')
@@ -216,7 +214,7 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         subprocess.run(git + ['commit', '-q', '-m', 'add project base'], check=True)
         self.pick_project(base, worktree=True)
         s.act('press', 'palette-accept')
-        name = 'acme/add-worktree'
+        name = 'acme/base/add-worktree'
         expected = self.worktrees/'acme/add-worktree'
         self.wait_session(name)
         session_path = s.tmux('display-message', '-p', '-t', '=' + name + ':', '#{session_path}')
@@ -225,53 +223,49 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         self.assertEqual(git_out(expected, 'symbolic-ref', '--short', 'HEAD'), 'add-worktree', 'the new Worktree is not on the slug branch')
         self.assertEqual(git_out(expected, 'rev-parse', 'HEAD'), git_out(base, 'rev-parse', 'HEAD'), 'the new Worktree does not start at the base HEAD')
         sessions = self.records()['add-worktree']['sessions']
-        self.assertTrue(any(session.get('project_path') == str(self.acme) and session.get('worktree_path') == str(expected)
+        self.assertTrue(any(session.get('repository_path') == str(self.acme) and session.get('worktree_path') == str(expected)
                             and session.get('worktree_created') is True for session in sessions), json.dumps(sessions))
-        s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add Project palette did not close')
+        s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add Session Path palette did not close')
 
-    def test_add_project_opens_with_new_worktree_off_after_a_project_added_with_it(self):
+    def test_add_session_opens_with_new_worktree_off_after_a_project_added_with_it(self):
         s = self.s
-        self.write_topic('add-reset', 'Add reset proof', self.beta, created_at='2026-10-07T00:00:00Z', order=0,
-                         sessions=[dict(project_path=str(self.beta))])
+        self.write_topic('add-reset', 'Add reset proof', self.beta, created_at='2026-10-07T00:00:00Z', order=0)
         self.new_session('beta/add-reset', self.beta, topic='add-reset')
         s.wait_rows(lambda rs: s.has('topic-add-reset', rs), 'no row for Topic add-reset')
         self.addCleanup(lambda: s.has('palette-accept') and s.act('press', 'palette-cancel'))
-        s.act('action', 'topic-add-reset', 'Add a Project…')
-        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Project palette did not open')
+        s.act('action', 'topic-add-reset', 'Add a Session…')
+        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Session Path palette did not open')
         self.pick_project(self.acme/'base', worktree=True)
         s.act('press', 'palette-accept')
-        self.wait_session('acme/add-reset')
-        s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add Project palette did not close')
-        s.act('action', 'topic-add-reset', 'Add a Project…')
-        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Project palette did not open again')
-        # The Topic has a Session in acme now, so the list offers it no more; another repository shows the option.
+        self.wait_session('acme/base/add-reset')
+        s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add Session Path palette did not close')
+        s.act('action', 'topic-add-reset', 'Add a Session…')
+        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Session Path palette did not open again')
+        # Paths remain available for repeated-folder Sessions. A fresh step starts New Worktree off.
         s.act('focus', 'palette-search')
         s.act('set', 'palette-search', str(self.gamma/'main'))
         key = self.project_row(self.gamma/'main')
         s.wait_rows(lambda rs: s.row(key, rs).get('accessibilityValue') == 'selected', 'the gamma/main row is not selected')
         rs = s.wait_rows(lambda rs: s.has('palette-new-worktree', rs), 'no New Worktree option for the repository row')
         self.assertEqual(s.row('palette-new-worktree', rs).get('accessibilityValue'), 'off',
-                         'New Worktree stayed on after the Project that used it')
+                         'New Worktree stayed on after the Session Path that used it')
 
-    def test_git_error_in_add_project_with_new_worktree_records_no_session_in_the_topic(self):
+    def test_existing_branch_allocates_a_new_worktree_name_without_changing_the_topic_slug(self):
         s = self.s
-        error = "a branch named 'add-clash' already exists"
-        self.write_topic('add-clash', 'Add clash proof', self.beta, created_at='2026-10-07T00:00:00Z', order=0,
-                         sessions=[dict(project_path=str(self.beta))])
+        self.write_topic('add-clash', 'Add clash proof', self.beta, created_at='2026-10-07T00:00:00Z', order=0)
         self.new_session('beta/add-clash', self.beta, topic='add-clash')
         s.wait_rows(lambda rs: s.has('topic-add-clash', rs), 'no row for Topic add-clash')
         subprocess.run(['/usr/bin/git', '-C', str(self.acme), 'branch', 'add-clash', 'main'], check=True)
         self.addCleanup(lambda: s.has('palette-accept') and s.act('press', 'palette-cancel'))
-        s.act('action', 'topic-add-clash', 'Add a Project…')
-        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Project palette did not open')
+        s.act('action', 'topic-add-clash', 'Add a Session…')
+        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Session Path palette did not open')
         self.pick_project(self.acme/'base', worktree=True)
         s.act('press', 'palette-accept')
-        rs = s.wait_rows(lambda rs: self.alert_shows(error, rs), 'no alert shows the git error', seconds=15)
-        sessions = self.records()['add-clash']['sessions']
-        self.assertEqual([session.get('project_path') for session in sessions], [str(self.beta)],
-                         'the Topic record gained a Session although git failed: ' + json.dumps(sessions))
-        self.assertTrue(self.alert_shows('No changes were made.', rs), 'the alert does not say that nothing changed')
-        s.act('press', 'OK')
-        s.wait_rows(lambda rs: not self.alert_shows(error, rs), 'the git error alert did not close')
-        self.assertFalse((self.worktrees/'acme/add-clash').exists(), 'a Worktree was created although git failed')
-        self.assertNotEqual(s.tmux_ok('has-session', '-t', '=acme/add-clash').returncode, 0, 'a Session was created although git failed')
+        self.wait_session('acme/base/add-clash')
+        expected = self.worktrees/'acme/add-clash-2'
+        self.assertTrue(expected.is_dir())
+        record = self.records()['add-clash']
+        self.assertEqual(record['slug'], 'add-clash')
+        saved = next(row for row in record['sessions'] if row.get('worktree_path') == str(expected))
+        self.assertEqual(saved['branch'], 'add-clash-2')
+        self.assertTrue(saved['worktree_created'])

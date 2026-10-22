@@ -5,7 +5,7 @@ import MuxifyCore
 /// `topic exec`: one child process per live Session of a Topic, each in its Session's folder, all at the same time.
 /// It never types into a Pane, so an Agent or a shell in the Topic sees no input.
 struct TopicExec {
-    /// A live Session and the folder its command runs in: its Worktree, else its Project.
+    /// A live Session and the folder its command runs in: its Worktree, else its SessionPath.
     struct Target {
         var session: TopicDetail.Session
         var directory: String
@@ -28,20 +28,18 @@ struct TopicExec {
     let arguments: [String]
     let timeout: TimeInterval
 
-    /// The Sessions of `topic` to run in. A `project` directory keeps only the Session in that folder, else the one
-    /// Session of that Project.
-    static func sessions(of topic: TopicDetail, project: Folder?) throws -> [Target] {
-        let all = topic.sessions.map { Target(session: $0, directory: $0.worktree?.path ?? $0.project.path) }
+    /// The Sessions of `topic` to run in. A `sessionPath` directory keeps only the Session in that folder, else the one
+    /// Session of that SessionPath.
+    static func sessions(of topic: TopicDetail, session: String?) throws -> [Target] {
+        let all = topic.sessions.map { Target(session: $0, directory: $0.directory) }
         guard !all.isEmpty else { throw CLIError("the Topic \(topic.label) has no live Session") }
-        guard let project else { return all }
-        var matches = all.filter { Folder.local($0.directory) == project }
-        if matches.isEmpty { matches = all.filter { Folder.local($0.session.project.path) == project } }
+        guard let session else { return all }
+        let matches = all.filter { $0.session.id == session || $0.session.name == session }
         switch matches.count {
-        case 0: throw CLIError("no live Session of the Topic \(topic.label) uses \(project.real)")
+        case 0: throw CLIError("no live Session of the Topic \(topic.label) matches \(session)")
         case 1: return matches
         default:
-            throw CLIError("more than one live Session of the Topic \(topic.label) uses \(project.real): "
-                           + matches.map(\.session.name).joined(separator: ", ") + "; give the folder of one of them")
+            throw CLIError("ambiguous Session selector \(session); use its tmux ID")
         }
     }
 

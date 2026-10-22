@@ -4,14 +4,14 @@ import MuxifyCore
 /// What a Command Palette row is, for its icon and its actions.
 struct PaletteItem: Equatable {
     enum Kind: Equatable {
-        case topic, snoozedTopic, settledTopic, session, project, worktree, window, agent, command, tag
+        case topic, snoozedTopic, settledTopic, session, sessionPath, worktree, window, agent, command, tag
     }
 
     enum Ref: Equatable {
         /// Nil `window`: Dormant or Settled, so ↩ shows the Topic's Reopen choice.
         case topic(id: String, window: TmuxWindow?)
         case session(SessionGroup)
-        case project(OpenDirectory)
+        case sessionPath(OpenDirectory)
         case window(TmuxWindow)
         case agent(Agent)
         case choice(PaletteChoice)
@@ -37,6 +37,9 @@ struct PaletteItem: Equatable {
 
 enum MoveDestination: Hashable {
     case topic(id: String)
+    case noTopic
+    case session(id: String)
+    case newSession(topic: String?)
     /// An empty title makes an Untitled Topic.
     case newTopic(title: String)
     case newWindow(title: String)
@@ -47,7 +50,7 @@ enum MoveDestination: Hashable {
 struct PaletteCatalog {
     var windows: [TmuxWindow]
     var agents: [Agent]
-    var projects: [Project] = []
+    var sessionPaths: [SessionPath] = []
     /// Resolves the Sessions' paths on the Environment's machine.
     var folders: FolderResolver = .local
     var selectedWindowID: String?
@@ -65,8 +68,6 @@ struct PaletteCatalog {
 
     /// Whether the topics Source has rows: Topics are on, in a Local App Window.
     var offersTopics: Bool { topics?.topicsEnabled == true }
-
-    private var inTopicsMode: Bool { offersTopics && topics?.mode == .topics }
 
     /// With `tagFilter`, only the Topics that have the Tag: open, Snoozed and Settled.
     func list(_ sources: [PaletteSource], query: String, tagFilter: Tag? = nil) -> PickList<PaletteItem> {
@@ -93,7 +94,7 @@ struct PaletteCatalog {
                 return (openTopicSection(only: nil).map { [$0] } ?? []) + (tagSection.map { [$0] } ?? [])
             case .sessions:
                 return [PickSectionInput(id: "sessions", title: "Sessions", rule: .ranked(showsWhenEmpty: true),
-                                         candidates: sessionCandidates)]
+                                         candidates: sessionCandidates, currentLast: true)]
             case .windows:
                 let hidden = sources.contains(.agents) ? Set(agents.map(\.windowID)) : []
                 return [PickSectionInput(id: "windows", title: "Windows", rule: .ranked(showsWhenEmpty: sources == [.windows]),
@@ -142,7 +143,7 @@ struct PaletteCatalog {
     }
 
     private func topicFields(_ row: TopicsModel.Row, type: String) -> [SearchField] {
-        [.typeWord(type)] + row.sessions.map { .label($0.projectName) } + SearchField.tags(row.tags)
+        [.typeWord(type)] + row.sessions.map { .label($0.baseName) } + SearchField.tags(row.tags)
     }
 
     private func topicCandidate(_ row: TopicsModel.Row) -> PickCandidate<PaletteItem>? {
@@ -171,7 +172,7 @@ struct PaletteCatalog {
     }
 
     private func settledCandidate(_ record: TopicRecord) -> PickCandidate<PaletteItem> {
-        let row = TopicsModel.settledRow(record, projects: projects, tags: topics?.tags, expanded: [])
+        let row = TopicsModel.settledRow(record, sessionPaths: sessionPaths, tags: topics?.tags, expanded: [])
         let outcome = record.outcome?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var settledOn: String?
         if outcome.isEmpty, case .settled(let detail) = row.kind { settledOn = detail }
@@ -183,44 +184,48 @@ struct PaletteCatalog {
             pick: .available(PaletteItem(kind: .settledTopic, ref: .topic(id: record.id, window: nil))))
     }
 
-    // MARK: Sessions and Projects
+    // MARK: Sessions and SessionPaths
 
-    private var openTopicIDs: Set<String> { Set(records.filter { $0.settledAt == nil }.map(\.id)) }
-
-    /// One row per Project and Worktree, holding the live Sessions that start in it, then one row per Session
-    /// outside every Project. In Topics mode an open Topic's Sessions are left out: its Topic row is the way to them.
+    /// All running Sessions, plus paths whose exact launch names are not running. Sidebar mode is irrelevant.
     private var sessionCandidates: [PickCandidate<PaletteItem>] {
-        let reach: SessionResolver.Reach = inTopicsMode ? .noTopicOnly : .anySession
-        let resolver = SessionResolver(windows: windows, openTopicIDs: openTopicIDs, projects: projects, folders: folders, visits: visits)
-        var joined: Set<String> = []
-        let projectRows = projects.flatMap(ProjectChoice.choices).map { choice in
-            let sessions = resolver.sessions(in: choice.directory, reach: reach)
-            joined.formUnion(sessions.map { $0[0].sessionID })
-            return projectCandidate(choice, sessions: sessions, reach: reach)
-        }
-        let shown = inTopicsMode ? (topics?.noTopicSessions ?? []).flatMap(\.windows) : windows
-        return projectRows + looseSessionCandidates(shown.filter { !joined.contains($0.sessionID) })
+        var names = Set(windows.map(\.sessionName))
+        let paths = sessionPaths.flatMap(SessionChoice.choices).filter { names.insert($0.name).inserted }
+        return looseSessionCandidates(windows) + paths.map(pathCandidate)
     }
 
-    /// ↩ goes to the first of `sessions`, the one visited last, or starts a Session when there is none.
-    private func projectCandidate(_ choice: ProjectChoice, sessions: [[TmuxWindow]],
-                                  reach: SessionResolver.Reach) -> PickCandidate<PaletteItem> {
-        let names = sessions.map { $0[0].sessionName }
-        let ids = sessions.map { $0[0].sessionID }
-        let visit = ([visits.last(.directory(choice.directory.real))]
-                     + names.map { visits.last(.session(name: $0)) }).compactMap { $0 }.max()
-        let isCurrent = sessions.contains { $0.contains { $0.id == selectedWindowID } }
+    /// Running Sessions from any other Topic or No Topic can be moved into this Topic.
+    func addSessionList(topic: String, query: String) -> PickList<PaletteItem> {
+        var seen: Set<String> = []
+        let rows = windows.filter { $0.topicID != topic && seen.insert($0.sessionID).inserted }.map { window in
+            PickCandidate(id: "running-" + window.sessionID, title: window.sessionName,
+                fields: [.detail(window.sessionPath)], pick: .available(PaletteItem(kind: .session, ref: .choice(.session(window.sessionID)))))
+        }
+        return FuzzyRanker.list([PickSectionInput(id: "running", title: "Running Sessions", rule: .ranked(showsWhenEmpty: true), candidates: rows)], query: FuzzyQuery(query))
+    }
+
+    func destinationList(_ source: TmuxWindow, topic: String?, query: String) -> PickList<PaletteItem> {
+        var seen: Set<String> = []
+        let open = Set(records.filter { $0.settledAt == nil }.map(\.id))
+        let rows = windows.filter {
+            $0.topicID.flatMap { open.contains($0) ? $0 : nil } == topic && $0.sessionID != source.sessionID && seen.insert($0.sessionID).inserted
+        }.map { window in
+            PickCandidate(id: "destination-" + window.sessionID, title: window.sessionName,
+                fields: [.detail(window.sessionPath)], pick: .available(PaletteItem(kind: .session, ref: .choice(.move(.session(id: window.sessionID))))))
+        }
+        let new = PickCandidate(id: "new-session", title: "New Session", pick: .available(PaletteItem(kind: .session, ref: .choice(.move(.newSession(topic: topic))))))
+        return FuzzyRanker.list([PickSectionInput(id: "sessions", rule: .ranked(showsWhenEmpty: true), candidates: rows),
+            PickSectionInput(id: "new", rule: .fixed, candidates: [new])], query: FuzzyQuery(query))
+    }
+
+    private func pathCandidate(_ choice: SessionChoice) -> PickCandidate<PaletteItem> {
+        let visit = visits.last(.directory(choice.directory.real))
         return PickCandidate(
-            id: "project:\(choice.directory.path)", symbol: sessions.isEmpty ? "□" : "■", title: choice.displayName,
-            fields: [.typeWord(choice.isWorktree ? "worktree" : "project"), .detail(Paths.tildify(choice.directory.path, home: homeDirectory))]
-                + choice.nameFields + names.filter { $0 != choice.name }.map { .hidden($0) },
-            trailing: sessions.isEmpty ? "↩ open" : isCurrent ? "Current" : visit.map { VisitAge.short(since: $0, now: now) } ?? "",
-            mark: ids.compactMap { topics?.sessionMarks[$0] }.max().map(RowMark.agent),
-            lastVisit: visit, isCurrent: isCurrent, unopened: sessions.isEmpty,
-            activity: sessions.flatMap { $0.map(\.sessionActivity) }.max() ?? 0,
-            pick: .available(PaletteItem(kind: choice.isWorktree ? .worktree : .project,
-                                         ref: .project(OpenDirectory(directory: choice.directory, name: choice.name, reach: reach)),
-                                         path: choice.directory.path, target: names.first)),
+            id: "session-path:\(choice.directory.path)", symbol: "□", title: choice.displayName,
+            fields: [.typeWord(choice.isWorktree ? "worktree" : "session"), .detail(Paths.tildify(choice.directory.path, home: homeDirectory))] + choice.nameFields,
+            trailing: "↩ open", lastVisit: visit, unopened: true,
+            pick: .available(PaletteItem(kind: choice.isWorktree ? .worktree : .sessionPath,
+                                         ref: .sessionPath(OpenDirectory(directory: choice.directory, name: choice.name)),
+                                         path: choice.directory.path)),
             paste: choice.directory.path)
     }
 
@@ -289,28 +294,29 @@ struct PaletteCatalog {
     // MARK: Move
 
     /// The open, not Snoozed Topics minus the source's own, ranked for `query`, then the New Topic row titled
-    /// by it. A Topic with a live Session in the source's Project is blocked, by the rule the move itself
+    /// by it. A Topic with a live Session in the source's SessionPath is blocked, by the rule the move itself
     /// throws on, so the dimmed row and the refusal cannot disagree.
     func moveList(_ source: TmuxWindow, query: String, scope: MoveDraft.Scope = .session) -> PickList<PaletteItem> {
         guard let topics else { return .empty }
-        let project = TopicMembershipPlan.project(of: source, records: records, projects: projects)
         let candidates = topics.rows.compactMap { row -> PickCandidate<PaletteItem>? in
-            guard case .topic(let id) = row.id, id != source.topicID,
-                  let record = records.first(where: { $0.id == id }) else { return nil }
-            let occupied = scope == .session && TopicMembershipPlan.occupant(of: record, project: project, windows: windows, projects: projects) != nil
+            guard case .topic(let id) = row.id, scope != .session || id != source.topicID,
+                  records.contains(where: { $0.id == id }) else { return nil }
             return PickCandidate(
                 id: row.id.accessibilityID, symbol: row.hasNoLiveSession ? "◇" : "◆", title: row.title,
                 fields: topicFields(row, type: row.idleLabel?.lowercased() ?? "topic"),
                 trailing: age(.topic(row.id)) ?? "", mark: row.mark,
                 lastVisit: visits.last(.topic(row.id)), isPinned: row.isPinned,
-                pick: occupied ? .blocked(reason: "has a \(project.displayName) Session")
-                    : .available(PaletteItem(kind: .topic, ref: .choice(.move(.topic(id: id))))))
+                pick: .available(PaletteItem(kind: .topic, ref: .choice(.move(.topic(id: id))))))
         }
         let title = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let newTopic = PickCandidate(
             id: "new-topic", symbol: "＋", title: "New Topic", note: title.isEmpty ? "Untitled" : "“" + title + "”",
             pick: .available(PaletteItem(kind: .topic, ref: .choice(.move(.newTopic(title: title))))))
         var newRows = [newTopic]
+        if query.isEmpty || "No Topic".localizedCaseInsensitiveContains(query) {
+            newRows.append(PickCandidate(id: "no-topic", title: "No Topic",
+                pick: .available(PaletteItem(kind: .session, ref: .choice(.move(.noTopic))))))
+        }
         if scope == .pane {
             newRows.append(PickCandidate(id: "new-window", symbol: "＋", title: "New Window in " + source.sessionName,
                                         note: title.isEmpty ? nil : title,

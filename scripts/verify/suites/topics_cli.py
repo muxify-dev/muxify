@@ -13,7 +13,7 @@ import subprocess
 import time
 import unittest
 
-from scripts.verify.sandbox import DEBUG_APP, Sandbox
+from scripts.verify.sandbox import DEBUG_APP, Sandbox, wait
 
 CLI = DEBUG_APP/'Contents/Resources/bin/muxify'
 
@@ -36,7 +36,7 @@ class TopicsCli(unittest.TestCase):
         project.mkdir(parents=True)
         pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
         for settled in [False, True]:
-            made = self.muxify('topic', 'new', 'Forget CLI', '--project', str(project), pane=pane)
+            made = self.muxify('topic', 'new', 'Forget CLI', '--directory', str(project), pane=pane)
             self.assertEqual(made.returncode, 0, made.stderr)
             topic = made.stdout.strip()
             self.assertTrue(self.s.tmux('display-message', '-p', '#{socket_path}').startswith(str(self.s.root) + '/'))
@@ -54,7 +54,7 @@ class TopicsCli(unittest.TestCase):
         pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
         self.assertEqual(self.s.tmux('show-options', '-qv', '-t', '=base:', '@muxify_topic'), '', 'base is outside any Topic')
 
-        made = self.muxify('topic', 'new', 'CLI check', '--project', str(project), pane=pane)
+        made = self.muxify('topic', 'new', 'CLI check', '--directory', str(project), pane=pane)
         self.assertEqual(made.returncode, 0, made.stderr)
         topic_id = made.stdout.strip()
         self.assertTrue(topic_id and '\n' not in topic_id, 'topic new printed no single id: %r' % made.stdout)
@@ -69,23 +69,25 @@ class TopicsCli(unittest.TestCase):
 
     def fake_agent(self, session, status, unread=False, conversation=None):
         """A Pane that runs a program, as an Agent does, with the pane options its Extension and Muxify write."""
-        pane = self.s.tmux('split-window', '-d', '-P', '-F', '#{pane_id}', '-t', '=' + session + ':', 'sleep 600')
+        pane = self.s.tmux('split-window', '-d', '-P', '-F', '#{pane_id}', '-t', '=' + session + ':', '/bin/sleep', '600')
         self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent', 'claude')
         self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_status', status)
         if unread:
             self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_unread', '1')
         if conversation:
             self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_conversation', conversation)
+        wait(lambda: self.s.tmux('display-message', '-p', '-t', pane, '#{pane_current_command}') == 'sleep',
+             'fake Agent has not left its startup shell', seconds=10)
         return pane
 
     def test_topic_show_lists_both_sessions_of_the_topic_and_the_status_of_its_agent(self):
         for name in ('cli-show-home', 'cli-show-tools'):
             (self.projects/name).mkdir(parents=True)
         pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
-        made = self.muxify('topic', 'new', 'Show check', '--project', str(self.projects/'cli-show-home'), pane=pane)
+        made = self.muxify('topic', 'new', 'Show check', '--directory', str(self.projects/'cli-show-home'), pane=pane)
         self.assertEqual(made.returncode, 0, made.stderr)
         topic_id = made.stdout.strip()
-        added = self.muxify('topic', 'add-project', str(self.projects/'cli-show-tools'), '--topic', topic_id, pane=pane)
+        added = self.muxify('topic', 'add-session', str(self.projects/'cli-show-tools'), '--topic', topic_id, pane=pane)
         self.assertEqual(added.returncode, 0, added.stderr)
         agent = self.fake_agent('cli-show-tools/show-check', 'working')
 
@@ -101,7 +103,7 @@ class TopicsCli(unittest.TestCase):
     def test_agent_list_shows_an_agent_with_its_status_unread_and_topic(self):
         (self.projects/'cli-agents').mkdir(parents=True)
         pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
-        made = self.muxify('topic', 'new', 'Agents check', '--project', str(self.projects/'cli-agents'), pane=pane)
+        made = self.muxify('topic', 'new', 'Agents check', '--directory', str(self.projects/'cli-agents'), pane=pane)
         self.assertEqual(made.returncode, 0, made.stderr)
         topic_id = made.stdout.strip()
         agent = self.fake_agent('cli-agents/agents-check', 'done', unread=True)
@@ -120,7 +122,7 @@ class TopicsCli(unittest.TestCase):
     def test_agent_conversation_reads_the_transcript_of_a_panes_agent_without_its_tool_entries(self):
         (self.projects/'cli-conversation').mkdir(parents=True)
         pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
-        made = self.muxify('topic', 'new', 'Conversation check', '--project', str(self.projects/'cli-conversation'), pane=pane)
+        made = self.muxify('topic', 'new', 'Conversation check', '--directory', str(self.projects/'cli-conversation'), pane=pane)
         self.assertEqual(made.returncode, 0, made.stderr)
         agent = self.fake_agent('cli-conversation/conversation-check', 'done', conversation='conv-check')
         claude = self.s.root/'claude'
@@ -150,7 +152,7 @@ class TopicsCli(unittest.TestCase):
     def test_window_move_moves_a_window_that_is_not_the_callers_and_it_shows_under_the_topic(self):
         (self.projects/'cli-move').mkdir(parents=True)
         caller = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
-        made = self.muxify('topic', 'new', 'Move check', '--project', str(self.projects/'cli-move'), pane=caller)
+        made = self.muxify('topic', 'new', 'Move check', '--directory', str(self.projects/'cli-move'), pane=caller)
         self.assertEqual(made.returncode, 0, made.stderr)
         topic_id = made.stdout.strip()
         self.s.tmux('new-session', '-d', '-s', 'cli-loose', '-c', str(self.s.root))
@@ -170,10 +172,10 @@ class TopicsCli(unittest.TestCase):
         for name in ('cli-exec-home', 'cli-exec-tools'):
             (self.projects/name).mkdir(parents=True)
         pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
-        made = self.muxify('topic', 'new', 'Exec check', '--project', str(self.projects/'cli-exec-home'), pane=pane)
+        made = self.muxify('topic', 'new', 'Exec check', '--directory', str(self.projects/'cli-exec-home'), pane=pane)
         self.assertEqual(made.returncode, 0, made.stderr)
         topic_id = made.stdout.strip()
-        added = self.muxify('topic', 'add-project', str(self.projects/'cli-exec-tools'), '--topic', topic_id, pane=pane)
+        added = self.muxify('topic', 'add-session', str(self.projects/'cli-exec-tools'), '--topic', topic_id, pane=pane)
         self.assertEqual(added.returncode, 0, added.stderr)
         sessions = ['cli-exec-home/exec-check', 'cli-exec-tools/exec-check']
         heard = []
@@ -208,10 +210,10 @@ class TopicsCli(unittest.TestCase):
         self.git('add', 'readme.txt', cwd=repository)
         self.git('commit', '-q', '-m', 'first', cwd=repository)
         pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
-        made = self.muxify('topic', 'new', 'Git check', '--project', str(plain), pane=pane)
+        made = self.muxify('topic', 'new', 'Git check', '--directory', str(plain), pane=pane)
         self.assertEqual(made.returncode, 0, made.stderr)
         topic_id = made.stdout.strip()
-        added = self.muxify('topic', 'add-project', str(repository), '--topic', topic_id, pane=pane)
+        added = self.muxify('topic', 'add-session', str(repository), '--topic', topic_id, pane=pane)
         self.assertEqual(added.returncode, 0, added.stderr)
         (repository/'readme.txt').write_text('changed\n')
         (repository/'new.txt').write_text('new\n')
@@ -232,7 +234,7 @@ class TopicsCli(unittest.TestCase):
         self.assertEqual(self.git('status', '--porcelain', cwd=repository), 'M readme.txt\n?? new.txt',
                          'topic diff staged nothing')
 
-    def test_add_project_with_worktree_makes_a_worktree_that_settle_removes(self):
+    def test_add_session_with_worktree_makes_a_worktree_that_settle_removes(self):
         home = self.projects/'cli-wt-home'
         home.mkdir(parents=True)
         repository = self.projects/'cli-wt-repo'
@@ -240,21 +242,21 @@ class TopicsCli(unittest.TestCase):
         self.git('commit', '-q', '--allow-empty', '-m', 'first', cwd=repository)
         commit = self.git('rev-parse', 'HEAD', cwd=repository)
         pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
-        made = self.muxify('topic', 'new', 'Worktree check', '--project', str(home), pane=pane)
+        made = self.muxify('topic', 'new', 'Worktree check', '--directory', str(home), pane=pane)
         self.assertEqual(made.returncode, 0, made.stderr)
         topic_id = made.stdout.strip()
 
-        added = self.muxify('topic', 'add-project', str(repository), '--worktree', '--topic', topic_id, pane=pane)
+        added = self.muxify('topic', 'add-session', str(repository), '--worktree', '--topic', topic_id, pane=pane)
         self.assertEqual(added.returncode, 0, added.stderr)
         worktree = self.s.root/'state/muxify/worktrees/cli-wt-repo/worktree-check'
-        self.assertTrue(worktree.is_dir(), 'add-project --worktree made no Worktree folder at %s' % worktree)
+        self.assertTrue(worktree.is_dir(), 'add-session --worktree made no Worktree folder at %s' % worktree)
         record = json.loads((self.s.root/'state/muxify/topics'/(topic_id + '.json')).read_text())
         session = next((s for s in record.get('sessions', []) if s.get('branch') == 'worktree-check'), None)
         self.assertIsNotNone(session, 'the record remembers no Session on the Topic branch: %r' % record)
         self.assertIs(session.get('worktree_created'), True, session)
         self.assertEqual(session.get('base'), commit, session)
 
-        settled = self.muxify('topic', 'settle', '--remove-worktrees', '--topic', topic_id, pane=pane)
+        settled = self.muxify('topic', 'settle', '--kill-sessions', '--remove-worktrees', '--topic', topic_id, pane=pane)
         self.assertEqual(settled.returncode, 0, settled.stderr)
         self.assertFalse(worktree.exists(), 'Settle kept the Worktree that the Topic made')
 

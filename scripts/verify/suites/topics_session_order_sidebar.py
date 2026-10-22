@@ -36,7 +36,7 @@ class TopicsSessionOrderSidebar(TopicsSidebar):
                                 '%s: lines %s' % (message, self.session_lines(topic, self.s.rows())))
 
     def recorded_paths(self, topic):
-        return [session.get('project_path') for session in self.records()[topic].get('sessions', [])]
+        return [session.get('directory') for session in self.records()[topic].get('sessions', [])]
 
     def test_sessions_follow_their_creation_oldest_first_and_newest_first_with_the_config(self):
         older, newer = self.two_session_topic('order-auto')

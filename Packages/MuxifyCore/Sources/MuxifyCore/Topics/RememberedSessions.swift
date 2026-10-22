@@ -1,27 +1,30 @@
 import Foundation
 
 extension TopicRecord {
-    /// No live Sessions means Dormant. Keep the last live set for Reopen, in the Topic's order of its Sessions.
-    /// Until the user orders them, that is oldest first whatever `order` says, so Reopen creates them in the order
-    /// they were created before.
-    public func remembering(_ snapshot: TmuxSnapshot, projects: [Project], order: SessionOrder,
-                            branches: TopicBranches = TopicBranches()) -> TopicRecord? {
+    /// Save the current layout. Only a confirmed removal may replace a remembered layout with empty;
+    /// startup, server loss and reconnect do not establish that the user closed anything.
+    public func remembering(_ snapshot: TmuxSnapshot, order: SessionOrder,
+                            branches: TopicBranches = TopicBranches(),
+                            previously: [TmuxWindow] = []) -> TopicRecord? {
         let windows = snapshot.windows.filter { $0.topicID == id }
-        guard settledAt == nil, !windows.isEmpty else { return nil }
+        let observed = previously.filter { $0.topicID == id }
+        guard settledAt == nil, snapshot.serverRunning, !windows.isEmpty || !observed.isEmpty else { return nil }
         var seen: Set<String> = []
         let sessionIDs = TopicSessionOrder.ordered(windows.filter { seen.insert($0.sessionID).inserted }, record: self,
                                                    order: hasManualSessionOrder ? order : .oldestFirst) {
-            TopicSessionKey(of: $0, record: self, projects: projects)
+            TopicSessionKey(of: $0)
         }.map(\.sessionID)
-        let byProject = rememberedSessions(by: "project_path")
-        let remembered = sessionIDs.compactMap { sessionID -> JSONValue? in
+        var remembered = sessionIDs.compactMap { sessionID -> JSONValue? in
             let members = windows.filter { $0.sessionID == sessionID }
             guard let first = members.first else { return nil }
-            let location = TopicLocation(of: first, record: self, projects: projects)
-            var session = byProject[location.project.folder]?.object ?? [:]
-            session["project_path"] = .string(location.project.folder.path)
-            session["worktree_path"] = location.worktree.map { .string($0.path) }
-            session["branch"] = location.worktree.flatMap { branches[$0].map(JSONValue.string) ?? session["branch"] }
+            var session = self.session(of: first)?.object ?? [:]
+            session["id"] = .string(first.sessionRecordID)
+            session["name"] = .string(first.sessionName)
+            session["base_name"] = .string(baseName(of: first))
+            session["directory"] = .string(first.sessionPath.isEmpty ? first.path : first.sessionPath)
+            if let tree = session["worktree_path"]?.string.map(Folder.local) {
+                session["branch"] = branches[tree].map(JSONValue.string) ?? session["branch"]
+            }
             let previousWindows = session["windows"]?.array ?? []
             session["windows"] = .array(members.enumerated().map { index, window in
                 let previous = previousWindows.first { $0["window_id"]?.string == window.id }
@@ -46,27 +49,28 @@ extension TopicRecord {
                 fields["panes"] = panes.isEmpty ? nil : .array(panes.map { Self.remembered($0, in: window, commandLines: snapshot.commandLines) })
                 return .object(fields)
             })
+            let liveWindows = Set(members.map(\.id))
+            let observedWindows = Set(observed.map(\.id))
+            let missing = previousWindows.filter { entry in
+                entry["window_id"]?.string.map { !liveWindows.contains($0) && !observedWindows.contains($0) } ?? false
+            }
+            session["windows"] = .array((session["windows"]?.array ?? []) + missing)
             return .object(session)
         }
+        let liveIDs = Set(remembered.compactMap { $0["id"]?.string })
+        let observedIDs = Set(observed.map(\.sessionRecordID))
+        remembered += sessions.filter { entry in entry["id"]?.string.map { !liveIDs.contains($0) && !observedIDs.contains($0) } ?? false }
         guard remembered != sessions else { return nil }
         var updated = self
         updated.sessions = remembered
         return updated
     }
 
-    /// The record without the remembered Session of `window`'s Project, or nil when it remembers none. A Topic has one
-    /// Session per Project, so the Project names the entry.
-    func forgetting(_ window: TmuxWindow, projects: [Project]) -> TopicRecord? {
-        let project = TopicLocation(of: window, record: self, projects: projects).project.folder
+    /// Remove exactly one Session, even when several Sessions share its directory.
+    func forgetting(_ window: TmuxWindow) -> TopicRecord? {
         var updated = self
-        updated.sessions.removeAll { $0["project_path"]?.string.map(Folder.local) == project }
+        updated.sessions.removeAll { $0["id"]?.string == window.sessionRecordID }
         return updated.sessions == sessions ? nil : updated
-    }
-
-    /// The first remembered Session of each folder that its `field` names, such as `project_path`, resolved on this Mac.
-    func rememberedSessions(by field: String) -> [Folder: JSONValue] {
-        Dictionary(sessions.compactMap { session in session[field]?.string.map { (Folder.local($0), session) } },
-                   uniquingKeysWith: { first, _ in first })
     }
 
     /// An Agent Pane keeps its conversation, a Pane that runs another program keeps its command line, and a shell
@@ -84,7 +88,7 @@ extension TopicRecord {
     }
 }
 
-private extension JSONValue {
+extension JSONValue {
     var object: [String: JSONValue]? {
         if case .object(let fields) = self { return fields }
         return nil

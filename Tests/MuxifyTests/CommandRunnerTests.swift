@@ -90,9 +90,9 @@ final class CommandRunnerTests: XCTestCase {
     }
 
     func testRemotePathsDoNotUseTheLocalHome() {
-        XCTAssertEqual(Paths.tildify("/home/dev/project", home: "/home/dev"), "~/project")
-        XCTAssertEqual(Paths.tildify("/Users/local/project", home: "/home/dev"), "/Users/local/project")
-        XCTAssertEqual(Paths.fishStyle("/home/dev/work/project", home: "/home/dev"), "~/w/project")
+        XCTAssertEqual(Paths.tildify("/home/dev/sessionPath", home: "/home/dev"), "~/sessionPath")
+        XCTAssertEqual(Paths.tildify("/Users/local/sessionPath", home: "/home/dev"), "/Users/local/sessionPath")
+        XCTAssertEqual(Paths.fishStyle("/home/dev/work/sessionPath", home: "/home/dev"), "~/w/sessionPath")
         let pane = TmuxPane(id: "%0", windowID: "@0", command: "dash", agent: "claude", agentStatus: "done", unread: false)
         XCTAssertFalse(Agent.runs(in: pane))
     }

@@ -10,7 +10,7 @@ enum PaletteCommand: String, CaseIterable {
     case moveWindow = "Move Window"
     case moveSession = "Move Session"
     case movePaneWithTab = "Move Pane with Active Tab"
-    case addProject = "Add a Project"
+    case addSession = "Add a Session"
     case snoozeTopics = "Snooze Topics…"
     case snoozeTopic = "Snooze Topic"
     case settleTopic = "Settle Topic"
@@ -72,7 +72,7 @@ enum PaletteCommand: String, CaseIterable {
         case .movePane: .movePane
         case .moveWindow: .moveWindow
         case .moveSession: .moveSession
-        case .addProject: .addProjectToTopic
+        case .addSession: .addSessionToTopic
         case .snoozeTopic: .snoozeTopic
         case .snoozeTopics: .snoozeTopics
         case .settleTopic: .settleTopic
@@ -135,7 +135,7 @@ extension CommandPalette {
             case .newTopic: return !store.isRemote && !store.changingTopic
             case .movePane, .moveWindow, .moveSession: return canChangeTopics && store.selectedWindow != nil
             case .movePaneWithTab: return canChangeTopics && store.selectedWindow != nil && store.currentBrowser?.activeTab != nil
-            case .addProject, .snoozeTopic, .settleTopic: return canChangeTopics && hasOpenTopic
+            case .addSession, .snoozeTopic, .settleTopic: return canChangeTopics && hasOpenTopic
             case .editTags: return canChangeTopics && hasOpenTopic && store.topicConfig.tags != nil
             case .forgetTopic, .renameTopic: return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
             case .removeSessionFromTopic:
@@ -204,7 +204,7 @@ extension CommandPalette {
             return
         }
         switch command {
-        case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addProject, .snoozeTopic, .snoozeTopics, .settleTopic, .zen,
+        case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addSession, .snoozeTopic, .snoozeTopics, .settleTopic, .zen,
              .forgetTopic, .renameTopic, .editTags, .unsnoozeTopic, .unsnoozeTopics: break
         default: close(restoringFocus: false)
         }
@@ -217,7 +217,7 @@ extension CommandPalette {
         case .movePaneWithTab: store.presentMovePane(nil, includesTab: true, keepingHistory: true)
         case .moveWindow: store.presentMoveWindow(keepingHistory: true)
         case .moveSession: store.presentMoveSession(keepingHistory: true)
-        case .addProject: store.presentAddProject(keepingHistory: true)
+        case .addSession: store.presentAddSession(keepingHistory: true)
         case .snoozeTopic: if let id = store.activeTopicID { store.presentSnooze(id, keepingHistory: true) }
         case .snoozeTopics: store.presentCheck(CheckDraft(action: .snooze), keepingHistory: true)
         case .unsnoozeTopics: store.presentCheck(CheckDraft(action: .unsnooze), keepingHistory: true)

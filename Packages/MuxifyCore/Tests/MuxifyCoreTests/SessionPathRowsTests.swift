@@ -1,8 +1,8 @@
 import XCTest
 @testable import MuxifyCore
 
-/// The rows of the New Topic list, which the app and `muxify project list` share. Real git in a temp folder.
-final class ProjectRowsTests: XCTestCase {
+/// The rows of the New Topic list, which the app and `muxify sessionPath list` share. Real git in a temp folder.
+final class SessionPathRowsTests: XCTestCase {
     private var root: URL!
 
     override func setUpWithError() throws {
@@ -20,9 +20,9 @@ final class ProjectRowsTests: XCTestCase {
 
     private func path(_ name: String) -> String { (root.appendingPathComponent(name).path as NSString).standardizingPath }
 
-    /// The Config's Projects in Config order: a bare repository with the Worktrees `main` and `release`, an aliased
+    /// The Config's SessionPaths in Config order: a bare repository with the Worktrees `main` and `release`, an aliased
     /// plain repository, and a plain directory.
-    private func projects() throws -> [Project] {
+    private func sessionPaths() throws -> [SessionPath] {
         let plain = path("app")
         try git(["init", "-q", "-b", "main", plain], in: root.path)
         try "a\n".write(toFile: plain + "/f", atomically: true, encoding: .utf8)
@@ -33,18 +33,18 @@ final class ProjectRowsTests: XCTestCase {
         try git(["worktree", "add", "-q", bare + "/main", "main"], in: bare)
         try git(["worktree", "add", "-q", bare + "/release", "-b", "release-line"], in: bare)
         try FileManager.default.createDirectory(atPath: path("notes"), withIntermediateDirectories: true)
-        return [Project(path: bare, name: "game_server"), Project(path: plain, name: "app", alias: "The App"), Project(path: path("notes"), name: "notes")]
-            .map { project in
-                var detected = project
-                detected.layout = ProjectLayout.detect(at: project.folder.path)
+        return [SessionPath(path: bare, name: "game_server"), SessionPath(path: plain, name: "app", alias: "The App"), SessionPath(path: path("notes"), name: "notes")]
+            .map { sessionPath in
+                var detected = sessionPath
+                detected.layout = RepositoryLayout.detect(at: sessionPath.folder.path)
                 return detected
             }
     }
 
-    func testRowsAreTheChoicesOfEachProjectInConfigOrderWithTheirLabels() throws {
-        let projects = try projects()
-        let rows = ProjectRows.build(projects: projects, windows: [], records: [], titles: [:])
-        XCTAssertEqual(rows.map(\.choice), projects.flatMap(ProjectChoice.choices))
+    func testRowsAreTheChoicesOfEachSessionPathInConfigOrderWithTheirLabels() throws {
+        let sessionPaths = try sessionPaths()
+        let rows = SessionPathRows.build(sessionPaths: sessionPaths, windows: [], records: [], titles: [:])
+        XCTAssertEqual(rows.map(\.choice), sessionPaths.flatMap(SessionChoice.choices))
         XCTAssertEqual(rows.map { [$0.choice.directory.path, $0.choice.name, $0.choice.displayName] }, [
             [path("game_server/main"), "game_server/main", "game_server/main"],
             [path("game_server/release"), "game_server/release", "game_server/release"],
@@ -56,20 +56,20 @@ final class ProjectRowsTests: XCTestCase {
     }
 
     func testARowNamesTheOtherOpenTopicsWhoseLiveSessionsUseItsFolderByIdAndLabel() throws {
-        let projects = try projects()
+        let sessionPaths = try sessionPaths()
         let release = path("game_server/release")
-        var fix = TopicRecord(id: "fix", slug: "fix-drops", homeProject: projects[0].folder.path)
-        fix.sessions = [.object(["project_path": .string(projects[0].folder.path), "worktree_path": .string(release), "branch": .string("release-line")])]
-        var titled = TopicRecord(id: "ui", title: "Polish UI", homeProject: projects[0].folder.path)
+        var fix = TopicRecord(id: "fix", slug: "fix-drops")
+        fix.sessions = [.object(["repository_path": .string(sessionPaths[0].folder.path), "worktree_path": .string(release), "branch": .string("release-line")])]
+        var titled = TopicRecord(id: "ui", title: "Polish UI")
         titled.sessions = fix.sessions
-        var settled = TopicRecord(id: "old", title: "Old", homeProject: projects[0].folder.path)
+        var settled = TopicRecord(id: "old", title: "Old")
         settled.sessions = fix.sessions
         settled.settledAt = "2026-10-01T00:00:00Z"
         let windows = [window("@1", session: "$1", topic: "fix", directory: release + "/src"),
                        window("@2", session: "$2", topic: "ui", directory: release),
                        window("@3", session: "$3", topic: "old", directory: release)]
-        let rows = ProjectRows.build(projects: projects, windows: windows, records: [fix, titled, settled], titles: [:])
-        XCTAssertEqual(rows.map(\.alsoIn), [[], [TopicSummary(id: "ui", label: "Polish UI"), TopicSummary(id: "fix", label: "fix-drops")], [], []],
+        let rows = SessionPathRows.build(sessionPaths: sessionPaths, windows: windows, records: [fix, titled, settled], titles: [:])
+        XCTAssertEqual(rows.map(\.alsoIn), [[], [TopicSummary(id: "fix", label: "fix-drops"), TopicSummary(id: "ui", label: "Polish UI")], [], []],
                        "a Topic with no title has the label topic list gives it; a Settled Topic is in no row")
     }
 

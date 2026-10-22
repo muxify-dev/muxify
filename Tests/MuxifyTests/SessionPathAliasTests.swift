@@ -1,9 +1,9 @@
 import XCTest
 @testable import MuxifyCore
 
-final class ProjectAliasTests: XCTestCase {
-    private let vault = Project(path: "/work/vault", name: "vault", alias: "My Obsidian")
-    private let game = Project(path: "/work/game", name: "game", alias: "Game Server",
+final class SessionPathAliasTests: XCTestCase {
+    private let vault = SessionPath(path: "/work/vault", name: "vault", alias: "My Obsidian")
+    private let game = SessionPath(path: "/work/game", name: "game", alias: "Game Server",
                                layout: .bareRepository([Worktree(path: "/work/game/main", branch: "main")]))
 
     private func window(_ id: String, session: String, directory: String, topic: String? = nil) -> TmuxWindow {
@@ -14,16 +14,16 @@ final class ProjectAliasTests: XCTestCase {
 
     private func catalog(records: [TopicRecord] = [], windows: [TmuxWindow] = [], mode: SidebarMode = .topics) -> PaletteCatalog {
         var config = Config()
-        config.projects = [vault, game]
+        config.sessionPaths = [vault, game]
         let model = TopicsModel(records: records, windows: windows, config: config, selection: TopicSelection(), mode: mode, agents: [], now: Date())
-        return PaletteCatalog(windows: windows, agents: [], projects: [vault, game], topics: model, records: records)
+        return PaletteCatalog(windows: windows, agents: [], sessionPaths: [vault, game], topics: model, records: records)
     }
 
-    private func discovered(_ config: Config) -> [Project] {
-        ProjectDiscovery.discover(config.projectRoots, aliases: config.projectAliases)
+    private func discovered(_ config: Config) -> [SessionPath] {
+        SessionPathDiscovery.discover(config.sessionRoots, aliases: config.sessionAliases)
     }
 
-    func testConfigGivesAProjectItsAliasByFullPathRelativePathOrHomePath() throws {
+    func testConfigGivesASessionPathItsAliasByFullPathRelativePathOrHomePath() throws {
         let root = try TestDirectory()
         for name in ["alpha", "beta", "gamma"] {
             try FileManager.default.createDirectory(at: root.url.appendingPathComponent("work/" + name), withIntermediateDirectories: true)
@@ -33,27 +33,27 @@ final class ProjectAliasTests: XCTestCase {
           aliases:
             - \(root.url.path)/work/alpha/: My Alpha
             - work/beta: Beta Notes
-            - /no/such/project: Nobody
+            - /no/such/sessionPath: Nobody
             - ~/Library: Home Library
           paths:
             - path: work/*
             - path: ~/Library
         """
         let config = try Config.load(path: root.url.appendingPathComponent("config.yaml").path) { _ in text }.get()
-        XCTAssertEqual(config.problems, [], "an alias of a path that is no Project is not a problem")
-        let projects = discovered(config)
-        XCTAssertEqual(projects.map(\.name), ["alpha", "beta", "gamma", "Library"], "the alias does not rename the Project")
-        XCTAssertEqual(projects.map(\.displayName), ["My Alpha", "Beta Notes", "gamma", "Home Library"])
+        XCTAssertEqual(config.problems, [], "an alias of a path that is no SessionPath is not a problem")
+        let sessionPaths = discovered(config)
+        XCTAssertEqual(sessionPaths.map(\.name), ["alpha", "beta", "gamma", "Library"], "the alias does not rename the SessionPath")
+        XCTAssertEqual(sessionPaths.map(\.displayName), ["My Alpha", "Beta Notes", "gamma", "Home Library"])
         XCTAssertTrue(Config.template.contains("#   aliases:"))
     }
 
     func testConfigReportsAliasEntriesItCannotApply() throws {
         let cases: [(String, String)] = [
             ("{/tmp: x}", "sessions.aliases: expected a list"),
-            ("[wrong]", "sessions.aliases: expected one Project path mapped to its alias"),
-            ("[{/tmp: x, /var: y}]", "sessions.aliases: expected one Project path mapped to its alias"),
-            ("[{}]", "sessions.aliases: expected one Project path mapped to its alias"),
-            ("[{42: x}]", "sessions.aliases: expected a Project path"),
+            ("[wrong]", "sessions.aliases: expected one SessionPath path mapped to its alias"),
+            ("[{/tmp: x, /var: y}]", "sessions.aliases: expected one SessionPath path mapped to its alias"),
+            ("[{}]", "sessions.aliases: expected one SessionPath path mapped to its alias"),
+            ("[{42: x}]", "sessions.aliases: expected a SessionPath path"),
             ("[{/tmp: ''}]", "sessions.aliases./tmp: expected a nonempty one-line alias"),
             ("[{/tmp: '  '}]", "sessions.aliases./tmp: expected a nonempty one-line alias"),
             ("[{/tmp: 42}]", "sessions.aliases./tmp: expected a nonempty one-line alias"),
@@ -82,35 +82,35 @@ final class ProjectAliasTests: XCTestCase {
         XCTAssertEqual(titles("vault"), ["My Obsidian"], "typing the folder name finds the aliased row")
         XCTAssertEqual(titles("game/main"), ["Game Server/main"])
         let row = catalog.list([.sessions], query: "obsidian").rows[0]
-        XCTAssertEqual(row.pick.payload?.ref, .project(OpenDirectory(directory: .local("/work/vault"), name: "vault", reach: .noTopicOnly)))
+        XCTAssertEqual(row.pick.payload?.ref, .sessionPath(OpenDirectory(directory: .local("/work/vault"), name: "vault")))
         let sessions = self.catalog(mode: .sessions).list([.sessions], query: "").rows
         XCTAssertEqual(sessions.map(\.title.text), ["My Obsidian", "Game Server/main"])
-        XCTAssertEqual(sessions[1].pick.payload?.ref, .project(OpenDirectory(directory: .local("/work/game/main"), name: "game/main", reach: .anySession)))
+        XCTAssertEqual(sessions[1].pick.payload?.ref, .sessionPath(OpenDirectory(directory: .local("/work/game/main"), name: "game/main")))
     }
 
-    func testProjectListsShowTheAliasAndFindTheRowByAliasOrFolder() {
-        let rows = ProjectRows.build(projects: [vault, game], windows: [], records: [], titles: [:])
-        func titles(_ query: String) -> [String] { ProjectRows.list(rows, query: query, visits: VisitLog()).rows.map(\.title.text) }
+    func testSessionPathListsShowTheAliasAndFindTheRowByAliasOrFolder() {
+        let rows = SessionPathRows.build(sessionPaths: [vault, game], windows: [], records: [], titles: [:])
+        func titles(_ query: String) -> [String] { SessionPathRows.list(rows, query: query, visits: VisitLog()).rows.map(\.title.text) }
         XCTAssertEqual(titles(""), ["My Obsidian", "Game Server/main"])
         XCTAssertEqual(titles("obsidian"), ["My Obsidian"])
         XCTAssertEqual(titles("vault"), ["My Obsidian"])
     }
 
     func testSidebarLabelsASessionWithTheAliasAndItsSessionKeepsTheFolderName() throws {
-        var record = TopicRecord(id: "t", title: "Write", homeProject: "/work/vault")
-        record.sessions = [.object(["project_path": .string("/work/game"), "worktree_path": .string("/work/game/main")])]
+        var record = TopicRecord(id: "t", title: "Write", slug: "write")
+        record.sessions = [.object(["id": .string("saved"), "name": .string("debug/write"), "base_name": .string("debug"), "directory": .string("/work/game/main")])]
         var windows = [window("@1", session: "vault/write", directory: "/work/vault", topic: "t"),
                        window("@2", session: "game/write", directory: "/work/game/main", topic: "t")]
         // A Topic lists its Sessions oldest first.
         windows[1].sessionCreated = 1
         let model = catalog(records: [record], windows: windows).topics!
-        XCTAssertEqual(model.rows.first { $0.id == .topic("t") }?.sessions.map(\.projectName), ["My Obsidian", "Game Server/main"])
+        XCTAssertEqual(model.rows.first { $0.id == .topic("t") }?.sessions.map(\.baseName), ["vault", "game"])
         var settled = record
         settled.settledAt = "2026-01-01T00:00:00Z"
-        settled.sessions.append(.object(["project_path": .string("/work/vault")]))
-        XCTAssertEqual(TopicsModel.settledRow(settled, projects: [vault, game], tags: nil, expanded: []).sessions.map(\.projectName),
-                       ["Game Server/main", "My Obsidian"])
-        let plan = TopicPlan(title: "Write notes", project: vault, records: [], sessionNames: [], id: "n")
+        settled.sessions.append(.object(["id": .string("notes"), "name": .string("notes/write"), "base_name": .string("notes"), "directory": .string("/work/vault")]))
+        XCTAssertEqual(TopicsModel.settledRow(settled, sessionPaths: [vault, game], tags: nil, expanded: []).sessions.map(\.baseName),
+                        ["debug", "notes"])
+        let plan = TopicPlan(title: "Write notes", sessionPath: vault, records: [], sessionNames: [], id: "n")
         XCTAssertEqual(plan.sessionName, "vault/write-notes")
     }
 }

@@ -5,28 +5,27 @@ the upstream maintainer what the branch changes in upstream's designs. It is
 not part of the merge.
 
 The branch adds Topics: a Topic is one thing the user wants to get done, and it
-owns at most one Session in each Project. Topics have their own ADRs
+groups arbitrary Sessions, including several in one folder. Topics have their own ADRs
 (0006 to 0010 on this branch, `docs/topic-records.md`) and are not listed here.
 This file is about what changes for upstream's own features.
 
 ## Upstream concepts that the branch replaces
 
-### Session Path becomes Project
+### Session Path discovery
 
-- `sessions.paths` keeps its name, and now finds Projects (ADR 0011). One list
+- `sessions.paths` keeps its name, and now finds Session Paths (ADR 0011). One list
   of folders serves the Command Palette, Topics and the CLI.
-- `ProjectDiscovery.swift` replaces `SessionPaths.swift`. One shell script finds
+- `SessionPathDiscovery.swift` replaces `SessionPaths.swift`. One shell script finds
   the folders. It runs on this Mac, or over the Remote Environment's SSH master.
-- A repository is one Project. Its Worktrees are rows of that Project, read
+- A repository is one Session Path. Its Worktrees are rows of that Session Path, read
   from `git worktree list`. Upstream made each worktree its own Session Path
   and found worktrees only below a `.git` folder. Bare repositories, and a
   `.bare` folder beside a `.git` file, now work.
 - Discovery does not list a folder inside a repository that it found.
-- A new Session in a Worktree has the name `<project>/<folder>`. Upstream used
+- A new Session in a Worktree has the name `<repo>/<folder>`. Upstream used
   `repo [wt]`, and put the parent folder in front on a name clash. When a name
-  is in use, the branch adds `-2`, `-3` and so on.
-- A Session still matches a Project by its start folder, not by its name.
-  Sessions that upstream made are found again.
+  is in use, New Session adds `+2`, `+3` and so on.
+- A Session Path matches a running Session by exact name, not by its folder.
 
 ### Palette ranking
 
@@ -39,7 +38,7 @@ This file is about what changes for upstream's own features.
   letters are marked.
 - Matching uses smart case. A word with a capital letter matches case. Upstream
   always ignored case.
-- On an equal score, a row with a running Session comes before a Project with
+- On an equal score, a row with a running Session comes before a Session Path with
   no Session, as upstream ranks. Then the last visit (new) breaks the tie,
   then the last activity.
 
@@ -68,23 +67,21 @@ Sidebar's Session header is replaced by Topic cards.
 - `sessions.paths` takes upstream's `path` and `depth`, and adds:
   - a glob in `path`
   - a path relative to the Config file's folder
-  - `display_depth`, the number of folder levels in the Project's name
-- `sessions.aliases` gives a Project a name to show in the lists and the
+  - `display_depth`, the number of folder levels in the Session Path's name
+- `sessions.aliases` gives a Session Path a name to show in the lists and the
   Sidebar. tmux Sessions keep the folder name.
 - The palette has a fourth Source, `topics`. It has rows only in a Local App
   Window with Topics on.
-- The `sessions` Source has one row for each Project and Worktree, which holds
-  the running Sessions that start in it. Then it has one row for each Session
-  outside every Project. ↩ on a Project row goes to its Session visited last,
-  or starts one. In Topics mode a Project row holds only No Topic Sessions.
+- The `sessions` Source has a row for every running Session in both Sidebar modes,
+  followed by Session Paths whose exact launch names are not running.
 - There are three new palette keys: `new_session` (⌘↩) starts another
-  Session in a Project or Worktree, even when one runs there, `paste_path` (⌃Y)
+  Session in a Session Path or Worktree, even when one runs there, `paste_path` (⌃Y)
   types the row's path at the terminal prompt, and `snooze` (⌃S) snoozes a
   Topic. The chips are now ⌘1–⌘4.
 - Move (⌘⇧M) sends a Session to a Topic. It uses the palette's view, and it is
   not a Source.
 - There are new global keybindings: `new_topic_from_pane` ⌘⇧T,
-  `move_session_to_topic` ⌘⇧M, `add_project_to_topic` ⌘⇧A, `snooze_topic` ⌥⌘S,
+  `move_session_to_topic` ⌘⇧M, `add_session_to_topic` ⌘⇧A, `snooze_topic` ⌥⌘S,
   `zen_mode` ⇧⌥⌘S, `toggle_terminal` ⌘J, `toggle_focus` ⇧⌘↩, `focus_terminal`
   ⌥⌘T and `focus_browser` ⌥⌘B.
 - There are new Config sections: `topics`, `notifications`, `sidebar` and
@@ -96,7 +93,7 @@ Sidebar's Session header is replaced by Topic cards.
   you can turn on and off, the collision rules, and
   `keybindings.command_palette`.
 - ADR 0010: the remote Config is read over SSH. Its `ghostty` and
-  `remote_environments` sections are skipped. Projects are found on each
+  `remote_environments` sections are skipped. Session Paths are found on each
   Environment's machine.
 - `depth`: 0 is the folder itself, and 1 to N are the levels below it. Hidden
   folders are skipped.

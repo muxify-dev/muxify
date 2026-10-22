@@ -48,10 +48,6 @@ class TopicsUnread(TopicsSidebar):
 
     def write_empty_topic(self, topic, **fields):
         self.write_topic(topic, topic, self.beta, **fields)
-        path = self.topics_dir / (topic + '.json')
-        record = json.loads(path.read_text())
-        record.pop('home_project')
-        path.write_text(json.dumps(record))
 
     def enter_empty(self, topic):
         self.enter(topic)
@@ -94,7 +90,7 @@ class TopicsUnread(TopicsSidebar):
             self.assert_unread(topic, False)
 
     def test_dormant_snoozed_and_settled_records_and_all_read(self):
-        for topic, fields in [('dormant-read-target', {'sessions': [{'project_path': str(self.beta)}]}),
+        for topic, fields in [('dormant-read-target', {'sessions': [dict(id='saved', name='debug/dormant-read-target', base_name='debug', directory=str(self.beta))]}),
                               ('snoozed-read-target', {'snoozed_until': 'never'}),
                               ('settled-read-target', {'settled_at': '2026-10-01T10:00:00Z'})]:
             self.write_topic(topic, topic, self.beta, **fields)

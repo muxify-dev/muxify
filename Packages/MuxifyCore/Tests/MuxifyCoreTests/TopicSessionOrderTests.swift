@@ -2,9 +2,9 @@ import XCTest
 @testable import MuxifyCore
 
 final class TopicSessionOrderTests: XCTestCase {
-    private let projects = ["a", "b", "c", "d"].map { Project(path: "/work/" + $0, name: $0) }
+    private let sessionPaths = ["a", "b", "c", "d"].map { SessionPath(path: "/work/" + $0, name: $0) }
 
-    /// A live Session of the Topic in Project `name`, created at `created`.
+    /// A live Session of the Topic in SessionPath `name`, created at `created`.
     private func window(_ name: String, created: Int) -> TmuxWindow {
         TmuxWindow(id: "@" + name, sessionID: "$" + name, sessionName: name + "/topic", index: 0, name: "shell", paneTitle: "",
                    path: "/work/" + name, command: "zsh", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0,
@@ -13,16 +13,16 @@ final class TopicSessionOrderTests: XCTestCase {
     }
 
     private func record(manual: [String]? = nil) -> TopicRecord {
-        var record = TopicRecord(id: "topic", title: "Topic", slug: "topic", homeProject: "/work/a")
+        var record = TopicRecord(id: "topic", title: "Topic", slug: "topic")
         if let manual {
-            record.sessions = manual.map { .object(["project_path": .string("/work/" + $0)]) }
+            record.sessions = manual.map { .object(["id": .string("$" + $0), "directory": .string("/work/" + $0)]) }
             record.hasManualSessionOrder = true
         }
         return record
     }
 
     private func names(_ windows: [TmuxWindow], record: TopicRecord, order: SessionOrder) -> [String] {
-        TopicSessionOrder.ordered(windows, record: record, order: order) { TopicSessionKey(of: $0, record: record, projects: projects) }
+        TopicSessionOrder.ordered(windows, record: record, order: order) { TopicSessionKey(of: $0) }
             .map { String($0.sessionName.prefix { $0 != "/" }) }
     }
 
@@ -55,17 +55,17 @@ final class TopicSessionOrderTests: XCTestCase {
     func testRememberingKeepsAManualOrderAndANewSessionAtItsEnd() throws {
         let manual = record(manual: ["a", "c", "b"])
         let snapshot = TmuxSnapshot(windows: live + [window("d", created: 50)], clients: [], panes: [], serverRunning: true)
-        let paths = { (record: TopicRecord) in record.sessions.compactMap { $0["project_path"]?.string } }
-        let remembered = try XCTUnwrap(manual.remembering(snapshot, projects: projects, order: .newestFirst))
+        let paths = { (record: TopicRecord) in record.sessions.compactMap { $0["directory"]?.string } }
+        let remembered = try XCTUnwrap(manual.remembering(snapshot, order: .newestFirst))
         XCTAssertEqual(paths(remembered), ["/work/d", "/work/a", "/work/c", "/work/b"])
         XCTAssertTrue(remembered.hasManualSessionOrder)
-        XCTAssertNil(remembered.remembering(snapshot, projects: projects, order: .newestFirst), "a second read changes nothing")
+        XCTAssertNil(remembered.remembering(snapshot, order: .newestFirst), "a second read changes nothing")
     }
 
     func testRememberingWithoutAManualOrderKeepsTheSessionsOldestFirstForReopen() throws {
         let snapshot = TmuxSnapshot(windows: live, clients: [], panes: [], serverRunning: true)
-        let remembered = try XCTUnwrap(record().remembering(snapshot, projects: projects, order: .newestFirst))
-        XCTAssertEqual(remembered.sessions.compactMap { $0["project_path"]?.string }, ["/work/c", "/work/b", "/work/a"])
+        let remembered = try XCTUnwrap(record().remembering(snapshot, order: .newestFirst))
+        XCTAssertEqual(remembered.sessions.compactMap { $0["directory"]?.string }, ["/work/c", "/work/b", "/work/a"])
         XCTAssertFalse(remembered.hasManualSessionOrder)
     }
 
