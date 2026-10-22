@@ -389,19 +389,30 @@ class CommandPalette(unittest.TestCase):
         wait(lambda: self.s.driver('press', 'Move Session…')['pressed'], 'the menu item did not come back', seconds=10)
         self.close_palette()
 
-    def test_the_palette_opens_with_the_active_topic_first_under_the_cursor(self):
+    def test_topic_palette_ranks_other_live_topics_by_visits_then_current_then_dormant_and_empty(self):
         windows = {}
-        for name in ['sw-previous', 'sw-current']:
-            self.write_topic(name, 'Sw ' + name[3:], self.beta)
+        for name in ['sw-order-older', 'sw-order-recent', 'sw-order-current']:
+            self.addCleanup(remove_topic, self.topics_dir/(name + '.json'))
+            self.write_topic(name, 'Sw ' + name[3:], self.beta, pinned=name != 'sw-order-recent')
             windows[name] = self.window_of(self.new_session('beta/' + name, self.beta, topic=name))
-        self.select_window(windows['sw-previous'])
-        self.select_window(windows['sw-current'])
-        rs = self.open_palette()
-        key = 'palette-row-topic-sw-current'
-        rs = self.s.wait_rows(lambda rs: self.s.has(key, rs) and self.s.has('palette-row-topic-sw-previous', rs), 'the Topics did not show')
-        listed = [k for k in self.s.ids(rs) if k.startswith('palette-row-topic-')]
-        self.assertEqual(listed[0], key, 'the Active Topic is not first: %s' % listed)
-        self.assertEqual(self.s.row(key, rs).get('accessibilityValue'), 'selected', self.describe(key, rs))
+        dormant, empty = 'sw-order-dormant', 'sw-order-empty-topic'
+        for name in [dormant, empty]:
+            self.addCleanup(remove_topic, self.topics_dir/(name + '.json'))
+        self.write_topic(dormant, 'Sw order dormant', self.beta, pinned=True,
+                         sessions=[remembered_session(self.beta, dormant, windows=[dict(directory=str(self.beta), name='shell')])])
+        self.write_topic(empty, 'Sw order empty', self.beta)
+        for name in ['sw-order-older', 'sw-order-recent', 'sw-order-current']:
+            self.select_window(windows[name])
+        self.addCleanup(self.close_palette)
+        self.open_palette()
+        self.s.wait_rows(lambda rs: self.s.has('palette-row-topic-sw-order-recent', rs), 'recent Topic row did not show')
+        listed = self.palette_order()
+        expected = ['palette-row-topic-' + name for name in ['sw-order-recent', 'sw-order-older', 'sw-order-current']]
+        self.assertEqual([key for key in listed if key in expected], expected, listed)
+        for name in [dormant, empty]:
+            self.assertGreater(listed.index('palette-row-topic-' + name), listed.index(expected[-1]), listed)
+        self.s.reveal(expected[0])
+        self.assertEqual(self.s.row(expected[0]).get('accessibilityValue'), 'selected', 'the most recent other Topic should be under the cursor')
         self.close_palette()
 
     def test_no_topic_has_no_row_and_a_no_topic_session_has_a_session_row(self):

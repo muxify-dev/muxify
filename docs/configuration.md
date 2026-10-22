@@ -449,7 +449,10 @@ Without `command_palettes`, Muxify has two palettes. **Commands** opens on
 ⇧⌘P with only `commands`. **Go to…** opens on ⌘P with `topics` and `sessions`.
 `command_palettes: []` removes both. Names must be unique. `sources` accepts:
 
-- `topics`: the open Topics, Pinned first. Its Snoozed and Settled Topics
+- `topics`: with no query, other live Topics by most recent visit, then the current
+  Topic, then Dormant and Empty Topics. Pins do not override this order; they
+  still determine Sidebar order. Activity breaks visit ties using the most active
+  member Session. Its Snoozed and Settled Topics
   come after the rows of every other Source, even when they match the query
   better. Only a Local App Window with Topics on has them.
 - `sessions`: one row per running Session, including Topic members in either
@@ -477,9 +480,11 @@ Results stay in sections, one or more for each source. Words match in any
 order, fzf style, on the name, a type word (`topic`, `dormant`, `snoozed`,
 `settled`, `session`, `worktree`, `window`), the details under the
 name, or a Settled Topic's outcome, and the matched letters are marked. With
-nothing typed, Pinned Topics come first, then the Active Topic or current row,
-then the most recently visited. On an equal match a running Session comes
-before a Session Path with no Session, then the more recently visited or active one.
+nothing typed, Topics and Sessions put the current live row last among live rows,
+before entries with nothing running. Other live rows are most recently visited first.
+Typed queries use fuzzy match quality, without pushing the current row down.
+On an equal match, live entries come before unopened ones, then the more recently
+visited or active one.
 A Window with an Agent is left out while the Agents Source button is on. ⎋ closes the
 palette without a change. In an Action, ⌫ in an empty field goes back one step.
 A step that kills a process needs ⌘↩ to confirm. The keys inside a palette are

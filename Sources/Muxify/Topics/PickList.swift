@@ -211,7 +211,7 @@ enum FuzzyRanker {
                 let pinned = ranked.filter { $0.1.isPinned }.sorted { $0.0 < $1.0 }
                 let others = ranked.filter { !$0.1.isPinned }
                 let emptyOrder = section.currentLast
-                    ? others.filter { !$0.1.isCurrent && !$0.1.unopened } + others.filter { $0.1.isCurrent } + others.filter { $0.1.unopened }
+                    ? others.filter { !$0.1.isCurrent && !$0.1.unopened } + others.filter { $0.1.isCurrent && !$0.1.unopened } + others.filter { $0.1.unopened }
                     : others.filter { $0.1.isCurrent } + others.filter { !$0.1.isCurrent }
                 let shown = query.isEmpty ? pinned + emptyOrder : ranked
                 rows = shown.map { row($0.1, match: query.isEmpty ? nil : $0.2) }

@@ -8,8 +8,8 @@ final class PickListTests: XCTestCase {
     }
 
     private func list(_ candidates: [PickCandidate<String>], _ query: String, rule: SectionRule = .ranked(showsWhenEmpty: true),
-                      title: String? = nil) -> PickList<String> {
-        FuzzyRanker.list([PickSectionInput(id: "s", title: title, rule: rule, candidates: candidates)], query: FuzzyQuery(query))
+                       title: String? = nil, currentLast: Bool = false) -> PickList<String> {
+        FuzzyRanker.list([PickSectionInput(id: "s", title: title, rule: rule, candidates: candidates, currentLast: currentLast)], query: FuzzyQuery(query))
     }
 
     func testEachWordTakesItsBestFieldAndTheTitleWinsATie() throws {
@@ -45,6 +45,13 @@ final class PickListTests: XCTestCase {
         let candidates = [candidate("other", "alpha beta", visit: 20), candidate("active", "alpha", visit: 10, current: true)]
         XCTAssertEqual(list(candidates, "").rows.map(\.id), ["active", "other"], "the current row leads even when visited earlier")
         XCTAssertEqual(list(candidates, "beta").rows.map(\.id), ["other"])
+    }
+
+    func testCurrentUnopenedTopicAppearsOnlyOnceAfterLiveTopics() {
+        var empty = candidate("empty", "Empty", visit: 30, current: true)
+        empty.unopened = true
+        let candidates = [empty, candidate("live", "Live", visit: 10)]
+        XCTAssertEqual(list(candidates, "", currentLast: true).rows.map(\.id), ["live", "empty"])
     }
 
     func testPinnedRowsGoFirstInCandidateOrderOnlyWhenNothingIsTyped() {

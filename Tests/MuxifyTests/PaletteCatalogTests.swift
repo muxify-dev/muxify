@@ -18,7 +18,8 @@ final class PaletteCatalogTests: XCTestCase {
     /// A Topic whose Session is remembered in the main Worktree of game, as the app remembers it.
     private func topic(_ id: String, _ title: String) -> TopicRecord {
         var record = TopicRecord(id: id, title: title)
-        record.sessions = [.object(["repository_path": .string("/work/game"), "worktree_path": .string("/work/game/main")])]
+        record.sessions = [.object(["id": .string("saved:" + id), "name": .string("game/" + id),
+                                   "base_name": .string("game"), "directory": .string("/work/game/main")])]
         return record
     }
 
@@ -50,7 +51,7 @@ final class PaletteCatalogTests: XCTestCase {
     private func ids(_ list: PickList<PaletteItem>) -> [String] { list.rows.map(\.id) }
     private let goTo: [PaletteSource] = [.topics, .sessions]
 
-    func testGoToListsTopicsThenSessionsThenSnoozedAndSettledWithTheActiveTopicFirst() {
+    func testGoToListsOtherLiveTopicsThenCurrentThenDormantBeforeSessionsSnoozedAndSettled() {
         var snoozed = topic("z", "Zzz")
         snoozed.snoozedUntil = "never"
         var settled = topic("s", "Settled")
@@ -64,12 +65,12 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(list.sections.map(\.id), ["topics", "sessions", "snoozed", "settled"])
         XCTAssertEqual(CommandPaletteConfig.goTo.sources, goTo)
         let topics = list.sections[0].rows
-        XCTAssertEqual(topics.map(\.id), ["topic-a", "topic-b", "topic-c"], "the Active Topic, then visits order, Dormant after; no No Topic row")
-        XCTAssertEqual(topics[0].trailing, "Active")
+        XCTAssertEqual(topics.map(\.id), ["topic-b", "topic-a", "topic-c"], "other live Topics, then the Active Topic, then Dormant; no No Topic row")
+        XCTAssertEqual(topics[1].trailing, "Active")
         XCTAssertEqual(topics[2].trailing, "Reopen")
         XCTAssertEqual(topics[2].pick.payload?.ref, .topic(id: "c", window: nil))
-        XCTAssertEqual(topics[1].pick.payload?.ref, .topic(id: "b", window: windows[1]))
-        XCTAssertEqual(topics[1].trailing, "2h")
+        XCTAssertEqual(topics[0].pick.payload?.ref, .topic(id: "b", window: windows[1]))
+        XCTAssertEqual(topics[0].trailing, "2h")
     }
 
     func testSnoozedAndSettledTopicsRankBelowAWeakerSessionMatch() {
@@ -253,7 +254,7 @@ final class PaletteCatalogTests: XCTestCase {
                        "the source's own Topic is not a target")
     }
 
-    func testAnEmptyQueryListsPinnedTopicsFirstInSidebarOrderAndATypedQueryRanksByMatchOnly() {
+    func testTopicVisitsOverridePinsAndDormantVisitsAndKeepCurrentLastAmongLive() {
         func pinned(_ record: TopicRecord, order: Double) -> TopicRecord {
             var record = record
             record.isPinned = true
@@ -262,12 +263,36 @@ final class PaletteCatalogTests: XCTestCase {
         }
         let records = [topic("a", "Alpha one"), topic("b", "Beta"), pinned(topic("c", "Charlie"), order: 0),
                        pinned(topic("d", "Alpha two"), order: 1)]
-        let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a")]
-        let visits = visits([(.topic(.topic("a")), 400), (.topic(.topic("d")), 300), (.topic(.topic("b")), 200), (.topic(.topic("c")), 100)])
+        let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
+                       window("@2", session: "game/beta", directory: "/work/game/main", topic: "b", activity: 900),
+                       window("@3", session: "game/charlie", directory: "/work/game/main", topic: "c", activity: 1000)]
+        let visits = visits([(.topic(.topic("a")), 400), (.topic(.topic("d")), 500), (.topic(.topic("b")), 200), (.topic(.topic("c")), 100)])
         let catalog = catalog(records: records, windows: windows, selected: "@1", visits: visits)
-        XCTAssertEqual(ids(catalog.list([.topics], query: "")), ["topic-c", "topic-d", "topic-a", "topic-b"],
-                       "Pinned Topics in Sidebar order, then the Active Topic, then by last visit")
+        XCTAssertEqual(ids(catalog.list([.topics], query: "")), ["topic-b", "topic-c", "topic-a", "topic-d"],
+                        "visits rank live Topics regardless of Pins/activity; current then Dormant, even when Dormant was visited more recently")
         XCTAssertEqual(ids(catalog.list([.topics], query: "alpha")), ["topic-a", "topic-d"], "on an equal match the last visit decides, not the Pin")
+    }
+
+    func testTopicActivityBreaksVisitTiesUsingAllMemberSessionsAndUnvisitedTopicsFollowVisitedOnes() {
+        let records = [topic("a", "Alpha"), topic("b", "Beta"), topic("c", "Charlie"), topic("d", "Dormant"), TopicRecord(id: "e", title: "Empty")]
+        let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a", activity: 1),
+                       window("@2", session: "game/beta", directory: "/work/game/main", topic: "b", activity: 5),
+                       window("@3", session: "notes/alpha", directory: "/work/notes", topic: "a", activity: 9),
+                       window("@4", session: "game/charlie", directory: "/work/game/main", topic: "c", activity: 100)]
+        let visits = visits([(.topic(.topic("a")), 100), (.topic(.topic("b")), 100), (.topic(.topic("d")), 500)])
+        let catalog = catalog(records: records, windows: windows, visits: visits)
+        XCTAssertEqual(ids(catalog.list([.topics], query: "")), ["topic-a", "topic-b", "topic-c", "topic-d", "topic-e"])
+        XCTAssertEqual(catalog.list([.topics], query: "").rows.last?.trailing, "Empty")
+    }
+
+    func testTypedTopicQueryRanksMatchesWithoutPushingCurrentDownOrDormantToBottom() {
+        let records = [topic("a", "Alpha current"), topic("b", "Alpha other"), topic("c", "Alpha dormant")]
+        let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
+                       window("@2", session: "game/beta", directory: "/work/game/main", topic: "b")]
+        let catalog = catalog(records: records, windows: windows, selected: "@1",
+                              visits: visits([(.topic(.topic("a")), 300), (.topic(.topic("b")), 100)]))
+        XCTAssertEqual(ids(catalog.list([.topics], query: "alpha")), ["topic-a", "topic-b", "topic-c"])
+        XCTAssertEqual(ids(catalog.list([.topics], query: "dormant")), ["topic-c"], "a better match still outranks running Topics")
     }
 
     func testAgentsThatNeedYouComeFirstAndWindowsShowEmptyOnlyAlone() {

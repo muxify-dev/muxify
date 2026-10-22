@@ -110,7 +110,7 @@ struct PaletteCatalog {
     private func openTopicSection(only tag: Tag?) -> PickSectionInput<PaletteItem>? {
         guard offersTopics, let topics else { return nil }
         return PickSectionInput(id: "topics", title: "Topics", rule: .ranked(showsWhenEmpty: true),
-                                candidates: topics.rows.filter { $0.has(tag) }.compactMap(topicCandidate))
+                                candidates: topics.rows.filter { $0.has(tag) }.compactMap(topicCandidate), currentLast: true)
     }
 
     /// Each Tag of `topics.tags` that a Topic record has, in Config order. A plain word matches its name too.
@@ -156,7 +156,8 @@ struct PaletteCatalog {
             id: row.id.accessibilityID, symbol: row.hasNoLiveSession ? "◇" : "◆", title: row.title,
             fields: topicFields(row, type: row.idleLabel?.lowercased() ?? "topic"),
             trailing: trailing, mark: row.mark,
-            lastVisit: visits.last(.topic(row.id)), isCurrent: isCurrent, isPinned: row.isPinned,
+            lastVisit: visits.last(.topic(row.id)), isCurrent: isCurrent, unopened: row.hasNoLiveSession,
+            activity: row.sessions.flatMap(\.windows).map(\.sessionActivity).max() ?? 0,
             pick: .available(PaletteItem(kind: .topic, ref: .topic(id: id, window: window))), snooze: id)
     }
 
