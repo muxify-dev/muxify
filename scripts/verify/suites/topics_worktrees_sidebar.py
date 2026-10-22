@@ -149,7 +149,8 @@ class TopicsWorktreesSidebar(TopicsSidebar):
 
     def test_new_worktree_from_a_chosen_base_of_a_bare_repository_lands_in_muxifys_worktrees_folder_on_the_slug_branch(self):
         base = self.gamma/'base'
-        git = ['/usr/bin/git', '-C', str(base), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid']
+        git = ['/usr/bin/git', '-C', str(base), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid',
+               '-c', 'commit.gpgSign=false']
         (base/'BASE-NOTES').write_text('base\n')
         subprocess.run(git + ['add', 'BASE-NOTES'], check=True)
         subprocess.run(git + ['commit', '-q', '-m', 'base only'], check=True)
@@ -208,7 +209,8 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         s.act('action', 'topic-add-worktree', 'Add a Session…')
         s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Add Session Path palette did not open')
         base = self.acme/'base'
-        git = ['/usr/bin/git', '-C', str(base), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid']
+        git = ['/usr/bin/git', '-C', str(base), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid',
+               '-c', 'commit.gpgSign=false']
         (base/'ADD-PROJECT-NOTES').write_text('add project base\n')
         subprocess.run(git + ['add', 'ADD-PROJECT-NOTES'], check=True)
         subprocess.run(git + ['commit', '-q', '-m', 'add project base'], check=True)

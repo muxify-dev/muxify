@@ -62,7 +62,8 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
         (zdot_dir/'.zprofile').write_text('export PATH=' + str(bin_dir) + ':/usr/bin:/bin:/usr/sbin:/sbin\n')
         s.app_env['ZDOTDIR'] = str(zdot_dir)
         for repository in [cls.alpha, cls.delta, cls.epsilon]:
-            git = ['/usr/bin/git', '-C', str(repository), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid']
+            git = ['/usr/bin/git', '-C', str(repository), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid',
+                   '-c', 'commit.gpgSign=false']
             subprocess.run(['/usr/bin/git', 'init', '-q', '-b', 'main', str(repository)], check=True)
             (repository/'README').write_text(repository.name + '\n')
             subprocess.run(git + ['add', 'README'], check=True)

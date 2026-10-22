@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import unittest
+from unittest.mock import patch
 
 from scripts.verify.sandbox import BASE, OWNER, OWNERLESS_GRACE, REPO, Sandbox, alive, new_run_id, wait
 
@@ -31,6 +32,30 @@ time.sleep(600)
 
 
 class Harness(unittest.TestCase):
+    def test_fixture_commits_do_not_use_the_users_signer(self):
+        from scripts.verify.suites.command_palette import CommandPalette
+        from scripts.verify.topics_sidebar import TopicsSidebar
+
+        run = Sandbox(NAME)
+        self.addCleanup(run.teardown)
+        config = run.root/'signing.gitconfig'
+        config.write_text('[commit]\n\tgpgSign = true\n[gpg]\n\tprogram = /usr/bin/false\n\tformat = openpgp\n')
+        # Exercise the real repository setup, but do not launch a UI or invoke
+        # the user's signer. A commit without its override would fail here.
+        with patch.dict(os.environ, GIT_CONFIG_GLOBAL=str(config)), patch.object(Sandbox, 'launch'):
+            for fixture in [TopicsSidebar, CommandPalette]:
+                with self.subTest(fixture=fixture.__name__):
+                    class Fixture(fixture):
+                        pass
+
+                    try:
+                        Fixture.setUpClass()
+                        commit = subprocess.check_output(
+                            ['/usr/bin/git', '-C', str(Fixture.alpha), 'cat-file', 'commit', 'HEAD'], text=True)
+                        self.assertNotIn('\ngpgsig ', commit, 'a fixture commit was signed')
+                    finally:
+                        Fixture.doClassCleanups()
+
     def live_run(self):
         run = Sandbox(NAME)
         self.addCleanup(run.teardown)

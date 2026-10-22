@@ -39,7 +39,8 @@ class CommandPalette(unittest.TestCase):
         cls.delta = s.root/'projects/delta'
         for directory in [cls.topics_dir, cls.alpha, cls.beta, cls.delta]:
             directory.mkdir(parents=True, exist_ok=True)
-        git = ['/usr/bin/git', '-C', str(cls.alpha), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid']
+        git = ['/usr/bin/git', '-C', str(cls.alpha), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid',
+               '-c', 'commit.gpgSign=false']
         subprocess.run(['/usr/bin/git', 'init', '-q', '-b', 'main', str(cls.alpha)], check=True)
         (cls.alpha/'README').write_text('alpha\n')
         subprocess.run(git + ['add', 'README'], check=True)
