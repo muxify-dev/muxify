@@ -88,11 +88,12 @@ class PaletteGoToTags(PaletteFixture):
         rs = s.wait_rows(lambda rs: not self.chips(rs) and s.has('palette-search', rs), 'Back did not remove the filter chip')
         self.assertFalse(s.has('palette-breadcrumb', rs), 'the breadcrumb stayed after the filter went')
 
-    def test_snooze_its_topics_on_a_tag_row_opens_check_with_the_topics_of_the_tag_checked(self):
+    def test_snooze_its_topics_on_a_tag_row_opens_check_with_the_topics_of_the_tag_that_are_not_snoozed_checked(self):
         s = self.s
         self.topic('gz-one', 21, tags=['gzsnooze'])
         self.topic('gz-two', 22, tags=['gzsnooze'])
         self.topic('gz-none', 23)
+        self.topic('gz-snoozed', 24, tags=['gzsnooze'], snoozed_until=LATER)
         self.go_to('#gzsnooze')
         s.wait_rows(lambda rs: s.has('palette-row-tag-gzsnooze', rs), 'the Tag row did not show')
         s.act('action', 'palette-row-tag-gzsnooze', 'Snooze its Topics…')
@@ -100,6 +101,8 @@ class PaletteGoToTags(PaletteFixture):
         rs = s.wait_rows(lambda rs: 'Snooze Topics › check' in self.text('palette-breadcrumb', rs) and checked(rs, 'gz-one') and checked(rs, 'gz-two'),
                          'Snooze its Topics… did not open the check step with the Topics of the Tag checked')
         self.assertFalse(checked(rs, 'gz-none'), 'a Topic without the Tag is checked')
+        self.assertTrue(s.has('palette-row-topic-gz-snoozed', rs), 'the Already Snoozed Topic of the Tag is not listed')
+        self.assertFalse(checked(rs, 'gz-snoozed'), 'an Already Snoozed Topic of the Tag is checked')
         self.assertEqual(self.chips(rs), [], 'the check step shows a chip')
         self.assertIn('↩ Snoozes 2 Topics…', self.text('palette-note', rs))
         s.act('action', 'palette-search', 'Close')

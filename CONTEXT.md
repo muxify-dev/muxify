@@ -244,7 +244,7 @@ One kind of thing a Command Palette searches: Topics, Sessions (a row for each P
 _Avoid_: provider, category, section
 
 **Check step**:
-A palette step that lists Topics with a box on each, and Tag rows that check or uncheck all their Topics in the list, before an Action on the checked Topics. A Tag row is not a member of the set. Snooze Topics and Unsnooze Topics start with it.
+A palette step that lists Topics with a box on each, and Tag rows that check or uncheck all their Topics in the list, before an Action on the checked Topics. In Snooze Topics, a Tag row does not check its Already Snoozed Topics. The user checks each of them by its own row. A Tag row is not a member of the set. Snooze Topics and Unsnooze Topics start with it.
 _Avoid_: pick step, chips, mark, multi-select, selection
 
 ### Git

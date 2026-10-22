@@ -13,6 +13,24 @@ enum CheckAction: Equatable {
         case .unsnooze: "Unsnooze"
         }
     }
+
+    /// The Topics that the step lists, in list order. Snooze: the Topics list, then the Snoozed Topics. Unsnooze: the
+    /// Snoozed Topics. Settled Topics are in neither.
+    func listed(_ topics: TopicsModel) -> [TopicsModel.Row] {
+        switch self {
+        case .snooze: topics.rows + topics.snoozedRows
+        case .unsnooze: topics.snoozedRows
+        }
+    }
+
+    /// The Topics that a Tag row reaches. Snooze: only the Topics list, so a Tag cannot change the time of an Already
+    /// Snoozed Topic, and the user checks that Topic by its own row (ADR 0036). Unsnooze: the Snoozed Topics.
+    func tagReach(_ topics: TopicsModel) -> [TopicsModel.Row] {
+        switch self {
+        case .snooze: topics.rows
+        case .unsnooze: topics.snoozedRows
+        }
+    }
 }
 
 /// A check step (ADR 0035): the Topics that the user checked. The step lists the order, so the set keeps none.
@@ -26,7 +44,8 @@ struct CheckDraft: Equatable {
     }
 }
 
-/// A row of a check step. A Tag row is a shortcut to the Topics that have the Tag in this list, not a member of the set.
+/// A row of a check step. A Tag row is a shortcut to the Topics with the Tag that it reaches (`CheckAction.tagReach`), not a
+/// member of the set.
 enum CheckRow: Equatable {
     case tag(Tag, topics: Set<String>)
     case topic(String)
@@ -73,12 +92,10 @@ struct RowCheck {
 }
 
 extension CommandPalette {
-    /// The Topics a check step lists, in list order. Snooze: the Topics list, then the Snoozed Topics. Unsnooze: the
-    /// Snoozed Topics. Settled Topics are in neither.
+    /// The Topics a check step lists (`CheckAction.listed`).
     func checkable(_ action: CheckAction) -> [(id: String, row: TopicsModel.Row)] {
         guard let topics = store?.topics else { return [] }
-        let rows = action == .snooze ? topics.rows + topics.snoozedRows : topics.snoozedRows
-        return rows.compactMap { row in
+        return action.listed(topics).compactMap { row in
             guard case .topic(let id) = row.id else { return nil }
             return (id, row)
         }
@@ -91,20 +108,24 @@ extension CommandPalette {
 
     func checkedIDs(_ draft: CheckDraft) -> [String] { listOrder(draft.checked, draft.action) }
 
-    /// The Topics of this list that have each Tag.
-    private func tagged(_ action: CheckAction) -> [Tag: Set<String>] {
+    /// The Topics of `rows` that have each Tag.
+    private func tagged(_ rows: [TopicsModel.Row]) -> [Tag: Set<String>] {
         var tagged: [Tag: Set<String>] = [:]
-        for (id, row) in checkable(action) {
+        for row in rows {
+            guard case .topic(let id) = row.id else { continue }
             for tag in row.tags.compactMap(\.definition).map(\.tag) { tagged[tag, default: []].insert(id) }
         }
         return tagged
     }
 
-    /// The Topics of this list that have `tag`.
-    func topics(with tag: Tag, _ action: CheckAction) -> Set<String> { tagged(action)[tag] ?? [] }
+    /// The Topics with `tag` that its Tag row reaches.
+    func topics(with tag: Tag, _ action: CheckAction) -> Set<String> {
+        guard let topics = store?.topics else { return [] }
+        return tagged(action.tagReach(topics))[tag] ?? []
+    }
 
-    /// Tags in Config order, then Topics, then Already Snoozed for Snooze, or Snoozed for Unsnooze. A row stays in its
-    /// place when it is checked.
+    /// Tags in Config order, then Topics, then Already Snoozed for Snooze, or Snoozed for Unsnooze. A Tag that reaches no
+    /// Topic has no row. A row stays in its place when it is checked.
     func checkRows(_ draft: CheckDraft) -> PickList<PaletteItem> {
         guard let topics = store?.topics else { return .empty }
         let checked = Set(checkedIDs(draft))
@@ -120,12 +141,15 @@ extension CommandPalette {
                                  trailing: trailing, mark: row.mark,
                                  pick: .available(PaletteItem(kind: kind, ref: .choice(.check(.topic(id))))))
         }
-        let tagged = tagged(draft.action)
+        let reached = tagged(draft.action.tagReach(topics))
+        let listed = tagged(draft.action.listed(topics))
         let tags = (topics.tags?.definitions ?? []).compactMap { definition -> PickCandidate<PaletteItem>? in
-            guard let ids = tagged[definition.tag] else { return nil }
+            guard let ids = reached[definition.tag] else { return nil }
             let row = CheckRow.tag(definition.tag, topics: ids)
+            let snoozed = (listed[definition.tag]?.count ?? 0) - ids.count
+            let count = row.box(checked: checked) == .some ? "\(ids.intersection(checked).count)/\(ids.count)" : plural(ids.count)
             return PickCandidate(id: "tag-" + definition.tag.name, title: definition.tag.description, fields: [.hidden(definition.tag.name)],
-                                 trailing: row.box(checked: checked) == .some ? "\(ids.intersection(checked).count)/\(ids.count)" : plural(ids.count),
+                                 trailing: count + (snoozed > 0 ? " · \(snoozed) Snoozed" : ""),
                                  pick: .available(PaletteItem(kind: .tag, ref: .choice(.check(row)), color: definition.color)), titlePlace: .tag)
         }
         var sections = [PickSectionInput(id: "tags", title: "Tags", rule: .ranked(showsWhenEmpty: true), candidates: tags)]

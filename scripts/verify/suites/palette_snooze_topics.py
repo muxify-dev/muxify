@@ -22,7 +22,7 @@ LATER = '2099-01-01T00:00:00Z'
 
 
 class PaletteSnoozeTopics(PaletteFixture):
-    TAGS = {name: '{}' for name in ['pkfirst', 'cttag', 'rttag', 'tgsnooze', 'other', 'bktag']}
+    TAGS = {name: '{}' for name in ['pkfirst', 'cttag', 'rttag', 'tgsnooze', 'other', 'bktag', 'assnooze']}
 
     def filter(self, query):
         self.s.act('set', 'palette-search', query)
@@ -167,28 +167,44 @@ class PaletteSnoozeTopics(PaletteFixture):
         self.filter('')
         self.wait_checked(['sp-other'], 'a checked Topic that the filter hid lost its check')
 
-    def test_a_snooze_by_tag_writes_one_time_on_its_topics_and_no_other_field(self):
-        tagged = ['tgsnooze-one', 'tgsnooze-two', 'tgsnooze-three']
+    def test_a_snooze_by_tag_writes_one_time_on_its_open_topics_and_keeps_its_already_snoozed_topic(self):
+        tagged = ['tgsnooze-one', 'tgsnooze-two']
         self.topic(tagged[0], 61, tags=['tgsnooze'])
         self.topic(tagged[1], 62, tags=['tgsnooze', 'other'])
-        self.topic(tagged[2], 63, tags=['tgsnooze'], snoozed_until=LATER)
+        self.topic('tgsnooze-three', 63, tags=['tgsnooze'], snoozed_until=LATER)
         self.topic('tgsnooze-none', 64)
         self.select(self.topic('tgsnooze-active', 65, session=True))
         self.open_check()
         self.s.act('press', 'palette-row-tag-tgsnooze')
-        self.wait_checked(tagged, 'checking the Tag did not check its Topics')
+        rs = self.wait_checked(tagged, 'checking the Tag did not check only its Topics that are not Snoozed')
+        self.assertEqual(self.box('palette-row-tag-tgsnooze', rs), 'checked', 'the Tag box counts its Already Snoozed Topic')
+        self.assertIn('2 Topics · 1 Snoozed', self.text('palette-row-tag-tgsnooze', rs), 'the Tag row does not count its Already Snoozed Topic apart')
         self.s.act('action', 'palette-search', 'Accept')
-        self.wait_step('3 Topics › Snooze › until')
+        self.wait_step('2 Topics › Snooze › until')
         self.s.act('press', 'palette-row-0')
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Snooze did not close the palette')
-        names = tagged + ['tgsnooze-none', 'tgsnooze-active']
+        names = tagged + ['tgsnooze-three', 'tgsnooze-none', 'tgsnooze-active']
         times = {name: self.record(name).get('snoozed_until') for name in names}
         self.assertEqual(len({times[name] for name in tagged}), 1, times)
         self.assertNotIn(times['tgsnooze-one'], (None, LATER), times)
+        self.assertEqual(times['tgsnooze-three'], LATER, 'a Snooze by Tag changed the time of an Already Snoozed Topic: %s' % times)
         self.assertIsNone(times['tgsnooze-none'], times)
         self.assertIsNone(times['tgsnooze-active'], 'a Topic that was not checked was Snoozed: %s' % times)
         self.assertEqual(sorted(self.record('tgsnooze-one')), ['home_project', 'id', 'order', 'sessions', 'slug', 'snoozed_until', 'tags', 'title'],
                          'a Snooze by Tag writes a usual Snooze and no other field')
+
+    def test_a_tag_with_only_snoozed_topics_has_no_row_and_its_topic_is_checked_by_its_own_row(self):
+        s = self.s
+        self.topic('as-one', 66, tags=['assnooze'], snoozed_until=LATER)
+        self.topic('as-two', 67, tags=['assnooze'], snoozed_until=LATER)
+        self.open_check()
+        self.filter('#assnooze')
+        rs = s.wait_rows(lambda rs: s.has('palette-row-topic-as-one', rs) and s.has('palette-row-topic-as-two', rs),
+                         'the Already Snoozed Topics of the Tag are not listed')
+        self.assertFalse(s.has('palette-row-tag-assnooze', rs), 'a Tag whose Topics are all Snoozed has a row')
+        rs = self.check_rows('as-one')
+        self.assertEqual(self.checked(rs), ['as-one'], 'pressing the Already Snoozed Topic did not check only it')
+        s.act('action', 'palette-search', 'Close')
 
     def test_snooze_topics_writes_one_time_on_the_set_names_the_shorter_snooze_and_opens_the_next_topic_outside_it(self):
         s = self.s
