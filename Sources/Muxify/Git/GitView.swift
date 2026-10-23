@@ -390,6 +390,8 @@ final class GitView {
     @ObservationIgnored private var logWork: DispatchWorkItem?
     /// Git commands that change the repository, run one at a time.
     @ObservationIgnored private var writes: [Write] = []
+    /// The arguments of the writes waiting or running, for tests, which have no store to run them.
+    var queuedWriteArguments: [[String]] { writes.map(\.arguments) }
     /// The branch and commit whose history is being read.
     @ObservationIgnored private var readingLog: String?
     @ObservationIgnored private var shownScope = Scope.all
@@ -1076,6 +1078,11 @@ final class GitView {
                 toggleFolder(path, in: tree)
             } else if case .stash(let stash) = item, list == .stashes {
                 askStashEntry(.apply, stash)
+            } else if case .branch(let branch) = item, list == .branches {
+                // On the branch you're on, it does nothing.
+                if !branch.isHead { checkout(.branch(branch.name)) }
+            } else if case .commit(let commit) = item, list == .history || list == .branch {
+                checkout(.commit(sha: commit.sha, shortSHA: commit.shortSHA))
             }
         case .commit:
             openCommit()
@@ -1520,6 +1527,61 @@ final class GitView {
     private func stashEntry(_ action: StashEntryAction, _ stash: GitStash) {
         guard let snapshot else { return }
         write(GitRepository.stashEntryScript, arguments: [snapshot.root, action.rawValue, stash.ref, stash.sha])
+    }
+
+    // MARK: Checking out
+
+    /// What a checkout brings the working tree to.
+    enum CheckoutTarget: Equatable {
+        case branch(String)
+        /// A commit, which leaves a detached HEAD.
+        case commit(sha: String, shortSHA: String)
+
+        var name: String {
+            switch self {
+            case .branch(let name): name
+            case .commit(_, let shortSHA): shortSHA
+            }
+        }
+        var ref: String {
+            switch self {
+            case .branch(let name): name
+            case .commit(let sha, _): sha
+            }
+        }
+        var kind: String { if case .branch = self { "branch" } else { "commit" } }
+    }
+
+    /// The one checkout of the Git View, which space in Branches and History takes, and later keys reuse: goes through
+    /// the Agent guard, as it changes files, then runs. When Changes would be overwritten, asks whether to stash and
+    /// pop them across, as lazygit does.
+    func checkout(_ target: CheckoutTarget) {
+        guard snapshot != nil else { return }
+        guardFiles("Check out", subject: .text(target.name), symbol: "arrow.triangle.branch", confirm: "Check it out") { [weak self] in
+            self?.runCheckout(target, autostash: false)
+        }
+    }
+
+    private func runCheckout(_ target: CheckoutTarget, autostash: Bool) {
+        guard let snapshot else { return }
+        write(GitRepository.checkoutScript, arguments: [snapshot.root, target.kind, target.ref, autostash ? "1" : "0"]) { [weak self] result in
+            self?.finishCheckout(target, result)
+        }
+    }
+
+    /// A checkout ended: says what went wrong, or, when only Changes were in the way, asks about stashing them.
+    func finishCheckout(_ target: CheckoutTarget, _ result: Result<String, Error>) {
+        guard case .failure(let error) = result else { return }
+        if case TmuxError.failed(_, let stderr) = error, stderr.hasPrefix(GitRepository.checkoutBlockedMarker) {
+            open(GitMenu(
+                id: "autostash", title: "Autostash?", subject: .text(target.name), symbol: "archivebox",
+                choices: [GitMenu.Choice(key: "y", title: "Stash, check out and pop",
+                                         note: "You must stash and pop your changes to bring them across. Do this automatically?") { [weak self] in
+                    self?.runCheckout(target, autostash: true)
+                }]))
+        } else {
+            writeError = Self.message(for: error)
+        }
     }
 
     // MARK: Staging lines

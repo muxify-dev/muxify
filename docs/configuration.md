@@ -447,6 +447,20 @@ The lists, the Stashes count and Changes update afterwards. In the stash's Diff
 files and in other tabs the keys keep their meanings: space folds a folder, and
 d discards in Changes.
 
+In Branches, space checks out the selected branch, as in lazygit; on the branch
+you're on it does nothing. In History and in a branch's commits, space checks out
+the selected commit and leaves a detached HEAD, which the toolbar and the commit
+box show. When Changes would be overwritten by the checkout, the Git View asks
+"Autostash?" ("You must stash and pop your changes to bring them across. Do this
+automatically?"): ↩ or y stashes them, including untracked files, checks out and
+pops the stash onto the new HEAD; ⎋ changes nothing. If the pop conflicts, the
+conflicted files show in Changes, the banner says so and the stash is kept. Any
+other failure, such as a branch that another Worktree has checked out, shows git's
+message in the banner. The toolbar, History, Branches and Changes show the new
+HEAD afterwards. Every checkout changes the files of the Worktree, so it asks
+first while an Agent is working there, as below. In a commit's Diff files, space
+still folds a folder.
+
 An operation that changes the files of the Worktree asks first while an Agent is
 working there. If a Pane whose folder is the Worktree or inside it runs an Agent
 that is working or blocked, the menu names each such Agent, by its Topic, or by
