@@ -308,7 +308,8 @@ final class GitView {
         case commit, discard, stash, stashOptions, filter, back, close, refresh
         /// n: a new branch off the branch selected in Branches.
         case newBranch
-        /// g: pops the stash selected in Stashes.
+        /// g: pops the stash selected in Stashes, and resets the branch you're on to the commit or branch selected
+        /// in History, a branch's commits and Branches.
         case pop
         /// W: marks the commit, branch or stash selected as the base, or
         /// ends the comparison on the base, as lazygit's diffing mode.
@@ -1133,7 +1134,14 @@ final class GitView {
         case .newBranch:
             if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askNewBranch(off: branch) }
         case .pop:
-            if list == .stashes, focus == .list, case .stash(let stash)? = selectedItem { askStashEntry(.pop, stash) }
+            guard focus == .list else { return }
+            switch selectedItem {
+            case .stash(let stash)? where list == .stashes: askStashEntry(.pop, stash)
+            case .commit(let commit)? where list == .history || list == .branch:
+                askReset(to: commit.sha, named: commit.shortSHA)
+            case .branch(let branch)? where list == .branches: askReset(to: branch.sha, named: branch.name)
+            default: break
+            }
         case .discard:
             if list == .branches {
                 if focus == .list, case .branch(let branch)? = selectedItem { askDeleteBranch(branch) }
@@ -2174,6 +2182,62 @@ final class GitView {
             switch result {
             case .success:
                 self?.store?.palette.showCopied(title: "Rebased", value: head)
+            case .failure(let error):
+                self?.writeError = Self.message(for: error)
+            }
+        }
+    }
+
+    // MARK: Resetting
+
+    /// How g resets, by the argument the reset script takes.
+    enum ResetKind: String {
+        case soft, mixed, hard
+    }
+
+    /// g on a commit or a branch: lazygit's Reset menu, which moves the branch you're on to it. Soft and mixed run at
+    /// once, as they change no file's content; a hard reset asks again (ADR 0041).
+    func askReset(to target: String, named name: String) {
+        guard let snapshot else { return }
+        writeError = nil
+        let head = snapshot.head
+        func choice(_ key: String, _ title: String, _ note: String, _ kind: ResetKind, isDestructive: Bool = false) -> GitMenu.Choice {
+            GitMenu.Choice(key: key, title: title, note: note, isDestructive: isDestructive) { [weak self] in
+                if kind == .hard { self?.askHardReset(to: target, named: name) } else { self?.reset(to: target, named: name, kind) }
+            }
+        }
+        open(GitMenu(
+            id: "reset", title: "Reset to \(name)", subject: .text("\(head) → \(name)"), symbol: "arrow.counterclockwise",
+            choices: [
+                choice("s", "Soft reset", "Keeps the changes between '\(head)' and '\(name)' as staged changes.", .soft),
+                choice("m", "Mixed reset", "Keeps the changes between '\(head)' and '\(name)' as unstaged changes.", .mixed),
+                choice("h", "Hard reset", "Discards the changes between '\(head)' and '\(name)', and all current changes.", .hard,
+                       isDestructive: true),
+            ]))
+    }
+
+    /// h in the Reset menu: with Changes, asks once more, naming how many files it discards, as d does; else runs. Either
+    /// way through the Agent guard, inside the one menu. Untracked files stay, as `git reset --hard` leaves them.
+    private func askHardReset(to target: String, named name: String) {
+        let files = trackedChanges.count
+        let run: () -> Void = { [weak self] in self?.reset(to: target, named: name, .hard) }
+        guard files > 0 else {
+            return guardFiles("Hard reset", subject: .text(name), symbol: "arrow.counterclockwise", confirm: "Hard reset to \(name)",
+                              isDestructive: true, run: run)
+        }
+        openGuarded(GitMenu(
+            id: "reset-hard", title: "Hard reset", subject: .text(name), symbol: "arrow.counterclockwise", isDestructive: true,
+            footnote: "This can't be undone.",
+            choices: [GitMenu.Choice(key: "y", title: files == 1 ? "Discard 1 file and reset" : "Discard \(files) files and reset",
+                                     note: "Are you sure you want to reset to '\(name)'? Untracked files are kept.", isDestructive: true, run: run)]))
+    }
+
+    private func reset(to target: String, named name: String, _ kind: ResetKind) {
+        guard let snapshot else { return }
+        write(GitRepository.resetScript, arguments: [snapshot.root, kind.rawValue, target]) { [weak self] result in
+            switch result {
+            case .success:
+                self?.store?.palette.showCopied(title: "Reset (\(kind.rawValue))", value: name)
             case .failure(let error):
                 self?.writeError = Self.message(for: error)
             }

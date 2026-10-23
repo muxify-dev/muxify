@@ -583,6 +583,17 @@ enum GitRepository {
     fi
     """
 
+    /// Takes the folder, `soft`, `mixed` or `hard`, and the commit to reset the branch you're on to. Git's own message
+    /// shows when it fails. A hard reset leaves untracked files.
+    static let resetScript = """
+    cd "$1" || exit 1
+    case $2 in
+        soft|mixed|hard) ;;
+        *) echo "Unknown reset: $2" >&2; exit 1 ;;
+    esac
+    LC_ALL=C git -c color.ui=never reset -q "--$2" "$3" 1>&2 || exit 1
+    """
+
     /// Takes the folder and the message; commits what's staged. Prints the
     /// new commit's short hash; hooks' output goes to stderr, where a
     /// failure shows it.

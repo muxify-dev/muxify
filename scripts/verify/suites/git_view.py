@@ -76,6 +76,10 @@ uncommitted); on the current branch `git-write-error` says it can't merge a bran
 r on a branch in Branches other than the one you're on asks in the menu `rebase` ("Rebase '<head>'") with the one choice
 `git-menu-choice-s` ("Simple rebase onto '<branch>'"); on the current branch `git-write-error` says it can't rebase a
 branch onto itself.
+g on a commit in History or a branch's commits, or a branch in Branches, asks in the menu `reset` ("Reset to <name>") with
+the choices `git-menu-choice-s` (soft), `-m` (mixed) and `-h` (hard); `h` with Changes asks in the menu `reset-hard`
+(with the one choice `git-menu-choice-y`, "Discard N files and reset"), which names any working Agent in
+`git-menu-agents`; a hard reset with no Changes goes through the same guard (menu `agents`) only while an Agent works.
 f in Changes fetches beside the writes; the toolbar's label ends with "Fetching…" until it ends. A credential question
 of git or ssh is asked in `git-prompt`, whose label is the question; ⎋ stops the fetch, and `git-write-error` says
 "Fetch cancelled.".
@@ -801,12 +805,11 @@ class GitView(unittest.TestCase):
             time.sleep(.5)
             self.assertFalse(self.s.has('git-menu'), key + ' asked in the stash\'s files')
         self.key('escape')
-        # In History: no menu either.
+        # In History: d asks nothing (g resets there, and has its own checks).
         self.key('2')
-        for key in ['g', 'd']:
-            self.key(key)
-            time.sleep(.5)
-            self.assertFalse(self.s.has('git-menu'), key + ' asked in History')
+        self.key('d')
+        time.sleep(.5)
+        self.assertFalse(self.s.has('git-menu'), 'd asked in History')
         # In Changes, d still discards.
         self.key('1')
         self.wait_change('tracked.txt', bool, 'Changes do not list tracked.txt')
@@ -1843,6 +1846,128 @@ class GitView(unittest.TestCase):
         self.assertNotEqual(self.git('rev-parse', 'HEAD^').strip(), self.git('rev-parse', 'r-base').strip(), 'the rebase ran before the question was answered')
         self.s.act('action', 'git-menu', 's')
         wait(lambda: self.git('rev-parse', 'HEAD^').strip() == self.git('rev-parse', 'r-base').strip(), 's did not rebase', seconds=10)
+
+
+    def reset_fixture(self, dirty=False):
+        """Sets the fixture's changes aside and adds one commit to main, `r.txt`, so that the commit before it is the
+        reset's target; with `dirty` a tracked file is changed too. Everything is put back after the check. Returns the
+        target's hash and the new tip's."""
+        self.git('stash', 'push', '-q', '-u', '-m', 'e2e reset')
+        target = self.git('rev-parse', 'HEAD').strip()
+        self.addCleanup(self.undo_reset, target)
+        (self.repo/'r.txt').write_text('reset\n')
+        self.git('add', 'r.txt')
+        self.git('commit', '-q', '-m', 'reset one')
+        tip = self.git('rev-parse', 'HEAD').strip()
+        if dirty:
+            (self.repo/'tracked.txt').write_text('dirty\n')
+        return target, tip
+
+    def undo_reset(self, target):
+        # The Git View reads the repository as this runs, so git can find its index locked: try again.
+        def retry(*args):
+            wait(lambda: self.git_try(*args).returncode == 0, 'git ' + ' '.join(args) + ' kept failing', seconds=10, step=.3)
+        retry('reset', '-q', '--hard', target)
+        retry('stash', 'pop', '-q', '--index')
+        (self.repo/'r.txt').unlink(missing_ok=True)
+        self.open_git_view()
+        self.key('shift+r')
+        self.go_to('2')
+        self.s.wait_rows(lambda rs: self.s.has('git-row-commit:' + target, rs) and 'reset one' not in self.commit_subjects(rs),
+                         'the Git View did not read the history again')
+        self.close_git_view()
+
+    def commit_subjects(self, rs):
+        return [r.get('accessibilityLabel') for r in self.rows_with_prefix('git-row-commit:', rs)]
+
+    def ask_reset(self, target, tip):
+        self.key('shift+r')
+        self.go_to('2')
+        self.s.wait_rows(lambda rs: self.s.has('git-row-commit:' + tip, rs), 'History does not list the new commit', seconds=10)
+        self.select_row('git-row-commit:' + target)
+        self.key('g')
+        short = target[:8]
+        return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Reset to ' + short, 'g did not open the reset menu')
+
+    def wait_reset(self, target, tip, message):
+        wait(lambda: self.git('rev-parse', 'HEAD').strip() == target, message, seconds=10)
+        self.assertEqual(self.git('symbolic-ref', '--short', 'HEAD').strip(), 'main')
+        self.s.wait_rows(lambda rs: not self.s.has('git-row-commit:' + tip, rs), 'History still lists the commit that was reset away', seconds=10)
+
+    def test_g_offers_soft_mixed_and_hard_with_notes_and_escape_resets_nothing(self):
+        target, tip = self.reset_fixture()
+        rs = self.ask_reset(target, tip)
+        labels = {key: self.s.row('git-menu-choice-' + key, rs).get('accessibilityLabel') for key in 'smh'}
+        self.assertEqual(labels, {'s': 'Soft reset', 'm': 'Mixed reset', 'h': 'Hard reset'})
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+        time.sleep(1)
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), tip, 'opening the menu or escape reset')
+
+    def test_a_soft_reset_keeps_the_commits_changes_staged(self):
+        target, tip = self.reset_fixture()
+        self.ask_reset(target, tip)
+        self.s.act('action', 'git-menu', 's')
+        self.wait_reset(target, tip, 's did not reset')
+        self.assertEqual(self.git('status', '--porcelain').strip(), 'A  r.txt')
+        self.assertFalse(self.s.has('git-write-error'), 'the reset failed')
+
+    def test_a_mixed_reset_keeps_the_commits_changes_unstaged(self):
+        target, tip = self.reset_fixture()
+        self.ask_reset(target, tip)
+        self.s.act('action', 'git-menu', 'm')
+        self.wait_reset(target, tip, 'm did not reset')
+        self.assertEqual(self.git('status', '--porcelain').strip(), '?? r.txt')
+
+    def test_a_hard_reset_with_no_changes_runs_at_once(self):
+        target, tip = self.reset_fixture()
+        self.ask_reset(target, tip)
+        self.s.act('action', 'git-menu', 'h')
+        self.wait_reset(target, tip, 'h did not reset')
+        self.assertEqual(self.git('status', '--porcelain').strip(), '')
+        self.assertFalse((self.repo/'r.txt').exists(), 'the hard reset kept the commit\'s file')
+
+    def test_a_hard_reset_with_changes_asks_again_naming_the_files(self):
+        target, tip = self.reset_fixture(dirty=True)
+        self.ask_reset(target, tip)
+        self.s.act('action', 'git-menu', 'h')
+        rs = self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Hard reset', 'h did not ask again')
+        self.assertEqual(self.s.row('git-menu-choice-y', rs).get('accessibilityLabel'), 'Discard 1 file and reset')
+        time.sleep(1)
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), tip, 'h reset before it was confirmed')
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+        time.sleep(1)
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), tip, 'escape reset')
+        self.assertEqual((self.repo/'tracked.txt').read_text(), 'dirty\n', 'escape discarded the changes')
+        self.ask_reset(target, tip)
+        self.s.act('action', 'git-menu', 'h')
+        self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Hard reset', 'h did not ask again')
+        self.s.act('action', 'git-menu', 'y')
+        self.wait_reset(target, tip, 'y did not reset')
+        self.assertEqual(self.git('status', '--porcelain').strip(), '')
+        self.assertEqual((self.repo/'tracked.txt').read_text(), 'one\nthe quick brown fox\n', 'the hard reset kept the changes')
+
+    def test_the_hard_resets_second_menu_names_the_agents_and_a_soft_reset_does_not_ask(self):
+        target, tip = self.reset_fixture(dirty=True)
+        self.agent_pane('gv-reset-agent', self.repo, 'working')
+        found = []
+
+        def asked():
+            self.ask_reset(target, tip)
+            self.s.act('action', 'git-menu', 'h')
+            rs = self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Hard reset', 'h did not ask again')
+            found[:] = [self.s.row('git-menu-agents', rs).get('accessibilityLabel') if self.s.has('git-menu-agents', rs) else None]
+            if found[0] is None:
+                self.s.act('action', 'git-menu', 'escape')
+                self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+            return found[0] is not None
+        wait(asked, 'the hard reset menu does not name the Agent', seconds=15, step=.5)
+        self.assertEqual(found[0], 'Claude Code in gv-reset-agent')
+        time.sleep(1)
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), tip, 'the reset ran before the question was answered')
+        self.s.act('action', 'git-menu', 'y')
+        self.wait_reset(target, tip, 'y did not reset')
 
 
 if __name__ == '__main__':

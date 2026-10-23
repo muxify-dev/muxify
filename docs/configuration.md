@@ -601,6 +601,16 @@ their hashes change, so the next push asks to force push. On the branch you're o
 a branch can't be rebased onto itself; while a merge, rebase or the like is in progress, the banner asks you to continue
 or abort it first. When your uncommitted changes are in the way, git's own message shows.
 
+g in History, in a branch's commits and in Branches resets the branch you're on to the selected commit or branch, as
+lazygit's Reset menu does. It opens a menu titled "Reset to X" with three choices, each with a note: s, a soft reset
+(`git reset --soft`), keeps the changes between the two commits as staged changes; m, a mixed reset, keeps them as
+unstaged changes; h, a hard reset, discards them and all current Changes. Soft and mixed run at once. A hard reset that
+would discard Changes asks once more, as d does: "Discard N files and reset", with "This can't be undone." beside
+Cancel; N counts the files `git reset --hard` puts back, not the untracked files, which stay. That second menu also
+carries the Agent guard, naming any Agent working in the Worktree, and a hard reset with no Changes still asks through
+the guard. Soft and mixed don't, as they leave the files as they are. Afterwards the lists show the new HEAD. In
+Stashes, g still pops the selected stash.
+
 An operation that changes the files of the Worktree asks first while an Agent is
 working there. If a Pane whose folder is the Worktree or inside it runs an Agent
 that is working or blocked, the menu names each such Agent, by its Topic, or by

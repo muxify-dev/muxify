@@ -1033,6 +1033,45 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(try git("status --porcelain", in: path), "?? a.txt\n")
     }
 
+    private func resetRepository() throws -> String {
+        let path = try mergeableRepository()
+        // master is at Base; side is two commits ahead of it. Check side out, with a staged and an unstaged change and an untracked file.
+        try run("cd \"$1\" && git checkout -q side && printf 'staged\\n' > a.txt && git add a.txt && printf 'unstaged\\n' > s.txt && printf 'u\\n' > untracked.txt", path)
+        return path
+    }
+
+    func testASoftResetKeepsTheChangesBetweenTheCommitsStaged() throws {
+        let path = try resetRepository()
+        try run(GitRepository.resetScript, path, "soft", try git("rev-parse master", in: path).trimmingCharacters(in: .whitespacesAndNewlines))
+        XCTAssertEqual(try git("rev-parse HEAD", in: path), try git("rev-parse master", in: path))
+        XCTAssertEqual(try git("rev-parse --abbrev-ref HEAD", in: path), "side\n")
+        XCTAssertEqual(try git("status --porcelain", in: path), "A  a.txt\nAM s.txt\n?? untracked.txt\n")
+    }
+
+    func testAMixedResetKeepsThemUnstaged() throws {
+        let path = try resetRepository()
+        try run(GitRepository.resetScript, path, "mixed", try git("rev-parse master", in: path).trimmingCharacters(in: .whitespacesAndNewlines))
+        XCTAssertEqual(try git("rev-parse HEAD", in: path), try git("rev-parse master", in: path))
+        XCTAssertEqual(try git("status --porcelain", in: path), "?? a.txt\n?? s.txt\n?? untracked.txt\n")
+        XCTAssertEqual(try git("diff --cached --name-only", in: path), "")
+    }
+
+    func testAHardResetDiscardsTheChangesAndLeavesUntrackedFiles() throws {
+        let path = try resetRepository()
+        try run(GitRepository.resetScript, path, "hard", try git("rev-parse master", in: path).trimmingCharacters(in: .whitespacesAndNewlines))
+        XCTAssertEqual(try git("rev-parse HEAD", in: path), try git("rev-parse master", in: path))
+        XCTAssertEqual(try git("status --porcelain", in: path), "?? untracked.txt\n")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path + "/s.txt"))
+    }
+
+    func testAResetThatGitRefusesPrintsItsMessage() throws {
+        let path = try resetRepository()
+        XCTAssertThrowsError(try run(GitRepository.resetScript, path, "hard", "nowhere")) {
+            XCTAssertTrue(self.stderr(of: $0).contains("nowhere"), self.stderr(of: $0))
+        }
+        XCTAssertThrowsError(try run(GitRepository.resetScript, path, "bogus", "HEAD"))
+    }
+
     private func rebase(onto branch: String, in path: String) throws {
         try run(GitRepository.rebaseScript, path, branch, "side")
     }
@@ -1857,9 +1896,8 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.discard)
         XCTAssertNil(gitView.menu)
         gitView.perform(.back)
-        // Nowhere else do they ask about a stash.
+        // Nowhere else do they ask about a stash; g resets in History, which has its own test.
         gitView.perform(.tab(.history))
-        gitView.perform(.pop)
         gitView.perform(.discard)
         XCTAssertNil(gitView.menu)
     }
@@ -2130,6 +2168,111 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.toggle)
         XCTAssertEqual(gitView.menu?.title, "Check out")
         XCTAssertEqual(gitView.menu?.subject, .text("c2"))
+    }
+
+    private var changedSnapshot: GitSnapshot {
+        var snapshot = snapshot
+        snapshot.changes = [GitChange(index: "M", worktree: " ", path: "a.swift"), GitChange(index: " ", worktree: "M", path: "b.swift"),
+                            GitChange(index: "?", worktree: "?", path: "notes.txt")]
+        return snapshot
+    }
+
+    func testGOnACommitOrABranchOpensTheResetMenuAndElsewhereKeepsItsMeaning() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        // In Changes it does nothing.
+        gitView.perform(.pop)
+        XCTAssertNil(gitView.menu)
+        gitView.perform(.tab(.history))
+        gitView.perform(.down)
+        gitView.perform(.pop)
+        XCTAssertEqual(gitView.menu?.id, "reset")
+        XCTAssertEqual(gitView.menu?.title, "Reset to c1")
+        XCTAssertEqual(gitView.menu?.subject, .text("master → c1"))
+        XCTAssertEqual(gitView.menu?.choices.map(\.key), ["s", "m", "h"])
+        XCTAssertEqual(gitView.menu?.choices.map(\.title), ["Soft reset", "Mixed reset", "Hard reset"])
+        XCTAssertEqual(gitView.menu?.choices.map(\.isDestructive), [false, false, true])
+        XCTAssertTrue(gitView.menu?.choices.allSatisfy { $0.note != nil } == true)
+        XCTAssertEqual(gitView.queuedWriteArguments, [], "opening the menu resets nothing")
+        gitView.closeMenu()
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        gitView.perform(.pop)
+        XCTAssertEqual(gitView.menu?.title, "Reset to feature")
+        gitView.closeMenu()
+        // A branch's commits.
+        gitView.perform(.up)
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .branch)
+        gitView.perform(.pop)
+        XCTAssertEqual(gitView.menu?.id, "reset")
+        gitView.closeMenu()
+        // In Stashes it is still pop.
+        gitView.perform(.tab(.stashes))
+        gitView.perform(.pop)
+        XCTAssertEqual(gitView.menu?.id, "stash-pop")
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+    }
+
+    func testSoftAndMixedResetRunAtOnceEvenWithAnAgentWorking() {
+        for (key, kind) in [("s", "soft"), ("m", "mixed")] {
+            let gitView = GitView(windowID: "@1")
+            gitView.apply(changedSnapshot)
+            gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
+                                              sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+            gitView.perform(.tab(.history))
+            gitView.perform(.down)
+            gitView.perform(.pop)
+            XCTAssertEqual(gitView.menu?.agents, [], "the first menu does not name the Agents")
+            XCTAssertTrue(gitView.chooseMenu(key: key))
+            XCTAssertNil(gitView.menu)
+            XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", kind, "c1"]])
+        }
+    }
+
+    func testAHardResetWithChangesAsksAgainNamingTheFilesAndNamesTheAgents() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(changedSnapshot)
+        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
+                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.perform(.tab(.history))
+        gitView.perform(.down)
+        gitView.perform(.pop)
+        XCTAssertTrue(gitView.chooseMenu(key: "h"))
+        XCTAssertEqual(gitView.queuedWriteArguments, [], "h alone resets nothing")
+        XCTAssertEqual(gitView.menu?.id, "reset-hard")
+        // The untracked file is not discarded, so two files.
+        XCTAssertEqual(gitView.menu?.choices.map(\.title), ["Discard 2 files and reset"])
+        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
+        gitView.closeMenu()
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        gitView.perform(.pop)
+        gitView.chooseMenu(key: "h")
+        XCTAssertTrue(gitView.chooseMenu(key: "y"))
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "hard", "c1"]])
+    }
+
+    func testAHardResetWithNoChangesStillGoesThroughTheGuardAndElseRunsAtOnce() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.perform(.tab(.history))
+        gitView.perform(.down)
+        gitView.perform(.pop)
+        XCTAssertTrue(gitView.chooseMenu(key: "h"))
+        XCTAssertNil(gitView.menu)
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "hard", "c1"]])
+        let guarded = GitView(windowID: "@1")
+        guarded.apply(snapshot)
+        guarded.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
+                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        guarded.perform(.tab(.history))
+        guarded.perform(.down)
+        guarded.perform(.pop)
+        guarded.chooseMenu(key: "h")
+        XCTAssertEqual(guarded.menu?.agents, ["Codex in work"])
+        XCTAssertEqual(guarded.queuedWriteArguments, [])
+        XCTAssertTrue(guarded.chooseMenu(key: "y"))
+        XCTAssertEqual(guarded.queuedWriteArguments, [["/repo", "hard", "c1"]])
     }
 
     private func trackedSnapshot(ahead: Int = 0, behind: Int = 0) -> GitSnapshot {
