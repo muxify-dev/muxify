@@ -210,7 +210,7 @@ private struct GitToolbar: View {
             }
             if let title = snapshot.operationTitle {
                 GitTag(text: title, symbol: Self.symbol(for: snapshot.operation), style: .tint(palette.colors.yellow), palette: palette)
-                    .help(snapshot.operation?.commitBlock ?? title)
+                    .help(snapshot.operation?.commitBlock ?? "\(title): m continues or aborts it.")
             }
             if let comparison = snapshot.comparison { aheadBehind(comparison) }
             if let text = comparingText {
@@ -271,13 +271,7 @@ private struct GitToolbar: View {
     }
 
     private static func symbol(for operation: GitOperation?) -> String {
-        switch operation {
-        case .merge?: "arrow.triangle.merge"
-        case .rebase?, .applying?: "arrow.triangle.2.circlepath"
-        case .cherryPick?: "arrow.uturn.forward"
-        case .revert?: "arrow.uturn.backward"
-        case .bisect?, nil: "magnifyingglass"
-        }
+        operation?.symbol ?? "magnifyingglass"
     }
 
     private var closeHelp: String {

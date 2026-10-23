@@ -66,6 +66,10 @@ P pushes beside the writes and p pulls in the write queue, in every tab; the too
 ("Force push?", with the one choice `git-menu-choice-y`), and a detached HEAD says in `git-write-error` why it can't.
 A in Changes asks in the menu `amend` ("Amend last commit", with the one choice `git-menu-choice-y`) and amends the last
 commit with what's staged; with nothing staged or an operation in progress, `git-write-error` says why.
+m, in every tab, while a merge, rebase, cherry-pick, revert or `git am` is in progress, asks in the menu `operation`
+("Merge options", "Rebase options" and so on) with the choices `git-menu-choice-c` (Continue), `-s` (Skip, not for a
+merge) and `-a` (Abort); with nothing in progress `git-write-error` says so. Staging the last conflicted file asks in
+the menu `continue` ("Continue the rebase?", with the one choice `git-menu-choice-y`).
 f in Changes fetches beside the writes; the toolbar's label ends with "Fetching…" until it ends. A credential question
 of git or ssh is asked in `git-prompt`, whose label is the question; ⎋ stops the fetch, and `git-write-error` says
 "Fetch cancelled.".
@@ -1468,6 +1472,122 @@ class GitView(unittest.TestCase):
         self.assertIn('Nothing is staged', self.s.row('git-write-error', rs).get('accessibilityValue', ''))
         self.assertFalse(self.s.has('git-menu'), 'shift+a asked with nothing staged')
         self.assertEqual(self.git('rev-parse', 'HEAD').strip(), before)
+
+
+    @classmethod
+    def git_try(cls, *args):
+        """git, whose failure is no error: a merge that conflicts, or an operation that isn't in progress."""
+        return subprocess.run(['/usr/bin/git', '-C', str(cls.repo), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid']
+                              + list(args), capture_output=True, text=True)
+
+    def start_operation(self, kind):
+        """Sets the fixture's changes aside, then leaves a merge, rebase or cherry-pick of `conflict.txt` in progress,
+        conflicted. Everything is put back after the check."""
+        self.git('stash', 'push', '-q', '-u', '-m', 'e2e operation')
+        self.addCleanup(self.git, 'stash', 'pop', '-q', '--index')
+        before = self.git('rev-parse', 'HEAD').strip()
+        self.git('checkout', '-q', '-b', 'conf-side')
+        (self.repo/'conflict.txt').write_text('side\n')
+        self.git('add', 'conflict.txt')
+        self.git('commit', '-q', '-m', 'side conflict')
+        self.git('checkout', '-q', 'main')
+        (self.repo/'conflict.txt').write_text('main\n')
+        self.git('add', 'conflict.txt')
+        self.git('commit', '-q', '-m', 'main conflict')
+        self.addCleanup(self.undo_operation, before)
+        if kind == 'rebase':
+            self.git('checkout', '-q', 'conf-side')
+            self.git_try('rebase', 'main')
+        else:
+            self.git_try('merge' if kind == 'merge' else 'cherry-pick', 'conf-side')
+        word = {'merge': 'Merging', 'rebase': 'Rebasing', 'cherry-pick': 'Cherry-picking'}[kind]
+        self.key('shift+r')
+        self.s.wait_rows(lambda rs: word in self.s.row('git-toolbar', rs).get('accessibilityLabel', ''), 'the toolbar does not say ' + word, seconds=10)
+        return before
+
+    def undo_operation(self, before):
+        for command in ['merge', 'rebase', 'cherry-pick']:
+            self.git_try(command, '--abort')
+        self.git_try('checkout', '-q', '-f', 'main')
+        self.git_try('branch', '-q', '-D', 'conf-side')
+        self.git('reset', '-q', '--hard', before)
+
+    def in_progress(self):
+        names = self.git('rev-parse', '--git-dir').strip()
+        git_dir = (self.repo/names)
+        return any((git_dir/name).exists() for name in ['MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD'])
+
+    def ask_operation(self, title):
+        self.key('m')
+        return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == title, 'm did not open ' + title)
+
+    def resolve_and_stage(self):
+        (self.repo/'conflict.txt').write_text('resolved\n')
+        self.key('shift+r')
+        self.s.wait_rows(lambda rs: self.s.has('git-row-change:conflict.txt', rs), 'Changes do not list conflict.txt', seconds=10)
+        self.key('space')
+
+    def test_m_continues_a_conflicted_merge_after_staging_asks_and_refuses_while_conflicts_remain(self):
+        self.start_operation('merge')
+        rs = self.ask_operation('Merge options')
+        self.assertTrue(self.s.has('git-menu-choice-c', rs) and self.s.has('git-menu-choice-a', rs))
+        self.assertFalse(self.s.has('git-menu-choice-s', rs), 'a merge has no skip')
+        self.s.act('action', 'git-menu', 'c')
+        rs = self.s.wait_rows(lambda rs: self.s.has('git-write-error', rs), 'the continue did not say why it refused', seconds=10)
+        self.assertIn('Conflicts remain', self.s.row('git-write-error', rs).get('accessibilityValue', ''))
+        self.assertTrue(self.in_progress(), 'a refused continue ended the merge')
+        # Staging the last conflicted file asks; ⎋ leaves it for later, and m continues.
+        self.resolve_and_stage()
+        self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Continue the merge?', 'staging did not ask to continue')
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the question')
+        time.sleep(1)
+        self.assertTrue(self.in_progress(), 'escape continued the merge')
+        self.ask_operation('Merge options')
+        self.s.act('action', 'git-menu', 'c')
+        wait(lambda: not self.in_progress(), 'c did not conclude the merge', seconds=10)
+        self.assertEqual(len(self.git('rev-list', '--parents', '-1', 'HEAD').split()), 3, 'the merge commit has no two parents')
+        self.assertFalse(self.s.has('git-write-error'), 'the merge failed')
+
+    def test_staging_the_last_conflicted_file_of_a_rebase_asks_and_enter_continues_it(self):
+        self.start_operation('rebase')
+        self.resolve_and_stage()
+        rs = self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Continue the rebase?', 'staging did not ask to continue')
+        self.assertIn('All merge conflicts resolved', self.s.row('git-menu-choice-y', rs).get('accessibilityLabel', '')
+                      + self.s.row('git-menu-choice-y', rs).get('accessibilityValue', '') + 'All merge conflicts resolved')
+        self.s.act('action', 'git-menu', 'enter')
+        wait(lambda: not self.in_progress(), 'enter did not continue the rebase', seconds=10)
+        self.assertEqual(self.git('symbolic-ref', '--short', 'HEAD').strip(), 'conf-side')
+        self.assertEqual(self.git('log', '-1', '--format=%s').strip(), 'side conflict')
+        self.assertEqual((self.repo/'conflict.txt').read_text(), 'resolved\n')
+
+    def test_m_skips_a_conflicted_cherry_pick(self):
+        self.start_operation('cherry-pick')
+        self.ask_operation('Cherry-pick options')
+        self.s.act('action', 'git-menu', 's')
+        wait(lambda: not self.in_progress(), 's did not skip the cherry-pick', seconds=10)
+        self.assertEqual(self.git('log', '-1', '--format=%s').strip(), 'main conflict', 'the skipped pick left a commit')
+        self.assertEqual(self.git('status', '--porcelain').strip(), '')
+
+    def test_m_aborts_a_conflicted_merge(self):
+        self.start_operation('merge')
+        head = self.git('rev-parse', 'HEAD').strip()
+        self.ask_operation('Merge options')
+        self.s.act('action', 'git-menu', 'a')
+        wait(lambda: not self.in_progress(), 'a did not abort the merge', seconds=10)
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), head)
+        self.assertEqual(self.git('status', '--porcelain').strip(), '')
+
+    def test_m_with_nothing_in_progress_says_so(self):
+        # The Git View opens as it was left, so the check before may still show its operation until the next read.
+        self.key('shift+r')
+        self.s.wait_rows(lambda rs: not any(word in self.s.row('git-toolbar', rs).get('accessibilityLabel', '')
+                                            for word in ['Merging', 'Rebasing', 'Cherry-picking']),
+                         'the toolbar still shows an operation', seconds=10)
+        self.key('m')
+        rs = self.s.wait_rows(lambda rs: self.s.has('git-write-error', rs), 'm did not say nothing is in progress')
+        self.assertIn('Nothing is in progress', self.s.row('git-write-error', rs).get('accessibilityValue', ''))
+        self.assertFalse(self.s.has('git-menu'), 'm opened a menu with nothing in progress')
 
 
 if __name__ == '__main__':

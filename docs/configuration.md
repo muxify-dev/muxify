@@ -562,6 +562,19 @@ pseudo-terminal as the fetch, with its credential prompts and its "Push
 cancelled." and "Pull cancelled." banners. A detached HEAD has no branch to push
 or pull, and the banner says so.
 
+m, in every tab, goes on with a merge, rebase, cherry-pick, revert or `git am` that is in progress, as lazygit's
+does. It opens a Git View menu of c (continue), s (skip) and a (abort); a merge has no skip, as git has none. Nothing
+opens an editor: a continue keeps git's message, and `git rebase --continue` and its kin run with the editor set to
+`true`. Each goes through the Agent guard, since each changes files, so with an Agent working in the Worktree the menu
+names it. While conflicts remain, git refuses to continue and the banner shows its reason, with a line saying to
+resolve them in Changes and stage each file; a continue that reaches new conflicts, as a rebase does at its next
+commit, leaves them in Changes, and m continues again. With nothing in progress, m says so; a bisect isn't continued
+from the Git View. The toolbar's tag and the banner of c and A point at m.
+
+After you stage the last conflicted file with space or a, the Git View asks lazygit's "All merge conflicts resolved.
+Continue the rebase?", naming the operation in progress: ↩ continues and ⎋ leaves it for later, when m still does it.
+It asks only after staging in the Git View, not when conflicts were resolved elsewhere.
+
 A in Changes amends the last commit with what's staged, as lazygit does, and keeps its message. It asks first, in a
 Git View menu: "Are you sure you want to amend the last commit?". Hooks and signing run as they do for c; when one
 fails, the banner shows what it said. With nothing staged, with no commit yet, or while a merge, rebase, cherry-pick,
@@ -590,7 +603,7 @@ another repository. A commit takes only what's staged; with nothing staged, c
 does nothing but say so. On a detached HEAD, the box warns that the commit won't
 be on any branch. During a merge, c concludes it once its conflicts are staged,
 with git's message for it unless you've written one; during a rebase,
-cherry-pick, revert or `git am`, c says to continue it in the terminal instead.
+cherry-pick, revert or `git am`, c says to continue it with m instead.
 Hooks and signing run as they do in a terminal; when one fails, the box shows
 what it said.
 

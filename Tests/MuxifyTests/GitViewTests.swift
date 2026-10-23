@@ -837,6 +837,158 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(try status(), ["?? u.txt"])
     }
 
+    // MARK: Continuing, skipping and aborting
+
+    /// A repository where `side` and `master` both changed f.txt, so merging, rebasing, cherry-picking and reverting
+    /// conflict; `master` has a second commit that a revert of the first conflicts with.
+    private func conflictedRepository() throws -> String {
+        let path = directory.url.appendingPathComponent("ops").path
+        try run("""
+        cd "$1"
+        git init -q -b master ops && cd ops
+        printf 'base\\n' > f.txt && git add f.txt && git commit -q -m Base
+        git checkout -q -b side
+        printf 'side\\n' > f.txt && git commit -q -am 'Side one'
+        printf 'side\\nmore\\n' > f.txt && git commit -q -am 'Side two'
+        git checkout -q master
+        printf 'master\\n' > f.txt && git commit -q -am 'Master one'
+        printf 'master\\ntwo\\n' > f.txt && git commit -q -am 'Master two'
+        """, directory.url.path)
+        return path
+    }
+
+    private func git(_ arguments: String, in path: String) throws -> String {
+        try run("cd \"$1\" && git \(arguments)", path)
+    }
+
+    private func resolve(_ path: String, _ text: String = "resolved") throws {
+        try run("cd \"$1\" && printf '\(text)\\n' > f.txt && git add f.txt", path)
+    }
+
+    private func step(_ command: String, _ verb: String, in path: String) throws {
+        try run(GitRepository.operationScript, path, command, verb)
+    }
+
+    /// Whether git is in the middle of something, by the state it keeps.
+    private func inProgress(_ path: String) throws -> Bool {
+        try run("cd \"$1\" && ls \"$(git rev-parse --git-dir)\"", path).split(separator: "\n").contains {
+            ["MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD"].contains(String($0))
+        }
+    }
+
+    func testContinueConcludesAMergeWithGitsMessageAndRefusesWhileConflictsRemain() throws {
+        let path = try conflictedRepository()
+        _ = try? git("merge side", in: path)
+        XCTAssertThrowsError(try step("merge", "continue", in: path)) {
+            XCTAssertTrue(self.stderr(of: $0).contains("Conflicts remain"), self.stderr(of: $0))
+        }
+        XCTAssertTrue(try inProgress(path))
+        try resolve(path)
+        try step("merge", "continue", in: path)
+        XCTAssertFalse(try inProgress(path))
+        XCTAssertEqual(try git("log -1 --format=%s", in: path), "Merge branch 'side'\n")
+        XCTAssertEqual(try git("rev-list --parents -1 HEAD", in: path).split(separator: " ").count, 3)
+    }
+
+    func testAbortGoesBackToBeforeTheMergeAndAMergeCannotBeSkipped() throws {
+        let path = try conflictedRepository()
+        let before = try git("rev-parse HEAD", in: path)
+        _ = try? git("merge side", in: path)
+        XCTAssertFalse(GitOperation.merge(["x"]).canSkip)
+        try step("merge", "abort", in: path)
+        XCTAssertFalse(try inProgress(path))
+        XCTAssertEqual(try git("rev-parse HEAD", in: path), before)
+        XCTAssertEqual(try git("status --porcelain", in: path), "")
+    }
+
+    func testContinueGoesOnWithARebaseAndLeavesNewConflictsInChanges() throws {
+        let path = try conflictedRepository()
+        _ = try? git("checkout -q side && git rebase master", in: path)
+        XCTAssertTrue(try inProgress(path))
+        try resolve(path, "r1")
+        // The second commit conflicts too: the continue says so and the rebase goes on.
+        XCTAssertThrowsError(try step("rebase", "continue", in: path)) {
+            XCTAssertTrue(self.stderr(of: $0).contains("Conflicts remain"), self.stderr(of: $0))
+        }
+        XCTAssertEqual(try git("status --porcelain", in: path), "UU f.txt\n")
+        try resolve(path, "r2")
+        try step("rebase", "continue", in: path)
+        XCTAssertFalse(try inProgress(path))
+        XCTAssertEqual(try git("log --format=%s", in: path), "Side two\nSide one\nMaster two\nMaster one\nBase\n")
+        XCTAssertEqual(try git("symbolic-ref --short HEAD", in: path), "side\n")
+    }
+
+    func testSkipLeavesOutTheStepAndAbortRestoresTheBranchOfARebase() throws {
+        let path = try conflictedRepository()
+        let original = try git("rev-parse side", in: path)
+        _ = try? git("checkout -q side && git rebase master", in: path)
+        try step("rebase", "abort", in: path)
+        XCTAssertEqual(try git("rev-parse HEAD", in: path), original)
+        XCTAssertEqual(try git("symbolic-ref --short HEAD", in: path), "side\n")
+        _ = try? git("rebase master", in: path)
+        // Skipping the first commit; the second applies on its own, or conflicts again.
+        _ = try? step("rebase", "skip", in: path)
+        _ = try? git("checkout --theirs f.txt && git add f.txt", in: path)
+        _ = try? step("rebase", "continue", in: path)
+        XCTAssertFalse(try inProgress(path))
+        XCTAssertFalse(try git("log --format=%s", in: path).contains("Side one"))
+    }
+
+    func testCherryPickAndRevertContinueSkipAndAbort() throws {
+        let path = try conflictedRepository()
+        let before = try git("rev-parse HEAD", in: path)
+        _ = try? git("cherry-pick side", in: path)
+        XCTAssertTrue(try inProgress(path))
+        try resolve(path)
+        try step("cherry-pick", "continue", in: path)
+        XCTAssertFalse(try inProgress(path))
+        XCTAssertEqual(try git("log -1 --format=%s", in: path), "Side two\n")
+        _ = try git("reset -q --hard \(before)", in: path)
+        _ = try? git("cherry-pick side", in: path)
+        try step("cherry-pick", "skip", in: path)
+        XCTAssertFalse(try inProgress(path))
+        XCTAssertEqual(try git("rev-parse HEAD", in: path), before)
+        _ = try? git("cherry-pick side", in: path)
+        try step("cherry-pick", "abort", in: path)
+        XCTAssertFalse(try inProgress(path))
+        XCTAssertEqual(try git("status --porcelain", in: path), "")
+        // A revert of the first commit conflicts with the second.
+        _ = try? git("revert HEAD~1", in: path)
+        XCTAssertTrue(try inProgress(path))
+        try resolve(path)
+        try step("revert", "continue", in: path)
+        XCTAssertFalse(try inProgress(path))
+        XCTAssertTrue(try git("log -1 --format=%s", in: path).hasPrefix("Revert \"Master one\""))
+        _ = try? git("revert HEAD~2", in: path)
+        try step("revert", "skip", in: path)
+        XCTAssertFalse(try inProgress(path))
+        _ = try? git("revert HEAD~2", in: path)
+        try step("revert", "abort", in: path)
+        XCTAssertFalse(try inProgress(path))
+    }
+
+    func testGitAmContinuesSkipsAndAborts() throws {
+        let path = try conflictedRepository()
+        let before = try git("rev-parse HEAD", in: path)
+        try run("cd \"$1\" && git format-patch -1 side --stdout > ../side.patch", path)
+        let patch = directory.url.appendingPathComponent("side.patch").path
+        _ = try? git("am -3 \(patch)", in: path)
+        XCTAssertTrue(try inProgress(path))
+        try resolve(path)
+        try step("am", "continue", in: path)
+        XCTAssertFalse(try inProgress(path))
+        XCTAssertEqual(try git("log -1 --format=%s", in: path), "Side two\n")
+        _ = try git("reset -q --hard \(before)", in: path)
+        _ = try? git("am -3 \(patch)", in: path)
+        try step("am", "skip", in: path)
+        XCTAssertFalse(try inProgress(path))
+        XCTAssertEqual(try git("rev-parse HEAD", in: path), before)
+        _ = try? git("am -3 \(patch)", in: path)
+        try step("am", "abort", in: path)
+        XCTAssertFalse(try inProgress(path))
+        XCTAssertEqual(try git("rev-parse HEAD", in: path), before)
+    }
+
     /// What a failed script said.
     private func stderr(of error: Error) -> String {
         if case TmuxError.failed(_, let stderr) = error { return stderr }
@@ -2361,6 +2513,128 @@ final class GitViewKeysTests: XCTestCase {
             XCTAssertNil(gitView.menu, "\(operation)")
             XCTAssertNotNil(gitView.writeError, "\(operation)")
         }
+    }
+
+    func testMOffersContinueSkipAndAbortWhereGitHasThem() {
+        let operations: [(GitOperation, String, [String])] = [
+            (.merge(["f1"]), "merge", ["c", "a"]),
+            (.rebase(branch: "feature", step: 1, steps: 2), "rebase", ["c", "s", "a"]),
+            (.applying(step: 1, steps: 2), "am", ["c", "s", "a"]),
+            (.cherryPick("abc1234"), "cherry-pick", ["c", "s", "a"]),
+            (.revert("abc1234"), "revert", ["c", "s", "a"]),
+        ]
+        for (operation, command, keys) in operations {
+            for tab in GitTab.allCases {
+                let gitView = GitView(windowID: "@1")
+                var busy = snapshot
+                busy.operation = operation
+                gitView.apply(busy)
+                gitView.perform(.tab(tab))
+                gitView.perform(.operation)
+                XCTAssertEqual(gitView.menu?.id, "operation", "\(operation) \(tab)")
+                XCTAssertEqual(gitView.menu?.choices.map(\.key), keys, "\(operation)")
+                XCTAssertEqual(gitView.menu?.choices.last?.isDestructive, true)
+                XCTAssertEqual(gitView.queuedWriteArguments, [])
+            }
+            for (key, verb) in [("c", "continue"), ("s", "skip"), ("a", "abort")] where keys.contains(key) {
+                let gitView = GitView(windowID: "@1")
+                var busy = snapshot
+                busy.operation = operation
+                gitView.apply(busy)
+                gitView.perform(.operation)
+                XCTAssertTrue(gitView.chooseMenu(key: key))
+                XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", command, verb]], "\(operation) \(key)")
+            }
+        }
+    }
+
+    func testMWithNothingInProgressOrABisectOpensNothing() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.perform(.operation)
+        XCTAssertNil(gitView.menu)
+        XCTAssertTrue(gitView.writeError?.contains("Nothing is in progress") == true)
+        var bisecting = snapshot
+        bisecting.operation = .bisect
+        gitView.apply(bisecting)
+        gitView.perform(.operation)
+        XCTAssertNil(gitView.menu)
+        XCTAssertTrue(gitView.writeError?.contains("bisect") == true)
+    }
+
+    func testTheOperationMenuGoesThroughTheAgentGuard() {
+        let gitView = GitView(windowID: "@1")
+        var busy = snapshot
+        busy.operation = .rebase(branch: "feature", step: 1, steps: 2)
+        gitView.apply(busy)
+        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
+                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.perform(.operation)
+        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        gitView.closeMenu()
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+    }
+
+    func testNoMessageSendsYouToTheTerminalAndTheyPointAtM() {
+        let gitView = GitView(windowID: "@1")
+        var busy = snapshot
+        busy.changes = [GitChange(index: "M", worktree: " ", path: "a.swift")]
+        for operation in [GitOperation.rebase(branch: nil, step: nil, steps: nil), .applying(step: nil, steps: nil), .cherryPick("abc"), .revert("abc")] {
+            busy.operation = operation
+            gitView.apply(busy)
+            gitView.perform(.commit)
+            XCTAssertTrue(gitView.writeError?.contains("continue it with m") == true, "\(operation)")
+            gitView.perform(.amend)
+            XCTAssertFalse(gitView.writeError?.contains("terminal") == true, "\(operation)")
+            XCTAssertTrue(gitView.writeError?.contains("with m") == true, "\(operation)")
+        }
+    }
+
+    func testStagingTheLastConflictedFileAsksToContinueTheOperation() {
+        var conflicted = snapshot
+        conflicted.operation = .rebase(branch: "feature", step: 1, steps: 2)
+        conflicted.changes = [GitChange(index: "U", worktree: "U", path: "a.swift"), GitChange(index: "U", worktree: "U", path: "b.swift")]
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(conflicted)
+        gitView.perform(.toggle)
+        XCTAssertEqual(gitView.queuedWriteArguments.count, 1)
+        // One file of two is staged: the other still conflicts.
+        var next = conflicted
+        next.changes = [GitChange(index: "M", worktree: " ", path: "a.swift"), GitChange(index: "U", worktree: "U", path: "b.swift")]
+        gitView.apply(next)
+        XCTAssertNil(gitView.menu)
+        // The read after the last one shows no conflict.
+        gitView.perform(.down)
+        gitView.perform(.toggle)
+        next.changes = [GitChange(index: "M", worktree: " ", path: "a.swift"), GitChange(index: "M", worktree: " ", path: "b.swift")]
+        gitView.apply(next)
+        XCTAssertEqual(gitView.menu?.id, "continue")
+        XCTAssertEqual(gitView.menu?.choices.first?.note, "All merge conflicts resolved. Continue the rebase?")
+        XCTAssertTrue(gitView.chooseMenu(key: "y"))
+        XCTAssertEqual(gitView.queuedWriteArguments.last, ["/repo", "rebase", "continue"])
+        // Reading again asks nothing more; ⎋ leaves it for later.
+        gitView.apply(next)
+        XCTAssertNil(gitView.menu)
+    }
+
+    func testTheContinuePromptIsAskedOnlyAfterStagingAndNamesTheOperation() {
+        var conflicted = snapshot
+        conflicted.operation = .cherryPick("abc1234")
+        conflicted.changes = [GitChange(index: "U", worktree: "U", path: "a.swift")]
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(conflicted)
+        var resolved = conflicted
+        resolved.changes = [GitChange(index: "M", worktree: " ", path: "a.swift")]
+        // Resolved outside the Git View: nothing was staged here, so nothing asks.
+        gitView.apply(resolved)
+        XCTAssertNil(gitView.menu)
+        gitView.apply(conflicted)
+        gitView.perform(.toggle)
+        gitView.apply(resolved)
+        XCTAssertEqual(gitView.menu?.title, "Continue the cherry-pick?")
+        gitView.closeMenu()
+        XCTAssertEqual(gitView.queuedWriteArguments.count, 1)
     }
 
     func testTheMessageIsDroppedInAnotherRepository() {
