@@ -47,6 +47,9 @@ Accessibility identifiers of the Git View, for the suites that follow this one:
                              prompt's actions then include down and up
     The Branches keys n, R, - and c ask in the prompts `New branch name (branch is off of '<branch>')`, `Rename branch`
     and `Check out`; ↩ checks out through the same path as space does.
+    A branch with an upstream also offers `git-menu-choice-r` ("Delete remote branch") and `git-menu-choice-b`
+    ("Delete local and remote branch") in `delete-branch`; each asks first in the menu `delete-remote-branch`, whose
+    choice `git-menu-choice-y` runs `git push <remote> --delete <branch>`.
     d in Branches asks in the menus `delete-branch` ("Delete branch", the choice `git-menu-choice-c`, "Delete local
     branch", disabled on the current branch) and, for a branch git finds unmerged, `force-delete-branch` ("Force delete
     branch", the choice `git-menu-choice-y`). A branch of another Worktree is left to git, whose message shows in
@@ -1059,6 +1062,48 @@ class GitView(unittest.TestCase):
         self.key('d')
         return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Delete branch',
                                 'd in Branches did not open the delete menu')
+
+    def remote_branches(self, origin):
+        return subprocess.run(['/usr/bin/git', '--git-dir', str(origin), 'branch', '--format=%(refname:short)'],
+                              capture_output=True, text=True).stdout.split()
+
+    def tracked_branch(self, name, origin):
+        self.git('branch', name, 'main')
+        self.addCleanup(self.drop_branch, name)
+        self.git('push', '-q', '-u', 'origin', name)
+
+    def confirm_remote_delete(self, key, name, origin):
+        self.tracked_branch(name, origin)
+        rs = self.ask_to_delete(name)
+        for choice in 'cr' if key == 'r' else 'crb':
+            self.assertTrue(self.s.has('git-menu-choice-' + choice, rs), 'no choice ' + choice)
+        self.s.act('action', 'git-menu', key)
+        self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') in ('Delete remote branch', 'Delete local and remote branch')
+                         and self.s.has('git-menu-choice-y', rs), 'the remote delete did not ask first')
+        time.sleep(.5)
+        self.assertIn(name, self.remote_branches(origin), 'opening the confirmation deleted the remote branch')
+
+    def test_r_deletes_the_remote_branch_after_asking_and_keeps_the_local_one(self):
+        origin = self.bare_remote('del-remote')
+        self.confirm_remote_delete('r', 'rem-r', origin)
+        self.s.act('action', 'git-menu', 'y')
+        wait(lambda: 'rem-r' not in self.remote_branches(origin), 'y did not delete the remote branch', seconds=15)
+        self.assertIn('rem-r', self.branches(), 'the local branch went')
+
+    def test_b_deletes_the_remote_and_then_the_local_branch(self):
+        origin = self.bare_remote('del-both')
+        self.confirm_remote_delete('b', 'rem-b', origin)
+        self.s.act('action', 'git-menu', 'y')
+        wait(lambda: 'rem-b' not in self.remote_branches(origin) and 'rem-b' not in self.branches(),
+             'y did not delete both branches', seconds=15)
+
+    def test_a_branch_without_an_upstream_offers_only_the_local_choice(self):
+        self.git('branch', 'rem-none', 'main')
+        self.addCleanup(self.drop_branch, 'rem-none')
+        rs = self.ask_to_delete('rem-none')
+        self.assertTrue(self.s.has('git-menu-choice-c', rs))
+        self.assertFalse(self.s.has('git-menu-choice-r', rs), 'a remote choice without an upstream')
+        self.assertFalse(self.s.has('git-menu-choice-b', rs), 'a both choice without an upstream')
 
     def test_d_on_a_merged_branch_asks_in_the_delete_menu_and_c_deletes_it(self):
         self.git('branch', 'merged-b', 'main')
