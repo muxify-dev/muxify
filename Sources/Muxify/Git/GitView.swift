@@ -299,6 +299,8 @@ final class GitView {
         case toggle, collapseAll, expandAll
         /// A: amends the last commit with what's staged, in Changes.
         case amend
+        /// m: continues, skips or aborts the merge, rebase, cherry-pick, revert or `git am` in progress.
+        case operation
         case commit, discard, stash, stashOptions, filter, back, close, refresh
         /// n: a new branch off the branch selected in Branches.
         case newBranch
@@ -1041,7 +1043,7 @@ final class GitView {
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
             "space": .toggle, "minus": .collapseAll, "equal": .expandAll, "n": .newBranch,
             "c": .commit, "d": .discard, "g": .pop, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
-            "shift+w": .mark, "e": .edit, "f": .fetch, "shift+a": .amend, "shift+p": .push, "p": .pull,
+            "shift+w": .mark, "e": .edit, "f": .fetch, "shift+a": .amend, "m": .operation, "shift+p": .push, "p": .pull,
     ]
 
     static let commands: [KeyTrigger: Command] = Dictionary(uniqueKeysWithValues: keyMap.map { (try! KeyTrigger($0), $1) })
@@ -1120,6 +1122,8 @@ final class GitView {
             if list == .changes { openCommit() } else if list == .branches, focus == .list { askCheckoutByName() }
         case .amend:
             if list == .changes { askAmend() }
+        case .operation:
+            askOperation()
         case .newBranch:
             if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askNewBranch(off: branch) }
         case .pop:
@@ -1277,6 +1281,7 @@ final class GitView {
         default:
             return
         }
+        noteStaging(staging.stage)
         write(staging.stage ? GitRepository.stageScript : GitRepository.unstageScript, arguments: [snapshot.root] + staging.paths)
     }
 
@@ -1284,6 +1289,7 @@ final class GitView {
     private func toggleStagedAll() {
         guard let snapshot, !snapshot.changes.isEmpty else { return }
         let staging = Self.staging(snapshot.changes, path: ".")
+        noteStaging(staging.stage)
         write(staging.stage ? GitRepository.stageScript : GitRepository.unstageScript, arguments: [snapshot.root] + staging.paths)
     }
 
@@ -1986,7 +1992,7 @@ final class GitView {
 
     /// c: the commit message box, once something is staged, or to conclude
     /// a merge once its conflicts are resolved. A rebase, cherry-pick or
-    /// revert goes on in the terminal.
+    /// revert goes on with m.
     func openCommit() {
         guard let snapshot else { return }
         if let block = snapshot.operation?.commitBlock {
@@ -2011,6 +2017,81 @@ final class GitView {
             commitDescription = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
         }
         isCommitOpen = true
+    }
+
+    // MARK: Continuing
+
+    /// Staging while an operation waits on conflicts: once the read after it shows none left, the Git View asks to continue.
+    private var asksToContinue = false
+
+    private func noteStaging(_ stages: Bool) {
+        guard stages, let snapshot, snapshot.operation?.noun != nil, snapshot.changes.contains(where: \.isConflict) else { return }
+        asksToContinue = true
+    }
+
+    private enum OperationStep: String {
+        case `continue`, skip, abort
+
+        var past: String {
+            switch self {
+            case .continue: "Continued"
+            case .skip: "Skipped"
+            case .abort: "Aborted"
+            }
+        }
+    }
+
+    /// m: lazygit's menu of what to do with the merge, rebase, cherry-pick, revert or `git am` in progress, through the
+    /// Agent guard, for each of them changes files.
+    func askOperation() {
+        guard let snapshot else { return }
+        guard let operation = snapshot.operation else {
+            writeError = "Nothing is in progress: there is no merge, rebase, cherry-pick, revert or git am to continue, skip or abort."
+            return
+        }
+        guard let noun = operation.noun else {
+            writeError = "A bisect is in progress; m doesn't go on with it."
+            return
+        }
+        let continues = noun == "merge" ? "Concludes the merge with git's message." : "Goes on to the next step, keeping git's message."
+        var choices = [
+            GitMenu.Choice(key: "c", title: "Continue", note: continues + " Git refuses while conflicts remain.") { [weak self] in
+                self?.run(.continue, noun: noun, command: operation.command)
+            },
+        ]
+        if operation.canSkip {
+            choices.append(GitMenu.Choice(key: "s", title: "Skip", note: "Leaves out the step it is at and goes on.") { [weak self] in
+                self?.run(.skip, noun: noun, command: operation.command)
+            })
+        }
+        choices.append(GitMenu.Choice(key: "a", title: "Abort", note: "Back to where it was before the \(noun) began.", isDestructive: true) { [weak self] in
+            self?.run(.abort, noun: noun, command: operation.command)
+        })
+        openGuarded(GitMenu(id: "operation", title: "\(noun.prefix(1).uppercased() + noun.dropFirst()) options",
+                            subject: snapshot.operationTitle.map(GitMenu.Subject.text), symbol: operation.symbol, choices: choices))
+    }
+
+    /// After staging the last conflicted file: lazygit's "All merge conflicts resolved. Continue the rebase?". ↩ continues
+    /// and ⎋ leaves it for later.
+    private func askToContinue(_ snapshot: GitSnapshot) {
+        guard let operation = snapshot.operation, let noun = operation.noun else { return }
+        openGuarded(GitMenu(
+            id: "continue", title: "Continue the \(noun)?", subject: snapshot.operationTitle.map(GitMenu.Subject.text), symbol: operation.symbol,
+            choices: [GitMenu.Choice(key: "y", title: "Continue", note: "All merge conflicts resolved. Continue the \(noun)?") { [weak self] in
+                self?.run(.continue, noun: noun, command: operation.command)
+            }]))
+    }
+
+    private func run(_ step: OperationStep, noun: String, command: String?) {
+        guard let snapshot, let command else { return }
+        write(GitRepository.operationScript, arguments: [snapshot.root, command, step.rawValue], timeout: 600) { [weak self] result in
+            switch result {
+            case .success:
+                self?.store?.palette.showCopied(title: step.past, value: noun)
+            case .failure(let error):
+                self?.writeError = Self.message(for: error)
+            }
+        }
     }
 
     /// A: asks, then amends the last commit with what's staged, keeping its message.
@@ -2701,6 +2782,10 @@ final class GitView {
         }
         readBranchLog()
         loadContent(reload: true)
+        if asksToContinue, !isWriting {
+            asksToContinue = false
+            if menu == nil, prompt == nil, !next.changes.contains(where: \.isConflict) { askToContinue(next) }
+        }
     }
 
     /// A tab's lists after a read: those gone into on what was just read,

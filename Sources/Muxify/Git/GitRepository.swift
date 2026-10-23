@@ -66,9 +66,8 @@ struct GitSnapshot: Equatable {
     }
 }
 
-/// What git is in the middle of: a merge, which a commit concludes, or a
-/// rebase, `git am`, cherry-pick or revert, which go on with their own
-/// command, or a bisect.
+/// What git is in the middle of: a merge, a rebase, `git am`, a cherry-pick or
+/// a revert, which m continues, skips or aborts, or a bisect.
 enum GitOperation: Equatable {
     /// The commits being merged in.
     case merge([String])
@@ -92,11 +91,63 @@ enum GitOperation: Equatable {
     /// Why c doesn't commit now, if it doesn't.
     var commitBlock: String? {
         switch self {
-        case .rebase: "A rebase is in progress: continue it in the terminal, with git rebase --continue."
-        case .applying: "git am is in progress: continue it in the terminal, with git am --continue."
-        case .cherryPick: "A cherry-pick is in progress: continue it in the terminal, with git cherry-pick --continue."
-        case .revert: "A revert is in progress: continue it in the terminal, with git revert --continue."
+        case .rebase, .applying, .cherryPick, .revert: "\(title) is in progress: continue it with m."
         case .merge, .bisect: nil
+        }
+    }
+
+    /// The operation as a sentence starts with it, such as "A rebase" or "git am".
+    private var title: String {
+        switch self {
+        case .merge: "A merge"
+        case .rebase: "A rebase"
+        case .applying: "git am"
+        case .cherryPick: "A cherry-pick"
+        case .revert: "A revert"
+        case .bisect: "A bisect"
+        }
+    }
+
+    /// What m calls it, such as "rebase" or "git am"; nil for a bisect, which m leaves alone.
+    var noun: String? {
+        switch self {
+        case .merge: "merge"
+        case .rebase: "rebase"
+        case .applying: "git am"
+        case .cherryPick: "cherry-pick"
+        case .revert: "revert"
+        case .bisect: nil
+        }
+    }
+
+    /// The git command that goes on with it, such as `rebase` for `git rebase --continue`.
+    var command: String? {
+        switch self {
+        case .merge: "merge"
+        case .rebase: "rebase"
+        case .applying: "am"
+        case .cherryPick: "cherry-pick"
+        case .revert: "revert"
+        case .bisect: nil
+        }
+    }
+
+    /// Git has no `--skip` for a merge.
+    var canSkip: Bool {
+        switch self {
+        case .merge, .bisect: false
+        case .rebase, .applying, .cherryPick, .revert: true
+        }
+    }
+
+    /// An SF Symbol for it.
+    var symbol: String {
+        switch self {
+        case .merge: "arrow.triangle.merge"
+        case .rebase, .applying: "arrow.triangle.2.circlepath"
+        case .cherryPick: "arrow.uturn.forward"
+        case .revert: "arrow.uturn.backward"
+        case .bisect: "magnifyingglass"
         }
     }
 }
@@ -463,6 +514,20 @@ enum GitRepository {
     cd "$1" || exit 1
     git -c color.ui=never commit -q --amend --no-edit 1>&2 || exit 1
     git rev-parse --short HEAD
+    """
+
+    /// Takes the folder, the git command of what's in progress (`merge`, `rebase`, `am`, `cherry-pick` or `revert`)
+    /// and one of `continue`, `skip` and `abort`. No editor opens, so git's message is kept. Git's own words, on
+    /// stderr, say why it refused; when conflicts are left, a line says where to resolve them.
+    static let operationScript = """
+    cd "$1" || exit 1
+    export GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true
+    git -c core.editor=true -c color.ui=never "$2" "--$3" 1>&2 && exit 0
+    code=$?
+    if [ "$3" != abort ] && [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+        printf 'Conflicts remain: resolve them in Changes and stage each file, then m continues again.\\n' >&2
+    fi
+    exit $code
     """
 
     /// Takes the folder and the message; commits what's staged. Prints the
