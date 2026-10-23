@@ -398,6 +398,9 @@ final class GitView {
     /// Entering Diff files before they were read: select the first once
     /// they are.
     @ObservationIgnored private var wantsFirstFile = false
+    /// `e` before the selection's diff is read, which gives the line: open
+    /// the editor once it is.
+    @ObservationIgnored private var wantsEditor = false
     /// Changes shown with all of their lines.
     @ObservationIgnored private var wholeFiles = Set<String>()
     /// Commits and stashes don't change, so their output is kept.
@@ -460,6 +463,7 @@ final class GitView {
         discard = nil
         writeError = nil
         wantsFocus = false
+        wantsEditor = false
         contentWork?.cancel()
         loadingID = nil
         logWork?.cancel()
@@ -854,6 +858,7 @@ final class GitView {
     /// Selects without moving keyboard focus.
     private func choose(_ item: Item?) {
         keptCursor = nil
+        wantsEditor = false
         updateLevel { $0.selection = item?.id }
         showSelection()
     }
@@ -1117,8 +1122,16 @@ final class GitView {
     }
 
     /// Opens the file in the editor, unless it's gone from the working tree.
+    /// The selection's diff is read a moment after the selection moves, so
+    /// `e` right after `j` waits for it: the line comes from the diff.
     func openInEditor() {
-        guard let store, let root = snapshot?.root, let target = editorTarget else { return }
+        guard let store, let root = snapshot?.root, let request = request() else { return }
+        guard content?.id == request.id else {
+            wantsEditor = true
+            if loadingID != request.id { loadContent(reload: true) }
+            return
+        }
+        guard let target = editorTarget else { return }
         writeError = nil
         let file = (root as NSString).appendingPathComponent(target.path)
         store.runGitScript("[ -e \"$1\" ] && echo present || echo missing", arguments: [file], timeout: 10) { [weak self] result in
@@ -2089,6 +2102,10 @@ final class GitView {
                 }
                 self.wantsFirstFile = false
                 self.rebuildDiffRows(keepingPosition: isSame)
+                if self.wantsEditor {
+                    self.wantsEditor = false
+                    self.openInEditor()
+                }
             }
         }
     }

@@ -3,6 +3,7 @@ import Foundation
 import XCTest
 @testable import MuxifyCLI
 import MuxifyCore
+import MuxifyTestSupport
 
 final class CLIIntegrationTests: XCTestCase {
     func testShortLivedProcessesCanBeAwaitedRepeatedly() async throws {
@@ -1252,8 +1253,7 @@ private final class TopicSandbox {
     private var clients: [(process: Process, input: Pipe)] = []
 
     init() throws {
-        guard let binary = Tmux.binary else { throw XCTSkip("tmux is not installed") }
-        tmuxBinary = binary
+        tmuxBinary = try requireTmux()
         // A short path, because a socket path must fit in 104 bytes. Real, because tmux reports the real socket path.
         let made = URL(fileURLWithPath: "/tmp/mxc-" + UUID().uuidString.prefix(8), isDirectory: true)
         try FileManager.default.createDirectory(at: made, withIntermediateDirectories: true)

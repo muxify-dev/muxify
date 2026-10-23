@@ -22,7 +22,7 @@ struct HintVerification: ViewModifier {
                         store.receiveHintInput(.keyUp(0))
                     }
                     Button("Reset Hints") { store.receiveHintInput(.reset) }
-                    ForEach(ConfigAction.allCases.filter { $0.quickSwitchSelection != nil || $0.step != nil || $0 == .focusTerminal || $0 == .markRead || $0 == .markUnread || $0 == .markAllRead }, id: \.self) { action in
+                    ForEach(ConfigAction.allCases.filter { ($0.quickSwitchSelection != nil || $0.step != nil || $0 == .focusTerminal || $0 == .markRead || $0 == .markUnread || $0 == .markAllRead) && canPress($0) }, id: \.self) { action in
                         ForEach(store.config.keybinds.triggers[action] ?? [], id: \.self) { trigger in
                             Button("Press " + trigger.symbol) {
                                 store.receiveHintInput(.keyDown(0))
@@ -37,4 +37,17 @@ struct HintVerification: ViewModifier {
         content
         #endif
     }
+
+    #if DEBUG
+    /// A Read change's shortcut, like its menu item, is inert until the app can take the change. The check sees
+    /// no Press action then, and waits for one, instead of a press that the app drops.
+    private func canPress(_ action: ConfigAction) -> Bool {
+        switch action {
+        case .markRead: store.canChangeRead(.read, in: store.currentReadTarget)
+        case .markUnread: store.canChangeRead(.unread, in: store.currentReadTarget)
+        case .markAllRead: store.canChangeRead(.read, in: .environment)
+        default: true
+        }
+    }
+    #endif
 }

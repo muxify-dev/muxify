@@ -8,7 +8,9 @@ TMUX_TMPDIR lies inside this sandbox.
 
 Each run gets the root BASE/<suite>/<run-id>/ and an owner file that names the
 process that owns it. A new Sandbox first sweeps the roots whose owner is gone,
-so a run that was killed with -9 leaves nothing behind for long.
+so a run that was killed with -9 leaves nothing behind for long. Under run.py,
+teardown first copies the app logs to the evidence folder of the run, which
+nothing deletes.
 """
 
 import fcntl
@@ -31,6 +33,9 @@ AX_WAKE_SOURCE = REPO/'scripts/verify/ax_wake.swift'
 # The user allows the accessibility helper in System Settings once. So it lives outside /tmp, which macOS empties,
 # and its name comes from its source, so every worktree with the same source uses the same file.
 AX_WAKE_DIR = pathlib.Path.home()/'Library/Application Support/MuxifyVerify'
+# ax_wake exits with this status when macOS does not trust it. Under heavy load macOS can report this for a moment
+# for a helper that the user allowed, so only a status that lasts means the permission is missing.
+AX_WAKE_NOT_TRUSTED = 3
 LSREGISTER = ('/System/Library/Frameworks/CoreServices.framework/Frameworks/'
               'LaunchServices.framework/Support/lsregister')
 BASE = pathlib.Path('/tmp/muxify-verify')
@@ -40,6 +45,26 @@ OWNER = 'owner.json'
 # is a run that died in that gap, or what a hand left; it is swept after this
 # many seconds, so the sweep cannot race a run that is starting.
 OWNERLESS_GRACE = 60
+# run.py names a folder in build/verify/runs/ here; teardown copies the app logs of its own run into it.
+EVIDENCE = 'MUXIFY_VERIFY_EVIDENCE'
+
+
+def ax_wake(pid):
+    """Runs ax_wake.swift against pid, after it builds the helper once."""
+    helper = AX_WAKE_DIR/('ax-wake-%s' % hashlib.sha256(AX_WAKE_SOURCE.read_bytes()).hexdigest()[:12])
+    if not helper.exists():
+        # swiftc signs the binary with its file name. Under the same name, the same source and compiler give the
+        # same code signature, so a rebuilt helper keeps its Accessibility permission.
+        AX_WAKE_DIR.mkdir(parents=True, exist_ok=True)
+        building = pathlib.Path(tempfile.mkdtemp(dir=AX_WAKE_DIR))
+        try:
+            built = subprocess.run(['swiftc', '-O', '-o', str(building/'ax-wake'), str(AX_WAKE_SOURCE)],
+                                   capture_output=True, text=True)
+            assert built.returncode == 0, 'swiftc could not build %s:\n%s' % (AX_WAKE_SOURCE, built.stderr)
+            (building/'ax-wake').replace(helper)
+        finally:
+            shutil.rmtree(building, ignore_errors=True)
+    return subprocess.run([str(helper), str(pid)], capture_output=True, text=True)
 
 
 def new_run_id():
@@ -50,6 +75,8 @@ class Sandbox:
     def __init__(self, name):
         sweep()
         self._bind(BASE/name/new_run_id())
+        # Only the process that made the root keeps its logs: the sweep tears down the runs of other processes.
+        self.evidence = os.environ.get(EVIDENCE)
         self._create()
 
     @classmethod
@@ -67,10 +94,13 @@ class Sandbox:
         self.driver_dir = self.root/'driver'
         self.bundle_id = 'dev.muxify.verify.%s.%s' % (self.name, root.name)
         self.pid = None
+        self.evidence = None
 
+        # tmux takes default-shell from SHELL when the server starts, and runs each Pane command through it.
+        # The user's zsh startup files replace XDG_CONFIG_HOME, so a Pane with their shell reads their Config.
         self.app_env = dict(TMUX_TMPDIR=str(self.root/'tmux'), XDG_CONFIG_HOME=str(self.root/'config'),
                             XDG_STATE_HOME=str(self.root/'state'), MUXIFY_TEST_DRIVER=str(self.driver_dir),
-                            PATH=os.environ.get('PATH', ''))
+                            PATH=os.environ.get('PATH', ''), SHELL='/bin/sh')
         self.env = dict(os.environ, **self.app_env)
         # tmux uses the socket in $TMUX before TMUX_TMPDIR.
         self.env.pop('TMUX', None)
@@ -110,6 +140,24 @@ class Sandbox:
         everything else carries the root path in its command line or, like a
         server or client the app started, in its environment (TMUX_TMPDIR).
         """
+        try:
+            self._stop_all()
+        finally:
+            self._keep_logs()
+
+    def _keep_logs(self):
+        """Copies logs/ and the driver's stall samples to EVIDENCE/app-logs/<run-id>/. The next Sandbox of any
+        checkout deletes this root, often seconds later in the same make verify, so only the copy lasts."""
+        if not self.evidence:
+            return
+        kept = pathlib.Path(self.evidence)/'app-logs'/self.root.name
+        if (self.root/'logs').is_dir():
+            shutil.copytree(self.root/'logs', kept, dirs_exist_ok=True)
+        for stall in self.driver_dir.glob('stall-*.txt'):
+            kept.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(stall, kept/stall.name)
+
+    def _stop_all(self):
         app = self._app_pid()
         if app is not None:
             self._terminate([app])
@@ -250,21 +298,8 @@ class Sandbox:
     def _wake_accessibility(self, deadline):
         """Asks for the app's windows as an outside accessibility client, then waits until the driver sees the
         SwiftUI elements. Without that request SwiftUI gives the driver an App Window with no elements."""
-        helper = AX_WAKE_DIR/('ax-wake-%s' % hashlib.sha256(AX_WAKE_SOURCE.read_bytes()).hexdigest()[:12])
-        if not helper.exists():
-            # swiftc signs the binary with its file name. Under the same name, the same source and compiler give the
-            # same code signature, so a rebuilt helper keeps its Accessibility permission.
-            AX_WAKE_DIR.mkdir(parents=True, exist_ok=True)
-            building = pathlib.Path(tempfile.mkdtemp(dir=AX_WAKE_DIR))
-            try:
-                built = subprocess.run(['swiftc', '-O', '-o', str(building/'ax-wake'), str(AX_WAKE_SOURCE)],
-                                       capture_output=True, text=True)
-                assert built.returncode == 0, 'swiftc could not build %s:\n%s' % (AX_WAKE_SOURCE, built.stderr)
-                (building/'ax-wake').replace(helper)
-            finally:
-                shutil.rmtree(building, ignore_errors=True)
         while True:
-            woke = subprocess.run([str(helper), str(self.pid)], capture_output=True, text=True)
+            woke = ax_wake(self.pid)
             if any(row.get('accessibilityIdentifier') for row in self.driver('dump')['rows']):
                 return
             assert time.monotonic() < deadline, ('the driver sees no SwiftUI elements: ax_wake exit %d %s'

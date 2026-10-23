@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// The service against a throwaway tmux server and state folder in the test's own run directory.
 final class TopicServiceTests: XCTestCase {
@@ -10,7 +11,7 @@ final class TopicServiceTests: XCTestCase {
     private var tools: SessionPath!
 
     override func setUpWithError() throws {
-        try XCTSkipIf(Tmux.binary == nil, "tmux is not installed")
+        _ = try requireTmux()
         // A short path: a socket path must fit in 104 bytes.
         root = URL(fileURLWithPath: "/tmp/mxt-" + UUID().uuidString.prefix(8), isDirectory: true)
         let work = root.appendingPathComponent("work/game", isDirectory: true)
@@ -232,7 +233,13 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(record.title, "Fix reward")
         XCTAssertEqual(record.sessions, [])
         XCTAssertEqual(created.shown, .emptyTopic(id: record.id))
-        XCTAssertEqual(server.snapshot().windows, windows, "an Empty Topic starts and moves nothing in tmux")
+        // Not the whole Window: tmux renames it by itself once its shell starts, which a slow machine shows here.
+        let after = server.snapshot().windows
+        XCTAssertEqual(after.map(\.id), windows.map(\.id), "an Empty Topic starts and moves nothing in tmux")
+        XCTAssertEqual(after.map(\.sessionID), windows.map(\.sessionID))
+        XCTAssertEqual(after.map(\.topicID), windows.map(\.topicID))
+        XCTAssertEqual(after.map(\.activePaneID), windows.map(\.activePaneID))
+        XCTAssertEqual(after.map(\.paneCount), windows.map(\.paneCount))
     }
 
     func testCreateWithNoSessionPathAndNoTargetMakesATopicWithNoSession() throws {

@@ -309,3 +309,4 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         saved = next(row for row in record['sessions'] if row.get('worktree_path') == str(expected))
         self.assertEqual(saved['branch'], 'add-clash-2')
         self.assertTrue(saved['worktree_created'])
+        s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add Session Path palette did not close')

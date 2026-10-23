@@ -6,7 +6,7 @@ INSTALL_DIR ?= /Applications
 MUXIFY_SIGN_IDENTITY ?= -
 MUXIFY_DEVELOPMENT_TEAM ?=
 
-.PHONY: all setup tools project build test test-release verify run install release clean
+.PHONY: all setup tools project build test test-release verify verify-gate run install release clean
 
 all: build
 
@@ -34,7 +34,8 @@ test: project
 	./scripts/check-folder-paths.sh
 	swift test
 	swift test --package-path Packages/MuxifyCore
-	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
+	# xcodebuild gives a test only the variables named TEST_RUNNER_<name>, as <name>.
+	TEST_RUNNER_MUXIFY_REQUIRE_TMUX="$$MUXIFY_REQUIRE_TMUX" xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages test
 
 test-release:
@@ -42,8 +43,14 @@ test-release:
 
 SUITE ?= $(basename $(notdir $(wildcard scripts/verify/suites/*.py)))
 
+# Runs the suites, then the gate. With SUITE= it is a subset run, which never satisfies the gate.
+# ARGS="--repeat N --shuffle" runs the selection N times, each time in a random check order.
 verify: build
-	python3 scripts/verify/run.py $(SUITE)
+	python3 -m scripts.verify.run $(ARGS) $(SUITE)
+
+# Passes only when the last full make verify passed on this exact tree.
+verify-gate:
+	python3 -m scripts.verify.gate
 
 # CONFIG=path/to/config.yaml starts a new copy of the app with that Config, through MUXIFY_CONFIG.
 run: build

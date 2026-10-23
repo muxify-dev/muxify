@@ -50,12 +50,16 @@ jobs:
         run: python3 -m unittest discover -s Tests/ReleaseTests -v
 
       - name: Prepare dependencies
-        run: make setup
+        run: |
+          brew install tmux ripgrep
+          make setup
 
       - name: Test Muxify
         timeout-minutes: 10
         env:
           NSUnbufferedIO: 'YES'
+          # A test that needs tmux fails here when tmux is missing, and does not skip.
+          MUXIFY_REQUIRE_TMUX: '1'
         run: make test
 
       - name: Build and package ad-hoc-signed beta

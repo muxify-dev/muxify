@@ -13,7 +13,10 @@ let package = Package(
         .executableTarget(name: "MuxifyCLI", dependencies: [
             .product(name: "MuxifyCore", package: "MuxifyCore"),
         ]),
-        .testTarget(name: "MuxifyCLITests", dependencies: ["MuxifyCLI"]),
+        .testTarget(name: "MuxifyCLITests", dependencies: [
+            "MuxifyCLI",
+            .product(name: "MuxifyTestSupport", package: "MuxifyCore"),
+        ]),
     ],
     swiftLanguageModes: [.v5]
 )

@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class TmuxServerTests: XCTestCase {
     private var directory: URL!
@@ -7,7 +8,7 @@ final class TmuxServerTests: XCTestCase {
     private var saved: [String: String?] = [:]
 
     override func setUpWithError() throws {
-        try XCTSkipIf(Tmux.binary == nil, "tmux is not installed")
+        _ = try requireTmux()
         // A short path: a socket path must fit in 104 bytes.
         directory = URL(fileURLWithPath: "/tmp/mxs-" + UUID().uuidString.prefix(8), isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
