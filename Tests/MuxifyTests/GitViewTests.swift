@@ -934,6 +934,105 @@ final class GitScriptTests: XCTestCase {
         XCTAssertFalse(try git("log --format=%s", in: path).contains("Side one"))
     }
 
+    /// master (Base, Master one) and side (Base, Side one, Side two) touching other files, so they merge cleanly; `ahead`
+    /// is a branch of one commit that master can fast-forward to.
+    private func mergeableRepository() throws -> String {
+        let path = directory.url.appendingPathComponent("merges").path
+        try run("""
+        cd "$1"
+        git init -q -b master merges && cd merges
+        printf 'base\\n' > f.txt && git add f.txt && git commit -q -m Base
+        git checkout -q -b ahead
+        printf 'a\\n' > a.txt && git add a.txt && git commit -q -m 'Ahead one'
+        git checkout -q -b side master
+        printf 's\\n' > s.txt && git add s.txt && git commit -q -m 'Side one'
+        printf 's2\\n' > s.txt && git commit -q -am 'Side two'
+        git checkout -q master
+        """, directory.url.path)
+        return path
+    }
+
+    private func merge(_ kind: String, _ branch: String, in path: String) throws {
+        try run(GitRepository.mergeScript, path, branch, kind, "master")
+    }
+
+    func testAFastForwardMergeMovesTheBranchWhenItCanAndMakesAMergeCommitWhenItCannot() throws {
+        let path = try mergeableRepository()
+        try merge("ff", "ahead", in: path)
+        XCTAssertEqual(try git("rev-parse HEAD", in: path), try git("rev-parse ahead", in: path))
+        XCTAssertEqual(try git("rev-list --parents -1 HEAD", in: path).split(separator: " ").count, 2)
+        // Master has moved on from side: git makes a merge commit, with its own message and no editor.
+        try merge("ff", "side", in: path)
+        XCTAssertEqual(try git("rev-list --parents -1 HEAD", in: path).split(separator: " ").count, 3)
+        XCTAssertEqual(try git("log -1 --format=%s", in: path), "Merge branch 'side'\n")
+    }
+
+    func testAMergeWithMergeCommitIsNeverAFastForward() throws {
+        let path = try mergeableRepository()
+        let before = try git("rev-parse HEAD", in: path)
+        try merge("no-ff", "ahead", in: path)
+        XCTAssertEqual(try git("rev-list --parents -1 HEAD", in: path).split(separator: " ").count, 3)
+        XCTAssertEqual(try git("rev-parse HEAD^1", in: path), before)
+        XCTAssertEqual(try git("log -1 --format=%s", in: path), "Merge branch 'ahead'\n")
+    }
+
+    func testASquashMergeCommitsOneCommitWithGitsMessageAndCanLeaveItStaged() throws {
+        let path = try mergeableRepository()
+        let before = try git("rev-parse HEAD", in: path)
+        try merge("squash", "side", in: path)
+        XCTAssertEqual(try git("rev-parse HEAD^", in: path), before)
+        XCTAssertEqual(try git("rev-list --parents -1 HEAD", in: path).split(separator: " ").count, 2, "a squash has one parent")
+        XCTAssertTrue(try git("log -1 --format=%B", in: path).hasPrefix("Squashed commit of the following:"))
+        XCTAssertTrue(try git("log -1 --format=%B", in: path).contains("Side two"))
+        XCTAssertEqual(try git("status --porcelain", in: path), "")
+        try run("cd \"$1\" && git reset -q --hard \(before)", path)
+        try merge("squash-leave", "side", in: path)
+        XCTAssertEqual(try git("rev-parse HEAD", in: path), before)
+        XCTAssertEqual(try git("status --porcelain", in: path), "A  s.txt\n")
+        XCTAssertFalse(try inProgress(path))
+    }
+
+    func testAMergeThatConflictsStaysInProgressAndIsToldApartFromOtherFailures() throws {
+        let path = try conflictedRepository()
+        XCTAssertThrowsError(try merge("no-ff", "side", in: path)) {
+            XCTAssertTrue(self.stderr(of: $0).contains("Merging 'side' into 'master' conflicted"), self.stderr(of: $0))
+        }
+        XCTAssertTrue(try inProgress(path))
+        XCTAssertEqual(try git("status --porcelain", in: path), "UU f.txt\n")
+        // c concludes it once the conflict is resolved and staged, and git's message is kept.
+        try resolve(path)
+        try run(GitRepository.makeCommitScript, path, "Merge branch 'side'")
+        XCTAssertFalse(try inProgress(path))
+        // m aborts it.
+        try run("cd \"$1\" && git reset -q --hard HEAD^", path)
+        XCTAssertThrowsError(try merge("ff", "side", in: path))
+        XCTAssertTrue(try inProgress(path))
+        try step("merge", "abort", in: path)
+        XCTAssertFalse(try inProgress(path))
+        // Any other failure prints what git said.
+        XCTAssertThrowsError(try merge("ff", "nowhere", in: path)) {
+            XCTAssertTrue(self.stderr(of: $0).contains("nowhere"), self.stderr(of: $0))
+        }
+    }
+
+    func testASquashMergeThatConflictsLeavesTheConflictsInChanges() throws {
+        let path = try conflictedRepository()
+        XCTAssertThrowsError(try merge("squash", "side", in: path)) {
+            XCTAssertTrue(self.stderr(of: $0).contains("Squashing 'side' into 'master' conflicted"), self.stderr(of: $0))
+        }
+        XCTAssertEqual(try git("status --porcelain", in: path), "UU f.txt\n")
+        XCTAssertEqual(try git("rev-parse HEAD", in: path), try git("rev-parse master", in: path))
+    }
+
+    func testAnUncommittedChangeThatTheMergeWouldOverwriteStopsItWithGitsWords() throws {
+        let path = try mergeableRepository()
+        try run("cd \"$1\" && git checkout -q side && printf 'x\\n' > a.txt && git add a.txt && git commit -q -m 'Side a' && git checkout -q master && printf 'mine\\n' > a.txt", path)
+        XCTAssertThrowsError(try merge("ff", "side", in: path)) {
+            XCTAssertTrue(self.stderr(of: $0).contains("a.txt"), self.stderr(of: $0))
+        }
+        XCTAssertEqual(try git("status --porcelain", in: path), "?? a.txt\n")
+    }
+
     func testCherryPickAndRevertContinueSkipAndAbort() throws {
         let path = try conflictedRepository()
         let before = try git("rev-parse HEAD", in: path)
@@ -2560,6 +2659,65 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.operation)
         XCTAssertNil(gitView.menu)
         XCTAssertTrue(gitView.writeError?.contains("bisect") == true)
+    }
+
+    func testMInBranchesOffersLazygitsFourMergesAndEachRunsTheScript() {
+        let kinds = [("f", "ff"), ("n", "no-ff"), ("s", "squash"), ("u", "squash-leave")]
+        for (key, kind) in kinds {
+            let gitView = GitView(windowID: "@1")
+            gitView.apply(snapshot)
+            // Elsewhere M does nothing.
+            gitView.perform(.merge)
+            XCTAssertNil(gitView.menu)
+            gitView.perform(.tab(.branches))
+            gitView.perform(.down)
+            gitView.perform(.merge)
+            XCTAssertEqual(gitView.menu?.id, "merge")
+            XCTAssertEqual(gitView.menu?.title, "Merge 'feature' into 'master'")
+            XCTAssertEqual(gitView.menu?.choices.map(\.key), ["f", "n", "s", "u"])
+            XCTAssertEqual(gitView.menu?.choices.map(\.title), [
+                "Regular merge (fast-forward)", "Regular merge (with merge commit)", "Squash merge and commit",
+                "Squash merge and leave uncommitted",
+            ])
+            XCTAssertEqual(gitView.queuedWriteArguments, [], "opening the menu merges nothing")
+            XCTAssertTrue(gitView.chooseMenu(key: key))
+            XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "feature", kind, "master"]], key)
+        }
+    }
+
+    func testMOnTheCurrentBranchSaysItCannotMergeIntoItself() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.merge)
+        XCTAssertNil(gitView.menu)
+        XCTAssertTrue(gitView.writeError?.contains("cannot merge a branch into itself") == true, gitView.writeError ?? "")
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+    }
+
+    func testMWhileAnOperationIsInProgressAsksToConcludeItFirst() {
+        let gitView = GitView(windowID: "@1")
+        var busy = snapshot
+        busy.operation = .merge(["f1"])
+        gitView.apply(busy)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        gitView.perform(.merge)
+        XCTAssertNil(gitView.menu)
+        XCTAssertTrue(gitView.writeError?.contains("in progress") == true, gitView.writeError ?? "")
+    }
+
+    func testTheMergeMenuGoesThroughTheAgentGuard() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
+                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        gitView.perform(.merge)
+        XCTAssertEqual(gitView.menu?.id, "merge")
+        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
     }
 
     func testTheOperationMenuGoesThroughTheAgentGuard() {

@@ -623,6 +623,17 @@ fails, the banner shows what it said. With nothing staged, with no commit yet, o
 revert or `git am` is in progress, A changes nothing and the banner says why. A commit that is already pushed can be
 amended; the next push then asks to force push.
 
+M in Branches merges the selected branch into the one you're on, as lazygit does. It opens a menu titled "Merge 'X'
+into 'Y'" with four choices: a regular merge, which fast-forwards when it can and else makes a merge commit (f); a
+regular merge that always makes a merge commit, as `git merge --no-ff` does (n); a squash merge that commits what it took
+in one commit, with the message git prepared (s); and a squash merge that leaves the changes staged (u). The merge runs
+without an editor and keeps git's message, and it goes through the Agent guard. When it conflicts, the banner says so
+and the conflicted files are in Changes. A merge stays in progress as git leaves it: after you stage the files, c
+concludes it, and m continues or aborts it (m then c is the same). A squash merge is not a merge to git, so it leaves
+only the conflicts: stage them, then c commits, or reset to give it up. On the branch you're on, M changes nothing and
+the banner says a branch can't be merged into itself; while a merge, rebase or the like is in progress, the banner asks
+you to continue or abort it first. When your uncommitted changes are in the way, git's own message shows.
+
 An operation that changes the files of the Worktree asks first while an Agent is
 working there. If a Pane whose folder is the Worktree or inside it runs an Agent
 that is working or blocked, the menu names each such Agent, by its Topic, or by
