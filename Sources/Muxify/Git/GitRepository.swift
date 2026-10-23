@@ -511,6 +511,38 @@ enum GitRepository {
     fi
     """
 
+    /// What the checkout script's stderr starts with when only Changes kept git from checking out.
+    static let checkoutBlockedMarker = "muxify:changes-in-the-way"
+
+    /// Takes the folder, `branch` or `commit`, the branch or commit, and `1` to stash the changes first and pop them
+    /// after. Without it, a checkout that Changes would be overwritten by fails with `checkoutBlockedMarker`, then
+    /// git's message. A pop that conflicts keeps the stash, as git does, and says so.
+    static let checkoutScript = """
+    cd "$1" || exit 1
+    kind=$2 target=$3 autostash=$4
+    checkout() {
+        if [ "$kind" = branch ]; then LC_ALL=C git checkout "$target" --; else LC_ALL=C git checkout --detach "$target"; fi
+    }
+    if [ "$autostash" != 1 ]; then
+        out=$(checkout 2>&1) && exit 0
+        if printf '%s\n' "$out" | grep -q 'would be overwritten by checkout'; then echo 'muxify:changes-in-the-way' >&2; fi
+        printf '%s\n' "$out" >&2
+        exit 1
+    fi
+    before=$(git rev-parse -q --verify refs/stash 2>/dev/null)
+    git stash push -q --include-untracked -m "Autostash before checking out $target" || exit 1
+    after=$(git rev-parse -q --verify refs/stash 2>/dev/null)
+    if ! out=$(checkout 2>&1); then
+        if [ "$after" != "$before" ]; then git stash pop -q >/dev/null 2>&1; fi
+        printf '%s\n' "$out" >&2
+        exit 1
+    fi
+    if [ "$after" != "$before" ] && ! git stash pop -q >/dev/null 2>&1; then
+        echo "Checked out, but popping the stash conflicted: the conflicted files are in Changes. The stash is kept." >&2
+        exit 1
+    fi
+    """
+
     // MARK: Parsing
 
     /// The snapshot, or what the Git View says instead of one.

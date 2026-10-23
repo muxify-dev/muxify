@@ -1,4 +1,4 @@
-"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu and its Agent guard, stashing from Changes, applying, popping and dropping a stash, and closing.
+"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu and its Agent guard, stashing from Changes, applying, popping and dropping a stash, checking out, and closing.
 
 The driver cannot type keys, so a check performs each Git View key as an accessibility action of the
 `git-view` element (`GitNavigator` in UI/GitViewPanel.swift). An action is named by the key's Config
@@ -41,7 +41,9 @@ Accessibility identifiers of the Git View, for the suites that follow this one:
     git-prompt-cancel        the prompt's Cancel button
     git-prompt-submit        the prompt's submit button, such as Stash
     The Stashes keys ask in the menus `stash-apply`, `stash-pop` and `stash-drop` (labels "Apply stash", "Pop stash" and
-    "Drop stash"), each with the one choice `git-menu-choice-y`.
+    "Drop stash"), each with the one choice `git-menu-choice-y`. space in Branches and History checks out; it asks
+    only in the menu `checkout` ("Check out", while an Agent is working in the Worktree) and in `autostash`
+    ("Autostash?", when Changes are in the way), each with the one choice `git-menu-choice-y`.
 The diff pane builds only the lines on screen, so keep a fixture's diffs short.
 
 Run from the repo root after `make build`:
@@ -755,7 +757,7 @@ class GitView(unittest.TestCase):
         self.key('escape')
         # In History: no menu either.
         self.key('2')
-        for key in ['g', 'd', 'space']:
+        for key in ['g', 'd']:
             self.key(key)
             time.sleep(.5)
             self.assertFalse(self.s.has('git-menu'), key + ' asked in History')
@@ -766,6 +768,86 @@ class GitView(unittest.TestCase):
         self.open_discard_menu()
         self.s.act('action', 'git-menu', 'escape')
         self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+
+    def head(self):
+        """The branch the fixture is on, or '' when HEAD is detached."""
+        return self.git('branch', '--show-current').strip()
+
+    def back_to_main(self):
+        self.git('checkout', '-q', 'main')
+
+    def history_subjects(self, rs=None):
+        return [r.get('accessibilityLabel') for r in self.rows_with_prefix('git-row-commit:', rs)]
+
+    def test_space_on_a_branch_checks_it_out_and_on_the_current_branch_does_nothing(self):
+        self.addCleanup(self.back_to_main)
+        self.go_to('3')
+        self.select_row('git-row-branch:main')
+        self.key('space')
+        time.sleep(1)
+        self.assertFalse(self.s.has('git-menu'), 'space on the current branch asked')
+        self.assertEqual(self.head(), 'main')
+        self.select_row('git-row-branch:feature-x')
+        self.key('space')
+        wait(lambda: self.head() == 'feature-x', 'space did not check out the branch', seconds=10)
+        self.go_to('2')
+        self.s.wait_rows(lambda rs: self.history_subjects(rs)[:1] == ['feature two'], 'History does not start at the new HEAD', seconds=15)
+        self.assertEqual((self.repo/'feature.txt').read_text(), 'feature\nmore\n')
+
+    def test_space_on_a_commit_in_history_checks_it_out_and_leaves_a_detached_head(self):
+        self.addCleanup(self.back_to_main)
+        sha = self.git('rev-parse', 'main~1').strip()
+        self.go_to('2')
+        self.select_row('git-row-commit:' + sha)
+        self.key('space')
+        wait(lambda: self.head() == '' and self.git('rev-parse', 'HEAD').strip() == sha, 'space did not detach HEAD at the commit', seconds=10)
+        self.assertEqual((self.repo/'README.md').read_text(), 'one\ntwo\n')
+        self.s.wait_rows(lambda rs: self.history_subjects(rs)[:1] == ['second commit'], 'History does not start at the detached HEAD', seconds=15)
+        self.assertNotIn('no upstream', self.toolbar(), 'the toolbar does not show a detached HEAD')
+
+    def test_a_checkout_that_changes_would_overwrite_asks_to_autostash(self):
+        self.git('checkout', '-q', '-b', 'autostash-x')
+        (self.repo/'stashed.txt').write_text('one\nbranch\n')
+        self.git('commit', '-q', '-m', 'autostash branch', '--', 'stashed.txt')
+        self.git('checkout', '-q', 'main')
+        self.addCleanup(self.git, 'branch', '-q', '-D', 'autostash-x')
+        self.addCleanup(self.back_to_main)
+        self.addCleanup(self.git, 'checkout', '-q', '--', 'stashed.txt')
+        # The pop brings the staged file back unstaged, as git does without --index.
+        self.addCleanup(self.git, 'add', 'staged.txt')
+        (self.repo/'stashed.txt').write_text('top\none\n')
+        stashes = len(self.stashes())
+        self.go_to('3')
+        self.key('shift+r')
+        self.select_row('git-row-branch:autostash-x')
+        self.key('space')
+        self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Autostash?', 'no Autostash? question')
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the question')
+        time.sleep(1)
+        self.assertEqual(self.head(), 'main', 'escape checked out')
+        self.assertEqual((self.repo/'stashed.txt').read_text(), 'top\none\n', 'escape changed the file')
+        self.key('space')
+        self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Autostash?', 'no Autostash? question the second time')
+        self.s.act('action', 'git-menu', 'y')
+        wait(lambda: self.head() == 'autostash-x', 'y did not check out the branch', seconds=10)
+        wait(lambda: (self.repo/'stashed.txt').read_text() == 'top\none\nbranch\n', 'the stash was not popped onto the branch', seconds=10)
+        self.assertEqual(len(self.stashes()), stashes, 'the autostash was left in the list')
+
+    def test_a_checkout_asks_first_while_an_agent_is_working_in_the_worktree(self):
+        self.addCleanup(self.back_to_main)
+        self.agent_pane('gv-checkout-agent', self.repo, 'working')
+        # Until the Git View knows the Agent, space would check out at once: wait on a menu that only asks.
+        self.assertEqual(self.discard_names_agents('tracked.txt', True), 'Claude Code in gv-checkout-agent')
+        self.go_to('3')
+        self.select_row('git-row-branch:feature-x')
+        self.key('space')
+        rs = self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Check out', 'space did not ask before checking out')
+        self.assertEqual(self.s.row('git-menu-agents', rs).get('accessibilityLabel'), 'Claude Code in gv-checkout-agent')
+        time.sleep(1)
+        self.assertEqual(self.head(), 'main', 'the branch was checked out before the question was answered')
+        self.s.act('action', 'git-menu', 'y')
+        wait(lambda: self.head() == 'feature-x', 'y did not check out the branch', seconds=10)
 
     def test_q_closes_the_git_view(self):
         self.assertTrue(self.is_open(), 'the Git View is not open')

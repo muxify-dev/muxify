@@ -886,6 +886,73 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(try git("stash list --format=%gs"), "On master: w\n")
     }
 
+    /// A clean master, and `diverged`, a branch whose a.swift differs from it.
+    private func prepareCheckout() throws {
+        try run("""
+        cd "$1" && git reset -q --hard && git stash clear && rm -f c.txt
+        git checkout -q -b diverged && printf 'let a = 9\\n' > a.swift && git commit -q -am diverge && git checkout -q master
+        """, repository)
+    }
+
+    func testACheckoutSwitchesBranchAndCarriesChangesThatDontClash() throws {
+        try prepareCheckout()
+        try run("cd \"$1\" && printf 'u\\n' > u.txt", repository)
+        try run(GitRepository.checkoutScript, repository, "branch", "feature", "0")
+        XCTAssertEqual(try git("branch --show-current").trimmingCharacters(in: .whitespacesAndNewlines), "feature")
+        XCTAssertEqual(try status(), ["?? u.txt"])
+    }
+
+    func testACheckoutOfACommitLeavesADetachedHead() throws {
+        try prepareCheckout()
+        let sha = try git("rev-parse feature").trimmingCharacters(in: .whitespacesAndNewlines)
+        try run(GitRepository.checkoutScript, repository, "commit", sha, "0")
+        XCTAssertEqual(try git("branch --show-current").trimmingCharacters(in: .whitespacesAndNewlines), "")
+        XCTAssertEqual(try git("rev-parse HEAD").trimmingCharacters(in: .whitespacesAndNewlines), sha)
+    }
+
+    func testAChangeThatWouldBeOverwrittenBlocksTheCheckoutAndIsToldApart() throws {
+        try prepareCheckout()
+        try run("cd \"$1\" && printf 'mine\\n' > a.swift", repository)
+        XCTAssertThrowsError(try run(GitRepository.checkoutScript, repository, "branch", "diverged", "0")) { error in
+            XCTAssertTrue(stderr(of: error).hasPrefix(GitRepository.checkoutBlockedMarker), stderr(of: error))
+            XCTAssertTrue(stderr(of: error).contains("overwritten"), stderr(of: error))
+        }
+        XCTAssertEqual(try git("branch --show-current").trimmingCharacters(in: .whitespacesAndNewlines), "master")
+        XCTAssertEqual(try status(), [" M a.swift"])
+    }
+
+    func testAnAutostashCheckoutStashesChecksOutAndPops() throws {
+        try prepareCheckout()
+        try run("""
+        cd "$1" && git checkout -q -b clash && printf 'let a = 1\\nline\\n' > a.swift && git commit -q -am clash && git checkout -q master
+        printf 'top\\nlet a = 1\\n' > a.swift && printf 'u\\n' > u.txt
+        """, repository)
+        XCTAssertThrowsError(try run(GitRepository.checkoutScript, repository, "branch", "clash", "0"))
+        try run(GitRepository.checkoutScript, repository, "branch", "clash", "1")
+        XCTAssertEqual(try git("branch --show-current").trimmingCharacters(in: .whitespacesAndNewlines), "clash")
+        XCTAssertEqual(try git("stash list"), "")
+        XCTAssertEqual(try status(), [" M a.swift", "?? u.txt"])
+        XCTAssertEqual(try run("cat \"$1/a.swift\"", repository), "top\nlet a = 1\nline\n")
+    }
+
+    func testAnAutostashCheckoutWithNothingToStashJustChecksOut() throws {
+        try prepareCheckout()
+        try run(GitRepository.checkoutScript, repository, "branch", "diverged", "1")
+        XCTAssertEqual(try git("branch --show-current").trimmingCharacters(in: .whitespacesAndNewlines), "diverged")
+        XCTAssertEqual(try git("stash list"), "")
+    }
+
+    func testAnAutostashPopThatConflictsKeepsTheStash() throws {
+        try prepareCheckout()
+        try run("cd \"$1\" && printf 'mine\\n' > a.swift", repository)
+        XCTAssertThrowsError(try run(GitRepository.checkoutScript, repository, "branch", "diverged", "1")) { error in
+            XCTAssertTrue(stderr(of: error).contains("conflicted"), stderr(of: error))
+        }
+        XCTAssertEqual(try git("branch --show-current").trimmingCharacters(in: .whitespacesAndNewlines), "diverged")
+        XCTAssertTrue(try status().contains("UU a.swift"))
+        XCTAssertEqual(try git("stash list --format=%gs").hasPrefix("On master: Autostash"), true)
+    }
+
     func testStashCanKeepTheIndex() throws {
         try prepareStash()
         try run(GitRepository.stashScript, repository, "keepindex", "k")
@@ -1303,6 +1370,82 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.pop)
         gitView.perform(.discard)
         XCTAssertNil(gitView.menu)
+    }
+
+    func testSpaceChecksOutABranchACommitAndNothingOnTheCurrentBranch() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        // The current branch: nothing.
+        gitView.perform(.tab(.branches))
+        gitView.perform(.toggle)
+        XCTAssertNil(gitView.menu)
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        // Another branch: checked out at once, with no Agent working there.
+        gitView.perform(.down)
+        XCTAssertEqual(gitView.level.selection, "branch:feature")
+        gitView.perform(.toggle)
+        XCTAssertNil(gitView.menu)
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "branch", "feature", "0"]])
+        // A commit in History, and in a branch's commits: detached.
+        gitView.perform(.tab(.history))
+        gitView.perform(.toggle)
+        XCTAssertEqual(gitView.queuedWriteArguments.last, ["/repo", "commit", "c2", "0"])
+        gitView.perform(.tab(.branches))
+        gitView.perform(.up)
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .branch)
+        gitView.perform(.down)
+        gitView.perform(.toggle)
+        XCTAssertEqual(gitView.queuedWriteArguments.last, ["/repo", "commit", "c1", "0"])
+        // In the commit's files, space still folds, and checks nothing out.
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .files)
+        let queued = gitView.queuedWriteArguments.count
+        gitView.perform(.toggle)
+        XCTAssertEqual(gitView.queuedWriteArguments.count, queued)
+        XCTAssertNil(gitView.menu)
+    }
+
+    func testEveryCheckoutGoesThroughTheAgentGuard() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
+                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        gitView.perform(.toggle)
+        XCTAssertEqual(gitView.menu?.title, "Check out")
+        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        gitView.closeMenu()
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        gitView.perform(.toggle)
+        XCTAssertTrue(gitView.chooseMenu(key: "y"))
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "branch", "feature", "0"]])
+        gitView.perform(.tab(.history))
+        gitView.perform(.toggle)
+        XCTAssertEqual(gitView.menu?.title, "Check out")
+        XCTAssertEqual(gitView.menu?.subject, .text("c2"))
+    }
+
+    func testAChangeInTheWayOfACheckoutAsksToAutostashAndEscapeChangesNothing() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        let target = GitView.CheckoutTarget.branch("feature")
+        gitView.finishCheckout(target, .failure(TmuxError.failed(status: 1, stderr: "\(GitRepository.checkoutBlockedMarker)\nerror: Your local changes would be overwritten by checkout")))
+        XCTAssertEqual(gitView.menu?.id, "autostash")
+        XCTAssertEqual(gitView.menu?.title, "Autostash?")
+        XCTAssertEqual(gitView.menu?.choices.first?.note, "You must stash and pop your changes to bring them across. Do this automatically?")
+        XCTAssertNil(gitView.writeError)
+        gitView.closeMenu()
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        gitView.finishCheckout(target, .failure(TmuxError.failed(status: 1, stderr: "\(GitRepository.checkoutBlockedMarker)\nerror")))
+        XCTAssertTrue(gitView.chooseMenu(key: "y"))
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "branch", "feature", "1"]])
+        // Another failure shows git's message.
+        gitView.finishCheckout(target, .failure(TmuxError.failed(status: 1, stderr: "fatal: 'feature' is already used by worktree at '/x'")))
+        XCTAssertNil(gitView.menu)
+        XCTAssertEqual(gitView.writeError, "fatal: 'feature' is already used by worktree at '/x'")
     }
 
     func testApplyAndPopOfAStashListTheAgentsWorkingThereButDropDoesNot() {

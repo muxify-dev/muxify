@@ -419,7 +419,7 @@ go on to the actions above.
 | j / k, ↓ / ↑ | Select the next or previous item; in the diff, the next or previous line |
 | < / > | First or last item; in the diff, the first or last line |
 | ↩ | On a folder, fold or open it; on a branch, go into its commits, or while comparing, into its Diff files; on a commit or stash, go into its Diff files; otherwise go to the diff |
-| Space | In Changes, stage the file or folder, or unstage it once all of it is staged; in a change's diff, stage the selected lines, or the cursor's, or unstage them in its Staged part; in Diff files, fold or open a folder; in Stashes, apply the selected stash after confirming, and it stays |
+| Space | In Changes, stage the file or folder, or unstage it once all of it is staged; in a change's diff, stage the selected lines, or the cursor's, or unstage them in its Staged part; in Diff files, fold or open a folder; in Stashes, apply the selected stash after confirming, and it stays; in Branches, check out the selected branch, and on the branch you're on do nothing; in History and in a branch's commits, check out the selected commit, which leaves a detached HEAD |
 | - / = | Fold or open every folder of the list |
 | l / h, → / ← | Go to the diff (on a branch, into its commits), or back to the list; from a list you went into, back out |
 | ⇧↓ / ⇧↑ | Select one more line below or above |
