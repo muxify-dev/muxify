@@ -446,6 +446,48 @@ enum GitRepository {
     git rev-parse --short HEAD
     """
 
+    /// Takes the folder, one of `all`, `untracked`, `staged`, `unstaged` and
+    /// `keepindex`, and the message, which may be empty. Stashes as `git
+    /// stash push` does, which leaves untracked files except for `untracked`.
+    /// `unstaged` is how lazygit does it: what's staged is committed for a
+    /// moment, the rest is stashed, and the commit is undone, softly.
+    static let stashScript = """
+    cd "$1" || exit 1
+    kind=$2 message=$3
+    push() {
+        flags=$1
+        set -- push -q
+        if [ -n "$flags" ]; then set -- "$@" "$flags"; fi
+        if [ -n "$message" ]; then set -- "$@" -m "$message"; fi
+        git stash "$@"
+    }
+    case $kind in
+        all) push ;;
+        untracked) push --include-untracked ;;
+        keepindex) push --keep-index ;;
+        staged)
+            if ! git stash push -h 2>&1 | grep -q -e --staged; then
+                echo "Stashing only what's staged needs git 2.35 or newer." >&2
+                exit 1
+            fi
+            push --staged
+            ;;
+        unstaged)
+            git rev-parse -q --verify HEAD >/dev/null || { echo "There is no commit yet to stash the unstaged changes against." >&2; exit 1; }
+            if git diff --cached --quiet; then
+                push
+                exit $?
+            fi
+            git -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -q --no-verify -m '[muxify] stashing unstaged changes' || exit 1
+            push
+            status=$?
+            git reset -q --soft HEAD^ || exit 1
+            exit $status
+            ;;
+        *) echo "Unknown stash option: $kind" >&2; exit 1 ;;
+    esac
+    """
+
     // MARK: Parsing
 
     /// The snapshot, or what the Git View says instead of one.

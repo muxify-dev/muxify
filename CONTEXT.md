@@ -269,6 +269,10 @@ _Avoid_: lazygit (when you mean ours), git panel, diff viewer
 One of the Git View's four lists: Changes, History, Branches and Stashes. Always qualified; a plain Tab is a Browser's.
 _Avoid_: Tab (alone), panel, section
 
+**Git View prompt**:
+A one-line field inside the Git View that asks for one value, as for the message of a stash. ↩ submits it and ⎋ cancels with no change. It can start with text filled in, and it can hide what is typed, as for a password. Like the Git View menu, it keeps the keyboard in the Git View.
+_Avoid_: dialog, sheet, alert
+
 **List pane**:
 The Git View's left pane, holding its Git View tabs; the diff pane beside it shows the selection's diff.
 _Avoid_: sidebar, Git View sidebar

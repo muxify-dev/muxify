@@ -416,6 +416,23 @@ keeping what's staged. New and untracked files are deleted; it can't be undone.
 The Git View asks in a menu, as lazygit does: each choice has its key, j and k
 (or ↓ and ↑) move the highlight, ↩ picks the highlighted choice, and ⎋ or q
 close the menu and change nothing. While it is open, no other Git View key acts.
+When an operation needs one value, such as a message, the Git View asks in a
+prompt: a one-line field over the Git View, filled in when the operation has a
+suggestion. ↩ submits it and ⎋ cancels with no change; a prompt for a secret,
+such as a password, shows dots as you type.
+
+In Changes, s stashes all changes, as `git stash push` does: it asks for the
+stash's message, which may be empty (git then names the stash itself), and
+leaves untracked files where they are. S opens lazygit's stash options as a
+menu: stash all changes (a); all changes including untracked files (U); only
+what's staged (s), which needs git 2.35 or newer; only what isn't staged (u),
+which keeps what's staged as it is, as lazygit does it, by committing it for a
+moment and undoing that commit; or all changes while keeping what's staged in
+the working tree too (i). Each asks for the message next. An option with
+nothing to take is dimmed, and when there is nothing to stash at all the Git
+View says so and opens nothing. Stashing changes the files of the Worktree, so it
+asks first while an Agent is working there, as below. The new stash is the first
+in Stashes, whose count goes up.
 
 An operation that changes the files of the Worktree asks first while an Agent is
 working there. If a Pane whose folder is the Worktree or inside it runs an Agent
