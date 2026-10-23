@@ -1072,6 +1072,65 @@ final class GitScriptTests: XCTestCase {
         XCTAssertThrowsError(try run(GitRepository.resetScript, path, "bogus", "HEAD"))
     }
 
+    private func sha(_ revision: String, in path: String) throws -> String {
+        try git("rev-parse \(revision)", in: path).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func testTheSnapshotNamesTheCommonGitDirectoryTheSameFromEveryWorktree() throws {
+        let path = try mergeableRepository()
+        let linked = directory.url.appendingPathComponent("merges-linked").path
+        try git("worktree add -q -b linked \"\(linked)\"", in: path)
+        let main = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, path)).get()
+        let other = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, linked)).get()
+        XCTAssertFalse(main.commonDirectory.isEmpty)
+        XCTAssertEqual(main.commonDirectory, other.commonDirectory)
+        XCTAssertNotEqual(main.root, other.root)
+        let unrelated = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, try conflictedRepository())).get()
+        XCTAssertNotEqual(unrelated.commonDirectory, main.commonDirectory)
+    }
+
+    func testCherryPickingPutsTheCopiesOnTheBranchOldestFirstWhateverTheCopyOrder() throws {
+        let path = try mergeableRepository()
+        let newest = try sha("side", in: path), oldest = try sha("side~1", in: path)
+        // Copied newest first, as a user may; the pick still goes oldest first, or "Side two" would not apply.
+        try run(GitRepository.cherryPickScript, path, newest, oldest)
+        XCTAssertEqual(try git("log --format=%s master~0 -2", in: path), "Side two\nSide one\n")
+        XCTAssertEqual(try git("rev-parse --abbrev-ref HEAD", in: path), "master\n")
+        XCTAssertFalse(try inProgress(path))
+        // One commit alone, and commits of unrelated branches in any order.
+        try git("reset -q --hard HEAD~2", in: path)
+        try run(GitRepository.cherryPickScript, path, try sha("ahead", in: path))
+        XCTAssertEqual(try git("log --format=%s -1", in: path), "Ahead one\n")
+        try git("reset -q --hard HEAD~1", in: path)
+        try run(GitRepository.cherryPickScript, path, try sha("ahead", in: path), newest, oldest)
+        XCTAssertEqual(try git("log --format=%s -3", in: path).split(separator: "\n").sorted(), ["Ahead one", "Side one", "Side two"])
+        XCTAssertLessThan(try git("log --format=%s", in: path).range(of: "Side two")!.lowerBound,
+                          try git("log --format=%s", in: path).range(of: "Side one")!.lowerBound)
+    }
+
+    func testACherryPickThatConflictsStopsWithTheConflictsAndMContinuesSkipsOrAbortsIt() throws {
+        let path = try conflictedRepository()
+        let one = try sha("side~1", in: path), two = try sha("side", in: path)
+        XCTAssertThrowsError(try run(GitRepository.cherryPickScript, path, two, one)) {
+            XCTAssertTrue(self.stderr(of: $0).contains("The cherry-pick conflicted"), self.stderr(of: $0))
+        }
+        XCTAssertTrue(try inProgress(path))
+        XCTAssertEqual(try git("status --porcelain", in: path), "UU f.txt\n")
+        try resolve(path)
+        // The first pick is continued; the second conflicts with what was resolved, and stops again.
+        XCTAssertThrowsError(try step("cherry-pick", "continue", in: path))
+        XCTAssertEqual(try git("log --format=%s -1", in: path), "Side one\n")
+        XCTAssertTrue(try inProgress(path))
+        XCTAssertEqual(try git("status --porcelain", in: path), "UU f.txt\n")
+        // m aborts the rest, back to where the paste began; another failure prints git's message.
+        try step("cherry-pick", "abort", in: path)
+        XCTAssertFalse(try inProgress(path))
+        XCTAssertEqual(try git("log --format=%s -1", in: path), "Master two\n")
+        XCTAssertThrowsError(try run(GitRepository.cherryPickScript, path, "nowhere")) {
+            XCTAssertTrue(self.stderr(of: $0).contains("nowhere"), self.stderr(of: $0))
+        }
+    }
+
     private func rebase(onto branch: String, in path: String) throws {
         try run(GitRepository.rebaseScript, path, branch, "side")
     }
@@ -2273,6 +2332,107 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(guarded.queuedWriteArguments, [])
         XCTAssertTrue(guarded.chooseMenu(key: "y"))
         XCTAssertEqual(guarded.queuedWriteArguments, [["/repo", "hard", "c1"]])
+    }
+
+    func testCTogglesTheCommitSelectedInHistoryAndABranchsCommitsAndNowhereElse() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.perform(.copyCommit)
+        XCTAssertEqual(gitView.copiedCommits, [], "C does nothing in Changes")
+        gitView.perform(.tab(.history))
+        gitView.perform(.down)
+        let commit = snapshot.commits[1]
+        XCTAssertFalse(gitView.isCopied(commit))
+        gitView.perform(.copyCommit)
+        XCTAssertEqual(gitView.copiedCommits, [commit.sha])
+        XCTAssertTrue(gitView.isCopied(commit))
+        gitView.perform(.copyCommit)
+        XCTAssertEqual(gitView.copiedCommits, [])
+        gitView.perform(.copyCommit)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.copyCommit)
+        gitView.perform(.tab(.stashes))
+        gitView.perform(.copyCommit)
+        XCTAssertEqual(gitView.copiedCommits, [commit.sha], "C copies only commits")
+        // A branch's commits.
+        gitView.perform(.tab(.branches))
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .branch)
+        gitView.perform(.copyCommit)
+        XCTAssertEqual(gitView.copiedCommits.count, 2)
+    }
+
+    func testCopiedCommitsAreSharedByEveryGitViewOfTheRepositoryAndNotByOtherRepositories() {
+        let shared = CopiedCommits()
+        var main = snapshot
+        main.commonDirectory = "/repo/.git"
+        var linked = snapshot
+        linked.root = "/repo-linked"
+        linked.commonDirectory = "/repo/.git"
+        var other = snapshot
+        other.root = "/other"
+        other.commonDirectory = "/other/.git"
+        let views = [("@1", main), ("@2", linked), ("@3", other)].map { id, snapshot in
+            let view = GitView(windowID: id)
+            view.copiedStore = shared
+            view.apply(snapshot)
+            view.perform(.tab(.history))
+            return view
+        }
+        views[0].perform(.down)
+        views[0].perform(.copyCommit)
+        XCTAssertEqual(views[1].copiedCommits, views[0].copiedCommits, "another Worktree of the repository sees the copy")
+        XCTAssertEqual(views[1].copiedCommits.count, 1)
+        XCTAssertTrue(views[1].isCopied(snapshot.commits[1]))
+        XCTAssertEqual(views[2].copiedCommits, [], "another repository does not")
+        // Taking it out in the second Worktree takes it out of the first; ⌃r clears it for both.
+        views[1].perform(.down)
+        views[1].perform(.copyCommit)
+        XCTAssertEqual(views[0].copiedCommits, [])
+        views[0].perform(.copyCommit)
+        views[2].perform(.clearCopied)
+        XCTAssertEqual(views[1].copiedCommits.count, 1, "clearing in another repository leaves it")
+        views[1].perform(.clearCopied)
+        XCTAssertEqual(views[0].copiedCommits, [])
+    }
+
+    func testVAsksToCherryPickThroughTheGuardAndRunsTheCopiesOnlyAfterTheAnswer() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.perform(.tab(.history))
+        gitView.perform(.pasteCommits)
+        XCTAssertNil(gitView.menu, "nothing is copied")
+        XCTAssertNotNil(gitView.writeError)
+        gitView.perform(.copyCommit)
+        gitView.perform(.down)
+        gitView.perform(.copyCommit)
+        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
+                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        // Only in History.
+        gitView.perform(.tab(.branches))
+        gitView.perform(.pasteCommits)
+        XCTAssertNil(gitView.menu)
+        gitView.perform(.tab(.history))
+        gitView.perform(.pasteCommits)
+        XCTAssertEqual(gitView.menu?.id, "cherry-pick")
+        XCTAssertEqual(gitView.menu?.choices.first?.note, "Are you sure you want to cherry-pick the 2 copied commits onto this branch?")
+        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        XCTAssertTrue(gitView.chooseMenu(key: "y"))
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo"] + gitView.copiedCommits])
+        XCTAssertEqual(gitView.copiedCommits.count, 2, "they stay until the paste has succeeded")
+    }
+
+    func testVWhileAnOperationIsInProgressSaysSoAndOpensNothing() {
+        var busy = snapshot
+        busy.operation = .cherryPick("abc")
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(busy)
+        gitView.perform(.tab(.history))
+        gitView.perform(.copyCommit)
+        gitView.perform(.pasteCommits)
+        XCTAssertNil(gitView.menu)
+        XCTAssertTrue(gitView.writeError?.contains("continue or abort it with m") == true, gitView.writeError ?? "")
     }
 
     private func trackedSnapshot(ahead: Int = 0, behind: Int = 0) -> GitSnapshot {

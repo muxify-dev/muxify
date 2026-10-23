@@ -12,6 +12,8 @@ struct GitSnapshot: Equatable {
     /// The repository's own folder: where its main checkout is, or its git directory when it is bare. Topic records
     /// name a Worktree's repository by it.
     var repositoryFolder = ""
+    /// The repository's common git directory, the same from every Worktree of it: what Copied commits are kept by.
+    var commonDirectory = ""
     /// The current branch, or the short commit of a detached HEAD.
     var head: String
     var isDetached = false
@@ -583,6 +585,36 @@ enum GitRepository {
     fi
     """
 
+    /// Takes the folder and the full hashes of the Copied commits, in any order. Cherry-picks them onto the branch you're
+    /// on, oldest first: parents before their children, found by walking from the copies down to their common ancestor.
+    /// A pick that conflicts is told apart from other failures, which print what git said: it stays in progress with the
+    /// conflicts in Changes, where m continues, skips or aborts it.
+    static let cherryPickScript = """
+    cd "$1" || exit 1
+    shift
+    export GIT_EDITOR=true
+    base=$(git merge-base --octopus "$@" 2>/dev/null)
+    if [ -n "$base" ]; then
+        ordered=$(git rev-list --topo-order --reverse "$@" "^$base^@")
+    else
+        ordered=$(git rev-list --no-walk --reverse "$@")
+    fi
+    picks=
+    for commit in $ordered; do
+        case " $* " in *" $commit "*) picks="$picks $commit" ;; esac
+    done
+    out=$(LC_ALL=C git -c core.editor=true -c color.ui=never cherry-pick $picks 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+            printf 'The cherry-pick conflicted: the conflicted files are in Changes. Stage them, then m continues, skips or aborts it.\\n' >&2
+        else
+            printf '%s\\n' "$out" >&2
+        fi
+        exit 1
+    fi
+    """
+
     /// Takes the folder, `soft`, `mixed` or `hard`, and the commit to reset the branch you're on to. Git's own message
     /// shows when it fails. A hard reset leaves untracked files.
     static let resetScript = """
@@ -812,6 +844,7 @@ enum GitRepository {
             head: isDetached ? String(headLine.dropFirst("detached ".count)) : headLine,
             isDetached: isDetached
         )
+        snapshot.commonDirectory = common
         if !common.isEmpty {
             snapshot.repositoryFolder = (common as NSString).lastPathComponent == ".git" ? (common as NSString).deletingLastPathComponent : common
         }

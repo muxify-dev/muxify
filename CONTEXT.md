@@ -289,6 +289,10 @@ _Avoid_: Tab (alone), panel, section
 A one-line field inside the Git View that asks for one value, as for the message of a stash. ↩ submits it and ⎋ cancels with no change. It can start with text filled in, and it can hide what is typed, as for a password. Like the Git View menu, it keeps the keyboard in the Git View.
 _Avoid_: dialog, sheet, alert
 
+**Copied commits**:
+The commits that `C` copied in the Git View, for `V` to cherry-pick onto the branch you're on. They belong to the repository, not to one Window: every Git View in any Worktree of it shows and pastes them. Kept while Muxify runs, not saved.
+_Avoid_: clipboard, copied commit list
+
 **List pane**:
 The Git View's left pane, holding its Git View tabs; the diff pane beside it shows the selection's diff.
 _Avoid_: sidebar, Git View sidebar
