@@ -2334,6 +2334,15 @@ final class WorkspaceStore {
         case .toggleMaximizeBrowser: toggleMaximize(.browser)
         case .focusTerminal: focus(.terminal)
         case .focusBrowser: focus(.browser)
+        case .toggleZoomPane: toggleZoomOfCurrentPane()
+        case .resizePaneLeft: resizeCurrentPane("-L")
+        case .resizePaneRight: resizeCurrentPane("-R")
+        case .resizePaneUp: resizeCurrentPane("-U")
+        case .resizePaneDown: resizeCurrentPane("-D")
+        case .selectNextTab: browserCommand { $0.selectTab(offset: 1) }
+        case .selectPrevTab: browserCommand { $0.selectTab(offset: -1) }
+        case .browserBack: browserCommand { $0.activeTab?.goBack() }
+        case .browserForward: browserCommand { $0.activeTab?.goForward() }
         case .selectCard1, .selectCard2, .selectCard3, .selectCard4, .selectCard5,
              .selectCard6, .selectCard7, .selectCard8, .selectCard9,
              .selectWindow1, .selectWindow2, .selectWindow3, .selectWindow4, .selectWindow5,
@@ -2343,14 +2352,29 @@ final class WorkspaceStore {
             if let selection = action.quickSwitchSelection { quickSwitch(selection) }
         case .selectNextWindow, .selectPrevWindow, .selectNextTopicWindow, .selectPrevTopicWindow,
              .selectNextSession, .selectPrevSession, .selectNextTopic, .selectPrevTopic:
-            if let step = action.step { self.step(step.level, step.direction) }
+            guard let step = action.step else { return }
+            // Windows and Tabs share their step keys: with the Browser's Focus, a Window step goes to a Tab.
+            if browserHasFocus, step.level == .window || step.level == .topicWindow {
+                browserCommand { $0.selectTab(offset: step.direction == .next ? 1 : -1) }
+            } else {
+                self.step(step.level, step.direction)
+            }
         }
     }
 
+    func toggleZoomOfCurrentPane() {
+        runOnCurrentPane { pane, _ in ["resize-pane", "-Z", "-t", pane] }
+    }
+
+    /// Moves the current Pane's border by 10 cells, as Ghostty's resize_split does.
+    private func resizeCurrentPane(_ direction: String) {
+        runOnCurrentPane { pane, _ in ["resize-pane", direction, "-t", pane, "10"] }
+    }
+
     /// The Config's keybinds, which act before the terminal, Browser and menu
-    /// see the key, so they win over Ghostty and page keybinds. Then shortcuts
+    /// see the key, so they win over Ghostty and page keybinds. Then a shortcut
     /// the menu can't express: ⌘W closes a Tab when the Browser has focus and
-    /// never the app window (which would quit Muxify); ⌃Tab and ⌃⇧Tab switch Tabs.
+    /// never the app window (which would quit Muxify).
     /// Other keys in the terminal are left to Ghostty/tmux bindings.
     private func installKeyMonitor() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
@@ -2362,6 +2386,7 @@ final class WorkspaceStore {
     @discardableResult
     func performConfiguredShortcut(_ trigger: KeyTrigger) -> Bool {
         guard !isShuttingDown, let action = config.keybinds.action(for: trigger) else { return false }
+        if let side = action.requiredFocus, !(side == .terminal ? terminalHasFocus : browserHasFocus) { return false }
         // ⌘G, the Git View's, is Find Next while the Browser is finding.
         if trigger == Self.findNext, browserHasFocus, currentBrowser?.activeTab?.isFindShown == true { return false }
         perform(action)
@@ -2398,11 +2423,6 @@ final class WorkspaceStore {
                 if browserHasFocus { browserCommand { $0.closeActiveTab() } }
                 return nil
             }
-        }
-        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
-        if event.keyCode == 0x30, flags == .control || flags == [.control, .shift], browserHasFocus {
-            currentBrowser?.selectTab(offset: flags.contains(.shift) ? -1 : 1)
-            return nil
         }
         return event
     }
@@ -2487,9 +2507,7 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
         }
     }
 
-    func ghosttyToggleSplitZoom() {
-        runOnCurrentPane { pane, _ in ["resize-pane", "-Z", "-t", pane] }
-    }
+    func ghosttyToggleSplitZoom() { toggleZoomOfCurrentPane() }
 
     func ghosttyEqualizeSplits() {
         runOnCurrentPane { pane, _ in ["select-layout", "-E", "-t", pane] }

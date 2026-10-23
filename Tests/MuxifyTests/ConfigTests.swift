@@ -291,7 +291,8 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(config.keybinds.action(for: trigger("cmd+s")), .toggleSidebar)
             XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+s")), .toggleSidebar)
             XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b")), .toggleBrowser)
-            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+n")), .newAppWindow)
+            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+n")), .newTopic)
+            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+n")), .newAppWindow)
             XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+backquote")), .focusTerminal)
             XCTAssertEqual(config.keybinds.firstTrigger(for: .focusTerminal), trigger("cmd+shift+j"))
             XCTAssertNil(config.keybinds.action(for: trigger("cmd+backquote")))
@@ -468,21 +469,47 @@ final class ConfigTests: XCTestCase {
         }
     }
 
-    func testNewAppWindowCanBeRemappedDisabledOrHaveItsDefaultClaimed() throws {
-        let remapped = try load("keybindings:\n  new_app_window: [cmd+shift+n, ctrl+cmd+n]")
-        XCTAssertNil(remapped.keybinds.action(for: trigger("cmd+n")))
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("cmd+shift+n")), .newAppWindow)
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("ctrl+cmd+n")), .newAppWindow)
-        XCTAssertTrue(remapped.keybinds.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
+    func testGhosttysCmdNOpensNoAppWindowUnlessTheConfigGivesItToNewAppWindow() throws {
+        XCTAssertFalse(Keybinds.defaults.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
+        let unbound = try load("keybindings:\n  new_topic: []")
+        XCTAssertNil(unbound.keybinds.action(for: trigger("cmd+n")))
+        XCTAssertEqual(unbound.keybinds.firstTrigger(for: .newAppWindow), trigger("cmd+shift+n"))
+        XCTAssertTrue(unbound.keybinds.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
+        let swapped = try load("keybindings:\n  new_app_window: cmd+n\n  new_topic: cmd+shift+n")
+        XCTAssertEqual(swapped.keybinds.action(for: trigger("cmd+n")), .newAppWindow)
+        XCTAssertEqual(swapped.keybinds.action(for: trigger("cmd+shift+n")), .newTopic)
+        XCTAssertFalse(swapped.keybinds.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
         let disabled = try load("keybindings:\n  new_app_window: []")
         XCTAssertNil(disabled.keybinds.firstTrigger(for: .newAppWindow))
-        XCTAssertTrue(disabled.keybinds.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
-        let claimed = try load("keybindings:\n  toggle_browser: cmd+n")
-        XCTAssertEqual(claimed.keybinds.action(for: trigger("cmd+n")), .toggleBrowser)
-        XCTAssertNil(claimed.keybinds.firstTrigger(for: .newAppWindow))
-        XCTAssertFalse(claimed.keybinds.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
-        XCTAssertFalse(Keybinds.defaults.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
-        for config in [remapped, disabled, claimed] { XCTAssertTrue(config.problems.isEmpty) }
+        XCTAssertNil(disabled.keybinds.action(for: trigger("cmd+shift+n")))
+        for config in [unbound, swapped, disabled] { XCTAssertTrue(config.problems.isEmpty) }
+    }
+
+    func testPaneAndBrowserKeybindsActOnlyWithTheirSidesFocus() throws {
+        let config = try load("")
+        let expected: [(ConfigAction, [String], PanelLayout.Side)] = [
+            (.toggleZoomPane, ["cmd+m"], .terminal),
+            (.resizePaneLeft, [], .terminal),
+            (.resizePaneRight, [], .terminal),
+            (.resizePaneUp, [], .terminal),
+            (.resizePaneDown, [], .terminal),
+            (.selectNextTab, ["cmd+shift+right_bracket", "ctrl+tab"], .browser),
+            (.selectPrevTab, ["cmd+shift+left_bracket", "ctrl+shift+tab"], .browser),
+            (.browserBack, ["cmd+left_bracket"], .browser),
+            (.browserForward, ["cmd+right_bracket"], .browser),
+        ]
+        for (action, spellings, side) in expected {
+            XCTAssertEqual(config.keybinds.triggers[action] ?? [], spellings.map(trigger), action.rawValue)
+            XCTAssertEqual(action.requiredFocus, side, action.rawValue)
+        }
+        XCTAssertNil(ConfigAction.selectNextTopicWindow.requiredFocus)
+        let custom = try load("keybindings:\n  resize_pane_left: ctrl+cmd+left\n  browser_back: cmd+left_bracket")
+        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+cmd+left")), .resizePaneLeft)
+        XCTAssertEqual(custom.keybinds.action(for: trigger("cmd+left_bracket")), .browserBack)
+        XCTAssertEqual(custom.problems, [])
+        let claimed = try load("keybindings:\n  select_prev_topic_window: cmd+left_bracket")
+        XCTAssertEqual(claimed.keybinds.action(for: trigger("cmd+left_bracket")), .selectPrevTopicWindow)
+        XCTAssertNil(claimed.keybinds.firstTrigger(for: .browserBack))
     }
 
     func testInvalidHeaderHeightUsesTheDefaultAndReportsTheLine() throws {

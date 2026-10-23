@@ -175,7 +175,8 @@ private struct HeaderBar: View {
             TitlebarButton(
                 systemName: "terminal",
                 help: help(layout.shows(.terminal) ? "Hide Terminal" : "Show Terminal", .toggleTerminal),
-                isOn: layout.shows(.terminal),
+                isOn: layout.isToggledOn(.terminal),
+                mark: mark(of: .terminal, in: layout),
                 action: { store.toggle(.terminal) }
             )
             .disabled(!store.canToggle(.terminal))
@@ -183,7 +184,8 @@ private struct HeaderBar: View {
             TitlebarButton(
                 systemName: "sidebar.right",
                 help: help(layout.shows(.browser) ? "Hide Browser" : "Show Browser", .toggleBrowser),
-                isOn: layout.shows(.browser),
+                isOn: layout.isToggledOn(.browser),
+                mark: mark(of: .browser, in: layout),
                 action: { store.toggle(.browser) }
             )
             .disabled(!store.canToggle(.browser))
@@ -203,6 +205,15 @@ private struct HeaderBar: View {
 
     private func help(_ title: String, _ action: ConfigAction) -> String {
         keybinds.firstTrigger(for: action).map { "\(title) (\($0.symbol))" } ?? title
+    }
+
+    /// The toggles say which side is Maximized, and which side the toggles keep for Restore.
+    private func mark(of side: PanelLayout.Side, in layout: PanelLayout) -> TitlebarButtonMark {
+        switch layout.maximized {
+        case side: .maximized
+        case side.other? where layout.isToggledOn(side): .hiddenByMaximize
+        default: .none
+        }
     }
 }
 
@@ -409,18 +420,30 @@ enum TitlebarMetrics {
     static let trafficLightsWidth: CGFloat = 78
 }
 
+/// What a side's toggle shows besides on and off while the Window is Maximized.
+enum TitlebarButtonMark {
+    case none
+    /// The side shown alone: a filled accent capsule.
+    case maximized
+    /// On in the toggles, but hidden until Restore: dimmed.
+    case hiddenByMaximize
+}
+
 struct TitlebarButton<Icon: View>: View {
     let help: String
     var isOn = false
+    var mark = TitlebarButtonMark.none
     let action: () -> Void
     @ViewBuilder let icon: () -> Icon
 
     @State private var hovering = false
     @Environment(\.isEnabled) private var isEnabled
 
-    init(help: String, isOn: Bool = false, action: @escaping () -> Void, @ViewBuilder icon: @escaping () -> Icon) {
+    init(help: String, isOn: Bool = false, mark: TitlebarButtonMark = .none, action: @escaping () -> Void,
+         @ViewBuilder icon: @escaping () -> Icon) {
         self.help = help
         self.isOn = isOn
+        self.mark = mark
         self.action = action
         self.icon = icon
     }
@@ -429,26 +452,48 @@ struct TitlebarButton<Icon: View>: View {
         Button(action: action) {
             icon()
                 .font(.system(size: 13, weight: .regular))
-                .foregroundStyle(isOn ? Color.accentColor : Color.secondary)
-                .opacity(isEnabled ? 1 : 0.4)
+                .foregroundStyle(isOn || mark == .maximized ? Color.accentColor : Color.secondary)
+                .opacity(opacity)
                 .frame(width: 28, height: 24)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(hovering ? Color.primary.opacity(0.08) : .clear)
+                        .fill(background)
                 )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(help)
-        .accessibilityValue(isOn ? "on" : "off")
+        .accessibilityValue(accessibilityValue)
         .actsOnFirstClick()
+    }
+
+    /// The Maximized side's toggle can't hide the only side on screen, so it is disabled, but its capsule stays clear.
+    private var opacity: Double {
+        switch mark {
+        case .maximized: 1
+        case .hiddenByMaximize: 0.45
+        case .none: isEnabled ? 1 : 0.4
+        }
+    }
+
+    private var background: Color {
+        if mark == .maximized { return Color.accentColor.opacity(hovering ? 0.28 : 0.2) }
+        return hovering ? Color.primary.opacity(0.08) : .clear
+    }
+
+    private var accessibilityValue: String {
+        switch mark {
+        case .maximized: "maximized"
+        case .hiddenByMaximize: "hidden"
+        case .none: isOn ? "on" : "off"
+        }
     }
 }
 
 extension TitlebarButton where Icon == Image {
-    init(systemName: String, help: String, isOn: Bool = false, action: @escaping () -> Void) {
-        self.init(help: help, isOn: isOn, action: action) { Image(systemName: systemName) }
+    init(systemName: String, help: String, isOn: Bool = false, mark: TitlebarButtonMark = .none, action: @escaping () -> Void) {
+        self.init(help: help, isOn: isOn, mark: mark, action: action) { Image(systemName: systemName) }
     }
 }
 

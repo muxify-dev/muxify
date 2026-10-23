@@ -44,6 +44,15 @@ public enum ConfigAction: String, KeybindAction {
     case toggleMaximizeBrowser = "toggle_maximize_browser"
     case focusTerminal = "focus_terminal"
     case focusBrowser = "focus_browser"
+    case toggleZoomPane = "toggle_zoom_pane"
+    case resizePaneLeft = "resize_pane_left"
+    case resizePaneRight = "resize_pane_right"
+    case resizePaneUp = "resize_pane_up"
+    case resizePaneDown = "resize_pane_down"
+    case selectNextTab = "select_next_tab"
+    case selectPrevTab = "select_prev_tab"
+    case browserBack = "browser_back"
+    case browserForward = "browser_forward"
     case selectCard1 = "select_card_1"
     case selectCard2 = "select_card_2"
     case selectCard3 = "select_card_3"
@@ -81,8 +90,8 @@ public enum ConfigAction: String, KeybindAction {
     case selectPrevTopic = "select_prev_topic"
 
     public static let defaultSpelling: KeyValuePairs<ConfigAction, [String]> = [
-        .newAppWindow: ["cmd+n"],
-        .newTopic: [],
+        .newAppWindow: ["cmd+shift+n"],
+        .newTopic: ["cmd+n"],
         .movePane: ["cmd+shift+t"],
         .moveWindow: [],
         .moveSession: ["cmd+shift+m"],
@@ -112,6 +121,15 @@ public enum ConfigAction: String, KeybindAction {
         .toggleMaximizeBrowser: ["alt+cmd+b"],
         .focusTerminal: ["cmd+shift+j", "ctrl+backquote", "ctrl+0", "alt+0"],
         .focusBrowser: ["cmd+shift+b"],
+        .toggleZoomPane: ["cmd+m"],
+        .resizePaneLeft: [],
+        .resizePaneRight: [],
+        .resizePaneUp: [],
+        .resizePaneDown: [],
+        .selectNextTab: ["cmd+shift+right_bracket", "ctrl+tab"],
+        .selectPrevTab: ["cmd+shift+left_bracket", "ctrl+shift+tab"],
+        .browserBack: ["cmd+left_bracket"],
+        .browserForward: ["cmd+right_bracket"],
         .selectCard1: ["ctrl+1"],
         .selectCard2: ["ctrl+2"],
         .selectCard3: ["ctrl+3"],
@@ -150,6 +168,18 @@ public enum ConfigAction: String, KeybindAction {
     ]
 
     public static let defaultTriggers = parse(defaultSpelling)
+
+    /// The side that must have Focus for the keybind to act. With Focus
+    /// elsewhere, the key goes on to Ghostty, the page or the menu, so a Pane
+    /// key does not take a key from the Browser, and a Tab key does not take
+    /// one from the Terminal.
+    public var requiredFocus: PanelLayout.Side? {
+        switch self {
+        case .toggleZoomPane, .resizePaneLeft, .resizePaneRight, .resizePaneUp, .resizePaneDown: .terminal
+        case .selectNextTab, .selectPrevTab, .browserBack, .browserForward: .browser
+        default: nil
+        }
+    }
 }
 
 /// What a keybind does while a Command Palette is open, from
@@ -264,9 +294,11 @@ public typealias Keybinds = KeybindSet<ConfigAction>
 public typealias PaletteKeybinds = KeybindSet<PaletteAction>
 
 extension KeybindSet where Action == ConfigAction {
-    /// Remapping/disabling New App Window must also remove Ghostty's fallback
-    /// Cmd+N behavior, rather than leaving a second shortcut in the terminal.
+    /// Ghostty's own Cmd+N opens an App Window. New App Window has only the
+    /// keys the Config gives it, so Cmd+N does nothing while no action has it.
     public func suppressesDefaultAppWindowShortcut(_ trigger: KeyTrigger) -> Bool {
-        trigger == Self.defaults.firstTrigger(for: .newAppWindow) && action(for: trigger) == nil
+        trigger == Self.ghosttyNewWindow && action(for: trigger) == nil
     }
+
+    private static let ghosttyNewWindow = KeyTrigger(modifiers: .command, key: .character("n"))
 }

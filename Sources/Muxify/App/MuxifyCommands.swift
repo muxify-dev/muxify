@@ -121,14 +121,14 @@ import MuxifyCore
             Button("Close Tab") { store?.browserCommand { $0.closeActiveTab() } }
                 .keyboardShortcut("w", modifiers: .command)
             Button("Show Next Tab") { store?.browserCommand { $0.selectTab(offset: 1) } }
-                .keyboardShortcut("]", modifiers: [.command, .shift])
+                .keyboardShortcut(keybinds.firstTrigger(for: .selectNextTab)?.shortcut)
             Button("Show Previous Tab") { store?.browserCommand { $0.selectTab(offset: -1) } }
-                .keyboardShortcut("[", modifiers: [.command, .shift])
+                .keyboardShortcut(keybinds.firstTrigger(for: .selectPrevTab)?.shortcut)
             Divider()
             Button("Back") { store?.browserCommand { $0.activeTab?.goBack() } }
-                .keyboardShortcut("[", modifiers: .command)
+                .keyboardShortcut(keybinds.firstTrigger(for: .browserBack)?.shortcut)
             Button("Forward") { store?.browserCommand { $0.activeTab?.goForward() } }
-                .keyboardShortcut("]", modifiers: .command)
+                .keyboardShortcut(keybinds.firstTrigger(for: .browserForward)?.shortcut)
             Button("Reload Page") { store?.browserCommand { $0.activeTab?.reloadOrStop() } }
                 .keyboardShortcut("r", modifiers: .command)
             Button("Copy URL") { store?.browserCommand { $0.activeTab?.copyURL() } }

@@ -382,6 +382,11 @@ public struct Config: Equatable {
         #   # Cmd+backquote stays available for macOS App Window switching.
         #   # select_card_1 through select_card_9 Jump To Topic or Session cards.
         #   # select_tab_1 through select_tab_9 select Tabs and show the Browser.
+        #   # toggle_zoom_pane and resize_pane_* act only while the Terminal
+        #   # has Focus. select_next_tab, select_prev_tab, browser_back and
+        #   # browser_forward act only while the Browser has Focus. With Focus
+        #   # elsewhere, their keys go on to Ghostty, the page or the menu.
+        #   # resize_pane_* move the Pane's border 10 cells and are unbound.
         #   # Hold the exact modifiers alone to show Hints after hints.hold_delay.
         #   # Hints show the resolved triggers. The shortcuts act without a wait.
         #   # select_window_1 through select_window_9 pick the first through
@@ -391,6 +396,8 @@ public struct Config: Equatable {
         #   # select_next_topic_window and select_prev_topic_window step
         #   # through every Window of the Active Topic in Topics mode, and
         #   # wrap within the Session in Sessions mode. They are unbound.
+        #   # While the Browser has Focus, these four Window step actions
+        #   # select the next or previous Tab instead.
         #   # select_next_session and select_prev_session step through the
         #   # Sessions the Sidebar shows: in Topics mode, those of the Active
         #   # Topic. select_next_topic and select_prev_topic go to the Topic

@@ -221,6 +221,10 @@ _Avoid_: the keyboard (when you mean where input goes), active side, first respo
 Showing one of a Window's Terminal and Browser alone, with the Sidebar hidden, until the user restores the Window; it never changes the toggles.
 _Avoid_: focus, zoom (tmux zooms a Pane), solo, full screen
 
+**Zoom**:
+tmux showing one Pane of a Window alone, until the user zooms it again. It never changes the Window's layout of Panes.
+_Avoid_: Maximize (when you mean a Pane), full screen
+
 **Hint**:
 The key that Muxify shows on a Topic or Session card, a Window row, a Tab or the Terminal while the user holds a modifier alone, such as ⌃2, or at all times on the cards, Window rows and Tabs where the Config turns that on. When it shows at all times, it is the key alone, such as 2. Pressing that key goes to what the Hint is on.
 _Avoid_: badge, number, label, Notification (when you mean the key mark)

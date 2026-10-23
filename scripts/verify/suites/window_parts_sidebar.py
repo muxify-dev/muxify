@@ -44,6 +44,18 @@ class WindowPartsSidebar(unittest.TestCase):
         return ', '.join(row['accessibilityLabel'] for row in rs
                          if row.get('accessibilityIdentifier') == self.row_key and row.get('accessibilityLabel'))
 
+    def test_the_pane_badge_glows_while_a_pane_is_zoomed(self):
+        self.show_mode('topics')
+        badge = 'window-right-panes-' + self.window
+        self.s.tmux('split-window', '-d', '-t', self.window, '/bin/zsh -f')
+        self.addCleanup(self.s.tmux, 'kill-pane', '-a', '-t', self.window + '.0')
+        self.s.tmux('resize-pane', '-Z', '-t', self.window + '.0')
+        self.s.wait_rows(lambda rs: self.s.row(badge, rs).get('accessibilityValue') == 'zoomed',
+                         'the Pane badge did not show the Zoomed Pane')
+        self.s.tmux('resize-pane', '-Z', '-t', self.window + '.0')
+        self.s.wait_rows(lambda rs: self.s.has(badge, rs) and self.s.row(badge, rs).get('accessibilityValue') != 'zoomed',
+                         'the Pane badge kept the Zoom mark after the Pane was zoomed out')
+
     def test_native_defaults_keep_mode_specific_pane_badges(self):
         for mode in ['topics', 'sessions']:
             self.show_mode(mode)

@@ -39,6 +39,11 @@ public struct PanelLayout: Hashable {
 
     public var hidesSidebar: Bool { maximized != nil }
 
+    /// Whether the toggles show `side`, also while Maximize hides it.
+    public func isToggledOn(_ side: Side) -> Bool {
+        shown.includes(side)
+    }
+
     /// The only side on screen can't be hidden.
     public func canToggle(_ side: Side) -> Bool {
         !shows(side) || shows(side.other)

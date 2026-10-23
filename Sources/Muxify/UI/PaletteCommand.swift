@@ -34,6 +34,7 @@ enum PaletteCommand: String, CaseIterable {
     case maximizeBrowser = "Maximize Browser"
     case focusTerminal = "Focus Terminal"
     case focusBrowser = "Focus Browser"
+    case zoomPane = "Zoom Pane"
     case showSidebar = "Show Sidebar"
     case hideSidebar = "Hide Sidebar"
     case showTerminal = "Show Terminal"
@@ -92,6 +93,11 @@ enum PaletteCommand: String, CaseIterable {
         case .maximizeBrowser: .toggleMaximizeBrowser
         case .focusTerminal: .focusTerminal
         case .focusBrowser: .focusBrowser
+        case .zoomPane: .toggleZoomPane
+        case .nextTab: .selectNextTab
+        case .previousTab: .selectPrevTab
+        case .back: .browserBack
+        case .forward: .browserForward
         case .showSidebar, .hideSidebar: .toggleSidebar
         case .showTerminal, .hideTerminal: .toggleTerminal
         case .showBrowser, .hideBrowser: .toggleBrowser
@@ -166,6 +172,7 @@ extension CommandPalette {
             case .maximizeTerminal: return store.panelLayout.maximized != .terminal && store.canMaximize(.terminal)
             case .maximizeBrowser: return store.panelLayout.maximized != .browser && store.canMaximize(.browser)
             case .focusTerminal, .focusBrowser: return store.currentBrowser != nil
+            case .zoomPane: return store.selectedWindow != nil
             case .showSidebar: return !store.sidebarShown
             case .hideSidebar: return store.sidebarShown
             case .showTerminal: return !store.panelLayout.shows(.terminal) && store.canToggle(.terminal)
@@ -235,6 +242,7 @@ extension CommandPalette {
         case .unsnoozeTopic: store.presentUnsnoozeTopic(keepingHistory: true)
         case .nextSession, .previousSession, .nextTopic, .previousTopic:
             if let step = command.keybinding?.step { store.step(step.level, step.direction) }
+        case .zoomPane: store.toggleZoomOfCurrentPane()
         case .newAppWindow: store.onNewAppWindow?()
         case .newWindow: store.newWindow()
         case .newSession: store.newSession()

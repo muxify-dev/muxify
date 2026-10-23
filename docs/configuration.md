@@ -793,7 +793,7 @@ Icons are allowed only in Window `left` and `right` output, including conditiona
 Conditions, comparisons, truncation, and basename operations accept text only. An icon anywhere in those operands is a Config problem.
 Expanded variable values remain text, even when they contain icon syntax.
 Title and Summary Formats reject icon expressions. Sidebar typography still controls font, size, and color.
-The built-in right part shows a Tab badge only when Tabs exist. It shows a Pane badge for every Window in Topics mode, and for multiple Panes in Sessions mode.
+The built-in right part shows a Tab badge only when Tabs exist. It shows a Pane badge for every Window in Topics mode, and for multiple Panes in Sessions mode. While one Pane of the Window is Zoomed, the Pane badge is accent-colored on an accent capsule.
 
 | Expression | Result |
 | --- | --- |
@@ -817,7 +817,7 @@ A loop that the current object does not contain produces no text.
 | Topic | `topic_title`, `topic_pinned_flag`, `topic_dormant_flag`, `topic_tags`, `tag_count`, `session_count`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | S, W, P, T |
 | Tag, inside `T` | Its Topic's variables, plus `tag` | None |
 | Session | `session_name`, `session_base_name`, `branch`, `topic_title`, `topic_tags`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | W, P |
-| Window | Its Session variables, plus `window_index`, `window_name`, `window_title`, `window_panes`, `pane_current_command`, `pane_current_path`, `tab_count`, `agent_kind`, `agent_status` | P |
+| Window | Its Session variables, plus `window_index`, `window_name`, `window_title`, `window_panes`, `window_zoomed_flag`, `pane_current_command`, `pane_current_path`, `tab_count`, `agent_kind`, `agent_status` | P |
 | Pane | Its Window and Session variables, plus `pane_index`, `pane_label`, `pane_title`, `pane_current_command`, `pane_current_path`, `pane_active_flag`, `agent_kind`, `agent_status`, `agent_unread_flag`, `agent_group` | None |
 | Agent | Its Pane variables, including its own Window, Session, and Topic values | None |
 

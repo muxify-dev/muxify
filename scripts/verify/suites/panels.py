@@ -89,6 +89,38 @@ class Panels(unittest.TestCase):
         self.assertEqual(self.panels(), {'sidebar', 'browser'}, 'the Browser toggle hid the only side shown')
         self.s.act('press', 'toggle-terminal')
 
+    def test_the_toggles_mark_the_maximized_side_and_the_side_it_hides(self):
+        self.s.act('press', 'Maximize Terminal')
+        self.wait_panels({'terminal'}, 'Maximize Terminal did not show the Terminal alone')
+        self.wait_toggles({'toggle-terminal': 'maximized', 'toggle-browser': 'hidden'},
+                          'the toggles do not mark the Maximized Terminal and the hidden Browser')
+        self.s.act('press', 'toggle-maximize')
+        self.wait_panels({'sidebar', 'terminal', 'browser'}, 'Restore did not show what the toggles say')
+        self.wait_toggles({'toggle-terminal': 'on', 'toggle-browser': 'on'}, 'the toggles kept a Maximize mark after Restore')
+
+    def test_the_zoom_pane_command_zooms_the_current_pane(self):
+        target = 'panels:' + self.id().rsplit('.', 1)[-1][:24]
+        self.s.tmux('split-window', '-d', '-t', target, SHELL)
+        self.run_command('Zoom Pane')
+        wait(lambda: self.s.tmux('display-message', '-p', '-t', target, '#{window_zoomed_flag}') == '1',
+             'the Zoom Pane Command did not zoom the current Pane')
+        self.run_command('Zoom Pane')
+        wait(lambda: self.s.tmux('display-message', '-p', '-t', target, '#{window_zoomed_flag}') == '0',
+             'the Zoom Pane Command did not show all the Panes again')
+
+    def run_command(self, title):
+        wait(lambda: self.s.driver('press', 'Commands')['pressed'], 'Commands did not open')
+        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'Commands field did not show')
+        self.s.act('focus', 'palette-search')
+        self.s.act('set', 'palette-search', title)
+        key = 'palette-row-command-' + title
+        self.s.wait_rows(lambda rs: self.s.has(key, rs), '%s was missing from Commands' % title)
+        self.s.act('press', key)
+
+    def wait_toggles(self, expected, message):
+        values = lambda rs: {key: self.s.row(key, rs).get('accessibilityValue') for key in expected}
+        return self.s.wait_rows(lambda rs: values(rs) == expected, '%s: %s' % (message, values(self.s.rows())))
+
     def test_maximize_hides_the_sidebar_and_the_other_side_and_restore_shows_both(self):
         self.s.act('press', 'Maximize Browser')
         self.wait_panels({'browser'}, 'Maximize Browser did not show the Browser alone')

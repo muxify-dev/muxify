@@ -3,12 +3,16 @@
 ## Configurable actions
 
 These keybindings work throughout Muxify, including while a Browser page or its
-address bar has Focus. All available `keybindings` actions are listed below.
+address bar has Focus. The Pane actions act only while the Terminal has Focus,
+and the Tab and history actions only while the Browser has Focus. With Focus
+elsewhere, their keys go on to Ghostty, the page or the menu: ⌘M still minimizes
+the App Window from the Browser, and ⌘⇧] still goes to the next Window in the
+Terminal. All available `keybindings` actions are listed below.
 
 | Action | Default shortcuts | What it does |
 | --- | --- | --- |
-| `new_app_window` | ⌘N | Open a new Local Muxify App Window |
-| `new_topic` | Unbound | Open New Topic in the palette |
+| `new_app_window` | ⌘⇧N | Open a new Local Muxify App Window. While no action has ⌘N, ⌘N does nothing, so Ghostty's ⌘N does not open an App Window |
+| `new_topic` | ⌘N | Open New Topic in the palette |
 | `move_pane` | ⌘⇧T | Open Move for the current Pane |
 | `move_window` | Unbound | Open Move for the selected Window |
 | `move_session` | ⌘⇧M | Open Move for the selected Window's Session, in the Command Palette's view |
@@ -38,6 +42,15 @@ address bar has Focus. All available `keybindings` actions are listed below.
 | `toggle_maximize_browser` | ⌥⌘B | Maximize the Browser and move Focus to it, also when the Browser is hidden. While the Browser is Maximized, Restore the Window |
 | `focus_terminal` | ⌘⇧J, ⌃ + backquote, ⌃0, ⌥0 | Move Focus to the Terminal. If the Terminal is hidden, show it. If the Browser is Maximized, Restore first |
 | `focus_browser` | ⌘⇧B | Move Focus to the Browser: to its page, or to the address field of a blank Tab. If the Browser is hidden, show it. If the Terminal is Maximized, Restore first |
+| `toggle_zoom_pane` | ⌘M | Zoom the current Pane: show it alone in its Window, or show all the Panes again. While a Pane is Zoomed, its Window's Pane badge in the Sidebar is on an accent capsule. Terminal Focus only |
+| `resize_pane_left` | Unbound | Move the current Pane's border 10 cells left. Terminal Focus only |
+| `resize_pane_right` | Unbound | Move the current Pane's border 10 cells right. Terminal Focus only |
+| `resize_pane_up` | Unbound | Move the current Pane's border 10 cells up. Terminal Focus only |
+| `resize_pane_down` | Unbound | Move the current Pane's border 10 cells down. Terminal Focus only |
+| `select_next_tab` | ⌘⇧], ⌃Tab | Select the next Browser Tab. Browser Focus only |
+| `select_prev_tab` | ⌘⇧[, ⌃⇧Tab | Select the previous Browser Tab. Browser Focus only |
+| `browser_back` | ⌘[ | Go back in the active Tab's history. Browser Focus only |
+| `browser_forward` | ⌘] | Go forward in the active Tab's history. Browser Focus only |
 | `select_card_1` … `select_card_9` | ⌃1 … ⌃9 | Jump To the Topic or Session at that position in Sidebar order |
 | `select_tab_1` … `select_tab_9` | ⌥1 … ⌥9 | Select that Tab and move Focus to the Browser, showing it if hidden |
 | `select_window_1` | ⌘1 | Select the first Window in the current Session |
@@ -53,6 +66,13 @@ address bar has Focus. All available `keybindings` actions are listed below.
 | `select_prev_window` | Unbound | Select the previous Window, wrapping to the last |
 | `select_next_topic_window` | Unbound | Select the next Window of the Active Topic, wrapping to the first. In Topics mode, every Window of the Active Topic's Sessions takes part, in the order the Sidebar shows them; for No Topic, the Windows of the No Topic Sessions. In Sessions mode, only the current Session's Windows take part |
 | `select_prev_topic_window` | Unbound | Select the previous Window of the Active Topic, wrapping to the last |
+
+While the Browser has Focus, the keys of `select_next_window`,
+`select_prev_window`, `select_next_topic_window` and `select_prev_topic_window`
+select the next or previous Tab, so Windows and Tabs share their step keys.
+
+| Action | Default shortcuts | What it does |
+| --- | --- | --- |
 | `select_next_session` | Unbound | Go to the next Session the Sidebar shows, wrapping to the first. In Topics mode, only the Active Topic's Sessions take part; for No Topic, the No Topic Sessions |
 | `select_prev_session` | Unbound | Go to the previous Session the Sidebar shows, wrapping to the last. In Topics mode, only the Active Topic's Sessions take part |
 | `select_next_topic` | Unbound | Go to the Topic below in the Topics list, wrapping to the first. Locked Sessions take part in their place; No Topic and Snoozed Topics do not. A Dormant Topic is Reopened. Works in both Sidebar modes |
@@ -150,6 +170,7 @@ shortcut.
 Commands also lists the layout and Focus actions: Maximize or Restore, Maximize
 Terminal, Maximize Browser, Focus Terminal, Focus Browser, and Show or Hide for
 the Sidebar, the Terminal and the Browser. Each row shows its configured shortcut.
+Zoom Pane runs at once on the current Pane, as `toggle_zoom_pane` does.
 A row appears only when its action can change something.
 
 Move opens for a Pane with ⌘⇧T, a Window with `move_window` or a Session with ⌘⇧M.
@@ -163,13 +184,15 @@ bar items. ⎋ closes without a change. ⌫ in an empty field goes back one step
 A step that kills a process needs ⌘↩ to confirm.
 
 Maximize never changes the toggles. On Restore, the Window shows what its
-toggles say. A Sidebar, Terminal or Browser toggle used while the Window is
+toggles say. While the Window is Maximized, the Maximized side's toggle has an
+accent capsule, and the toggle of a side that Maximize hides shows its own state,
+dimmed. A Sidebar, Terminal or Browser toggle used while the Window is
 Maximized first keeps what is on screen, then restores the Window and applies.
 Maximize of a side that is already alone, with the Sidebar hidden, has nothing to
 hide and does nothing. Each Window keeps its own Maximize state: the Sidebar shows
 again in a Window that is not Maximized. ⇧⌘↩ is also Ghostty's default for
-`toggle_split_zoom`. Muxify's binding takes precedence, as for every Muxify
-keybinding.
+`toggle_split_zoom`. Muxify's binding takes precedence, so Zoom of a Pane has its
+own key, ⌘M (`toggle_zoom_pane`).
 
 Focus is where keyboard input goes: the Terminal, the Browser or a Command
 Palette. `focus_terminal` and `focus_browser` move Focus only. They never
@@ -434,10 +457,10 @@ when it does not. New Tab and Open Location can reveal a hidden Browser:
 | ⌘-click (link) | Open the link in a new Browser Tab |
 | ⌘L | Move Focus to the address bar, opening the Browser if hidden |
 | ⌘W | Close the active Browser Tab |
-| ⌘⇧] or ⌃Tab | Select the next Browser Tab |
-| ⌘⇧[ or ⌃⇧Tab | Select the previous Browser Tab |
-| ⌘[ | Go back |
-| ⌘] | Go forward |
+| ⌘⇧] or ⌃Tab | Select the next Browser Tab (`select_next_tab`) |
+| ⌘⇧[ or ⌃⇧Tab | Select the previous Browser Tab (`select_prev_tab`) |
+| ⌘[ | Go back (`browser_back`) |
+| ⌘] | Go forward (`browser_forward`) |
 | ⌘R | Reload the page, or stop it while loading |
 | ⌘⇧C | Copy the active Browser Tab's current URL and show a “Copied URL” confirmation |
 | ⌘⌥I | Open or focus Developer Tools for the active Browser Tab |
@@ -449,7 +472,8 @@ when it does not. New Tab and Open Location can reveal a hidden Browser:
 | Enter / ⇧Enter (Find in Page) | Go to the next / previous match |
 | Escape (Find in Page) | Close Find in Page, remove the highlight and focus the page |
 
-The ⌃Tab shortcuts also require the Browser to be open. ⌘W never closes the
+The Tab and history keys above are the defaults of their actions, and the Config
+can change them. ⌘W never closes the
 Muxify app window; when the terminal has Focus, it does nothing unless you
 assign it to a configurable action.
 

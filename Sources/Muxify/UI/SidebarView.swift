@@ -1085,7 +1085,14 @@ struct WindowRow: View {
                         Text("\(window.paneCount)")
                             .font(typography.font(for: .badge))
                     }
-                    .foregroundStyle(secondaryStyle)
+                    // A Zoomed Pane hides the others, so the badge glows like the Maximized side's toggle.
+                    .foregroundStyle(window.isZoomed ? Color.accentColor : secondaryStyle)
+                    .padding(.horizontal, window.isZoomed ? 4 : 0)
+                    .background(
+                        Capsule().fill(Color.accentColor.opacity(window.isZoomed ? 0.2 : 0))
+                    )
+                    .help(window.isZoomed ? "One Pane is Zoomed. The others are hidden." : "")
+                    .accessibilityValue(window.isZoomed ? "zoomed" : "")
                     .accessibilityIdentifier("window-right-panes-\(window.id)")
                 }
             }

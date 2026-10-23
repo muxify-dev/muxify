@@ -349,24 +349,29 @@ final class AppWindowsTests: XCTestCase {
             var opened: [AppWindowRequest] = []
             windows.openWindow = { opened.append($0) }
             let commandN = try keyEvent(window: native, flags: .command)
-            XCTAssertTrue(second.handleKeyEvent(commandN) === commandN)
-            XCTAssertNil(first.handleKeyEvent(commandN))
+            let commandShiftN = try keyEvent(window: native, flags: [.command, .shift])
+            XCTAssertTrue(second.handleKeyEvent(commandShiftN) === commandShiftN)
+            XCTAssertNil(first.handleKeyEvent(commandShiftN))
             XCTAssertEqual(opened.count, 1)
             XCTAssertNil(opened.first?.environmentName)
 
-            try (Self.config + "\nkeybindings:\n  new_app_window: cmd+shift+n\n")
+            try (Self.config + "\nkeybindings:\n  new_topic: []\n")
                 .write(toFile: path, atomically: true, encoding: .utf8)
             windows.configStore.reload()
-            XCTAssertNil(first.handleKeyEvent(commandN), "Do not leak the removed default through to Ghostty")
+            XCTAssertNil(first.handleKeyEvent(commandN), "Do not leak Cmd+N through to Ghostty's New Window")
             XCTAssertEqual(opened.count, 1)
-            XCTAssertNil(first.handleKeyEvent(try keyEvent(window: native, flags: [.command, .shift])))
+
+            try (Self.config + "\nkeybindings:\n  new_app_window: cmd+n\n")
+                .write(toFile: path, atomically: true, encoding: .utf8)
+            windows.configStore.reload()
+            XCTAssertNil(first.handleKeyEvent(commandN))
             XCTAssertEqual(opened.count, 2)
 
-            try (Self.config + "\nkeybindings:\n  new_app_window: []\n  toggle_sidebar: cmd+n\n")
+            try (Self.config + "\nkeybindings:\n  new_app_window: []\n  toggle_sidebar: cmd+shift+n\n")
                 .write(toFile: path, atomically: true, encoding: .utf8)
             windows.configStore.reload()
             let wasVisible = first.sidebarVisible
-            XCTAssertNil(first.handleKeyEvent(commandN))
+            XCTAssertNil(first.handleKeyEvent(commandShiftN))
             XCTAssertEqual(first.sidebarVisible, !wasVisible)
             XCTAssertEqual(opened.count, 2)
         }

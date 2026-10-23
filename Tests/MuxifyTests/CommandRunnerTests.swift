@@ -89,6 +89,17 @@ final class CommandRunnerTests: XCTestCase {
         XCTAssertEqual(snapshot.serverID, "500")
     }
 
+    func testSnapshotReadsWhetherAWindowHasAZoomedPane() {
+        let s = Tmux.separator
+        func window(_ id: String, zoomed: String?) -> String {
+            var fields = ["W", id, "$0", "main", "0", "zsh", "", "/tmp", "zsh", "1", "2", "0", "0"] + Array(repeating: "", count: 15)
+            if let zoomed { fields.append(zoomed) }
+            return fields.joined(separator: s)
+        }
+        let snapshot = Tmux.parseSnapshot([window("@1", zoomed: "1"), window("@2", zoomed: "0"), window("@3", zoomed: nil)].joined(separator: "\n"))
+        XCTAssertEqual(snapshot.windows.map(\.isZoomed), [true, false, false])
+    }
+
     func testRemotePathsDoNotUseTheLocalHome() {
         XCTAssertEqual(Paths.tildify("/home/dev/sessionPath", home: "/home/dev"), "~/sessionPath")
         XCTAssertEqual(Paths.tildify("/Users/local/sessionPath", home: "/home/dev"), "/Users/local/sessionPath")

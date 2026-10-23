@@ -45,7 +45,8 @@ struct SidebarFormatContexts {
                 let firstAgent = windowAgents.first
                 let windowValues = merged(merged(sessionValues, counts(windowAgents)), [
                     .window_index: String(window.index), .window_name: window.name, .window_title: window.displayTitle,
-                    .window_panes: String(window.paneCount), .tab_count: String(tabCounts[window.id] ?? 0),
+                    .window_panes: String(window.paneCount), .window_zoomed_flag: window.isZoomed ? "1" : "0",
+                    .tab_count: String(tabCounts[window.id] ?? 0),
                     .pane_current_command: window.command, .pane_current_path: window.path,
                     .agent_kind: firstAgent?.kind.displayName ?? "", .agent_status: firstAgent?.status?.rawValue ?? "",
                 ])

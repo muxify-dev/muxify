@@ -40,6 +40,8 @@ public struct TmuxWindow: Identifiable, Hashable {
     public var sessionCreated = 0
     /// tmux `#{window_layout}`: where each Pane sits, as `select-layout` takes it. tmux gives the unzoomed layout.
     public var layout = ""
+    /// tmux `#{window_zoomed_flag}`: one Pane of the Window is Zoomed.
+    public var isZoomed = false
 
     /// The pane title is what shells and TUIs set via OSC 0/2 (fish sets it to
     /// `~/w/sessionPath`), so it is the best human label. tmux defaults it to the
@@ -341,6 +343,7 @@ public enum Tmux {
             "#{\(tabsOption)}", "#{\(activeTabOption)}", "#{\(shownOption)}", "#{\(openOption)}",
             "#{\(lastWindowOption)}", "#{\(agentOption)}", "#{@muxify_topic}", "#{session_path}", "#{pane_id}", "#{pane_start_command}",
             "#{\(maximizeOption)}", "#{session_created}", "#{window_layout}", "#{@muxify_lock}", "#{@muxify_session_id}",
+            "#{window_zoomed_flag}",
         ].joined(separator: s)
         let clientFormat = ["C", "#{client_tty}", "#{session_id}", "#{window_id}", "#{client_pid}", "#{client_control_mode}"].joined(separator: s)
         let paneFormat = [
@@ -383,7 +386,7 @@ public enum Tmux {
                     topicID: field(19).isEmpty ? nil : field(19), savedSessionID: field(27), lockOrder: Double(field(26)).flatMap { $0.isFinite ? $0 : nil },
                     sessionPath: field(20),
                     activePaneID: field(21), startCommand: field(22), sessionCreated: Int(field(24)) ?? 0,
-                    layout: field(25)
+                    layout: field(25), isZoomed: field(28) == "1"
                 ))
                 if !f[17].isEmpty { lastWindowID = f[17] }
             } else if f.first == "C", f.count >= 4 {
