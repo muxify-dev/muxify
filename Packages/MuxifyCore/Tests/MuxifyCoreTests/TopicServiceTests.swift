@@ -1043,6 +1043,24 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(server.snapshot().windows.first { $0.id == window.id }?.name, "logs")
     }
 
+    func testZoomPaneZoomsThePaneAndASecondZoomEndsIt() throws {
+        try server.run(["new-session", "-d", "-s", "zoom", "-c", sessionPath.folder.path, ";", "split-window", "-d", "-t", "zoom:"])
+        let second = try server.run(["list-panes", "-t", "zoom:", "-F", "#{pane_id}"]).split(separator: "\n").map(String.init)[1]
+        func state() throws -> String {
+            try server.run(["display-message", "-p", "-t", "zoom:", "#{window_id} #{window_zoomed_flag} #{pane_id}"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let window = try state().split(separator: " ")[0]
+        func zoom() throws -> TopicChange {
+            try change(service().handle(EnvironmentRequest(.zoomPane, target: .pane(PaneID(rawValue: second)!))))
+        }
+
+        XCTAssertEqual(try zoom().window?.rawValue, String(window))
+        XCTAssertEqual(try state(), "\(window) 1 \(second)", "the target Pane fills its Window")
+        _ = try zoom()
+        XCTAssertEqual(try state(), "\(window) 0 \(second)", "a second Zoom ends it")
+    }
+
     func testMoveWindowPutsAWindowBeforeOrAfterAnotherWindowOfItsSessionAndKeepsTheCurrentWindow() throws {
         func ids(_ session: String) throws -> [String] {
             try server.run(["list-windows", "-t", session, "-F", "#{window_id}"]).split(separator: "\n").map(String.init)

@@ -292,14 +292,14 @@ extension EnvironmentCommand {
         case .snooze, .unsnooze, .tags, .pin, .unpin, .moveCard, .startZen, .endZen, .markRead, .markAllRead: return .records
         case .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename,
              .reopen, .startFresh, .moveSession, .sortSessions, .lock, .unlock, .newWindow, .newSession, .renameSession,
-             .renameWindow, .moveWindow, .killWindow, .killSession: return .edit
+             .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession: return .edit
         }
     }
 
     /// Whether the command reads or writes a Topic record whatever its target.
     var needsRecords: Bool {
         switch self {
-        case .newWindow, .newSession, .renameSession, .renameWindow, .moveWindow, .killWindow, .killSession: return false
+        case .newWindow, .newSession, .renameSession, .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession: return false
         // Agent Unread is in tmux. Only a Topic's Read state is in its record; Mark All as Read leaves the records
         // out where there are none.
         case .markRead(_, let scope): return scope == .topic

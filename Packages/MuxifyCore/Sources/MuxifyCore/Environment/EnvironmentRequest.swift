@@ -319,6 +319,8 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case renameWindow(name: String)
     /// Puts the target's Window before or after another Window of its Session. The Session keeps its current Window.
     case moveWindow(to: WindowPlacement)
+    /// Zooms the target Pane, or the current Pane of the target Window, or ends the Zoom of its Window.
+    case zoomPane
     /// Kills the target's Window. With `expectedPaneIDs`, only while its Panes are the ones the user reviewed. A Topic
     /// record remembers what is left.
     case killWindow
@@ -354,6 +356,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
         case renameSession = "rename_session"
         case renameWindow = "rename_window"
         case moveWindow = "move_window"
+        case zoomPane = "zoom_pane"
         case killWindow = "kill_window"
         case killSession = "kill_session"
         case pin, unpin

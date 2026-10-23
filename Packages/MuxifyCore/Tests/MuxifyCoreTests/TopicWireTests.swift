@@ -22,7 +22,7 @@ final class TopicWireTests: XCTestCase {
             .lock, .unlock, .moveSession(to: .before(session)), .moveSession(to: .up), .moveSession(to: .down), .sortSessions,
             .snooze(until: .never), .unsnooze(), .tags(.set([Tag(name: "backend")!])),
             .newWindow(command: ["make", "test"]), .newSession(sessionPath: "/work", name: "notes"), .renameSession(name: "n"),
-            .renameWindow(name: "w"), .killWindow, .killSession, .pin, .unpin, .moveCard(.up), .moveCard(.down),
+            .renameWindow(name: "w"), .zoomPane, .killWindow, .killSession, .pin, .unpin, .moveCard(.up), .moveCard(.down),
             .moveCard(.before(.topic(.id("fix")))), .moveCard(.after(.lock(session))),
             .moveWindow(to: .before(WindowID(rawValue: "@3")!)), .moveWindow(to: .after(WindowID(rawValue: "@3")!))]
         for command in commands {
@@ -47,6 +47,7 @@ final class TopicWireTests: XCTestCase {
         XCTAssertEqual(try json(EnvironmentCommand.moveWindow(to: .after(WindowID(rawValue: "@5")!))), #"{"move_window":{"to":{"after":{"window":"@5"}}}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.startZen(until: .never)), #"{"start_zen":{"until":"never"}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.endZen), #"{"end_zen":{}}"#)
+        XCTAssertEqual(try json(EnvironmentCommand.zoomPane), #"{"zoom_pane":{}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.markRead(.unread, scope: .session)), #"{"mark_read":{"change":"unread","scope":"session"}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.markAllRead), #"{"mark_all_read":{}}"#)
         XCTAssertEqual(try json(EnvironmentResponse.readChanged(TopicReadChange(topicIDs: ["a"], paneIDs: [PaneID(rawValue: "%3")!]))),

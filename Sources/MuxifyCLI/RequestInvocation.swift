@@ -52,6 +52,7 @@ struct RequestInvocation: Equatable {
         case newSession(directory: String, name: String?)
         case renameSession(name: String)
         case renameWindow(name: String)
+        case zoomPane
         case kill(session: Bool)
         case pin(Bool)
         /// The Topic's card, one place up or down.
@@ -80,7 +81,7 @@ struct RequestInvocation: Equatable {
             case .newWindow: return [.topic, .session, .window, .pane]
             case .newSession: return []
             case .renameSession: return [.session, .window, .pane]
-            case .renameWindow, .placeWindow: return [.window, .pane]
+            case .renameWindow, .placeWindow, .zoomPane: return [.window, .pane]
             case .kill(let session): return session ? [.session, .window, .pane] : [.window, .pane]
             case .removeSessionFromTopic: return [.session, .pane]
             case .markRead(_, .topic): return [.topic, .window, .pane]
@@ -105,7 +106,7 @@ struct RequestInvocation: Equatable {
         var findsAllSessionPaths: Bool {
             switch self {
             case .new, .snooze, .unsnooze, .tag, .lock, .pin, .moveCard, .moveSession, .sortSessions, .zen, .endZen, .markRead, .markAllRead,
-                 .placeWindow: return false
+                 .placeWindow, .zoomPane: return false
             default: return !showsTopic
             }
         }
@@ -139,6 +140,7 @@ struct RequestInvocation: Equatable {
             case .newSession: return "session new"
             case .renameSession: return "session rename"
             case .renameWindow: return "window rename"
+            case .zoomPane: return "window zoom"
             case .placeWindow: return "window move"
             case .kill(let session): return session ? "session kill" : "window kill"
             case .pin(let pinned): return pinned ? "topic pin" : "topic unpin"
@@ -455,6 +457,7 @@ extension RequestInvocation {
         case .newSession(let path, let name): return .newSession(sessionPath: try Self.directory(path).real, name: name)
         case .renameSession(let name): return .renameSession(name: name)
         case .renameWindow(let name): return .renameWindow(name: name)
+        case .zoomPane: return .zoomPane
         case .placeWindow(let placement): return .moveWindow(to: placement)
         case .kill(let session): return session ? .killSession : .killWindow
         case .pin(let pinned): return pinned ? .pin : .unpin

@@ -134,6 +134,7 @@ enum PaletteCommand: String, CaseIterable {
         case .endZen: .verb(.zenEnd)
         case .newWindow: .verb(.windowNew)
         case .newSession: .verb(.sessionNew)
+        case .zoomPane: .verb(.windowZoom)
         case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser, .showSidebar, .hideSidebar,
              .showTerminal, .hideTerminal, .showBrowser, .hideBrowser, .nextSession, .previousSession, .nextTopic, .previousTopic,
              .newAppWindow:
