@@ -1,4 +1,4 @@
-"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu and its Agent guard, stashing from Changes, and closing.
+"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu and its Agent guard, stashing from Changes, applying, popping and dropping a stash, and closing.
 
 The driver cannot type keys, so a check performs each Git View key as an accessibility action of the
 `git-view` element (`GitNavigator` in UI/GitViewPanel.swift). An action is named by the key's Config
@@ -40,6 +40,8 @@ Accessibility identifiers of the Git View, for the suites that follow this one:
     git-prompt-field         the prompt's one-line field: `set` it to type; its label is the prompt's title
     git-prompt-cancel        the prompt's Cancel button
     git-prompt-submit        the prompt's submit button, such as Stash
+    The Stashes keys ask in the menus `stash-apply`, `stash-pop` and `stash-drop` (labels "Apply stash", "Pop stash" and
+    "Drop stash"), each with the one choice `git-menu-choice-y`.
 The diff pane builds only the lines on screen, so keep a fixture's diffs short.
 
 Run from the repo root after `make build`:
@@ -628,6 +630,142 @@ class GitView(unittest.TestCase):
         self.s.act('action', 'git-menu', 'y')
         self.addCleanup(self.restore_fixture, before)
         wait(lambda: len(self.stashes()) == before + 1, 'y did not stash', seconds=10)
+
+    def make_stash(self, name):
+        """A stash of a change to stashed.txt alone, named `name`, at the top of the list; returns its hash. The
+        cleanup puts the fixture back, as restore_fixture does, and drops it."""
+        self.addCleanup(self.restore_fixture, len(self.stashes()))
+        (self.repo/'stashed.txt').write_text('one\nentry ' + name + '\n')
+        self.git('stash', 'push', '-q', '-m', name, '--', 'stashed.txt')
+        return self.git('rev-parse', 'stash@{0}').strip()
+
+    def select_stash(self, sha):
+        """Goes to Stashes, reads the repository again, and selects the stash's row."""
+        self.key('4')
+        self.key('shift+r')
+        self.select_row('git-row-stash:' + sha)
+
+    def ask_stash(self, key, title):
+        self.key(key)
+        return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == title, key + ' did not open ' + title)
+
+    def has_stash_row(self, sha, rs=None):
+        return self.s.has('git-row-stash:' + sha, rs)
+
+    def test_space_on_a_stash_applies_it_after_asking_and_the_stash_stays(self):
+        sha = self.make_stash('apply me')
+        self.select_stash(sha)
+        rs = self.ask_stash('space', 'Apply stash')
+        self.assertEqual(self.s.row('git-menu-choice-y', rs).get('accessibilityLabel'), 'Apply it')
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the question')
+        time.sleep(1)
+        self.assertEqual((self.repo/'stashed.txt').read_text(), 'one\n', 'escape applied the stash')
+        self.ask_stash('space', 'Apply stash')
+        self.s.act('action', 'git-menu', 'y')
+        wait(lambda: (self.repo/'stashed.txt').read_text() == 'one\nentry apply me\n', 'y did not apply the stash', seconds=10)
+        self.assertEqual(self.stashes()[0], 'On main: apply me', 'apply dropped the stash')
+        self.s.wait_rows(lambda rs: self.has_stash_row(sha, rs), 'Stashes no longer list the applied stash', seconds=15)
+        self.key('1')
+        self.wait_change('stashed.txt', lambda row: self.status(row) == ' M', 'Changes do not list the applied stash\'s file')
+
+    def test_g_on_a_stash_pops_it_after_asking(self):
+        sha = self.make_stash('pop me')
+        before = len(self.stashes())
+        self.select_stash(sha)
+        self.ask_stash('g', 'Pop stash')
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the question')
+        time.sleep(1)
+        self.assertEqual(len(self.stashes()), before, 'escape popped')
+        self.ask_stash('g', 'Pop stash')
+        self.s.act('action', 'git-menu', 'y')
+        wait(lambda: len(self.stashes()) == before - 1, 'y did not drop the popped stash', seconds=10)
+        self.assertEqual((self.repo/'stashed.txt').read_text(), 'one\nentry pop me\n', 'pop did not apply the stash')
+        self.s.wait_rows(lambda rs: not self.has_stash_row(sha, rs), 'Stashes still list the popped stash', seconds=15)
+        self.key('1')
+        self.wait_change('stashed.txt', lambda row: self.status(row) == ' M', 'Changes do not list the popped stash\'s file')
+
+    def test_a_pop_that_conflicts_keeps_the_stash_and_shows_the_conflict(self):
+        sha = self.make_stash('conflict')
+        # Another change to the same line, committed, so that applying the stash conflicts.
+        (self.repo/'stashed.txt').write_text('one\nother\n')
+        self.git('commit', '-q', '-m', 'conflicting change', '--', 'stashed.txt')
+        self.addCleanup(self.git, 'reset', '-q', '--hard', 'HEAD^')
+        before = len(self.stashes())
+        self.select_stash(sha)
+        self.ask_stash('g', 'Pop stash')
+        self.s.act('action', 'git-menu', 'y')
+        rs = self.s.wait_rows(lambda rs: 'conflicted' in self.s.row('git-write-error', rs).get('accessibilityValue', ''),
+                              'the banner does not say the pop conflicted', seconds=15)
+        self.assertEqual(len(self.stashes()), before, 'the conflicting pop dropped the stash')
+        self.assertIn('UU stashed.txt', self.porcelain())
+        self.s.wait_rows(lambda rs: self.has_stash_row(sha, rs), 'Stashes no longer list the stash', seconds=15)
+        self.key('1')
+        self.wait_change('stashed.txt', bool, 'Changes do not list the conflicted file')
+
+    def test_d_on_a_stash_drops_it_after_asking(self):
+        sha = self.make_stash('drop me')
+        before = len(self.stashes())
+        self.select_stash(sha)
+        self.ask_stash('d', 'Drop stash')
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the question')
+        time.sleep(1)
+        self.assertEqual(len(self.stashes()), before, 'escape dropped')
+        self.ask_stash('d', 'Drop stash')
+        self.assertFalse(self.s.has('git-menu-agents'), 'drop does not change files, so the guard does not ask')
+        self.s.act('action', 'git-menu', 'y')
+        wait(lambda: len(self.stashes()) == before - 1, 'y did not drop the stash', seconds=10)
+        self.assertEqual((self.repo/'stashed.txt').read_text(), 'one\n', 'drop changed the working tree')
+        self.s.wait_rows(lambda rs: not self.has_stash_row(sha, rs), 'Stashes still list the dropped stash', seconds=15)
+
+    def test_applying_a_stash_asks_in_its_own_menu_while_an_agent_is_working_in_the_worktree(self):
+        sha = self.make_stash('guarded')
+        self.agent_pane('gv-stash-entry-agent', self.repo, 'working')
+        self.select_stash(sha)
+        found = []
+
+        def names_agent():
+            rs = self.ask_stash('space', 'Apply stash')
+            found[:] = [self.s.row('git-menu-agents', rs).get('accessibilityLabel') if self.s.has('git-menu-agents', rs) else None]
+            if found[0] is None:
+                # Muxify reads the Panes' options on its own timer, so the first menu may be early.
+                self.s.act('action', 'git-menu', 'escape')
+                self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+            return found[0] is not None
+        wait(names_agent, 'the Apply menu does not name the working Agent', seconds=20, step=1)
+        self.assertEqual(found[0], 'Claude Code in gv-stash-entry-agent')
+        time.sleep(1)
+        self.assertEqual((self.repo/'stashed.txt').read_text(), 'one\n', 'the stash was applied before the question was answered')
+        self.s.act('action', 'git-menu', 'y')
+        wait(lambda: (self.repo/'stashed.txt').read_text() == 'one\nentry guarded\n', 'y did not apply the stash', seconds=10)
+
+    def test_space_g_and_d_keep_their_meanings_outside_the_stashes_list(self):
+        sha = self.make_stash('elsewhere')
+        self.select_stash(sha)
+        # In the stash's files: g and d do nothing, and space folds nothing that isn't a folder.
+        self.key('enter')
+        self.s.wait_rows(lambda rs: self.rows_with_prefix('git-row-file:', rs) or self.rows_with_prefix('git-row-folder:', rs),
+                         'enter did not go into the stash\'s files')
+        for key in ['g', 'd']:
+            self.key(key)
+            time.sleep(.5)
+            self.assertFalse(self.s.has('git-menu'), key + ' asked in the stash\'s files')
+        self.key('escape')
+        # In History: no menu either.
+        self.key('2')
+        for key in ['g', 'd', 'space']:
+            self.key(key)
+            time.sleep(.5)
+            self.assertFalse(self.s.has('git-menu'), key + ' asked in History')
+        # In Changes, d still discards.
+        self.key('1')
+        self.wait_change('tracked.txt', bool, 'Changes do not list tracked.txt')
+        self.select_change('tracked.txt')
+        self.open_discard_menu()
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
 
     def test_q_closes_the_git_view(self):
         self.assertTrue(self.is_open(), 'the Git View is not open')

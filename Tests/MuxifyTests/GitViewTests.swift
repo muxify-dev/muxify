@@ -824,6 +824,68 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(try status(), ["?? u.txt"])
     }
 
+    /// What a failed script said.
+    private func stderr(of error: Error) -> String {
+        if case TmuxError.failed(_, let stderr) = error { return stderr }
+        return String(describing: error)
+    }
+
+    private func stashSha(_ ref: String = "stash@{0}") throws -> String {
+        try git("rev-parse \(ref)").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func testAStashIsAppliedAndStaysInTheList() throws {
+        try prepareStash()
+        try run(GitRepository.stashScript, repository, "all", "w")
+        XCTAssertEqual(try status(), ["?? u.txt"])
+        try run(GitRepository.stashEntryScript, repository, "apply", "stash@{0}", try stashSha())
+        XCTAssertEqual(try status(), [" M a.swift", "A  s.txt", "?? u.txt"])
+        XCTAssertEqual(try git("stash list --format=%gs"), "On master: w\n")
+    }
+
+    func testAStashIsPoppedAndDropped() throws {
+        try prepareStash()
+        try run(GitRepository.stashScript, repository, "all", "w")
+        try run(GitRepository.stashEntryScript, repository, "pop", "stash@{0}", try stashSha())
+        XCTAssertEqual(try git("show :s.txt"), "staged\n", "the stash's new file is staged again, as git does")
+        XCTAssertEqual(try git("stash list"), "")
+        try run(GitRepository.stashScript, repository, "all", "second")
+        try run(GitRepository.stashEntryScript, repository, "drop", "stash@{0}", try stashSha())
+        XCTAssertEqual(try git("stash list"), "")
+        XCTAssertEqual(try status(), ["?? u.txt"], "dropping leaves the working tree as it is")
+    }
+
+    func testAStashEntryRefusesWhenTheListMovedUnderIt() throws {
+        try prepareStash()
+        try run(GitRepository.stashScript, repository, "all", "w")
+        let sha = try stashSha()
+        try run("cd \"$1\" && printf 'again\\n' >> a.swift && git stash push -q -m newer", repository)
+        // stash@{0} is now the newer one: nothing changes.
+        XCTAssertThrowsError(try run(GitRepository.stashEntryScript, repository, "drop", "stash@{0}", sha))
+        XCTAssertEqual(try git("stash list --format=%gs"), "On master: newer\nOn master: w\n")
+    }
+
+    func testAConflictingPopKeepsTheStashAndLeavesTheConflictedFiles() throws {
+        try prepareStash()
+        try run(GitRepository.stashScript, repository, "all", "w")
+        try run("cd \"$1\" && printf 'let a = 4\\n' > a.swift && git commit -q -am other", repository)
+        XCTAssertThrowsError(try run(GitRepository.stashEntryScript, repository, "pop", "stash@{0}", try stashSha())) { error in
+            XCTAssertTrue(stderr(of: error).contains("conflicted"), stderr(of: error))
+        }
+        XCTAssertTrue(try status().contains("UU a.swift"))
+        XCTAssertEqual(try git("stash list --format=%gs"), "On master: w\n")
+    }
+
+    func testAnApplyThatGitRefusesSaysWhatGitSaid() throws {
+        try prepareStash()
+        try run(GitRepository.stashScript, repository, "all", "w")
+        try run("cd \"$1\" && printf 'let a = 5\\n' > a.swift", repository)
+        XCTAssertThrowsError(try run(GitRepository.stashEntryScript, repository, "apply", "stash@{0}", try stashSha())) { error in
+            XCTAssertTrue(stderr(of: error).contains("overwritten"), stderr(of: error))
+        }
+        XCTAssertEqual(try git("stash list --format=%gs"), "On master: w\n")
+    }
+
     func testStashCanKeepTheIndex() throws {
         try prepareStash()
         try run(GitRepository.stashScript, repository, "keepindex", "k")
@@ -1206,6 +1268,57 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertTrue(GitView.staging([unstaged, staged], path: "src") == (true, ["src"]))
         XCTAssertTrue(GitView.staging([GitChange(index: "M", worktree: "M", path: "src/a.swift")], path: "src/a.swift").stage)
         XCTAssertTrue(GitView.staging([staged, renamed], path: "src") == (false, ["src", "old.swift"]))
+    }
+
+    func testSpaceGAndDOnAStashAskBeforeApplyingPoppingAndDropping() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        // In Changes, d still discards and g and space keep their meanings.
+        gitView.perform(.pop)
+        XCTAssertNil(gitView.menu)
+        gitView.perform(.tab(.stashes))
+        for (command, id, title, question) in [
+            (GitView.Command.toggle, "stash-apply", "Apply stash", "Are you sure you want to apply this stash entry?"),
+            (.pop, "stash-pop", "Pop stash", "Are you sure you want to pop this stash entry?"),
+            (.discard, "stash-drop", "Drop stash", "Are you sure you want to drop the selected stash entry?"),
+        ] {
+            gitView.perform(command)
+            XCTAssertEqual(gitView.menu?.id, id)
+            XCTAssertEqual(gitView.menu?.title, title)
+            XCTAssertEqual(gitView.menu?.subject, .text("stash@{0} On master: wip"))
+            XCTAssertEqual(gitView.menu?.choices.map(\.key), ["y"])
+            XCTAssertTrue(gitView.menu?.choices.first?.note?.hasPrefix(question) == true)
+            XCTAssertEqual(gitView.menu?.choices.first?.isDestructive, command == .discard)
+            gitView.closeMenu()
+        }
+        // In the stash's files, space folds a folder and d and g do nothing.
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .files)
+        gitView.perform(.pop)
+        gitView.perform(.discard)
+        XCTAssertNil(gitView.menu)
+        gitView.perform(.back)
+        // Nowhere else do they ask about a stash.
+        gitView.perform(.tab(.history))
+        gitView.perform(.pop)
+        gitView.perform(.discard)
+        XCTAssertNil(gitView.menu)
+    }
+
+    func testApplyAndPopOfAStashListTheAgentsWorkingThereButDropDoesNot() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.perform(.tab(.stashes))
+        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
+                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.perform(.pop)
+        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
+        gitView.closeMenu()
+        gitView.perform(.toggle)
+        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
+        gitView.closeMenu()
+        gitView.perform(.discard)
+        XCTAssertEqual(gitView.menu?.agents, [])
     }
 
     func testAListWhoseStashIsGoneCloses() {
