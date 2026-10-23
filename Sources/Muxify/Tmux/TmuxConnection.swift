@@ -74,6 +74,29 @@ final class TmuxConnection: @unchecked Sendable {
         return try runner.run(invocation, timeout: timeout)
     }
 
+    /// Runs a /bin/sh `script` as `runScriptAsync` does, but in a pseudo-terminal with the C locale, over SSH
+    /// with a remote PTY for a Remote Environment, so git's and ssh's credential prompts go to `onPrompt`
+    /// (`TerminalCommand`). Returns the command, to answer or cancel, or nil after completing with the error.
+    @discardableResult
+    func startTerminalScript(_ script: String, arguments: [String] = [], timeout: TimeInterval,
+                             onPrompt: @escaping (GitCredentialPrompt) -> Void,
+                             completion: @escaping (Result<String, Error>) -> Void) -> TerminalCommand? {
+        lock.lock()
+        let stopped = retired
+        lock.unlock()
+        let exports = TerminalCommand.locale.keys.sorted().map { "\($0)=\(TerminalCommand.locale[$0]!)" }.joined(separator: " ")
+        let script = "export \(exports)\n" + script
+        do {
+            guard !stopped else { throw TmuxError.cancelled }
+            let invocation = remote?.terminalScript(script, arguments: arguments)
+                ?? CommandInvocation(executable: "/bin/sh", arguments: ["-c", script, "muxify"] + arguments)
+            return try TerminalCommand(invocation, timeout: timeout, onPrompt: onPrompt, completion: completion)
+        } catch {
+            DispatchQueue.main.async { completion(.failure(error)) }
+            return nil
+        }
+    }
+
     /// Serializes marker writes with removal, so a late registration cannot
     /// survive detach or retirement. Each replacement gets its own option.
     func updateLocalClient(_ client: TmuxClient?) {

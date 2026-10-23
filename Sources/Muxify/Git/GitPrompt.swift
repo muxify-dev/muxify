@@ -23,6 +23,9 @@ struct GitPrompt {
     var suggestions: [String] = []
     /// The button beside Cancel, such as "Stash".
     var submitTitle = "OK"
+    /// ⎋, or a click outside it, for a prompt that a command waits on, such as git's question for a password: it
+    /// stops the command.
+    var onCancel: (() -> Void)?
     /// Takes what was typed, as it was: the prompt's owner trims it.
     let submit: (String) -> Void
 

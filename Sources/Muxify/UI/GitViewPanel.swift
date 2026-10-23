@@ -227,6 +227,14 @@ private struct GitToolbar: View {
             .labelsHidden()
             .fixedSize()
             .help("Show the diff unified or side by side")
+            ForEach(gitView.networkActivity, id: \.self) { activity in
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text(activity).font(.system(size: 11.5, weight: .medium)).foregroundStyle(.secondary)
+                }
+                .lineLimit(1)
+                .fixedSize()
+            }
             if gitView.isReading || gitView.isWriting {
                 ProgressView().controlSize(.small).frame(width: 28, height: 28)
             } else {
@@ -251,6 +259,7 @@ private struct GitToolbar: View {
         if let title = snapshot.operationTitle { parts.append(title) }
         if let comparison = snapshot.comparison { parts.append("↑\(comparison.ahead) ↓\(comparison.behind) vs \(comparison.base)") }
         if let text = comparingText { parts.append(text) }
+        parts += gitView.networkActivity
         return parts.joined(separator: " · ")
     }
 
@@ -2282,10 +2291,17 @@ private struct GitPromptView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(prompt.title).font(.system(size: 14.5, weight: .semibold))
                 if case .text(let text)? = prompt.subject {
-                    Text(text).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                    Text(text).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(4)
                 }
             }
             Spacer(minLength: 0)
+            if prompt.isSecret {
+                Label("Hidden", systemImage: "lock.fill")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .help("What you type is hidden")
+                    .accessibilityIdentifier("git-prompt-secret")
+            }
         }
     }
 

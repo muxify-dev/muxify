@@ -1,4 +1,4 @@
-"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu and its Agent guard, stashing from Changes, applying, popping and dropping a stash, checking out, and closing.
+"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu and its Agent guard, stashing from Changes, applying, popping and dropping a stash, checking out, fetching, and closing.
 
 The driver cannot type keys, so a check performs each Git View key as an accessibility action of the
 `git-view` element (`GitNavigator` in UI/GitViewPanel.swift). An action is named by the key's Config
@@ -39,6 +39,7 @@ Accessibility identifiers of the Git View, for the suites that follow this one:
     git-prompt               an open Git View prompt, such as the stash message that s asks for; its label is its title,
                              and its actions are enter (submit) and escape (cancel)
     git-prompt-field         the prompt's one-line field: `set` it to type; its label is the prompt's title
+    git-prompt-secret        the prompt's "Hidden" mark, only while what is typed is hidden, as for a password
     git-prompt-cancel        the prompt's Cancel button
     git-prompt-submit        the prompt's submit button, such as Stash
     git-prompt-suggestion-<n>  a suggestion of a prompt that offers some, such as the branch names `c` in Branches
@@ -56,6 +57,9 @@ Accessibility identifiers of the Git View, for the suites that follow this one:
     ("Autostash?", when Changes are in the way), each with the one choice `git-menu-choice-y`. space on a branch that
     another Worktree has checked out asks in the menu `other-worktree` ("Go to Worktree?") instead, with the one
     choice `git-menu-choice-y`: it goes to a Window with a Pane in that Worktree, else opens Go to… on its Session Path.
+f in Changes fetches beside the writes; the toolbar's label ends with "Fetching…" until it ends. A credential question
+of git or ssh is asked in `git-prompt`, whose label is the question; ⎋ stops the fetch, and `git-write-error` says
+"Fetch cancelled.".
 The diff pane builds only the lines on screen, so keep a fixture's diffs short.
 
 Run from the repo root after `make build`:
@@ -149,6 +153,9 @@ class GitView(unittest.TestCase):
             self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close')
 
     def close_git_view(self):
+        if self.s.has('git-prompt'):
+            self.s.act('action', 'git-prompt', 'escape')
+            self.s.wait_rows(lambda rs: not self.s.has('git-prompt', rs), 'the Git View prompt did not close')
         if self.s.has('git-menu'):
             self.s.act('action', 'git-menu', 'escape')
             self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'the Git View menu did not close')
@@ -1108,6 +1115,98 @@ class GitView(unittest.TestCase):
         self.s.wait_rows(lambda rs: self.s.has('git-row-change:tracked.txt', rs), 'no Changes')
         self.select_change('tracked.txt')
         self.open_discard_menu()
+
+    def remote_one_commit_ahead(self, name, url=None):
+        """Adds the remote origin, a bare repository with main and one commit more, and main tracking it, so a fetch
+        leaves main one commit behind. `url` reaches it another way, such as over the fake ssh."""
+        origin = self.s.root/(name + '.git')
+        subprocess.run(['/usr/bin/git', 'init', '-q', '--bare', str(origin)], check=True)
+        self.git('push', '-q', str(origin), 'main:main')
+        clone = self.s.root/(name + '-clone')
+        subprocess.run(['/usr/bin/git', 'clone', '-q', '-b', 'main', str(origin), str(clone)], check=True)
+        (clone/'remote.txt').write_text('remote\n')
+        identity = ['-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid']
+        for args in [['add', 'remote.txt'], ['commit', '-q', '-m', 'remote commit'], ['push', '-q', 'origin', 'main']]:
+            subprocess.run(['/usr/bin/git', '-C', str(clone)] + identity + args, check=True)
+        self.git('remote', 'add', 'origin', url or str(origin))
+        self.addCleanup(self.git, 'remote', 'remove', 'origin')
+        self.git('config', 'branch.main.remote', 'origin')
+        self.git('config', 'branch.main.merge', 'refs/heads/main')
+        return origin
+
+    def test_f_in_changes_fetches_all_remotes_and_the_counts_update(self):
+        self.remote_one_commit_ahead('fetch-plain')
+        # Only in Changes.
+        self.key('2')
+        self.key('f')
+        time.sleep(1)
+        self.assertNotIn('origin/main', self.git('branch', '-r'), 'f fetched in History')
+        self.key('1')
+        self.key('f')
+        self.s.wait_rows(lambda rs: '↑0 ↓1 vs origin/main' in self.toolbar(rs), 'f did not fetch, or the counts did not update', seconds=15)
+        self.assertNotIn('Fetching…', self.toolbar())
+        self.assertFalse(self.s.has('git-write-error'), 'the fetch failed')
+
+    def fake_ssh(self, name):
+        """An ssh for git's core.sshCommand that, once the file `go` exists, asks for a passphrase on its terminal as
+        ssh does, writes the answer to `answers`, and serves the repository only for the answer `right`."""
+        folder = self.s.root/name
+        folder.mkdir()
+        go, answers, ssh = folder/'go', folder/'answers', folder/'ssh'
+        ssh.write_text('#!/bin/sh\n'
+                       f'while [ ! -e {shlex.quote(str(go))} ]; do sleep .1; done\n'
+                       'printf "Enter passphrase for key \'/fake/id\': " > /dev/tty\n'
+                       'IFS= read -r answer < /dev/tty\n'
+                       f'printf \'%s\\n\' "$answer" >> {shlex.quote(str(answers))}\n'
+                       '[ "$answer" = right ] || { echo "Permission denied (publickey)." >&2; exit 255; }\n'
+                       'for last; do :; done\n'
+                       'exec /bin/sh -c "$last"\n')
+        ssh.chmod(0o755)
+        self.git('config', 'core.sshCommand', shlex.quote(str(ssh)))
+        self.addCleanup(self.git, 'config', '--unset', 'core.sshCommand')
+        return go, answers
+
+    def answer_prompt(self, title, text):
+        self.wait_prompt(title)
+        self.s.act('set', 'git-prompt-field', text)
+        self.s.act('action', 'git-prompt', 'enter')
+        self.s.wait_rows(lambda rs: not self.s.has('git-prompt', rs), 'enter did not close the prompt')
+
+    def test_a_passphrase_ssh_asks_is_asked_hidden_while_staging_goes_on_and_escape_cancels(self):
+        go, answers = self.fake_ssh('fetch-ssh-bin')
+        origin = self.s.root/'fetch-ssh.git'
+        self.remote_one_commit_ahead('fetch-ssh', url='ssh://fake.invalid' + str(origin))
+        question = "Enter passphrase for key '/fake/id':"
+        self.select_row('git-row-change:new.txt')
+        self.key('f')
+        self.s.wait_rows(lambda rs: 'Fetching…' in self.toolbar(rs), 'the toolbar does not show Fetching…')
+        # The fetch runs beside the writes: staging goes on.
+        self.addCleanup(self.git, 'reset', '-q', '--', 'new.txt')
+        self.key('space')
+        wait(lambda: 'A  new.txt' in self.porcelain(), 'space did not stage while the fetch ran', seconds=10)
+        self.assertIn('Fetching…', self.toolbar(), 'the fetch ended before ssh asked')
+        go.touch()
+        rs = self.wait_prompt(question)
+        self.assertTrue(self.s.has('git-prompt-secret', rs), 'the passphrase is not hidden')
+        # ⎋ stops the fetch, and the banner says so.
+        self.s.act('action', 'git-prompt', 'escape')
+        self.s.wait_rows(lambda rs: self.s.row('git-write-error', rs).get('accessibilityValue') == 'Fetch cancelled.',
+                         'the banner does not say the fetch was cancelled', seconds=10)
+        self.assertNotIn('Fetching…', self.toolbar())
+        # A wrong answer: git's message, with no progress.
+        self.key('f')
+        self.answer_prompt(question, 'wrong')
+        rs = self.s.wait_rows(lambda rs: 'Could not read from remote repository' in self.s.row('git-write-error', rs).get('accessibilityValue', ''),
+                              'the banner does not show git\'s message', seconds=15)
+        message = self.s.row('git-write-error', rs).get('accessibilityValue', '')
+        self.assertIn('Permission denied (publickey).', message)
+        self.assertNotIn('\r', message)
+        # The right one: the fetch ends and the counts update.
+        self.key('f')
+        self.answer_prompt(question, 'right')
+        self.s.wait_rows(lambda rs: '↑0 ↓1 vs origin/main' in self.toolbar(rs), 'the fetch did not end, or the counts did not update', seconds=15)
+        self.assertFalse(self.s.has('git-write-error'), 'the fetch failed')
+        self.assertEqual(answers.read_text().split(), ['wrong', 'right'])
 
     def test_q_closes_the_git_view(self):
         self.assertTrue(self.is_open(), 'the Git View is not open')
