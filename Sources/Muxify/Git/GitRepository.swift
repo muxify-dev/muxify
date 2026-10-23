@@ -9,6 +9,9 @@ struct GitSnapshot: Equatable {
     var repositoryName: String
     /// The folder of a linked worktree, when it isn't the repository's own.
     var worktreeName: String?
+    /// The repository's own folder: where its main checkout is, or its git directory when it is bare. Topic records
+    /// name a Worktree's repository by it.
+    var repositoryFolder = ""
     /// The current branch, or the short commit of a detached HEAD.
     var head: String
     var isDetached = false
@@ -523,6 +526,27 @@ enum GitRepository {
     git branch -m -- "$2" "$3"
     """
 
+    /// What the delete script's stderr is when `git branch -d` refused because the branch isn't fully merged.
+    static let branchNotMergedMarker = "muxify:branch-not-merged"
+
+    /// Takes the folder, a branch and `1` to force. Without force it tells a branch that git won't delete for not
+    /// being fully merged from any other failure, which prints what git said, such as that another Worktree has it
+    /// checked out. A Worktree is never removed.
+    static let deleteBranchScript = """
+    cd "$1" || exit 1
+    if [ "$3" = 1 ]; then exec git branch -D -- "$2"; fi
+    out=$(LC_ALL=C git branch -d -- "$2" 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        if printf '%s\\n' "$out" | grep -q 'is not fully merged'; then
+            echo "\(branchNotMergedMarker)" >&2
+        else
+            printf '%s\\n' "$out" >&2
+        fi
+        exit 1
+    fi
+    """
+
     /// What the checkout script's stderr starts with when only Changes kept git from checking out.
     static let checkoutBlockedMarker = "muxify:changes-in-the-way"
 
@@ -587,6 +611,9 @@ enum GitRepository {
             head: isDetached ? String(headLine.dropFirst("detached ".count)) : headLine,
             isDetached: isDetached
         )
+        if !common.isEmpty {
+            snapshot.repositoryFolder = (common as NSString).lastPathComponent == ".git" ? (common as NSString).deletingLastPathComponent : common
+        }
         let status = parseStatus(sections["status"] ?? "")
         snapshot.changes = counted(status.changes, staged: parseNumstat(sections["staged"] ?? ""),
                                    unstaged: parseNumstat(sections["unstaged"] ?? ""),

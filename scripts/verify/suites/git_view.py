@@ -46,6 +46,10 @@ Accessibility identifiers of the Git View, for the suites that follow this one:
                              prompt's actions then include down and up
     The Branches keys n, R, - and c ask in the prompts `New branch name (branch is off of '<branch>')`, `Rename branch`
     and `Check out`; ↩ checks out through the same path as space does.
+    d in Branches asks in the menus `delete-branch` ("Delete branch", the choice `git-menu-choice-c`, "Delete local
+    branch", disabled on the current branch) and, for a branch git finds unmerged, `force-delete-branch` ("Force delete
+    branch", the choice `git-menu-choice-y`). A branch of another Worktree is left to git, whose message shows in
+    `git-write-error`. `git-menu-footnote` is the line beside Cancel, such as which Topics remember the branch.
     The Stashes keys ask in the menus `stash-apply`, `stash-pop` and `stash-drop` (labels "Apply stash", "Pop stash" and
     "Drop stash"), each with the one choice `git-menu-choice-y`. space in Branches and History checks out; it asks
     only in the menu `checkout` ("Check out", while an Agent is working in the Worktree) and in `autostash`
@@ -1025,6 +1029,85 @@ class GitView(unittest.TestCase):
         self.key('c')
         self.s.wait_rows(lambda rs: self.s.has('git-commit-box', rs), 'c in Changes did not open the commit box')
         self.key('escape')
+
+    def branches(self):
+        return self.git('branch', '--format=%(refname:short)').split()
+
+    def drop_branch(self, name):
+        """Cleanup for a branch that the test may have deleted already."""
+        if name in self.branches():
+            self.git('branch', '-q', '-D', name)
+
+    def ask_to_delete(self, branch, refresh=True):
+        """d on the branch in Branches, after reading the repository again (R renames in Branches, so it comes first,
+        and only before going there)."""
+        if refresh:
+            self.key('shift+r')
+        self.go_to('3')
+        self.select_row('git-row-branch:' + branch)
+        self.key('d')
+        return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Delete branch',
+                                'd in Branches did not open the delete menu')
+
+    def test_d_on_a_merged_branch_asks_in_the_delete_menu_and_c_deletes_it(self):
+        self.git('branch', 'merged-b', 'main')
+        self.addCleanup(self.drop_branch, 'merged-b')
+        rs = self.ask_to_delete('merged-b')
+        self.assertEqual(self.s.row('git-menu-choice-c', rs).get('accessibilityLabel'), 'Delete local branch')
+        self.assertEqual(self.s.row('git-menu-choice-c', rs).get('accessibilityValue'), 'highlighted=1 enabled=1')
+        time.sleep(.5)
+        self.assertIn('merged-b', self.branches(), 'opening the menu deleted the branch')
+        self.s.act('action', 'git-menu', 'c')
+        wait(lambda: 'merged-b' not in self.branches(), 'c did not delete the merged branch', seconds=10)
+        self.assertFalse(self.s.has('git-menu'), 'the menu stays open')
+        self.assertFalse(self.s.has('git-write-error'), 'deleting a merged branch failed')
+
+    def test_an_unmerged_branch_asks_to_force_and_is_deleted_only_on_confirm(self):
+        self.git('branch', 'unmerged-b', 'feature-x')
+        self.addCleanup(self.drop_branch, 'unmerged-b')
+        self.ask_to_delete('unmerged-b')
+        self.s.act('action', 'git-menu', 'c')
+        self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Force delete branch',
+                         'c on an unmerged branch did not ask to force delete it')
+        self.assertIn('unmerged-b', self.branches(), 'the branch was deleted before the question was answered')
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the question')
+        time.sleep(1)
+        self.assertIn('unmerged-b', self.branches(), 'escape deleted the branch')
+        self.ask_to_delete('unmerged-b', refresh=False)
+        self.s.act('action', 'git-menu', 'c')
+        self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Force delete branch', 'no force question the second time')
+        self.s.act('action', 'git-menu', 'y')
+        wait(lambda: 'unmerged-b' not in self.branches(), 'y did not force delete the branch', seconds=10)
+
+    def test_the_current_branch_cannot_be_deleted(self):
+        rs = self.ask_to_delete('main')
+        self.assertEqual(self.s.row('git-menu-choice-c', rs).get('accessibilityValue'), 'highlighted=0 enabled=0')
+        self.s.act('action', 'git-menu', 'c')
+        self.s.act('action', 'git-menu', 'enter')
+        time.sleep(1)
+        self.assertIn('main', self.branches(), 'the current branch was deleted')
+        self.assertFalse(self.s.has('git-write-error'), 'a delete ran')
+        self.assertTrue(self.s.has('git-menu'), 'the menu closed')
+
+    def test_a_branch_of_another_worktree_is_not_deleted_and_git_says_why(self):
+        path = self.add_worktree('del-other-wt')
+        self.ask_to_delete('del-other-wt')
+        self.s.act('action', 'git-menu', 'c')
+        rs = self.s.wait_rows(lambda rs: self.s.has('git-write-error', rs), 'git did not refuse to delete the branch', seconds=10)
+        self.assertIn('del-other-wt', self.s.row('git-write-error', rs).get('accessibilityValue', ''))
+        self.assertIn('del-other-wt', self.branches(), 'the branch was deleted')
+        self.assertTrue(path.exists(), 'the Worktree was removed')
+
+    def test_d_keeps_its_meanings_in_history_and_changes(self):
+        self.key('2')
+        self.key('d')
+        time.sleep(.5)
+        self.assertFalse(self.s.has('git-menu'), 'd opened a menu in History')
+        self.key('1')
+        self.s.wait_rows(lambda rs: self.s.has('git-row-change:tracked.txt', rs), 'no Changes')
+        self.select_change('tracked.txt')
+        self.open_discard_menu()
 
     def test_q_closes_the_git_view(self):
         self.assertTrue(self.is_open(), 'the Git View is not open')

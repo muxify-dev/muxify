@@ -2149,7 +2149,8 @@ private struct GitMenuView: View {
         HStack(spacing: 6) {
             if let footnote = menu.footnote {
                 Image(systemName: "exclamationmark.triangle").font(.system(size: 11))
-                Text(footnote).font(.system(size: 11.5))
+                Text(footnote).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("git-menu-footnote")
             }
             Spacer(minLength: 8)
             Button { gitView.closeMenu() } label: {
@@ -2169,7 +2170,8 @@ private struct GitMenuView: View {
         }
         .foregroundStyle(.secondary)
         .padding(.horizontal, 16)
-        .frame(height: 48)
+        .padding(.vertical, 8)
+        .frame(minHeight: 48)
         .background(Color.primary.opacity(palette.colors.isDark ? 0.03 : 0.025))
         .overlay(alignment: .top) { palette.softSeparator.frame(height: 1) }
     }

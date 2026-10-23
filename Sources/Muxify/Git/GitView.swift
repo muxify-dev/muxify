@@ -1106,6 +1106,10 @@ final class GitView {
         case .pop:
             if list == .stashes, focus == .list, case .stash(let stash)? = selectedItem { askStashEntry(.pop, stash) }
         case .discard:
+            if list == .branches {
+                if focus == .list, case .branch(let branch)? = selectedItem { askDeleteBranch(branch) }
+                return
+            }
             if list == .stashes {
                 if focus == .list, case .stash(let stash)? = selectedItem { askStashEntry(.drop, stash) }
                 return
@@ -1725,6 +1729,75 @@ final class GitView {
         guard snapshot.remoteBranches.contains(name), let slash = name.firstIndex(of: "/") else { return .branch(name) }
         let local = String(name[name.index(after: slash)...])
         return snapshot.branches.contains { $0.name == local } ? .branch(local) : .remote(name)
+    }
+
+    // MARK: Deleting branches
+
+    /// The Topic records of the Environment, which are on this Mac: a Remote Environment's Git View finds none.
+    /// `topicRecordsForTesting` stands in for them.
+    private var topicRecords: [TopicRecord] {
+        topicRecordsForTesting ?? (store?.isRemote == true ? [] : store?.topicWatcher.records ?? [])
+    }
+
+    @ObservationIgnored var topicRecordsForTesting: [TopicRecord]?
+
+    /// The titles of the Topics that remember this branch: open, Dormant and Settled ones.
+    func topicTitles(remembering branch: GitBranch) -> [String] {
+        guard let snapshot else { return [] }
+        let resolver = store?.folders ?? .local
+        let repository = ([snapshot.repositoryFolder, snapshot.root] + snapshot.branches.compactMap(\.worktreePath))
+            .filter { !$0.isEmpty }.map(resolver.folder)
+        return TopicBranchHolders.records(remembering: branch.name, in: repository, among: topicRecords).map {
+            store?.topics.titles[$0.id] ?? $0.title ?? $0.slug ?? "Untitled Topic"
+        }
+    }
+
+    /// d in Branches: lazygit's delete menu, with the one choice that works on a local branch for now. The branch
+    /// you're on can't be deleted, and the menu says so. A branch that another Worktree has checked out is left to
+    /// git, whose message shows. Deleting a branch changes no files, so the Agent guard does not ask.
+    func askDeleteBranch(_ branch: GitBranch) {
+        guard list == .branches, snapshot != nil else { return }
+        let reason = branch.isHead ? "You cannot delete the checked out branch!" : nil
+        open(deleteBranchMenu(id: "delete-branch", title: "Delete branch", branch,
+                              choice: GitMenu.Choice(key: "c", title: "Delete local branch", note: reason, isEnabled: reason == nil,
+                                                     isDestructive: true) { [weak self] in
+            self?.deleteBranch(branch, force: false)
+        }))
+    }
+
+    /// A menu that confirms deleting `branch`, which names the Topics that remember it.
+    private func deleteBranchMenu(id: String, title: String, _ branch: GitBranch, choice: GitMenu.Choice) -> GitMenu {
+        GitMenu(id: id, title: title, subject: .text(branch.name), symbol: "trash", isDestructive: true,
+                footnote: Self.rememberingNote(topicTitles(remembering: branch)), choices: [choice])
+    }
+
+    /// What the confirmation says about the Topics that remember the branch, or nil when none does.
+    static func rememberingNote(_ titles: [String]) -> String? {
+        guard !titles.isEmpty else { return nil }
+        return titles.map { "Topic '\($0)' remembers this branch; Reopen will start it again from its base." }.joined(separator: " ")
+    }
+
+    private func deleteBranch(_ branch: GitBranch, force: Bool) {
+        guard let snapshot else { return }
+        write(GitRepository.deleteBranchScript, arguments: [snapshot.root, branch.name, force ? "1" : "0"]) { [weak self] result in
+            self?.finishDeleteBranch(branch, result)
+        }
+    }
+
+    /// A delete ended: asks to force when git refused for the branch not being fully merged, else says what went wrong.
+    func finishDeleteBranch(_ branch: GitBranch, _ result: Result<String, Error>) {
+        guard case .failure(let error) = result else { return }
+        if case TmuxError.failed(_, let stderr) = error, stderr.hasPrefix(GitRepository.branchNotMergedMarker) {
+            open(deleteBranchMenu(
+                id: "force-delete-branch", title: "Force delete branch", branch,
+                choice: GitMenu.Choice(key: "y", title: "Force delete",
+                                       note: "'\(branch.name)' is not fully merged. Are you sure you want to delete it?",
+                                       isDestructive: true) { [weak self] in
+                    self?.deleteBranch(branch, force: true)
+                }))
+        } else {
+            writeError = Self.message(for: error)
+        }
     }
 
     // MARK: Staging lines
