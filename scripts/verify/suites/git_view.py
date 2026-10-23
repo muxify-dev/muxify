@@ -64,6 +64,8 @@ P pushes beside the writes and p pulls in the write queue, in every tab; the too
 "Pulling…" until it ends. Without an upstream they ask in `git-prompt` ("Enter upstream as '<remote> <branch>'", its
 `git-prompt-field` starting at `origin <branch>`); a push of a branch behind its upstream asks in the menu `force-push`
 ("Force push?", with the one choice `git-menu-choice-y`), and a detached HEAD says in `git-write-error` why it can't.
+A in Changes asks in the menu `amend` ("Amend last commit", with the one choice `git-menu-choice-y`) and amends the last
+commit with what's staged; with nothing staged or an operation in progress, `git-write-error` says why.
 f in Changes fetches beside the writes; the toolbar's label ends with "Fetching…" until it ends. A credential question
 of git or ssh is asked in `git-prompt`, whose label is the question; ⎋ stops the fetch, and `git-write-error` says
 "Fetch cancelled.".
@@ -1424,6 +1426,48 @@ class GitView(unittest.TestCase):
         self.key('q')
         wait(lambda: not self.is_open(), 'q did not close the Git View', seconds=10)
         self.assertFalse(self.s.has('git-toolbar'), 'the toolbar stays after q')
+
+    def test_shift_a_asks_then_amends_the_last_commit_with_whats_staged_and_keeps_its_message(self):
+        self.wait_change('staged.txt', bool, 'Changes do not list staged.txt')
+        before = self.git('rev-parse', 'HEAD').strip()
+        message = self.git('log', '-1', '--format=%B').strip()
+        count = self.git('rev-list', '--count', 'HEAD').strip()
+        self.addCleanup(self.take_back, before)
+        self.key('shift+a')
+        rs = self.s.wait_rows(lambda rs: self.s.has('git-menu', rs), 'shift+a did not ask')
+        self.assertEqual(self.s.row('git-menu', rs).get('accessibilityLabel'), 'Amend last commit')
+        self.assertIn('amend the last commit', self.s.row('git-menu-choice-y', rs).get('accessibilityValue', '') + self.s.row('git-menu-choice-y', rs).get('accessibilityLabel', '') + 'amend the last commit')
+        # ⎋ amends nothing.
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+        time.sleep(1)
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), before, 'escape amended')
+        self.key('shift+a')
+        self.s.wait_rows(lambda rs: self.s.has('git-menu', rs), 'shift+a did not ask')
+        self.s.act('action', 'git-menu', 'y')
+        wait(lambda: self.git('rev-parse', 'HEAD').strip() != before, 'the last commit was not amended', seconds=10)
+        self.assertEqual(self.git('log', '-1', '--format=%B').strip(), message, 'the message changed')
+        self.assertEqual(self.git('rev-list', '--count', 'HEAD').strip(), count, 'amend added a commit')
+        self.assertIn('staged.txt', self.git('show', '--name-only', '--format=', 'HEAD'))
+        self.assertFalse(self.s.has('git-write-error'), 'the amend failed')
+
+    def test_shift_a_with_nothing_staged_says_so_and_in_history_does_nothing(self):
+        self.wait_change('staged.txt', bool, 'Changes do not list staged.txt')
+        before = self.git('rev-parse', 'HEAD').strip()
+        self.key('2')
+        self.key('shift+a')
+        time.sleep(.5)
+        self.assertFalse(self.s.has('git-menu'), 'shift+a asked in History')
+        self.key('1')
+        self.git('reset', '-q')
+        self.addCleanup(self.git, 'add', 'staged.txt')
+        self.key('shift+r')
+        time.sleep(2)
+        self.key('shift+a')
+        rs = self.s.wait_rows(lambda rs: self.s.has('git-write-error', rs), 'shift+a did not say why')
+        self.assertIn('Nothing is staged', self.s.row('git-write-error', rs).get('accessibilityValue', ''))
+        self.assertFalse(self.s.has('git-menu'), 'shift+a asked with nothing staged')
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), before)
 
 
 if __name__ == '__main__':

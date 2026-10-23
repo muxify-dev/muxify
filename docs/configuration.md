@@ -604,6 +604,12 @@ pseudo-terminal as the fetch, with its credential prompts and its "Push
 cancelled." and "Pull cancelled." banners. A detached HEAD has no branch to push
 or pull, and the banner says so.
 
+A in Changes amends the last commit with what's staged, as lazygit does, and keeps its message. It asks first, in a
+Git View menu: "Are you sure you want to amend the last commit?". Hooks and signing run as they do for c; when one
+fails, the banner shows what it said. With nothing staged, with no commit yet, or while a merge, rebase, cherry-pick,
+revert or `git am` is in progress, A changes nothing and the banner says why. A commit that is already pushed can be
+amended; the next push then asks to force push.
+
 An operation that changes the files of the Worktree asks first while an Agent is
 working there. If a Pane whose folder is the Worktree or inside it runs an Agent
 that is working or blocked, the menu names each such Agent, by its Topic, or by
