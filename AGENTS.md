@@ -1,5 +1,11 @@
 # Agent rules for Muxify
 
+## A feature is done when `master` plus the feature builds
+
+Run `make build` and `make test` when you finish a feature. Both must pass. Before the feature merges, rebase it onto the current `master` and run both again.
+
+A branch that builds alone can still break `master`. The exhaustive switches, such as `mirror` in ADR 0039, make every new case name its answer. If two branches merge without a rebase, one can add a case that the other's switch does not know.
+
 ## End-to-end checks
 
 To prove a change in the running app, use the e2e harness in `scripts/verify/`. Do not write your own. Read `scripts/verify/README.md` before you run, add or change a check.
