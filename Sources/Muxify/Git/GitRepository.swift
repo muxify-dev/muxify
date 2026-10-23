@@ -547,6 +547,16 @@ enum GitRepository {
     fi
     """
 
+    /// Takes the folder and a local branch, and deletes the branch it tracks on its remote with
+    /// `git push <remote> --delete <branch>`. It runs in a pseudo-terminal, so credential questions are asked in the Git View.
+    static let deleteRemoteBranchScript = """
+    cd "$1" || exit 1
+    remote=$(git config "branch.$2.remote") || { echo "'$2' has no remote branch." >&2; exit 1; }
+    ref=$(git config "branch.$2.merge") || { echo "'$2' has no remote branch." >&2; exit 1; }
+    if [ "$remote" = . ]; then echo "'$2' tracks a local branch, not a remote one." >&2; exit 1; fi
+    exec git push "$remote" --delete "${ref#refs/heads/}"
+    """
+
     /// Takes the folder and fetches all remotes, as lazygit's `f` does by default. It runs in a pseudo-terminal
     /// (`TerminalCommand`), so git's and ssh's questions for credentials are asked in the Git View.
     static let fetchScript = """

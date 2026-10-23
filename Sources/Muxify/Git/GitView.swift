@@ -1790,17 +1790,56 @@ final class GitView {
     func askDeleteBranch(_ branch: GitBranch) {
         guard list == .branches, snapshot != nil else { return }
         let reason = branch.isHead ? "You cannot delete the checked out branch!" : nil
-        open(deleteBranchMenu(id: "delete-branch", title: "Delete branch", branch,
-                              choice: GitMenu.Choice(key: "c", title: "Delete local branch", note: reason, isEnabled: reason == nil,
-                                                     isDestructive: true) { [weak self] in
+        var choices = [GitMenu.Choice(key: "c", title: "Delete local branch", note: reason, isEnabled: reason == nil,
+                                      isDestructive: true) { [weak self] in
             self?.deleteBranch(branch, force: false)
-        }))
+        }]
+        // A branch with no upstream, or one whose upstream is gone, has no remote branch to delete.
+        if let upstream = branch.upstream, branch.track != "gone" {
+            choices.append(GitMenu.Choice(key: "r", title: "Delete remote branch", note: upstream, isDestructive: true) { [weak self] in
+                self?.confirmDeleteRemote(branch, upstream: upstream, andLocal: false)
+            })
+            choices.append(GitMenu.Choice(key: "b", title: "Delete local and remote branch", note: reason ?? upstream,
+                                          isEnabled: reason == nil, isDestructive: true) { [weak self] in
+                self?.confirmDeleteRemote(branch, upstream: upstream, andLocal: true)
+            })
+        }
+        open(deleteBranchMenu(id: "delete-branch", title: "Delete branch", branch, choices: choices))
+    }
+
+    /// Asks before deleting the remote branch, naming it, as lazygit does.
+    private func confirmDeleteRemote(_ branch: GitBranch, upstream: String, andLocal: Bool) {
+        open(deleteBranchMenu(
+            id: "delete-remote-branch", title: andLocal ? "Delete local and remote branch" : "Delete remote branch", branch,
+            choices: [GitMenu.Choice(key: "y", title: "Delete",
+                                     note: "Are you sure you want to delete the remote branch '\(upstream)'?",
+                                     isDestructive: true) { [weak self] in
+                self?.deleteRemote(branch, andLocal: andLocal)
+            }]))
+    }
+
+    /// `git push <remote> --delete <branch>` on the network runner. For the local and remote choice the local branch
+    /// goes after it, under the rules of a local delete; a failed remote delete leaves the local branch.
+    private func deleteRemote(_ branch: GitBranch, andLocal: Bool) {
+        guard let root = snapshot?.root else { return }
+        runNetwork(GitRepository.deleteRemoteBranchScript, arguments: [root, branch.name], activity: Self.deletingRemote,
+                   cancelled: "Delete cancelled.", refreshing: !andLocal) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error): self.writeError = Self.message(for: error, cancelled: "Delete cancelled.")
+            case .success: if andLocal { self.deleteBranch(branch, force: false) }
+            }
+        }
     }
 
     /// A menu that confirms deleting `branch`, which names the Topics that remember it.
     private func deleteBranchMenu(id: String, title: String, _ branch: GitBranch, choice: GitMenu.Choice) -> GitMenu {
+        deleteBranchMenu(id: id, title: title, branch, choices: [choice])
+    }
+
+    private func deleteBranchMenu(id: String, title: String, _ branch: GitBranch, choices: [GitMenu.Choice]) -> GitMenu {
         GitMenu(id: id, title: title, subject: .text(branch.name), symbol: "trash", isDestructive: true,
-                footnote: Self.rememberingNote(topicTitles(remembering: branch)), choices: [choice])
+                footnote: Self.rememberingNote(topicTitles(remembering: branch)), choices: choices)
     }
 
     /// What the confirmation says about the Topics that remember the branch, or nil when none does.
@@ -2062,6 +2101,7 @@ final class GitView {
 
     static let fetching = "Fetching…"
     static let pushing = "Pushing…"
+    static let deletingRemote = "Deleting remote branch…"
     static let pulling = "Pulling…"
 
     /// P: pushes the branch you're on, as lazygit's does, beside the writes like the fetch. Without an upstream it asks

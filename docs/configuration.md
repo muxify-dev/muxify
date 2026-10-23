@@ -474,8 +474,16 @@ the offer to go to another Worktree. c now commits only in Changes and in a
 change's diff, as in lazygit; in History and Stashes it does nothing. A merge is
 still concluded with c in Changes.
 
-d in Branches opens lazygit's delete menu for the selected branch. For now its one
-choice is c, "Delete local branch", which runs `git branch -d`. The branch you're
+d in Branches opens lazygit's delete menu for the selected branch. Its first
+choice is c, "Delete local branch", which runs `git branch -d`. A branch with an
+upstream also offers r, "Delete remote branch", and b, "Delete local and remote
+branch". Each asks first, naming the remote branch: "Are you sure you want to
+delete the remote branch 'origin/x'?" The remote delete runs `git push <remote>
+--delete <branch>` beside the write queue, with the same credential prompts as
+fetch, and the toolbar says "Deleting remote branch…". b then deletes the local
+branch under the rules below, including the force question and the Topic note, and
+is dimmed on the branch you're on; if the remote delete fails, the local branch
+stays. A branch with no upstream, or whose upstream is gone, offers only c. The branch you're
 on can't be deleted: the choice is dimmed with "You cannot delete the checked out
 branch!". A branch that another Worktree has checked out is refused by git, and
 its message shows in the banner; a Worktree is never removed. When git refuses
