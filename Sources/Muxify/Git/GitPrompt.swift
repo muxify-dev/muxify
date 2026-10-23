@@ -19,10 +19,24 @@ struct GitPrompt {
     var isSecret = false
     /// ↩ submits an empty value, as for a stash with no message.
     var allowsEmpty = true
+    /// Names to offer as the user types, such as the branches `c` checks out; ↓/↑ choose one and ↩ takes it.
+    var suggestions: [String] = []
     /// The button beside Cancel, such as "Stash".
     var submitTitle = "OK"
     /// Takes what was typed, as it was: the prompt's owner trims it.
     let submit: (String) -> Void
+
+    /// How many suggestions show at once.
+    static let suggestionLimit = 8
+
+    /// The suggestions that match what was typed, those it starts first, as many as show.
+    func suggestions(matching text: String) -> [String] {
+        let typed = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !typed.isEmpty else { return Array(suggestions.prefix(Self.suggestionLimit)) }
+        let matches = suggestions.filter { $0.lowercased().contains(typed) }
+        let starting = matches.filter { $0.lowercased().hasPrefix(typed) }
+        return Array((starting + matches.filter { !starting.contains($0) }).prefix(Self.suggestionLimit))
+    }
 
     func accepts(_ text: String) -> Bool {
         allowsEmpty || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

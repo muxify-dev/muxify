@@ -502,6 +502,20 @@ HEAD afterwards. Every checkout changes the files of the Worktree, so it asks
 first while an Agent is working there, as below. In a commit's Diff files, space
 still folds a folder.
 
+Four more keys in Branches check out, as lazygit's Local branches do. n asks for a
+name ("New branch name (branch is off of 'feature')"; spaces become dashes),
+creates the branch off the selected one and checks it out. R asks for a new name,
+starting at the current one, and renames the selected branch; elsewhere R still
+reads the repository again. - checks out the previous branch, as `git checkout -`
+does; elsewhere - still folds. c asks for a name in a prompt that offers the local
+and remote branches matching what you type: ↓ / ↑ choose one, and ↩ checks out
+the chosen one, else what was typed. A remote branch such as `origin/foo` makes a
+local branch `foo` that tracks it, unless `foo` exists, which is then checked out.
+Each of these goes the way space does: through Autostash?, the Agent guard and
+the offer to go to another Worktree. c now commits only in Changes and in a
+change's diff, as in lazygit; in History and Stashes it does nothing. A merge is
+still concluded with c in Changes.
+
 A branch that another Worktree has checked out can't be checked out here, so
 space on it asks instead, in a Git View menu: "Branch feature is checked out by
 Worktree repo-feature. Go to that Worktree?" ↩ or y goes there. If a Window of

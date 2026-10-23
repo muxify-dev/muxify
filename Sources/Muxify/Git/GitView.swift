@@ -298,6 +298,8 @@ final class GitView {
         /// a change's diff; folds a folder of the Diff files.
         case toggle, collapseAll, expandAll
         case commit, discard, stash, stashOptions, filter, back, close, refresh
+        /// n: a new branch off the branch selected in Branches.
+        case newBranch
         /// g: pops the stash selected in Stashes.
         case pop
         /// W: marks the commit, branch or stash selected as the base, or
@@ -331,6 +333,12 @@ final class GitView {
     private(set) var prompt: GitPrompt?
     /// What the prompt's field holds.
     var promptText = ""
+    /// The suggestion ↓/↑ chose, if it still matches what is typed.
+    private var chosenSuggestion: String?
+
+    /// The suggestions that match what the prompt's field holds.
+    var promptSuggestions: [String] { prompt?.suggestions(matching: promptText) ?? [] }
+    var promptSuggestion: String? { chosenSuggestion.flatMap { promptSuggestions.contains($0) ? $0 : nil } }
     /// The Git View tab the list pane shows.
     private(set) var tab = GitTab.changes
     /// Each tab's lists: its own, then each one gone into; the last one
@@ -948,8 +956,12 @@ final class GitView {
         }
         // A Git View prompt's field takes the rest; ↩ submits from the field.
         if prompt != nil, window === keyView?.window {
-            guard trigger == Self.escape else { return false }
-            closePrompt()
+            switch trigger {
+            case Self.escape: closePrompt()
+            case Self.down where !promptSuggestions.isEmpty: moveSuggestion(by: 1)
+            case Self.up where !promptSuggestions.isEmpty: moveSuggestion(by: -1)
+            default: return false
+            }
             return true
         }
         // A Git View menu's keys, as lazygit's; no other Git View key acts.
@@ -1010,7 +1022,7 @@ final class GitView {
             "shift+j": .scroll(lines: 3), "shift+k": .scroll(lines: -3), "ctrl+d": .halfPage(1), "ctrl+u": .halfPage(-1),
             "alt+down": .nextHunk, "alt+up": .previousHunk, "right_bracket": .nextFile, "left_bracket": .previousFile,
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
-            "space": .toggle, "minus": .collapseAll, "equal": .expandAll,
+            "space": .toggle, "minus": .collapseAll, "equal": .expandAll, "n": .newBranch,
             "c": .commit, "d": .discard, "g": .pop, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
             "shift+w": .mark, "e": .edit,
     ]
@@ -1087,7 +1099,10 @@ final class GitView {
                 checkout(.commit(sha: commit.sha, shortSHA: commit.shortSHA))
             }
         case .commit:
-            openCommit()
+            // As in lazygit, c commits in Changes, checks out by name in Branches, and does nothing elsewhere.
+            if list == .changes { openCommit() } else if list == .branches, focus == .list { askCheckoutByName() }
+        case .newBranch:
+            if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askNewBranch(off: branch) }
         case .pop:
             if list == .stashes, focus == .list, case .stash(let stash)? = selectedItem { askStashEntry(.pop, stash) }
         case .discard:
@@ -1102,7 +1117,12 @@ final class GitView {
         case .stashOptions:
             openStashOptions()
         case .collapseAll, .expandAll:
-            if focus == .list { foldAll(command == .collapseAll) }
+            // Branches has no folders: - goes back to the previous branch, as `git checkout -` does.
+            if list == .branches, command == .collapseAll {
+                if focus == .list { checkoutPrevious() }
+            } else if focus == .list {
+                foldAll(command == .collapseAll)
+            }
         case .filter:
             wantsFilterFocus = true
         case .back:
@@ -1120,7 +1140,12 @@ final class GitView {
         case .close:
             close()
         case .refresh:
-            refresh(showingProgress: true)
+            // In Branches, R renames the selected branch, as in lazygit.
+            if list == .branches, focus == .list, case .branch(let branch)? = selectedItem {
+                askRename(branch)
+            } else {
+                refresh(showingProgress: true)
+            }
         case .mark:
             guard let item = contentItem, item.sha != nil else { return }
             mark(item.id == base?.id ? nil : item)
@@ -1319,7 +1344,22 @@ final class GitView {
     func open(_ prompt: GitPrompt) {
         self.prompt = prompt
         promptText = prompt.initialText
+        chosenSuggestion = nil
         writeError = nil
+    }
+
+    /// ↓ or ↑ in a prompt with suggestions: the next or previous one; ↑ from the first goes back to what was typed.
+    func moveSuggestion(by delta: Int) {
+        let suggestions = promptSuggestions
+        let index = promptSuggestion.flatMap(suggestions.firstIndex(of:))
+        let next = (index ?? -1) + delta
+        chosenSuggestion = suggestions.indices.contains(next) ? suggestions[next] : delta < 0 ? nil : index.map { suggestions[$0] }
+    }
+
+    /// A click on a suggestion: submits it.
+    func submitSuggestion(_ name: String) {
+        chosenSuggestion = name
+        submitPrompt()
     }
 
     /// ⎋, or a click outside it: changes nothing.
@@ -1327,15 +1367,18 @@ final class GitView {
         guard prompt != nil else { return }
         prompt = nil
         promptText = ""
+        chosenSuggestion = nil
         focusKeyView()
     }
 
     /// ↩ in the field: closes the prompt and gives what was typed to whatever asked.
     func submitPrompt() {
-        guard let prompt, prompt.accepts(promptText) else { return }
-        let text = promptText
+        guard let prompt else { return }
+        let text = promptSuggestion ?? promptText
+        guard prompt.accepts(text) else { return }
         self.prompt = nil
         promptText = ""
+        chosenSuggestion = nil
         focusKeyView()
         prompt.submit(text)
     }
@@ -1538,20 +1581,36 @@ final class GitView {
         case branch(String)
         /// A commit, which leaves a detached HEAD.
         case commit(sha: String, shortSHA: String)
+        /// A remote branch such as `origin/foo`, which makes a local branch that tracks it.
+        case remote(String)
+        /// A new branch off another one.
+        case newBranch(name: String, from: String)
+        /// What `git checkout -` goes back to, when it isn't a branch of this repository.
+        case previous
 
         var name: String {
             switch self {
-            case .branch(let name): name
+            case .branch(let name), .remote(let name), .newBranch(let name, _): name
             case .commit(_, let shortSHA): shortSHA
+            case .previous: "the previous branch"
             }
         }
         var ref: String {
             switch self {
-            case .branch(let name): name
+            case .branch(let name), .remote(let name), .newBranch(let name, _): name
             case .commit(let sha, _): sha
+            case .previous: "-"
             }
         }
-        var kind: String { if case .branch = self { "branch" } else { "commit" } }
+        var kind: String {
+            switch self {
+            case .branch: "branch"
+            case .commit: "commit"
+            case .remote: "remote"
+            case .newBranch: "new"
+            case .previous: "previous"
+            }
+        }
     }
 
     /// The one checkout of the Git View, which space in Branches and History takes, and later keys reuse: goes through
@@ -1593,7 +1652,9 @@ final class GitView {
 
     private func runCheckout(_ target: CheckoutTarget, autostash: Bool) {
         guard let snapshot else { return }
-        write(GitRepository.checkoutScript, arguments: [snapshot.root, target.kind, target.ref, autostash ? "1" : "0"]) { [weak self] result in
+        var arguments = [snapshot.root, target.kind, target.ref, autostash ? "1" : "0"]
+        if case .newBranch(_, let base) = target { arguments.append(base) }
+        write(GitRepository.checkoutScript, arguments: arguments) { [weak self] result in
             self?.finishCheckout(target, result)
         }
     }
@@ -1611,6 +1672,59 @@ final class GitView {
         } else {
             writeError = Self.message(for: error)
         }
+    }
+
+    // MARK: Branch names
+
+    /// A branch name as typed: git has no spaces in one, so lazygit makes them dashes.
+    static func branchName(_ typed: String) -> String {
+        typed.split(whereSeparator: \.isWhitespace).joined(separator: "-")
+    }
+
+    /// n in Branches: asks for the name of a branch off the one selected, then checks it out.
+    func askNewBranch(off branch: GitBranch) {
+        guard list == .branches else { return }
+        open(GitPrompt(id: "new-branch", title: "New branch name (branch is off of '\(branch.name)')", symbol: "plus",
+                       placeholder: "Branch name", allowsEmpty: false, submitTitle: "Create") { [weak self] typed in
+            self?.checkout(.newBranch(name: Self.branchName(typed), from: branch.name))
+        })
+    }
+
+    /// R in Branches: asks for the selected branch's new name, starting at its current one.
+    func askRename(_ branch: GitBranch) {
+        guard list == .branches else { return }
+        open(GitPrompt(id: "rename-branch", title: "Rename branch", subject: .text("Enter a new name for '\(branch.name)'"),
+                       symbol: "pencil", placeholder: "Branch name", initialText: branch.name, allowsEmpty: false,
+                       submitTitle: "Rename") { [weak self] typed in
+            guard let self, let snapshot = self.snapshot else { return }
+            let name = Self.branchName(typed)
+            if name != branch.name { self.write(GitRepository.renameBranchScript, arguments: [snapshot.root, branch.name, name]) }
+        })
+    }
+
+    /// -: `git checkout -`. A previous branch that is still one goes the way a checkout of it does.
+    func checkoutPrevious() {
+        checkout(snapshot?.previousBranch.map(CheckoutTarget.branch) ?? .previous)
+    }
+
+    /// c in Branches: asks for a name, with the local and remote branches that match it offered as it is typed.
+    func askCheckoutByName() {
+        guard list == .branches, let snapshot else { return }
+        open(GitPrompt(id: "checkout-by-name", title: "Check out", subject: .text("A branch name, or choose one with ↓ and ↑"),
+                       symbol: "arrow.triangle.branch", placeholder: "Branch name", allowsEmpty: false,
+                       suggestions: snapshot.branches.map(\.name) + snapshot.remoteBranches, submitTitle: "Check out") { [weak self] typed in
+            guard let self else { return }
+            self.checkout(self.checkoutTarget(named: typed.trimmingCharacters(in: .whitespacesAndNewlines)))
+        })
+    }
+
+    /// What a name typed in `c` checks out: a local branch as it is; a remote one, a local branch that tracks it, unless
+    /// there is one already; else git is left to say what the name is.
+    func checkoutTarget(named name: String) -> CheckoutTarget {
+        guard let snapshot, !snapshot.branches.contains(where: { $0.name == name }) else { return .branch(name) }
+        guard snapshot.remoteBranches.contains(name), let slash = name.firstIndex(of: "/") else { return .branch(name) }
+        let local = String(name[name.index(after: slash)...])
+        return snapshot.branches.contains { $0.name == local } ? .branch(local) : .remote(name)
     }
 
     // MARK: Staging lines
