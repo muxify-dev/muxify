@@ -247,6 +247,14 @@ extension EnvironmentService {
             }
             let window = try source().0.window
             return Planned(edit: try TmuxObjectPlan.moveWindow(window, to: placement, windows: snapshot.windows).get(), window: WindowID(rawValue: window.id))
+        case .zoomPane:
+            switch request.target {
+            case .topic?, .session?, .sessionName?: throw TopicRequestError.noTarget
+            case .window?, .pane?, nil: break
+            }
+            let pane = try source().0
+            return Planned(edit: TopicEdit(record: nil, commands: [.tmux(["resize-pane", "-Z", "-t", pane.paneID])], selection: .unchanged),
+                           window: WindowID(rawValue: pane.window.id))
         case .killWindow, .killSession:
             let session = request.command == .killSession
             let window: TmuxWindow

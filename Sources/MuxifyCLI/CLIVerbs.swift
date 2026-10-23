@@ -556,6 +556,16 @@ enum CLIVerbs {
             guard parsed.operands.count == 1, !parsed.operands[0].allSatisfy(\.isWhitespace) else { throw CLIError.usage }
             return .request(try RequestInvocation(.renameWindow(name: parsed.operands[0]), parsed: parsed))
         },
+        CLIVerb(path: .windowZoom, synopsis: "[--window <id> | --pane <id>] [--json]",
+                options: [.flag("--json")], targets: [.window, .pane],
+                help: """
+                Zooms this Pane, as Zoom Pane does: it fills its Window and hides the other
+                Panes. With --window, it zooms the Window's current Pane. When the Window
+                has a Zoomed Pane, it ends the Zoom. Prints the id of the Window.
+                """) { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            return .request(try RequestInvocation(.zoomPane, parsed: parsed))
+        },
         CLIVerb(path: .windowKill, synopsis: "[--window <id> | --pane <id>] [--json]",
                 options: [.flag("--json")], targets: [.window, .pane],
                 help: """

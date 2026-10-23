@@ -28,6 +28,7 @@ extension EnvironmentCommand {
         case .renameSession: .verb(.sessionRename)
         case .renameWindow: .verb(.windowRename)
         case .moveWindow: .verb(.windowMove)
+        case .zoomPane: .verb(.windowZoom)
         case .killWindow: .verb(.windowKill)
         case .killSession: .verb(.sessionKill)
         case .pin: .verb(.topicPin)

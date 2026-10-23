@@ -44,6 +44,8 @@ final class CLIVerbsTests: XCTestCase {
             (["window", "remove-from-topic", "--new-session"], request(.removeWindowFromTopic(session: nil))),
             (["window", "remove-from-topic", "--session", "notes", "--window", "@12"],
              request(.removeWindowFromTopic(session: "notes"), target: .window(WindowID(rawValue: "@12")!))),
+            (["window", "zoom"], request(.zoomPane)),
+            (["window", "zoom", "--pane", "%3"], request(.zoomPane, target: .pane(PaneID(rawValue: "%3")!))),
         ]
         for (arguments, expected) in cases {
             XCTAssertEqual(try CLICommand(arguments: arguments, environment: inside), expected, "\(arguments)")
@@ -56,6 +58,7 @@ final class CLIVerbsTests: XCTestCase {
             (["session", "remove-from-topic", "--remove-worktree"], CLIVerbs.usage),
             (["session", "remove-from-topic", "--window", "@1"], CLIVerbs.usage),
             (["session", "lock", "--pane", "%3"], CLIVerbs.usage),
+            (["window", "zoom", "extra"], CLIVerbs.usage),
             (["window", "remove-from-topic"],
              "window remove-from-topic takes the destination: --session <name|id> of a No Topic Session, or --new-session"),
             (["window", "remove-from-topic", "--session", "a", "--new-session"],

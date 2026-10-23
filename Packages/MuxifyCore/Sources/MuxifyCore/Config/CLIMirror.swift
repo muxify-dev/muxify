@@ -38,6 +38,7 @@ public enum CLIVerbPath: String, CaseIterable, Sendable {
     case windowRemoveFromTopic = "window remove-from-topic"
     case windowNew = "window new"
     case windowRename = "window rename"
+    case windowZoom = "window zoom"
     case windowKill = "window kill"
     case zenStart = "zen start"
     case zenEnd = "zen end"
