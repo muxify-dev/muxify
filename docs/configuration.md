@@ -434,6 +434,19 @@ View says so and opens nothing. Stashing changes the files of the Worktree, so i
 asks first while an Agent is working there, as below. The new stash is the first
 in Stashes, whose count goes up.
 
+In Stashes, the selected stash is applied, popped or dropped as lazygit's Stash
+panel does, each after a confirmation menu: space applies it ("Are you sure you
+want to apply this stash entry?") and the stash stays; g pops it, which applies
+it and drops it; d drops it ("Are you sure you want to drop the selected stash
+entry?"). ↩ or y confirms and ⎋ cancels. Apply and pop change the files of the
+Worktree, so the same menu names any Agent working there, as below; drop doesn't.
+When applying conflicts, the conflicted files show in Changes and the banner
+says so; a pop that conflicts keeps the stash, as git does. If the stash list
+changed since the stash was selected, nothing is done and the banner says so.
+The lists, the Stashes count and Changes update afterwards. In the stash's Diff
+files and in other tabs the keys keep their meanings: space folds a folder, and
+d discards in Changes.
+
 An operation that changes the files of the Worktree asks first while an Agent is
 working there. If a Pane whose folder is the Worktree or inside it runs an Agent
 that is working or blocked, the menu names each such Agent, by its Topic, or by

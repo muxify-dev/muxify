@@ -298,6 +298,8 @@ final class GitView {
         /// a change's diff; folds a folder of the Diff files.
         case toggle, collapseAll, expandAll
         case commit, discard, stash, stashOptions, filter, back, close, refresh
+        /// g: pops the stash selected in Stashes.
+        case pop
         /// W: marks the commit, branch or stash selected as the base, or
         /// ends the comparison on the base, as lazygit's diffing mode.
         case mark
@@ -1005,7 +1007,7 @@ final class GitView {
             "alt+down": .nextHunk, "alt+up": .previousHunk, "right_bracket": .nextFile, "left_bracket": .previousFile,
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
             "space": .toggle, "minus": .collapseAll, "equal": .expandAll,
-            "c": .commit, "d": .discard, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
+            "c": .commit, "d": .discard, "g": .pop, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
             "shift+w": .mark, "e": .edit,
     ]
 
@@ -1072,10 +1074,18 @@ final class GitView {
                 toggleStaged(item)
             } else if case .folder(let tree, let path) = item {
                 toggleFolder(path, in: tree)
+            } else if case .stash(let stash) = item, list == .stashes {
+                askStashEntry(.apply, stash)
             }
         case .commit:
             openCommit()
+        case .pop:
+            if list == .stashes, focus == .list, case .stash(let stash)? = selectedItem { askStashEntry(.pop, stash) }
         case .discard:
+            if list == .stashes {
+                if focus == .list, case .stash(let stash)? = selectedItem { askStashEntry(.drop, stash) }
+                return
+            }
             guard list == .changes else { return }
             if focus == .diff { askDiscardLines() } else if let item = selectedItem { askDiscard(item) }
         case .stash:
@@ -1473,6 +1483,43 @@ final class GitView {
         guardFiles("Stash changes", subject: .text(kind.title), symbol: "archivebox", confirm: "Stash them") { [weak self] in
             self?.write(GitRepository.stashScript, arguments: [snapshot.root, kind.rawValue, message])
         }
+    }
+
+    // MARK: Stash entries
+
+    /// What lazygit's Stash panel does with the stash selected.
+    enum StashEntryAction: String {
+        /// space: the stash stays.
+        case apply
+        /// g: applies it and drops it, unless it conflicts.
+        case pop
+        /// d.
+        case drop
+
+        var verb: String { rawValue }
+        var symbol: String { self == .drop ? "trash" : self == .apply ? "tray.and.arrow.down" : "tray.and.arrow.up" }
+    }
+
+    /// space, g or d on a stash: confirms in a menu of one choice, as lazygit does. Apply and pop change files, so
+    /// the menu also lists the Agents working there; drop doesn't.
+    func askStashEntry(_ action: StashEntryAction, _ stash: GitStash) {
+        guard list == .stashes, snapshot != nil else { return }
+        let menu = GitMenu(
+            id: "stash-\(action.verb)", title: "\(action.verb.capitalized) stash", subject: .text("\(stash.ref) \(stash.message)"),
+            symbol: action.symbol, isDestructive: action == .drop, footnote: action == .drop ? "This can't be undone." : nil,
+            choices: [GitMenu.Choice(key: "y", title: "\(action.verb.capitalized) it",
+                                     note: action == .apply ? "Are you sure you want to apply this stash entry?"
+                                         : action == .pop ? "Are you sure you want to pop this stash entry? It is applied and dropped; a conflict keeps it."
+                                         : "Are you sure you want to drop the selected stash entry?",
+                                     isDestructive: action == .drop) { [weak self] in
+                self?.stashEntry(action, stash)
+            }])
+        if action == .drop { open(menu) } else { openGuarded(menu) }
+    }
+
+    private func stashEntry(_ action: StashEntryAction, _ stash: GitStash) {
+        guard let snapshot else { return }
+        write(GitRepository.stashEntryScript, arguments: [snapshot.root, action.rawValue, stash.ref, stash.sha])
     }
 
     // MARK: Staging lines

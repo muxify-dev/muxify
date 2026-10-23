@@ -411,14 +411,15 @@ go on to the actions above.
 | j / k, ↓ / ↑ | Select the next or previous item; in the diff, the next or previous line |
 | < / > | First or last item; in the diff, the first or last line |
 | ↩ | On a folder, fold or open it; on a branch, go into its commits, or while comparing, into its Diff files; on a commit or stash, go into its Diff files; otherwise go to the diff |
-| Space | In Changes, stage the file or folder, or unstage it once all of it is staged; in a change's diff, stage the selected lines, or the cursor's, or unstage them in its Staged part; in Diff files, fold or open a folder |
+| Space | In Changes, stage the file or folder, or unstage it once all of it is staged; in a change's diff, stage the selected lines, or the cursor's, or unstage them in its Staged part; in Diff files, fold or open a folder; in Stashes, apply the selected stash after confirming, and it stays |
 | - / = | Fold or open every folder of the list |
 | l / h, → / ← | Go to the diff (on a branch, into its commits), or back to the list; from a list you went into, back out |
 | ⇧↓ / ⇧↑ | Select one more line below or above |
 | v | Start or end a range: moving then selects lines, as in lazygit |
 | a | In the diff, select the hunk; in Changes, stage everything, or unstage it all once it all is |
 | c | Commit what's staged, once something is, or conclude a merge: write a summary and a description, then ↩ in the summary or ⌘↩; ⎋ keeps the message for later |
-| d | In Changes, discard the file's or folder's changes, as in lazygit: x (or ↩) discards all of them, u only the unstaged ones when some are staged; new and untracked files are deleted. In a change's diff, discard the selected unstaged lines, or the cursor's, with x (or ↩). j / k move between the choices; ⎋ or q cancels |
+| d | In Changes, discard the file's or folder's changes, as in lazygit: x (or ↩) discards all of them, u only the unstaged ones when some are staged; new and untracked files are deleted. In a change's diff, discard the selected unstaged lines, or the cursor's, with x (or ↩). j / k move between the choices; ⎋ or q cancels; in Stashes, drop the selected stash after confirming |
+| g | In Stashes, pop the selected stash after confirming: it is applied and dropped. When applying conflicts, the conflicted files show in Changes, the banner says so, and the stash stays |
 | s | In Changes, stash all changes, as `git stash push`: type the stash's message (it may be empty), then ↩; ⎋ cancels. Untracked files stay. Nothing to stash is said, and nothing opens |
 | S | In Changes, open lazygit's stash options: a all changes, U all changes including untracked files, s staged changes, u unstaged changes, i all changes and keep index; each then asks for the message. j / k move between the choices; ⎋ or q cancels |
 | y, ⌘C | Copy the selected code, without + and −; in the list, the path, hash or branch |

@@ -488,6 +488,29 @@ enum GitRepository {
     esac
     """
 
+    /// Takes the folder, `apply`, `pop` or `drop`, a stash's ref and its hash. Refuses when the ref is no longer the
+    /// stash that was selected. A conflict leaves the conflicted files in the working tree, and the stash in the list
+    /// even for a pop, as git does; it is told apart from other failures, which print what git said.
+    static let stashEntryScript = """
+    cd "$1" || exit 1
+    action=$2 ref=$3 sha=$4
+    if [ "$(git rev-parse -q --verify "$ref" 2>/dev/null)" != "$sha" ]; then
+        echo "$ref is no longer the stash that was selected. Look at the stashes again." >&2
+        exit 1
+    fi
+    if [ "$action" = drop ]; then exec git stash drop -q "$ref"; fi
+    out=$(LC_ALL=C git stash "$action" "$ref" 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        if printf '%s\\n' "$out" | grep -q '^CONFLICT'; then
+            echo "Applying $ref conflicted: the conflicted files are in Changes. The stash is kept." >&2
+        else
+            printf '%s\\n' "$out" >&2
+        fi
+        exit 1
+    fi
+    """
+
     // MARK: Parsing
 
     /// The snapshot, or what the Git View says instead of one.
