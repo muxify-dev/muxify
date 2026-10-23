@@ -634,6 +634,15 @@ only the conflicts: stage them, then c commits, or reset to give it up. On the b
 the banner says a branch can't be merged into itself; while a merge, rebase or the like is in progress, the banner asks
 you to continue or abort it first. When your uncommitted changes are in the way, git's own message shows.
 
+r in Branches rebases the branch you're on onto the selected one, as lazygit's simple rebase does. It opens a menu
+titled "Rebase 'Y'" with one choice, "Simple rebase onto 'X'" (s), which runs `git rebase X` without an editor, and it
+goes through the Agent guard. The interactive rebase and the rebase onto a base branch are not offered. When it
+conflicts, the banner says so and the rebase stays in progress with the conflicted files in Changes: after you stage the
+last one, Muxify asks to continue, and m continues, skips or aborts it. Commits that were already pushed can be rebased;
+their hashes change, so the next push asks to force push. On the branch you're on, r changes nothing and the banner says
+a branch can't be rebased onto itself; while a merge, rebase or the like is in progress, the banner asks you to continue
+or abort it first. When your uncommitted changes are in the way, git's own message shows.
+
 An operation that changes the files of the Worktree asks first while an Agent is
 working there. If a Pane whose folder is the Worktree or inside it runs an Agent
 that is working or blocked, the menu names each such Agent, by its Topic, or by

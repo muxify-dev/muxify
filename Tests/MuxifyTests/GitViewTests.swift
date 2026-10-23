@@ -1033,6 +1033,55 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(try git("status --porcelain", in: path), "?? a.txt\n")
     }
 
+    private func rebase(onto branch: String, in path: String) throws {
+        try run(GitRepository.rebaseScript, path, branch, "side")
+    }
+
+    func testASimpleRebaseReplaysTheCommitsOnTopOfTheBranchWithNoEditor() throws {
+        let path = try mergeableRepository()
+        try run("cd \"$1\" && git checkout -q side", path)
+        try rebase(onto: "ahead", in: path)
+        XCTAssertEqual(try git("rev-parse --abbrev-ref HEAD", in: path), "side\n")
+        XCTAssertEqual(try git("rev-parse ahead", in: path), try git("merge-base ahead side", in: path))
+        XCTAssertEqual(try git("log --format=%s ahead..side", in: path), "Side two\nSide one\n")
+        XCTAssertFalse(try inProgress(path))
+    }
+
+    func testARebaseThatConflictsStaysInProgressAndIsToldApartFromOtherFailures() throws {
+        let path = try conflictedRepository()
+        try run("cd \"$1\" && git checkout -q side", path)
+        XCTAssertThrowsError(try run(GitRepository.rebaseScript, path, "master", "side")) {
+            XCTAssertTrue(self.stderr(of: $0).contains("Rebasing 'side' onto 'master' conflicted"), self.stderr(of: $0))
+        }
+        XCTAssertTrue(try inProgress(path))
+        XCTAssertEqual(try git("status --porcelain", in: path), "UU f.txt\n")
+        // m continues it once the conflict is resolved and staged; the next commit conflicts too.
+        try resolve(path)
+        XCTAssertThrowsError(try step("rebase", "continue", in: path))
+        try resolve(path, "again")
+        try step("rebase", "continue", in: path)
+        XCTAssertFalse(try inProgress(path))
+        // m aborts it, and skips it.
+        try run("cd \"$1\" && git reset -q --hard ORIG_HEAD", path)
+        XCTAssertThrowsError(try run(GitRepository.rebaseScript, path, "master", "side"))
+        try step("rebase", "abort", in: path)
+        XCTAssertFalse(try inProgress(path))
+        XCTAssertEqual(try git("log --format=%s master..side", in: path), "Side two\nSide one\n")
+        // Any other failure prints what git said.
+        XCTAssertThrowsError(try run(GitRepository.rebaseScript, path, "nowhere", "side")) {
+            XCTAssertTrue(self.stderr(of: $0).contains("nowhere"), self.stderr(of: $0))
+        }
+    }
+
+    func testAnUncommittedChangeStopsTheRebaseWithGitsWords() throws {
+        let path = try mergeableRepository()
+        try run("cd \"$1\" && git checkout -q side && printf 'dirty\\n' > s.txt", path)
+        XCTAssertThrowsError(try rebase(onto: "ahead", in: path)) {
+            XCTAssertTrue(self.stderr(of: $0).contains("unstaged changes"), self.stderr(of: $0))
+        }
+        XCTAssertFalse(try inProgress(path))
+    }
+
     func testCherryPickAndRevertContinueSkipAndAbort() throws {
         let path = try conflictedRepository()
         let before = try git("rev-parse HEAD", in: path)
@@ -2716,6 +2765,59 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.down)
         gitView.perform(.merge)
         XCTAssertEqual(gitView.menu?.id, "merge")
+        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+    }
+
+    func testRInBranchesOffersTheSimpleRebaseAndRunsTheScriptOnlyAfterTheChoice() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        // Elsewhere r does nothing.
+        gitView.perform(.rebase)
+        XCTAssertNil(gitView.menu)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        gitView.perform(.rebase)
+        XCTAssertEqual(gitView.menu?.id, "rebase")
+        XCTAssertEqual(gitView.menu?.title, "Rebase 'master'")
+        XCTAssertEqual(gitView.menu?.choices.map(\.key), ["s"])
+        XCTAssertEqual(gitView.menu?.choices.map(\.title), ["Simple rebase onto 'feature'"])
+        XCTAssertEqual(gitView.queuedWriteArguments, [], "opening the menu rebases nothing")
+        XCTAssertTrue(gitView.chooseMenu(key: "s"))
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "feature", "master"]])
+    }
+
+    func testROnTheCurrentBranchSaysItCannotRebaseOntoItself() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.rebase)
+        XCTAssertNil(gitView.menu)
+        XCTAssertTrue(gitView.writeError?.contains("cannot rebase a branch onto itself") == true, gitView.writeError ?? "")
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+    }
+
+    func testRWhileAnOperationIsInProgressAsksToContinueItFirst() {
+        let gitView = GitView(windowID: "@1")
+        var busy = snapshot
+        busy.operation = .rebase(branch: "feature", step: 1, steps: 2)
+        gitView.apply(busy)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        gitView.perform(.rebase)
+        XCTAssertNil(gitView.menu)
+        XCTAssertTrue(gitView.writeError?.contains("in progress") == true, gitView.writeError ?? "")
+    }
+
+    func testTheRebaseMenuGoesThroughTheAgentGuard() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
+                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        gitView.perform(.rebase)
+        XCTAssertEqual(gitView.menu?.id, "rebase")
         XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
         XCTAssertEqual(gitView.queuedWriteArguments, [])
     }
