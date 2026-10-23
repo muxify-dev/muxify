@@ -455,11 +455,24 @@ box show. When Changes would be overwritten by the checkout, the Git View asks
 automatically?"): ↩ or y stashes them, including untracked files, checks out and
 pops the stash onto the new HEAD; ⎋ changes nothing. If the pop conflicts, the
 conflicted files show in Changes, the banner says so and the stash is kept. Any
-other failure, such as a branch that another Worktree has checked out, shows git's
-message in the banner. The toolbar, History, Branches and Changes show the new
+other failure shows git's message in the banner. The toolbar, History, Branches and Changes show the new
 HEAD afterwards. Every checkout changes the files of the Worktree, so it asks
 first while an Agent is working there, as below. In a commit's Diff files, space
 still folds a folder.
+
+A branch that another Worktree has checked out can't be checked out here, so
+space on it asks instead, in a Git View menu: "Branch feature is checked out by
+Worktree repo-feature. Go to that Worktree?" ↩ or y goes there. If a Window of
+the Environment has a Pane whose folder is that Worktree or inside it, Muxify goes
+to the most recent such Window, as Jump To does, with the Pane active when it
+wasn't. Windows are ranked by when their Session was visited last, then by the
+active Window and the latest Session activity. Folders are compared by real path.
+If no Window has a Pane there, Go to… opens searched for that Worktree's Session
+Path, with its row under the cursor, so you can start a Session there with ↩; the
+Git View starts nothing itself. ⎋ changes nothing: nothing is checked out, and
+the Git View of the Window you were in stays as it was. This question changes no
+files, so the Agent guard doesn't join it. Every later checkout, such as one from
+another key, asks the same way.
 
 An operation that changes the files of the Worktree asks first while an Agent is
 working there. If a Pane whose folder is the Worktree or inside it runs an Agent

@@ -215,6 +215,24 @@ final class WorkspaceStore {
         }
     }
 
+    /// Goes to the Worktree because a Git View asked to (ADR 0041): the most recent Window with a Pane in it, with
+    /// that Pane active, else Go to… on the Worktree's Session Path. Nothing starts until the user picks a row.
+    func goToWorktree(_ worktree: Folder) {
+        let window = WorktreeWindow.mostRecent(in: worktree, windows: windows, panes: panes, resolver: folders) {
+            visits.last(.session(name: $0.sessionName))
+        }
+        guard let window else {
+            palette.openGoTo(at: worktree)
+            return
+        }
+        if let pane = panes.first(where: { $0.windowID == window.id && worktree.contains(folders.folder($0.path)) && !$0.path.isEmpty }),
+           !pane.isActive {
+            select(TopicsModel.PaneRow(pane: pane, window: window, agent: nil, isUnderWindowRow: true))
+        } else {
+            select(window)
+        }
+    }
+
     /// Goes to the Session's active Window, as its palette row does.
     func goToSession(_ sessionID: String) {
         if let window = EntryWindow.ofSession(windows.filter { $0.sessionID == sessionID }) { select(window) }
