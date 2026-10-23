@@ -694,20 +694,34 @@ final class GitScriptTests: XCTestCase {
     func testAComparisonIsTheDiffFromTheBaseWithRenamesFound() throws {
         try run("""
         cd "$1" && git worktree add -q -b moved ../moved feature && cd ../moved
-        git mv a.swift renamed.swift && printf 'let c = 3\\n' > c.swift && git add c.swift && git commit -q -m Move
+        git mv a.swift renamed.swift && printf 'let c = 3\\n' > c.swift && git add c.swift
+        # A minute after feature, so moved sorts above it, as it does when the clock ticks between commits.
+        GIT_COMMITTER_DATE="$(($(git log -1 --format=%ct feature) + 60)) +0000" git commit -q -m Move
         """, repository)
         let gitView = GitView(windowID: "@1")
         gitView.apply(try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get())
         gitView.perform(.tab(.branches))
-        while gitView.selectedItem?.name != "feature" { gitView.perform(.down) }
+        select("feature", in: gitView)
         gitView.perform(.mark)
-        while gitView.selectedItem?.name != "moved" { gitView.perform(.down) }
+        select("moved", in: gitView)
         let request = try XCTUnwrap(gitView.request())
         XCTAssertEqual(request.script, GitRepository.gitScript)
         let patch = GitPatch.parse(try run(request.script, request.arguments))
         XCTAssertEqual(patch.files.map(\.path), ["c.swift", "renamed.swift"])
         XCTAssertEqual(patch.files.map(\.change), [.added, .renamed])
         XCTAssertEqual(patch.additions, 1)
+    }
+
+    /// Branches sort newest commit first, so a row can be above or below the
+    /// selection. This walks the whole list once and fails when no row has the name.
+    @MainActor
+    private func select(_ name: String, in gitView: GitView) {
+        gitView.perform(.top)
+        var seen: Set<String> = []
+        while let selected = gitView.selectedItem?.name, selected != name, seen.insert(selected).inserted {
+            gitView.perform(.down)
+        }
+        XCTAssertEqual(gitView.selectedItem?.name, name, "no row named \(name) in \(seen.sorted())")
     }
 
     private func status() throws -> [String] {
