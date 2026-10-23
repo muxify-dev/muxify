@@ -413,6 +413,9 @@ all of it is staged, and a stages or unstages everything; a click on a file's
 letters does the same. d asks, as lazygit does, whether to discard all of a
 file's or folder's changes, back to the last commit, or only the unstaged ones,
 keeping what's staged. New and untracked files are deleted; it can't be undone.
+The Git View asks in a menu, as lazygit does: each choice has its key, j and k
+(or ↓ and ↑) move the highlight, ↩ picks the highlighted choice, and ⎋ or q
+close the menu and change nothing. While it is open, no other Git View key acts.
 
 In a change's diff, space stages the line under the cursor, the lines selected
 with v, or the hunk selected with a; in its Staged part, it unstages them. d

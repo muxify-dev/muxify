@@ -1,4 +1,4 @@
-"""The Git View: opening it, the Changes list and a file's diff, History, and closing.
+"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu, and closing.
 
 The driver cannot type keys, so a check performs each Git View key as an accessibility action of the
 `git-view` element (`GitNavigator` in UI/GitViewPanel.swift). An action is named by the key's Config
@@ -28,6 +28,11 @@ Accessibility identifiers of the Git View, for the suites that follow this one:
                              ` marks=<start>..<<end>,...` when it has changed words: their columns in the
                              code as shown, tabs expanded to the next multiple of 4
     git-write-error          the banner of a failed write or of an `e` that found its file gone; its value is the message
+    git-menu                 an open Git View menu, such as Discard changes; its label is its title, and its
+                             actions are each choice's key, then enter, escape, j and k
+    git-menu-choice-<key>    a choice of the menu, by its key's Config spelling; its label is its title, and its
+                             value is `highlighted=<0|1> enabled=<0|1>`
+    git-menu-cancel          the menu's Cancel button
 The diff pane builds only the lines on screen, so keep a fixture's diffs short.
 
 Run from the repo root after `make build`:
@@ -38,6 +43,7 @@ import json
 import re
 import shlex
 import subprocess
+import time
 import unittest
 
 from scripts.verify.sandbox import Sandbox, wait
@@ -112,6 +118,9 @@ class GitView(unittest.TestCase):
         self.s.wait_rows(lambda rs: self.s.has('git-toolbar', rs), 'the Git View did not read the repository')
 
     def close_git_view(self):
+        if self.s.has('git-menu'):
+            self.s.act('action', 'git-menu', 'escape')
+            self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'the Git View menu did not close')
         if self.is_open():
             self.key('q')
             wait(lambda: not self.is_open(), 'the Git View did not close', seconds=10)
@@ -333,6 +342,98 @@ class GitView(unittest.TestCase):
             self.assertFalse(self.editor_out.exists(), 'the editor ran')
         finally:
             (self.repo/'moved.txt').rename(self.repo/'new.txt')
+
+    def menu(self, rs=None):
+        return self.s.row('git-menu', rs)
+
+    def open_discard_menu(self, title='Discard changes'):
+        self.key('d')
+        return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == title, 'd did not open ' + title)
+
+    def wait_change(self, name, predicate, message):
+        """Reads the repository again with R, as the Git View reads it by itself only every 10 seconds, and waits
+        for the change's row."""
+        self.key('shift+r')
+        return self.s.wait_rows(lambda rs: predicate(self.s.row('git-row-change:' + name, rs)), message, seconds=10)
+
+    def test_d_asks_in_the_discard_menu_and_escape_discards_nothing(self):
+        # z- puts each new file last in Changes, where select_change's j reaches it.
+        path = self.repo/'z-discard-escape.txt'
+        path.write_text('kept\n')
+        try:
+            self.wait_change('z-discard-escape.txt', bool, 'Changes do not list z-discard-escape.txt')
+            self.select_change('z-discard-escape.txt')
+            rs = self.open_discard_menu()
+            self.assertEqual(self.s.row('git-menu-choice-x', rs).get('accessibilityLabel'), 'Discard all changes')
+            self.assertEqual(self.s.row('git-menu-choice-x', rs).get('accessibilityValue'), 'highlighted=1 enabled=1',
+                             'the menu does not highlight x first')
+            # Nothing of an untracked file is staged, so u is not offered.
+            self.assertEqual(self.s.row('git-menu-choice-u', rs).get('accessibilityValue'), 'highlighted=0 enabled=0',
+                             'u is offered for a file with nothing staged')
+            # While the menu is open, no other Git View key acts.
+            self.key('2')
+            time.sleep(1)
+            rs = self.s.rows()
+            self.assertTrue(self.s.has('git-menu', rs), '2 closed the menu')
+            self.assertEqual(self.s.row('git-tab-changes', rs).get('accessibilityValue'), 'selected', '2 changed the tab under the menu')
+            self.s.act('action', 'git-menu', 'escape')
+            self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+            time.sleep(1)
+            self.assertTrue(path.exists(), 'escape discarded the file')
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_x_in_the_discard_menu_deletes_an_untracked_file(self):
+        path = self.repo/'z-discard-x.txt'
+        path.write_text('gone\n')
+        try:
+            self.wait_change('z-discard-x.txt', bool, 'Changes do not list z-discard-x.txt')
+            self.select_change('z-discard-x.txt')
+            self.open_discard_menu()
+            self.s.act('action', 'git-menu', 'x')
+            self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'x did not close the menu')
+            wait(lambda: not path.exists(), 'x did not delete the untracked file', seconds=10)
+            self.wait_change('z-discard-x.txt', lambda row: not row, 'the discarded file stays in Changes')
+        finally:
+            path.unlink(missing_ok=True)
+
+    def test_enter_on_u_in_the_discard_menu_keeps_what_is_staged(self):
+        path = self.repo/'stashed.txt'
+        path.write_text('one\nstaged\n')
+        self.git('add', 'stashed.txt')
+        path.write_text('one\nstaged\nunstaged\n')
+        try:
+            self.wait_change('stashed.txt', lambda row: self.status(row) == 'MM', 'stashed.txt is not staged and unstaged')
+            self.select_change('stashed.txt')
+            rs = self.open_discard_menu()
+            self.assertEqual(self.s.row('git-menu-choice-u', rs).get('accessibilityValue'), 'highlighted=0 enabled=1',
+                             'u is not offered for a file with staged and unstaged changes')
+            self.s.act('action', 'git-menu', 'j')
+            self.s.wait_rows(lambda rs: self.s.row('git-menu-choice-u', rs).get('accessibilityValue') == 'highlighted=1 enabled=1',
+                             'j did not highlight u')
+            self.s.act('action', 'git-menu', 'enter')
+            self.wait_change('stashed.txt', lambda row: self.status(row) == 'M ', 'u did not discard only the unstaged change')
+            self.assertEqual(path.read_text(), 'one\nstaged\n', 'u changed what is staged')
+        finally:
+            self.git('checkout', '-q', 'HEAD', '--', 'stashed.txt')
+
+    def test_d_in_a_diff_asks_to_discard_the_cursors_line(self):
+        path = self.repo/'z-discard-line.txt'
+        path.write_text('only line\n')
+        try:
+            self.wait_change('z-discard-line.txt', bool, 'Changes do not list z-discard-line.txt')
+            self.select_change('z-discard-line.txt')
+            self.key('enter')
+            self.s.wait_rows(lambda rs: any(r.get('accessibilityLabel') == 'only line'
+                                            and r.get('accessibilityIdentifier', '').startswith('git-line-') for r in rs),
+                             'the new file\'s diff does not show')
+            rs = self.open_discard_menu('Discard lines')
+            self.assertEqual(self.s.row('git-menu-choice-x', rs).get('accessibilityLabel'), 'Discard the line')
+            self.assertFalse(self.s.has('git-menu-choice-u', rs), 'lines offer u')
+            self.s.act('press', 'git-menu-choice-x')
+            wait(lambda: not path.exists(), 'discarding all of a new file\'s lines did not delete it', seconds=10)
+        finally:
+            path.unlink(missing_ok=True)
 
     def test_q_closes_the_git_view(self):
         self.assertTrue(self.is_open(), 'the Git View is not open')

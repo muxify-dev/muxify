@@ -323,8 +323,8 @@ final class GitView {
     var commitDescription = ""
     private(set) var commitError: String?
     private(set) var isCommitting = false
-    /// d in Changes: lazygit's Discard changes menu, on what it's for.
-    private(set) var discard: Discard?
+    /// The Git View menu open, such as lazygit's Discard changes menu on d.
+    private(set) var menu: GitMenu?
     /// The Git View tab the list pane shows.
     private(set) var tab = GitTab.changes
     /// Each tab's lists: its own, then each one gone into; the last one
@@ -460,7 +460,7 @@ final class GitView {
         isFiltering = false
         isCommitOpen = false
         commitError = nil
-        discard = nil
+        menu = nil
         writeError = nil
         wantsFocus = false
         wantsEditor = false
@@ -485,7 +485,7 @@ final class GitView {
     func suspend() {
         isFiltering = false
         // Asked again when it's wanted, never waiting to be confirmed.
-        discard = nil
+        menu = nil
         wantsFocus = false
         // What had focus before is gone with the Window; closing later
         // gives it to the terminal.
@@ -934,19 +934,8 @@ final class GitView {
             }
             return true
         }
-        // The Discard changes menu's keys, as lazygit's.
-        if let discard, window === keyView?.window {
-            switch trigger {
-            case Self.escape, Self.q: closeDiscard()
-            case Self.x: confirmDiscard(.all)
-            case Self.u: confirmDiscard(.unstaged)
-            case Self.enter: confirmDiscard(discard.option)
-            case Self.down, Self.j, Self.ctrlJ: moveDiscardOption(by: 1)
-            case Self.up, Self.k, Self.ctrlK: moveDiscardOption(by: -1)
-            default: return false
-            }
-            return true
-        }
+        // A Git View menu's keys, as lazygit's; no other Git View key acts.
+        if menu != nil, window === keyView?.window { return handleMenuKey(trigger) }
         if isFiltering, window === keyView?.window {
             switch trigger {
             case Self.escape, Self.enter:
@@ -965,6 +954,23 @@ final class GitView {
         return true
     }
 
+    /// A key while a Git View menu is open: false for a key it doesn't
+    /// use, which goes on to Muxify's keybinds, not to the Git View's.
+    func handleMenuKey(_ trigger: KeyTrigger) -> Bool {
+        guard let menu else { return false }
+        switch trigger {
+        case Self.escape, Self.q: closeMenu()
+        case Self.enter: menu.highlightedChoice.map(choose)
+        case Self.down, Self.j, Self.ctrlJ: self.menu?.move(by: 1)
+        case Self.up, Self.k, Self.ctrlK: self.menu?.move(by: -1)
+        default:
+            // A choice's key, even a disabled one's, goes no further.
+            guard let choice = menu.choice(for: trigger) else { return false }
+            choose(choice)
+        }
+        return true
+    }
+
     private static let escape = try! KeyTrigger("escape")
     private static let enter = try! KeyTrigger("enter")
     private static let down = try! KeyTrigger("down")
@@ -975,8 +981,6 @@ final class GitView {
     private static let j = try! KeyTrigger("j")
     private static let k = try! KeyTrigger("k")
     private static let q = try! KeyTrigger("q")
-    private static let u = try! KeyTrigger("u")
-    private static let x = try! KeyTrigger("x")
 
     /// The Git View's keys by their Config spelling; each is also an
     /// accessibility action of the Git View, named by its spelling.
@@ -1222,8 +1226,8 @@ final class GitView {
         var isEmpty: Bool { paths.isEmpty && patch.isEmpty }
     }
 
-    /// lazygit's Discard changes menu, for a file or folder of Changes, or
-    /// for the lines picked in its diff.
+    /// What lazygit's Discard changes menu is on: a file or folder of
+    /// Changes, or the lines picked in its diff.
     struct Discard: Equatable {
         enum Option: CaseIterable { case all, unstaged }
 
@@ -1234,8 +1238,6 @@ final class GitView {
         let changes: [GitChange]
         /// d in the diff: the lines to discard, instead of the changes.
         var lines: LineWrite?
-        /// The option ↩ picks.
-        var option = Option.all
 
         /// As in lazygit, only when some of it is staged and some isn't.
         var canDiscardUnstaged: Bool {
@@ -1248,28 +1250,79 @@ final class GitView {
         }
     }
 
+    // MARK: Menus
+
+    /// Opens a Git View menu, in place of any other.
+    func open(_ menu: GitMenu) {
+        self.menu = menu
+        writeError = nil
+    }
+
+    /// ⎋ or q, or a click outside it: changes nothing.
+    func closeMenu() {
+        menu = nil
+    }
+
+    /// A choice's key, ↩ on the highlighted one, or a click on it.
+    func choose(_ choice: GitMenu.Choice) {
+        guard menu != nil, choice.isEnabled else { return }
+        menu = nil
+        choice.run()
+    }
+
+    /// A choice by its key, as an accessibility action of the menu does.
+    @discardableResult
+    func chooseMenu(key name: String) -> Bool {
+        guard let trigger = try? KeyTrigger(name), let choice = menu?.choice(for: trigger), choice.isEnabled else { return false }
+        choose(choice)
+        return true
+    }
+
+    // MARK: Discarding
+
     /// d: asks what to discard of a file or folder, as lazygit does.
     func askDiscard(_ item: Item) {
         guard let snapshot else { return }
         switch item {
         case .change(let change):
-            discard = Discard(path: change.path, isFolder: false, changes: [change])
+            open(discardMenu(Discard(path: change.path, isFolder: false, changes: [change])))
         case .folder(_, let folder):
-            discard = Discard(path: folder, isFolder: true, changes: snapshot.changes.filter { GitTree.path($0.path, isIn: folder) })
+            open(discardMenu(Discard(path: folder, isFolder: true, changes: snapshot.changes.filter { GitTree.path($0.path, isIn: folder) })))
         default:
             return
         }
-        writeError = nil
     }
 
-    func closeDiscard() {
-        discard = nil
+    /// lazygit's Discard changes menu: x discards everything, u only what
+    /// isn't staged; for lines, x discards them.
+    func discardMenu(_ discard: Discard) -> GitMenu {
+        let subject: GitMenu.Subject = discard.isFolder
+            ? .folder(discard.path, files: discard.lines == nil ? discard.changes.count : nil) : .file(discard.path)
+        let choices: [GitMenu.Choice]
+        if let lines = discard.lines {
+            // All of a new file's lines: it's deleted, as the file's discard does.
+            let deletes = discard.changes.contains { $0.isUntracked && lines.paths.contains($0.path) }
+            choices = [
+                GitMenu.Choice(key: "x", title: lines.lines == 1 ? "Discard the line" : "Discard \(lines.lines) lines",
+                               note: deletes ? "Back to what's staged. A new file with all of its lines picked is deleted." : "Back to what's staged.",
+                               isDestructive: true) { [weak self] in self?.discard(discard, .all) },
+            ]
+        } else {
+            choices = [
+                GitMenu.Choice(key: "x", title: "Discard all changes", note: "Back to the last commit. New and untracked files are deleted.",
+                               isDestructive: true) { [weak self] in self?.discard(discard, .all) },
+                GitMenu.Choice(key: "u", title: "Discard unstaged changes",
+                               note: discard.canDiscardUnstaged ? "Keep what's staged." : "Only when some of it is staged and some isn't.",
+                               isEnabled: discard.canDiscardUnstaged) { [weak self] in self?.discard(discard, .unstaged) },
+            ]
+        }
+        return GitMenu(id: "discard", title: discard.lines == nil ? "Discard changes" : "Discard lines", subject: subject,
+                       symbol: "trash", isDestructive: true, footnote: "This can't be undone.", choices: choices)
     }
 
-    /// x, u, or ↩ or a click on an option. It can't be undone.
-    func confirmDiscard(_ option: Discard.Option) {
-        guard let discard, let snapshot, option == .all || discard.canDiscardUnstaged else { return }
-        self.discard = nil
+    /// x or u in the Discard changes menu. It can't be undone.
+    private func discard(_ discard: Discard, _ option: Discard.Option) {
+        guard let snapshot, option == .all || discard.canDiscardUnstaged else { return }
         if let lines = discard.lines {
             keepCursor()
             return write(lines, .discard, root: snapshot.root)
@@ -1353,11 +1406,10 @@ final class GitView {
             return
         }
         switch content.header {
-        case .change(let change): discard = Discard(path: change.path, isFolder: false, changes: [change], lines: lines)
-        case .folder(let path, let changes): discard = Discard(path: path, isFolder: true, changes: changes, lines: lines)
+        case .change(let change): open(discardMenu(Discard(path: change.path, isFolder: false, changes: [change], lines: lines)))
+        case .folder(let path, let changes): open(discardMenu(Discard(path: path, isFolder: true, changes: changes, lines: lines)))
         default: return
         }
-        writeError = nil
     }
 
     private func write(_ lines: LineWrite, _ mode: LineWrite.Mode, root: String) {
@@ -1379,14 +1431,6 @@ final class GitView {
     private func keepCursor() {
         guard let row = cursor?.row else { return }
         keptCursor = (contentItem?.id ?? "", row, topIndex)
-    }
-
-    private func moveDiscardOption(by step: Int) {
-        guard var discard else { return }
-        let options = discard.canDiscardUnstaged ? Discard.Option.allCases : [.all]
-        let index = (options.firstIndex(of: discard.option) ?? 0) + step
-        discard.option = options[min(max(index, 0), options.count - 1)]
-        self.discard = discard
     }
 
     /// The changes staged, which a commit takes.
@@ -2224,8 +2268,8 @@ final class GitView {
         if let summary = fields["summary"] { commitSummary = summary }
         if let description = fields["description"] { commitDescription = description.replacingOccurrences(of: "\\n", with: "\n") }
         if fields["commitnow"] != nil { commit() }
-        // `discardnow=1` picks the Discard changes menu's highlighted option.
-        if fields["discardnow"] != nil, let discard { confirmDiscard(discard.option) }
+        // `menunow=1` runs the Git View menu's highlighted choice.
+        if fields["menunow"] != nil, let choice = menu?.highlightedChoice { choose(choice) }
         // `shot=<path>` saves the App Window as drawn, for shells that
         // aren't allowed to record the screen.
         if let path = fields["shot"], let view = store?.terminalHost.window?.contentView,
