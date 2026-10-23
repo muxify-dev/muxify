@@ -297,6 +297,8 @@ final class GitView {
         /// Space: stages or unstages in Changes, and the selected lines in
         /// a change's diff; folds a folder of the Diff files.
         case toggle, collapseAll, expandAll
+        /// A: amends the last commit with what's staged, in Changes.
+        case amend
         case commit, discard, stash, stashOptions, filter, back, close, refresh
         /// n: a new branch off the branch selected in Branches.
         case newBranch
@@ -1037,7 +1039,7 @@ final class GitView {
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
             "space": .toggle, "minus": .collapseAll, "equal": .expandAll, "n": .newBranch,
             "c": .commit, "d": .discard, "g": .pop, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
-            "shift+w": .mark, "e": .edit, "f": .fetch, "shift+p": .push, "p": .pull,
+            "shift+w": .mark, "e": .edit, "f": .fetch, "shift+a": .amend, "shift+p": .push, "p": .pull,
     ]
 
     static let commands: [KeyTrigger: Command] = Dictionary(uniqueKeysWithValues: keyMap.map { (try! KeyTrigger($0), $1) })
@@ -1114,6 +1116,8 @@ final class GitView {
         case .commit:
             // As in lazygit, c commits in Changes, checks out by name in Branches, and does nothing elsewhere.
             if list == .changes { openCommit() } else if list == .branches, focus == .list { askCheckoutByName() }
+        case .amend:
+            if list == .changes { askAmend() }
         case .newBranch:
             if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askNewBranch(off: branch) }
         case .pop:
@@ -2005,6 +2009,43 @@ final class GitView {
             commitDescription = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
         }
         isCommitOpen = true
+    }
+
+    /// A: asks, then amends the last commit with what's staged, keeping its message.
+    func askAmend() {
+        guard let snapshot else { return }
+        if let block = snapshot.operation?.amendBlock {
+            writeError = block
+            return
+        }
+        guard !snapshot.commits.isEmpty else {
+            writeError = "There is no commit to amend yet."
+            return
+        }
+        guard stagedCount > 0 else {
+            writeError = snapshot.changes.isEmpty ? "Nothing to amend with: the working tree is clean."
+                : "Nothing is staged. Stage files with space, or everything with a, to amend the last commit with them."
+            return
+        }
+        writeError = nil
+        let last = snapshot.commits[0]
+        open(GitMenu(
+            id: "amend", title: "Amend last commit", subject: .text("\(last.shortSHA) \(last.subject)"), symbol: "arrow.uturn.backward.circle",
+            choices: [GitMenu.Choice(key: "y", title: "Amend commit", note: "Are you sure you want to amend the last commit?") { [weak self] in
+                self?.amend()
+            }]))
+    }
+
+    private func amend() {
+        guard let snapshot else { return }
+        write(GitRepository.amendScript, arguments: [snapshot.root], timeout: 600) { [weak self] result in
+            switch result {
+            case .success(let output):
+                self?.store?.palette.showCopied(title: "Amended", value: output.trimmingCharacters(in: .whitespacesAndNewlines))
+            case .failure(let error):
+                self?.writeError = Self.message(for: error)
+            }
+        }
     }
 
     func closeCommit() {

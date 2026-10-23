@@ -749,6 +749,19 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(try status(), [" M a.swift", "?? c.txt"])
     }
 
+    func testAmendTakesWhatsStagedAndKeepsTheMessage() throws {
+        try run(GitRepository.makeCommitScript, repository, "Stage a\n\nThe body.")
+        let before = try run("cd \"$1\" && git rev-list --count HEAD", repository)
+        try run("cd \"$1\" && git add c.txt", repository)
+        try run(GitRepository.amendScript, repository)
+        XCTAssertEqual(try run("cd \"$1\" && git rev-list --count HEAD", repository), before)
+        XCTAssertEqual(try run("cd \"$1\" && git log -1 --format='%s|%b'", repository).trimmingCharacters(in: .whitespacesAndNewlines), "Stage a|The body.")
+        XCTAssertTrue(try run("cd \"$1\" && git show --name-only --format= HEAD", repository).contains("c.txt"))
+        // A failing hook's words come back.
+        try run("cd \"$1\" && printf '#!/bin/sh\\necho no amend today >&2\\nexit 1\\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit && printf 'z\\n' > z.txt && git add z.txt", repository)
+        XCTAssertThrowsError(try run(GitRepository.amendScript, repository)) { XCTAssertTrue(self.stderr(of: $0).contains("no amend today")) }
+    }
+
     func testDiscardTakesEverythingOrOnlyWhatsUnstaged() throws {
         // a.swift is staged and changed again: only the change goes.
         try run(GitRepository.discardUnstagedScript, repository, "a.swift")
@@ -2310,6 +2323,44 @@ final class GitViewKeysTests: XCTestCase {
         gitView.commitSummary = "Mine"
         gitView.perform(.commit)
         XCTAssertEqual(gitView.commitSummary, "Mine")
+    }
+
+    func testAAmendsAfterAskingAndSaysWhyItCant() {
+        let gitView = GitView(windowID: "@1")
+        var changed = snapshot
+        changed.changes = [GitChange(index: " ", worktree: "M", path: "a.swift")]
+        gitView.apply(changed)
+        gitView.perform(.amend)
+        XCTAssertNil(gitView.menu)
+        XCTAssertTrue(gitView.writeError?.contains("Nothing is staged") == true)
+        changed.changes = [GitChange(index: "M", worktree: " ", path: "a.swift")]
+        gitView.apply(changed)
+        gitView.perform(.tab(.history))
+        gitView.perform(.amend)
+        XCTAssertNil(gitView.menu)
+        gitView.perform(.tab(.changes))
+        gitView.perform(.amend)
+        XCTAssertEqual(gitView.menu?.id, "amend")
+        XCTAssertEqual(gitView.menu?.choices.first?.note, "Are you sure you want to amend the last commit?")
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        XCTAssertTrue(gitView.chooseMenu(key: "y"))
+        XCTAssertEqual(gitView.queuedWriteArguments, [[changed.root]])
+        // No commit, or something in progress.
+        gitView.closeMenu()
+        var unborn = changed
+        unborn.commits = []
+        gitView.apply(unborn)
+        gitView.perform(.amend)
+        XCTAssertNil(gitView.menu)
+        XCTAssertEqual(gitView.writeError, "There is no commit to amend yet.")
+        for operation in [GitOperation.merge(["f1"]), .rebase(branch: nil, step: nil, steps: nil), .applying(step: nil, steps: nil), .cherryPick("abc"), .revert("abc")] {
+            var busy = changed
+            busy.operation = operation
+            gitView.apply(busy)
+            gitView.perform(.amend)
+            XCTAssertNil(gitView.menu, "\(operation)")
+            XCTAssertNotNil(gitView.writeError, "\(operation)")
+        }
     }
 
     func testTheMessageIsDroppedInAnotherRepository() {

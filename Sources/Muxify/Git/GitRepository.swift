@@ -79,6 +79,16 @@ enum GitOperation: Equatable {
     case revert(String)
     case bisect
 
+    /// Why A doesn't amend now, if it doesn't.
+    var amendBlock: String? {
+        switch self {
+        case .merge: "A merge is in progress: conclude it with c first, then amend."
+        case .rebase, .applying, .cherryPick, .revert:
+            (commitBlock ?? "").replacingOccurrences(of: ": continue", with: ", so the last commit isn't amended: continue")
+        case .bisect: nil
+        }
+    }
+
     /// Why c doesn't commit now, if it doesn't.
     var commitBlock: String? {
         switch self {
@@ -444,6 +454,15 @@ enum GitRepository {
     printf '%s' "$patch" | git apply --recount --whitespace=nowarn $flags - && exit 0
     if [ $# -gt 0 ]; then git rm -q -f --cached -- "$@"; fi
     exit 1
+    """
+
+    /// Takes the folder; amends the last commit with what's staged and keeps
+    /// its message. Prints the commit's short hash; hooks' output goes to
+    /// stderr, where a failure shows it.
+    static let amendScript = """
+    cd "$1" || exit 1
+    git -c color.ui=never commit -q --amend --no-edit 1>&2 || exit 1
+    git rev-parse --short HEAD
     """
 
     /// Takes the folder and the message; commits what's staged. Prints the
