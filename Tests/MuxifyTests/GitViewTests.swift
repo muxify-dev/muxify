@@ -1177,11 +1177,79 @@ final class GitViewKeysTests: XCTestCase {
         changed.changes = [mixed, untracked]
         gitView.apply(changed)
         gitView.perform(.discard)
-        XCTAssertEqual(gitView.discard?.path, "src/a.swift")
-        gitView.closeDiscard()
+        XCTAssertEqual(gitView.menu?.id, "discard")
+        XCTAssertEqual(gitView.menu?.subject, .file("src/a.swift"))
+        gitView.closeMenu()
         gitView.perform(.tab(.history))
         gitView.perform(.discard)
-        XCTAssertNil(gitView.discard)
+        XCTAssertNil(gitView.menu)
+    }
+
+    func testTheDiscardMenuOffersWhatLazygitDoes() {
+        let gitView = GitView(windowID: "@1")
+        let mixed = GitChange(index: "M", worktree: "M", path: "src/a.swift")
+        let untracked = GitChange(index: "?", worktree: "?", path: "src/c.txt")
+        let file = gitView.discardMenu(GitView.Discard(path: mixed.path, isFolder: false, changes: [mixed]))
+        XCTAssertEqual(file.title, "Discard changes")
+        XCTAssertEqual(file.choices.map(\.key), ["x", "u"])
+        XCTAssertEqual(file.choices.map(\.isEnabled), [true, true])
+        XCTAssertEqual(file.highlightedChoice?.key, "x")
+        let new = gitView.discardMenu(GitView.Discard(path: untracked.path, isFolder: false, changes: [untracked]))
+        XCTAssertEqual(new.choices.map(\.isEnabled), [true, false])
+        let folder = gitView.discardMenu(GitView.Discard(path: "src", isFolder: true, changes: [mixed, untracked]))
+        XCTAssertEqual(folder.subject, .folder("src", files: 2))
+        var lines = GitView.LineWrite()
+        lines.lines = 3
+        lines.paths = ["src/a.swift"]
+        let picked = gitView.discardMenu(GitView.Discard(path: mixed.path, isFolder: false, changes: [mixed], lines: lines))
+        XCTAssertEqual(picked.title, "Discard lines")
+        XCTAssertEqual(picked.choices.map(\.title), ["Discard 3 lines"])
+    }
+
+    func testAGitViewMenuMovesRunsAndClosesOnItsKeys() throws {
+        let gitView = GitView(windowID: "@1")
+        var ran: [String] = []
+        func open() {
+            gitView.open(GitMenu(id: "test", title: "Test", symbol: "circle", choices: [
+                GitMenu.Choice(key: "a", title: "A") { ran.append("a") },
+                GitMenu.Choice(key: "b", title: "B", isEnabled: false) { ran.append("b") },
+                GitMenu.Choice(key: "shift+c", title: "C", note: "The last.") { ran.append("c") },
+            ]))
+        }
+        func key(_ name: String) throws -> Bool { gitView.handleMenuKey(try KeyTrigger(name)) }
+        open()
+        XCTAssertEqual(gitView.menu?.highlightedChoice?.key, "a")
+        // j and ↓ skip what's disabled, and stop at the ends.
+        XCTAssertTrue(try key("j"))
+        XCTAssertEqual(gitView.menu?.highlightedChoice?.key, "shift+c")
+        XCTAssertTrue(try key("down"))
+        XCTAssertEqual(gitView.menu?.highlightedChoice?.key, "shift+c")
+        XCTAssertTrue(try key("k"))
+        XCTAssertTrue(try key("up"))
+        XCTAssertEqual(gitView.menu?.highlightedChoice?.key, "a")
+        XCTAssertTrue(try key("j"))
+        XCTAssertTrue(try key("enter"))
+        XCTAssertEqual(ran, ["c"])
+        XCTAssertNil(gitView.menu)
+        // A choice's own key runs it; a disabled one's does nothing, and goes no further.
+        open()
+        XCTAssertTrue(try key("b"))
+        XCTAssertNotNil(gitView.menu)
+        XCTAssertTrue(try key("a"))
+        XCTAssertEqual(ran, ["c", "a"])
+        // ⎋ and q close it and run nothing; other keys aren't the Git View's while it's open.
+        for name in ["escape", "q"] {
+            open()
+            XCTAssertTrue(try key(name))
+            XCTAssertNil(gitView.menu)
+        }
+        open()
+        XCTAssertFalse(try key("d"))
+        XCTAssertFalse(try key("cmd+b"))
+        XCTAssertNotNil(gitView.menu)
+        XCTAssertTrue(gitView.chooseMenu(key: "shift+c"))
+        XCTAssertFalse(gitView.chooseMenu(key: "a"))
+        XCTAssertEqual(ran, ["c", "a", "c"])
     }
 
     func testCommittingWaitsForARebaseAndConcludesAMerge() {
