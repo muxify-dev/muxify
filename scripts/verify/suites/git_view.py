@@ -1,4 +1,4 @@
-"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu and its Agent guard, stashing from Changes, applying, popping and dropping a stash, checking out, fetching, and closing.
+"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu and its Agent guard, stashing from Changes, applying, popping and dropping a stash, checking out, fetching, pushing, pulling, and closing.
 
 The driver cannot type keys, so a check performs each Git View key as an accessibility action of the
 `git-view` element (`GitNavigator` in UI/GitViewPanel.swift). An action is named by the key's Config
@@ -57,6 +57,10 @@ Accessibility identifiers of the Git View, for the suites that follow this one:
     ("Autostash?", when Changes are in the way), each with the one choice `git-menu-choice-y`. space on a branch that
     another Worktree has checked out asks in the menu `other-worktree` ("Go to Worktree?") instead, with the one
     choice `git-menu-choice-y`: it goes to a Window with a Pane in that Worktree, else opens Go to… on its Session Path.
+P pushes beside the writes and p pulls in the write queue, in every tab; the toolbar's label ends with "Pushing…" or
+"Pulling…" until it ends. Without an upstream they ask in `git-prompt` ("Enter upstream as '<remote> <branch>'", its
+`git-prompt-field` starting at `origin <branch>`); a push of a branch behind its upstream asks in the menu `force-push`
+("Force push?", with the one choice `git-menu-choice-y`), and a detached HEAD says in `git-write-error` why it can't.
 f in Changes fetches beside the writes; the toolbar's label ends with "Fetching…" until it ends. A credential question
 of git or ssh is asked in `git-prompt`, whose label is the question; ⎋ stops the fetch, and `git-write-error` says
 "Fetch cancelled.".
@@ -1207,6 +1211,168 @@ class GitView(unittest.TestCase):
         self.s.wait_rows(lambda rs: '↑0 ↓1 vs origin/main' in self.toolbar(rs), 'the fetch did not end, or the counts did not update', seconds=15)
         self.assertFalse(self.s.has('git-write-error'), 'the fetch failed')
         self.assertEqual(answers.read_text().split(), ['wrong', 'right'])
+
+    def bare_remote(self, name, tracking=True):
+        """Adds the remote origin, an empty bare repository, and with `tracking` pushes main to it, which then is main's
+        upstream. Returns its path."""
+        origin = self.s.root/(name + '.git')
+        subprocess.run(['/usr/bin/git', 'init', '-q', '--bare', str(origin)], check=True)
+        self.git('remote', 'add', 'origin', str(origin))
+        self.addCleanup(self.git, 'remote', 'remove', 'origin')
+        if tracking:
+            self.git('push', '-q', '-u', 'origin', 'main')
+        return origin
+
+    def remote_main(self, origin):
+        return subprocess.run(['/usr/bin/git', '--git-dir', str(origin), 'rev-parse', '--verify', '-q', 'main'],
+                              capture_output=True, text=True).stdout.strip()
+
+    def push_from_a_clone(self, origin, name):
+        """Another clone pushes a commit to the remote's main, and fetches nothing here."""
+        clone = self.s.root/(name + '-clone')
+        subprocess.run(['/usr/bin/git', 'clone', '-q', '-b', 'main', str(origin), str(clone)], check=True)
+        (clone/'clone.txt').write_text('clone\n')
+        identity = ['-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid']
+        for args in [['add', 'clone.txt'], ['commit', '-q', '-m', 'clone commit'], ['push', '-q', 'origin', 'main']]:
+            subprocess.run(['/usr/bin/git', '-C', str(clone)] + identity + args, check=True)
+
+    def read_upstream(self):
+        """Reads the repository again, which was read when the Git View opened, before the check made its remote."""
+        self.key('shift+r')
+        self.s.wait_rows(lambda rs: 'no upstream' not in self.toolbar(rs), 'the Git View does not show the upstream', seconds=15)
+
+    def take_back(self, before, *pulled):
+        """Moves main back to `before` and drops the files a pull brought, leaving what the fixture has staged and
+        changed as it was (`reset --keep` would unstage it)."""
+        self.git('reset', '-q', '--soft', before)
+        for name in pulled:
+            self.git('rm', '-q', '-f', '--cached', '--ignore-unmatch', name)
+            (self.repo/name).unlink(missing_ok=True)
+
+    def commit_here(self, message):
+        """An empty commit on main, taken back after the check."""
+        before = self.git('rev-parse', 'HEAD').strip()
+        self.git('commit', '-q', '--allow-empty', '-m', message)
+        self.addCleanup(self.take_back, before)
+
+    def test_shift_p_pushes_the_branch_in_every_tab_and_the_toolbar_says_pushing(self):
+        origin = self.bare_remote('push-plain')
+        self.commit_here('to push')
+        self.key('f')
+        self.s.wait_rows(lambda rs: '↑1 ↓0 vs origin/main' in self.toolbar(rs), 'the Git View does not count the commit as unpushed', seconds=15)
+        self.key('3')
+        self.key('shift+p')
+        wait(lambda: self.remote_main(origin) == self.git('rev-parse', 'HEAD').strip(), 'shift+p did not push main', seconds=15)
+        self.s.wait_rows(lambda rs: '↑0 ↓0 vs origin/main' in self.toolbar(rs) and 'Pushing…' not in self.toolbar(rs),
+                         'the counts do not update after the push', seconds=15)
+        self.assertFalse(self.s.has('git-write-error'), 'the push failed')
+        self.assertFalse(self.s.has('git-menu'), 'a plain push asked')
+
+    def test_shift_p_without_an_upstream_asks_for_one_starting_at_origin_and_the_branch_and_sets_it(self):
+        origin = self.bare_remote('push-upstream', tracking=False)
+        self.assertEqual(self.remote_main(origin), '')
+        self.key('shift+r')
+        self.s.wait_rows(lambda rs: 'no upstream' in self.toolbar(rs), 'the Git View still shows an upstream', seconds=15)
+        self.key('shift+p')
+        self.wait_prompt("Enter upstream as '<remote> <branch>'")
+        self.assertEqual(self.s.row('git-prompt-field').get('accessibilityValue'), 'origin main', 'the prompt does not start at origin and the branch')
+        # ⎋ pushes nothing.
+        self.s.act('action', 'git-prompt', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-prompt', rs), 'escape did not close the prompt')
+        time.sleep(.5)
+        self.assertEqual(self.remote_main(origin), '', 'escape pushed')
+        # ↩ pushes and sets the upstream.
+        self.key('shift+p')
+        self.wait_prompt("Enter upstream as '<remote> <branch>'")
+        self.s.act('action', 'git-prompt', 'enter')
+        wait(lambda: self.remote_main(origin) == self.git('rev-parse', 'HEAD').strip(), 'the push did not reach the remote', seconds=15)
+        self.s.wait_rows(lambda rs: 'no upstream' not in self.toolbar(rs) and '↑0 ↓0 vs origin/main' in self.toolbar(rs),
+                         'the upstream was not set', seconds=15)
+        self.assertEqual(self.git('config', 'branch.main.remote').strip(), 'origin')
+        self.assertEqual(self.git('config', 'branch.main.merge').strip(), 'refs/heads/main')
+
+    def test_shift_p_on_a_diverged_branch_asks_to_force_push_and_only_a_confirmation_does(self):
+        origin = self.bare_remote('push-force')
+        self.push_from_a_clone(origin, 'push-force')
+        self.commit_here('diverging')
+        theirs = self.remote_main(origin)
+        self.key('f')
+        self.s.wait_rows(lambda rs: '↑1 ↓1 vs origin/main' in self.toolbar(rs), 'the branch does not show as diverged', seconds=15)
+        self.key('shift+p')
+        rs = self.s.wait_rows(lambda rs: self.s.has('git-menu', rs), 'P did not ask before a force push')
+        self.assertEqual(self.s.row('git-menu', rs).get('accessibilityLabel'), 'Force push?')
+        # ⎋ changes nothing.
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+        time.sleep(.5)
+        self.assertEqual(self.remote_main(origin), theirs, 'escape pushed')
+        # ↩ force pushes, with the lease.
+        self.key('shift+p')
+        self.s.wait_rows(lambda rs: self.s.has('git-menu', rs), 'P did not ask again')
+        self.s.act('action', 'git-menu', 'enter')
+        wait(lambda: self.remote_main(origin) == self.git('rev-parse', 'HEAD').strip(), 'the force push did not reach the remote', seconds=15)
+        self.s.wait_rows(lambda rs: '↑0 ↓0 vs origin/main' in self.toolbar(rs), 'the counts do not update after the force push', seconds=15)
+        self.assertFalse(self.s.has('git-write-error'), 'the force push failed')
+
+    def test_p_pulls_with_the_users_config_and_asks_for_an_upstream_when_there_is_none(self):
+        origin = self.remote_one_commit_ahead('pull-ff')
+        before = self.git('rev-parse', 'HEAD').strip()
+        self.addCleanup(self.take_back, before, 'remote.txt')
+        self.read_upstream()
+        self.key('p')
+        wait(lambda: (self.repo/'remote.txt').exists(), 'p did not pull', seconds=20)
+        self.s.wait_rows(lambda rs: '↑0 ↓0 vs origin/main' in self.toolbar(rs) and 'Pulling…' not in self.toolbar(rs),
+                         'the counts do not update after the pull', seconds=15)
+        self.assertEqual(self.git('log', '-1', '--format=%s').strip(), 'remote commit')
+        self.assertFalse(self.s.has('git-write-error'), 'the pull failed')
+        # Without an upstream, it asks as push does.
+        self.git('config', '--unset', 'branch.main.remote')
+        self.git('config', '--unset', 'branch.main.merge')
+        self.key('shift+r')
+        self.s.wait_rows(lambda rs: 'no upstream' in self.toolbar(rs), 'the Git View still shows an upstream', seconds=15)
+        self.key('p')
+        self.wait_prompt("Enter upstream as '<remote> <branch>'")
+        self.assertEqual(self.s.row('git-prompt-field').get('accessibilityValue'), 'origin main')
+        self.s.act('action', 'git-prompt', 'enter')
+        wait(lambda: self.git('config', 'branch.main.remote').strip() == 'origin', 'the pull did not set the upstream', seconds=15)
+        self.s.wait_rows(lambda rs: 'no upstream' not in self.toolbar(rs), 'the Git View does not show the upstream', seconds=15)
+
+    def test_a_pull_waits_in_the_write_queue_and_the_toolbar_says_pulling(self):
+        go, answers = self.fake_ssh('pull-ssh-bin')
+        origin = self.s.root/'pull-ssh.git'
+        self.remote_one_commit_ahead('pull-ssh', url='ssh://fake.invalid' + str(origin))
+        before = self.git('rev-parse', 'HEAD').strip()
+        self.addCleanup(self.take_back, before, 'remote.txt')
+        question = "Enter passphrase for key '/fake/id':"
+        self.read_upstream()
+        self.select_row('git-row-change:new.txt')
+        self.key('p')
+        self.s.wait_rows(lambda rs: 'Pulling…' in self.toolbar(rs), 'the toolbar does not show Pulling…')
+        # Staging waits behind the pull, in the write queue.
+        self.addCleanup(self.git, 'reset', '-q', '--', 'new.txt')
+        self.key('space')
+        go.touch()
+        rs = self.wait_prompt(question)
+        self.assertTrue(self.s.has('git-prompt-secret', rs), 'the passphrase is not hidden')
+        time.sleep(1)
+        self.assertNotIn('A  new.txt', self.porcelain(), 'space staged while the pull waited')
+        self.s.act('set', 'git-prompt-field', 'right')
+        self.s.act('action', 'git-prompt', 'enter')
+        wait(lambda: (self.repo/'remote.txt').exists(), 'the pull did not end', seconds=20)
+        wait(lambda: 'A  new.txt' in self.porcelain(), 'the staging did not run after the pull', seconds=15)
+        self.assertEqual(answers.read_text().split(), ['right'])
+        self.s.wait_rows(lambda rs: 'Pulling…' not in self.toolbar(rs), 'the toolbar still shows Pulling…', seconds=15)
+
+    def test_a_detached_head_says_why_it_cannot_push_or_pull(self):
+        self.addCleanup(self.back_to_main)
+        self.git('checkout', '-q', '--detach')
+        self.key('shift+r')
+        self.s.wait_rows(lambda rs: 'no upstream' not in self.toolbar(rs), 'the Git View does not show the detached HEAD', seconds=15)
+        for key, verb in [('shift+p', 'push'), ('p', 'pull')]:
+            self.key(key)
+            said = f'A detached HEAD has no branch to {verb}. Check out a branch first.'
+            self.s.wait_rows(lambda rs: self.s.row('git-write-error', rs).get('accessibilityValue') == said, key + ' did not say why')
+            self.assertFalse(self.s.has('git-prompt'), key + ' asked on a detached HEAD')
 
     def test_q_closes_the_git_view(self):
         self.assertTrue(self.is_open(), 'the Git View is not open')

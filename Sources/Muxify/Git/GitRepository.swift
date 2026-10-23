@@ -554,6 +554,42 @@ enum GitRepository {
     exec git fetch --all
     """
 
+    /// Takes the folder, `plain`, `upstream` or `force`, and for `upstream` a remote and a branch. `upstream` pushes
+    /// the current branch to that branch and sets it as the upstream; `force` is `--force-with-lease`, which stops when
+    /// the remote branch isn't where the last fetch saw it. It runs in a pseudo-terminal, as the fetch does.
+    static let pushScript = """
+    cd "$1" || exit 1
+    case "$2" in
+        upstream) exec git push --set-upstream "$3" "HEAD:refs/heads/$4" ;;
+        force) exec git push --force-with-lease ;;
+        *) exec git push ;;
+    esac
+    """
+
+    /// Takes the folder, `plain` or `upstream`, and for `upstream` a remote and a branch to pull, which then become
+    /// the upstream. A plain pull follows the user's git config, such as `pull.rebase`; `--no-edit` keeps a merge from
+    /// waiting for an editor. A pull that conflicts leaves the merge or rebase in progress, with the conflicts in
+    /// Changes, and says so; any other failure prints what git said.
+    static let pullScript = """
+    cd "$1" || exit 1
+    mode=$2 remote=$3 branch=$4
+    if [ "$mode" = upstream ]; then set -- pull --no-edit "$remote" "$branch"; else set -- pull --no-edit; fi
+    out=$(git "$@" 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        if [ -e "$(git rev-parse --git-path MERGE_HEAD)" ]; then
+            echo "Pulling conflicted: the merge is in progress, with the conflicted files in Changes." >&2
+        elif [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
+            echo "Pulling conflicted: the rebase is in progress, with the conflicted files in Changes." >&2
+        else
+            printf '%s\\n' "$out" >&2
+        fi
+        exit 1
+    fi
+    if [ "$mode" = upstream ]; then git branch --set-upstream-to="$remote/$branch" >/dev/null 2>&1; fi
+    exit 0
+    """
+
     /// What the checkout script's stderr starts with when only Changes kept git from checking out.
     static let checkoutBlockedMarker = "muxify:changes-in-the-way"
 
