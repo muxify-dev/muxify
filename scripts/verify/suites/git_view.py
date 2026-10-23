@@ -43,7 +43,9 @@ Accessibility identifiers of the Git View, for the suites that follow this one:
     The Stashes keys ask in the menus `stash-apply`, `stash-pop` and `stash-drop` (labels "Apply stash", "Pop stash" and
     "Drop stash"), each with the one choice `git-menu-choice-y`. space in Branches and History checks out; it asks
     only in the menu `checkout` ("Check out", while an Agent is working in the Worktree) and in `autostash`
-    ("Autostash?", when Changes are in the way), each with the one choice `git-menu-choice-y`.
+    ("Autostash?", when Changes are in the way), each with the one choice `git-menu-choice-y`. space on a branch that
+    another Worktree has checked out asks in the menu `other-worktree` ("Go to Worktree?") instead, with the one
+    choice `git-menu-choice-y`: it goes to a Window with a Pane in that Worktree, else opens Go to… on its Session Path.
 The diff pane builds only the lines on screen, so keep a fixture's diffs short.
 
 Run from the repo root after `make build`:
@@ -100,7 +102,9 @@ class GitView(unittest.TestCase):
         # The editor writes its file and line to a file, then stays, as a real editor would.
         cls.editor_out = s.root/'editor.out'
         command = "printf '%s\\n%s\\n' {file} {line} > " + shlex.quote(str(cls.editor_out)) + '; sleep 60'
-        (s.root/'config/muxify/config.yaml').write_text('git_view:\n  editor: ' + json.dumps(command) + '\n')
+        # Every folder of projects/ is a Session Path, so a Worktree beside the fixture has a Go to… row.
+        (s.root/'config/muxify/config.yaml').write_text('git_view:\n  editor: ' + json.dumps(command) + '\n'
+                                                       'sessions:\n  paths:\n    - path: ' + str(s.root/'projects') + '/*\n')
         s.launch(LAUNCH_ARGS)
         s.wait_shown(cls.window)
 
@@ -114,6 +118,7 @@ class GitView(unittest.TestCase):
         self.open_git_view()
 
     def tearDown(self):
+        self.close_palette()
         self.close_git_view()
 
     def is_open(self, rs=None):
@@ -127,6 +132,11 @@ class GitView(unittest.TestCase):
             return self.is_open()
         wait(opened, 'the Git View did not open', seconds=10, step=.3)
         self.s.wait_rows(lambda rs: self.s.has('git-toolbar', rs), 'the Git View did not read the repository')
+
+    def close_palette(self):
+        if self.s.has('palette-search'):
+            self.s.driver('action', 'palette-search', 'Close')
+            self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close')
 
     def close_git_view(self):
         if self.s.has('git-menu'):
@@ -848,6 +858,80 @@ class GitView(unittest.TestCase):
         self.assertEqual(self.head(), 'main', 'the branch was checked out before the question was answered')
         self.s.act('action', 'git-menu', 'y')
         wait(lambda: self.head() == 'feature-x', 'y did not check out the branch', seconds=10)
+
+    def add_worktree(self, name):
+        """A Worktree of the fixture beside it, with a new branch of the same name checked out in it."""
+        path = self.repo.parent/('fixture-' + name)
+        self.git('worktree', 'add', '-q', '-b', name, str(path))
+        self.addCleanup(self.git, 'branch', '-q', '-D', name)
+        self.addCleanup(self.git, 'worktree', 'remove', '--force', str(path))
+        return path
+
+    def ask_to_go_to_worktree(self, branch):
+        """space on the branch in Branches, until the Git View has read it as checked out by another Worktree."""
+        self.go_to('3')
+        self.key('shift+r')
+        self.select_row('git-row-branch:' + branch)
+        self.key('space')
+        return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Go to Worktree?',
+                                'space on a branch of another Worktree did not ask to go there')
+
+    def test_a_branch_of_another_worktree_asks_to_go_there_and_escape_changes_nothing(self):
+        self.add_worktree('other-wt-esc')
+        sessions = self.s.tmux('list-sessions', '-F', '#{session_name}')
+        rs = self.ask_to_go_to_worktree('other-wt-esc')
+        self.assertTrue(self.s.has('git-menu-choice-y', rs), 'the question has no y')
+        self.assertEqual(self.s.row('git-menu-choice-y', rs).get('accessibilityLabel'), 'Go to fixture-other-wt-esc',
+                         'the question does not name the Worktree that has the branch')
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the question')
+        time.sleep(1)
+        self.assertEqual(self.head(), 'main', 'escape checked out')
+        self.assertFalse(self.s.has('palette-search'), 'escape opened Go to…')
+        self.assertTrue(self.is_open(), 'escape closed the Git View')
+        self.assertEqual(self.s.tmux('list-sessions', '-F', '#{session_name}'), sessions, 'escape changed the Sessions')
+        self.s.wait_shown(self.window)
+
+    def test_confirming_goes_to_a_window_with_a_pane_in_that_worktree(self):
+        path = self.add_worktree('other-wt-window')
+        session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'gv-wt-window', '-c', str(path), SHELL)
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', session)
+        window = self.s.tmux('display-message', '-p', '-t', session + ':', '#{window_id}')
+        self.addCleanup(self.back_to_fixture_window)
+        # Muxify reads tmux on its own timer, about once a second: let it see the Pane before asking.
+        time.sleep(3)
+        self.ask_to_go_to_worktree('other-wt-window')
+        self.s.act('action', 'git-menu', 'y')
+        self.s.wait_shown(window)
+        self.assertFalse(self.s.has('palette-search'), 'Go to… opened although a Window has a Pane there')
+        self.assertEqual(self.head(), 'main', 'the branch was checked out')
+
+    def back_to_fixture_window(self):
+        for tty in self.s.tmux('list-clients', '-F', '#{client_tty}').split():
+            self.s.tmux('switch-client', '-c', tty, '-t', self.window)
+        self.s.wait_shown(self.window)
+
+    def test_confirming_with_no_window_in_that_worktree_opens_go_to_on_its_session_path_and_starts_nothing(self):
+        path = self.add_worktree('other-wt-none')
+        sessions = self.s.tmux('list-sessions', '-F', '#{session_name}')
+        self.ask_to_go_to_worktree('other-wt-none')
+        self.s.act('action', 'git-menu', 'y')
+        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'Go to… did not open')
+
+        def worktree_rows(rs):
+            return [r for r in rs if r.get('accessibilityIdentifier', '').startswith('palette-row-session-path:')
+                    and r['accessibilityIdentifier'].endswith('fixture-other-wt-none')]
+        try:
+            rs = self.s.wait_rows(lambda rs: worktree_rows(rs), 'Go to… has no row for the Worktree')
+        except AssertionError:
+            self.fail('no row: %s' % [(i, r.get('accessibilityValue')) for r in self.s.rows() for i in [r.get('accessibilityIdentifier', '')] if i.startswith('palette')])
+        rows = worktree_rows(rs)
+        self.assertEqual(len(rows), 1, [i for i in self.s.ids(rs) if i.startswith('palette-row-')])
+        self.assertEqual(rows[0].get('accessibilityValue'), 'selected', 'the Worktree\'s row is not under the cursor')
+        time.sleep(1)
+        self.assertEqual(self.s.tmux('list-sessions', '-F', '#{session_name}'), sessions, 'a Session started without the user')
+        self.assertEqual(self.head(), 'main', 'the branch was checked out')
+        self.assertTrue(self.is_open(), 'the Git View of the Window that was left closed')
 
     def test_q_closes_the_git_view(self):
         self.assertTrue(self.is_open(), 'the Git View is not open')

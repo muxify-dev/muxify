@@ -1118,8 +1118,8 @@ final class GitViewKeysTests: XCTestCase {
         GitCommit(sha: sha, author: "A", date: Date(), tags: [], parents: parents, subject: "Subject \(sha)")
     }
 
-    private func branch(_ name: String, at sha: String, isHead: Bool = false) -> GitBranch {
-        GitBranch(name: name, sha: sha, isHead: isHead, upstream: nil, track: "", date: nil, worktreePath: nil)
+    private func branch(_ name: String, at sha: String, isHead: Bool = false, worktreePath: String? = nil) -> GitBranch {
+        GitBranch(name: name, sha: sha, isHead: isHead, upstream: nil, track: "", date: nil, worktreePath: worktreePath)
     }
 
     private var snapshot: GitSnapshot {
@@ -1426,6 +1426,44 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.toggle)
         XCTAssertEqual(gitView.menu?.title, "Check out")
         XCTAssertEqual(gitView.menu?.subject, .text("c2"))
+    }
+
+    func testABranchCheckedOutByAnotherWorktreeAsksToGoThereAndEscapeChangesNothing() {
+        let gitView = GitView(windowID: "@1")
+        var snapshot = snapshot
+        snapshot.branches = [branch("master", at: "c2", isHead: true, worktreePath: "/repo"),
+                             branch("feature", at: "f1", worktreePath: "/work/repo-feature"), branch("other", at: "o1")]
+        gitView.apply(snapshot)
+        var visited: [String] = []
+        gitView.worktreeVisitForTesting = { visited.append($0) }
+        // An Agent working here doesn't matter: nothing changes files.
+        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
+                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        XCTAssertEqual(gitView.level.selection, "branch:feature")
+        gitView.perform(.toggle)
+        XCTAssertEqual(gitView.menu?.id, "other-worktree")
+        XCTAssertEqual(gitView.menu?.choices.first?.note, "Branch feature is checked out by Worktree repo-feature. Go to that Worktree?")
+        XCTAssertEqual(gitView.menu?.agents, [])
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        // ⎋ changes nothing, and nothing is checked out or visited.
+        gitView.closeMenu()
+        XCTAssertEqual(visited, [])
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        XCTAssertNil(gitView.writeError)
+        // y goes to that Worktree and checks nothing out.
+        gitView.perform(.toggle)
+        XCTAssertTrue(gitView.chooseMenu(key: "y"))
+        XCTAssertEqual(visited, ["/work/repo-feature"])
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        XCTAssertNil(gitView.menu)
+        // A branch no Worktree has still checks out, through the Agent guard.
+        gitView.perform(.down)
+        gitView.perform(.toggle)
+        XCTAssertEqual(gitView.menu?.title, "Check out")
+        XCTAssertTrue(gitView.chooseMenu(key: "y"))
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "branch", "other", "0"]])
     }
 
     func testAChangeInTheWayOfACheckoutAsksToAutostashAndEscapeChangesNothing() {

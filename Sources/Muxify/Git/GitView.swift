@@ -1558,11 +1558,38 @@ final class GitView {
     /// the Agent guard, as it changes files, then runs. When Changes would be overwritten, asks whether to stash and
     /// pop them across, as lazygit does.
     func checkout(_ target: CheckoutTarget) {
-        guard snapshot != nil else { return }
+        guard let snapshot else { return }
+        // A branch that another Worktree has checked out can't be checked out here: ask to go there instead.
+        if case .branch(let name) = target, let branch = snapshot.branches.first(where: { $0.name == name }),
+           !branch.isHead, let path = branch.worktreePath {
+            askToGoToWorktree(of: branch, at: path)
+            return
+        }
         guardFiles("Check out", subject: .text(target.name), symbol: "arrow.triangle.branch", confirm: "Check it out") { [weak self] in
             self?.runCheckout(target, autostash: false)
         }
     }
+
+    /// Asks to go to the Worktree that has the branch checked out: the most recent Window with a Pane there, else Go to…
+    /// on its Session Path (ADR 0041). The Git View starts no Session, and ⎋ changes nothing. It is no change of files, so
+    /// the Agent guard does not ask.
+    private func askToGoToWorktree(of branch: GitBranch, at path: String) {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        open(GitMenu(
+            id: "other-worktree", title: "Go to Worktree?", subject: .text(branch.name), symbol: "rectangle.split.2x1",
+            choices: [GitMenu.Choice(key: "y", title: "Go to \(name)",
+                                     note: "Branch \(branch.name) is checked out by Worktree \(name). Go to that Worktree?") { [weak self] in
+                self?.goToWorktree(at: path)
+            }]))
+    }
+
+    private func goToWorktree(at path: String) {
+        if let worktreeVisitForTesting { return worktreeVisitForTesting(path) }
+        store?.goToWorktree((store?.folders ?? .local).folder(path))
+    }
+
+    /// Stands in for going to a Worktree, which needs the Environment's Windows.
+    @ObservationIgnored var worktreeVisitForTesting: ((String) -> Void)?
 
     private func runCheckout(_ target: CheckoutTarget, autostash: Bool) {
         guard let snapshot else { return }
