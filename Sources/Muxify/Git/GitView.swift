@@ -303,6 +303,8 @@ final class GitView {
         case operation
         /// M: merges the branch selected in Branches into the one you're on.
         case merge
+        /// r: rebases the branch you're on onto the branch selected in Branches.
+        case rebase
         case commit, discard, stash, stashOptions, filter, back, close, refresh
         /// n: a new branch off the branch selected in Branches.
         case newBranch
@@ -1043,7 +1045,7 @@ final class GitView {
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
             "space": .toggle, "minus": .collapseAll, "equal": .expandAll, "n": .newBranch,
             "c": .commit, "d": .discard, "g": .pop, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
-            "shift+w": .mark, "e": .edit, "f": .fetch, "shift+a": .amend, "m": .operation, "shift+m": .merge, "shift+p": .push, "p": .pull,
+            "shift+w": .mark, "e": .edit, "f": .fetch, "shift+a": .amend, "m": .operation, "shift+m": .merge, "r": .rebase, "shift+p": .push, "p": .pull,
     ]
 
     static let commands: [KeyTrigger: Command] = Dictionary(uniqueKeysWithValues: keyMap.map { (try! KeyTrigger($0), $1) })
@@ -1126,6 +1128,8 @@ final class GitView {
             askOperation()
         case .merge:
             if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askMerge(branch) }
+        case .rebase:
+            if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askRebase(branch) }
         case .newBranch:
             if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askNewBranch(off: branch) }
         case .pop:
@@ -2135,6 +2139,41 @@ final class GitView {
             switch result {
             case .success:
                 self?.store?.palette.showCopied(title: "Merged", value: branch.name)
+            case .failure(let error):
+                self?.writeError = Self.message(for: error)
+            }
+        }
+    }
+
+    /// r in Branches: lazygit's rebase menu, on a branch other than the one you're on, through the Agent guard, for a
+    /// rebase changes files. Its one choice is the simple rebase; the interactive rebase and the rebase onto a base
+    /// branch are not offered. A merge, rebase or the like already in progress is to be continued or aborted first.
+    func askRebase(_ branch: GitBranch) {
+        guard let snapshot else { return }
+        guard !branch.isHead else {
+            writeError = "You cannot rebase a branch onto itself: '\(branch.name)' is the one you're on."
+            return
+        }
+        if let operation = snapshot.operation {
+            writeError = "A \(operation.noun ?? "bisect") is in progress: continue or abort it with m before rebasing."
+            return
+        }
+        writeError = nil
+        let head = snapshot.head
+        openGuarded(GitMenu(
+            id: "rebase", title: "Rebase '\(head)'", subject: .text("\(head) → \(branch.name)"), symbol: "arrow.triangle.pull",
+            choices: [GitMenu.Choice(key: "s", title: "Simple rebase onto '\(branch.name)'",
+                                     note: "Replays the commits of '\(head)' on top of '\(branch.name)'.") { [weak self] in
+                self?.rebase(onto: branch, head: head)
+            }]))
+    }
+
+    private func rebase(onto branch: GitBranch, head: String) {
+        guard let snapshot else { return }
+        write(GitRepository.rebaseScript, arguments: [snapshot.root, branch.name, head], timeout: 600) { [weak self] result in
+            switch result {
+            case .success:
+                self?.store?.palette.showCopied(title: "Rebased", value: head)
             case .failure(let error):
                 self?.writeError = Self.message(for: error)
             }

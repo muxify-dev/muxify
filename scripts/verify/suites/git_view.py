@@ -73,6 +73,9 @@ the menu `continue` ("Continue the rebase?", with the one choice `git-menu-choic
 M on a branch in Branches other than the one you're on asks in the menu `merge` ("Merge '<branch>' into '<head>'") with
 the choices `git-menu-choice-f` (fast-forward), `-n` (merge commit), `-s` (squash and commit) and `-u` (squash and leave
 uncommitted); on the current branch `git-write-error` says it can't merge a branch into itself.
+r on a branch in Branches other than the one you're on asks in the menu `rebase` ("Rebase '<head>'") with the one choice
+`git-menu-choice-s` ("Simple rebase onto '<branch>'"); on the current branch `git-write-error` says it can't rebase a
+branch onto itself.
 f in Changes fetches beside the writes; the toolbar's label ends with "Fetching…" until it ends. A credential question
 of git or ssh is asked in `git-prompt`, whose label is the question; ⎋ stops the fetch, and `git-write-error` says
 "Fetch cancelled.".
@@ -1725,6 +1728,121 @@ class GitView(unittest.TestCase):
         self.assertEqual(self.git('rev-parse', 'HEAD').strip(), before, 'the merge ran before the question was answered')
         self.s.act('action', 'git-menu', 'f')
         wait(lambda: self.git('rev-parse', 'HEAD').strip() != before, 'f did not merge', seconds=10)
+
+
+    def rebase_fixture(self, kind):
+        """Sets the fixture's changes aside and makes `r-base`, one commit off main's tip: `clean` on a new file, `conflict`
+        on `conflict.txt`, which a commit on a new branch `r-work` (the one you're on) also changed. Everything is put
+        back after the check."""
+        self.git('stash', 'push', '-q', '-u', '-m', 'e2e rebase')
+        before = self.git('rev-parse', 'HEAD').strip()
+        self.addCleanup(self.undo_rebase, before)
+        name = 'conflict.txt' if kind == 'conflict' else 'rebased.txt'
+        self.git('checkout', '-q', '-b', 'r-work')
+        (self.repo/'work.txt' if kind == 'clean' else self.repo/name).write_text('work\n')
+        self.git('add', '-A')
+        self.git('commit', '-q', '-m', 'work change')
+        self.git('checkout', '-q', '-b', 'r-base', 'main')
+        (self.repo/name).write_text('base\n')
+        self.git('add', '-A')
+        self.git('commit', '-q', '-m', 'base change')
+        self.git('checkout', '-q', 'r-work')
+        return before
+
+    def undo_rebase(self, before):
+        # The Git View reads the repository as this runs, so git can find its index locked: try again.
+        def retry(*args):
+            wait(lambda: self.git_try(*args).returncode == 0, 'git ' + ' '.join(args) + ' kept failing', seconds=10, step=.3)
+        self.git_try('rebase', '--abort')
+        retry('checkout', '-q', '-f', 'main')
+        retry('branch', '-q', '-D', 'r-work')
+        retry('branch', '-q', '-D', 'r-base')
+        retry('reset', '-q', '--hard', before)
+        retry('stash', 'pop', '-q', '--index')
+        # The Git View keeps what it last read, and the next check may show it before reading again: read it here.
+        self.open_git_view()
+        self.key('shift+r')
+        self.go_to('3')
+        self.s.wait_rows(lambda rs: self.s.has('git-row-branch:main', rs) and not self.s.has('git-row-branch:r-work', rs),
+                         'the Git View did not read the branches again')
+        self.close_git_view()
+
+    def ask_rebase(self, branch='r-base'):
+        # R renames in Branches, so it comes first, from Changes.
+        self.key('1')
+        self.key('shift+r')
+        self.go_to('3')
+        self.select_row('git-row-branch:' + branch)
+        self.key('r')
+        return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == "Rebase 'r-work'", 'r did not open the rebase menu')
+
+    def test_r_offers_the_simple_rebase_and_s_rebases_onto_the_branch_only_after_the_choice(self):
+        self.rebase_fixture('clean')
+        base = self.git('rev-parse', 'r-base').strip()
+        before = self.git('rev-parse', 'HEAD').strip()
+        rs = self.ask_rebase()
+        self.assertEqual(self.s.row('git-menu-choice-s', rs).get('accessibilityLabel'), "Simple rebase onto 'r-base'")
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+        time.sleep(1)
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), before, 'opening the menu or escape rebased')
+        self.ask_rebase()
+        self.s.act('action', 'git-menu', 's')
+        wait(lambda: self.git('rev-parse', 'HEAD^').strip() == base, 's did not rebase onto r-base', seconds=10)
+        self.assertEqual(self.git('symbolic-ref', '--short', 'HEAD').strip(), 'r-work')
+        self.assertEqual(self.git('log', '-1', '--format=%s').strip(), 'work change')
+        self.assertFalse(self.in_progress(), 'a clean rebase stayed in progress')
+        self.assertFalse(self.s.has('git-write-error'), 'the rebase failed')
+
+    def test_a_rebase_that_conflicts_stops_with_the_conflicts_and_m_aborts_it(self):
+        before = self.rebase_fixture('conflict')
+        self.ask_rebase()
+        self.s.act('action', 'git-menu', 's')
+        rs = self.s.wait_rows(lambda rs: self.s.has('git-write-error', rs), 'the conflicting rebase did not say so', seconds=10)
+        self.assertIn("Rebasing 'r-work' onto 'r-base' conflicted", self.s.row('git-write-error', rs).get('accessibilityValue', ''))
+        self.assertTrue(self.in_progress(), 'the conflicting rebase did not stay in progress')
+        self.s.wait_rows(lambda rs: 'Rebasing' in self.s.row('git-toolbar', rs).get('accessibilityLabel', ''), 'the toolbar does not say Rebasing', seconds=10)
+        self.key('1')
+        self.key('shift+r')
+        self.s.wait_rows(lambda rs: self.s.has('git-row-change:conflict.txt', rs), 'Changes do not list conflict.txt', seconds=10)
+        self.ask_operation('Rebase options')
+        self.s.act('action', 'git-menu', 'a')
+        wait(lambda: not self.in_progress(), 'm then a did not abort the rebase', seconds=10)
+        self.assertEqual(self.git('symbolic-ref', '--short', 'HEAD').strip(), 'r-work')
+        self.assertEqual(self.git('log', '-1', '--format=%s').strip(), 'work change')
+
+    def test_r_on_the_current_branch_says_it_cannot_rebase_onto_itself(self):
+        # R renames in Branches, so it comes first, from Changes.
+        self.key('1')
+        self.key('shift+r')
+        self.go_to('3')
+        self.s.wait_rows(lambda rs: self.s.has('git-row-branch:main', rs), 'no row git-row-branch:main')
+        self.key('shift+comma')
+        self.s.wait_rows(lambda rs: 'selected=1' in self.s.row('git-row-branch:main', rs).get('accessibilityValue', ''), 'could not select main')
+        self.key('r')
+        rs = self.s.wait_rows(lambda rs: self.s.has('git-write-error', rs), 'r on the current branch did not say why')
+        self.assertIn('cannot rebase a branch onto itself', self.s.row('git-write-error', rs).get('accessibilityValue', ''))
+        self.assertFalse(self.s.has('git-menu'), 'r opened a menu on the current branch')
+
+    def test_the_rebase_menu_names_the_agents_working_in_the_worktree(self):
+        before = self.rebase_fixture('clean')
+        self.agent_pane('gv-rebase-agent', self.repo, 'working')
+        found = []
+
+        def asked():
+            rs = self.ask_rebase()
+            found[:] = [self.s.row('git-menu-agents', rs).get('accessibilityLabel') if self.s.has('git-menu-agents', rs) else None]
+            if found[0] is None:
+                self.s.act('action', 'git-menu', 'escape')
+                self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+            return found[0] is not None
+        wait(asked, 'the rebase menu does not name the Agent', seconds=15, step=.5)
+        self.assertEqual(found[0], 'Claude Code in gv-rebase-agent')
+        time.sleep(1)
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), self.git('rev-parse', 'r-work').strip())
+        self.assertNotEqual(self.git('rev-parse', 'HEAD^').strip(), self.git('rev-parse', 'r-base').strip(), 'the rebase ran before the question was answered')
+        self.s.act('action', 'git-menu', 's')
+        wait(lambda: self.git('rev-parse', 'HEAD^').strip() == self.git('rev-parse', 'r-base').strip(), 's did not rebase', seconds=10)
 
 
 if __name__ == '__main__':

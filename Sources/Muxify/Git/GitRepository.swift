@@ -564,6 +564,25 @@ enum GitRepository {
     fi
     """
 
+    /// Takes the folder, the branch to rebase onto and the branch you're on, for the words. `git rebase`, with no
+    /// editor, so nothing waits for input. A rebase that conflicts is told apart from other failures, which print what
+    /// git said: it stays in progress with the conflicts in Changes, where m continues, skips or aborts it.
+    static let rebaseScript = """
+    cd "$1" || exit 1
+    onto=$2 head=$3
+    export GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true
+    out=$(LC_ALL=C git -c core.editor=true -c color.ui=never rebase "$onto" 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+            printf "Rebasing '%s' onto '%s' conflicted: the conflicted files are in Changes. Stage them, then m continues, skips or aborts the rebase.\\n" "$head" "$onto" >&2
+        else
+            printf '%s\\n' "$out" >&2
+        fi
+        exit 1
+    fi
+    """
+
     /// Takes the folder and the message; commits what's staged. Prints the
     /// new commit's short hash; hooks' output goes to stderr, where a
     /// failure shows it.
