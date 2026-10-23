@@ -1092,7 +1092,9 @@ struct WindowRow: View {
                         Capsule().fill(Color.accentColor.opacity(window.isZoomed ? 0.2 : 0))
                     )
                     .help(window.isZoomed ? "One Pane is Zoomed. The others are hidden." : "")
-                    .accessibilityValue(window.isZoomed ? "zoomed" : "")
+                    // The row's own identifier and value replace the badge's, so the row label is where a client reads Zoom.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(window.isZoomed ? "\(window.paneCount), Zoomed" : "\(window.paneCount)")
                     .accessibilityIdentifier("window-right-panes-\(window.id)")
                 }
             }
