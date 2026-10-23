@@ -474,6 +474,22 @@ the offer to go to another Worktree. c now commits only in Changes and in a
 change's diff, as in lazygit; in History and Stashes it does nothing. A merge is
 still concluded with c in Changes.
 
+d in Branches opens lazygit's delete menu for the selected branch. For now its one
+choice is c, "Delete local branch", which runs `git branch -d`. The branch you're
+on can't be deleted: the choice is dimmed with "You cannot delete the checked out
+branch!". A branch that another Worktree has checked out is refused by git, and
+its message shows in the banner; a Worktree is never removed. When git refuses
+because the branch is not fully merged, a second menu asks "Force delete branch"
+("'X' is not fully merged. Are you sure you want to delete it?"), and y deletes it
+with `git branch -D`; ⎋ keeps it. When a Topic's record remembers the branch as the
+`branch` of one of its remembered Sessions' Worktrees, in this repository, the
+confirmation says so: "Topic 'Fix payments' remembers this branch; Reopen will
+start it again from its base." That holds for open, Dormant and Settled Topics,
+and the menu names each. The Topic records are on this Mac, so a Git View on a
+Remote Environment names none. Deleting a branch changes no files, so the Agent
+guard doesn't join the menu. In Changes d still discards, in Stashes it still
+drops, and elsewhere it does nothing.
+
 A branch that another Worktree has checked out can't be checked out here, so
 space on it asks instead, in a Git View menu: "Branch feature is checked out by
 Worktree repo-feature. Go to that Worktree?" ↩ or y goes there. If a Window of

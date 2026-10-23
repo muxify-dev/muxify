@@ -1010,6 +1010,44 @@ final class GitScriptTests: XCTestCase {
         }
     }
 
+    private func branchNames() throws -> [String] {
+        try git("branch --format='%(refname:short)'").split(separator: "\n").map(String.init)
+    }
+
+    func testDeletingAMergedBranchNeedsNoForceAndAnUnmergedOneAsksFirst() throws {
+        try run("cd \"$1\" && git branch merged master", repository)
+        try run(GitRepository.deleteBranchScript, repository, "merged", "0")
+        XCTAssertFalse(try branchNames().contains("merged"))
+        // git refuses an unmerged branch, and the script says so apart from any other failure.
+        XCTAssertThrowsError(try run(GitRepository.deleteBranchScript, repository, "feature", "0")) { error in
+            XCTAssertEqual(stderr(of: error).trimmingCharacters(in: .whitespacesAndNewlines), GitRepository.branchNotMergedMarker)
+        }
+        XCTAssertTrue(try branchNames().contains("feature"))
+        try run(GitRepository.deleteBranchScript, repository, "feature", "1")
+        XCTAssertFalse(try branchNames().contains("feature"))
+    }
+
+    func testTheCurrentBranchAndAnotherWorktreesBranchAreNotDeletedEvenWithForce() throws {
+        for (branch, force) in [("master", "0"), ("master", "1"), ("other", "0"), ("other", "1")] {
+            XCTAssertThrowsError(try run(GitRepository.deleteBranchScript, repository, branch, force)) { error in
+                // git's wording differs by version: "checked out at" or "used by worktree at".
+                XCTAssertTrue(stderr(of: error).contains("checked out") || stderr(of: error).contains("worktree"), stderr(of: error))
+                XCTAssertFalse(stderr(of: error).hasPrefix(GitRepository.branchNotMergedMarker))
+            }
+        }
+        XCTAssertTrue(try branchNames().contains("master"))
+        XCTAssertTrue(try branchNames().contains("other"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: directory.url.appendingPathComponent("linked").path), "no Worktree is removed")
+    }
+
+    func testTheSnapshotNamesTheRepositoryFolderFromAnyWorktree() throws {
+        let real = (repository as NSString).resolvingSymlinksInPath
+        for path in [repository, directory.url.appendingPathComponent("linked").path] {
+            let snapshot = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, path)).get()
+            XCTAssertEqual((snapshot.repositoryFolder as NSString).resolvingSymlinksInPath, real)
+        }
+    }
+
     func testStashCanKeepTheIndex() throws {
         try prepareStash()
         try run(GitRepository.stashScript, repository, "keepindex", "k")
@@ -1508,6 +1546,97 @@ final class GitViewKeysTests: XCTestCase {
         gitView.promptText = "better"
         gitView.submitPrompt()
         XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "feature", "better"]])
+    }
+
+    private func topicRecord(_ id: String, title: String?, settled: Bool = false, repository: String = "/repo",
+                             branch: String) -> TopicRecord {
+        var record = TopicRecord(id: id, title: title)
+        record.settledAt = settled ? "2026-01-01T00:00:00Z" : nil
+        record.sessions = [.object(["id": .string("s"), "repository_path": .string(repository),
+                                    "worktree_path": .string("/worktrees/\(id)"), "branch": .string(branch)])]
+        return record
+    }
+
+    func testDInBranchesOpensTheDeleteMenuAndDeletesTheLocalBranchOnConfirm() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        // Elsewhere d keeps its meaning.
+        gitView.perform(.discard)
+        XCTAssertNil(gitView.menu)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        gitView.perform(.discard)
+        XCTAssertEqual(gitView.menu?.id, "delete-branch")
+        XCTAssertEqual(gitView.menu?.title, "Delete branch")
+        XCTAssertEqual(gitView.menu?.subject, .text("feature"))
+        XCTAssertEqual(gitView.menu?.choices.map(\.title), ["Delete local branch"])
+        XCTAssertEqual(gitView.menu?.choices.map(\.isEnabled), [true])
+        XCTAssertNil(gitView.menu?.footnote)
+        XCTAssertEqual(gitView.queuedWriteArguments, [], "opening the menu deletes nothing")
+        gitView.handleMenuKey(try! KeyTrigger("c"))
+        XCTAssertNil(gitView.menu)
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "feature", "0"]])
+    }
+
+    func testTheCurrentBranchHasNothingToDeleteAndSaysWhy() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.discard)
+        XCTAssertEqual(gitView.menu?.choices.map(\.isEnabled), [false])
+        XCTAssertEqual(gitView.menu?.choices.first?.note, "You cannot delete the checked out branch!")
+        gitView.handleMenuKey(try! KeyTrigger("c"))
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+    }
+
+    func testAnUnmergedBranchAsksForForceAndIsForceDeletedOnlyOnConfirm() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        let feature = gitView.snapshot!.branches[1]
+        let refusal = TmuxError.failed(status: 1, stderr: GitRepository.branchNotMergedMarker)
+        gitView.finishDeleteBranch(feature, .failure(refusal))
+        XCTAssertEqual(gitView.menu?.id, "force-delete-branch")
+        XCTAssertEqual(gitView.menu?.title, "Force delete branch")
+        XCTAssertEqual(gitView.menu?.choices.first?.note, "'feature' is not fully merged. Are you sure you want to delete it?")
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        gitView.closeMenu()
+        XCTAssertEqual(gitView.queuedWriteArguments, [], "cancelling deletes nothing")
+        gitView.finishDeleteBranch(feature, .failure(refusal))
+        gitView.handleMenuKey(try! KeyTrigger("y"))
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "feature", "1"]])
+    }
+
+    func testAnotherFailureOfTheDeleteShowsGitsMessage() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        let message = "error: Cannot delete branch 'other' checked out at '/linked'"
+        gitView.finishDeleteBranch(gitView.snapshot!.branches[1], .failure(TmuxError.failed(status: 1, stderr: message)))
+        XCTAssertNil(gitView.menu)
+        XCTAssertEqual(gitView.writeError, message)
+    }
+
+    func testTheDeleteConfirmationNamesEveryTopicThatRemembersTheBranch() {
+        let gitView = GitView(windowID: "@1")
+        var snapshot = snapshot
+        snapshot.repositoryFolder = "/repo"
+        gitView.apply(snapshot)
+        gitView.topicRecordsForTesting = [
+            topicRecord("a", title: "Fix payments", branch: "feature"),
+            topicRecord("b", title: "Old work", settled: true, branch: "feature"),
+            topicRecord("c", title: "Other branch", branch: "master"),
+            topicRecord("d", title: "Other repository", repository: "/elsewhere", branch: "feature"),
+        ]
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        gitView.perform(.discard)
+        XCTAssertEqual(gitView.menu?.footnote, "Topic 'Fix payments' remembers this branch; Reopen will start it again from its base. "
+                       + "Topic 'Old work' remembers this branch; Reopen will start it again from its base.")
+        // The confirmation to force names them too.
+        gitView.finishDeleteBranch(snapshot.branches[1], .failure(TmuxError.failed(status: 1, stderr: GitRepository.branchNotMergedMarker)))
+        XCTAssertTrue(gitView.menu?.footnote?.hasPrefix("Topic 'Fix payments' remembers this branch;") == true)
     }
 
     func testMinusChecksOutThePreviousBranchInBranchesAndStillFoldsElsewhere() {
