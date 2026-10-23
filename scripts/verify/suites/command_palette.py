@@ -148,8 +148,8 @@ class CommandPalette(unittest.TestCase):
     def session_row(self, sid):
         return 'palette-row-session:' + sid
 
-    def project_row(self, path):
-        return 'palette-row-project:' + str(path)
+    def session_path_row(self, path):
+        return 'palette-row-session-path:' + str(path)
 
     def choose_reopen(self, session):
         """↩ on a Settled row shows the Topic's Reopen choice and creates nothing; its Reopen button does."""
@@ -216,7 +216,7 @@ class CommandPalette(unittest.TestCase):
         wait(lambda: 'alpha/sw-settled' in self.client_sessions(), 'the client did not go to the reopened Session', seconds=10)
 
     def test_launch_row_opens_exact_name_and_is_replaced_by_its_running_session_row(self):
-        key = self.project_row(self.gamma/'release')
+        key = self.session_path_row(self.gamma/'release')
         self.open_palette()
         rs = self.search('gamma/rel', key)
         self.assertIn('↩ open', self.describe(key, rs), 'a row without a Session does not offer open')
@@ -244,7 +244,7 @@ class CommandPalette(unittest.TestCase):
         key = self.session_row(sid)
         self.open_palette()
         rs = self.search('gamma/main', key)
-        self.assertFalse(self.s.has(self.project_row(self.gamma/'main'), rs), 'the exact name still offers a launch row')
+        self.assertFalse(self.s.has(self.session_path_row(self.gamma/'main'), rs), 'the exact name still offers a launch row')
         self.s.act('action', key, 'New Session')
         wait(lambda: self.s.tmux_ok('has-session', '-t', '=gamma/main+2').returncode == 0, 'no Session gamma/main+2 was created', seconds=10)
         self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', '=gamma/main+2')
@@ -258,8 +258,8 @@ class CommandPalette(unittest.TestCase):
         names = sorted(name for name in self.s.tmux('list-sessions', '-F', '#{session_name}').split() if name.startswith('gamma/main'))
         self.assertEqual(names, ['gamma/main', 'gamma/main+2'], 'New Session did not start exactly one more Session')
 
-    def test_a_project_alias_names_the_row_typing_alias_or_folder_finds_it_and_its_session_keeps_the_folder_name(self):
-        key = self.project_row(self.delta)
+    def test_a_session_path_alias_names_the_row_typing_alias_or_folder_finds_it_and_its_session_keeps_the_folder_name(self):
+        key = self.session_path_row(self.delta)
         self.open_palette()
         rs = self.search('delta notes', key)
         self.assertIn('Delta Notes', self.describe(key, rs), 'the row does not show the alias')
@@ -271,21 +271,23 @@ class CommandPalette(unittest.TestCase):
         self.addCleanup(self.select_window, self.base_window)
         names = self.s.tmux('list-sessions', '-F', '#{session_name}').splitlines()
         self.assertNotIn('Delta Notes', names, 'the alias named a tmux Session')
+        # The app selects the new Session after the palette closes; a kill before that leaves a modal alert.
+        wait(lambda: 'delta' in self.client_sessions(), 'the client did not go to the new Session', seconds=10)
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close after open')
 
-    def test_a_folder_made_after_the_config_loaded_is_a_project_row_when_the_palette_opens(self):
+    def test_a_folder_made_after_the_config_loaded_is_a_session_path_row_when_the_palette_opens(self):
         late = self.s.root/'projects/latecomer'
         late.mkdir()
         self.open_palette()
-        self.search('latecomer', self.project_row(late))
+        self.search('latecomer', self.session_path_row(late))
 
-    def test_paste_path_on_a_project_row_types_its_path_at_the_prompt_without_enter(self):
+    def test_paste_path_on_a_session_path_row_types_its_path_at_the_prompt_without_enter(self):
         sid = self.new_session('sw-paste', self.beta)
         window = self.window_of(sid)
         self.select_window(window)
         pane = self.s.tmux('display-message', '-p', '-t', window, '#{pane_id}')
         wait(lambda: self.s.tmux('capture-pane', '-p', '-t', pane).strip() != '', 'the shell in sw-paste did not start', seconds=10)
-        key = self.project_row(self.gamma/'release')
+        key = self.session_path_row(self.gamma/'release')
         self.open_palette()
         self.search('gamma/rel', key)
         self.s.act('action', key, 'Paste Path')
@@ -327,15 +329,20 @@ class CommandPalette(unittest.TestCase):
         until = datetime.datetime.strptime(stored, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
         self.assertIn(until, expected, 'snoozed_until %s is not the next 13:00 local time %s' % (stored, sorted(expected)))
 
-    def test_sessions_mode_finds_a_topic_session_by_name_on_its_project_row_and_goes_into_it(self):
+    def test_sessions_mode_finds_a_topic_session_by_name_on_its_own_row_and_goes_into_it(self):
+        """ADR 0037: every running Session has its own row, in Sessions mode too, and a Topic Session in a Session
+        Path's folder does not take the place of that path's launch row."""
         self.write_topic('sw-join', 'Sw join', self.alpha)
         sid = self.new_session('alpha/sw-join', self.alpha, topic='sw-join')
         window = self.window_of(sid)
         self.show_view('sessions')
         self.open_palette()
-        rs = self.search('sw-join', self.project_row(self.alpha))
-        self.assertFalse(self.s.has(self.session_row(sid), rs), 'a Session in a Session Path has a row of its own')
-        self.s.act('press', self.project_row(self.alpha))
+        rs = self.search('sw-join', self.session_row(sid))
+        self.assertIn('session', self.describe(self.session_row(sid), rs), 'the row does not say it is a Session')
+        rs = self.search('alpha', self.session_path_row(self.alpha))
+        self.assertIn('↩ open', self.describe(self.session_path_row(self.alpha), rs), 'the Topic Session took the folder\'s launch row')
+        self.search('sw-join', self.session_row(sid))
+        self.s.act('press', self.session_row(sid))
         wait(lambda: window in self.client_windows(), 'the client did not go into the Topic Session', seconds=10)
 
     def open_move(self):
@@ -353,22 +360,23 @@ class CommandPalette(unittest.TestCase):
                       'no Topic record titled by the query', seconds=15)[0]
         wait(lambda: self.s.tmux_ok('show-options', '-qv', '-t', sid, '@muxify_topic').stdout.strip() == record['id'],
              'the Session did not move into the new Topic', seconds=10)
-        self.assertEqual(self.s.tmux('display-message', '-p', '-t', sid + ':', '#{session_name}'), 'beta/moved-by-move')
+        # ADR 0036: the moved Session keeps its own name as the base, whatever its folder is named.
+        self.assertEqual(self.s.tmux('display-message', '-p', '-t', sid + ':', '#{session_name}'), 'sw-move-src/moved-by-move')
 
-    def test_move_blocks_a_topic_with_a_session_in_the_same_project(self):
+    def test_move_into_a_topic_with_a_session_in_the_same_folder_joins_it_under_the_sessions_own_name(self):
+        """ADR 0036: a Topic groups Sessions, so a Session in the same folder as a member does not block the move."""
         self.write_topic('sw-occupied', 'Sw occupied', self.beta)
         self.new_session('beta/sw-occupied', self.beta, topic='sw-occupied')
-        sid = self.new_session('sw-move-blocked', self.beta)
+        sid = self.new_session('sw-move-joins', self.beta)
         self.select_window(self.window_of(sid))
         self.open_move()
         key = 'palette-row-topic-sw-occupied'
-        rs = self.s.wait_rows(lambda rs: self.s.has(key, rs), 'the occupied Topic is not listed')
-        self.assertEqual(self.s.row(key, rs).get('accessibilityValue'), 'has a beta Session', self.describe(key, rs))
-        self.s.driver('press', key)
-        time.sleep(REFRESH_LIMIT)
-        self.assertTrue(self.s.has('palette-search'), 'pressing a blocked row closed Move')
-        self.assertEqual(self.s.tmux('show-options', '-qv', '-t', sid, '@muxify_topic'), '', 'the Session moved into the occupied Topic')
-        self.close_palette()
+        rs = self.s.wait_rows(lambda rs: self.s.has(key, rs), 'the Topic with a beta Session is not listed')
+        self.s.act('press', key)
+        wait(lambda: self.s.tmux_ok('show-options', '-qv', '-t', sid, '@muxify_topic').stdout.strip() == 'sw-occupied',
+             'the Session did not move into the Topic: ' + self.describe(key, rs), seconds=10)
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Move did not close after the move')
+        self.assertEqual(self.s.tmux('display-message', '-p', '-t', sid + ':', '#{session_name}'), 'sw-move-joins/sw-occupied')
 
     def test_move_menu_item_is_disabled_when_topics_are_off(self):
         config = self.s.root/'config/muxify/config.yaml'
@@ -459,7 +467,7 @@ class CommandPalette(unittest.TestCase):
         for sid in [self.new_session('beta/sw-order-open', self.beta, topic='sw-order-open'), outside_sid]:
             self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', sid)
         placed = [('palette-row-topic-sw-order-open', 'topics'), (self.session_row(outside_sid), 'sessions'),
-                  (self.project_row(empty), 'sessions'), ('palette-row-topic-sw-order-snoozed', 'snoozed'),
+                  (self.session_path_row(empty), 'sessions'), ('palette-row-topic-sw-order-snoozed', 'snoozed'),
                   ('palette-row-topic-sw-order-settled', 'settled')]
         rows = [row for row, _ in placed]
         self.open_palette()
@@ -473,6 +481,9 @@ class CommandPalette(unittest.TestCase):
         for row, name in placed:
             section = names.index(name)
             self.assertTrue(bounds[section] < order.index(row) < bounds[section + 1], '%s is not under %s: %s' % (row, headers[section], order))
+        # ADR 0037: other running Sessions, then the current Session, then the unopened Session Paths.
+        sessions = [self.session_row(outside_sid), self.session_row(self.base), self.session_path_row(empty)]
+        self.assertEqual([key for key in order if key in sessions], sessions, order)
         self.close_palette()
 
     def test_a_no_topic_session_opened_here_shows_as_one_card_after_the_open_topics_and_goes_when_a_topic_is_selected(self):

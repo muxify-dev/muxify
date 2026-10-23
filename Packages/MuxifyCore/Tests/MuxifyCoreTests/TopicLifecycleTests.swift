@@ -73,6 +73,13 @@ final class TopicLifecycleTests: XCTestCase {
         XCTAssertTrue(edit.commands.contains(.tmux(["set-option", "-t", "=debug+3/fix:", "@muxify_session_id", "$1"])))
     }
 
+    func testReopenOfADormantSnoozedTopicKeepsItsSnooze() throws {
+        var saved = try remembered()
+        saved.snoozedUntil = "never"
+        let edit = try TopicReopenPlan(topic: saved, records: [saved], windows: [], sessionPaths: [], existingDirectories: ["/work/game"]).edit
+        XCTAssertEqual(edit.savedCompletionRecord?.snoozedUntil, "never", "only Unsnooze or the wake ends a Snooze")
+    }
+
     func testExternalRenameRemainsAuthoritativeAndIdentityKeepsProvenance() throws {
         var saved = try remembered()
         var fields = try XCTUnwrap(saved.sessions[0].object)

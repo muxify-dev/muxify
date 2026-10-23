@@ -90,9 +90,10 @@ class TopicsCardsSidebar(TopicsSidebar):
         # (topicMembershipActions), because the menu itself takes the mouse and the keyboard.
         s.act('action', 'topic-window-' + window, 'Move Window to Topic…')
         s.wait_rows(lambda rs: s.has('palette-row-topic-move-target', rs), 'Move did not show the target Topic')
+        # The Topic has one Session, so the move skips the destination step and lands in that Session (ADR 0036).
         s.act('press', 'palette-row-topic-move-target')
-        wait(lambda: s.tmux('display-message', '-p', '-t', window, '#{session_name}') == 'beta/move-target',
-             'Window did not move to beta/move-target', seconds=10)
+        wait(lambda: s.tmux('display-message', '-p', '-t', window, '#{session_name}') == 'alpha/move-target',
+             'Window did not move to alpha/move-target', seconds=10)
         self.select_window(window)
         self.expand('topic-move-target')
         rs = s.wait_rows(lambda rs: self.card_of('topic-window-' + window, rs) == 'topic-move-target' and s.has('agent-' + pane, rs),
@@ -103,7 +104,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         # The Sidebar shows the moved Window only after the app read tmux again, so options it lost would show now.
         after = s.tmux('display-message', '-p', '-t', window, AGENT_WINDOW).split('|')
         changes = {name: (b, a) for name, b, a in zip(AGENT_WINDOW_FIELDS, before, after) if b != a}
-        self.assertEqual((after[0], after[1]), ('beta/move-target', 'move-target'), 'moved Window: %s' % changes)
+        self.assertEqual((after[0], after[1]), ('alpha/move-target', 'move-target'), 'moved Window: %s' % changes)
         self.assertEqual(set(changes), {'session', 'topic'}, 'moved Window changed more than its Session and Topic')
 
     def card_of(self, key, rs):
@@ -193,12 +194,20 @@ class TopicsCardsSidebar(TopicsSidebar):
         rs = s.wait_rows(lambda rows: s.has('palette-accept', rows) and s.has('palette-row-session-' + sid, rows),
                          'Forget palette did not load its Sessions')
         self.assertIn('Forget', self.describe('palette-breadcrumb', rs))
-        self.assertTrue(s.has('palette-row-session-' + sid, rs))
+        self.choose_kill(sid)
         self.assertTrue(s.tmux('display-message', '-p', '#{socket_path}').startswith(str(s.root) + '/'))
         s.act('press', 'palette-accept')
         wait(lambda: topic not in self.records(), 'Forget kept the Topic record')
-        self.assertNotEqual(s.tmux_ok('has-session', '-t', sid).returncode, 0)
+        wait(lambda: s.tmux_ok('has-session', '-t', sid).returncode != 0, 'Forget did not kill the Session')
         s.wait_rows(lambda rows: not s.has('topic-' + topic, rows), 'Forget kept the Topic card')
+
+    def choose_kill(self, sid):
+        """Turns the Session's row of the Settle or Forget palette from Keep, the default for every live Session
+        (ADR 0036), to Kill. A press toggles the row."""
+        key = 'palette-row-session-' + sid
+        self.s.act('press', key)
+        self.s.wait_rows(lambda rs: 'Kill' in self.s.row(key, rs).get('accessibilityLabel', ''),
+                         'the Session row did not turn to Kill: ' + self.describe(key, self.s.rows()))
 
     def test_forget_dormant_snoozed_and_settled_topics_confirms_before_removal(self):
         s = self.s
@@ -266,6 +275,9 @@ class TopicsCardsSidebar(TopicsSidebar):
         s.act('press', 'settle-topic-' + topic)
         s.wait_rows(lambda rs: s.has('palette-row-session-' + idle, rs) and s.has('palette-row-session-' + working, rs),
                     'the Settle palette does not list both Sessions')
+        self.choose_kill(idle)
+        self.assertIn('Keep', s.row('palette-row-session-' + working).get('accessibilityLabel', ''),
+                      'the Session of the working Agent is not kept: ' + self.describe('palette-row-session-' + working, s.rows()))
         s.act('focus', 'palette-search')
         s.act('set', 'palette-search', 'Shipped from the palette')
         s.act('press', 'palette-accept')
@@ -277,7 +289,9 @@ class TopicsCardsSidebar(TopicsSidebar):
             options = s.tmux_ok('show-options', '-t', working)
             return options.returncode == 0 and '@muxify_topic' not in options.stdout
         wait(kept_without_topic, 'the Session of the working Agent is gone or still has the Topic')
-        self.assertEqual(s.tmux('display-message', '-p', '-t', working + ':', '#{session_name}'), 'beta/palette-settle')
+        # Keep removes the membership and gives the Session its base name back (ADR 0036).
+        wait(lambda: s.tmux('display-message', '-p', '-t', working + ':', '#{session_name}') == 'beta',
+             'Keep did not restore the base name of the kept Session')
 
     def test_rename_palette_renames_the_topic_and_its_session(self):
         s = self.s

@@ -87,10 +87,15 @@ class PaletteNextTopic(unittest.TestCase):
             rs = s.wait_rows(lambda rs: s.has('empty-no-topic', rs), action + ' did not show empty No Topic')
             self.assertTrue(s.has('empty-no-topic', rs))
         else:
-            s.wait_shown(self.base)
-            sid = s.tmux('display-message', '-p', '-t', self.base, '#{session_id}')
+            # Settle keeps the Session with no Topic (ADR 0036), so No Topic shows it. Snooze leaves it in its Topic.
+            shown = windows[current] if action == 'Settle' else self.base
+            s.wait_shown(shown)
+            sid = s.tmux('display-message', '-p', '-t', shown, '#{session_id}')
             rs = s.wait_rows(lambda rs: s.has('no-topic-session-' + sid, rs), action + ' did not show the No Topic card')
             self.assertTrue(s.has('no-topic-session-' + sid, rs))
+            if action == 'Settle':
+                self.assertEqual(s.tmux('show-option', '-qv', '-t', sid, '@muxify_topic'), '',
+                                 'Settle with Keep left the Session in the Topic')
         record = json.loads((self.topics/(current + '.json')).read_text())
         self.assertTrue(record.get('snoozed_until' if action == 'Snooze' else 'settled_at'), record)
 

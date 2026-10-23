@@ -190,7 +190,7 @@ class PaletteSnoozeTopics(PaletteFixture):
         self.assertEqual(times['tgsnooze-three'], LATER, 'a Snooze by Tag changed the time of an Already Snoozed Topic: %s' % times)
         self.assertIsNone(times['tgsnooze-none'], times)
         self.assertIsNone(times['tgsnooze-active'], 'a Topic that was not checked was Snoozed: %s' % times)
-        self.assertEqual(sorted(self.record('tgsnooze-one')), ['home_project', 'id', 'order', 'sessions', 'slug', 'snoozed_until', 'tags', 'title'],
+        self.assertEqual(sorted(self.record('tgsnooze-one')), ['id', 'order', 'sessions', 'slug', 'snoozed_until', 'tags', 'title'],
                          'a Snooze by Tag writes a usual Snooze and no other field')
 
     def test_a_tag_with_only_snoozed_topics_has_no_row_and_its_topic_is_checked_by_its_own_row(self):

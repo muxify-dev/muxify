@@ -295,8 +295,7 @@ struct PaletteCatalog {
     // MARK: Move
 
     /// The open, not Snoozed Topics minus the source's own, ranked for `query`, then the New Topic row titled
-    /// by it. A Topic with a live Session in the source's SessionPath is blocked, by the rule the move itself
-    /// throws on, so the dimmed row and the refusal cannot disagree.
+    /// by it. A Topic with a Session in the source's folder is offered too: Topics group Sessions, not folders.
     func moveList(_ source: TmuxWindow, query: String, scope: MoveDraft.Scope = .session) -> PickList<PaletteItem> {
         guard let topics else { return .empty }
         let candidates = topics.rows.compactMap { row -> PickCandidate<PaletteItem>? in

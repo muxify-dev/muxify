@@ -289,7 +289,6 @@ struct TopicReopenPlan {
         var reopened = topic
         reopened.slug = slug
         reopened.settledAt = nil
-        reopened.snoozedUntil = nil
         for (index, session) in reopening.sessions.enumerated() {
             guard var fields = reopened.sessions[index].object else { continue }
             fields["id"] = .string(session.id)
