@@ -217,6 +217,10 @@ private struct GitToolbar: View {
                 GitTag(text: text, symbol: "arrow.left.arrow.right", style: .tint(palette.colors.magenta), palette: palette)
                     .help("W on the base, or ⎋, ends the comparison")
             }
+            if let text = copiedText {
+                GitTag(text: text, symbol: "doc.on.doc", style: .tint(palette.colors.cyan), palette: palette)
+                    .help("V cherry-picks the copied commits onto the branch you're on; ⌃R forgets them")
+            }
             Spacer(minLength: 8)
             filterField
             Picker("Diff layout", selection: $gitView.layout) {
@@ -259,6 +263,7 @@ private struct GitToolbar: View {
         if let title = snapshot.operationTitle { parts.append(title) }
         if let comparison = snapshot.comparison { parts.append("↑\(comparison.ahead) ↓\(comparison.behind) vs \(comparison.base)") }
         if let text = comparingText { parts.append(text) }
+        if let text = copiedText { parts.append(text) }
         parts += gitView.networkActivity
         return parts.joined(separator: " · ")
     }
@@ -268,6 +273,12 @@ private struct GitToolbar: View {
     private var comparingText: String? {
         guard let base = gitView.base else { return nil }
         return gitView.compared.map { "\(base.name) → \($0.name)" } ?? "Comparing \(base.name)"
+    }
+
+    /// C: "2 copied", while commits are copied.
+    private var copiedText: String? {
+        let count = gitView.copiedCommits.count
+        return count == 0 ? nil : "\(count) copied"
     }
 
     private static func symbol(for operation: GitOperation?) -> String {
@@ -621,15 +632,17 @@ private struct GitListView: View {
     }
 
     /// `selected=1 status="M "`: whether the row is the selection, and a
-    /// change's or file's two status letters; ` base=1` on the base.
+    /// change's or file's two status letters; ` base=1` on the base, ` copied=1` on a copied commit.
     private func accessibilityValue(_ item: GitView.Item, isSelected: Bool, level: GitView.Level) -> String {
         let status: String? = switch item {
         case .change(let change): String(change.index) + String(change.worktree)
         case .file(let path): Self.letter(gitView.ownerFiles(for: level)?.first { $0.path == path }?.change).text
         case .folder, .commit, .stash, .branch: nil
         }
+        let copied: Bool = if case .commit(let commit) = item { gitView.isCopied(commit) } else { false }
         return "selected=\(isSelected ? 1 : 0)" + (status.map { " status=\"\($0)\"" } ?? "")
             + (item.id == gitView.base?.id ? " base=1" : "")
+            + (copied ? " copied=1" : "")
     }
 
     @ViewBuilder
@@ -688,6 +701,7 @@ private struct GitListView: View {
                 refs(commit, onAccent: onAccent)
                 Text(commit.subject).font(.system(size: 13)).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
+                copiedMark(commit, onAccent: onAccent)
                 baseMark(item, onAccent: onAccent)
                 Text(GitRepository.age(of: commit.date)).font(.system(size: 11)).foregroundStyle(secondary)
             case .stash(let stash):
@@ -718,6 +732,16 @@ private struct GitListView: View {
                 // A click goes into its commits.
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(secondary)
             }
+        }
+    }
+
+    /// C copied it: V cherry-picks it onto the branch you're on.
+    @ViewBuilder
+    private func copiedMark(_ commit: GitCommit, onAccent: Bool) -> some View {
+        if gitView.isCopied(commit) {
+            GitTag(text: "copied", symbol: "doc.on.doc", style: .tint(palette.colors.cyan), palette: palette,
+                   height: 16, fontSize: 10, onAccent: onAccent)
+                .help("Copied: V cherry-picks it onto the branch you're on, C takes it out again")
         }
     }
 

@@ -1073,6 +1073,8 @@ final class WorkspaceStore {
     /// Each Window's Git View, made when it first opens and kept while the
     /// Window lives. Observed, for the sidebar's Git View icons.
     private var gitViews: [String: GitView] = [:]
+    /// The Git Views' Copied commits, by repository: shared by every Window in any Worktree of it.
+    @ObservationIgnored private let copiedCommits = CopiedCommits()
     @ObservationIgnored private var persistWork: [String: DispatchWorkItem] = [:]
     /// Keep changes dirty until tmux confirms the write, including commands
     /// already submitted when a window closes. Never flush unchanged Browsers
@@ -2022,6 +2024,7 @@ final class WorkspaceStore {
         if let gitView = gitViews[windowID] { return gitView }
         let gitView = GitView(windowID: windowID)
         gitView.store = self
+        gitView.copiedStore = copiedCommits
         gitViews[windowID] = gitView
         return gitView
     }

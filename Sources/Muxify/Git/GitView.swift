@@ -322,6 +322,12 @@ final class GitView {
         case push
         /// p: pulls the branch you're on, in every tab.
         case pull
+        /// C: copies the commit selected in History or a branch's commits, or takes it out again.
+        case copyCommit
+        /// V: cherry-picks the Copied commits onto the branch you're on, in History.
+        case pasteCommits
+        /// ⌃r: clears the Copied commits.
+        case clearCopied
     }
 
     private(set) var isOpen = false
@@ -405,6 +411,8 @@ final class GitView {
     @ObservationIgnored private var press: (point: TextPoint, location: CGPoint, inGutter: Bool, clicks: Int)?
 
     @ObservationIgnored weak var store: WorkspaceStore?
+    /// The commits copied with C: the store's, shared by every Window's Git View. A Git View with no store has its own.
+    var copiedStore = CopiedCommits()
     /// Holds keyboard focus while the Git View has it (see `GitKeyCatcher`).
     @ObservationIgnored weak var keyView: NSView?
     /// The tmux Window it's of.
@@ -1047,6 +1055,7 @@ final class GitView {
             "space": .toggle, "minus": .collapseAll, "equal": .expandAll, "n": .newBranch,
             "c": .commit, "d": .discard, "g": .pop, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
             "shift+w": .mark, "e": .edit, "f": .fetch, "shift+a": .amend, "m": .operation, "shift+m": .merge, "r": .rebase, "shift+p": .push, "p": .pull,
+            "shift+c": .copyCommit, "shift+v": .pasteCommits, "ctrl+r": .clearCopied,
     ]
 
     static let commands: [KeyTrigger: Command] = Dictionary(uniqueKeysWithValues: keyMap.map { (try! KeyTrigger($0), $1) })
@@ -1133,6 +1142,12 @@ final class GitView {
             if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askRebase(branch) }
         case .newBranch:
             if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askNewBranch(off: branch) }
+        case .copyCommit:
+            if list == .history || list == .branch, focus == .list, case .commit(let commit)? = selectedItem { toggleCopied(commit) }
+        case .pasteCommits:
+            if list == .history, focus == .list { askCherryPick() }
+        case .clearCopied:
+            clearCopied()
         case .pop:
             guard focus == .list else { return }
             switch selectedItem {
@@ -2182,6 +2197,71 @@ final class GitView {
             switch result {
             case .success:
                 self?.store?.palette.showCopied(title: "Rebased", value: head)
+            case .failure(let error):
+                self?.writeError = Self.message(for: error)
+            }
+        }
+    }
+
+    // MARK: Cherry-picking
+
+    /// What Copied commits are kept by: the repository's common git directory, the same from every Worktree of it.
+    private var copiedKey: String? {
+        guard let snapshot else { return nil }
+        return snapshot.commonDirectory.isEmpty ? snapshot.root : snapshot.commonDirectory
+    }
+
+    /// The full hashes copied in this repository, in the order they were copied.
+    var copiedCommits: [String] {
+        copiedKey.map { copiedStore.shas(in: $0) } ?? []
+    }
+
+    func isCopied(_ commit: GitCommit) -> Bool {
+        copiedKey.map { copiedStore.contains(commit.sha, in: $0) } == true
+    }
+
+    /// C: copies the commit, or takes it out again.
+    func toggleCopied(_ commit: GitCommit) {
+        guard let key = copiedKey else { return }
+        writeError = nil
+        copiedStore.toggle(commit.sha, in: key)
+    }
+
+    /// ⌃r: forgets every copied commit of this repository, in every Window.
+    func clearCopied() {
+        guard let key = copiedKey else { return }
+        copiedStore.clear(in: key)
+    }
+
+    /// V: asks, through the Agent guard, to cherry-pick the Copied commits onto the branch you're on.
+    func askCherryPick() {
+        guard let snapshot else { return }
+        let shas = copiedCommits
+        guard !shas.isEmpty else {
+            writeError = "No commit is copied: C copies the selected commit."
+            return
+        }
+        if let operation = snapshot.operation {
+            writeError = "A \(operation.noun ?? "bisect") is in progress: continue or abort it with m before cherry-picking."
+            return
+        }
+        writeError = nil
+        let count = shas.count == 1 ? "1 copied commit" : "\(shas.count) copied commits"
+        openGuarded(GitMenu(
+            id: "cherry-pick", title: "Cherry-pick", subject: .text("\(count) → \(snapshot.head)"), symbol: "arrow.triangle.merge",
+            choices: [GitMenu.Choice(key: "y", title: "Cherry-pick \(count)",
+                                     note: "Are you sure you want to cherry-pick the \(count) onto this branch?") { [weak self] in
+                self?.cherryPick(shas)
+            }]))
+    }
+
+    private func cherryPick(_ shas: [String]) {
+        guard let snapshot, let key = copiedKey else { return }
+        write(GitRepository.cherryPickScript, arguments: [snapshot.root] + shas, timeout: 600) { [weak self] result in
+            switch result {
+            case .success:
+                self?.copiedStore.remove(shas, in: key)
+                self?.store?.palette.showCopied(title: "Cherry-picked", value: shas.count == 1 ? "1 commit" : "\(shas.count) commits")
             case .failure(let error):
                 self?.writeError = Self.message(for: error)
             }

@@ -611,6 +611,18 @@ carries the Agent guard, naming any Agent working in the Worktree, and a hard re
 the guard. Soft and mixed don't, as they leave the files as they are. Afterwards the lists show the new HEAD. In
 Stashes, g still pops the selected stash.
 
+C in History and in a branch's commits copies the selected commit, or takes it out again, as lazygit's cherry-pick
+does. Copied commits show a "copied" mark on their rows in every commit list, and the toolbar says "N copied". V in
+History asks, in a menu, "Are you sure you want to cherry-pick the N copied commit(s) onto this branch?" and, on y,
+cherry-picks them onto the branch you're on, oldest first, whatever order you copied them in; the menu also carries the
+Agent guard, naming any Agent working in the Worktree. When the pick succeeds, the Copied commits are cleared. ⌃R
+clears them at any time. A pick that conflicts stops with the conflicted files in Changes, and m continues, skips or
+aborts it; the Copied commits stay until a paste succeeds. As in git, a cherry-pick wants staged changes committed or
+stashed first: when git refuses, its message shows. Copied commits belong to the repository, not to the Window:
+they are kept by the repository's common git directory, which every Worktree shares, so you can copy in the Git View of
+one Topic's Worktree and paste in the Git View of a Window in another. A different repository has its own. They are
+kept while Muxify runs and are not saved.
+
 An operation that changes the files of the Worktree asks first while an Agent is
 working there. If a Pane whose folder is the Worktree or inside it runs an Agent
 that is working or blocked, the menu names each such Agent, by its Topic, or by
