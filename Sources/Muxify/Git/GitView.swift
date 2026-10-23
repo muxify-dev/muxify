@@ -297,7 +297,7 @@ final class GitView {
         /// Space: stages or unstages in Changes, and the selected lines in
         /// a change's diff; folds a folder of the Diff files.
         case toggle, collapseAll, expandAll
-        case commit, discard, filter, back, close, refresh
+        case commit, discard, stash, stashOptions, filter, back, close, refresh
         /// W: marks the commit, branch or stash selected as the base, or
         /// ends the comparison on the base, as lazygit's diffing mode.
         case mark
@@ -325,6 +325,10 @@ final class GitView {
     private(set) var isCommitting = false
     /// The Git View menu open, such as lazygit's Discard changes menu on d.
     private(set) var menu: GitMenu?
+    /// The Git View prompt open, such as the stash message that s asks for.
+    private(set) var prompt: GitPrompt?
+    /// What the prompt's field holds.
+    var promptText = ""
     /// The Git View tab the list pane shows.
     private(set) var tab = GitTab.changes
     /// Each tab's lists: its own, then each one gone into; the last one
@@ -463,6 +467,7 @@ final class GitView {
         isCommitOpen = false
         commitError = nil
         menu = nil
+        prompt = nil
         writeError = nil
         wantsFocus = false
         wantsEditor = false
@@ -488,6 +493,7 @@ final class GitView {
         isFiltering = false
         // Asked again when it's wanted, never waiting to be confirmed.
         menu = nil
+        prompt = nil
         wantsFocus = false
         // What had focus before is gone with the Window; closing later
         // gives it to the terminal.
@@ -936,6 +942,12 @@ final class GitView {
             }
             return true
         }
+        // A Git View prompt's field takes the rest; ↩ submits from the field.
+        if prompt != nil, window === keyView?.window {
+            guard trigger == Self.escape else { return false }
+            closePrompt()
+            return true
+        }
         // A Git View menu's keys, as lazygit's; no other Git View key acts.
         if menu != nil, window === keyView?.window { return handleMenuKey(trigger) }
         if isFiltering, window === keyView?.window {
@@ -995,7 +1007,7 @@ final class GitView {
             "alt+down": .nextHunk, "alt+up": .previousHunk, "right_bracket": .nextFile, "left_bracket": .previousFile,
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
             "space": .toggle, "minus": .collapseAll, "equal": .expandAll,
-            "c": .commit, "d": .discard, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
+            "c": .commit, "d": .discard, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
             "shift+w": .mark, "e": .edit,
     ]
 
@@ -1068,6 +1080,10 @@ final class GitView {
         case .discard:
             guard list == .changes else { return }
             if focus == .diff { askDiscardLines() } else if let item = selectedItem { askDiscard(item) }
+        case .stash:
+            askStash(.all)
+        case .stashOptions:
+            openStashOptions()
         case .collapseAll, .expandAll:
             if focus == .list { foldAll(command == .collapseAll) }
         case .filter:
@@ -1280,6 +1296,33 @@ final class GitView {
         return true
     }
 
+    // MARK: Prompts
+
+    /// Opens a Git View prompt, in place of any other, with its initial text in the field.
+    func open(_ prompt: GitPrompt) {
+        self.prompt = prompt
+        promptText = prompt.initialText
+        writeError = nil
+    }
+
+    /// ⎋, or a click outside it: changes nothing.
+    func closePrompt() {
+        guard prompt != nil else { return }
+        prompt = nil
+        promptText = ""
+        focusKeyView()
+    }
+
+    /// ↩ in the field: closes the prompt and gives what was typed to whatever asked.
+    func submitPrompt() {
+        guard let prompt, prompt.accepts(promptText) else { return }
+        let text = promptText
+        self.prompt = nil
+        promptText = ""
+        focusKeyView()
+        prompt.submit(text)
+    }
+
     // MARK: Agent guard
 
     /// The Agents that are working or blocked in a Pane inside this Worktree. `agentsForTesting` stands in for the
@@ -1368,6 +1411,70 @@ final class GitView {
         }
         write(option == .all ? GitRepository.discardScript : GitRepository.discardUnstagedScript,
               arguments: [snapshot.root] + discard.paths(option))
+    }
+
+    // MARK: Stashing
+
+    /// The changes `git stash push` takes: all but the untracked files.
+    private var trackedChanges: [GitChange] { snapshot?.changes.filter { !$0.isUntracked } ?? [] }
+
+    /// Why this stash would have nothing to take, else nil.
+    func nothingToStash(_ kind: GitStashKind) -> String? {
+        guard let changes = snapshot?.changes else { return nil }
+        if changes.isEmpty { return "Nothing to stash: the working tree is clean." }
+        switch kind {
+        case .all, .keepIndex:
+            return trackedChanges.isEmpty ? "Nothing to stash but untracked files. S stashes them too." : nil
+        case .untracked:
+            return nil
+        case .staged:
+            return changes.contains { $0.groups.contains(.staged) } ? nil : "Nothing is staged to stash."
+        case .unstaged:
+            return trackedChanges.contains { $0.groups.contains(.unstaged) } ? nil : "Nothing unstaged to stash."
+        }
+    }
+
+    /// s in Changes: asks for the stash's message, which may be empty, and stashes all changes. Other kinds come
+    /// from the options menu of S.
+    func askStash(_ kind: GitStashKind) {
+        guard list == .changes, snapshot != nil else { return }
+        if let reason = nothingToStash(kind) {
+            writeError = reason
+            return
+        }
+        if kind == .unstaged, let title = snapshot?.operationTitle {
+            writeError = "Stashing only the unstaged changes isn't offered while git is in the middle of something (\(title))."
+            return
+        }
+        open(GitPrompt(id: "stash", title: "Stash changes", subject: .text(kind.title), symbol: "archivebox",
+                       placeholder: "Stash message (optional)", submitTitle: "Stash") { [weak self] message in
+            self?.stash(kind, message: message)
+        })
+    }
+
+    /// S in Changes: lazygit's stash options, each then asking for the message.
+    func openStashOptions() {
+        guard list == .changes, snapshot != nil else { return }
+        if snapshot?.changes.isEmpty == true {
+            writeError = nothingToStash(.untracked)
+            return
+        }
+        let operation = snapshot?.operationTitle != nil
+        open(GitMenu(id: "stash", title: "Stash options", symbol: "archivebox", choices: GitStashKind.allCases.map { kind in
+            let reason = kind == .unstaged && operation ? "Not while git is in the middle of a merge, rebase or the like." : nothingToStash(kind)
+            return GitMenu.Choice(key: kind.key, title: kind.title, note: reason ?? kind.note, isEnabled: reason == nil) { [weak self] in
+                self?.askStash(kind)
+            }
+        }))
+    }
+
+    /// Stashes as `git stash push` does, after the Agent guard.
+    private func stash(_ kind: GitStashKind, message: String) {
+        guard let snapshot else { return }
+        let message = message.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        guardFiles("Stash changes", subject: .text(kind.title), symbol: "archivebox", confirm: "Stash them") { [weak self] in
+            self?.write(GitRepository.stashScript, arguments: [snapshot.root, kind.rawValue, message])
+        }
     }
 
     // MARK: Staging lines

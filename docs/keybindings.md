@@ -427,6 +427,8 @@ go on to the actions above.
 | a | In the diff, select the hunk; in Changes, stage everything, or unstage it all once it all is |
 | c | Commit what's staged, once something is, or conclude a merge: write a summary and a description, then ↩ in the summary or ⌘↩; ⎋ keeps the message for later |
 | d | In Changes, discard the file's or folder's changes, as in lazygit: x (or ↩) discards all of them, u only the unstaged ones when some are staged; new and untracked files are deleted. In a change's diff, discard the selected unstaged lines, or the cursor's, with x (or ↩). j / k move between the choices; ⎋ or q cancels |
+| s | In Changes, stash all changes, as `git stash push`: type the stash's message (it may be empty), then ↩; ⎋ cancels. Untracked files stay. Nothing to stash is said, and nothing opens |
+| S | In Changes, open lazygit's stash options: a all changes, U all changes including untracked files, s staged changes, u unstaged changes, i all changes and keep index; each then asks for the message. j / k move between the choices; ⎋ or q cancels |
 | y, ⌘C | Copy the selected code, without + and −; in the list, the path, hash or branch |
 | J / K, ⌃D / ⌃U | Scroll the diff by three lines, or half a page |
 | ⌥↓ / ⌥↑ | Next or previous hunk |

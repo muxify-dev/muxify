@@ -135,9 +135,14 @@ private struct GitNavigator: View {
                     GitMenuView(gitView: gitView, menu: menu, palette: palette)
                         .transition(.opacity)
                 }
+                if let prompt = gitView.prompt {
+                    GitPromptView(gitView: gitView, prompt: prompt, palette: palette)
+                        .transition(.opacity)
+                }
             }
             .animation(.easeOut(duration: 0.15), value: gitView.isCommitOpen)
             .animation(.easeOut(duration: 0.15), value: gitView.menu != nil)
+            .animation(.easeOut(duration: 0.15), value: gitView.prompt != nil)
         }
         .background(GitKeyCatcher(gitView: gitView))
         .environment(\.colorScheme, colors.isDark ? .dark : .light)
@@ -2106,7 +2111,8 @@ private struct GitMenuView: View {
     private func row(_ choice: GitMenu.Choice, isHighlighted: Bool) -> some View {
         Button { gitView.choose(choice) } label: {
             HStack(spacing: 10) {
-                GitKeyCap(text: choice.key, palette: palette)
+                GitKeyCap(text: choice.key.hasPrefix("shift+") ? choice.key.dropFirst("shift+".count).uppercased() : choice.key,
+                          palette: palette)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(choice.title)
                         .font(.system(size: 13, weight: .semibold))
@@ -2160,6 +2166,144 @@ private struct GitMenuView: View {
             .accessibilityIdentifier("git-menu-cancel")
         }
         .foregroundStyle(.secondary)
+        .padding(.horizontal, 16)
+        .frame(height: 48)
+        .background(Color.primary.opacity(palette.colors.isDark ? 0.03 : 0.025))
+        .overlay(alignment: .top) { palette.softSeparator.frame(height: 1) }
+    }
+}
+
+// MARK: - Prompts
+
+/// A Git View prompt: one line for one value, over the Git View as a menu is.
+/// ↩ submits and ⎋ cancels; the field is `git-prompt-field`, and the prompt's
+/// actions are `enter` and `escape`.
+private struct GitPromptView: View {
+    @Bindable var gitView: GitView
+    let prompt: GitPrompt
+    let palette: Palette
+    @FocusState private var isFocused: Bool
+    @State private var isShown = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .top) {
+                Color.black.opacity(palette.colors.isDark ? 0.32 : 0.14)
+                    .contentShape(Rectangle())
+                    .onTapGesture { gitView.closePrompt() }
+                card
+                    .frame(width: min(520, proxy.size.width - 48))
+                    .padding(.top, max(20, proxy.size.height * 0.16))
+                    .scaleEffect(isShown ? 1 : 0.97, anchor: .top)
+                    .offset(y: isShown ? 0 : -6)
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(duration: 0.28, bounce: 0.2)) { isShown = true }
+            DispatchQueue.main.async { isFocused = true }
+        }
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 12)
+            field
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
+            footer
+        }
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(palette.chrome))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(palette.separator))
+        .shadow(color: .black.opacity(0.35), radius: 32, y: 14)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("git-prompt")
+        .accessibilityLabel(prompt.title)
+        // The keys, so scripts/verify can press them without typing.
+        .accessibilityActions {
+            ForEach(["enter", "escape"], id: \.self) { name in
+                Button { name == "enter" ? gitView.submitPrompt() : gitView.closePrompt() } label: { Text(verbatim: name) }
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(palette.color(palette.colors.strong(palette.colors.blue)).gradient)
+                .frame(width: 30, height: 30)
+                .overlay(Image(systemName: prompt.symbol).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(prompt.title).font(.system(size: 14.5, weight: .semibold))
+                if case .text(let text)? = prompt.subject {
+                    Text(text).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var field: some View {
+        Group {
+            if prompt.isSecret {
+                SecureField("", text: $gitView.promptText, prompt: Text(prompt.placeholder).foregroundColor(.secondary))
+            } else {
+                TextField("", text: $gitView.promptText, prompt: Text(prompt.placeholder).foregroundColor(.secondary))
+            }
+        }
+        .textFieldStyle(.plain)
+        .font(.system(size: 13.5))
+        .focused($isFocused)
+        .onSubmit { gitView.submitPrompt() }
+        .padding(.horizontal, 12)
+        .frame(height: 38)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(palette.background))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(isFocused ? Color.accentColor.opacity(0.8) : palette.softSeparator, lineWidth: isFocused ? 1.5 : 1)
+        )
+        .accessibilityIdentifier("git-prompt-field")
+        .accessibilityLabel(prompt.title)
+    }
+
+    private var footer: some View {
+        let canSubmit = prompt.accepts(gitView.promptText)
+        return HStack(spacing: 8) {
+            Spacer(minLength: 8)
+            Button { gitView.closePrompt() } label: {
+                HStack(spacing: 6) {
+                    Text("Cancel").font(.system(size: 12.5, weight: .medium))
+                    Text(verbatim: "esc").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(palette.fill2))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close (⎋)")
+            .accessibilityIdentifier("git-prompt-cancel")
+            Button { gitView.submitPrompt() } label: {
+                HStack(spacing: 6) {
+                    Text(prompt.submitTitle).font(.system(size: 12.5, weight: .semibold))
+                    Text(verbatim: "↩").font(.system(size: 10.5, weight: .medium)).opacity(0.7)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.accentColor))
+                .opacity(canSubmit ? 1 : 0.45)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSubmit)
+            .help("\(prompt.submitTitle) (↩)")
+            .accessibilityIdentifier("git-prompt-submit")
+        }
         .padding(.horizontal, 16)
         .frame(height: 48)
         .background(Color.primary.opacity(palette.colors.isDark ? 0.03 : 0.025))

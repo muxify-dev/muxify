@@ -771,6 +771,68 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(try status(), [" M app/i/p"])
     }
 
+    /// A clean master with a staged new file, an unstaged change and an untracked file.
+    private func prepareStash() throws {
+        try run("""
+        cd "$1" && git reset -q --hard && git stash clear && rm -f c.txt
+        printf 'staged\\n' > s.txt && git add s.txt && printf 'let a = 3\\n' > a.swift && printf 'u\\n' > u.txt
+        """, repository)
+        XCTAssertEqual(try status(), [" M a.swift", "A  s.txt", "?? u.txt"])
+    }
+
+    private func git(_ arguments: String) throws -> String {
+        try run("cd \"$1\" && git \(arguments)", repository)
+    }
+
+    func testStashTakesAllChangesAndLeavesUntrackedFilesAsGitDoes() throws {
+        try prepareStash()
+        try run(GitRepository.stashScript, repository, "all", "my note")
+        XCTAssertEqual(try status(), ["?? u.txt"])
+        XCTAssertEqual(try git("stash list --format=%gs"), "On master: my note\n")
+        XCTAssertEqual(try git("show stash@{0}:a.swift"), "let a = 3\n")
+        XCTAssertEqual(try git("show stash@{0}:s.txt"), "staged\n")
+        // No message: git's own.
+        try run("cd \"$1\" && printf 'let a = 4\\n' > a.swift", repository)
+        try run(GitRepository.stashScript, repository, "all", "")
+        XCTAssertTrue(try git("stash list --format=%gs").hasPrefix("WIP on master: "))
+    }
+
+    func testStashCanIncludeUntrackedFiles() throws {
+        try prepareStash()
+        try run(GitRepository.stashScript, repository, "untracked", "everything")
+        XCTAssertEqual(try status(), [])
+        XCTAssertEqual(try git("show stash@{0}^3:u.txt"), "u\n")
+    }
+
+    func testStashCanTakeOnlyWhatIsStagedOrOnlyWhatIsNot() throws {
+        try prepareStash()
+        try run(GitRepository.stashScript, repository, "staged", "s")
+        XCTAssertEqual(try status(), [" M a.swift", "?? u.txt"])
+        XCTAssertEqual(try git("diff --name-only stash@{0}^ stash@{0}"), "s.txt\n")
+        // Only what isn't staged: what's staged stays staged, and no commit is left behind.
+        try prepareStash()
+        let commits = try git("rev-list --count HEAD")
+        try run(GitRepository.stashScript, repository, "unstaged", "u")
+        XCTAssertEqual(try status(), ["A  s.txt", "?? u.txt"])
+        XCTAssertEqual(try git("diff --name-only stash@{0}^ stash@{0}"), "a.swift\n")
+        XCTAssertEqual(try git("show stash@{0}:a.swift"), "let a = 3\n")
+        XCTAssertEqual(try git("rev-list --count HEAD"), commits)
+        XCTAssertEqual(try git("stash list --format=%gs"), "On master: u\n")
+        // With nothing staged, it is a plain stash.
+        try run("cd \"$1\" && git reset -q --hard && printf 'let a = 5\\n' > a.swift", repository)
+        try run(GitRepository.stashScript, repository, "unstaged", "")
+        XCTAssertEqual(try status(), ["?? u.txt"])
+    }
+
+    func testStashCanKeepTheIndex() throws {
+        try prepareStash()
+        try run(GitRepository.stashScript, repository, "keepindex", "k")
+        XCTAssertEqual(try status(), ["A  s.txt", "?? u.txt"])
+        XCTAssertEqual(try git("show stash@{0}:a.swift"), "let a = 3\n")
+        XCTAssertEqual(try git("show stash@{0}:s.txt"), "staged\n")
+        XCTAssertThrowsError(try run(GitRepository.stashScript, repository, "bogus", ""))
+    }
+
     /// The changed lines of a file's diff with these texts, by hunk.
     private func pick(_ file: GitPatchFile, _ texts: Set<String>) -> [Int: Set<Int>] {
         var picked: [Int: Set<Int>] = [:]
@@ -1297,6 +1359,116 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertTrue(gitView.chooseMenu(key: "shift+c"))
         XCTAssertFalse(gitView.chooseMenu(key: "a"))
         XCTAssertEqual(ran, ["c", "a", "c"])
+    }
+
+    func testAPromptStartsWithItsTextAndSubmitsOrCancelsWithNoChange() {
+        let gitView = GitView(windowID: "@1")
+        var submitted: [String] = []
+        func open(allowsEmpty: Bool = true) {
+            gitView.open(GitPrompt(id: "test", title: "Test", symbol: "circle", initialText: "start", isSecret: true,
+                                   allowsEmpty: allowsEmpty) { submitted.append($0) })
+        }
+        open()
+        XCTAssertEqual(gitView.promptText, "start")
+        XCTAssertEqual(gitView.prompt?.isSecret, true)
+        gitView.closePrompt()
+        XCTAssertNil(gitView.prompt)
+        XCTAssertEqual(submitted, [], "cancelling submits nothing")
+        open()
+        gitView.promptText = "typed"
+        gitView.submitPrompt()
+        XCTAssertNil(gitView.prompt)
+        XCTAssertEqual(submitted, ["typed"])
+        gitView.submitPrompt()
+        XCTAssertEqual(submitted, ["typed"], "a closed prompt submits nothing more")
+        // An empty value is submitted unless the prompt wants one.
+        open()
+        gitView.promptText = ""
+        gitView.submitPrompt()
+        XCTAssertEqual(submitted, ["typed", ""])
+        open(allowsEmpty: false)
+        gitView.promptText = "  "
+        gitView.submitPrompt()
+        XCTAssertNotNil(gitView.prompt, "↩ on an empty value the prompt doesn't take leaves it open")
+        XCTAssertEqual(submitted, ["typed", ""])
+    }
+
+    func testSAsksForTheStashMessageAndSOpensTheStashOptions() throws {
+        let gitView = GitView(windowID: "@1")
+        var changed = snapshot
+        // Nothing changed: it says so and opens nothing.
+        gitView.apply(changed)
+        gitView.perform(.stash)
+        XCTAssertNil(gitView.prompt)
+        XCTAssertEqual(gitView.writeError, "Nothing to stash: the working tree is clean.")
+        gitView.perform(.stashOptions)
+        XCTAssertNil(gitView.menu)
+        // Only an untracked file: s has nothing to take, but S can.
+        changed.changes = [GitChange(index: "?", worktree: "?", path: "new.txt")]
+        gitView.apply(changed)
+        gitView.perform(.stash)
+        XCTAssertNil(gitView.prompt)
+        XCTAssertEqual(gitView.writeError, "Nothing to stash but untracked files. S stashes them too.")
+        gitView.perform(.stashOptions)
+        XCTAssertEqual(gitView.menu?.choices.map(\.isEnabled), [false, true, false, false, false])
+        gitView.closeMenu()
+        // A staged and an unstaged change: all five, in lazygit's keys.
+        changed.changes = [GitChange(index: "M", worktree: "M", path: "a.swift"), GitChange(index: "?", worktree: "?", path: "new.txt")]
+        gitView.apply(changed)
+        gitView.perform(.stashOptions)
+        XCTAssertEqual(gitView.menu?.id, "stash")
+        XCTAssertEqual(gitView.menu?.choices.map(\.title), [
+            "Stash all changes", "Stash all changes including untracked files", "Stash staged changes",
+            "Stash unstaged changes", "Stash all changes and keep index",
+        ])
+        XCTAssertEqual(gitView.menu?.choices.map(\.key), ["a", "shift+u", "s", "u", "i"])
+        XCTAssertEqual(gitView.menu?.choices.map(\.isEnabled), [true, true, true, true, true])
+        // A choice asks for the message.
+        XCTAssertTrue(gitView.chooseMenu(key: "shift+u"))
+        XCTAssertNil(gitView.menu)
+        XCTAssertEqual(gitView.prompt?.id, "stash")
+        XCTAssertEqual(gitView.prompt?.subject, .text("Stash all changes including untracked files"))
+        XCTAssertEqual(gitView.prompt?.allowsEmpty, true)
+        gitView.closePrompt()
+        // s asks for the message of a stash of all changes, in Changes only.
+        gitView.perform(.stash)
+        XCTAssertEqual(gitView.prompt?.subject, .text("Stash all changes"))
+        gitView.closePrompt()
+        gitView.perform(.tab(.history))
+        gitView.perform(.stash)
+        gitView.perform(.stashOptions)
+        XCTAssertNil(gitView.prompt)
+        XCTAssertNil(gitView.menu)
+        // Only staged or only unstaged changes disable the other's option.
+        gitView.perform(.tab(.changes))
+        changed.changes = [GitChange(index: "A", worktree: " ", path: "a.swift")]
+        gitView.apply(changed)
+        gitView.perform(.stashOptions)
+        XCTAssertEqual(gitView.menu?.choices.map(\.isEnabled), [true, true, true, false, true])
+        gitView.closeMenu()
+        changed.changes = [GitChange(index: " ", worktree: "M", path: "a.swift")]
+        gitView.apply(changed)
+        gitView.perform(.stashOptions)
+        XCTAssertEqual(gitView.menu?.choices.map(\.isEnabled), [true, true, false, true, true])
+    }
+
+    func testStashingGoesThroughTheAgentGuard() {
+        let gitView = GitView(windowID: "@1")
+        var changed = snapshot
+        changed.changes = [GitChange(index: " ", worktree: "M", path: "a.swift")]
+        gitView.apply(changed)
+        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .claude, status: .working, unread: false, windowID: "@1", sessionID: "$1",
+                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: changed.root)]
+        gitView.perform(.stash)
+        XCTAssertEqual(gitView.prompt?.id, "stash")
+        gitView.promptText = "wip"
+        gitView.submitPrompt()
+        // The message is asked first; an Agent is working there, so stashing then asks once more.
+        XCTAssertNil(gitView.prompt)
+        XCTAssertEqual(gitView.menu?.title, "Stash changes")
+        XCTAssertEqual(gitView.menu?.agents, ["Claude Code in work"])
+        gitView.closeMenu()
+        XCTAssertNil(gitView.menu)
     }
 
     func testCommittingWaitsForARebaseAndConcludesAMerge() {

@@ -1,4 +1,4 @@
-"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu and its Agent guard, and closing.
+"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu and its Agent guard, stashing from Changes, and closing.
 
 The driver cannot type keys, so a check performs each Git View key as an accessibility action of the
 `git-view` element (`GitNavigator` in UI/GitViewPanel.swift). An action is named by the key's Config
@@ -35,6 +35,11 @@ Accessibility identifiers of the Git View, for the suites that follow this one:
     git-menu-agents          the Agent guard's warning in a menu, only while an Agent that is working or blocked has a
                              Pane in the Worktree; its label is one line for each Agent, "<kind> in <Topic or Session>"
     git-menu-cancel          the menu's Cancel button
+    git-prompt               an open Git View prompt, such as the stash message that s asks for; its label is its title,
+                             and its actions are enter (submit) and escape (cancel)
+    git-prompt-field         the prompt's one-line field: `set` it to type; its label is the prompt's title
+    git-prompt-cancel        the prompt's Cancel button
+    git-prompt-submit        the prompt's submit button, such as Stash
 The diff pane builds only the lines on screen, so keep a fixture's diffs short.
 
 Run from the repo root after `make build`:
@@ -492,6 +497,137 @@ class GitView(unittest.TestCase):
             wait(lambda: not path.exists(), 'x did not delete the file after the guarded menu', seconds=10)
         finally:
             path.unlink(missing_ok=True)
+
+    def stashes(self):
+        return self.git('stash', 'list', '--format=%gs').splitlines()
+
+    def porcelain(self):
+        return self.git('status', '--porcelain', '--untracked-files=all').splitlines()
+
+    def restore_fixture(self, stashes):
+        """Puts the fixture's changes back as setUpClass left them (one staged, one not, one untracked), and drops the
+        stashes a check made, so the checks that follow find the tree they expect."""
+        self.git('reset', '-q', '--hard')
+        while len(self.stashes()) > stashes:
+            self.git('stash', 'drop', '-q')
+        (self.repo/'tracked.txt').write_text('one\nthe quick red fox\ntracked added line\n')
+        (self.repo/'staged.txt').write_text('one\nstaged line\n')
+        self.git('add', 'staged.txt')
+        (self.repo/'new.txt').write_text('new file\n')
+
+    def type_in_prompt(self, message, title='Stash changes'):
+        """Waits for the prompt, types a message in its field and submits it with ↩."""
+        self.s.wait_rows(lambda rs: self.s.row('git-prompt', rs).get('accessibilityLabel') == title, 'no prompt: ' + title)
+        self.s.act('set', 'git-prompt-field', message)
+        self.s.act('action', 'git-prompt', 'enter')
+        self.s.wait_rows(lambda rs: not self.s.has('git-prompt', rs), 'enter did not close the prompt')
+
+    def test_s_asks_for_a_message_and_stashes_all_changes_but_untracked_files(self):
+        self.wait_change('tracked.txt', bool, 'Changes do not list tracked.txt')
+        before = self.stashes()
+        tree = self.porcelain()
+        self.key('s')
+        rs = self.s.wait_rows(lambda rs: self.s.has('git-prompt', rs), 's did not open the prompt')
+        self.assertEqual(self.s.row('git-prompt', rs).get('accessibilityLabel'), 'Stash changes')
+        # While it is open, ⎋ cancels with no change.
+        self.s.act('action', 'git-prompt', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-prompt', rs), 'escape did not close the prompt')
+        time.sleep(1)
+        self.assertEqual(self.stashes(), before, 'escape stashed')
+        self.assertEqual(self.porcelain(), tree, 'escape changed the tree')
+        self.key('s')
+        self.type_in_prompt('my note')
+        self.addCleanup(self.restore_fixture, len(before))
+        wait(lambda: self.stashes()[:1] == ['On main: my note'], 'the stash is not git\'s stash of "my note"', seconds=10)
+        self.assertEqual(self.porcelain(), ['?? new.txt'], 'the tree is not as git stash push leaves it')
+        self.assertEqual(self.git('show', 'stash@{0}:tracked.txt'), 'one\nthe quick red fox\ntracked added line\n')
+        self.assertEqual(self.git('show', 'stash@{0}:staged.txt'), 'one\nstaged line\n')
+        # The new stash shows in Stashes, with its count, and Changes lists what is left.
+        rs = self.s.wait_rows(lambda rs: not self.s.has('git-row-change:tracked.txt', rs) and self.s.has('git-row-change:new.txt', rs),
+                              'Changes list what the stash took', seconds=15)
+        self.assertEqual(len(before) + 1, len(self.stashes()))
+        self.key('4')
+        self.s.wait_rows(lambda rs: sum(r.get('accessibilityLabel') == 'my note' for r in
+                                        self.rows_with_prefix('git-row-stash:', rs)) == 1, 'Stashes do not list the new stash', seconds=15)
+        self.key('1')
+
+    def test_shift_s_offers_lazygits_stash_options_and_each_stashes_as_git_does(self):
+        # The fixture: staged.txt staged, tracked.txt changed and not staged, new.txt untracked.
+        kinds = [
+            ('a', 'Stash all changes', ['?? new.txt'], None),
+            ('shift+u', 'Stash all changes including untracked files', [], None),
+            ('s', 'Stash staged changes', [' M tracked.txt', '?? new.txt'], 'staged.txt'),
+            ('u', 'Stash unstaged changes', ['M  staged.txt', '?? new.txt'], 'tracked.txt'),
+            ('i', 'Stash all changes and keep index', ['M  staged.txt', '?? new.txt'], None),
+        ]
+        self.wait_change('tracked.txt', bool, 'Changes do not list tracked.txt')
+        tree = self.porcelain()
+        self.key('shift+s')
+        rs = self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Stash options', 'S did not open the stash options')
+        for key, title, _, _ in kinds:
+            self.assertEqual(self.s.row('git-menu-choice-' + key, rs).get('accessibilityLabel'), title)
+            self.assertIn('enabled=1', self.s.row('git-menu-choice-' + key, rs).get('accessibilityValue'), title + ' is not offered')
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+        for key, title, left, only in kinds:
+            with self.subTest(title):
+                message = 'by ' + key.replace('+', '-')
+                before = len(self.stashes())
+                self.key('shift+s')
+                self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Stash options', 'S did not open the stash options')
+                self.s.act('action', 'git-menu', key)
+                self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), key + ' did not close the menu')
+                self.type_in_prompt(message)
+                wait(lambda: len(self.stashes()) == before + 1, title + ' made no stash', seconds=10)
+                self.assertEqual(self.stashes()[0], 'On main: ' + message)
+                self.assertEqual(self.porcelain(), left, title + ' left the tree as git would not')
+                if only:
+                    self.assertEqual(self.git('diff', '--name-only', 'stash@{0}^', 'stash@{0}').split(), [only])
+                else:
+                    self.assertEqual(self.git('show', 'stash@{0}:staged.txt'), 'one\nstaged line\n')
+                self.restore_fixture(before)
+                self.assertEqual(self.porcelain(), tree, 'the check did not put the tree back')
+                self.wait_change('tracked.txt', bool, 'Changes do not list tracked.txt again')
+
+    def test_with_nothing_to_stash_the_git_view_says_so_and_opens_nothing(self):
+        self.addCleanup(self.restore_fixture, len(self.stashes()))
+        self.git('stash', 'push', '-u', '-q', '-m', 'all of it')
+        self.wait_change('tracked.txt', lambda row: not row, 'Changes still list tracked.txt')
+        for key in ['s', 'shift+s']:
+            self.key(key)
+            self.s.wait_rows(lambda rs: 'Nothing to stash' in self.s.row('git-write-error', rs).get('accessibilityValue', ''),
+                             key + ' does not say there is nothing to stash')
+            self.assertFalse(self.s.has('git-prompt'), key + ' opened a prompt')
+            self.assertFalse(self.s.has('git-menu'), key + ' opened a menu')
+            self.key('shift+r')
+
+    def test_stashing_asks_first_while_an_agent_is_working_in_the_worktree(self):
+        path = self.repo/'z-stash-agent.txt'
+        path.write_text('kept\n')
+        self.addCleanup(path.unlink, missing_ok=True)
+        self.wait_change('z-stash-agent.txt', bool, 'Changes do not list z-stash-agent.txt')
+        self.agent_pane('gv-stash-agent', self.repo, 'working')
+        # Muxify reads the Panes' options on its own timer: wait until the Git View names the Agent.
+        self.assertEqual(self.discard_names_agents('z-stash-agent.txt', True), 'Claude Code in gv-stash-agent')
+        before = len(self.stashes())
+        self.key('shift+s')
+        self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Stash options', 'S did not open the stash options')
+        self.s.act('action', 'git-menu', 'shift+u')
+        self.type_in_prompt('guarded')
+        rs = self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Stash changes', 'no question while an Agent works there')
+        self.assertEqual(self.s.row('git-menu-agents', rs).get('accessibilityLabel'), 'Claude Code in gv-stash-agent')
+        time.sleep(1)
+        self.assertEqual(len(self.stashes()), before, 'the stash was made before the question was answered')
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the question')
+        time.sleep(1)
+        self.assertEqual(len(self.stashes()), before, 'escape stashed')
+        self.key('s')
+        self.type_in_prompt('guarded')
+        self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Stash changes', 'no question while an Agent works there')
+        self.s.act('action', 'git-menu', 'y')
+        self.addCleanup(self.restore_fixture, before)
+        wait(lambda: len(self.stashes()) == before + 1, 'y did not stash', seconds=10)
 
     def test_q_closes_the_git_view(self):
         self.assertTrue(self.is_open(), 'the Git View is not open')
