@@ -528,6 +528,32 @@ Environment the fetch runs over SSH with a remote terminal (`ssh -tt`), so the
 same questions come from the remote machine. Other git commands of the Git View
 run without a terminal and fail with git's message when they would ask.
 
+P pushes the branch you're on and p pulls it, in every tab of the Git View.
+The push runs beside the other writes, as the fetch does, and the toolbar shows
+"Pushing…" until it ends. A branch with no upstream asks for one in a Git View
+prompt, "Enter upstream as '<remote> <branch>'", starting at `origin <branch>`;
+↩ pushes the branch to that remote branch and sets it as the upstream, and an
+answer that isn't two words is told how to write it. When the upstream has
+commits the branch doesn't, a menu asks "Your branch has diverged from the remote
+branch. Press ⎋ to cancel, or ↩ to force push." and only ↩ pushes, with
+`--force-with-lease`, which stops when the remote branch has moved since the last
+fetch. Any other push is a plain `git push`, so a rejection shows git's message
+in the banner. A push changes no files here, so the Agent guard doesn't join it.
+
+The pull is `git pull --no-edit`, so it follows your git config, such as
+`pull.rebase`, and a merge doesn't wait for an editor. It waits in the write
+queue, behind the writes before it, and the writes after it wait for it; the
+toolbar shows "Pulling…" while it runs. It changes files, so it goes through the
+Agent guard: with an Agent working in the Worktree, a "Pull" menu names it and
+asks for y. A branch with no upstream asks as push does, after which the pull
+takes that remote branch and sets it as the upstream. A pull that conflicts
+leaves the merge or the rebase in progress, with the conflicted files in
+Changes, and the banner says so; any other failure shows git's message, such as
+the question of how to reconcile divergent branches. Both run in the same
+pseudo-terminal as the fetch, with its credential prompts and its "Push
+cancelled." and "Pull cancelled." banners. A detached HEAD has no branch to push
+or pull, and the banner says so.
+
 An operation that changes the files of the Worktree asks first while an Agent is
 working there. If a Pane whose folder is the Worktree or inside it runs an Agent
 that is working or blocked, the menu names each such Agent, by its Topic, or by

@@ -309,6 +309,10 @@ final class GitView {
         case edit
         /// f: fetches all remotes, in Changes, as lazygit's Files panel does.
         case fetch
+        /// P: pushes the branch you're on, in every tab.
+        case push
+        /// p: pulls the branch you're on, in every tab.
+        case pull
     }
 
     private(set) var isOpen = false
@@ -406,6 +410,8 @@ final class GitView {
     @ObservationIgnored private var writes: [Write] = []
     /// The arguments of the writes waiting or running, for tests, which have no store to run them.
     var queuedWriteArguments: [[String]] { writes.map(\.arguments) }
+    /// The arguments of the network commands started, for tests, which have no store to run them.
+    private(set) var networkArguments: [[String]] = []
     /// The branch and commit whose history is being read.
     @ObservationIgnored private var readingLog: String?
     @ObservationIgnored private var shownScope = Scope.all
@@ -1031,7 +1037,7 @@ final class GitView {
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
             "space": .toggle, "minus": .collapseAll, "equal": .expandAll, "n": .newBranch,
             "c": .commit, "d": .discard, "g": .pop, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
-            "shift+w": .mark, "e": .edit, "f": .fetch,
+            "shift+w": .mark, "e": .edit, "f": .fetch, "shift+p": .push, "p": .pull,
     ]
 
     static let commands: [KeyTrigger: Command] = Dictionary(uniqueKeysWithValues: keyMap.map { (try! KeyTrigger($0), $1) })
@@ -1164,6 +1170,10 @@ final class GitView {
             openInEditor()
         case .fetch:
             if list == .changes, focus == .list { fetch() }
+        case .push:
+            push()
+        case .pull:
+            pull()
         }
     }
 
@@ -2005,14 +2015,17 @@ final class GitView {
         let arguments: [String]
         let timeout: TimeInterval
         let completion: ((Result<String, Error>) -> Void)?
+        /// A command that talks to a remote, such as a pull, runs in a pseudo-terminal; the toolbar names it.
+        var network: (activity: String, cancelled: String)?
     }
 
     /// Runs commands that change the repository one at a time, so they
     /// don't race for its index, and reads it again after the last.
     private func write(_ script: String, arguments: [String], timeout: TimeInterval = 30,
+                       network: (activity: String, cancelled: String)? = nil,
                        completion: ((Result<String, Error>) -> Void)? = nil) {
         writeError = nil
-        writes.append(Write(script: script, arguments: arguments, timeout: timeout, completion: completion))
+        writes.append(Write(script: script, arguments: arguments, timeout: timeout, completion: completion, network: network))
         runNextWrite()
     }
 
@@ -2020,15 +2033,21 @@ final class GitView {
         guard !isWriting, let store, !writes.isEmpty else { return }
         let write = writes.removeFirst()
         isWriting = true
-        store.runGitScript(write.script, arguments: write.arguments, timeout: write.timeout) { [weak self] result in
+        let finish: (Result<String, Error>) -> Void = { [weak self] result in
             guard let self else { return }
             self.isWriting = false
             if let completion = write.completion {
                 completion(result)
             } else if case .failure(let error) = result {
-                self.writeError = Self.message(for: error)
+                self.writeError = Self.message(for: error, cancelled: write.network?.cancelled)
             }
             if self.writes.isEmpty { self.refresh() } else { self.runNextWrite() }
+        }
+        if let network = write.network {
+            runNetwork(write.script, arguments: write.arguments, activity: network.activity, cancelled: network.cancelled,
+                       refreshing: false, completion: finish)
+        } else {
+            store.runGitScript(write.script, arguments: write.arguments, timeout: write.timeout, completion: finish)
         }
     }
 
@@ -2042,12 +2061,82 @@ final class GitView {
     }
 
     static let fetching = "Fetching…"
+    static let pushing = "Pushing…"
+    static let pulling = "Pulling…"
+
+    /// P: pushes the branch you're on, as lazygit's does, beside the writes like the fetch. Without an upstream it asks
+    /// for one and sets it; when the upstream has commits the branch doesn't, it asks before a force push, which is
+    /// `--force-with-lease`. A detached HEAD has no branch to push.
+    func push() {
+        guard let snapshot, !networkActivity.contains(Self.pushing) else { return }
+        guard !snapshot.isDetached else {
+            writeError = "A detached HEAD has no branch to push. Check out a branch first."
+            return
+        }
+        if snapshot.upstream == nil {
+            askUpstream(for: snapshot.head, title: "Push") { [weak self] remote, branch in self?.runPush(.upstream, remote, branch) }
+        } else if snapshot.behind > 0 {
+            open(GitMenu(
+                id: "force-push", title: "Force push?", subject: .text(snapshot.head), symbol: "arrow.up.circle", isDestructive: true,
+                choices: [GitMenu.Choice(key: "y", title: "Force push",
+                                         note: "Your branch has diverged from the remote branch. Press ⎋ to cancel, or ↩ to force push.",
+                                         isDestructive: true) { [weak self] in self?.runPush(.force) }]))
+        } else {
+            runPush(.plain)
+        }
+    }
+
+    enum PushMode: String { case plain, upstream, force }
+
+    private func runPush(_ mode: PushMode, _ remote: String = "", _ branch: String = "") {
+        guard let root = snapshot?.root, !networkActivity.contains(Self.pushing) else { return }
+        runNetwork(GitRepository.pushScript, arguments: [root, mode.rawValue, remote, branch], activity: Self.pushing,
+                   cancelled: "Push cancelled.")
+    }
+
+    /// p: pulls the branch you're on, following the user's git config, such as `pull.rebase`. It waits in the write
+    /// queue, as it changes files, and goes through the Agent guard. Without an upstream it asks for one, as push does.
+    func pull() {
+        guard let snapshot, !networkActivity.contains(Self.pulling) else { return }
+        guard !snapshot.isDetached else {
+            writeError = "A detached HEAD has no branch to pull. Check out a branch first."
+            return
+        }
+        if snapshot.upstream == nil {
+            askUpstream(for: snapshot.head, title: "Pull") { [weak self] remote, branch in self?.guardedPull(.upstream, remote, branch) }
+        } else {
+            guardedPull(.plain)
+        }
+    }
+
+    private func guardedPull(_ mode: PushMode, _ remote: String = "", _ branch: String = "") {
+        guardFiles("Pull", subject: .text(snapshot?.head ?? ""), symbol: "arrow.down.circle", confirm: "Pull it") { [weak self] in
+            guard let self, let root = self.snapshot?.root else { return }
+            self.write(GitRepository.pullScript, arguments: [root, mode.rawValue, remote, branch], timeout: 120,
+                       network: (Self.pulling, "Pull cancelled."))
+        }
+    }
+
+    /// Asks for the upstream of a branch that has none, as lazygit does, starting at `origin <branch>`.
+    private func askUpstream(for branch: String, title: String, then run: @escaping (_ remote: String, _ branch: String) -> Void) {
+        open(GitPrompt(id: "upstream", title: "Enter upstream as '<remote> <branch>'", subject: .text("\(title) \(branch)"),
+                       symbol: "arrow.up.arrow.down", placeholder: "origin \(branch)", initialText: "origin \(branch)",
+                       allowsEmpty: false, submitTitle: title) { [weak self] typed in
+            let words = typed.split(whereSeparator: \.isWhitespace).map(String.init)
+            guard words.count == 2 else {
+                self?.writeError = "Enter the upstream as '<remote> <branch>', such as 'origin \(branch)'."
+                return
+            }
+            run(words[0], words[1])
+        })
+    }
 
     /// Runs a command that talks to a remote, such as a fetch, in a pseudo-terminal beside the write queue, and
     /// asks git's and ssh's questions for credentials in Git View prompts. The toolbar shows `activity` while it
     /// runs; a failure shows git's message, and a cancelled question `cancelled`.
     private func runNetwork(_ script: String, arguments: [String], activity: String, cancelled: String,
-                            completion: ((Result<String, Error>) -> Void)? = nil) {
+                            refreshing: Bool = true, completion: ((Result<String, Error>) -> Void)? = nil) {
+        networkArguments.append(arguments)
         guard let store else { return }
         writeError = nil
         networkActivity.append(activity)
@@ -2065,9 +2154,9 @@ final class GitView {
             if let completion {
                 completion(result)
             } else if case .failure(let error) = result {
-                self.writeError = if case TmuxError.cancelled = error { cancelled } else { Self.message(for: error) }
+                self.writeError = Self.message(for: error, cancelled: cancelled)
             }
-            self.refresh()
+            if refreshing { self.refresh() }
         })
     }
 
@@ -2710,6 +2799,12 @@ final class GitView {
                 }
             }
         }
+    }
+
+    /// `message(for:)`, with `cancelled` for a network command that a cancelled question stopped.
+    static func message(for error: Error, cancelled: String?) -> String {
+        if let cancelled, case TmuxError.cancelled = error { return cancelled }
+        return message(for: error)
     }
 
     static func message(for error: Error) -> String {

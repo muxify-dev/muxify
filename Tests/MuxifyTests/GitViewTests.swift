@@ -968,6 +968,90 @@ final class GitScriptTests: XCTestCase {
         }
     }
 
+    /// A clean master, a bare remote `origin` that has it, and a second clone `other` that pushes to it.
+    private func prepareRemote() throws {
+        try prepareCheckout()
+        try run("""
+        cd "$1" && git init -q --bare origin.git && cd repo && git remote add origin ../origin.git && git push -q origin master
+        cd "$1" && git clone -q -b master origin.git other
+        """, directory.url.path)
+    }
+
+    /// A commit that `other` pushes to the remote's master, changing `file`.
+    private func pushFromOther(_ file: String, _ text: String) throws {
+        try run("""
+        cd "$1/other" && printf '%s\\n' "$3" > "$2" && git add "$2" && git commit -q -m "other $2"
+        git pull -q --rebase origin master && git push -q origin master
+        """, directory.url.path, file, text)
+    }
+
+    func testAPushWithNoUpstreamPushesTheBranchAndSetsItAsTheUpstream() throws {
+        try prepareRemote()
+        try run("cd \"$1\" && git checkout -q -b topic && git commit -q --allow-empty -m topic", repository)
+        XCTAssertThrowsError(try git("rev-parse --abbrev-ref topic@{upstream}"))
+        try run(GitRepository.pushScript, repository, "upstream", "origin", "topic")
+        XCTAssertEqual(try git("rev-parse --abbrev-ref topic@{upstream}"), "origin/topic\n")
+        XCTAssertEqual(try run("git -C \"$1/origin.git\" rev-parse topic", directory.url.path),
+                       try git("rev-parse topic"))
+        // To another name: the remote branch has it, and the upstream follows.
+        try run(GitRepository.pushScript, repository, "upstream", "origin", "renamed")
+        XCTAssertEqual(try git("rev-parse --abbrev-ref topic@{upstream}"), "origin/renamed\n")
+    }
+
+    func testAPlainPushSendsNewCommitsAndAForcePushNeedsTheLeaseToHold() throws {
+        try prepareRemote()
+        try run("cd \"$1\" && git branch -q --set-upstream-to=origin/master && git commit -q --allow-empty -m mine", repository)
+        try run(GitRepository.pushScript, repository, "plain", "", "")
+        XCTAssertEqual(try run("git -C \"$1/origin.git\" rev-parse master", directory.url.path), try git("rev-parse HEAD"))
+        // The remote moved on: a plain push is rejected, with git's message.
+        try pushFromOther("o.txt", "o")
+        try run("cd \"$1\" && git commit -q --allow-empty -m more", repository)
+        XCTAssertThrowsError(try run(GitRepository.pushScript, repository, "plain", "", "")) { error in
+            XCTAssertTrue(stderr(of: error).contains("rejected"), stderr(of: error))
+        }
+        // The lease is on what the last fetch saw: a remote that moved since is not overwritten.
+        XCTAssertThrowsError(try run(GitRepository.pushScript, repository, "force", "", "")) { error in
+            XCTAssertTrue(stderr(of: error).contains("stale info") || stderr(of: error).contains("rejected"), stderr(of: error))
+        }
+        XCTAssertNotEqual(try run("git -C \"$1/origin.git\" rev-parse master", directory.url.path), try git("rev-parse HEAD"))
+        // After a fetch the lease holds, and the force push wins.
+        try run("cd \"$1\" && git fetch -q", repository)
+        try run(GitRepository.pushScript, repository, "force", "", "")
+        XCTAssertEqual(try run("git -C \"$1/origin.git\" rev-parse master", directory.url.path), try git("rev-parse HEAD"))
+    }
+
+    func testAPullFollowsTheUsersGitConfigAndSetsAnUpstreamItWasGiven() throws {
+        try prepareRemote()
+        try pushFromOther("o.txt", "o")
+        // No upstream: the one given is pulled from, and becomes the upstream.
+        XCTAssertThrowsError(try run(GitRepository.pullScript, repository, "plain", "", ""))
+        try run(GitRepository.pullScript, repository, "upstream", "origin", "master")
+        XCTAssertEqual(try git("show -s --format=%s HEAD"), "other o.txt\n")
+        XCTAssertEqual(try git("rev-parse --abbrev-ref master@{upstream}"), "origin/master\n")
+        // With `pull.rebase`, the local commit goes on top of the remote's, as it does for git.
+        try run("cd \"$1\" && git commit -q --allow-empty -m mine && git config pull.rebase true", repository)
+        try pushFromOther("p.txt", "p")
+        try run(GitRepository.pullScript, repository, "plain", "", "")
+        XCTAssertEqual(try git("log --format=%s -3"), "mine\nother p.txt\nother o.txt\n")
+    }
+
+    func testAPullThatConflictsLeavesTheMergeInProgressAndSaysSo() throws {
+        try prepareRemote()
+        try run("cd \"$1\" && git branch -q --set-upstream-to=origin/master && git config pull.rebase false", repository)
+        try pushFromOther("a.swift", "let a = 7")
+        try run("cd \"$1\" && printf 'let a = 8\\n' > a.swift && git commit -q -am mine", repository)
+        XCTAssertThrowsError(try run(GitRepository.pullScript, repository, "plain", "", "")) { error in
+            XCTAssertTrue(stderr(of: error).contains("merge is in progress"), stderr(of: error))
+        }
+        XCTAssertTrue(try status().contains("UU a.swift"))
+        // A rebase says so too.
+        try run("cd \"$1\" && git merge --abort && git config pull.rebase true", repository)
+        XCTAssertThrowsError(try run(GitRepository.pullScript, repository, "plain", "", "")) { error in
+            XCTAssertTrue(stderr(of: error).contains("rebase is in progress"), stderr(of: error))
+        }
+        XCTAssertTrue(try status().contains("UU a.swift"))
+    }
+
     func testThePreviousBranchIsWhatCheckoutDashGoesBackTo() throws {
         try prepareCheckout()
         let before = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get()
@@ -1733,6 +1817,131 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.toggle)
         XCTAssertEqual(gitView.menu?.title, "Check out")
         XCTAssertEqual(gitView.menu?.subject, .text("c2"))
+    }
+
+    private func trackedSnapshot(ahead: Int = 0, behind: Int = 0) -> GitSnapshot {
+        var snapshot = snapshot
+        snapshot.upstream = "origin/master"
+        snapshot.ahead = ahead
+        snapshot.behind = behind
+        return snapshot
+    }
+
+    func testPPushesTheBranchAndAsksForAnUpstreamWhenThereIsNone() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(trackedSnapshot(ahead: 1))
+        // In every tab, a branch with an upstream pushes at once.
+        for tab in [GitTab.changes, .history, .branches, .stashes] {
+            gitView.perform(.tab(tab))
+            gitView.perform(.push)
+        }
+        XCTAssertEqual(gitView.networkArguments, Array(repeating: ["/repo", "plain", "", ""], count: 4))
+        XCTAssertNil(gitView.menu)
+        XCTAssertNil(gitView.prompt)
+        // Without one, a prompt starts at origin and the branch, and its answer is pushed and set.
+        gitView.apply(snapshot)
+        gitView.perform(.push)
+        XCTAssertEqual(gitView.prompt?.title, "Enter upstream as '<remote> <branch>'")
+        XCTAssertEqual(gitView.promptText, "origin master")
+        gitView.submitPrompt()
+        XCTAssertEqual(gitView.networkArguments.last, ["/repo", "upstream", "origin", "master"])
+        gitView.perform(.push)
+        gitView.promptText = "fork  topic"
+        gitView.submitPrompt()
+        XCTAssertEqual(gitView.networkArguments.last, ["/repo", "upstream", "fork", "topic"])
+        // ⎋ changes nothing; an answer that isn't two words says how to write it.
+        let count = gitView.networkArguments.count
+        gitView.perform(.push)
+        gitView.closePrompt()
+        gitView.perform(.push)
+        gitView.promptText = "origin"
+        gitView.submitPrompt()
+        XCTAssertEqual(gitView.networkArguments.count, count)
+        XCTAssertEqual(gitView.writeError, "Enter the upstream as '<remote> <branch>', such as 'origin master'.")
+    }
+
+    func testPOnADivergedBranchAsksBeforeAForcePushAndEscapeChangesNothing() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(trackedSnapshot(ahead: 1, behind: 2))
+        gitView.perform(.push)
+        XCTAssertEqual(gitView.menu?.id, "force-push")
+        XCTAssertEqual(gitView.menu?.choices.map(\.key), ["y"])
+        XCTAssertEqual(gitView.menu?.choices.first?.note,
+                       "Your branch has diverged from the remote branch. Press ⎋ to cancel, or ↩ to force push.")
+        XCTAssertEqual(gitView.networkArguments, [])
+        gitView.closeMenu()
+        XCTAssertEqual(gitView.networkArguments, [])
+        gitView.perform(.push)
+        XCTAssertTrue(gitView.chooseMenu(key: "y"))
+        XCTAssertEqual(gitView.networkArguments, [["/repo", "force", "", ""]])
+        // Only behind the upstream asks; ahead alone pushes plainly.
+        gitView.apply(trackedSnapshot(ahead: 3))
+        gitView.perform(.push)
+        XCTAssertNil(gitView.menu)
+        XCTAssertEqual(gitView.networkArguments.last, ["/repo", "plain", "", ""])
+    }
+
+    func testPAndPSayWhyADetachedHeadCannotPushOrPull() {
+        let gitView = GitView(windowID: "@1")
+        var detached = snapshot
+        detached.isDetached = true
+        detached.head = "1a2b3c4"
+        gitView.apply(detached)
+        gitView.perform(.push)
+        XCTAssertEqual(gitView.writeError, "A detached HEAD has no branch to push. Check out a branch first.")
+        gitView.dismissWriteError()
+        gitView.perform(.pull)
+        XCTAssertEqual(gitView.writeError, "A detached HEAD has no branch to pull. Check out a branch first.")
+        XCTAssertNil(gitView.prompt)
+        XCTAssertNil(gitView.menu)
+        XCTAssertEqual(gitView.networkArguments, [])
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+    }
+
+    func testPPullsInTheWriteQueueAndAsksForAnUpstreamWhenThereIsNone() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(trackedSnapshot(behind: 1))
+        for tab in [GitTab.changes, .history, .branches, .stashes] {
+            gitView.perform(.tab(tab))
+            gitView.perform(.pull)
+        }
+        XCTAssertEqual(gitView.queuedWriteArguments, Array(repeating: ["/repo", "plain", "", ""], count: 4))
+        XCTAssertEqual(gitView.networkArguments, [], "a pull waits in the write queue")
+        gitView.apply(snapshot)
+        gitView.perform(.pull)
+        XCTAssertEqual(gitView.prompt?.id, "upstream")
+        XCTAssertEqual(gitView.promptText, "origin master")
+        gitView.submitPrompt()
+        XCTAssertEqual(gitView.queuedWriteArguments.last, ["/repo", "upstream", "origin", "master"])
+    }
+
+    func testPullGoesThroughTheAgentGuardAfterTheUpstreamIsTyped() {
+        let gitView = GitView(windowID: "@1")
+        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
+                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.apply(trackedSnapshot(behind: 1))
+        gitView.perform(.pull)
+        XCTAssertEqual(gitView.menu?.title, "Pull")
+        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        gitView.closeMenu()
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        gitView.perform(.pull)
+        XCTAssertTrue(gitView.chooseMenu(key: "y"))
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "plain", "", ""]])
+        // Without an upstream, the prompt comes first and the guard after it.
+        gitView.apply(snapshot)
+        gitView.perform(.pull)
+        XCTAssertNil(gitView.menu)
+        gitView.submitPrompt()
+        XCTAssertEqual(gitView.menu?.title, "Pull")
+        XCTAssertEqual(gitView.queuedWriteArguments.count, 1)
+        // A push changes no files here, so the guard does not ask.
+        gitView.closeMenu()
+        gitView.apply(trackedSnapshot(ahead: 1))
+        gitView.perform(.push)
+        XCTAssertNil(gitView.menu)
+        XCTAssertEqual(gitView.networkArguments.last, ["/repo", "plain", "", ""])
     }
 
     func testABranchCheckedOutByAnotherWorktreeAsksToGoThereAndEscapeChangesNothing() {
