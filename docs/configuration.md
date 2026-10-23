@@ -546,6 +546,30 @@ the Git View of the Window you were in stays as it was. This question changes no
 files, so the Agent guard doesn't join it. Every later checkout, such as one from
 another key, asks the same way.
 
+f in Changes fetches all remotes, as lazygit's does by default (`git fetch
+--all`). The fetch doesn't wait for staging, committing or other writes, and they
+don't wait for it: the toolbar shows "Fetching…" until it ends, then the
+repository is read again and the counts of commits ahead of and behind the
+upstream update. While a fetch runs, f does nothing more. When it fails, the
+banner shows git's message, without its progress lines.
+
+The fetch runs in a pseudo-terminal with `LANG`, `LC_ALL` and `LC_MESSAGES` set to
+`C`, as lazygit runs it, so git's and ssh's questions are in English. Muxify
+watches its output for lazygit's credential prompts (`Password:`, `<user>'s
+password:`, `Password for '…':`, `Username for '…':`, `Enter passphrase for key
+'…':`, `Enter PIN for … key …:`, `Enter PIN for '…':` and `2FA Token`) and for
+ssh's question about an unknown host ("Are you sure you want to continue
+connecting (yes/no/[fingerprint])?", shown with the host and fingerprint ssh
+named). Each is asked in a Git View prompt whose title is git's or ssh's
+question; for a password, passphrase, PIN or token what you type is hidden, and
+the prompt says "Hidden". ↩ writes the answer into the terminal, ⎋ stops the
+fetch and the banner says "Fetch cancelled.". The fetch's two-minute timeout
+doesn't run while a question waits. Selecting another Window keeps the question
+for when you come back; closing the Git View stops the fetch. On a Remote
+Environment the fetch runs over SSH with a remote terminal (`ssh -tt`), so the
+same questions come from the remote machine. Other git commands of the Git View
+run without a terminal and fail with git's message when they would ask.
+
 An operation that changes the files of the Worktree asks first while an Agent is
 working there. If a Pane whose folder is the Worktree or inside it runs an Agent
 that is working or blocked, the menu names each such Agent, by its Topic, or by

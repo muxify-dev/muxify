@@ -307,6 +307,8 @@ final class GitView {
         case mark
         /// e: opens the file in the editor, at the line.
         case edit
+        /// f: fetches all remotes, in Changes, as lazygit's Files panel does.
+        case fetch
     }
 
     private(set) var isOpen = false
@@ -320,6 +322,10 @@ final class GitView {
     private(set) var isWriting = false
     /// What a stage, unstage or commit that failed said.
     private(set) var writeError: String?
+    /// The network commands running beside the writes, as the toolbar names them, such as "Fetching…".
+    private(set) var networkActivity: [String] = []
+    /// Questions of network commands that wait while another prompt is open.
+    @ObservationIgnored private var waitingPrompts: [GitPrompt] = []
     /// The commit message box is open; c opens it, as in lazygit.
     private(set) var isCommitOpen = false
     /// The message being written, kept when the box closes uncommitted.
@@ -479,6 +485,9 @@ final class GitView {
         isCommitOpen = false
         commitError = nil
         menu = nil
+        // A command waiting on a question stops with it.
+        for waiting in [prompt].compactMap({ $0 }) + waitingPrompts { waiting.onCancel?() }
+        waitingPrompts = []
         prompt = nil
         writeError = nil
         wantsFocus = false
@@ -503,9 +512,9 @@ final class GitView {
     /// reading the repository until its Window is selected again.
     func suspend() {
         isFiltering = false
-        // Asked again when it's wanted, never waiting to be confirmed.
+        // Asked again when it's wanted, never waiting to be confirmed. A command's question stays: it waits for it.
         menu = nil
-        prompt = nil
+        if prompt?.onCancel == nil { prompt = nil }
         wantsFocus = false
         // What had focus before is gone with the Window; closing later
         // gives it to the terminal.
@@ -1024,7 +1033,7 @@ final class GitView {
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
             "space": .toggle, "minus": .collapseAll, "equal": .expandAll, "n": .newBranch,
             "c": .commit, "d": .discard, "g": .pop, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
-            "shift+w": .mark, "e": .edit,
+            "shift+w": .mark, "e": .edit, "f": .fetch,
     ]
 
     static let commands: [KeyTrigger: Command] = Dictionary(uniqueKeysWithValues: keyMap.map { (try! KeyTrigger($0), $1) })
@@ -1155,6 +1164,8 @@ final class GitView {
             mark(item.id == base?.id ? nil : item)
         case .edit:
             openInEditor()
+        case .fetch:
+            if list == .changes, focus == .list { fetch() }
         }
     }
 
@@ -1366,13 +1377,15 @@ final class GitView {
         submitPrompt()
     }
 
-    /// ⎋, or a click outside it: changes nothing.
+    /// ⎋, or a click outside it: changes nothing, or stops the command that asked.
     func closePrompt() {
-        guard prompt != nil else { return }
-        prompt = nil
+        guard let prompt else { return }
+        self.prompt = nil
         promptText = ""
         chosenSuggestion = nil
         focusKeyView()
+        prompt.onCancel?()
+        openWaitingPrompt()
     }
 
     /// ↩ in the field: closes the prompt and gives what was typed to whatever asked.
@@ -1385,6 +1398,17 @@ final class GitView {
         chosenSuggestion = nil
         focusKeyView()
         prompt.submit(text)
+        openWaitingPrompt()
+    }
+
+    /// A network command's question, asked at once unless another prompt is open.
+    private func ask(_ prompt: GitPrompt) {
+        if self.prompt == nil { open(prompt) } else { waitingPrompts.append(prompt) }
+    }
+
+    private func openWaitingPrompt() {
+        guard prompt == nil, !waitingPrompts.isEmpty else { return }
+        open(waitingPrompts.removeFirst())
     }
 
     // MARK: Agent guard
@@ -2008,6 +2032,73 @@ final class GitView {
             }
             if self.writes.isEmpty { self.refresh() } else { self.runNextWrite() }
         }
+    }
+
+    // MARK: Network
+
+    /// f: `git fetch --all`, as lazygit's default, beside the writes, so staging and committing go on. The
+    /// repository is read again after it.
+    func fetch() {
+        guard !networkActivity.contains(Self.fetching), let root = snapshot?.root else { return }
+        runNetwork(GitRepository.fetchScript, arguments: [root], activity: Self.fetching, cancelled: "Fetch cancelled.")
+    }
+
+    static let fetching = "Fetching…"
+
+    /// Runs a command that talks to a remote, such as a fetch, in a pseudo-terminal beside the write queue, and
+    /// asks git's and ssh's questions for credentials in Git View prompts. The toolbar shows `activity` while it
+    /// runs; a failure shows git's message, and a cancelled question `cancelled`.
+    private func runNetwork(_ script: String, arguments: [String], activity: String, cancelled: String,
+                            completion: ((Result<String, Error>) -> Void)? = nil) {
+        guard let store else { return }
+        writeError = nil
+        networkActivity.append(activity)
+        let running = RunningCommand()
+        running.command = store.runGitNetworkScript(script, arguments: arguments, onPrompt: { [weak self] question in
+            self?.ask(Self.credentialPrompt(question, id: running.id, answer: { running.command?.answer($0) },
+                                            cancel: { running.command?.cancel() }))
+        }, completion: { [weak self] result in
+            guard let self else { return }
+            running.command = nil
+            if let index = self.networkActivity.firstIndex(of: activity) { self.networkActivity.remove(at: index) }
+            // A question the command no longer waits for goes.
+            self.waitingPrompts.removeAll { $0.id == running.id }
+            if self.prompt?.id == running.id { self.closePrompt() }
+            if let completion {
+                completion(result)
+            } else if case .failure(let error) = result {
+                self.writeError = if case TmuxError.cancelled = error { cancelled } else { Self.message(for: error) }
+            }
+            self.refresh()
+        })
+    }
+
+    /// Holds a network command for its questions; its prompts have its id.
+    private final class RunningCommand {
+        let id = "credential-" + UUID().uuidString
+        var command: TerminalCommand?
+    }
+
+    /// The Git View prompt for a command's question: hidden text for a password, passphrase, PIN or token.
+    static func credentialPrompt(_ question: GitCredentialPrompt, id: String = "credential",
+                                 answer: @escaping (String) -> Void, cancel: @escaping () -> Void) -> GitPrompt {
+        let symbol = switch question.kind {
+        case .username: "person"
+        case .hostKey: "server.rack"
+        case .password, .passphrase, .pin, .token: "key"
+        }
+        let placeholder = switch question.kind {
+        case .username: "Username"
+        case .hostKey: "yes, no or the fingerprint"
+        case .password: "Password"
+        case .passphrase: "Passphrase"
+        case .pin: "PIN"
+        case .token: "Token"
+        }
+        return GitPrompt(id: id, title: question.question,
+                         subject: question.context.isEmpty ? nil : .text(question.context.joined(separator: "\n")),
+                         symbol: symbol, placeholder: placeholder, isSecret: question.isSecret, submitTitle: "OK",
+                         onCancel: cancel, submit: answer)
     }
 
     // MARK: Diff pane

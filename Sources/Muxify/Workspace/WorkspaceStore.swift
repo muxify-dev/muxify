@@ -2081,6 +2081,26 @@ final class WorkspaceStore {
         }
     }
 
+    /// Runs a Git View network command, such as `git fetch`, on the Environment's machine in a pseudo-terminal,
+    /// so its credential prompts go to `onPrompt`. Returns the command, to answer or cancel.
+    @discardableResult
+    func runGitNetworkScript(_ script: String, arguments: [String], timeout: TimeInterval = 120,
+                             onPrompt: @escaping (GitCredentialPrompt) -> Void,
+                             completion: @escaping (Result<String, Error>) -> Void) -> TerminalCommand? {
+        guard let connection, !isTransitioning, !isRemote || isConnected else {
+            completion(.failure(GitViewError(message: "Not connected to \(environmentName).")))
+            return nil
+        }
+        let current = generation
+        return connection.startTerminalScript(script, arguments: arguments, timeout: timeout, onPrompt: { [weak self] prompt in
+            guard let self, self.generation == current else { return }
+            onPrompt(prompt)
+        }, completion: { [weak self] result in
+            guard let self, self.generation == current else { return }
+            completion(result)
+        })
+    }
+
     // MARK: - Browser
 
     /// What the current Window shows of its Terminal and Browser.

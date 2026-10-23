@@ -547,6 +547,13 @@ enum GitRepository {
     fi
     """
 
+    /// Takes the folder and fetches all remotes, as lazygit's `f` does by default. It runs in a pseudo-terminal
+    /// (`TerminalCommand`), so git's and ssh's questions for credentials are asked in the Git View.
+    static let fetchScript = """
+    cd "$1" || exit 1
+    exec git fetch --all
+    """
+
     /// What the checkout script's stderr starts with when only Changes kept git from checking out.
     static let checkoutBlockedMarker = "muxify:changes-in-the-way"
 
