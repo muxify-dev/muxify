@@ -2015,6 +2015,7 @@ private struct GitMenuView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
                 .padding(.bottom, 12)
+            if !menu.agents.isEmpty { agents }
             VStack(spacing: 2) {
                 ForEach(Array(menu.choices.enumerated()), id: \.element.id) { index, choice in
                     row(choice, isHighlighted: menu.highlighted == index)
@@ -2077,6 +2078,28 @@ private struct GitMenuView: View {
             }
             Spacer(minLength: 0)
         }
+    }
+
+    /// The Agent guard's warning: the Agents working in the Worktree, which this would change the files under.
+    private var agents: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Label(menu.agents.count == 1 ? "An Agent is working here" : "\(menu.agents.count) Agents are working here",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 12, weight: .semibold))
+            ForEach(menu.agents, id: \.self) { name in
+                Text(name).font(.system(size: 11.5)).lineLimit(1).padding(.leading, 20)
+            }
+        }
+        .foregroundStyle(red)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(red.opacity(0.12)))
+        .padding(.horizontal, 8)
+        .padding(.bottom, 6)
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("git-menu-agents")
+        .accessibilityLabel(menu.agents.joined(separator: "\n"))
     }
 
     /// ↩ runs the highlighted one; j and k move between them.

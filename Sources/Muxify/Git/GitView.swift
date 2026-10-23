@@ -1278,6 +1278,43 @@ final class GitView {
         return true
     }
 
+    // MARK: Agent guard
+
+    /// The Agents that are working or blocked in a Pane inside this Worktree. `agentsForTesting` stands in for the
+    /// Environment's Agents.
+    var guardedAgents: [Agent] {
+        guard let root = snapshot?.root else { return [] }
+        let resolver = store?.folders ?? .local
+        let worktree = resolver.folder(root)
+        return AgentGuard.agents(in: worktree, among: agentsForTesting ?? store?.agents ?? [], resolver: resolver)
+    }
+
+    @ObservationIgnored var agentsForTesting: [Agent]?
+
+    /// An Agent as the guard names it: its kind, then its Topic, else its Session.
+    func guardName(of agent: Agent) -> String {
+        let topic = store?.topics.topicTitle(ofSession: agent.sessionID)
+        return "\(agent.kind.displayName) in \(topic ?? agent.sessionName)"
+    }
+
+    /// The one entry point of the Agent guard, for an operation that already asks in `menu`: opens it as it is when
+    /// no Agent is working in the Worktree, else with the Agents named in it, so one menu asks both. ⎋ changes nothing.
+    func openGuarded(_ menu: GitMenu) {
+        var menu = menu
+        menu.agents = guardedAgents.map(guardName(of:))
+        open(menu)
+    }
+
+    /// The same entry point for an operation with no confirmation of its own: runs `run` at once when no Agent is
+    /// working in the Worktree, else asks first, in a menu with one choice. `title` is the operation's wording, such as
+    /// "Pop stash", and `confirm` the choice's, such as "Pop it".
+    func guardFiles(_ title: String, subject: GitMenu.Subject? = nil, symbol: String, confirm: String,
+                    isDestructive: Bool = false, run: @escaping () -> Void) {
+        guard !guardedAgents.isEmpty else { return run() }
+        openGuarded(GitMenu(id: "agents", title: title, subject: subject, symbol: symbol, isDestructive: isDestructive,
+                            choices: [GitMenu.Choice(key: "y", title: confirm, isDestructive: isDestructive, run: run)]))
+    }
+
     // MARK: Discarding
 
     /// d: asks what to discard of a file or folder, as lazygit does.
@@ -1285,9 +1322,9 @@ final class GitView {
         guard let snapshot else { return }
         switch item {
         case .change(let change):
-            open(discardMenu(Discard(path: change.path, isFolder: false, changes: [change])))
+            openGuarded(discardMenu(Discard(path: change.path, isFolder: false, changes: [change])))
         case .folder(_, let folder):
-            open(discardMenu(Discard(path: folder, isFolder: true, changes: snapshot.changes.filter { GitTree.path($0.path, isIn: folder) })))
+            openGuarded(discardMenu(Discard(path: folder, isFolder: true, changes: snapshot.changes.filter { GitTree.path($0.path, isIn: folder) })))
         default:
             return
         }
@@ -1406,8 +1443,8 @@ final class GitView {
             return
         }
         switch content.header {
-        case .change(let change): open(discardMenu(Discard(path: change.path, isFolder: false, changes: [change], lines: lines)))
-        case .folder(let path, let changes): open(discardMenu(Discard(path: path, isFolder: true, changes: changes, lines: lines)))
+        case .change(let change): openGuarded(discardMenu(Discard(path: change.path, isFolder: false, changes: [change], lines: lines)))
+        case .folder(let path, let changes): openGuarded(discardMenu(Discard(path: path, isFolder: true, changes: changes, lines: lines)))
         default: return
         }
     }

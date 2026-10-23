@@ -5,7 +5,8 @@ import MuxifyCore
 /// as lazygit's menus are, each choice with its own key. j and k (and ↓ and
 /// ↑) move the highlight, ↩ runs the highlighted choice, and ⎋ or q close
 /// it and change nothing. A confirmation is a menu with one choice. While
-/// one is open, no other Git View key acts.
+/// one is open, no other Git View key acts. An operation that changes files
+/// opens through the Agent guard, which lists the Agents working there.
 struct GitMenu {
     /// What the menu is about, under its title.
     enum Subject: Equatable {
@@ -38,6 +39,9 @@ struct GitMenu {
     var isDestructive = false
     /// The line beside Cancel, such as "This can't be undone."
     var footnote: String?
+    /// The Agents that are working or blocked in the Worktree, as the Agent guard names them, one line each. Empty
+    /// when none are, and then the menu is as the operation made it.
+    var agents: [String] = []
     let choices: [Choice]
     /// The choice ↩ runs: the first that's enabled, until j or k moves it.
     private(set) var highlighted: Int?

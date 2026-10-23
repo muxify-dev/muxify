@@ -1,4 +1,4 @@
-"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu, and closing.
+"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu and its Agent guard, and closing.
 
 The driver cannot type keys, so a check performs each Git View key as an accessibility action of the
 `git-view` element (`GitNavigator` in UI/GitViewPanel.swift). An action is named by the key's Config
@@ -32,6 +32,8 @@ Accessibility identifiers of the Git View, for the suites that follow this one:
                              actions are each choice's key, then enter, escape, j and k
     git-menu-choice-<key>    a choice of the menu, by its key's Config spelling; its label is its title, and its
                              value is `highlighted=<0|1> enabled=<0|1>`
+    git-menu-agents          the Agent guard's warning in a menu, only while an Agent that is working or blocked has a
+                             Pane in the Worktree; its label is one line for each Agent, "<kind> in <Topic or Session>"
     git-menu-cancel          the menu's Cancel button
 The diff pane builds only the lines on screen, so keep a fixture's diffs short.
 
@@ -432,6 +434,62 @@ class GitView(unittest.TestCase):
             self.assertFalse(self.s.has('git-menu-choice-u', rs), 'lines offer u')
             self.s.act('press', 'git-menu-choice-x')
             wait(lambda: not path.exists(), 'discarding all of a new file\'s lines did not delete it', seconds=10)
+        finally:
+            path.unlink(missing_ok=True)
+
+    def agent_pane(self, name, folder, status):
+        """A Pane running `sleep` in its own Session, which Muxify takes for an Agent with this Status."""
+        pane = self.s.tmux('new-session', '-d', '-P', '-F', '#{pane_id}', '-s', name, '-c', str(folder), 'sleep 600')
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', name)
+        self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent', 'claude')
+        self.set_status(pane, status)
+        return pane
+
+    def set_status(self, pane, status):
+        if status:
+            self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_status', status)
+        else:
+            self.s.tmux('set-option', '-p', '-u', '-t', pane, '@muxify_agent_status')
+
+    def discard_names_agents(self, name, shown):
+        """Opens the Discard menu of `name` until the Git View knows the Agents as they are, then returns the
+        guard's warning, or None. Muxify reads the Panes' options on its own timer, so the first menu may be early."""
+        found = []
+
+        def asked():
+            self.select_change(name)
+            rs = self.open_discard_menu()
+            found[:] = [self.s.row('git-menu-agents', rs).get('accessibilityLabel') if self.s.has('git-menu-agents', rs) else None]
+            self.s.act('action', 'git-menu', 'escape')
+            self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+            return (found[0] is not None) == shown
+        wait(asked, 'the Discard menu %s the Agent' % ('does not name' if shown else 'still names'), seconds=15, step=.5)
+        return found[0]
+
+    def test_discard_asks_naming_the_agents_working_in_the_worktree_and_only_them(self):
+        path = self.repo/'z-discard-agent.txt'
+        path.write_text('kept\n')
+        other = self.s.root/'projects/other'
+        other.mkdir(exist_ok=True)
+        try:
+            self.wait_change('z-discard-agent.txt', bool, 'Changes do not list z-discard-agent.txt')
+            # Another Worktree's Agent, and one that is done, do not count: the menu is as before.
+            self.agent_pane('gv-agent-other', other, 'working')
+            inside = self.agent_pane('gv-agent-inside', self.repo/'.git', 'done')
+            time.sleep(2)
+            self.discard_names_agents('z-discard-agent.txt', False)
+            # A working Agent in a folder inside the Worktree is named in the same menu, and ⎋ discards nothing.
+            self.set_status(inside, 'working')
+            names = self.discard_names_agents('z-discard-agent.txt', True)
+            self.assertEqual(names, 'Claude Code in gv-agent-inside')
+            self.assertTrue(path.exists(), 'escape discarded the file')
+            # So does a blocked one, and x still discards from the one menu.
+            self.set_status(inside, 'blocked')
+            self.discard_names_agents('z-discard-agent.txt', True)
+            self.select_change('z-discard-agent.txt')
+            self.open_discard_menu()
+            self.s.act('action', 'git-menu', 'x')
+            wait(lambda: not path.exists(), 'x did not delete the file after the guarded menu', seconds=10)
         finally:
             path.unlink(missing_ok=True)
 

@@ -1206,6 +1206,53 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(picked.choices.map(\.title), ["Discard 3 lines"])
     }
 
+    func testDiscardNamesTheAgentsWorkingInTheWorktreeAndOtherwiseAsksAsBefore() {
+        let gitView = GitView(windowID: "@1")
+        let mixed = GitChange(index: "M", worktree: "M", path: "src/a.swift")
+        var changed = snapshot
+        changed.changes = [mixed]
+        gitView.apply(changed)
+        func agent(_ id: String, _ status: AgentStatus?, at path: String) -> Agent {
+            Agent(paneID: id, kind: .claude, status: status, unread: false, windowID: "@1", sessionID: "$1", sessionName: "work",
+                  windowIndex: 0, windowTitle: "w", label: "", path: path)
+        }
+        let inside = changed.root + "/src"
+        // Done, failed and Status-less Agents, and Agents elsewhere, leave the menu as it was.
+        gitView.agentsForTesting = [agent("%1", .done, at: inside), agent("%2", .failed, at: inside), agent("%3", nil, at: inside),
+                                    agent("%4", .working, at: changed.root + "-other")]
+        gitView.perform(.discard)
+        XCTAssertEqual(gitView.menu?.id, "discard")
+        XCTAssertEqual(gitView.menu?.agents, [])
+        gitView.closeMenu()
+        // A working or blocked Agent inside the Worktree is named in the same menu, and ⎋ discards nothing.
+        gitView.agentsForTesting = [agent("%1", .working, at: inside), agent("%2", .blocked, at: changed.root), agent("%3", .done, at: inside)]
+        gitView.perform(.discard)
+        XCTAssertEqual(gitView.menu?.id, "discard", "the guard folds into the discard menu instead of asking twice")
+        XCTAssertEqual(gitView.menu?.agents, ["Claude Code in work", "Claude Code in work"])
+        gitView.closeMenu()
+        XCTAssertNil(gitView.menu)
+    }
+
+    func testTheAgentGuardAsksOnceForAnOperationWithNoMenuOfItsOwn() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        var ran = 0
+        gitView.guardFiles("Pop stash", symbol: "tray.and.arrow.up", confirm: "Pop it") { ran += 1 }
+        XCTAssertEqual(ran, 1, "no Agent is working: it runs at once")
+        XCTAssertNil(gitView.menu)
+        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .blocked, unread: false, windowID: "@1", sessionID: "$1",
+                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.guardFiles("Pop stash", symbol: "tray.and.arrow.up", confirm: "Pop it") { ran += 1 }
+        XCTAssertEqual(ran, 1, "an Agent is blocked there: it asks first")
+        XCTAssertEqual(gitView.menu?.title, "Pop stash")
+        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
+        gitView.closeMenu()
+        XCTAssertEqual(ran, 1)
+        gitView.guardFiles("Pop stash", symbol: "tray.and.arrow.up", confirm: "Pop it") { ran += 1 }
+        XCTAssertTrue(gitView.chooseMenu(key: "y"))
+        XCTAssertEqual(ran, 2)
+    }
+
     func testAGitViewMenuMovesRunsAndClosesOnItsKeys() throws {
         let gitView = GitView(windowID: "@1")
         var ran: [String] = []

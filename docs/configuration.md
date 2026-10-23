@@ -417,6 +417,16 @@ The Git View asks in a menu, as lazygit does: each choice has its key, j and k
 (or ↓ and ↑) move the highlight, ↩ picks the highlighted choice, and ⎋ or q
 close the menu and change nothing. While it is open, no other Git View key acts.
 
+An operation that changes the files of the Worktree asks first while an Agent is
+working there. If a Pane whose folder is the Worktree or inside it runs an Agent
+that is working or blocked, the menu names each such Agent, by its Topic, or by
+its Session when it has none, and the operation runs only when you confirm; ⎋
+changes nothing. Agents that are done, failed or have no Status don't count, and
+neither do Agents in other Worktrees of the same repository or in folders
+outside it. An operation that asks already, such as Discard changes, shows the
+Agents in its own menu instead of asking twice. Discard is the first to ask this
+way; the operations that follow use the same guard.
+
 In a change's diff, space stages the line under the cursor, the lines selected
 with v, or the hunk selected with a; in its Staged part, it unstages them. d
 there discards the selected unstaged lines, after asking. A new file's lines are
