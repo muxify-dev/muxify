@@ -118,16 +118,6 @@ class SidebarLayout(unittest.TestCase):
         def height(key, rs):
             bottom, top = frame(self.s.row(key, rs))
             return top - bottom
-        def closed(key):
-            """The closed card, once its close animation ended: the accessibility value changes at the start of the
-            animation, and the frame only at its end."""
-            heights = []
-            def settled(rs):
-                if not self.s.row(key, rs).get('accessibilityValue', '').startswith('collapsed'):
-                    return False
-                heights.append(height(key, rs))
-                return heights[-2:] == [heights[-1]] * 2
-            return self.s.wait_rows(settled, 'the card %s did not close' % key)
         # A press opens or closes only the card that holds the selected Window; on another card it goes there. Just
         # after launch the app can still move its client back, so the client moves on once the app shows layout-open.
         self.s.wait_shown(self.sessions[0] + ':')
@@ -141,7 +131,7 @@ class SidebarLayout(unittest.TestCase):
                                   'the card %s does not show its default title' % key)
             if self.s.row(key, rs).get('accessibilityValue', '').startswith('expanded'):
                 self.s.act('press', key)
-            one_line = height(key, closed(key))
+            one_line = height(key, self.closed(key))
             self.write_config(long_titles)
             rs = self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityLabel') == 'layout-other' + tail
                                   and height(key, rs) > one_line + 8,
@@ -153,6 +143,19 @@ class SidebarLayout(unittest.TestCase):
                                   % (key, wrapped, one_line))
             self.assertEqual(self.s.row(key, rs).get('accessibilityLabel'), 'layout-other' + tail,
                              'the cut title of %s does not keep the whole title for accessibility' % key)
+
+    def closed(self, key):
+        """The rows once the card's close animation ended: the accessibility value changes at the start of the animation,
+        and the frame only at its end. Two polls of `wait_rows` are 100 ms apart, longer than a frame of the animation,
+        so a height that two polls agree on is the closed card's."""
+        heights = []
+        def settled(rs):
+            if not self.s.row(key, rs).get('accessibilityValue', '').startswith('collapsed'):
+                return False
+            bottom, top = frame(self.s.row(key, rs))
+            heights.append(top - bottom)
+            return heights[-2:] == [heights[-1]] * 2
+        return self.s.wait_rows(settled, 'the card %s did not close' % key)
 
     def show_view(self, name):
         key = 'sidebar-view-' + name
@@ -186,9 +189,7 @@ class SidebarLayout(unittest.TestCase):
         rs = self.s.wait_rows(lambda rs: self.s.has(key, rs), 'no card for the Topic')
         if self.s.row(key, rs).get('accessibilityValue', '').startswith('expanded'):
             self.s.act('press', key)
-        rs = self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityValue', '').startswith('collapsed'),
-                              'the card did not close')
-        row = self.s.row(key, rs)
+        row = self.s.row(key, self.closed(key))
         bottom, top = frame(row)
         x, y = map(float, re.findall(r'-?[\d.]+', row['accessibilityActivationPoint']))
         # The title is the first line of a closed card; the summary line is under it, in the lower half.

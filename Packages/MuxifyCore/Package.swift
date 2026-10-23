@@ -6,13 +6,17 @@ import PackageDescription
 let package = Package(
     name: "MuxifyCore",
     platforms: [.macOS(.v14)],
-    products: [.library(name: "MuxifyCore", targets: ["MuxifyCore"])],
+    products: [
+        .library(name: "MuxifyCore", targets: ["MuxifyCore"]),
+        .library(name: "MuxifyTestSupport", targets: ["MuxifyTestSupport"]),
+    ],
     dependencies: [
         .package(url: "https://github.com/jpsim/Yams", exact: "6.2.2"),
     ],
     targets: [
         .target(name: "MuxifyCore", dependencies: [.product(name: "Yams", package: "Yams")]),
-        .testTarget(name: "MuxifyCoreTests", dependencies: ["MuxifyCore"], resources: [.copy("Fixtures")]),
+        .target(name: "MuxifyTestSupport", dependencies: ["MuxifyCore"]),
+        .testTarget(name: "MuxifyCoreTests", dependencies: ["MuxifyCore", "MuxifyTestSupport"], resources: [.copy("Fixtures")]),
     ],
     swiftLanguageModes: [.v5]
 )

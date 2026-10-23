@@ -1,12 +1,13 @@
 import XCTest
 import Darwin
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// Executes the real remote shell protocol against an isolated tmux socket.
 /// No network, default tmux server, user config or real HOME is touched.
 final class RemoteTmuxTests: XCTestCase {
     func testBootstrapClientTargetingLiteralArgumentsAndServerRestart() throws {
-        guard let tmux = Tmux.binary else { throw XCTSkip("tmux is needed for the isolated transport integration test") }
+        let tmux = try requireTmux()
         let root = try TestDirectory()
         defer { withExtendedLifetime(root) {} }
         let fm = FileManager.default
@@ -138,7 +139,7 @@ final class RemoteTmuxTests: XCTestCase {
     }
 
     func testClosingSessionsReportsSurvivorsAndOnlyExplicitReconnectCreatesMain() throws {
-        guard let tmux = Tmux.binary else { throw XCTSkip("tmux is needed for the isolated transport integration test") }
+        let tmux = try requireTmux()
         let root = try TestDirectory()
         defer { withExtendedLifetime(root) {} }
         let fm = FileManager.default

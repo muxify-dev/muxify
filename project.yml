@@ -94,6 +94,8 @@ targets:
       - path: Tests/MuxifyTests
     dependencies:
       - package: MuxifyCore
+      - package: MuxifyCore
+        product: MuxifyTestSupport
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES

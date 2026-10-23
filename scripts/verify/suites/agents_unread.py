@@ -86,7 +86,7 @@ class AgentsUnread(TopicsSidebar):
         self.s.wait_shown(first)
         self.s.wait_rows(lambda rs: self.s.has('agent-' + one, rs) and self.s.has('agent-' + two, rs),
                          'The Session Agents did not appear')
-        self.s.act('action', 'quick-switch-input', 'Press ⇧⌘R')
+        self.press_shortcut('⇧⌘R')
         self.assert_read(one, two)
         self.assertTrue(self.unread(other))
         self.show_view('sessions')
@@ -205,9 +205,9 @@ class AgentsUnread(TopicsSidebar):
         self.select_window(window)
         self.s.wait_shown(window)
         self.s.wait_rows(lambda rs: self.s.has('agent-' + pane, rs), 'No Agent for Mark Unread')
-        self.s.act('action', 'quick-switch-input', 'Press ⌃⌥U')
+        self.press_shortcut('⌃⌥U')
         self.assert_unread(pane)
-        self.s.act('action', 'quick-switch-input', 'Press ⌃⌥A')
+        self.press_shortcut('⌃⌥A')
         self.assert_read(pane, other)
 
     def test_remapped_shortcut_runs_mark_read(self):
@@ -216,7 +216,7 @@ class AgentsUnread(TopicsSidebar):
         self.select_window(window)
         self.s.wait_shown(window)
         self.s.wait_rows(lambda rs: self.s.has('agent-' + pane, rs), 'No Agent for the remapped shortcut')
-        self.s.act('action', 'quick-switch-input', 'Press ⌃⌥R')
+        self.press_shortcut('⌃⌥R')
         self.assert_read(pane)
 
 

@@ -278,6 +278,12 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
             self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_unread', '1')
         return sid, window, pane
 
+    def press_shortcut(self, symbol):
+        """The app offers the Press action of a Read change's shortcut only while the change can run, as it enables
+        the menu item. After a Read change the next one waits for the snapshot that shows it."""
+        wait(lambda: self.s.driver('action', 'quick-switch-input', 'Press ' + symbol)['pressed'],
+             'the shortcut %s stays unavailable' % symbol, seconds=10)
+
     def press_menu_item(self, title):
         """The app updates its menu items a moment after its App Window gets focus, so a check that runs first
         in a fresh app can find the item still disabled."""
