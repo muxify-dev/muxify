@@ -953,6 +953,63 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(try git("stash list --format=%gs").hasPrefix("On master: Autostash"), true)
     }
 
+    private func currentBranch() throws -> String {
+        try git("branch --show-current").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    func testANewBranchIsMadeOffAnotherBranchAndCheckedOut() throws {
+        try prepareCheckout()
+        try run(GitRepository.checkoutScript, repository, "new", "topic", "0", "diverged")
+        XCTAssertEqual(try currentBranch(), "topic")
+        XCTAssertEqual(try git("rev-parse topic"), try git("rev-parse diverged"))
+        // A name that is taken is git's to refuse.
+        XCTAssertThrowsError(try run(GitRepository.checkoutScript, repository, "new", "topic", "0", "master")) { error in
+            XCTAssertTrue(stderr(of: error).contains("already exists"), stderr(of: error))
+        }
+    }
+
+    func testThePreviousBranchIsWhatCheckoutDashGoesBackTo() throws {
+        try prepareCheckout()
+        let before = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get()
+        XCTAssertEqual(before.previousBranch, "diverged", "prepareCheckout moved from diverged to master")
+        try run(GitRepository.checkoutScript, repository, "previous", "-", "0")
+        XCTAssertEqual(try currentBranch(), "diverged")
+        let after = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get()
+        XCTAssertEqual(after.previousBranch, "master")
+        // A repository that never switched has none, and says so.
+        try run("git init -q -b main \"$1/fresh\" && cd \"$1/fresh\" && git -c user.email=a@b -c user.name=a commit -q --allow-empty -m x", directory.url.path)
+        let fresh = directory.url.appendingPathComponent("fresh").path
+        XCTAssertNil(try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, fresh)).get().previousBranch)
+        XCTAssertThrowsError(try run(GitRepository.checkoutScript, fresh, "previous", "-", "0")) { error in
+            XCTAssertTrue(stderr(of: error).contains("no previous branch"), stderr(of: error))
+        }
+    }
+
+    func testARemoteBranchMakesALocalBranchThatTracksIt() throws {
+        try prepareCheckout()
+        try run("""
+        cd "$1" && git init -q --bare ../origin.git && git remote add origin ../origin.git
+        git push -q origin feature:remote-only && git fetch -q origin
+        """, repository)
+        let snapshot = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get()
+        XCTAssertEqual(snapshot.remoteBranches, ["origin/remote-only"])
+        try run(GitRepository.checkoutScript, repository, "remote", "origin/remote-only", "0")
+        XCTAssertEqual(try currentBranch(), "remote-only")
+        XCTAssertEqual(try git("rev-parse --abbrev-ref remote-only@{upstream}").trimmingCharacters(in: .whitespacesAndNewlines),
+                       "origin/remote-only")
+    }
+
+    func testARenameChangesTheNameAndKeepsTheBranch() throws {
+        try prepareCheckout()
+        let sha = try git("rev-parse feature")
+        try run(GitRepository.renameBranchScript, repository, "feature", "renamed")
+        XCTAssertEqual(try git("rev-parse renamed"), sha)
+        XCTAssertFalse(try git("branch --format='%(refname:short)'").split(separator: "\n").contains("feature"))
+        XCTAssertThrowsError(try run(GitRepository.renameBranchScript, repository, "renamed", "master")) { error in
+            XCTAssertTrue(stderr(of: error).contains("already exists"), stderr(of: error))
+        }
+    }
+
     func testStashCanKeepTheIndex() throws {
         try prepareStash()
         try run(GitRepository.stashScript, repository, "keepindex", "k")
@@ -1404,6 +1461,127 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.toggle)
         XCTAssertEqual(gitView.queuedWriteArguments.count, queued)
         XCTAssertNil(gitView.menu)
+    }
+
+    private var snapshotWithRemotes: GitSnapshot {
+        var snapshot = snapshot
+        snapshot.remoteBranches = ["origin/master", "origin/feature", "origin/remote-only"]
+        snapshot.previousBranch = "feature"
+        return snapshot
+    }
+
+    func testNAsksForANameAndChecksOutANewBranchOffTheSelectedOne() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        // Only in Branches.
+        gitView.perform(.newBranch)
+        XCTAssertNil(gitView.prompt)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        gitView.perform(.newBranch)
+        XCTAssertEqual(gitView.prompt?.title, "New branch name (branch is off of 'feature')")
+        XCTAssertEqual(gitView.promptText, "")
+        XCTAssertEqual(gitView.prompt?.allowsEmpty, false)
+        gitView.submitPrompt()
+        XCTAssertNotNil(gitView.prompt, "an empty name submits nothing")
+        gitView.promptText = "my  topic"
+        gitView.submitPrompt()
+        XCTAssertNil(gitView.prompt)
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "new", "my-topic", "0", "feature"]])
+    }
+
+    func testRRenamesTheSelectedBranchFromItsCurrentNameAndRefreshesElsewhere() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        // Outside Branches R still refreshes, and asks nothing.
+        gitView.perform(.refresh)
+        XCTAssertNil(gitView.prompt)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        gitView.perform(.refresh)
+        XCTAssertEqual(gitView.prompt?.id, "rename-branch")
+        XCTAssertEqual(gitView.promptText, "feature")
+        // The same name changes nothing.
+        gitView.submitPrompt()
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        gitView.perform(.refresh)
+        gitView.promptText = "better"
+        gitView.submitPrompt()
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "feature", "better"]])
+    }
+
+    func testMinusChecksOutThePreviousBranchInBranchesAndStillFoldsElsewhere() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshotWithRemotes)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.collapseAll)
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "branch", "feature", "0"]])
+        // A previous commit, which is no branch of the repository, is git's to go back to.
+        var detached = snapshot
+        detached.previousBranch = nil
+        gitView.apply(detached)
+        gitView.perform(.collapseAll)
+        XCTAssertEqual(gitView.queuedWriteArguments.last, ["/repo", "previous", "-", "0"])
+        // In a branch's commits there is nothing to go back to: the key keeps its folding meaning.
+        let queued = gitView.queuedWriteArguments.count
+        gitView.perform(.tab(.history))
+        gitView.perform(.collapseAll)
+        XCTAssertEqual(gitView.queuedWriteArguments.count, queued)
+    }
+
+    func testCInBranchesChecksOutTheTypedOrChosenNameAndMakesTrackingBranchesOfRemoteOnes() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshotWithRemotes)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.commit)
+        XCTAssertEqual(gitView.prompt?.id, "checkout-by-name")
+        // Nothing typed: every branch, local then remote.
+        XCTAssertEqual(gitView.promptSuggestions, ["master", "feature", "origin/master", "origin/feature", "origin/remote-only"])
+        gitView.promptText = "REM"
+        XCTAssertEqual(gitView.promptSuggestions, ["origin/remote-only"])
+        // ↓ chooses, ↩ takes the choice and not what was typed.
+        XCTAssertNil(gitView.promptSuggestion)
+        gitView.moveSuggestion(by: 1)
+        XCTAssertEqual(gitView.promptSuggestion, "origin/remote-only")
+        gitView.moveSuggestion(by: 1)
+        XCTAssertEqual(gitView.promptSuggestion, "origin/remote-only", "the last stays chosen")
+        gitView.submitPrompt()
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "remote", "origin/remote-only", "0"]])
+        // Typed in full, with no choice: the name as typed. ↑ from the first goes back to the typed text.
+        gitView.perform(.commit)
+        gitView.promptText = "feat"
+        XCTAssertEqual(gitView.promptSuggestions, ["feature", "origin/feature"])
+        gitView.moveSuggestion(by: 1)
+        gitView.moveSuggestion(by: -1)
+        XCTAssertNil(gitView.promptSuggestion)
+        gitView.promptText = "feature"
+        gitView.submitPrompt()
+        XCTAssertEqual(gitView.queuedWriteArguments.last, ["/repo", "branch", "feature", "0"])
+        // A remote branch whose local branch exists checks out that one; a name that matches nothing is git's to judge.
+        XCTAssertEqual(gitView.checkoutTarget(named: "origin/feature"), .branch("feature"))
+        XCTAssertEqual(gitView.checkoutTarget(named: "origin/remote-only"), .remote("origin/remote-only"))
+        XCTAssertEqual(gitView.checkoutTarget(named: "v1.0"), .branch("v1.0"))
+    }
+
+    func testCCommitsOnlyInChangesAndDoesNothingInHistoryAndStashes() {
+        let gitView = GitView(windowID: "@1")
+        var changed = snapshotWithRemotes
+        changed.changes = [GitChange(index: "M", worktree: " ", path: "a.swift")]
+        gitView.apply(changed)
+        gitView.perform(.commit)
+        XCTAssertTrue(gitView.isCommitOpen)
+        gitView.closeCommit()
+        for tab in [GitTab.history, .stashes] {
+            gitView.perform(.tab(tab))
+            gitView.perform(.commit)
+            XCTAssertFalse(gitView.isCommitOpen, "c in \(tab)")
+            XCTAssertNil(gitView.prompt)
+            XCTAssertNil(gitView.menu)
+        }
+        gitView.perform(.tab(.branches))
+        gitView.perform(.commit)
+        XCTAssertFalse(gitView.isCommitOpen)
+        XCTAssertEqual(gitView.prompt?.id, "checkout-by-name")
     }
 
     func testEveryCheckoutGoesThroughTheAgentGuard() {

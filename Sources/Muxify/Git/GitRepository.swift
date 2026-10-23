@@ -20,6 +20,10 @@ struct GitSnapshot: Equatable {
     /// What the toolbar's ↑/↓ count against: the upstream, else main.
     var comparison: GitComparison?
     var branches: [GitBranch] = []
+    /// The names of the remote branches, such as `origin/foo`, for `c` in Branches to suggest.
+    var remoteBranches: [String] = []
+    /// The branch that `git checkout -` goes back to, if it is still a branch.
+    var previousBranch: String?
     var commits: [GitCommit] = []
     /// The History graph, a row per commit.
     var graph: [GitGraphRow] = []
@@ -236,6 +240,8 @@ enum GitRepository {
     section branches
     g for-each-ref --sort=-committerdate \\
         --format='%(HEAD)%00%(refname:short)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:unix)%00%(worktreepath)%00%(objectname)' refs/heads
+    section remotebranches; g for-each-ref --format='%(refname)' refs/remotes
+    section previous; g rev-parse --abbrev-ref '@{-1}' 2>/dev/null
     \(mainRefs)
     rev=HEAD upstream='HEAD@{upstream}'
     \(logSections)
@@ -511,17 +517,34 @@ enum GitRepository {
     fi
     """
 
+    /// Takes the folder, a branch and its new name.
+    static let renameBranchScript = """
+    cd "$1" || exit 1
+    git branch -m -- "$2" "$3"
+    """
+
     /// What the checkout script's stderr starts with when only Changes kept git from checking out.
     static let checkoutBlockedMarker = "muxify:changes-in-the-way"
 
-    /// Takes the folder, `branch` or `commit`, the branch or commit, and `1` to stash the changes first and pop them
-    /// after. Without it, a checkout that Changes would be overwritten by fails with `checkoutBlockedMarker`, then
+    /// Takes the folder, `branch`, `remote`, `new`, `previous` or `commit`, the branch, the new branch's name or the
+    /// commit, `1` to stash the changes first and pop them after, and for `new` the branch it is off of. `remote`
+    /// makes a local branch that tracks the remote one, and `previous` is `git checkout -`. Without it, a checkout that Changes would be overwritten by fails with `checkoutBlockedMarker`, then
     /// git's message. A pop that conflicts keeps the stash, as git does, and says so.
     static let checkoutScript = """
     cd "$1" || exit 1
-    kind=$2 target=$3 autostash=$4
+    kind=$2 target=$3 autostash=$4 base=$5
+    if [ "$kind" = previous ] && ! git rev-parse -q --verify '@{-1}' >/dev/null 2>&1; then
+        echo 'There is no previous branch to check out.' >&2
+        exit 1
+    fi
     checkout() {
-        if [ "$kind" = branch ]; then LC_ALL=C git checkout "$target" --; else LC_ALL=C git checkout --detach "$target"; fi
+        case "$kind" in
+            branch) LC_ALL=C git checkout "$target" -- ;;
+            remote) LC_ALL=C git checkout --track "$target" -- ;;
+            new) LC_ALL=C git checkout -b "$target" "$base" -- ;;
+            previous) LC_ALL=C git checkout - ;;
+            *) LC_ALL=C git checkout --detach "$target" ;;
+        esac
     }
     if [ "$autostash" != 1 ]; then
         out=$(checkout 2>&1) && exit 0
@@ -579,6 +602,9 @@ enum GitRepository {
             return branch
         }
         snapshot.branches = branches.filter(\.isHead) + branches.filter { !$0.isHead }
+        snapshot.remoteBranches = parseRemoteBranches(sections["remotebranches"] ?? "")
+        let previous = trimmed(sections["previous"] ?? "")
+        snapshot.previousBranch = branches.contains { $0.name == previous } ? previous : nil
         snapshot.comparison = parseComparison(sections["comparison"] ?? "")
         let main = trimmed(sections["main"] ?? "")
         snapshot.mainBranch = main.isEmpty ? nil : main
@@ -610,6 +636,15 @@ enum GitRepository {
         let commits = parseCommits(sections["commits"] ?? "", unpushed: shaSet(sections["unpushed"]),
                                    unmerged: shaSet(sections["unmerged"]))
         return GitLog(commits: commits, graph: GitGraphRow.layout(commits))
+    }
+
+    /// `git for-each-ref refs/remotes`, as `origin/foo`; a remote's `HEAD` is no branch.
+    static func parseRemoteBranches(_ output: String) -> [String] {
+        let prefix = "refs/remotes/"
+        return output.split(separator: "\n").compactMap { line in
+            guard line.hasPrefix(prefix), !line.hasSuffix("/HEAD") else { return nil }
+            return String(line.dropFirst(prefix.count))
+        }
     }
 
     /// `git status --porcelain=v1 --branch -z`.

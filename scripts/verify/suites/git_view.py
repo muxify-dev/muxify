@@ -35,11 +35,17 @@ Accessibility identifiers of the Git View, for the suites that follow this one:
     git-menu-agents          the Agent guard's warning in a menu, only while an Agent that is working or blocked has a
                              Pane in the Worktree; its label is one line for each Agent, "<kind> in <Topic or Session>"
     git-menu-cancel          the menu's Cancel button
+    git-commit-box           the commit message box that c opens in Changes
     git-prompt               an open Git View prompt, such as the stash message that s asks for; its label is its title,
                              and its actions are enter (submit) and escape (cancel)
     git-prompt-field         the prompt's one-line field: `set` it to type; its label is the prompt's title
     git-prompt-cancel        the prompt's Cancel button
     git-prompt-submit        the prompt's submit button, such as Stash
+    git-prompt-suggestion-<n>  a suggestion of a prompt that offers some, such as the branch names `c` in Branches
+                             takes; its label is the name, and its value is `chosen` for the one ↓/↑ chose. The
+                             prompt's actions then include down and up
+    The Branches keys n, R, - and c ask in the prompts `New branch name (branch is off of '<branch>')`, `Rename branch`
+    and `Check out`; ↩ checks out through the same path as space does.
     The Stashes keys ask in the menus `stash-apply`, `stash-pop` and `stash-drop` (labels "Apply stash", "Pop stash" and
     "Drop stash"), each with the one choice `git-menu-choice-y`. space in Branches and History checks out; it asks
     only in the menu `checkout` ("Check out", while an Agent is working in the Worktree) and in `autostash`
@@ -827,8 +833,9 @@ class GitView(unittest.TestCase):
         self.addCleanup(self.git, 'add', 'staged.txt')
         (self.repo/'stashed.txt').write_text('top\none\n')
         stashes = len(self.stashes())
-        self.go_to('3')
+        # R renames in Branches, so it reads the repository again before going there.
         self.key('shift+r')
+        self.go_to('3')
         self.select_row('git-row-branch:autostash-x')
         self.key('space')
         self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Autostash?', 'no Autostash? question')
@@ -869,8 +876,9 @@ class GitView(unittest.TestCase):
 
     def ask_to_go_to_worktree(self, branch):
         """space on the branch in Branches, until the Git View has read it as checked out by another Worktree."""
-        self.go_to('3')
+        # R renames in Branches, so it reads the repository again before going there.
         self.key('shift+r')
+        self.go_to('3')
         self.select_row('git-row-branch:' + branch)
         self.key('space')
         return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Go to Worktree?',
@@ -932,6 +940,91 @@ class GitView(unittest.TestCase):
         self.assertEqual(self.s.tmux('list-sessions', '-F', '#{session_name}'), sessions, 'a Session started without the user')
         self.assertEqual(self.head(), 'main', 'the branch was checked out')
         self.assertTrue(self.is_open(), 'the Git View of the Window that was left closed')
+
+    def prompt_label(self, rs=None):
+        return self.s.row('git-prompt', rs).get('accessibilityLabel')
+
+    def wait_prompt(self, title):
+        return self.s.wait_rows(lambda rs: self.prompt_label(rs) == title, 'no prompt: ' + title)
+
+    def test_n_asks_for_a_name_and_checks_out_a_new_branch_off_the_selected_one(self):
+        self.addCleanup(self.git, 'branch', '-q', '-D', 'n-topic')
+        self.addCleanup(self.back_to_main)
+        self.go_to('3')
+        self.select_row('git-row-branch:feature-x')
+        self.key('n')
+        self.wait_prompt("New branch name (branch is off of 'feature-x')")
+        self.s.act('set', 'git-prompt-field', 'n topic')
+        self.s.act('action', 'git-prompt', 'enter')
+        wait(lambda: self.head() == 'n-topic', 'n did not check out the new branch', seconds=10)
+        self.assertEqual(self.git('rev-parse', 'n-topic'), self.git('rev-parse', 'feature-x'), 'the branch is not off of feature-x')
+
+    def test_shift_r_in_branches_renames_the_selected_branch_starting_at_its_name(self):
+        self.git('branch', 'rename-me')
+        self.addCleanup(self.git, 'branch', '-q', '-D', 'renamed')
+        self.key('shift+r')
+        self.go_to('3')
+        self.select_row('git-row-branch:rename-me')
+        self.key('shift+r')
+        self.wait_prompt('Rename branch')
+        self.assertEqual(self.s.row('git-prompt-field').get('accessibilityValue'), 'rename-me', 'the prompt does not start at the name')
+        self.s.act('set', 'git-prompt-field', 'renamed')
+        self.s.act('action', 'git-prompt', 'enter')
+        wait(lambda: 'renamed' in self.git('branch', '--format=%(refname:short)').split(), 'R did not rename the branch', seconds=10)
+        self.assertNotIn('rename-me', self.git('branch', '--format=%(refname:short)').split())
+
+    def test_minus_in_branches_checks_out_the_previous_branch(self):
+        self.addCleanup(self.back_to_main)
+        self.git('checkout', '-q', 'feature-x')
+        self.git('checkout', '-q', 'main')
+        self.close_git_view()
+        self.open_git_view()
+        self.go_to('3')
+        self.select_row('git-row-branch:main')
+        self.key('minus')
+        wait(lambda: self.head() == 'feature-x', 'minus did not check out the previous branch', seconds=10)
+
+    def test_c_in_branches_checks_out_by_name_with_suggestions_and_a_remote_branch_makes_a_tracking_branch(self):
+        origin = self.s.root/'origin.git'
+        subprocess.run(['/usr/bin/git', 'init', '-q', '--bare', str(origin)], check=True)
+        self.git('remote', 'add', 'origin', str(origin))
+        self.addCleanup(self.git, 'remote', 'remove', 'origin')
+        self.git('push', '-q', 'origin', 'feature-x:remote-y')
+        self.git('fetch', '-q', 'origin')
+        self.addCleanup(self.git, 'branch', '-q', '-D', 'remote-y')
+        self.addCleanup(self.back_to_main)
+        self.key('shift+r')
+        self.go_to('3')
+        # The prompt offers the branches the Git View had read when it opened, so ask again until it has read the remote's.
+        def suggested():
+            self.key('c')
+            self.wait_prompt('Check out')
+            self.s.act('set', 'git-prompt-field', 'remote-y')
+            try:
+                return self.s.wait_rows(lambda rs: self.s.row('git-prompt-suggestion-0', rs).get('accessibilityLabel') == 'origin/remote-y',
+                                        'typing did not suggest the remote branch', seconds=2)
+            except AssertionError:
+                self.s.act('action', 'git-prompt', 'escape')
+                self.s.wait_rows(lambda rs: not self.s.has('git-prompt', rs), 'escape did not close the prompt')
+        rs = wait(suggested, 'typing did not suggest the remote branch', seconds=30)
+        self.assertFalse(self.s.has('git-prompt-suggestion-1', rs), 'a name that does not match was suggested')
+        self.s.act('action', 'git-prompt', 'down')
+        self.s.wait_rows(lambda rs: self.s.row('git-prompt-suggestion-0', rs).get('accessibilityValue') == 'chosen', 'down did not choose it')
+        self.s.act('action', 'git-prompt', 'enter')
+        wait(lambda: self.head() == 'remote-y', 'the suggestion was not checked out', seconds=10)
+        self.assertEqual(self.git('rev-parse', '--abbrev-ref', 'remote-y@{upstream}').strip(), 'origin/remote-y')
+
+    def test_c_commits_only_in_changes_and_does_nothing_in_history_and_stashes(self):
+        for key in ['2', '4']:
+            self.key(key)
+            self.key('c')
+            time.sleep(.5)
+            self.assertFalse(self.s.has('git-prompt'), 'c opened a prompt in tab ' + key)
+            self.assertFalse(self.s.has('git-commit-box'), 'c opened the commit box in tab ' + key)
+        self.key('1')
+        self.key('c')
+        self.s.wait_rows(lambda rs: self.s.has('git-commit-box', rs), 'c in Changes did not open the commit box')
+        self.key('escape')
 
     def test_q_closes_the_git_view(self):
         self.assertTrue(self.is_open(), 'the Git View is not open')

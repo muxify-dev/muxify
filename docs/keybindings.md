@@ -412,12 +412,12 @@ go on to the actions above.
 | < / > | First or last item; in the diff, the first or last line |
 | ↩ | On a folder, fold or open it; on a branch, go into its commits, or while comparing, into its Diff files; on a commit or stash, go into its Diff files; otherwise go to the diff |
 | Space | In Changes, stage the file or folder, or unstage it once all of it is staged; in a change's diff, stage the selected lines, or the cursor's, or unstage them in its Staged part; in Diff files, fold or open a folder; in Stashes, apply the selected stash after confirming, and it stays; in Branches, check out the selected branch, and on the branch you're on do nothing; in History and in a branch's commits, check out the selected commit, which leaves a detached HEAD |
-| - / = | Fold or open every folder of the list |
+| - / = | Fold or open every folder of the list; in Branches, - checks out the previous branch, as `git checkout -` does |
 | l / h, → / ← | Go to the diff (on a branch, into its commits), or back to the list; from a list you went into, back out |
 | ⇧↓ / ⇧↑ | Select one more line below or above |
 | v | Start or end a range: moving then selects lines, as in lazygit |
 | a | In the diff, select the hunk; in Changes, stage everything, or unstage it all once it all is |
-| c | Commit what's staged, once something is, or conclude a merge: write a summary and a description, then ↩ in the summary or ⌘↩; ⎋ keeps the message for later |
+| c | In Changes and in a change's diff, commit what's staged, once something is, or conclude a merge: write a summary and a description, then ↩ in the summary or ⌘↩; ⎋ keeps the message for later. In Branches, check out by name: type a name, and the local and remote branches that match are offered; ↓ / ↑ choose one, ↩ checks out the chosen or the typed name, and a remote branch such as `origin/foo` makes a local branch that tracks it. In History and Stashes, c does nothing |
 | d | In Changes, discard the file's or folder's changes, as in lazygit: x (or ↩) discards all of them, u only the unstaged ones when some are staged; new and untracked files are deleted. In a change's diff, discard the selected unstaged lines, or the cursor's, with x (or ↩). j / k move between the choices; ⎋ or q cancels; in Stashes, drop the selected stash after confirming |
 | g | In Stashes, pop the selected stash after confirming: it is applied and dropped. When applying conflicts, the conflicted files show in Changes, the banner says so, and the stash stays |
 | s | In Changes, stash all changes, as `git stash push`: type the stash's message (it may be empty), then ↩; ⎋ cancels. Untracked files stay. Nothing to stash is said, and nothing opens |
@@ -428,7 +428,8 @@ go on to the actions above.
 | ] / [ | Next or previous file: the next file in Changes or Diff files, or the next file in a commit's, stash's or comparison's diff |
 | / | Filter the list shown; ↓ / ↑ move through the matches, ↩ or ⎋ go back to the list |
 | e | Open the file in your editor (`git_view.editor`) in a new tmux Window, at the cursor's line in the diff, or at the first changed line of a change or Diff files file; a removed line opens at the new line beside it |
-| R | Read the repository again |
+| n | In Branches, create a branch off the selected one and check it out: type its name, then ↩ |
+| R | Read the repository again; in Branches, rename the selected branch: the prompt starts at its name |
 | W | Mark the selected commit, branch or stash as the base: every other commit, branch or stash selected then shows the diff from the base to it, as lazygit's diffing mode. W on another one moves the base there; W on the base ends the comparison |
 | ⎋ | Clear the selected range, leave the diff, clear the filter, go back out of Diff files or a branch's commits, end the comparison, then close the Git View |
 | q | Close the Git View |

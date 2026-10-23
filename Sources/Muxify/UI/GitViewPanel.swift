@@ -1733,6 +1733,8 @@ private struct GitCommitBox: View {
                     .contentShape(Rectangle())
                     .onTapGesture { gitView.closeCommit() }
                 card(staged: staged)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("git-commit-box")
                     .frame(width: min(620, proxy.size.width - 48))
                     .padding(.top, max(20, proxy.size.height * 0.1))
                     .scaleEffect(isShown ? 1 : 0.97, anchor: .top)
@@ -2212,7 +2214,12 @@ private struct GitPromptView: View {
                 .padding(.bottom, 12)
             field
                 .padding(.horizontal, 16)
-                .padding(.bottom, 16)
+                .padding(.bottom, suggestions.isEmpty ? 16 : 8)
+            if !suggestions.isEmpty {
+                suggestionList
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+            }
             footer
         }
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(palette.chrome))
@@ -2224,8 +2231,42 @@ private struct GitPromptView: View {
         .accessibilityLabel(prompt.title)
         // The keys, so scripts/verify can press them without typing.
         .accessibilityActions {
-            ForEach(["enter", "escape"], id: \.self) { name in
-                Button { name == "enter" ? gitView.submitPrompt() : gitView.closePrompt() } label: { Text(verbatim: name) }
+            ForEach(["enter", "escape"] + (suggestions.isEmpty ? [] : ["down", "up"]), id: \.self) { name in
+                Button {
+                    switch name {
+                    case "enter": gitView.submitPrompt()
+                    case "escape": gitView.closePrompt()
+                    default: gitView.moveSuggestion(by: name == "down" ? 1 : -1)
+                    }
+                } label: { Text(verbatim: name) }
+            }
+        }
+    }
+
+    private var suggestions: [String] { gitView.promptSuggestions }
+
+    /// What matches as it is typed; ↓/↑ choose, and a click takes one. Each row is `git-prompt-suggestion-<n>`, and its
+    /// value says whether it is the one chosen.
+    private var suggestionList: some View {
+        let chosen = gitView.promptSuggestion
+        return VStack(spacing: 2) {
+            ForEach(Array(suggestions.enumerated()), id: \.element) { index, name in
+                let isChosen = name == chosen
+                Button { gitView.submitSuggestion(name) } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.triangle.branch").font(.system(size: 10.5)).foregroundStyle(.secondary)
+                        Text(name).font(.system(size: 12.5)).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 26)
+                    .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(isChosen ? Color.accentColor.opacity(0.22) : .clear))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("git-prompt-suggestion-\(index)")
+                .accessibilityLabel(name)
+                .accessibilityValue(isChosen ? "chosen" : "")
             }
         }
     }
