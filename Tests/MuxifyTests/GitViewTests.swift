@@ -46,6 +46,29 @@ final class GitViewConfigTests: XCTestCase {
         XCTAssertEqual(config.problems.last?.message, "unknown key \"git_view.theme\"")
     }
 
+    func testTheEditorCommandNamesTheFileAndMayNameTheLine() throws {
+        let config = try load("git_view:\n  editor: hx {file}:{line}")
+        XCTAssertEqual(config.gitView.editor, "hx {file}:{line}")
+        XCTAssertEqual(config.problems, [])
+        XCTAssertNil(try load("").gitView.editor)
+        let invalid = try load("git_view:\n  editor: nvim +{line}\n  display: popup")
+        XCTAssertNil(invalid.gitView.editor)
+        XCTAssertEqual(invalid.problems.map(\.line), [2])
+        XCTAssertEqual(invalid.problems.first?.message, "git_view.editor: expected a command with {file}, and {line} if it takes one")
+        XCTAssertNotNil(try load("git_view:\n  editor: \"\"").problems.first)
+    }
+
+    func testTheEditorCommandQuotesTheFileAndFillsTheLine() {
+        let custom = GitViewConfig(editor: "nvim +{line} {file} # {line}")
+        XCTAssertEqual(custom.editorCommand(file: "/r/a b.swift", line: 12), "nvim +12 '/r/a b.swift' # 12")
+        // A file name is data: neither its quotes nor a placeholder in it is read again.
+        XCTAssertEqual(custom.editorCommand(file: "/r/it's {line}", line: 3), "nvim +3 '/r/it'\"'\"'s {line}' # 3")
+        XCTAssertEqual(GitViewConfig(editor: "hx {file}:{line} {other}").editorCommand(file: "/r/a", line: 0), "hx '/r/a':1 {other}")
+        XCTAssertEqual(GitViewConfig().editorCommand(file: "/r/a b", line: 7), "${VISUAL:-${EDITOR:-vi}} +7 '/r/a b'")
+        XCTAssertEqual(GitViewConfig(editor: "code -g {file}:{line}").editorShellCommand(file: "/r/a", line: 2),
+                       "sh -c 'code -g '\"'\"'/r/a'\"'\"':2'")
+    }
+
     func testTheKeybindingCanBeRemappedOrDisabled() throws {
         let remapped = try load("keybindings:\n  toggle_git_view: [ctrl+g, cmd+shift+g]")
         XCTAssertEqual(remapped.keybinds.firstTrigger(for: .toggleGitView), trigger("ctrl+g"))
@@ -187,6 +210,23 @@ final class GitPatchTests: XCTestCase {
     new file mode 100644
     Binary files /dev/null and b/icon.png differ
     """
+
+    func testARemovedLineOpensAtTheNewLineBesideIt() throws {
+        let file = try XCTUnwrap(GitPatch.parse(diff).files.first)
+        // context 16, removed, added 17, added 18, context 19
+        XCTAssertEqual(file.hunks[0].newLine(at: 0), 16)
+        XCTAssertEqual(file.hunks[0].newLine(at: 1), 17)
+        XCTAssertEqual(file.hunks[0].newLine(at: 3), 18)
+        XCTAssertEqual(file.firstChangedLine, 17)
+        // A run of removed lines at the end of a hunk takes the last line before it.
+        let tail = try XCTUnwrap(GitPatch.parse("diff --git a/t b/t\n--- a/t\n+++ b/t\n@@ -5,3 +5,1 @@\n keep\n-gone\n-gone too\n").files.first)
+        XCTAssertEqual(tail.hunks[0].newLine(at: 2), 5)
+        XCTAssertEqual(tail.firstChangedLine, 5)
+        // All removed: the hunk's start.
+        let removed = try XCTUnwrap(GitPatch.parse("diff --git a/t b/t\n--- a/t\n+++ b/t\n@@ -1,2 +0,0 @@\n-a\n-b\n").files.first)
+        XCTAssertEqual(removed.firstChangedLine, 1)
+        XCTAssertEqual(GitPatch.parse(diff).files[2].firstChangedLine, 1)
+    }
 
     func testFilesHunksAndLineNumbers() throws {
         let patch = GitPatch.parse(diff)
@@ -432,6 +472,98 @@ final class GitHighlighterTests: XCTestCase {
     }
 }
 
+final class GitWordDiffTests: XCTestCase {
+    private func hunk(_ body: String) throws -> GitHunk {
+        try XCTUnwrap(GitPatch.parse("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1,9 +1,9 @@\n" + body).files.first?.hunks.first)
+    }
+
+    func testTokensAreWordsSpacesAndSingleCharacters() {
+        let tokens = GitWordDiff.tokens("foo_bar1  (x)->é")
+        XCTAssertEqual(tokens.map(\.text), ["foo_bar1", "  ", "(", "x", ")", "-", ">", "é"])
+        XCTAssertEqual(tokens.map(\.kind), [.word, .space, .other, .word, .other, .other, .other, .word])
+        XCTAssertEqual(tokens.map(\.columns), [0..<8, 8..<10, 10..<11, 11..<12, 12..<13, 13..<14, 14..<15, 15..<16])
+    }
+
+    func testAOneWordChangeMarksOnlyThatWordOnBothLines() throws {
+        let hunk = try hunk(" one\n-the quick brown fox\n+the quick red fox\n two\n")
+        XCTAssertEqual(hunk.lines.map(\.marks), [[], [10..<15], [10..<13], []])
+        // Split shows the same lines side by side.
+        let pair = try XCTUnwrap(hunk.pairs.first { $0.old?.kind == .removed })
+        XCTAssertEqual(pair.old?.marks, [10..<15])
+        XCTAssertEqual(pair.new?.marks, [10..<13])
+    }
+
+    func testLinesPairInOrderAndLeftoversGetNoMarks() throws {
+        let hunk = try hunk("-let a = 1\n-let b = 2\n-let c = 3\n+let a = 10\n+let b = 20\n context\n+let d = 4\n")
+        XCTAssertEqual(hunk.lines.map(\.marks), [[8..<9], [8..<9], [], [8..<10], [8..<10], [], []])
+    }
+
+    func testAnAddedRunBeforeARemovedOneIsNotABlock() throws {
+        let hunk = try hunk("+let a = 1\n-let a = 2\n")
+        XCTAssertEqual(hunk.lines.map(\.marks), [[], []])
+    }
+
+    func testPairsSharingLessThanHalfTheirCodeGetNoMarks() throws {
+        // Half their code in common tokens, whitespace aside, is enough.
+        XCTAssertNotNil(GitWordDiff.marks(old: "aa bb", new: "aa cc"))
+        XCTAssertNil(GitWordDiff.marks(old: "aa bbb", new: "aa ccc"))
+        // A changed value keeps its marks; a line that only keeps its keyword is a rewrite.
+        XCTAssertEqual(GitWordDiff.marks(old: "    timeout: 30,", new: "    timeout: 45,")?.new, [13..<15])
+        XCTAssertNil(GitWordDiff.marks(old: "let a = 1", new: "let total = count"))
+        // Shared indentation doesn't make two lines alike.
+        XCTAssertNil(GitWordDiff.marks(old: "        return nil", new: "        throw error"))
+        let hunk = try hunk("-let a = 1\n+let total = count\n")
+        XCTAssertEqual(hunk.lines.map(\.marks), [[], []])
+    }
+
+    func testMarksAreJoinedAcrossASpaceBetweenChangedWords() {
+        XCTAssertEqual(GitWordDiff.marks(old: "the old brown fox jumps", new: "the old red cat jumps")?.old, [8..<17])
+        XCTAssertEqual(GitWordDiff.marks(old: "f(a, b)", new: "f(a, c)")?.new, [5..<6])
+    }
+
+    func testMarksAreInShownColumnsWithTabsExpanded() throws {
+        let hunk = try hunk("-\tname\t= old\n+\tname\t= new\n")
+        // `    name    = old`: the tab after `name` reaches column 12.
+        XCTAssertEqual(hunk.lines.map(\.marks), [[14..<17], [14..<17]])
+        XCTAssertEqual(hunk.lines[1].text(in: 14..<17), "new")
+        // A tab after a longer word reaches further.
+        let mixed = try XCTUnwrap(GitWordDiff.marks(old: "id\tfirst_name = value + old", new: "ident\tfirst_name = value + new"))
+        XCTAssertEqual(mixed.old, [0..<2, 25..<28])
+        XCTAssertEqual(mixed.new, [0..<5, 29..<32])
+    }
+
+    func testVeryLongLinesAndVeryLargeBlocksGetNoMarks() throws {
+        let long = String(repeating: "a ", count: GitWordDiff.lineLimit / 2 - 1)
+        XCTAssertNotNil(GitWordDiff.marks(old: long + "bb", new: long + "cc"))
+        XCTAssertNil(GitWordDiff.marks(old: long + "bbb", new: long + "ccc"))
+        func block(_ size: Int) throws -> GitHunk {
+            try hunk((0..<size).map { "-line \($0) old\n" }.joined() + (0..<size).map { "+line \($0) new\n" }.joined())
+        }
+        XCTAssertTrue(try block(GitWordDiff.blockLimit).lines.allSatisfy { !$0.marks.isEmpty })
+        XCTAssertTrue(try block(GitWordDiff.blockLimit + 1).lines.allSatisfy(\.marks.isEmpty))
+    }
+
+    func testMarksColorTheChangedWordsUnderTheSyntaxColors() throws {
+        let colors = GitColors(nil)
+        var patch = GitPatch.parse("diff --git a/a.swift b/a.swift\n--- a/a.swift\n+++ b/a.swift\n@@ -1 +1 @@\n-\tlet name = \"old\"\n+\tlet name = \"new\"\n")
+        GitHighlighter(colors: colors, fontSize: 12).highlight(&patch)
+        let lines = try XCTUnwrap(patch.files.first?.hunks.first?.lines)
+        let removed = try XCTUnwrap(lines[0].styled)
+        let added = try XCTUnwrap(lines[1].styled)
+        XCTAssertEqual(added[try XCTUnwrap(added.range(of: "new"))].backgroundColor, Color(nsColor: colors.addedWord))
+        XCTAssertEqual(added[try XCTUnwrap(added.range(of: "new"))].foregroundColor, Color(nsColor: colors.green))
+        XCTAssertEqual(removed[try XCTUnwrap(removed.range(of: "old"))].backgroundColor, Color(nsColor: colors.removedWord))
+        XCTAssertNil(added[try XCTUnwrap(added.range(of: "let name"))].backgroundColor)
+        XCTAssertNil(added[try XCTUnwrap(added.range(of: "\""))].backgroundColor)
+        // A wrap is a slice of `styled` by column, so the mark stays on its characters.
+        let characters = added.characters
+        let wrap = AttributedString(added[characters.index(characters.startIndex, offsetBy: 16)..<characters.endIndex])
+        XCTAssertEqual(String(wrap.characters), "new\"")
+        XCTAssertEqual(wrap.runs.map { String(wrap[$0.range].characters) }.first, "new")
+        XCTAssertEqual(wrap[try XCTUnwrap(wrap.range(of: "new"))].backgroundColor, Color(nsColor: colors.addedWord))
+    }
+}
+
 /// Runs the Git View's scripts against real repositories, with a private
 /// HOME so the user's git config can't change the output.
 final class GitScriptTests: XCTestCase {
@@ -556,6 +688,26 @@ final class GitScriptTests: XCTestCase {
         let child = GitRepository.parseCommitDetail(try run(GitRepository.commitScript, repository, "feature"))
         XCTAssertEqual(child.detail?.parents.count, 1)
         XCTAssertEqual(child.detail?.author, "Yauhen Karatkou")
+    }
+
+    @MainActor
+    func testAComparisonIsTheDiffFromTheBaseWithRenamesFound() throws {
+        try run("""
+        cd "$1" && git worktree add -q -b moved ../moved feature && cd ../moved
+        git mv a.swift renamed.swift && printf 'let c = 3\\n' > c.swift && git add c.swift && git commit -q -m Move
+        """, repository)
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get())
+        gitView.perform(.tab(.branches))
+        while gitView.selectedItem?.name != "feature" { gitView.perform(.down) }
+        gitView.perform(.mark)
+        while gitView.selectedItem?.name != "moved" { gitView.perform(.down) }
+        let request = try XCTUnwrap(gitView.request())
+        XCTAssertEqual(request.script, GitRepository.gitScript)
+        let patch = GitPatch.parse(try run(request.script, request.arguments))
+        XCTAssertEqual(patch.files.map(\.path), ["c.swift", "renamed.swift"])
+        XCTAssertEqual(patch.files.map(\.change), [.added, .renamed])
+        XCTAssertEqual(patch.additions, 1)
     }
 
     private func status() throws -> [String] {
@@ -847,6 +999,115 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.tab(.stashes))
         XCTAssertEqual(gitView.filter, "")
         XCTAssertEqual(gitView.count(for: gitView.level), 1)
+    }
+
+    func testWMarksTheBaseAndTheSelectionIsComparedWithIt() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        XCTAssertEqual(GitView.commands[try! KeyTrigger("shift+w")], .mark)
+        // Changes have no base to be.
+        gitView.perform(.mark)
+        XCTAssertNil(gitView.base)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.mark)
+        XCTAssertEqual(gitView.base?.id, "branch:master")
+        XCTAssertNil(gitView.compared)
+        // The base itself shows a note, with no Diff files to go into.
+        XCTAssertEqual(gitView.request()?.id, "base:branch:master@c2")
+        XCTAssertNil(gitView.filesLevel)
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .branch, "↩ on the base still goes into its commits")
+        gitView.perform(.back)
+        // Another branch: base to it, with its Diff files under it.
+        gitView.perform(.down)
+        XCTAssertEqual(gitView.compared?.id, "branch:feature")
+        let request = gitView.request()
+        XCTAssertEqual(request?.id, "compare:branch:master@c2 branch:feature@f1")
+        XCTAssertEqual(request?.arguments, ["/repo", "diff", "--no-color", "--no-ext-diff", "-M", "c2", "f1", "--"])
+        XCTAssertEqual(request?.isFixed, true)
+        XCTAssertEqual(gitView.filesLevel?.owner?.id, "branch:feature")
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .files)
+        XCTAssertEqual(gitView.contentItem?.id, "branch:feature")
+        // Across tabs: a commit in History is compared with the branch.
+        gitView.perform(.tab(.history))
+        gitView.perform(.down)
+        XCTAssertEqual(gitView.request()?.id, "compare:branch:master@c2 commit:c1@c1")
+        XCTAssertEqual(gitView.filesLevel?.owner?.id, "commit:c1")
+        // Changes are not affected.
+        gitView.perform(.tab(.changes))
+        XCTAssertNil(gitView.compared)
+        XCTAssertNil(gitView.request())
+        // W on another commit moves the base there.
+        gitView.perform(.tab(.stashes))
+        XCTAssertEqual(gitView.request()?.id, "compare:branch:master@c2 stash:s1@s1")
+        gitView.perform(.tab(.history))
+        gitView.perform(.mark)
+        XCTAssertEqual(gitView.base?.id, "commit:c1")
+        XCTAssertEqual(gitView.request()?.id, "base:commit:c1@c1")
+    }
+
+    func testTheComparisonFollowsABranchThatMoved() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        gitView.perform(.mark)
+        gitView.perform(.tab(.history))
+        XCTAssertEqual(gitView.request()?.arguments.suffix(3), ["f1", "c2", "--"])
+        var moved = snapshot
+        moved.branches[1] = branch("feature", at: "f2")
+        gitView.apply(moved)
+        XCTAssertEqual(gitView.base?.sha, "f2")
+        XCTAssertEqual(gitView.request()?.id, "compare:branch:feature@f2 commit:c2@c2")
+    }
+
+    func testWOnTheBaseOrEscapeEndsTheComparison() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(snapshot)
+        gitView.perform(.tab(.history))
+        gitView.perform(.mark)
+        gitView.perform(.mark)
+        XCTAssertNil(gitView.base, "W on the base ends it")
+        gitView.perform(.mark)
+        // In a branch's Diff files, ⎋ comes back out first, then ends the
+        // comparison; the Diff files only a comparison had close with it.
+        gitView.perform(.tab(.branches))
+        gitView.perform(.down)
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .files)
+        gitView.perform(.back)
+        XCTAssertEqual(gitView.list, .branches)
+        gitView.perform(.enter)
+        gitView.perform(.tab(.history))
+        gitView.perform(.back)
+        XCTAssertNil(gitView.base, "⎋ where it would close the Git View ends the comparison")
+        XCTAssertEqual(gitView.request()?.id, "commit:c2")
+        gitView.perform(.tab(.branches))
+        XCTAssertEqual(gitView.list, .branches, "a branch's Diff files closed with the comparison")
+        XCTAssertNil(gitView.filesLevel)
+        // W in the Diff files of what becomes the base leaves them.
+        gitView.perform(.tab(.history))
+        gitView.perform(.enter)
+        XCTAssertEqual(gitView.list, .files)
+        gitView.perform(.mark)
+        XCTAssertEqual(gitView.list, .history)
+        XCTAssertEqual(gitView.base?.id, "commit:c2")
+    }
+
+    func testAComparisonsCardNamesBothEnds() {
+        func cards(_ content: GitView.Content) -> [Bool] {
+            GitView.diffRows(for: content, layout: .unified).map { if case .card = $0.kind { true } else { false } }
+        }
+        let base = GitView.Item.branch(branch("master", at: "c2", isHead: true))
+        let target = GitView.Item.commit(commit("c1abcdef9"))
+        let content = GitView.Content(id: "x", header: .comparison(base: base, target: target), output: "",
+                                      patch: GitPatch.parse(""), theme: nil)
+        XCTAssertEqual(cards(content), [true, false])
+        let note = GitView.Content(id: "y", header: .comparison(base: base, target: nil), output: "", patch: GitPatch.parse(""), theme: nil)
+        XCTAssertEqual(cards(note), [true], "the base shows only its note")
+        XCTAssertEqual(target.name, "c1abcde")
+        XCTAssertEqual(GitView.Item.stash(snapshot.stashes[0]).name, "stash@{0}")
     }
 
     func testChangesAreOnTheirFirstFileOnceThereAreSome() {

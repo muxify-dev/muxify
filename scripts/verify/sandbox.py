@@ -12,6 +12,7 @@ so a run that was killed with -9 leaves nothing behind for long.
 """
 
 import fcntl
+import hashlib
 import json
 import os
 import pathlib
@@ -20,12 +21,16 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 DEBUG_APP = REPO/'build/Build/Products/Debug/Muxify.app'
 AX_WAKE_SOURCE = REPO/'scripts/verify/ax_wake.swift'
+# The user allows the accessibility helper in System Settings once. So it lives outside /tmp, which macOS empties,
+# and its name comes from its source, so every worktree with the same source uses the same file.
+AX_WAKE_DIR = pathlib.Path.home()/'Library/Application Support/MuxifyVerify'
 LSREGISTER = ('/System/Library/Frameworks/CoreServices.framework/Frameworks/'
               'LaunchServices.framework/Support/lsregister')
 BASE = pathlib.Path('/tmp/muxify-verify')
@@ -245,12 +250,19 @@ class Sandbox:
     def _wake_accessibility(self, deadline):
         """Asks for the app's windows as an outside accessibility client, then waits until the driver sees the
         SwiftUI elements. Without that request SwiftUI gives the driver an App Window with no elements."""
-        helper = BASE/('ax-wake-%d' % AX_WAKE_SOURCE.stat().st_mtime_ns)
+        helper = AX_WAKE_DIR/('ax-wake-%s' % hashlib.sha256(AX_WAKE_SOURCE.read_bytes()).hexdigest()[:12])
         if not helper.exists():
-            building = helper.with_name(helper.name + '.' + uuid.uuid4().hex)
-            built = subprocess.run(['swiftc', '-O', '-o', str(building), str(AX_WAKE_SOURCE)], capture_output=True, text=True)
-            assert built.returncode == 0, 'swiftc could not build %s:\n%s' % (AX_WAKE_SOURCE, built.stderr)
-            building.replace(helper)
+            # swiftc signs the binary with its file name. Under the same name, the same source and compiler give the
+            # same code signature, so a rebuilt helper keeps its Accessibility permission.
+            AX_WAKE_DIR.mkdir(parents=True, exist_ok=True)
+            building = pathlib.Path(tempfile.mkdtemp(dir=AX_WAKE_DIR))
+            try:
+                built = subprocess.run(['swiftc', '-O', '-o', str(building/'ax-wake'), str(AX_WAKE_SOURCE)],
+                                       capture_output=True, text=True)
+                assert built.returncode == 0, 'swiftc could not build %s:\n%s' % (AX_WAKE_SOURCE, built.stderr)
+                (building/'ax-wake').replace(helper)
+            finally:
+                shutil.rmtree(building, ignore_errors=True)
         while True:
             woke = subprocess.run([str(helper), str(self.pid)], capture_output=True, text=True)
             if any(row.get('accessibilityIdentifier') for row in self.driver('dump')['rows']):

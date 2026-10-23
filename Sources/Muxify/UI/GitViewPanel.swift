@@ -141,6 +141,14 @@ private struct GitNavigator: View {
         }
         .background(GitKeyCatcher(gitView: gitView))
         .environment(\.colorScheme, colors.isDark ? .dark : .light)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("git-view")
+        // Each key, named by its Config spelling, so scripts/verify can press it without typing.
+        .accessibilityActions {
+            ForEach(GitView.keyMap.map(\.0), id: \.self) { name in
+                Button { gitView.performKey(named: name) } label: { Text(verbatim: name) }
+            }
+        }
     }
 
     private func placeholder(_ palette: Palette) -> some View {
@@ -200,6 +208,10 @@ private struct GitToolbar: View {
                     .help(snapshot.operation?.commitBlock ?? title)
             }
             if let comparison = snapshot.comparison { aheadBehind(comparison) }
+            if let text = comparingText {
+                GitTag(text: text, symbol: "arrow.left.arrow.right", style: .tint(palette.colors.magenta), palette: palette)
+                    .help("W on the base, or ⎋, ends the comparison")
+            }
             Spacer(minLength: 8)
             filterField
             Picker("Diff layout", selection: $gitView.layout) {
@@ -221,6 +233,27 @@ private struct GitToolbar: View {
         .frame(height: 48)
         .background(palette.chrome)
         .overlay(alignment: .bottom) { palette.separator.frame(height: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("git-toolbar")
+        .accessibilityLabel(shownText)
+    }
+
+    /// The text the toolbar shows, for the accessibility label.
+    private var shownText: String {
+        var parts = [snapshot.repositoryName]
+        if snapshot.worktreeName != nil { parts.append("linked worktree") }
+        if snapshot.upstream == nil, !snapshot.isDetached { parts.append("no upstream") }
+        if let title = snapshot.operationTitle { parts.append(title) }
+        if let comparison = snapshot.comparison { parts.append("↑\(comparison.ahead) ↓\(comparison.behind) vs \(comparison.base)") }
+        if let text = comparingText { parts.append(text) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// W: "Comparing main", and "main → 1a2b3c4" while something else is
+    /// selected.
+    private var comparingText: String? {
+        guard let base = gitView.base else { return nil }
+        return gitView.compared.map { "\(base.name) → \($0.name)" } ?? "Comparing \(base.name)"
     }
 
     private static func symbol(for operation: GitOperation?) -> String {
@@ -484,6 +517,8 @@ private struct GitTabBar: View {
         }
         .buttonStyle(.plain)
         .help("\(tab.title) (\(tab.key))")
+        .accessibilityIdentifier("git-tab-\(tab.rawValue)")
+        .accessibilityValue(isSelected ? "selected" : "")
     }
 
     /// The changes and stashes there are.
@@ -549,6 +584,12 @@ private struct GitListView: View {
                 .environment(\.gitOnAccent, onAccent)
                 .contentShape(Rectangle())
                 .onTapGesture { gitView.select(item, in: level) }
+                .accessibilityElement(children: .ignore)
+                // An element with a role carries its value into the accessibility tree, where a check reads it.
+                .accessibilityAddTraits(.isButton)
+                .accessibilityIdentifier("git-row-\(item.id)")
+                .accessibilityLabel(accessibilityName(item, row: row))
+                .accessibilityValue(accessibilityValue(item, isSelected: isSelected, level: level))
                 .id(row.id)
         } else {
             Text(row.text)
@@ -558,6 +599,29 @@ private struct GitListView: View {
                 .frame(height: 22)
                 .id(row.id)
         }
+    }
+
+    private func accessibilityName(_ item: GitView.Item, row: GitView.Row) -> String {
+        switch item {
+        case .change(let change): change.name
+        case .folder: row.text
+        case .commit(let commit): commit.subject
+        case .stash(let stash): GitNavigatorText.stashTitle(stash.message)
+        case .branch(let branch): branch.name
+        case .file(let path): (path as NSString).lastPathComponent
+        }
+    }
+
+    /// `selected=1 status="M "`: whether the row is the selection, and a
+    /// change's or file's two status letters; ` base=1` on the base.
+    private func accessibilityValue(_ item: GitView.Item, isSelected: Bool, level: GitView.Level) -> String {
+        let status: String? = switch item {
+        case .change(let change): String(change.index) + String(change.worktree)
+        case .file(let path): Self.letter(gitView.ownerFiles(for: level)?.first { $0.path == path }?.change).text
+        case .folder, .commit, .stash, .branch: nil
+        }
+        return "selected=\(isSelected ? 1 : 0)" + (status.map { " status=\"\($0)\"" } ?? "")
+            + (item.id == gitView.base?.id ? " base=1" : "")
     }
 
     @ViewBuilder
@@ -616,11 +680,13 @@ private struct GitListView: View {
                 refs(commit, onAccent: onAccent)
                 Text(commit.subject).font(.system(size: 13)).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
+                baseMark(item, onAccent: onAccent)
                 Text(GitRepository.age(of: commit.date)).font(.system(size: 11)).foregroundStyle(secondary)
             case .stash(let stash):
                 Text(stash.ref).font(mono).foregroundStyle(secondary)
                 Text(GitNavigatorText.stashTitle(stash.message)).font(.system(size: 13)).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
+                baseMark(item, onAccent: onAccent)
                 Text(GitRepository.age(of: stash.date)).font(.system(size: 11)).foregroundStyle(secondary)
             case .branch(let branch):
                 if branch.isHead {
@@ -637,12 +703,23 @@ private struct GitListView: View {
                     .truncationMode(.middle)
                 branchTags(branch, onAccent: onAccent)
                 Spacer(minLength: 4)
+                baseMark(item, onAccent: onAccent)
                 if let date = branch.date {
                     Text(GitRepository.age(of: date)).font(.system(size: 11)).foregroundStyle(secondary)
                 }
                 // A click goes into its commits.
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(secondary)
             }
+        }
+    }
+
+    /// W marked it: the others are compared with it.
+    @ViewBuilder
+    private func baseMark(_ item: GitView.Item, onAccent: Bool) -> some View {
+        if item.id == gitView.base?.id {
+            GitTag(text: "base", symbol: "arrow.left.arrow.right", style: .tint(palette.colors.magenta), palette: palette,
+                   height: 16, fontSize: 10, onAccent: onAccent)
+                .help("The base: what's selected is compared with it (W)")
         }
     }
 
@@ -927,13 +1004,13 @@ private struct GitDiffPane: View {
                 hunkHeader(hunk)
             }
         case .line(let line):
-            selectable(row, metrics: metrics) { unifiedLine(line, metrics: metrics) }
+            selectable(row, metrics: metrics) { unifiedLine(line, id: row.id, metrics: metrics) }
         case .pair(let old, let new):
             selectable(row, metrics: metrics) {
                 HStack(spacing: 0) {
-                    splitSide(old, number: old?.old, metrics: metrics)
+                    splitSide(old, number: old?.old, id: "\(row.id)-old", metrics: metrics)
                     palette.softSeparator.frame(width: 1)
-                    splitSide(new, number: new?.new, metrics: metrics)
+                    splitSide(new, number: new?.new, id: "\(row.id)-new", metrics: metrics)
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }
@@ -1044,7 +1121,7 @@ private struct GitDiffPane: View {
     private var codeFont: Font { .system(size: fontSize, design: .monospaced) }
     private var numberFont: Font { .system(size: fontSize - 1, design: .monospaced) }
 
-    private func unifiedLine(_ line: GitDiffLine, metrics: GitView.TextMetrics) -> some View {
+    private func unifiedLine(_ line: GitDiffLine, id: Int, metrics: GitView.TextMetrics) -> some View {
         HStack(alignment: .top, spacing: 0) {
             number(line.old)
             number(line.new)
@@ -1057,10 +1134,15 @@ private struct GitDiffPane: View {
                 band(line.kind, gutter: false)
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isStaticText)
+        .accessibilityIdentifier("git-line-\(id)")
+        .accessibilityLabel(line.text)
+        .accessibilityValue(line.accessibilityValue)
     }
 
     @ViewBuilder
-    private func splitSide(_ line: GitDiffLine?, number value: Int?, metrics: GitView.TextMetrics) -> some View {
+    private func splitSide(_ line: GitDiffLine?, number value: Int?, id: String, metrics: GitView.TextMetrics) -> some View {
         Group {
             if let line {
                 HStack(alignment: .top, spacing: 0) {
@@ -1074,6 +1156,11 @@ private struct GitDiffPane: View {
                         band(line.kind, gutter: false)
                     }
                 }
+                .accessibilityElement(children: .ignore)
+                .accessibilityAddTraits(.isStaticText)
+                .accessibilityIdentifier("git-line-\(id)")
+                .accessibilityLabel(line.text)
+                .accessibilityValue(line.accessibilityValue)
             } else {
                 palette.fill
             }
@@ -1267,6 +1354,9 @@ private struct GitFileHeader: View {
                 GitIconButton(symbol: "arrow.down", help: "Next hunk (⌥↓)") { gitView.jumpToHunk(forward: true) }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("git-file-header")
+        .accessibilityLabel(header.path)
     }
 }
 
@@ -1287,6 +1377,9 @@ private struct GitFileBar: View {
         } trailing: {
             EmptyView()
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("git-file-bar-\(file.id)")
+        .accessibilityLabel(file.path)
     }
 }
 
@@ -1335,7 +1428,8 @@ private struct GitPathBar<Tags: View, Trailing: View>: View {
 }
 
 /// Above a commit's, stash's or folder's files: what it is, who made it,
-/// and how much it changes; a branch's latest commits.
+/// and how much it changes; a branch's latest commits; a comparison's two
+/// ends.
 private struct GitCard: View {
     let gitView: GitView
     let content: GitView.Content
@@ -1352,6 +1446,8 @@ private struct GitCard: View {
                 stashCard(stash)
             case .folder(let path, let changes):
                 folderCard(path, changes)
+            case .comparison(let base, let target):
+                comparisonCard(base, target)
             case .change:
                 EmptyView()
             }
@@ -1360,6 +1456,63 @@ private struct GitCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(palette.header)
         .overlay(alignment: .bottom) { palette.separator.frame(height: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("git-card")
+        .accessibilityLabel(title)
+    }
+
+    /// What the card is about: a commit's subject, a branch's name, a stash's message, a folder's path.
+    private var title: String {
+        switch content.header {
+        case .commit(let commit, let detail): detail?.title ?? commit.subject
+        case .branch(let branch, _): branch.name
+        case .stash(let stash): GitNavigatorText.stashTitle(stash.message)
+        case .folder(let path, _): path
+        case .change(let change): change.path
+        case .comparison(let base, let target?): "\(base.name) → \(target.name)"
+        case .comparison(let base, nil): "Comparing \(base.name)"
+        }
+    }
+
+    /// W: both ends and what changes from one to the other; on the base
+    /// itself, what to do next.
+    private func comparisonCard(_ base: GitView.Item, _ target: GitView.Item?) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.left.arrow.right").font(.system(size: 15)).foregroundStyle(.secondary)
+                Text(title).font(.system(size: 17, weight: .semibold)).textSelection(.enabled)
+            }
+            end(base, role: "Base")
+            if let target {
+                end(target, role: "Compared")
+                summary
+            } else {
+                Text("Select another commit, branch or stash to compare it with. W here, or ⎋, ends the comparison.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// One end of a comparison: its name, its commit and what it says.
+    private func end(_ item: GitView.Item, role: String) -> some View {
+        HStack(spacing: 8) {
+            Text(role).font(.system(size: 12)).foregroundStyle(.tertiary).frame(width: 64, alignment: .leading)
+            switch item {
+            case .branch(let branch):
+                GitTag(text: branch.name, symbol: "arrow.triangle.branch", style: .tint(palette.colors.green), palette: palette)
+                hashChip(branch.sha)
+            case .stash(let stash):
+                GitTag(text: stash.ref, symbol: "archivebox", style: .gray, palette: palette)
+                hashChip(stash.sha)
+                Text(GitNavigatorText.stashTitle(stash.message)).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+            case .commit(let commit):
+                hashChip(commit.sha)
+                Text(commit.subject).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+            default:
+                EmptyView()
+            }
+        }
     }
 
     private func commitCard(_ commit: GitCommit, _ detail: GitCommitDetail?) -> some View {
@@ -1991,6 +2144,7 @@ private struct GitWriteErrorBanner: View {
                 .lineLimit(6)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("git-write-error")
             Button { gitView.dismissWriteError() } label: {
                 Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary).frame(width: 18, height: 18)
             }
@@ -2163,5 +2317,20 @@ private struct GitKeyCatcher: NSViewRepresentable {
             guard window != nil else { return }
             DispatchQueue.main.async { [weak self] in self?.gitView?.keyViewDidAppear() }
         }
+    }
+}
+
+private extension GitDiffLine {
+    /// `kind=added old=- new=3 marks=6..<9`: what the line is, its numbers,
+    /// and the columns of its changed words, if any.
+    var accessibilityValue: String {
+        let kind = switch kind {
+        case .context: "context"
+        case .added: "added"
+        case .removed: "removed"
+        case .note: "note"
+        }
+        let marks = marks.isEmpty ? "" : " marks=" + marks.map { "\($0.lowerBound)..<\($0.upperBound)" }.joined(separator: ",")
+        return "kind=\(kind) old=\(old.map(String.init) ?? "-") new=\(new.map(String.init) ?? "-")" + marks
     }
 }

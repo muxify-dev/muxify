@@ -1983,6 +1983,20 @@ final class WorkspaceStore {
         }
     }
 
+    /// Runs the Git View's editor command for `file` at `line` in a new Window of
+    /// the Session of `windowID`, in `directory`, and switches to it. On a
+    /// Remote Environment tmux runs it there, so it edits that machine's file.
+    func openInEditor(file: String, line: Int, from windowID: String, in directory: String) {
+        guard let sessionID = windows.first(where: { $0.id == windowID })?.sessionID ?? selectedWindow?.sessionID else { return }
+        let command = config.gitView.editorShellCommand(file: file, line: line)
+        let args = ["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "\(sessionID):", "-c", directory, command]
+        runAsync(args) { [weak self] result in
+            guard let self, case .success(let output) = result else { return }
+            let windowID = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.switchClient(to: Target(sessionID: sessionID, windowID: windowID, path: nil))
+        }
+    }
+
     // MARK: - Git View
 
     /// The Window's Git View, made on first use.

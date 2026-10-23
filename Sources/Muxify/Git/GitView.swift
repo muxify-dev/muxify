@@ -96,6 +96,28 @@ final class GitView {
             case .branch(let branch): branch.name
             }
         }
+
+        /// The commit a commit, branch or stash is at, which W compares.
+        var sha: String? {
+            switch self {
+            case .commit(let commit): commit.sha
+            case .branch(let branch): branch.sha
+            case .stash(let stash): stash.sha
+            default: nil
+            }
+        }
+
+        /// A branch's name, a commit's short hash or a stash's ref, as the
+        /// toolbar and a comparison's card name them.
+        var name: String {
+            switch self {
+            case .commit(let commit): String(commit.sha.prefix(7))
+            case .branch(let branch): branch.name
+            case .stash(let stash): stash.ref
+            case .change(let change): change.path
+            case .folder(_, let path), .file(let path): path
+            }
+        }
     }
 
     /// A row of a list as shown.
@@ -188,6 +210,9 @@ final class GitView {
             /// A branch, with its history once read; no diff.
             case branch(GitBranch, GitLog?)
             case stash(GitStash)
+            /// The diff from the base to the commit, branch or stash
+            /// selected; none while the base itself is.
+            case comparison(base: Item, target: Item?)
         }
 
         let id: String
@@ -212,7 +237,7 @@ final class GitView {
     /// A row of the diff pane, numbered for scrolling to.
     struct DiffRow: Identifiable {
         enum Kind {
-            /// The commit, branch, stash or folder card.
+            /// The commit, branch, stash, comparison or folder card.
             case card
             /// A file's header bar, for the patches with several files.
             case file(Int)
@@ -273,6 +298,11 @@ final class GitView {
         /// a change's diff; folds a folder of the Diff files.
         case toggle, collapseAll, expandAll
         case commit, discard, filter, back, close, refresh
+        /// W: marks the commit, branch or stash selected as the base, or
+        /// ends the comparison on the base, as lazygit's diffing mode.
+        case mark
+        /// e: opens the file in the editor, at the line.
+        case edit
     }
 
     private(set) var isOpen = false
@@ -303,6 +333,9 @@ final class GitView {
     private(set) var focus = Focus.list
     /// Folded folders of the Changes tree and of the Diff files.
     private(set) var collapsedFolders: [GitList: Set<String>] = [:]
+    /// W: the commit, branch or stash that the commit, branch or stash
+    /// selected is compared with, in every Git View tab.
+    private(set) var base: Item?
     /// The branches' histories read, with the commit each branch was at.
     private(set) var branchLogs: [String: (sha: String, log: GitLog)] = [:]
     /// The filter field has keyboard focus; the view keeps it current.
@@ -419,6 +452,8 @@ final class GitView {
     func close(restoringFocus: Bool = true) {
         guard isOpen else { return }
         isOpen = false
+        base = nil
+        closeFilesOfNothing()
         isFiltering = false
         isCommitOpen = false
         commitError = nil
@@ -550,14 +585,30 @@ final class GitView {
     }
 
     /// The Diff files under the History, a branch's commits and the
-    /// Stashes: the selected commit's or stash's, or those gone into.
+    /// Stashes, and under the Branches while comparing: the selection's,
+    /// or those gone into.
     var filesLevel: Level? {
         if list == .files { return level }
-        guard list == .history || list == .branch || list == .stashes else { return nil }
-        switch selectedItem {
-        case .commit?, .stash?: return Level(list: .files, owner: selectedItem)
-        default: return nil
+        guard list != .changes, let item = selectedItem, hasFiles(item) else { return nil }
+        return Level(list: .files, owner: item)
+    }
+
+    /// Whether an item has Diff files: a commit or stash, and while
+    /// comparing, a branch; the base, which shows a note, has none.
+    func hasFiles(_ item: Item) -> Bool {
+        if let base, base.id == item.id { return false }
+        switch item {
+        case .commit, .stash: return true
+        case .branch: return base != nil
+        default: return false
         }
+    }
+
+    /// What the diff pane compares with the base: the commit, branch or
+    /// stash selected, or whose Diff files are shown; never the base.
+    var compared: Item? {
+        guard let base, let item = contentItem, item.sha != nil, item.id != base.id else { return nil }
+        return item
     }
 
     /// The shown list's filter; each list has its own.
@@ -731,7 +782,7 @@ final class GitView {
     /// the files gone into comes back out to it.
     func select(_ item: Item, in level: Level) {
         if case .branch = item { return enter(item) }
-        if level.list == .files, list != .files, let owner = level.owner { return enter(owner, selecting: item) }
+        if level.list == .files, list != .files, let owner = level.owner { return enter(owner, into: .files, selecting: item) }
         if level.list != .files, list == .files { goBack() }
         focus = .list
         choose(item)
@@ -760,14 +811,16 @@ final class GitView {
     }
 
     /// Goes into a branch's commits, or a commit's or stash's files, as ↩
-    /// in lazygit: on the first one, or on `selecting`.
-    func enter(_ item: Item, selecting: Item? = nil) {
+    /// in lazygit: on the first one, or on `selecting`. A branch compared
+    /// with the base goes `into` its Diff files.
+    func enter(_ item: Item, into files: GitList? = nil, selecting: Item? = nil) {
         let list: GitList
         switch item {
-        case .branch: list = .branch
+        case .branch: list = files ?? .branch
         case .commit, .stash: list = .files
         default: return
         }
+        guard list != .files || hasFiles(item) else { return }
         focus = .list
         updateLevel { $0.selection = item.id }
         levels[tab, default: [Level(list: tab.list)]].append(Level(list: list, owner: item))
@@ -854,9 +907,21 @@ final class GitView {
     /// Git View or its filter field has focus. Keys it doesn't use, such as
     /// ⌘B, go on to them.
     func handle(_ trigger: KeyTrigger, in event: NSEvent) -> Bool {
+        handle(trigger, in: event.window)
+    }
+
+    /// An accessibility action of the Git View performs the key named by its
+    /// Config spelling, as `handle` does for the key in the Git View's window.
+    @discardableResult
+    func performKey(named name: String) -> Bool {
+        guard let trigger = try? KeyTrigger(name) else { return false }
+        return handle(trigger, in: keyView?.window)
+    }
+
+    private func handle(_ trigger: KeyTrigger, in window: NSWindow?) -> Bool {
         guard isOpen else { return false }
         // The commit message box's fields take the rest.
-        if isCommitOpen, event.window === keyView?.window {
+        if isCommitOpen, window === keyView?.window {
             switch trigger {
             case Self.escape: closeCommit()
             case Self.commandEnter: commit()
@@ -865,7 +930,7 @@ final class GitView {
             return true
         }
         // The Discard changes menu's keys, as lazygit's.
-        if let discard, event.window === keyView?.window {
+        if let discard, window === keyView?.window {
             switch trigger {
             case Self.escape, Self.q: closeDiscard()
             case Self.x: confirmDiscard(.all)
@@ -877,7 +942,7 @@ final class GitView {
             }
             return true
         }
-        if isFiltering, event.window === keyView?.window {
+        if isFiltering, window === keyView?.window {
             switch trigger {
             case Self.escape, Self.enter:
                 filterDidEnd()
@@ -890,7 +955,7 @@ final class GitView {
             }
             return true
         }
-        guard hasKeyFocus(in: event.window), let command = Self.commands[trigger] else { return false }
+        guard hasKeyFocus(in: window), let command = Self.commands[trigger] else { return false }
         perform(command)
         return true
     }
@@ -908,8 +973,9 @@ final class GitView {
     private static let u = try! KeyTrigger("u")
     private static let x = try! KeyTrigger("x")
 
-    static let commands: [KeyTrigger: Command] = {
-        let spelling: KeyValuePairs<String, Command> = [
+    /// The Git View's keys by their Config spelling; each is also an
+    /// accessibility action of the Git View, named by its spelling.
+    static let keyMap: KeyValuePairs<String, Command> = [
             "1": .tab(.changes), "2": .tab(.history), "3": .tab(.branches), "4": .tab(.stashes),
             "j": .down, "down": .down, "k": .up, "up": .up, "shift+comma": .top, "shift+period": .bottom,
             "tab": .nextTab, "shift+tab": .previousTab, "enter": .enter,
@@ -919,9 +985,10 @@ final class GitView {
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
             "space": .toggle, "minus": .collapseAll, "equal": .expandAll,
             "c": .commit, "d": .discard, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
-        ]
-        return Dictionary(uniqueKeysWithValues: spelling.map { (try! KeyTrigger($0), $1) })
-    }()
+            "shift+w": .mark, "e": .edit,
+    ]
+
+    static let commands: [KeyTrigger: Command] = Dictionary(uniqueKeysWithValues: keyMap.map { (try! KeyTrigger($0), $1) })
 
     func perform(_ command: Command) {
         switch command {
@@ -945,6 +1012,7 @@ final class GitView {
             guard focus == .list, let item = selectedItem else { return }
             switch item {
             case .folder(let tree, let path): toggleFolder(path, in: tree)
+            case .branch where hasFiles(item): enter(item, into: .files)
             case .branch, .commit, .stash: enter(item)
             case .change, .file: setFocus(.diff)
             }
@@ -1000,6 +1068,8 @@ final class GitView {
                 filter = ""
             } else if parentLevel != nil {
                 goBack()
+            } else if base != nil {
+                mark(nil)
             } else {
                 close()
             }
@@ -1007,6 +1077,82 @@ final class GitView {
             close()
         case .refresh:
             refresh(showingProgress: true)
+        case .mark:
+            guard let item = contentItem, item.sha != nil else { return }
+            mark(item.id == base?.id ? nil : item)
+        case .edit:
+            openInEditor()
+        }
+    }
+
+    // MARK: Editing
+
+    /// The file `e` opens and the line: in the diff, the selection's first
+    /// line; in a list, a change's or a file's first changed line.
+    var editorTarget: (path: String, line: Int)? {
+        if focus == .diff {
+            guard let row = selectionBounds?.start.row, diffRows.indices.contains(row), diffRows[row].isLine,
+                  let fileID = diffRows[row].file, let hunkIndex = diffRows[row].hunk,
+                  let file = content?.patch.files.first(where: { $0.id == fileID }), file.hunks.indices.contains(hunkIndex)
+            else { return nil }
+            let hunk = file.hunks[hunkIndex]
+            switch diffRows[row].kind {
+            case .line:
+                return diffRows[row].lines.first.map { (file.path, hunk.newLine(at: $0)) }
+            case .pair(_, let new):
+                if let line = new?.new { return (file.path, line) }
+                return diffRows[row].lines.first.map { (file.path, hunk.newLine(at: $0)) }
+            default:
+                return nil
+            }
+        }
+        let path: String
+        switch selectedItem {
+        case .change(let change)?: path = change.path
+        case .file(let file)?: path = file
+        default: return nil
+        }
+        let file = content?.patch.files.first { $0.path == path }
+        return (path, file?.firstChangedLine ?? 1)
+    }
+
+    /// Opens the file in the editor, unless it's gone from the working tree.
+    func openInEditor() {
+        guard let store, let root = snapshot?.root, let target = editorTarget else { return }
+        writeError = nil
+        let file = (root as NSString).appendingPathComponent(target.path)
+        store.runGitScript("[ -e \"$1\" ] && echo present || echo missing", arguments: [file], timeout: 10) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let output) where output.contains("missing"):
+                self.writeError = "\(target.path) is no longer in the working tree."
+            case .success:
+                store.openInEditor(file: file, line: target.line, from: self.windowID, in: root)
+            case .failure(let error):
+                self.writeError = Self.message(for: error)
+            }
+        }
+    }
+
+    // MARK: Comparing
+
+    /// Marks the base, or with nil ends the comparison.
+    func mark(_ item: Item?) {
+        base = item
+        closeFilesOfNothing()
+        showSelection()
+    }
+
+    /// Diff files gone into that have nothing to list now close: the
+    /// base's, or a branch's once the comparison ends.
+    private func closeFilesOfNothing() {
+        for (tab, stack) in levels {
+            guard let index = stack.firstIndex(where: { $0.list == .files && !($0.owner.map(hasFiles) ?? false) }) else { continue }
+            levels[tab] = Array(stack[..<index])
+            if tab == self.tab {
+                focus = .list
+                wantsFirstFile = false
+            }
         }
     }
 
@@ -1679,6 +1825,7 @@ final class GitView {
         let isSingleFile = isChange || { if case .file = scope { true } else { false } }()
         if !isSingleFile, scope == .all { add(.card) }
         if case .branch = content.header { return rows }
+        if case .comparison(_, nil) = content.header { return rows }
         if let error = content.error {
             add(.message(error))
             return rows
@@ -1754,6 +1901,9 @@ final class GitView {
         }
         messageRoot = next.root
         if snapshot != next { snapshot = next }
+        // A branch moved: the comparison follows it. One gone is compared
+        // at the commit it was at.
+        if let base { self.base = refreshed(base) ?? base }
         for (tab, stack) in levels {
             levels[tab] = refreshed(stack, previous: previous[tab] ?? [])
         }
@@ -1972,6 +2122,16 @@ final class GitView {
     func request(for item: Item) -> Request? {
         guard let snapshot else { return nil }
         let root = snapshot.root
+        // W: a commit, branch or stash shows the diff from the base, at the
+        // commits they are at now, so the output of two is kept.
+        if let base, let from = base.sha, let to = item.sha {
+            guard item.id != base.id else {
+                return Request(id: "base:\(base.id)@\(from)", header: .comparison(base: base, target: nil), localOutput: "")
+            }
+            return Request(id: "compare:\(base.id)@\(from) \(item.id)@\(to)", header: .comparison(base: base, target: item),
+                           script: GitRepository.gitScript,
+                           arguments: [root, "diff", "--no-color", "--no-ext-diff", "-M", from, to, "--"], isFixed: true)
+        }
         switch item {
         case .change(let change):
             let whole = wholeFiles.contains(change.path)

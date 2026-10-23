@@ -229,6 +229,10 @@ public struct Config: Equatable {
         #   # display-popup -w 80% -h 80%: from 10% to 100%.
         #   width: 80%
         #   height: 80%
+        #   # What e runs in a new tmux Window to edit a file, in the
+        #   # repository's folder: {file} and {line} are filled in and
+        #   # quoted. Without it: ${VISUAL:-${EDITOR:-vi}} +{line} {file}
+        #   editor: nvim +{line} {file}
         #
         # sessions:
         #   # Folders where you open Sessions. A path may be a glob, and each
@@ -752,6 +756,12 @@ private struct ConfigReader {
                     continue
                 }
                 if name == "width" { config.gitView.width = share } else { config.gitView.height = share }
+            case "editor":
+                guard let editor = string(value), GitViewConfig.isEditor(editor) else {
+                    problem(at: value, "git_view.editor: expected a command with {file}, and {line} if it takes one")
+                    continue
+                }
+                config.gitView.editor = editor
             default:
                 problem(at: key, "unknown key \"git_view.\(name)\"")
             }

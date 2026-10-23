@@ -139,6 +139,7 @@ enum PaletteCommand: String, CaseIterable {
              .showTerminal, .hideTerminal, .showBrowser, .hideBrowser, .nextSession, .previousSession, .nextTopic, .previousTopic,
              .newAppWindow:
             .noMirror("It changes only the view of one App Window.")
+        case .zoomPane: .noMirror("It toggles tmux's Zoom of the current Pane, which the Topic records do not store.")
         case .newTab, .closeTab, .openLocation, .nextTab, .previousTab, .back, .forward, .reloadPage, .copyURL, .developerTools:
             .noMirror("It changes only the Browser of one App Window.")
         case .openConfig, .reloadConfig, .installExtensions, .installCLI:

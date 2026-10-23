@@ -53,6 +53,10 @@ struct GitColors {
     var addedGutter: NSColor { green.withAlphaComponent(isDark ? 0.26 : 0.25) }
     var removedLine: NSColor { red.withAlphaComponent(isDark ? 0.2 : 0.1) }
     var removedGutter: NSColor { red.withAlphaComponent(isDark ? 0.34 : 0.2) }
+    /// A changed word, over its line's band: stronger, but light enough
+    /// that syntax colors stay readable on it.
+    var addedWord: NSColor { green.withAlphaComponent(isDark ? 0.3 : 0.26) }
+    var removedWord: NSColor { red.withAlphaComponent(isDark ? 0.34 : 0.2) }
 
     /// A tag's text: `color` darkened on a light theme, lightened on a dark one.
     func strong(_ color: NSColor) -> NSColor {
@@ -86,8 +90,10 @@ struct GitHighlighter: @unchecked Sendable {
                 // Comments and strings carry over lines within a hunk only.
                 var state = SyntaxState()
                 for line in patch.files[file].hunks[hunk].lines.indices {
-                    let text = patch.files[file].hunks[hunk].lines[line].shown
-                    patch.files[file].hunks[hunk].lines[line].styled = styled(text, language, &state)
+                    let diffLine = patch.files[file].hunks[hunk].lines[line]
+                    var text = styled(diffLine.shown, language, &state)
+                    mark(&text, diffLine)
+                    patch.files[file].hunks[hunk].lines[line].styled = text
                 }
             }
         }
@@ -110,5 +116,18 @@ struct GitHighlighter: @unchecked Sendable {
             }
         }
         return result
+    }
+
+    /// The line's changed words on their own background, so they stay
+    /// marked when the line wraps.
+    func mark(_ text: inout AttributedString, _ line: GitDiffLine) {
+        guard !line.marks.isEmpty else { return }
+        let color = Color(nsColor: line.kind == .added ? colors.addedWord : colors.removedWord)
+        let characters = text.characters
+        for columns in line.marks {
+            guard let lower = characters.index(characters.startIndex, offsetBy: columns.lowerBound, limitedBy: characters.endIndex),
+                  let upper = characters.index(lower, offsetBy: columns.count, limitedBy: characters.endIndex) else { continue }
+            text[lower..<upper].backgroundColor = color
+        }
     }
 }

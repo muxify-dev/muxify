@@ -410,7 +410,7 @@ go on to the actions above.
 | Tab / ⇧Tab | Next or previous Git View tab |
 | j / k, ↓ / ↑ | Select the next or previous item; in the diff, the next or previous line |
 | < / > | First or last item; in the diff, the first or last line |
-| ↩ | On a folder, fold or open it; on a branch, go into its commits; on a commit or stash, go into its Diff files; otherwise go to the diff |
+| ↩ | On a folder, fold or open it; on a branch, go into its commits, or while comparing, into its Diff files; on a commit or stash, go into its Diff files; otherwise go to the diff |
 | Space | In Changes, stage the file or folder, or unstage it once all of it is staged; in a change's diff, stage the selected lines, or the cursor's, or unstage them in its Staged part; in Diff files, fold or open a folder |
 | - / = | Fold or open every folder of the list |
 | l / h, → / ← | Go to the diff (on a branch, into its commits), or back to the list; from a list you went into, back out |
@@ -422,10 +422,12 @@ go on to the actions above.
 | y, ⌘C | Copy the selected code, without + and −; in the list, the path, hash or branch |
 | J / K, ⌃D / ⌃U | Scroll the diff by three lines, or half a page |
 | ⌥↓ / ⌥↑ | Next or previous hunk |
-| ] / [ | Next or previous file: the next file in Changes or Diff files, or the next file in a commit's or stash's diff |
+| ] / [ | Next or previous file: the next file in Changes or Diff files, or the next file in a commit's, stash's or comparison's diff |
 | / | Filter the list shown; ↓ / ↑ move through the matches, ↩ or ⎋ go back to the list |
+| e | Open the file in your editor (`git_view.editor`) in a new tmux Window, at the cursor's line in the diff, or at the first changed line of a change or Diff files file; a removed line opens at the new line beside it |
 | R | Read the repository again |
-| ⎋ | Clear the selected range, leave the diff, clear the filter, go back out of Diff files or a branch's commits, then close the Git View |
+| W | Mark the selected commit, branch or stash as the base: every other commit, branch or stash selected then shows the diff from the base to it, as lazygit's diffing mode. W on another one moves the base there; W on the base ends the comparison |
+| ⎋ | Clear the selected range, leave the diff, clear the filter, go back out of Diff files or a branch's commits, end the comparison, then close the Git View |
 | q | Close the Git View |
 
 Clicking selects an item; on a branch, it goes into the branch's commits, and on a

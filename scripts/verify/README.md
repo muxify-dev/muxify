@@ -80,9 +80,11 @@ Commit a check that must stay true with the feature that it checks. Keep a one-o
 
 ## Accessibility permission
 
-SwiftUI makes the accessibility tree of an App Window only after an accessibility client outside the app asks for it. Before that, the driver sees an App Window with no elements. So `Sandbox.launch` runs `ax_wake.swift`, which asks the app for its windows, and then waits until the driver sees the elements. `Sandbox.launch` compiles it with `swiftc` once into `/tmp/muxify-verify/`.
+SwiftUI makes the accessibility tree of an App Window only after an accessibility client outside the app asks for it. Before that, the driver sees an App Window with no elements. So `Sandbox.launch` runs `ax_wake.swift`, which asks the app for its windows, and then waits until the driver sees the elements. `Sandbox.launch` compiles it with `swiftc` into `~/Library/Application Support/MuxifyVerify/ax-wake-<hash>`, once for each version of the source. Every worktree with the same source uses the same file.
 
-The terminal that runs the checks must have the Accessibility permission in System Settings > Privacy & Security > Accessibility. Without it, `launch` stops with the message "the driver sees no SwiftUI elements" and the reason.
+macOS checks the Accessibility permission of the app that started the terminal, or the tmux server, that runs the checks. If that app has the permission, the helper needs none. If that app has no permission, or has quit, the helper starts itself again as its own responsible process, and macOS checks the helper.
+
+So allow the helper once: in System Settings > Privacy & Security > Accessibility, click +, press ⌘⇧G and paste its path. Without the permission, `launch` stops with the message "the driver sees no SwiftUI elements" and the path to allow. When `ax_wake.swift` changes, the helper gets a new name, and you allow the new file.
 
 ## Sandbox guarantees
 

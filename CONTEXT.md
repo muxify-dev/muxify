@@ -278,8 +278,12 @@ The files that differ from the last commit, staged or not, as the Git View lists
 _Avoid_: working copy, status, modified files
 
 **Diff files**:
-The files the selected commit or stash changed, shown under it in the Git View.
+The files the selected commit or stash changed, shown under it in the Git View; while comparing, the files that differ from the Base.
 _Avoid_: commit files, changed files
+
+**Base**:
+The commit, branch or stash that W marks in the Git View. Every other commit, branch or stash selected then shows the diff from the Base to it, as lazygit's diffing mode; Changes don't.
+_Avoid_: diff base, compare target, marked commit
 
 ### Configuration
 

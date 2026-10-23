@@ -27,8 +27,8 @@ final class ExtensionCommandTests: XCTestCase {
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = home.path
         environment["CODEX_HOME"] = nil
-        guard (try? CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", "command -v jq && command -v python3 && command -v codex"]), environment: environment)) != nil else {
-            throw XCTSkip("The Extension installer requires jq, python3 and codex")
+        guard (try? CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", "command -v jq && command -v python3 && codex app-server --help </dev/null | grep -q 'codex app-server'"]), environment: environment)) != nil else {
+            throw XCTSkip("The Extension installer requires jq, python3 and a codex with app-server")
         }
         let invocation = CommandInvocation(executable: command.path, arguments: ["extensions", "install"])
         let first = try CommandRunner().run(invocation, environment: environment)
