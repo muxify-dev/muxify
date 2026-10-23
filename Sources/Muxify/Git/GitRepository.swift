@@ -530,6 +530,40 @@ enum GitRepository {
     exit $code
     """
 
+    /// Takes the folder, a branch, how to merge it (`ff`, `no-ff`, `squash` or `squash-leave`) and the branch it goes
+    /// into, for the words. No editor opens, so git's message is kept. A merge that conflicts is told apart from
+    /// other failures, which print what git said: the conflicts are left in the working tree, and a `ff` or `no-ff`
+    /// merge stays in progress, as git does. A squash is no merge in git's eyes, so only the conflicts remain.
+    /// `squash` commits what it took, with the message git prepared; `squash-leave` leaves it staged.
+    static let mergeScript = """
+    cd "$1" || exit 1
+    branch=$2 kind=$3 into=$4
+    export GIT_EDITOR=true GIT_MERGE_AUTOEDIT=no
+    case $kind in
+        ff) set -- --ff ;;
+        no-ff) set -- --no-ff ;;
+        squash|squash-leave) set -- --squash --ff ;;
+        *) echo "Unknown merge: $kind" >&2; exit 1 ;;
+    esac
+    out=$(LC_ALL=C git -c color.ui=never merge --no-edit "$@" "$branch" 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+            if [ "$kind" = ff ] || [ "$kind" = no-ff ]; then
+                printf "Merging '%s' into '%s' conflicted: the conflicted files are in Changes. Stage them, then c concludes the merge, or m continues or aborts it.\\n" "$branch" "$into" >&2
+            else
+                printf "Squashing '%s' into '%s' conflicted: the conflicted files are in Changes. Stage them, then c commits.\\n" "$branch" "$into" >&2
+            fi
+        else
+            printf '%s\\n' "$out" >&2
+        fi
+        exit 1
+    fi
+    if [ "$kind" = squash ] && ! git diff --cached --quiet; then
+        git -c color.ui=never commit -q --no-edit 1>&2 || exit 1
+    fi
+    """
+
     /// Takes the folder and the message; commits what's staged. Prints the
     /// new commit's short hash; hooks' output goes to stderr, where a
     /// failure shows it.

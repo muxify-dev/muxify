@@ -70,6 +70,9 @@ m, in every tab, while a merge, rebase, cherry-pick, revert or `git am` is in pr
 ("Merge options", "Rebase options" and so on) with the choices `git-menu-choice-c` (Continue), `-s` (Skip, not for a
 merge) and `-a` (Abort); with nothing in progress `git-write-error` says so. Staging the last conflicted file asks in
 the menu `continue` ("Continue the rebase?", with the one choice `git-menu-choice-y`).
+M on a branch in Branches other than the one you're on asks in the menu `merge` ("Merge '<branch>' into '<head>'") with
+the choices `git-menu-choice-f` (fast-forward), `-n` (merge commit), `-s` (squash and commit) and `-u` (squash and leave
+uncommitted); on the current branch `git-write-error` says it can't merge a branch into itself.
 f in Changes fetches beside the writes; the toolbar's label ends with "Fetching…" until it ends. A credential question
 of git or ssh is asked in `git-prompt`, whose label is the question; ⎋ stops the fetch, and `git-write-error` says
 "Fetch cancelled.".
@@ -1003,6 +1006,10 @@ class GitView(unittest.TestCase):
         self.git('checkout', '-q', 'main')
         self.close_git_view()
         self.open_git_view()
+        # The Git View opens on what it read last, which a check before may have left behind, with the branch it was
+        # on before: read again, and give the read time to end.
+        self.key('shift+r')
+        time.sleep(2)
         self.go_to('3')
         self.select_row('git-row-branch:main')
         self.key('minus')
@@ -1588,6 +1595,136 @@ class GitView(unittest.TestCase):
         rs = self.s.wait_rows(lambda rs: self.s.has('git-write-error', rs), 'm did not say nothing is in progress')
         self.assertIn('Nothing is in progress', self.s.row('git-write-error', rs).get('accessibilityValue', ''))
         self.assertFalse(self.s.has('git-menu'), 'm opened a menu with nothing in progress')
+
+    def merge_fixture(self, kind):
+        """Sets the fixture's changes aside and makes `m-side`, one commit on a new file: `ahead` leaves main where it
+        was, so main can fast-forward to it, `diverged` moves main on another file, and `conflict` moves main on
+        `conflict.txt`, which `m-side` also changed. Everything is put back after the check."""
+        self.git('stash', 'push', '-q', '-u', '-m', 'e2e merge')
+        self.addCleanup(self.git, 'stash', 'pop', '-q', '--index')
+        before = self.git('rev-parse', 'HEAD').strip()
+        self.addCleanup(self.undo_merge, before)
+        self.git('checkout', '-q', '-b', 'm-side')
+        name = 'conflict.txt' if kind == 'conflict' else 'merged.txt'
+        (self.repo/name).write_text('side\n')
+        self.git('add', name)
+        self.git('commit', '-q', '-m', 'side change')
+        self.git('checkout', '-q', 'main')
+        if kind != 'ahead':
+            other = 'conflict.txt' if kind == 'conflict' else 'main-only.txt'
+            (self.repo/other).write_text('main\n')
+            self.git('add', other)
+            self.git('commit', '-q', '-m', 'main change')
+        return before
+
+    def undo_merge(self, before):
+        self.git_try('merge', '--abort')
+        self.git_try('checkout', '-q', '-f', 'main')
+        self.git_try('branch', '-q', '-D', 'm-side')
+        self.git('reset', '-q', '--hard', before)
+
+    def ask_merge(self, branch='m-side'):
+        # R renames in Branches, so it comes first, from Changes.
+        self.key('1')
+        self.key('shift+r')
+        self.go_to('3')
+        self.select_row('git-row-branch:' + branch)
+        self.key('shift+m')
+        return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == "Merge '%s' into 'main'" % branch,
+                                'shift+m did not open the merge menu')
+
+    def parents(self):
+        return len(self.git('rev-list', '--parents', '-1', 'HEAD').split()) - 1
+
+    def test_shift_m_offers_the_four_merges_and_f_fast_forwards_only_after_a_choice(self):
+        self.merge_fixture('ahead')
+        before = self.git('rev-parse', 'HEAD').strip()
+        rs = self.ask_merge()
+        for key, title in [('f', 'Regular merge (fast-forward)'), ('n', 'Regular merge (with merge commit)'),
+                           ('s', 'Squash merge and commit'), ('u', 'Squash merge and leave uncommitted')]:
+            self.assertEqual(self.s.row('git-menu-choice-' + key, rs).get('accessibilityLabel'), title)
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+        time.sleep(1)
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), before, 'opening the menu or escape merged')
+        self.ask_merge()
+        self.s.act('action', 'git-menu', 'f')
+        wait(lambda: self.git('rev-parse', 'HEAD').strip() == self.git('rev-parse', 'm-side').strip(), 'f did not fast-forward', seconds=10)
+        self.assertEqual(self.parents(), 1, 'a fast-forward made a merge commit')
+        self.assertFalse(self.s.has('git-write-error'), 'the merge failed')
+
+    def test_shift_m_n_makes_a_merge_commit_with_gits_message_even_when_it_could_fast_forward(self):
+        before = self.merge_fixture('ahead')
+        self.ask_merge()
+        self.s.act('action', 'git-menu', 'n')
+        wait(lambda: self.git('rev-parse', 'HEAD').strip() != before, 'n did not merge', seconds=10)
+        self.assertEqual(self.parents(), 2)
+        self.assertEqual(self.git('log', '-1', '--format=%s').strip(), "Merge branch 'm-side'")
+        self.assertFalse(self.s.has('git-write-error'), 'the merge failed')
+
+    def test_shift_m_s_squashes_into_one_commit_and_u_leaves_the_changes_staged(self):
+        before = self.merge_fixture('diverged')
+        self.ask_merge()
+        self.s.act('action', 'git-menu', 's')
+        wait(lambda: self.git('rev-parse', 'HEAD').strip() != before, 's did not commit the squash', seconds=10)
+        self.assertEqual(self.parents(), 1, 'a squash has one parent')
+        self.assertIn('Squashed commit of the following:', self.git('log', '-1', '--format=%B'))
+        self.assertIn('merged.txt', self.git('show', '--name-only', '--format=', 'HEAD'))
+        self.git('reset', '-q', '--hard', before)
+        self.ask_merge()
+        self.s.act('action', 'git-menu', 'u')
+        wait(lambda: self.git('diff', '--cached', '--name-only').split() == ['merged.txt'], 'u did not leave the squash staged', seconds=10)
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), before, 'u committed')
+        self.assertFalse(self.s.has('git-write-error'), 'the merge failed')
+
+    def test_a_merge_that_conflicts_stays_in_progress_and_m_continues_it_and_c_opens_its_commit(self):
+        self.merge_fixture('conflict')
+        self.ask_merge()
+        self.s.act('action', 'git-menu', 'n')
+        rs = self.s.wait_rows(lambda rs: self.s.has('git-write-error', rs), 'the conflicting merge did not say so', seconds=10)
+        self.assertIn("Merging 'm-side' into 'main' conflicted", self.s.row('git-write-error', rs).get('accessibilityValue', ''))
+        self.assertTrue(self.in_progress(), 'the conflicting merge did not stay in progress')
+        self.s.wait_rows(lambda rs: 'Merging' in self.s.row('git-toolbar', rs).get('accessibilityLabel', ''), 'the toolbar does not say Merging', seconds=10)
+        self.key('1')
+        self.resolve_and_stage()
+        self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Continue the merge?', 'staging did not ask to continue')
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the question')
+        self.key('c')
+        self.s.wait_rows(lambda rs: self.s.has('git-commit-box', rs), 'c did not open the commit box of the merge')
+        self.key('escape')
+        self.ask_operation('Merge options')
+        self.s.act('action', 'git-menu', 'c')
+        wait(lambda: not self.in_progress(), 'm then c did not conclude the merge', seconds=10)
+        self.assertEqual(self.parents(), 2)
+
+    def test_shift_m_on_the_current_branch_says_it_cannot_merge_into_itself(self):
+        self.key('shift+r')
+        self.go_to('3')
+        self.select_row('git-row-branch:main')
+        self.key('shift+m')
+        rs = self.s.wait_rows(lambda rs: self.s.has('git-write-error', rs), 'shift+m on the current branch did not say why')
+        self.assertIn('cannot merge a branch into itself', self.s.row('git-write-error', rs).get('accessibilityValue', ''))
+        self.assertFalse(self.s.has('git-menu'), 'shift+m opened a menu on the current branch')
+
+    def test_the_merge_menu_names_the_agents_working_in_the_worktree(self):
+        before = self.merge_fixture('ahead')
+        self.agent_pane('gv-merge-agent', self.repo, 'working')
+        found = []
+
+        def asked():
+            rs = self.ask_merge()
+            found[:] = [self.s.row('git-menu-agents', rs).get('accessibilityLabel') if self.s.has('git-menu-agents', rs) else None]
+            if found[0] is None:
+                self.s.act('action', 'git-menu', 'escape')
+                self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+            return found[0] is not None
+        wait(asked, 'the merge menu does not name the Agent', seconds=15, step=.5)
+        self.assertEqual(found[0], 'Claude Code in gv-merge-agent')
+        time.sleep(1)
+        self.assertEqual(self.git('rev-parse', 'HEAD').strip(), before, 'the merge ran before the question was answered')
+        self.s.act('action', 'git-menu', 'f')
+        wait(lambda: self.git('rev-parse', 'HEAD').strip() != before, 'f did not merge', seconds=10)
 
 
 if __name__ == '__main__':

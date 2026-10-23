@@ -301,6 +301,8 @@ final class GitView {
         case amend
         /// m: continues, skips or aborts the merge, rebase, cherry-pick, revert or `git am` in progress.
         case operation
+        /// M: merges the branch selected in Branches into the one you're on.
+        case merge
         case commit, discard, stash, stashOptions, filter, back, close, refresh
         /// n: a new branch off the branch selected in Branches.
         case newBranch
@@ -1041,7 +1043,7 @@ final class GitView {
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
             "space": .toggle, "minus": .collapseAll, "equal": .expandAll, "n": .newBranch,
             "c": .commit, "d": .discard, "g": .pop, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
-            "shift+w": .mark, "e": .edit, "f": .fetch, "shift+a": .amend, "m": .operation, "shift+p": .push, "p": .pull,
+            "shift+w": .mark, "e": .edit, "f": .fetch, "shift+a": .amend, "m": .operation, "shift+m": .merge, "shift+p": .push, "p": .pull,
     ]
 
     static let commands: [KeyTrigger: Command] = Dictionary(uniqueKeysWithValues: keyMap.map { (try! KeyTrigger($0), $1) })
@@ -1122,6 +1124,8 @@ final class GitView {
             if list == .changes { askAmend() }
         case .operation:
             askOperation()
+        case .merge:
+            if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askMerge(branch) }
         case .newBranch:
             if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askNewBranch(off: branch) }
         case .pop:
@@ -2086,6 +2090,51 @@ final class GitView {
             switch result {
             case .success:
                 self?.store?.palette.showCopied(title: step.past, value: noun)
+            case .failure(let error):
+                self?.writeError = Self.message(for: error)
+            }
+        }
+    }
+
+    /// How M merges, by the argument the merge script takes.
+    enum MergeKind: String {
+        case fastForward = "ff", mergeCommit = "no-ff", squashAndCommit = "squash", squashAndLeave = "squash-leave"
+    }
+
+    /// M in Branches: lazygit's merge menu, on a branch other than the one you're on, through the Agent guard, for a
+    /// merge changes files. A merge, rebase or the like already in progress is to be concluded or aborted first.
+    func askMerge(_ branch: GitBranch) {
+        guard let snapshot else { return }
+        guard !branch.isHead else {
+            writeError = "You cannot merge a branch into itself: '\(branch.name)' is the one you're on."
+            return
+        }
+        if let operation = snapshot.operation {
+            writeError = "A \(operation.noun ?? "bisect") is in progress: continue or abort it with m before merging."
+            return
+        }
+        writeError = nil
+        let into = snapshot.head
+        func choice(_ key: String, _ title: String, _ note: String, _ kind: MergeKind) -> GitMenu.Choice {
+            GitMenu.Choice(key: key, title: title, note: note) { [weak self] in self?.merge(branch, into: into, kind) }
+        }
+        openGuarded(GitMenu(
+            id: "merge", title: "Merge '\(branch.name)' into '\(into)'", subject: .text("\(branch.name) → \(into)"),
+            symbol: "arrow.triangle.merge",
+            choices: [
+                choice("f", "Regular merge (fast-forward)", "Moves '\(into)' up when it can, else makes a merge commit.", .fastForward),
+                choice("n", "Regular merge (with merge commit)", "Always makes a merge commit (--no-ff).", .mergeCommit),
+                choice("s", "Squash merge and commit", "Takes its changes as one commit, with git's message.", .squashAndCommit),
+                choice("u", "Squash merge and leave uncommitted", "Takes its changes and leaves them staged.", .squashAndLeave),
+            ]))
+    }
+
+    private func merge(_ branch: GitBranch, into: String, _ kind: MergeKind) {
+        guard let snapshot else { return }
+        write(GitRepository.mergeScript, arguments: [snapshot.root, branch.name, kind.rawValue, into], timeout: 600) { [weak self] result in
+            switch result {
+            case .success:
+                self?.store?.palette.showCopied(title: "Merged", value: branch.name)
             case .failure(let error):
                 self?.writeError = Self.message(for: error)
             }
