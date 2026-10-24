@@ -851,7 +851,7 @@ private struct SessionsSection: View {
                                         viewport: Self.viewport,
                                         showsAllRows: showingAllRows.contains(session.id),
                                         onShowAllRows: { showingAllRows.insert(session.id) }) { item in
-                                row(item, model: model)
+                                row(item)
                             }
                         }
                     }
@@ -878,8 +878,7 @@ private struct SessionsSection: View {
     }
 
     @ViewBuilder
-    private func row(_ item: TopicsModel.SessionChildren.Item, model: TopicsModel) -> some View {
-        let dimmed = item.window.topicID.map { model.snoozedTopicIDs.contains($0) } == true
+    private func row(_ item: TopicsModel.SessionChildren.Item) -> some View {
         switch item {
         case .window(let window):
             WindowRow(
@@ -892,13 +891,11 @@ private struct SessionsSection: View {
                     window, record: store.topicWatcher.records.first { $0.id == window.topicID },
                     sessionPaths: store.sessionPaths)
             )
-                .opacity(dimmed ? 0.45 : 1)
                 .accessibilityIdentifier("session-window-\(window.id)")
                 .accessibilityValue(window.id == store.selectedWindowID ? "selected" : "")
                 .contextMenu { menu(for: window) }
         case .pane(let row):
             PaneRow(store: store, row: row)
-                .opacity(dimmed ? 0.45 : 1)
         }
     }
 
@@ -948,7 +945,7 @@ private struct SessionCard<Row: View>: View {
         let mark = model.sessionMarks[session.id].map(RowMark.agent)
         let isLocked = model.lockedSessionIDs.contains(session.id)
         SidebarCard(isOpen: isOpen, holdsSelection: holdsSelection, mark: mark,
-                    viewport: viewport, restingOpacity: isSnoozed ? 0.45 : 1) {
+                    viewport: viewport) {
             CardHeader(title: formatted.title, isOpen: isOpen, mark: mark, isLocked: isLocked, hintTarget: .session(session.id),
                        notes: (isSnoozed ? ["snoozed"] : []) + (isLocked ? ["Locked"] : []),
                        summary: formatted.summary) {
