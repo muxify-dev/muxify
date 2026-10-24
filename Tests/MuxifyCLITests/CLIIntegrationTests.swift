@@ -1304,7 +1304,8 @@ private final class TopicSandbox {
     func tmux(_ arguments: [String]) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tmuxBinary)
-        process.arguments = ["-S", socket.path] + arguments
+        // `-u`, as TmuxServer does: xcodebuild runs the tests without a UTF-8 locale, and then tmux prints a tab as `_`.
+        process.arguments = ["-u", "-S", socket.path] + arguments
         process.environment = tmuxEnvironment
         let output = Pipe()
         process.standardOutput = output

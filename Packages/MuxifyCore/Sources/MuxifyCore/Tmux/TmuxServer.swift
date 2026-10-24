@@ -25,7 +25,9 @@ public struct TmuxServer: Sendable {
     /// The tmux command line for `arguments` on this server.
     public func invocation(_ arguments: [String]) throws -> CommandInvocation {
         guard let binary = Tmux.binary else { throw TmuxError.notInstalled }
-        return CommandInvocation(executable: binary, arguments: options + arguments)
+        // `-u`: without a UTF-8 locale, as under launchd or an xcodebuild test, the tmux client prints
+        // `Tmux.separator` as `_`, and every parsed field is wrong.
+        return CommandInvocation(executable: binary, arguments: ["-u"] + options + arguments)
     }
 
     /// Runs one tmux command, or several joined by `;`, and returns its output.
