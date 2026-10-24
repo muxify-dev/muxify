@@ -1,7 +1,9 @@
 #!/bin/sh
 set -eu
-configuration=debug
-if [ "${CONFIGURATION:-Debug}" = Release ]; then configuration=release; fi
-cd "$PROJECT_DIR"
+# MuxifyCLITool built the CLI into the same products folder as the app.
 destination="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/bin"
-/bin/sh scripts/build-cli.sh "$destination" "$configuration"
+mkdir -p "$destination"
+# Replace the inode so macOS cannot reuse a cached signature for an older build.
+cp "$BUILT_PRODUCTS_DIR/muxify" "$destination/muxify.new"
+codesign --force --sign - "$destination/muxify.new"
+mv -f "$destination/muxify.new" "$destination/muxify"

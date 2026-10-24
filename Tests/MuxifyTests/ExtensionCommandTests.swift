@@ -13,7 +13,7 @@ final class ExtensionCommandTests: XCTestCase {
         try fm.createDirectory(at: bin, withIntermediateDirectories: true)
         let bundledBin = resources.appendingPathComponent("bin")
         try fm.createDirectory(at: bundledBin, withIntermediateDirectories: true)
-        try fm.copyItem(at: repository.appendingPathComponent(".build/debug/muxify"), to: bundledBin.appendingPathComponent("muxify"))
+        try fm.copyItem(at: Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("muxify"), to: bundledBin.appendingPathComponent("muxify"))
         try fm.copyItem(at: repository.appendingPathComponent("extensions"), to: resources.appendingPathComponent("extensions"))
         for path in [".claude", ".codex", ".config/opencode", ".pi/agent"] {
             try fm.createDirectory(at: home.appendingPathComponent(path), withIntermediateDirectories: true)
