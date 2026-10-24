@@ -6,7 +6,7 @@ INSTALL_DIR ?= /Applications
 MUXIFY_SIGN_IDENTITY ?= -
 MUXIFY_DEVELOPMENT_TEAM ?=
 
-.PHONY: all setup tools project build test test-release verify verify-gate run install release clean
+.PHONY: all setup tools project build test test-release verify verify-gate run install release clean prototype-sidebar-swipe
 
 all: build
 
@@ -51,6 +51,10 @@ verify: build
 # Passes only when the last full make verify passed on this exact tree.
 verify-gate:
 	python3 -m scripts.verify.gate
+
+# A separate app, Config and throwaway tmux server; Ctrl-C cleans up only this demo.
+prototype-sidebar-swipe: build
+	python3 -m scripts.verify.sidebar_swipe_prototype
 
 # CONFIG=path/to/config.yaml starts a new copy of the app with that Config, through MUXIFY_CONFIG.
 run: build

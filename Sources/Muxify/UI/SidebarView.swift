@@ -19,26 +19,26 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var content: some View {
-        Group {
-        if store.sessionsVisible && store.agentsVisible {
-            GeometryReader { proxy in
-                let total = proxy.size.height
-                VStack(spacing: 0) {
+        GeometryReader { proxy in
+            let total = proxy.size.height
+            // Keep WorkSection's identity when the two modes have different Show Agents choices, so a swipe
+            // can finish and both lists keep their scroll positions as the Agents section appears or disappears.
+            VStack(spacing: 0) {
+                if store.sessionsVisible {
                     WorkSection(store: store)
                         .frame(maxHeight: .infinity)
+                }
+                if store.sessionsVisible && store.agentsVisible {
                     SectionResizeHandle(fraction: $agentsFraction, total: total)
+                }
+                if store.agentsVisible {
                     AgentsSection(store: store)
-                        .frame(height: SectionResizeHandle.agentsHeight(agentsFraction, total: total))
+                        .frame(height: store.sessionsVisible ? SectionResizeHandle.agentsHeight(agentsFraction, total: total) : total)
+                }
+                if !store.sessionsVisible && !store.agentsVisible {
+                    Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-        } else if store.sessionsVisible {
-            WorkSection(store: store)
-        } else if store.agentsVisible {
-            AgentsSection(store: store)
-        } else {
-            Color.clear
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
         }
         .onChange(of: store.selectedWindowID, initial: true) { _, _ in store.updateTopicSelection() }
         .onChange(of: store.topics.activeTopic) { _, _ in store.updateTopicSelection() }
@@ -56,37 +56,20 @@ private struct WorkSection: View {
 
     var body: some View {
         let model = store.topics
-        let showsTopics = model.mode == .topics
-        VStack(spacing: 0) {
-            if model.showsToggle {
-                HStack(spacing: 4) {
-                    viewButton(.topics, selected: showsTopics)
-                    viewButton(.sessions, selected: !showsTopics)
-                }
-                .padding(6)
-            }
-            if showsTopics {
+        if model.showsToggle {
+            SidebarSwipePrototype(mode: Binding(get: { model.mode }, set: { store.sidebarMode = $0 }),
+                                  acceptsGestures: !store.palette.isOpen && store.currentGitView == nil) {
                 TopicsSection(store: store, model: model)
-            } else if model.sessionsEnabled {
+            } sessions: {
                 SessionsSection(store: store)
-            } else {
-                Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        } else if model.mode == .topics {
+            TopicsSection(store: store, model: model)
+        } else if model.sessionsEnabled {
+            SessionsSection(store: store)
+        } else {
+            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-
-    private func viewButton(_ mode: SidebarMode, selected: Bool) -> some View {
-        Button { store.sidebarMode = mode } label: {
-            Text(mode.rawValue)
-                .font(.system(size: 11, weight: .semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 4)
-                .background(selected ? Color.primary.opacity(0.1) : .clear, in: RoundedRectangle(cornerRadius: 5))
-                .contentShape(RoundedRectangle(cornerRadius: 5))
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("sidebar-view-" + mode.rawValue.lowercased())
-        .accessibilityValue(selected ? "selected" : "")
     }
 }
 
