@@ -1,5 +1,6 @@
 #if DEBUG
 import AppKit
+import MuxifyCore
 
 /// Lets scripts/verify drive a Debug build through its accessibility tree.
 /// The script writes `command.json` (with a fresh nonce) into the folder
@@ -74,8 +75,7 @@ enum TestDriver {
                 let sample = Process()
                 sample.executableURL = URL(fileURLWithPath: "/usr/bin/sample")
                 sample.arguments = [String(getpid()), "2", "-mayDie", "-file", path]
-                try? sample.run()
-                sample.waitUntilExit()
+                try? sample.start().wait()
             }
         }
     }

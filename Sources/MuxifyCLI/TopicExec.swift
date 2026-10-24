@@ -111,7 +111,8 @@ struct TopicExec {
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
-        do { try process.run() } catch {
+        let exit: ProcessExit
+        do { exit = try process.start() } catch {
             return (.notStarted(error.localizedDescription), Data(), Data())
         }
 
@@ -145,7 +146,7 @@ struct TopicExec {
             }
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline)
-        process.waitUntilExit()
+        exit.wait()
         deadline.cancel()
         // A process that the command started in the background can keep a pipe open after the command exits. Its
         // later output is not waited for.

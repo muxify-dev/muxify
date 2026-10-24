@@ -1,4 +1,5 @@
 import Foundation
+import MuxifyCore
 
 struct CLICommandResult {
     let status: Int32
@@ -18,9 +19,9 @@ struct CLIProcessRunner: CLICommandRunning {
         let output = Pipe()
         process.standardOutput = output
         if quiet { process.standardError = FileHandle.nullDevice }
-        try process.run()
+        let exit = try process.start()
         let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
+        exit.wait()
         return CLICommandResult(status: process.terminationStatus, output: String(decoding: data, as: UTF8.self))
     }
 }
