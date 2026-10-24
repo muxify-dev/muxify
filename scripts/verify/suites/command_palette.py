@@ -312,9 +312,11 @@ class CommandPalette(unittest.TestCase):
                         'the Snooze palette is not for the Topic: %s' % [r.get('accessibilityLabel') for r in rs])
 
         def next_1300():
-            now = datetime.datetime.now().astimezone()
+            # Count days in naive local wall-clock time, so the UTC offset comes from the day of the 13:00 and not
+            # from now: on the day before a daylight-saving change the two differ.
+            now = datetime.datetime.now()
             today = now.replace(hour=13, minute=0, second=0, microsecond=0)
-            return today if today > now else today + datetime.timedelta(days=1)
+            return (today if today > now else today + datetime.timedelta(days=1)).astimezone()
         expected = {next_1300()}
 
         def typed():
