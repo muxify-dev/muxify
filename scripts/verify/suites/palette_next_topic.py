@@ -87,7 +87,7 @@ class PaletteNextTopic(unittest.TestCase):
             rs = s.wait_rows(lambda rs: s.has('empty-no-topic', rs), action + ' did not show empty No Topic')
             self.assertTrue(s.has('empty-no-topic', rs))
         else:
-            # Settle keeps the Session with no Topic (ADR 0036), so No Topic shows it. Snooze leaves it in its Topic.
+            # Settle keeps the Session with no Topic (ADR 0041), so No Topic shows it. Snooze leaves it in its Topic.
             shown = windows[current] if action == 'Settle' else self.base
             s.wait_shown(shown)
             sid = s.tmux('display-message', '-p', '-t', shown, '#{session_id}')

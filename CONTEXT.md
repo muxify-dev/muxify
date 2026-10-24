@@ -51,7 +51,7 @@ A Topic's short name used as the suffix of its Sessions' names. It follows Topic
 _Avoid_: Session base name, branch name (when you mean the Topic's slug)
 
 **Session Path**:
-A folder offered as a place to start a Session, found through `sessions.paths` or Git's Worktrees. It is a launch location, not a running Session or a group of Sessions.
+A folder offered as a place to start a Session, found through `sessions.paths` or Git's Worktrees. It is a launch folder, not a running Session or a group of Sessions.
 _Avoid_: Session Path, workspace, Session (when you mean the folder)
 
 **Worktree**:
@@ -63,7 +63,7 @@ A Topic that has no title yet. A rename or a title suggested from its Agents giv
 _Avoid_: draft, scratch, temp Topic
 
 **Active Topic**:
-The Topic of the Window the user looks at, or No Topic when that Window belongs to no Topic.
+The Topic of the App Window's Location: the Topic of its Window or of its Empty Topic page, or No Topic.
 _Avoid_: current Topic, selected Topic, focused Topic
 
 **Next Topic**:
@@ -206,8 +206,20 @@ _Avoid_: line, record, event, turn, message (when you mean the Entry)
 ### Layout
 
 **App Window**:
-A native macOS Muxify window, with its own Active Environment, selected tmux Window, terminal and Browser.
+A native macOS Muxify window, with its own Active Environment, Location, terminal and Browser.
 _Avoid_: instance, Window (without "App", when you mean the native window)
+
+**Location**:
+What an App Window shows in the Terminal's place: a Window or an Empty Topic page. Each App Window has one Location, and the Active Topic comes from it.
+_Avoid_: place, focus, selection, current Window (when an Empty Topic page shows)
+
+**Empty Topic page**:
+The page in the Terminal's place for a Topic with no live Session, whether Empty, Dormant or Settled, or for No Topic when it has no Window. It offers Add a Session, or Reopen and Start Fresh.
+_Avoid_: Topic page, empty view, Empty (when you mean the page of a Dormant or Settled Topic)
+
+**Intent**:
+A move to a Location that the Terminal does not show yet, such as a click on a Window row before tmux switches the Client. An App Window has at most one Intent, and a new one replaces it.
+_Avoid_: pending selection, navigation, transition
 
 **Sidebar**:
 The panel on the left of the Muxify window that lists Sessions, Windows and Agents. The Git View's left pane is its List pane, never a sidebar.

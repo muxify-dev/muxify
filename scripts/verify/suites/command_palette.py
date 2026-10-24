@@ -362,11 +362,11 @@ class CommandPalette(unittest.TestCase):
                       'no Topic record titled by the query', seconds=15)[0]
         wait(lambda: self.s.tmux_ok('show-options', '-qv', '-t', sid, '@muxify_topic').stdout.strip() == record['id'],
              'the Session did not move into the new Topic', seconds=10)
-        # ADR 0036: the moved Session keeps its own name as the base, whatever its folder is named.
+        # ADR 0041: the moved Session keeps its own name as the base, whatever its folder is named.
         self.assertEqual(self.s.tmux('display-message', '-p', '-t', sid + ':', '#{session_name}'), 'sw-move-src/moved-by-move')
 
     def test_move_into_a_topic_with_a_session_in_the_same_folder_joins_it_under_the_sessions_own_name(self):
-        """ADR 0036: a Topic groups Sessions, so a Session in the same folder as a member does not block the move."""
+        """ADR 0041: a Topic groups Sessions, so a Session in the same folder as a member does not block the move."""
         self.write_topic('sw-occupied', 'Sw occupied', self.beta)
         self.new_session('beta/sw-occupied', self.beta, topic='sw-occupied')
         sid = self.new_session('sw-move-joins', self.beta)

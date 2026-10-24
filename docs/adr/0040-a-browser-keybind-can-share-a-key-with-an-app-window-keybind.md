@@ -1,8 +1,8 @@
 # A Browser keybind can share a key with an App Window keybind
 
-Reopen Closed Tab wants `cmd+shift+t`, the key that browsers give it. Move Pane has `cmd+shift+t`, and people already use it. ADR 0039 says that one trigger cannot belong to two Actions, so one of them had to lose the key.
+Reopen Closed Tab wants `cmd+shift+t`, the key that browsers give it. Move Pane has `cmd+shift+t`, and people already use it. ADR 0042 says that one trigger cannot belong to two Actions, so one of them had to lose the key.
 
-We decide that one trigger can belong to two Actions when they never act under the same Focus. An Action for one side, such as `reopen_closed_tab` for the Browser, can share a trigger with an Action for the other side or with an Action that acts everywhere. While its side has Focus, the Action for that side acts. With other Focus, the other Action acts. This amends "one trigger cannot belong to two Actions" in ADR 0039.
+We decide that one trigger can belong to two Actions when they never act under the same Focus. An Action for one side, such as `reopen_closed_tab` for the Browser, can share a trigger with an Action for the other side or with an Action that acts everywhere. While its side has Focus, the Action for that side acts. With other Focus, the other Action acts. This amends "one trigger cannot belong to two Actions" in ADR 0042.
 
 - `reopen_closed_tab` acts only while the Browser has Focus, and its default is `cmd+shift+t`. `move_pane` keeps `cmd+shift+t`. From the Browser, `cmd+shift+t` reopens the last closed Tab. From the Terminal, it opens Move for the Pane.
 - Two Actions that can act under the same Focus still cannot share a trigger. The Config reports the second one as "already bound", as before. A Command Palette trigger shares with nothing, because it acts before every keybind.

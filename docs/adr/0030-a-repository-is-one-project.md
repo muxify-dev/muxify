@@ -4,7 +4,7 @@ Git determines repository layout, including bare repositories. Discovery offers
 the main checkout and linked Worktrees as launch choices, wherever they live.
 
 The former one-Session-per-repository membership rule is superseded by
-[ADR 0036](0036-topics-group-sessions-not-repositories.md): Topics group Sessions,
+[ADR 0041](0041-topics-group-sessions-not-repositories.md): Topics group Sessions,
 not folders or repositories. A Topic may have several Sessions in one checkout.
 
 [ADR 0038](0038-worktree-creation-and-cleanup-are-explicit.md) supersedes the old

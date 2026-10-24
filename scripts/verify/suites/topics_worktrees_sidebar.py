@@ -153,7 +153,7 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         key = self.project_row(self.gamma/'main')
         s.wait_rows(lambda rs: 'Also in Shared owner' in s.row(key, rs).get('accessibilityLabel', ''),
                     'the Worktree row does not say Also in Shared owner')
-        # Add a Session also offers the other Topic's running Session in this folder (ADR 0036), and the exact path
+        # Add a Session also offers the other Topic's running Session in this folder (ADR 0041), and the exact path
         # selects that row first. The user picks the Session Path row itself, which adds a new Session there.
         running = 'palette-row-running-' + s.tmux('display-message', '-p', '-t', '=gamma/shared-owner:', '#{session_id}')
         s.wait_rows(lambda rs: s.has(running, rs), 'Add a Session does not offer the running Session gamma/shared-owner')
