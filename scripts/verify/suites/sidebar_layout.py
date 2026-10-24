@@ -206,7 +206,8 @@ class SidebarLayout(unittest.TestCase):
         open_bottom, _ = frame(self.s.row('settled-topics', rs))
         self.assertLessEqual(row_top, open_bottom + 1, 'the Settled Topic is not under the Settled row')
         self.assertGreater(open_bottom - closed_bottom, 10, 'the Settled row did not move up when the group opened')
-        self.assertLess(abs(row_bottom - closed_bottom), 4, 'the opened group does not end at the bottom of the panel')
+        # The block of the open group puts 6 points of padding around its cards.
+        self.assertLess(abs(row_bottom - 6 - closed_bottom), 4, 'the opened group does not end at the bottom of the panel')
 
     def test_sidebar_panes_true_shows_pane_rows_whatever_the_view_menu_says(self):
         rs = self.s.wait_rows(lambda rs: self.s.has('topic-layout-open', rs), 'no row for the open Topic')

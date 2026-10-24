@@ -95,7 +95,6 @@ private struct TopicsSection: View {
     let store: WorkspaceStore
     let model: TopicsModel
     @State private var drag = LongPressDrag<TopicListID>(spacing: 6)
-    @State private var groupsHeight: CGFloat = 0
     /// The cards whose "N more…" the user pressed.
     @State private var showingAllRows: Set<TopicGroupID> = []
     /// The No Topic Session cards whose "N more…" the user pressed, by Session ID.
@@ -111,14 +110,13 @@ private struct TopicsSection: View {
                 if let zen = store.topicWatcher.zen { zenLine(zen) }
                 topicsList
                 if !model.groups.isEmpty {
-                    // The groups stay at the bottom of the panel, so an opened group pushes its row up. They take
-                    // their own height up to a third of the panel, and scroll when an open group is taller.
-                    ScrollView {
-                        groupRows.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { groupsHeight = $0 }
+                    VStack(spacing: 4) {
+                        ForEach(model.groups) { group in
+                            TopicGroupBlock(store: store, model: model, group: group, showingAllRows: $showingAllRows,
+                                            cardsLimit: proxy.size.height / 3)
+                        }
                     }
-                    .coordinateSpace(.named(TopicCard.groupsViewport))
-                    .scrollIndicators(.never)
-                    .frame(height: min(groupsHeight, proxy.size.height / 3))
+                    .padding(.horizontal, 6).padding(.vertical, 4)
                 }
             }
         }
@@ -211,37 +209,6 @@ private struct TopicsSection: View {
             }
             .tracksBottomEdge(.noTopic, in: $cardsBelow)
         }
-    }
-
-    private var groupRows: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            ForEach(model.groups) { group in
-                GroupHeader(icon: group.kind == .snoozed ? "moon" : "checkmark.circle", title: group.kind.title,
-                            count: group.count, isExpanded: group.isExpanded) {
-                    store.topicGroups.toggle(group.kind)
-                }
-                .padding(.top, 4)
-                .accessibilityIdentifier(group.kind.accessibilityID)
-                .accessibilityValue(group.isExpanded ? "expanded" : "collapsed")
-                if group.isExpanded {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(group.topics) { topic in
-                            TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
-                                      showsAllRows: showingAllRows.contains(topic.id),
-                                      onShowAllRows: { showingAllRows.insert(topic.id) }, place: .group)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                    if group.hiddenCount > 0 {
-                        Button("Show \(min(group.hiddenCount, TopicGroupsState.pageSize)) more") { store.topicGroups.showMoreSettled() }
-                            .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
-                            .padding(.leading, 24).frame(height: 24)
-                            .accessibilityIdentifier("settled-show-more")
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 6).padding(.vertical, 4)
     }
 
     private func renameTopic(_ id: String, suggest: Bool = false) {
@@ -406,40 +373,15 @@ private struct TopicItemRow: View {
     }
 }
 
-/// A group row: Snoozed or Settled.
-private struct GroupHeader: View {
-    let icon: String
-    let title: String
-    let count: Int
-    let isExpanded: Bool
-    let onToggle: () -> Void
-
-    var body: some View {
-        Button(action: onToggle) {
-            HStack(spacing: 6) {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 10, weight: .bold)).frame(width: 10)
-                Image(systemName: icon).font(.system(size: 11))
-                Text("\(title) (\(count))").font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                Spacer(minLength: 4)
-            }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8).frame(height: 26)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 /// Where a Topic card sits. In the Topics list the card has a Hint, moves by a drag and by Move Up and Move Down, and
 /// offers Settle. In the Snoozed or Settled group it has none of these, and closed it shows only its title and wake time.
-private enum TopicCardPlace {
+enum TopicCardPlace {
     case list(TopicListPlace)
     case group
 }
 
 /// What a card in the Topics list needs to move among the cards with its Pin.
-private struct TopicListPlace {
+struct TopicListPlace {
     let drag: LongPressDrag<TopicListID>
     /// The Topic and Locked cards with this card's pin, in list order, among which it moves.
     let order: [TopicListID]
@@ -447,7 +389,7 @@ private struct TopicListPlace {
     let rename: (String, Bool) -> Void
 }
 
-private struct TopicCard: View {
+struct TopicCard: View {
     let store: WorkspaceStore
     let topic: TopicsModel.Row
     let titles: [String: String]
