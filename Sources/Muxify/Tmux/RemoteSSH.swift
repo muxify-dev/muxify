@@ -3,7 +3,7 @@ import Darwin
 import MuxifyCore
 
 /// One foreground, prompt-owning SSH master and its master-only channels.
-/// No files, helper or listening port are installed on the remote machine.
+/// No helper or listening port is installed on the remote machine.
 final class RemoteSSH {
     let environment: RemoteEnvironment
     let directory: URL

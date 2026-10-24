@@ -54,6 +54,24 @@ The Browser stays local: use reachable URLs, such as Tailscale URLs. There is
 no port forwarding or remote dev-server discovery; Reveal in Finder is disabled.
 Install [Agent Extensions](../extensions/README.md#install) manually on the remote.
 
+### Paste screenshots and files
+
+Take a screenshot to the Mac's clipboard (for example, ⌃⇧⌘4), then press ⌘V
+in the Terminal. Muxify saves the image as a PNG, uploads it over the Environment's
+existing SSH connection, and pastes its remote path. You can also drag screenshot
+thumbnails or files into the Terminal. Tools such as Claude Code can read the
+uploaded image from that path; other tools must support image/file paths as input.
+
+An upload status appears at the bottom of the App Window. The path is pasted
+only after the upload succeeds, into the Pane where you started, even if you
+switch Windows or Panes while it uploads. Reconnecting cancels pending uploads.
+Files remain in private `muxify-paste.*` directories under the remote machine's
+temporary directory, subject to that machine's temporary-file cleanup policy.
+No remote clipboard helper is needed. Plain text pastes work as usual.
+
+In Local, clipboard images are saved in the Mac's temporary directory and their
+paths are pasted directly.
+
 ## Session Paths
 
 Session Paths are the folders where you open Sessions. The New Topic and Add Session Path

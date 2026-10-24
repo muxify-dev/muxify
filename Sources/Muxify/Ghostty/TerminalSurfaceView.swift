@@ -17,6 +17,7 @@ final class TerminalSurfaceView: NSView {
     private var cursor: NSCursor = .iBeam
     private var trackingArea: NSTrackingArea?
     private var screenObserver: NSObjectProtocol?
+    private(set) var isHandlingKeyDown = false
 
     static func from(_ userdata: UnsafeMutableRawPointer?) -> TerminalSurfaceView? {
         guard let userdata else { return nil }
@@ -100,6 +101,7 @@ final class TerminalSurfaceView: NSView {
     }
 
     func performBinding(_ action: String) {
+        if action == "paste_from_clipboard", pasteAttachments(from: .general) { return }
         guard let surface else { return }
         _ = action.withCString { ghostty_surface_binding_action(surface, $0, UInt(action.utf8.count)) }
     }
@@ -355,6 +357,8 @@ final class TerminalSurfaceView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        isHandlingKeyDown = true
+        defer { isHandlingKeyDown = false }
         guard let surface else {
             interpretKeyEvents([event])
             return
@@ -471,6 +475,7 @@ final class TerminalSurfaceView: NSView {
     }
 
     override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        if pasteAttachments(from: sender.draggingPasteboard) { return true }
         guard let surface,
               let text = GhosttyInput.dropText(sender.draggingPasteboard, stagingDirectory: Self.dropStagingDirectory)
         else { return false }
@@ -480,6 +485,11 @@ final class TerminalSurfaceView: NSView {
     }
 
     // MARK: - Edit menu
+
+    func pasteAttachments(from pasteboard: NSPasteboard) -> Bool {
+        guard surface != nil else { return false }
+        return delegate?.ghosttyPasteAttachments(from: pasteboard, into: self) ?? false
+    }
 
     @objc func copy(_ sender: Any?) { performBinding("copy_to_clipboard") }
     @objc func paste(_ sender: Any?) { performBinding("paste_from_clipboard") }
