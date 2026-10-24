@@ -82,6 +82,8 @@ public struct Config: Equatable {
     public struct Sidebar: Equatable {
         public var topics = true
         public var sessions = true
+        /// Animate switching between Topics and Sessions. False keeps swipes and buttons, with an instant switch.
+        public var animateSwitching = true
         /// The Agents section, for each Sidebar mode. Nil leaves that mode to the View menu's Show Agents;
         /// a value decides, and the menu item is disabled in that mode.
         public var agents = PerMode<Bool?>(nil)
@@ -290,6 +292,8 @@ public struct Config: Equatable {
         # sidebar:
         #   topics: true
         #   sessions: true
+        #   # false switches Topics/Sessions instantly, without a swipe preview or animation.
+        #   animate_switching: true
         #   # The Agents section and the Pane rows. Leave them out to choose in the
         #   # View menu; a value here decides, and the menu item is disabled.
         #   agents: true
@@ -832,7 +836,7 @@ private struct ConfigReader {
     public mutating func readSidebar(_ node: Node) {
         for (name, key, value) in entries(of: node, "sidebar") {
             switch name {
-            case "topics", "sessions", "panes":
+            case "topics", "sessions", "animate_switching", "panes":
                 guard value.tag == Yams.Tag(.bool), let enabled = value.bool else {
                     problem(at: value, "sidebar.\(name): expected a boolean")
                     continue
@@ -840,6 +844,7 @@ private struct ConfigReader {
                 switch name {
                 case "topics": config.sidebar.topics = enabled
                 case "sessions": config.sidebar.sessions = enabled
+                case "animate_switching": config.sidebar.animateSwitching = enabled
                 default: config.sidebar.panes = enabled
                 }
             case "agents":

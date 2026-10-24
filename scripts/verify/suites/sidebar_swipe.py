@@ -1,6 +1,6 @@
-"""The native Sidebar swipe proof of concept, driven without taking focus.
+"""Topics/Sessions switching in the Sidebar, driven without taking focus.
 
-SidebarSwipePrototype exposes Debug-only accessibility samples while the sandbox's TestDriver runs. They feed
+SidebarPager exposes Debug-only accessibility samples while the sandbox's TestDriver runs. They feed
 the real gesture recognizer and release path; no check needs to move the pointer or use the user's tmux server.
 """
 
@@ -21,7 +21,7 @@ class SidebarSwipe(unittest.TestCase):
         cls.config.write_text('sidebar:\n  agents: false\n')
         topics = s.root/'state/muxify/topics'
         topics.mkdir()
-        (topics/'swipe.json').write_text(json.dumps(dict(id='swipe', title='Swipe proof', slug='swipe')))
+        (topics/'swipe.json').write_text(json.dumps(dict(id='swipe', title='Sidebar swipe', slug='swipe')))
         cls.session = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'sidebar-swipe',
                              '-c', str(project), '/bin/zsh -f')
         s.tmux('set-option', '-t', cls.session, '@muxify_topic', 'swipe')
@@ -62,6 +62,46 @@ class SidebarSwipe(unittest.TestCase):
         rs = self.s.wait_rows(lambda rs: self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').endswith(' 0.400'),
                               'the Sidebar did not follow the partial swipe')
         self.assertEqual(self.s.row('sidebar-view-topics', rs).get('accessibilityValue'), 'selected')
+        self.sample('Cancel current swipe')
+        self.wait_mode('topics')
+
+    def test_animation_can_be_disabled_and_reenabled_live_without_disabling_switching(self):
+        self.addCleanup(self.config.write_text, 'sidebar:\n  agents: false\n')
+        self.addCleanup(lambda: self.sample('Cancel current swipe'))
+        frames = []
+        def settled(rs):
+            frames.append(self.s.row('topics-list', rs).get('accessibilityFrame'))
+            return len(frames) >= 2 and frames[-1] is not None and frames[-2] == frames[-1]
+        rs = self.s.wait_rows(settled, 'the Topics list did not finish its previous animation')
+        before = self.s.row('topics-list', rs)['accessibilityFrame']
+        self.sample('Begin swipe left')
+        self.s.wait_rows(lambda rs: self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').endswith(' 0.400'),
+                         'the enabled animation did not preview the swipe')
+        self.config.write_text('sidebar:\n  agents: false\n  animate_switching: false\n')
+        self.s.wait_rows(lambda rs: self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').startswith('Sidebar swipe input instant '),
+                         'the animation setting did not reload')
+        rs = self.wait_mode('topics')
+        self.assertEqual(self.s.row('topics-list', rs)['accessibilityFrame'], before,
+                         'disabling animation left the Topics list shifted or scaled')
+        self.sample('Cancel current swipe')
+        self.sample('Begin swipe left')
+        rs = self.wait_mode('topics')
+        self.assertEqual(self.s.row('topics-list', rs)['accessibilityFrame'], before,
+                         'a swipe moved the Topics list with animation disabled')
+        self.sample('Cancel current swipe')
+        self.sample('Short swipe left')
+        self.wait_mode('topics')
+        self.sample('Swipe left')
+        rs = self.wait_mode('sessions')
+        self.assertTrue(self.s.has('session-' + self.session, rs), 'the instant swipe did not show Sessions')
+        self.s.act('press', 'sidebar-view-topics')
+        self.wait_mode('topics')
+        self.config.write_text('sidebar:\n  agents: false\n  animate_switching: true\n')
+        self.s.wait_rows(lambda rs: self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').startswith('Sidebar swipe input animated '),
+                         'the animation did not turn back on')
+        self.sample('Begin swipe left')
+        self.s.wait_rows(lambda rs: self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').endswith(' 0.400'),
+                         'reenabling animation did not restore the swipe preview')
         self.sample('Cancel current swipe')
         self.wait_mode('topics')
 

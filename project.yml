@@ -117,7 +117,7 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: Sources/Muxify/Muxify-Bridging-Header.h
         LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/vendor/ghostty/lib
         OTHER_LDFLAGS: "-lghostty -lc++ -framework Carbon"
-  # The `muxify` CLI, built in the same Xcode build as the app, so MuxifyCore compiles once.
+  # The CLI, built in the same Xcode build as the app, so MuxifyCore compiles once.
   # The package's own MuxifyCLIMain builds the same binary for `swift build`.
   MuxifyCLITool:
     type: tool
@@ -129,6 +129,8 @@ targets:
         product: MuxifyCLI
     settings:
       base:
-        PRODUCT_NAME: muxify
+        # Package tests also build `muxify`. Use a distinct intermediate name;
+        # bundle-cli.sh installs this tool into the app as bin/muxify.
+        PRODUCT_NAME: muxify-app-cli
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual

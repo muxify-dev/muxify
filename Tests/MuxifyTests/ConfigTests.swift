@@ -229,11 +229,14 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(try load("").sidebar, Config.Sidebar(topics: true, sessions: true))
         XCTAssertEqual(try load("").sidebar.agents, .init(nil), "the View menu decides")
         XCTAssertNil(try load("").sidebar.panes, "the View menu decides")
-        let config = try load("sidebar:\n  topics: false\n  sessions: true\n  agents: false\n  panes: true")
-        XCTAssertEqual(config.sidebar, Config.Sidebar(topics: false, sessions: true, agents: .init(false), panes: true))
+        XCTAssertTrue(try load("").sidebar.animateSwitching)
+        let config = try load("sidebar:\n  topics: false\n  sessions: true\n  animate_switching: false\n  agents: false\n  panes: true")
+        XCTAssertEqual(config.sidebar, Config.Sidebar(topics: false, sessions: true, animateSwitching: false, agents: .init(false), panes: true))
+        XCTAssertTrue(try load("sidebar:\n  animate_switching: true").sidebar.animateSwitching)
         XCTAssertTrue(config.problems.isEmpty)
         XCTAssertTrue(Config.template.contains("#   topics: true"))
         XCTAssertTrue(Config.template.contains("#   sessions: true"))
+        XCTAssertTrue(Config.template.contains("#   animate_switching: true"))
         XCTAssertTrue(Config.template.contains("#   agents: true"))
         XCTAssertTrue(Config.template.contains("#   panes: false"))
     }
@@ -257,9 +260,10 @@ final class ConfigTests: XCTestCase {
 
     func testSidebarWrongTypesReportProblemsAndKeepDefaults() throws {
         for value in ["1", "null", "[]", "wrong", "\"false\"", "'true'"] {
-            let config = try load("sidebar:\n  topics: \(value)\n  sessions: \(value)\n  agents: \(value)\n  panes: \(value)")
+            let config = try load("sidebar:\n  topics: \(value)\n  sessions: \(value)\n  agents: \(value)\n  panes: \(value)\n  animate_switching: \(value)")
             XCTAssertEqual(config.sidebar, Config.Sidebar(), value)
-            XCTAssertEqual(config.problems.count, 4, value)
+            XCTAssertEqual(config.problems.count, 5, value)
+            XCTAssertEqual(config.problems.last?.message, "sidebar.animate_switching: expected a boolean", value)
             XCTAssertEqual(config.problems.first?.line, 2, value)
         }
         XCTAssertEqual(try load("sidebar: []").problems.count, 1)

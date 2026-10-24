@@ -734,6 +734,19 @@ sidebar:
     sessions: all
 ```
 
+### Switching Topics and Sessions
+
+Switch views with the Topics/Sessions buttons or a two-finger horizontal swipe over
+their section. `sidebar.animate_switching` defaults to `true`. Set it to `false`
+to switch instantly, without the sliding preview, spring, scale or fade. Buttons
+and swipes still work, and both lists keep their scroll positions and opened cards.
+Changes apply live. macOS Reduce Motion also disables these animations.
+
+```yaml
+sidebar:
+  animate_switching: false
+```
+
 ### Card titles
 
 A long Topic or Session card title wraps onto as many lines as it needs, so it always shows whole.

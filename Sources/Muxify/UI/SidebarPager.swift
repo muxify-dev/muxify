@@ -2,32 +2,36 @@ import AppKit
 import SwiftUI
 import MuxifyCore
 
-/// PROTOTYPE: does a finger-following, Arc-style pager feel right between the existing Sidebar views?
-/// Both lists stay mounted so their scroll positions and opened cards survive a swipe. Only the committed
-/// mode uses the app's existing preference; the gesture and its preview live entirely in memory.
-struct SidebarSwipePrototype<Topics: View, Sessions: View>: View {
+/// Switches the Sidebar between Topics and Sessions with buttons or horizontal swipes.
+/// Both lists stay mounted to preserve their scroll positions and opened cards. Only the committed
+/// mode is persisted; the gesture and its preview stay in memory.
+struct SidebarPager<Topics: View, Sessions: View>: View {
     @Binding private var mode: SidebarMode
+    private let animateSwitching: Bool
     private let acceptsGestures: Bool
     private let topics: Topics
     private let sessions: Sessions
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var position: CGFloat
     @State private var origin: CGFloat?
-    @State private var input = SidebarSwipeProbe()
+    @State private var inputReference = SidebarSwipeInputReference()
 
-    init(mode: Binding<SidebarMode>, acceptsGestures: Bool,
+    init(mode: Binding<SidebarMode>, animateSwitching: Bool, acceptsGestures: Bool,
          @ViewBuilder topics: () -> Topics, @ViewBuilder sessions: () -> Sessions) {
         _mode = mode
+        self.animateSwitching = animateSwitching
         self.acceptsGestures = acceptsGestures
         _position = State(initialValue: mode.wrappedValue == .topics ? 0 : 1)
         self.topics = topics()
         self.sessions = sessions()
     }
 
+    private var motionEnabled: Bool { animateSwitching && !reduceMotion }
+    private var displayedPosition: CGFloat { motionEnabled ? position : (mode == .topics ? 0 : 1) }
+
     var body: some View {
         GeometryReader { proxy in
             let width = max(1, proxy.size.width)
-            let displayedPosition = reduceMotion ? (mode == .topics ? CGFloat(0) : 1) : position
             VStack(spacing: 0) {
                 selector
                 ZStack(alignment: .topLeading) {
@@ -42,8 +46,9 @@ struct SidebarSwipePrototype<Topics: View, Sessions: View>: View {
                 .contentShape(Rectangle())
             }
             .background {
-                SidebarSwipeInput(probe: input, isEnabled: acceptsGestures, onChange: { translation in
+                SidebarSwipeInput(reference: inputReference, isEnabled: acceptsGestures, onChange: { translation in
                     if origin == nil { origin = mode == .topics ? 0 : 1 }
+                    guard motionEnabled else { return }
                     let proposed = (origin ?? 0) - translation / width
                     // A little resistance at either end, rather than wrapping the two views around.
                     position = proposed < 0 ? rubberBand(proposed) : proposed > 1 ? 1 + rubberBand(proposed - 1) : proposed
@@ -62,6 +67,7 @@ struct SidebarSwipePrototype<Topics: View, Sessions: View>: View {
             origin = nil
             settle(newMode)
         }
+        .onChange(of: motionEnabled) { _, _ in settle(mode) }
     }
 
     private var selector: some View {
@@ -75,7 +81,7 @@ struct SidebarSwipePrototype<Topics: View, Sessions: View>: View {
                 RoundedRectangle(cornerRadius: 5)
                     .fill(Color.primary.opacity(0.1))
                     .frame(width: half)
-                    .offset(x: min(1, max(0, position)) * (half + 4))
+                    .offset(x: min(1, max(0, displayedPosition)) * (half + 4))
             }
         }
         .padding(6)
@@ -85,11 +91,12 @@ struct SidebarSwipePrototype<Topics: View, Sessions: View>: View {
             if TestDriver.isRunning {
                 Color.clear.frame(width: 1, height: 1)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Sidebar swipe input " + String(format: "%.3f", Double(position)))
+                    .accessibilityLabel("Sidebar swipe input " + (motionEnabled ? "animated " : "instant ")
+                                        + String(format: "%.3f", Double(displayedPosition)))
                     .accessibilityIdentifier("sidebar-swipe-input")
                     .accessibilityActions {
                         ForEach(SidebarSwipeInputView.verificationNames, id: \.self) { name in
-                            Button(name) { input.view?.verify(name) }
+                            Button(name) { inputReference.view?.verify(name) }
                         }
                     }
             }
@@ -113,8 +120,8 @@ struct SidebarSwipePrototype<Topics: View, Sessions: View>: View {
     private func page<Content: View>(_ content: Content, mode target: SidebarMode, index: CGFloat, width: CGFloat) -> some View {
         content
             .frame(width: width)
-            .scaleEffect(reduceMotion ? 1 : 1 - min(1, abs(position - index)) * 0.025)
-            .opacity(reduceMotion ? 1 : 1 - min(1, abs(position - index)) * 0.18)
+            .scaleEffect(motionEnabled ? 1 - min(1, abs(position - index)) * 0.025 : 1)
+            .opacity(motionEnabled ? 1 - min(1, abs(position - index)) * 0.18 : 1)
             .allowsHitTesting(mode == target && origin == nil)
             .accessibilityHidden(mode != target)
     }
@@ -130,28 +137,28 @@ struct SidebarSwipePrototype<Topics: View, Sessions: View>: View {
     }
 
     private func settle(_ target: SidebarMode) {
-        withAnimation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.86)) {
+        withAnimation(motionEnabled ? .spring(response: 0.34, dampingFraction: 0.86) : nil) {
             position = target == .topics ? 0 : 1
         }
     }
 }
 
-/// A weak link for the sandbox's input samples, without retaining the AppKit view through its callbacks.
-private final class SidebarSwipeProbe {
+/// A weak reference for sandbox verification, without retaining the AppKit view through its callbacks.
+private final class SidebarSwipeInputReference {
     weak var view: SidebarSwipeInputView?
 }
 
 /// List scroll views own vertical scrolling. Observe scroll events before AppKit dispatches them, and keep
 /// only a precise, horizontally locked gesture that began inside this panel in this App Window.
 private struct SidebarSwipeInput: NSViewRepresentable {
-    let probe: SidebarSwipeProbe
+    let reference: SidebarSwipeInputReference
     let isEnabled: Bool
     let onChange: (CGFloat) -> Void
     let onEnd: (CGFloat, CGFloat, Bool) -> Void
 
     func makeNSView(context: Context) -> SidebarSwipeInputView {
         let view = SidebarSwipeInputView()
-        probe.view = view
+        reference.view = view
         return view
     }
 
@@ -265,7 +272,7 @@ private final class SidebarSwipeInputView: NSView {
     }
 
     #if DEBUG
-    /// The existing verify driver reaches the same axis lock, tracking and release path without moving the user's
+    /// The verify driver reaches the same axis lock, tracking and release path without moving the user's
     /// pointer or taking focus. This input element exists only inside a throwaway Sandbox, never in a normal launch.
     private static let verificationSamples: [(name: String, x: CGFloat, y: CGFloat, duration: TimeInterval, cancelled: Bool)] = [
         ("Swipe left", -0.65, 0, 0.3, false), ("Swipe right", 0.65, 0, 0.3, false),

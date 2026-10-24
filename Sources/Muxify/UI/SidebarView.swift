@@ -57,8 +57,9 @@ private struct WorkSection: View {
     var body: some View {
         let model = store.topics
         if model.showsToggle {
-            SidebarSwipePrototype(mode: Binding(get: { model.mode }, set: { store.sidebarMode = $0 }),
-                                  acceptsGestures: !store.palette.isOpen && store.currentGitView == nil) {
+            SidebarPager(mode: Binding(get: { model.mode }, set: { store.sidebarMode = $0 }),
+                         animateSwitching: store.config.sidebar.animateSwitching,
+                         acceptsGestures: !store.palette.isOpen && store.currentGitView == nil) {
                 TopicsSection(store: store, model: model)
             } sessions: {
                 SessionsSection(store: store)
