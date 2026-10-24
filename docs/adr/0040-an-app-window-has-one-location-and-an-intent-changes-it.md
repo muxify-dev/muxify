@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # An App Window has one Location, and an Intent changes it

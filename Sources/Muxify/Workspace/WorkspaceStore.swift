@@ -110,12 +110,8 @@ final class WorkspaceStore {
     /// Puts a Topic with no live Session in place of the terminal and makes it the Active Topic: an empty Topic
     /// offers Add a Session, a Dormant or Settled one offers Reopen and Start Fresh. Selecting a Window ends it.
     func showEmptyTopic(_ id: String) {
-        let entering = topicSelection.emptyTopicID != id
-        topicSelection.showsEmptyNoTopic = false
-        topicSelection.emptyTopicID = id
+        route(.go(.emptyTopic(.topic(id))))
         sidebarMode = .topics
-        updateTopicSelection()
-        if entering { readTopicsOnVisit([id]) }
         if !palette.isOpen { surface?.window?.makeFirstResponder(nil) }
     }
 
@@ -127,7 +123,6 @@ final class WorkspaceStore {
         }
     }
     private var topicEditGeneration = 0
-    private var pendingNextTopic: TopicGroupID?
     @ObservationIgnored private var topicRequests: [EnvironmentRequest] = []
 
     /// Move for the selected Window's Session, in the Command Palette's view. Nothing happens with Topics off.
@@ -206,13 +201,8 @@ final class WorkspaceStore {
         if let window = entryWindow(of: id) { select(window) }
         else if case .topic(let topicID) = id { showEmptyTopic(topicID) }
         else {
-            topicSelection.showsEmptyNoTopic = true
-            topicSelection.emptyTopicID = nil
-            selectedWindowID = nil
-            pendingSelection = nil
-            recoveryPending = false
+            route(.go(.emptyTopic(.noTopic)))
             sidebarMode = .topics
-            updateTopicSelection()
             if !palette.isOpen { terminalHost.window?.makeFirstResponder(nil) }
         }
     }
@@ -636,7 +626,6 @@ final class WorkspaceStore {
     }
 
     func forgetTopic(_ id: String, choices: [TopicSettleSession], worktrees: [String]) {
-        if topicSelection.emptyTopicID == id { topicSelection.emptyTopicID = nil }
         perform(EnvironmentRequest(.forget(choices: choices, worktrees: worktrees), target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id)))
     }
 
@@ -714,7 +703,6 @@ final class WorkspaceStore {
         let browserCommands = pendingBrowserCommands
         changingTopic = true
         topicEditGeneration += 1
-        if case .membership(let windowID?) = presentation { pendingSelection = (windowID, Date().addingTimeInterval(5), false) }
         let remote = isRemote && !onLocalServer
         // A Remote Environment's client is on the remote server; the local terminal's tty names nothing there, and
         // no client of the Local server shows this App Window.
@@ -781,7 +769,6 @@ final class WorkspaceStore {
                 break
             }
         case .failed(let failure):
-            pendingSelection = nil
             if case .newSession(let directory) = presentation { pendingOpenings[directory] = nil }
             if case .newTopic = presentation, failure.phase == .nothingChanged, ownsPalette {
                 newTopicFailure = "Could not save the Topic. \(failure.message)"
@@ -794,17 +781,16 @@ final class WorkspaceStore {
         case .changed(let change):
             switch presentation {
             case .membership(let windowID):
-                if let windowID { selectedWindowID = windowID }
+                if let id = windowID.flatMap(WindowID.init(rawValue:)) { route(.result(.window(id), lastStartedRead: lastStartedRead)) }
             case .settle(let next):
                 if ownsPalette { palette.close(restoringFocus: false) }
-                pendingNextTopic = next
+                route(.settled(next: next))
             case .move(let source, let tab):
                 if case .window(let destination)? = change.shown {
                     if let tab, source != destination.rawValue {
                         browser(for: source).moveTab(tab, to: browser(for: destination.rawValue))
                     }
-                    pendingSelection = (destination.rawValue, Date().addingTimeInterval(5), false)
-                    selectedWindowID = destination.rawValue
+                    route(.result(.window(destination), lastStartedRead: lastStartedRead))
                 }
             case .snooze, .unsnooze, .wake, .zen:
                 break
@@ -815,16 +801,14 @@ final class WorkspaceStore {
                     showEmptyTopic(id)
                     if case .newTopic = presentation, ownsPalette { presentAddSession(toTopic: id) }
                 case .window(let id)?:
-                    pendingSelect = nil
-                    pendingSelection = (id.rawValue, Date().addingTimeInterval(5), false)
-                    selectedWindowID = id.rawValue
+                    route(.result(.window(id), lastStartedRead: lastStartedRead))
                     // A new tmux Window or Session names no Topic and leaves the Sidebar in its mode.
                     if change.topicID != nil { sidebarMode = .topics }
                     moveFocusIntoWindow()
                     if surface == nil || surface?.processExited == true,
                        let window = windows.first(where: { $0.id == id.rawValue })
                         ?? TmuxServer.app.snapshot().windows.first(where: { $0.id == id.rawValue }) {
-                        attach(to: Target(window))
+                        route(.attach(id), target: Target(window))
                     }
                 case .emptyTopic?, nil:
                     break
@@ -863,8 +847,7 @@ final class WorkspaceStore {
         alert.runModal()
     }
 
-    /// Every way of reaching a Window ends in `selectedWindowID`, so this is the one place a visit is recorded.
-    /// The snapshot that first lists the Window records it too, when the selection came before the Windows.
+    /// A Location can name a Window before a read lists it, so that first read records the visit too.
     private func recordVisit() {
         guard let window = selectedWindow else { return }
         let group: TopicGroupID = window.topicID.map { id in
@@ -892,13 +875,11 @@ final class WorkspaceStore {
     @ObservationIgnored private lazy var topicsCache = ObservedCache(expiry: \.changesAt) { [unowned self] in buildTopics() }
 
     private func buildTopics() -> TopicsModel {
-        var selection = topicSelection
-        selection.windowID = selectedWindowID
         var config = self.config
         // Topic records and SessionPaths are on this Mac; a Remote App Window shows Sessions only.
         if isRemote { config.sidebar.topics = false }
         return TopicsModel(records: topicWatcher.records, windows: windows, config: config,
-                           selection: selection, mode: sidebarMode, groups: topicGroups, agents: agents,
+                           selection: topicSelection, location: location, mode: sidebarMode, groups: topicGroups, agents: agents,
                            panes: panesVisible ? panes : nil, zen: isRemote ? nil : topicWatcher.zen)
     }
 
@@ -944,28 +925,30 @@ final class WorkspaceStore {
     private(set) var agents: [Agent] = []
     private(set) var panes: [TmuxPane] = []
     private(set) var serverRunning = true
-    private(set) var selectedWindowID: String? {
-        didSet {
-            // A selected Window ends the Empty Topic; a Window that goes away, as when the tmux server stops, does not.
-            if selectedWindowID != nil, selectedWindowID != oldValue { topicSelection.emptyTopicID = nil }
-            if selectedWindowID != nil { topicSelection.showsEmptyNoTopic = false }
-            windowRecovery.selected(selectedWindowID)
-            rememberSelection()
-            recordVisit()
-            updateTopicSelection()
-            guard selectedWindowID != oldValue else { return }
-            // Each Window has its own Git View, which stays open or closed,
-            // as it was, while another Window is shown.
-            let previous = oldValue.flatMap { gitViews[$0] }
-            let coveredWindow = previous?.isOpen == true
-            previous?.suspend()
-            if let gitView = selectedWindowID.flatMap({ gitViews[$0] }), gitView.isOpen {
-                gitView.resume()
-            } else if coveredWindow {
-                moveFocusIntoWindow()
-            }
+    private var router = Router()
+    var location: Location? { router.location }
+    var selectedWindowID: String? { location?.windowID?.rawValue }
+    var showsEmptyPage: Bool {
+        if case .emptyTopic = location { return true }
+        return false
+    }
+
+    private func locationChanged(from old: Location?) {
+        rememberSelection()
+        recordVisit()
+        updateTopicSelection()
+        let previousID = old?.windowID?.rawValue
+        guard selectedWindowID != previousID else { return }
+        let previous = previousID.flatMap { gitViews[$0] }
+        let coveredWindow = previous?.isOpen == true
+        previous?.suspend()
+        if let gitView = selectedWindowID.flatMap({ gitViews[$0] }), gitView.isOpen {
+            gitView.resume()
+        } else if coveredWindow {
+            moveFocusIntoWindow()
         }
     }
+
     private(set) var surface: TerminalSurfaceView?
     private(set) var terminalMessage: String?
     private(set) var activeEnvironment: RemoteEnvironment?
@@ -1066,11 +1049,7 @@ final class WorkspaceStore {
     @ObservationIgnored private var consumingOpen = Set<String>()
     @ObservationIgnored private var rememberedWindowID: String?
     @ObservationIgnored private var clientTTY: String?
-    /// A click we sent to tmux that the next snapshots may not reflect yet.
-    private var pendingSelection: (windowID: String, deadline: Date, readsOnArrival: Bool)?
-    /// A Session asked for by name (`muxify session open`) that the snapshot
-    /// may not list yet: Muxify is just launching, or it was just created.
-    @ObservationIgnored private var pendingSelect: (request: SelectRequest, deadline: Date)?
+    @ObservationIgnored private var lastStartedRead = 0
     /// Sessions a SessionPath row is creating, by directory, until a snapshot lists them or a few seconds pass.
     @ObservationIgnored private var pendingOpenings: [Folder: (name: String, deadline: Date)] = [:]
     @ObservationIgnored private var timer: Timer?
@@ -1087,9 +1066,9 @@ final class WorkspaceStore {
     @ObservationIgnored private var isTransitioning = false
     @ObservationIgnored private var reconnectWork: DispatchWorkItem?
     @ObservationIgnored private var reconnectAttempt = 0
-    @ObservationIgnored private var windowRecovery = WindowRecovery()
-    @ObservationIgnored private var recoveryPending = false
     @ObservationIgnored private var attachmentTarget: Target?
+    @ObservationIgnored private var attachmentReadsOnArrival = false
+    @ObservationIgnored private var pendingAttachment: Router.IntentID?
     @ObservationIgnored private var createSessionIfNeeded = true
     @ObservationIgnored private var serverID: String?
     @ObservationIgnored private(set) var homeDirectory = NSHomeDirectory()
@@ -1162,7 +1141,8 @@ final class WorkspaceStore {
 
     /// Reconnect after transport/config changes. Environment clicks instead
     /// open or focus another App Window through the app coordinator.
-    private func transition(to next: RemoteEnvironment?, target: Target? = nil, createSessionIfNeeded: Bool = true) {
+    private func transition(to next: RemoteEnvironment?, target: Target? = nil, createSessionIfNeeded: Bool = true,
+                            readsOnArrival: Bool = false) {
         guard !isShuttingDown else { return }
         receiveHintInput(.reset)
         if next != activeEnvironment {
@@ -1172,6 +1152,7 @@ final class WorkspaceStore {
         }
         activeEnvironment = next
         attachmentTarget = target
+        attachmentReadsOnArrival = readsOnArrival
         self.createSessionIfNeeded = createSessionIfNeeded
         generation = UUID()
         attachmentStatusID = UUID()
@@ -1227,7 +1208,8 @@ final class WorkspaceStore {
         }
         if isRemote {
             environmentStatus = "Connecting to \(environmentName)…"
-            attach(to: attachmentTarget, createSessionIfNeeded: createSessionIfNeeded)
+            route(.attach(attachmentTarget.flatMap { WindowID(rawValue: $0.windowID) }, readsOnArrival: attachmentReadsOnArrival),
+                  target: attachmentTarget, reconnectIfNeeded: false)
         } else {
             environmentStatus = "Local"
             isConnected = true
@@ -1249,22 +1231,17 @@ final class WorkspaceStore {
         readGeneration += 1
         pendingReads = 0
         pendingReadNavigations.removeAll()
+        pendingAttachment = nil
         readSnapshotPending = false
         windows = []
         agents = []
         palette.close(restoringFocus: false)
-        topicSelection.emptyTopicID = nil
-        topicSelection.showsEmptyNoTopic = false
-        pendingNextTopic = nil
-        selectedWindowID = nil
-        windowRecovery = WindowRecovery()
-        recoveryPending = false
+        route(.serverChanged)
+        topicSelection = TopicSelection()
         hasNoSessions = false
         rememberedWindowID = nil
         clientTTY = nil
         serverID = nil
-        pendingSelection = nil
-        pendingSelect = nil
         isRefreshing = false
         refreshAgain = false
         serverRunning = false
@@ -1330,6 +1307,8 @@ final class WorkspaceStore {
             return
         }
         isRefreshing = true
+        lastStartedRead += 1
+        let readNumber = lastStartedRead
         let current = generation
         let topicGeneration = topicEditGeneration
         let readGeneration = self.readGeneration
@@ -1371,7 +1350,7 @@ final class WorkspaceStore {
                     }
                     if self.topicBranches != branches { self.topicBranches = branches }
                     self.paneCommandLines = snapshot.commandLines
-                    self.apply(snapshot, attachIfNeeded: attachIfNeeded)
+                    self.apply(snapshot, readNumber: readNumber, attachIfNeeded: attachIfNeeded)
                 case .failure(let error):
                     self.isConnected = false
                     self.memoryServerID = nil
@@ -1394,7 +1373,7 @@ final class WorkspaceStore {
         refresh()
     }
 
-    private func apply(_ snapshot: TmuxSnapshot, attachIfNeeded: Bool) {
+    private func apply(_ snapshot: TmuxSnapshot, readNumber: Int, attachIfNeeded: Bool) {
         if let serverID, let next = snapshot.serverID, serverID != next {
             clearServerState()
             clientTTY = snapshot.ownClientTTY
@@ -1409,7 +1388,6 @@ final class WorkspaceStore {
             persistWork.removeAll()
             dirtyBrowsers.removeAll()
         }
-        let listedBefore = windows
         if !changingTopic { rememberTopics(in: snapshot) }
         let unresolvedSelectedWindowID = selectedWindow == nil ? selectedWindowID : nil
         if windows != snapshot.windows { windows = snapshot.windows }
@@ -1427,43 +1405,14 @@ final class WorkspaceStore {
         if !isRemote, surface?.processExited == false {
             connection?.updateLocalClient(snapshot.clients.first { $0.tty == ownTTY && !$0.isControl })
         }
-        if recoveryPending, let ownTTY,
-           snapshot.clients.contains(where: { $0.tty == ownTTY && $0.windowID == selectedWindowID }) {
-            recoveryPending = false
+        if case .request(.topic, _)? = router.intent { topicWatcher.reload() }
+        let facts = routingFacts(snapshot: snapshot, allowAttach: attachIfNeeded)
+        if let command = pendingAttachment, facts.ownClientWindow != nil, surface?.processExited == false {
+            pendingAttachment = nil
+            route(.commandFinished(command, .success, lastStartedRead: lastStartedRead), facts: facts)
         }
-
-        if let next = pendingNextTopic {
-            pendingNextTopic = nil
-            recoveryPending = false
-            showTopic(next)
-        } else if topicSelection.showsEmptyNoTopic {
-            recoveryPending = false
-        } else if !changingTopic, attachIfNeeded, surface == nil {
-            rememberedWindowID = snapshot.lastWindowID
-            let last = snapshot.lastWindowID.flatMap { id in snapshot.windows.first { $0.id == id } }
-            let requested = takePendingSelect(in: snapshot.windows)
-            attach(to: (requested ?? last ?? Self.initialWindow(in: snapshot.windows)).map(Target.init))
-        } else if !changingTopic, recoveryPending || windowRecovery.selectionDisappeared(in: windows) {
-            let fallback = windowRecovery.fallback(in: windows, listedBefore: listedBefore)
-            let target = recoveryPending ? selectedWindow ?? fallback : fallback
-            pendingSelection = nil
-            if let target {
-                recoveryPending = true
-                if isRemote, surface == nil || surface?.processExited == true {
-                    transition(to: activeEnvironment, target: Target(target), createSessionIfNeeded: false)
-                    return
-                }
-                switchClient(to: Target(target))
-            } else if !changingTopic {
-                selectedWindowID = nil
-                recoveryPending = false
-                windowRecovery = WindowRecovery()
-            }
-        } else if !changingTopic {
-            followClient(snapshot.clients)
-            if surface != nil, let window = takePendingSelect(in: windows) ?? arrivedEmptyTopicWindow() { select(window) }
-            if surface != nil, let topic = takePendingTopic() { goToTopic(.topic(topic)) }
-        }
+        route(.read(readNumber), facts: facts)
+        if isTransitioning { return }
         updateTopicSelection()
         if let unresolvedSelectedWindowID, selectedWindow?.id == unresolvedSelectedWindowID {
             moveFocusIntoWindow()
@@ -1489,25 +1438,6 @@ final class WorkspaceStore {
             for id in gitViews.keys where !live.contains(id) {
                 gitViews.removeValue(forKey: id)?.close(restoringFocus: false)
             }
-        }
-    }
-
-    /// The sidebar follows whatever window our tmux client is showing.
-    private func followClient(_ clients: [TmuxClient]) {
-        if clientTTY == nil, !isRemote { clientTTY = surface?.ttyName }
-        if let tty = clientTTY, let client = clients.first(where: { $0.tty == tty }) {
-            if let pending = pendingSelection, client.windowID == pending.windowID || Date() > pending.deadline {
-                if pending.readsOnArrival, client.windowID == pending.windowID {
-                    explicitReadVisits.enter(windowID: client.windowID, windows: windows)
-                }
-                pendingSelection = nil
-            }
-            if client.windowID == selectedWindowID { recoveryPending = false }
-            if pendingSelection == nil, selectedWindowID != client.windowID {
-                selectedWindowID = client.windowID
-            }
-        } else if surface == nil, let selectedWindowID, !windows.contains(where: { $0.id == selectedWindowID }) {
-            self.selectedWindowID = nil
         }
     }
 
@@ -1545,23 +1475,27 @@ final class WorkspaceStore {
     }
 
     /// Starts our tmux client on `target`, or a fresh session if there is none.
-    private func attach(to target: Target?, readsOnArrival: Bool = false, createSessionIfNeeded: Bool = true) {
+    private func attach(to target: Target?, intent: Router.IntentID, createSessionIfNeeded: Bool = true) {
         let args = target.map { ["-u", "attach-session", "-t", $0.tmuxTarget] }
             ?? ["-u", "new-session", "-A", "-s", "main", "-c", NSHomeDirectory()]
         guard let connection, let command = try? connection.terminalCommand(args, target: target?.tmuxTarget, createSessionIfNeeded: createSessionIfNeeded),
               let view = TerminalSurfaceView(command: command, workingDirectory: isRemote ? nil : target?.path, delegate: self)
         else {
             terminalMessage = "Could not start the terminal."
+            route(.commandFinished(intent, .failure, lastStartedRead: lastStartedRead))
             return
         }
         connection.updateLocalClient(nil)
-        surface?.close()
+        if let previous = pendingAttachment {
+            route(.commandFinished(previous, .failure, lastStartedRead: lastStartedRead))
+        }
+        pendingAttachment = intent
+        let oldSurface = surface
         surface = view
+        oldSurface?.close()
         clientTTY = nil
         terminalMessage = nil
         hasNoSessions = false
-        selectedWindowID = target?.windowID
-        if let target { pendingSelection = (target.windowID, Date().addingTimeInterval(3), readsOnArrival) }
         terminalHost.show(view)
         moveFocusIntoWindow()
         let current = generation
@@ -1573,17 +1507,15 @@ final class WorkspaceStore {
 
     func reattach() {
         if isRemote { reconnectAttempt = 0; transition(to: activeEnvironment); return }
-        attach(to: (selectedWindow ?? Self.initialWindow(in: windows)).map(Target.init))
+        let target = (selectedWindow ?? Self.initialWindow(in: windows)).map(Target.init)
+        route(.attach(target.flatMap { WindowID(rawValue: $0.windowID) }), target: target)
     }
 
     func select(_ window: TmuxWindow, onFailure: ((Error) -> Void)? = nil) {
         guard windows.contains(where: { $0.id == window.id && $0.sourceID == window.sourceID }) else { return }
-        if topicSelection.emptyTopicID != nil || topicSelection.showsEmptyNoTopic {
-            topicSelection.emptyTopicID = nil
-            topicSelection.showsEmptyNoTopic = false
-            updateTopicSelection()
-        }
-        switchClient(to: Target(window), onFailure: onFailure)
+        guard connection != nil, !isTransitioning, !isRemote || isConnected,
+              let id = WindowID(rawValue: window.id) else { return }
+        route(.go(.window(id), readsOnArrival: true), onFailure: onFailure)
     }
 
     /// Ghostty's numbered and last tab actions. Only the selected Session's
@@ -1599,42 +1531,8 @@ final class WorkspaceStore {
 
     /// Shows what a `muxify://select` URL names (`muxify session open`, `window open`, `topic open`).
     func select(_ request: SelectRequest) {
-        pendingSelect = (request, Date().addingTimeInterval(5))
-        // Before the terminal exists, the first snapshot attaches to it.
-        guard started, surface != nil else { return }
-        if let window = takePendingSelect(in: windows) { select(window) } else { refresh() }
-    }
-
-    /// The requested Session's or Window's Window once a snapshot lists it. The request is dropped when found, or
-    /// after a few seconds.
-    private func takePendingSelect(in windows: [TmuxWindow]) -> TmuxWindow? {
-        guard let pending = pendingSelect else { return nil }
-        let window: TmuxWindow?
-        switch pending.request {
-        case .session(let name):
-            window = windows.first { $0.sessionName == name && $0.isActive } ?? windows.first { $0.sessionName == name }
-        case .window(let id): window = windows.first { $0.id == id }
-        case .topic: return nil
-        }
-        if window != nil || Date() > pending.deadline { pendingSelect = nil }
-        return window
-    }
-
-    /// The Session that this read first lists in the Empty Topic the user looks at. Another process made it, so the
-    /// Topic's view goes on to it, as it does when Add a Session makes one, and not back to the Window shown before.
-    private func arrivedEmptyTopicWindow() -> TmuxWindow? {
-        guard pendingSelection == nil, let id = topicSelection.emptyTopicID else { return nil }
-        return entryWindow(of: .topic(id))
-    }
-
-    /// The requested Topic, taken with a snapshot after the URL: the command line may have made the Topic and its
-    /// Sessions a moment before, and `goToTopic` Reopens a Dormant Topic whose Sessions this app does not list.
-    private func takePendingTopic() -> String? {
-        guard let pending = pendingSelect, case .topic(let id) = pending.request else { return nil }
-        topicWatcher.reload()
-        let found = topicWatcher.records.contains { $0.id == id && $0.settledAt == nil }
-        if found || Date() > pending.deadline { pendingSelect = nil }
-        return found ? id : nil
+        route(.request(request, at: Date()))
+        if started { refresh() }
     }
 
     /// Switches to the Agent's Window with its Pane active. The Pane is
@@ -1667,7 +1565,7 @@ final class WorkspaceStore {
 
     func canChangeRead(_ change: ReadChange, in target: ReadPlan.Place?) -> Bool {
         guard let target, !isTransitioning, pendingReadNavigations.isEmpty,
-              pendingSelection == nil else { return false }
+              router.intent == nil else { return false }
         if isConnected, pendingReads > 0 || readSnapshotPending { return false }
         let records = isRemote ? [] : topicWatcher.records
         if case .topic(let id) = target, records.contains(where: { $0.id == id }) { return true }
@@ -1680,7 +1578,7 @@ final class WorkspaceStore {
         let visits = canWriteAgentRead ? unreadChanges(panes) : []
         if !canWriteAgentRead {
             explicitReadVisits = AgentReadVisits()
-            unreadVisit = topicSelection.emptyTopicID == nil && NSApp.isActive && terminalHost.window?.isKeyWindow == true ? selectedWindowID : nil
+            unreadVisit = !showsEmptyPage && NSApp.isActive && terminalHost.window?.isKeyWindow == true ? selectedWindowID : nil
         }
         // Earlier visits must not clear a later explicit mark, so they go to tmux before the request. They go also
         // when the request cannot start, because `unreadChanges` already counts them as written.
@@ -1689,7 +1587,7 @@ final class WorkspaceStore {
 
     func readActiveTopicOnEntry() {
         guard NSApp.isActive, terminalHost.window?.isKeyWindow == true,
-              let id = topicSelection.emptyTopicID else { return }
+              case .emptyTopic(.topic(let id)) = location else { return }
         readTopicsOnVisit([id])
     }
 
@@ -1721,7 +1619,7 @@ final class WorkspaceStore {
     }
 
     private func unreadChanges(_ panes: [TmuxPane]) -> [[String]] {
-        let lookingAt = topicSelection.emptyTopicID == nil && NSApp.isActive && terminalHost.window?.isKeyWindow == true ? selectedWindowID : nil
+        let lookingAt = !showsEmptyPage && NSApp.isActive && terminalHost.window?.isKeyWindow == true ? selectedWindowID : nil
         let entering = lookingAt != unreadVisit
         let topic = entering ? lookingAt.flatMap { id in windows.first { $0.id == id }?.topicID } : nil
         unreadVisit = lookingAt
@@ -1749,16 +1647,85 @@ final class WorkspaceStore {
         return true
     }
 
+    private func routingFacts(snapshot: TmuxSnapshot? = nil, allowAttach: Bool = false) -> Router.Facts {
+        let groups = Set((topics.rows + topics.snoozedRows).map(\.id)).union([.noTopic])
+        let entries = Dictionary(uniqueKeysWithValues: groups.compactMap { group -> (TopicGroupID, WindowID)? in
+            guard let window = entryWindow(of: group), let id = WindowID(rawValue: window.id) else { return nil }
+            return (group, id)
+        })
+        let tty = clientTTY ?? (isRemote ? nil : surface?.ttyName)
+        let client = snapshot?.clients.first { $0.tty == tty && !$0.isControl }
+        return Router.Facts(windows: windows, ownClientWindow: client.flatMap { WindowID(rawValue: $0.windowID) },
+                            records: topicWatcher.records, entryWindows: entries,
+                            hasTerminal: surface != nil && surface?.processExited == false,
+                            allowAttach: allowAttach, rememberedWindow: snapshot?.lastWindowID.flatMap(WindowID.init(rawValue:)),
+                            initialWindow: Self.initialWindow(in: windows).flatMap { WindowID(rawValue: $0.id) }, now: Date())
+    }
+
+    private func route(_ event: Router.Event, facts: Router.Facts? = nil, target: Target? = nil,
+                       reconnectIfNeeded: Bool = true, onFailure: ((Error) -> Void)? = nil) {
+        let old = location
+        let facts = facts ?? routingFacts()
+        let effects = router.handle(event, facts)
+        if old != location { locationChanged(from: old) }
+        for effect in effects {
+            switch effect {
+            case .visit(let location):
+                rememberSelection()
+                recordVisit()
+                updateTopicSelection()
+                if case .emptyTopic(.topic(let id)) = location, old != location { readTopicsOnVisit([id]) }
+            case .enterRead(let id):
+                explicitReadVisits.enter(windowID: id.rawValue, windows: windows)
+            case .requestTopic(let group):
+                goToTopic(group)
+            case .switchClient(let id, let intent):
+                if let destination = windows.first(where: { $0.id == id.rawValue }).map(Target.init)
+                    ?? target.flatMap({ $0.windowID == id.rawValue ? $0 : nil }) {
+                    executeSwitch(to: destination, intent: intent, onFailure: onFailure)
+                }
+            case .attach(let id, let intent):
+                let destination = id.flatMap { id in
+                    windows.first(where: { $0.id == id.rawValue }).map(Target.init)
+                        ?? target.flatMap { $0.windowID == id.rawValue ? $0 : nil }
+                }
+                if isRemote, !isConnected, reconnectIfNeeded {
+                    let readsOnArrival: Bool
+                    if case .window(let pending) = router.intent, pending.id == intent {
+                        readsOnArrival = pending.readsOnArrival
+                    } else {
+                        readsOnArrival = false
+                    }
+                    transition(to: activeEnvironment, target: destination, createSessionIfNeeded: false,
+                               readsOnArrival: readsOnArrival)
+                } else {
+                    attach(to: destination, intent: intent, createSessionIfNeeded: isRemote ? createSessionIfNeeded : true)
+                }
+            }
+        }
+    }
+
     private func switchClient(to target: Target, onFailure: ((Error) -> Void)? = nil) {
-        guard connection != nil, !isTransitioning, !isRemote || isConnected else { return }
-        let previousWindowID = selectedWindowID
-        let previousTopicSelection = topicSelection
-        selectedWindowID = target.windowID
-        pendingSelection = (target.windowID, Date().addingTimeInterval(isRemote ? 10 : 2), false)
+        guard connection != nil, !isTransitioning, !isRemote || isConnected,
+              let id = WindowID(rawValue: target.windowID) else { return }
+        route(.go(.window(id), readsOnArrival: true), target: target, onFailure: onFailure)
+    }
+
+    private func executeSwitch(to target: Target, intent: Router.IntentID, onFailure: ((Error) -> Void)? = nil) {
         moveFocusIntoWindow()
         guard let surface, !surface.processExited, let tty = clientTTY ?? (isRemote ? nil : surface.ttyName) else {
-            if isRemote { return }
-            attach(to: target, readsOnArrival: true)
+            if isRemote {
+                let readsOnArrival: Bool
+                if case .window(let pending) = router.intent, pending.id == intent {
+                    readsOnArrival = pending.readsOnArrival
+                } else {
+                    readsOnArrival = false
+                }
+                transition(to: activeEnvironment, target: target, createSessionIfNeeded: false,
+                           readsOnArrival: readsOnArrival)
+            } else {
+                attach(to: target, intent: intent)
+            }
             return
         }
         clientTTY = tty
@@ -1766,15 +1733,12 @@ final class WorkspaceStore {
         pendingReadNavigations.insert(navigation)
         runAsync(["switch-client", "-c", tty, "-t", target.tmuxTarget]) { [weak self] result in
             guard let self, self.pendingReadNavigations.remove(navigation) != nil else { return }
-            if case .failure(let error) = result {
-                if self.pendingSelection?.windowID == target.windowID {
-                    self.pendingSelection = nil
-                    self.selectedWindowID = previousWindowID
-                    self.topicSelection = previousTopicSelection
-                }
+            switch result {
+            case .success:
+                self.route(.commandFinished(intent, .success, lastStartedRead: self.lastStartedRead))
+            case .failure(let error):
+                self.route(.commandFinished(intent, .failure, lastStartedRead: self.lastStartedRead))
                 onFailure?(error)
-            } else {
-                self.explicitReadVisits.enter(windowID: target.windowID, windows: self.windows)
             }
             self.refresh()
         }
@@ -1825,8 +1789,7 @@ final class WorkspaceStore {
     /// Makes the Terminal the first responder. A hidden Terminal never takes Focus.
     func focusTerminal() {
         DispatchQueue.main.async { [weak self] in
-            guard let self, let surface, panelLayout.shows(.terminal), topics.emptyTopic == nil,
-                  !topicSelection.showsEmptyNoTopic, !palette.isOpen else { return }
+            guard let self, let surface, panelLayout.shows(.terminal), !showsEmptyPage, !palette.isOpen else { return }
             surface.window?.makeFirstResponder(surface)
         }
     }
@@ -2563,6 +2526,10 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
         // A close request (e.g. cmd+w) while tmux is still attached: keep the client.
         guard view.processExited else { return }
         connection?.updateLocalClient(nil)
+        if let command = pendingAttachment {
+            pendingAttachment = nil
+            route(.commandFinished(command, .failure, lastStartedRead: lastStartedRead))
+        }
         view.close()
         surface = nil
         clientTTY = nil
@@ -2578,7 +2545,8 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
             if remote.exitStatus == 0 {
                 if let snapshot = connection?.closedSnapshot {
                     terminalMessage = nil
-                    apply(snapshot, attachIfNeeded: false)
+                    lastStartedRead += 1
+                    apply(snapshot, readNumber: lastStartedRead, attachIfNeeded: false)
                     // apply may have started a recovery on another connection.
                     if isTransitioning { return }
                     if hasNoSessions {
@@ -2623,12 +2591,4 @@ final class TerminalHostView: NSView {
         view.autoresizingMask = [.width, .height]
         addSubview(view)
     }
-}
-
-/// What a `muxify://select` URL asks the app to show. It waits for a snapshot that lists it, for a few seconds.
-enum SelectRequest {
-    case session(String)
-    case window(String)
-    /// An open Topic's id.
-    case topic(String)
 }

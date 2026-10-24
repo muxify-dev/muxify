@@ -23,7 +23,20 @@ final class AgentsScopeTests: XCTestCase {
         config.sidebar.agentsScope = .init(scope)
         var selection = TopicSelection()
         selection.windowID = selected
-        return TopicsModel(records: records, windows: windows, config: config, selection: selection, mode: mode, agents: agents)
+        return TopicsModel(records: records, windows: windows, config: config, selection: selection,
+                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), mode: mode, agents: agents)
+    }
+
+    func testAnEmptyTopicPageScopesAgentsToItsTopic() {
+        let inBeta = window("@1", session: "$1", topic: "b")
+        var config = Config()
+        config.sidebar.agentsScope = .init(.active)
+        let model = TopicsModel(records: [alpha, beta], windows: [inBeta], config: config,
+                                selection: TopicSelection(), location: .emptyTopic(.topic("a")),
+                                agents: [agent("%1", in: inBeta)])
+        XCTAssertEqual(model.activeTopic, .topic("a"))
+        XCTAssertEqual(model.agentsScope, .topic(.topic("a"), title: "Alpha"))
+        XCTAssertTrue(model.visibleAgents.isEmpty)
     }
 
     func testTopicsModeListsOnlyTheAgentsOfTheActiveTopicOrNoTopic() {
@@ -95,6 +108,7 @@ final class AgentsScopeTests: XCTestCase {
         var selection = TopicSelection()
         selection.windowID = "@1"
         let scoped = TopicsModel(records: [alpha], windows: [first, other], config: config, selection: selection,
+                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window),
                                  mode: .topics, agents: [agent("%1", in: first), agent("%2", in: other)])
         XCTAssertEqual(scoped.mode, .sessions)
         XCTAssertEqual(scoped.visibleAgents.map(\.paneID), ["%1"])

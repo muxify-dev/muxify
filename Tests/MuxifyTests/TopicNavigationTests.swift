@@ -11,7 +11,8 @@ final class TopicNavigationTests: XCTestCase {
 
     private func model(_ records: [TopicRecord], _ windows: [TmuxWindow], _ selection: TopicSelection,
                        now: Date = Date()) -> TopicsModel {
-        TopicsModel(records: records, windows: windows, config: Config(), selection: selection, now: now)
+        TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
+                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), now: now)
     }
 
     private func visit(_ id: String, topic: String, selection: inout TopicSelection) {

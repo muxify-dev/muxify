@@ -297,7 +297,11 @@ final class RouterTests: XCTestCase {
         let pending = try windowIntent(router)
         let facts = Router.Facts(windows: [window("@1"), window("@2"), window("@3")], hasTerminal: false,
                                  allowAttach: true, rememberedWindow: id("@2"), initialWindow: id("@1"))
-        XCTAssertEqual(router.handle(.read(1), facts), [.attach(id("@3"), intent: pending.id)])
+        let attachment = router.handle(.read(1), facts)
+        let attaching = try windowIntent(router)
+        XCTAssertNotEqual(attaching.id, pending.id)
+        XCTAssertNil(attaching.finishedBefore)
+        XCTAssertEqual(attachment, [.attach(id("@3"), intent: attaching.id)])
         for (remembered, target) in [(Optional(id("@2")), id("@2")), (nil, id("@1")), (Optional(id("@9")), id("@1"))] {
             var fresh = Router()
             var next = facts
@@ -311,7 +315,7 @@ final class RouterTests: XCTestCase {
     func testAnEmptyServerCanAttachWithoutAWindowOnlyWhenAllowed() {
         var router = Router()
         XCTAssertTrue(router.handle(.read(1), .init(hasTerminal: false)).isEmpty)
-        XCTAssertEqual(router.handle(.read(2), .init(hasTerminal: false, allowAttach: true)), [.attach(nil, intent: nil)])
+        XCTAssertEqual(router.handle(.read(2), .init(hasTerminal: false, allowAttach: true)), [.attach(nil, intent: 1)])
         XCTAssertNil(router.location)
     }
 
@@ -398,6 +402,148 @@ final class RouterTests: XCTestCase {
         _ = router.handle(.commandFinished(pending.id, .failure, lastStartedRead: 2), facts)
         _ = router.handle(.read(3), facts)
         XCTAssertEqual(router.location, .window(id("@3")))
+    }
+
+    func testAnUntargetedAttachmentPreservesANewerPageWhenItsClientAppears() throws {
+        var router = Router()
+        let effects = router.handle(.read(1), .init(hasTerminal: false, allowAttach: true))
+        let command = try attachmentID(effects)
+        XCTAssertNil(router.intent)
+        var facts = Router.Facts(windows: [window("@1")], records: [TopicRecord(id: "work")])
+        let page = Location.emptyTopic(.topic("work"))
+        _ = router.handle(.go(page), facts)
+        _ = router.handle(.read(2), facts)
+        facts.ownClientWindow = id("@1")
+        _ = router.handle(.commandFinished(command, .success, lastStartedRead: 3), facts)
+        _ = router.handle(.read(3), facts)
+        _ = router.handle(.read(4), facts)
+        XCTAssertEqual(router.location, page)
+        facts.windows.append(window("@2"))
+        facts.ownClientWindow = id("@2")
+        _ = router.handle(.read(5), facts)
+        XCTAssertEqual(router.location, .window(id("@2")))
+    }
+
+    func testAnUntargetedAttachmentInitializesLocationWhenItsClientAppears() throws {
+        var router = Router()
+        let command = try attachmentID(router.handle(.read(1), .init(hasTerminal: false, allowAttach: true)))
+        let facts = Router.Facts(windows: [window("@1")], ownClientWindow: id("@1"))
+        _ = router.handle(.commandFinished(command, .success, lastStartedRead: 2), facts)
+        _ = router.handle(.read(2), facts)
+        _ = router.handle(.read(3), facts)
+        XCTAssertEqual(router.location, .window(id("@1")))
+        XCTAssertNil(router.intent)
+    }
+
+    func testAFallbackAttachmentKeepsTheCLIRequestAndPreservesANewerPage() throws {
+        var router = Router()
+        let now = Date(timeIntervalSince1970: 100)
+        var facts = Router.Facts(windows: [window("@1")], hasTerminal: false, allowAttach: true,
+                                 initialWindow: id("@1"), now: now)
+        _ = router.handle(.request(.window("@9"), at: now), facts)
+        let command = try attachmentID(router.handle(.read(1), facts))
+        XCTAssertEqual(router.intent, .request(.window("@9"), until: now.addingTimeInterval(5)))
+        let page = Location.emptyTopic(.noTopic)
+        _ = router.handle(.go(page), facts)
+        facts.hasTerminal = true
+        _ = router.handle(.read(2), facts)
+        facts.ownClientWindow = id("@1")
+        _ = router.handle(.commandFinished(command, .success, lastStartedRead: 3), facts)
+        _ = router.handle(.read(4), facts)
+        XCTAssertEqual(router.location, page)
+    }
+
+    func testAResolvedCLIWindowOrSessionRequestReadsOnArrival() throws {
+        for request in [SelectRequest.window("@2"), .session("test")] {
+            var router = Router()
+            let facts = Router.Facts(windows: [window("@2")])
+            _ = router.handle(.request(request, at: .distantPast), facts)
+            let command = try windowIntent(router)
+            XCTAssertEqual(router.handle(.commandFinished(command.id, .success, lastStartedRead: 1), facts), [.enterRead(id("@2"))])
+        }
+    }
+
+    func testASuccessfulSupersededCommandStillReadsItsWindowOnce() throws {
+        var router = Router()
+        let facts = Router.Facts(windows: [window("@1"), window("@2")])
+        _ = router.handle(.read(1), .init(windows: facts.windows, ownClientWindow: id("@1")))
+        _ = router.handle(.go(.window(id("@2")), readsOnArrival: true), facts)
+        let second = try windowIntent(router)
+        _ = router.handle(.go(.window(id("@1")), readsOnArrival: true), facts)
+        let latest = try windowIntent(router)
+        XCTAssertEqual(router.handle(.commandFinished(second.id, .success, lastStartedRead: 2), facts), [.enterRead(id("@2"))])
+        XCTAssertEqual(router.intent, .window(latest))
+        XCTAssertEqual(router.location, .window(id("@1")))
+        XCTAssertTrue(router.handle(.commandFinished(second.id, .success, lastStartedRead: 2), facts).isEmpty)
+    }
+
+    func testTopicArrivalNextTopicAndRecoveryReadOnArrival() throws {
+        let facts = Router.Facts(windows: [window("@2")], records: [TopicRecord(id: "work")],
+                                 entryWindows: [.topic("work"): id("@2")])
+        for origin in [Router.Event.go(.emptyTopic(.topic("work"))), .settled(next: .topic("work")),
+                       .result(.window(id("@1")), lastStartedRead: 0)] {
+            var router = Router()
+            _ = router.handle(origin, facts)
+            _ = router.handle(.read(1), facts)
+            let command = try windowIntent(router)
+            XCTAssertEqual(router.handle(.commandFinished(command.id, .success, lastStartedRead: 1), facts), [.enterRead(id("@2"))])
+        }
+    }
+
+    func testAKnownAttachmentWaitsForItsClientAndPreservesANewerPage() throws {
+        var router = Router()
+        var facts = Router.Facts(windows: [window("@1")], hasTerminal: false)
+        let command = try attachmentID(router.handle(.attach(id("@1"), readsOnArrival: true), facts))
+        XCTAssertEqual(router.location, .window(id("@1")))
+        facts.hasTerminal = true
+        _ = router.handle(.read(1), facts)
+        XCTAssertNotNil(router.intent)
+        let page = Location.emptyTopic(.noTopic)
+        _ = router.handle(.go(page), facts)
+        _ = router.handle(.read(2), facts)
+        facts.ownClientWindow = id("@1")
+        XCTAssertEqual(router.handle(.commandFinished(command, .success, lastStartedRead: 3), facts), [.enterRead(id("@1"))])
+        _ = router.handle(.read(4), facts)
+        XCTAssertEqual(router.location, page)
+    }
+
+    func testAnAttachmentFailureRestoresItsOriginAndStopsSuppressingClientMoves() throws {
+        for target in [Optional(id("@1")), nil] {
+            var router = Router()
+            let page = Location.emptyTopic(.noTopic)
+            _ = router.handle(.go(page), .init())
+            let command = try attachmentID(router.handle(.attach(target), .init(hasTerminal: false)))
+            _ = router.handle(.commandFinished(command, .failure, lastStartedRead: 1), .init())
+            XCTAssertEqual(router.location, page)
+            XCTAssertNil(router.intent)
+            _ = router.handle(.read(2), .init(windows: [window("@2")], ownClientWindow: id("@2")))
+            XCTAssertEqual(router.location, .window(id("@2")))
+        }
+    }
+
+    func testAttachingATopicResultStartsANewCompletionBarrier() throws {
+        var router = Router()
+        _ = router.handle(.result(.window(id("@1")), lastStartedRead: 1), .init())
+        var facts = Router.Facts(windows: [window("@1")], hasTerminal: false, allowAttach: true)
+        let command = try attachmentID(router.handle(.read(1), facts))
+        facts.hasTerminal = true
+        _ = router.handle(.read(2), facts)
+        XCTAssertNotNil(router.intent)
+        _ = router.handle(.go(.emptyTopic(.noTopic)), facts)
+        facts.ownClientWindow = id("@1")
+        _ = router.handle(.commandFinished(command, .success, lastStartedRead: 3), facts)
+        _ = router.handle(.read(4), facts)
+        XCTAssertEqual(router.location, .emptyTopic(.noTopic))
+    }
+
+    private func attachmentID(_ effects: [Router.Effect], file: StaticString = #filePath, line: UInt = #line) throws -> Router.IntentID {
+        for effect in effects {
+            if case .attach(_, let command) = effect {
+                return try XCTUnwrap(command, "Every attachment needs a command ID", file: file, line: line)
+            }
+        }
+        XCTFail("Expected an attachment", file: file, line: line)
+        throw NSError(domain: "RouterTests", code: 2)
     }
 
     private func id(_ value: String) -> WindowID { WindowID(rawValue: value)! }

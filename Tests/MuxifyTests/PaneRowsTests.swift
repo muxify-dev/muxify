@@ -19,7 +19,7 @@ final class PaneRowsTests: XCTestCase {
         var selection = TopicSelection()
         selection.select(windowID: windows[0].id, activeTopic: .topic("t"))
         return TopicsModel(records: [TopicRecord(id: "t", title: "T")], windows: windows, config: Config(),
-                           selection: selection, mode: mode,
+                           selection: selection, location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), mode: mode,
                            agents: Agent.list(panes: panes ?? [], windows: windows, ordered: false), panes: panes)
     }
 

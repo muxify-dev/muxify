@@ -22,6 +22,7 @@ public struct Router: Equatable {
 
     public enum Event {
         case go(Location, readsOnArrival: Bool = false)
+        case attach(WindowID?, readsOnArrival: Bool = false)
         case request(SelectRequest, at: Date)
         case result(Location?, lastStartedRead: ReadNumber)
         case settled(next: TopicGroupID?)
@@ -32,7 +33,7 @@ public struct Router: Equatable {
 
     public enum Effect: Equatable {
         case switchClient(WindowID, intent: IntentID)
-        case attach(WindowID?, intent: IntentID?)
+        case attach(WindowID?, intent: IntentID)
         case enterRead(WindowID)
         case visit(Location)
         case requestTopic(TopicGroupID)
@@ -69,7 +70,8 @@ public struct Router: Equatable {
     public private(set) var location: Location?
     public private(set) var intent: Intent?
     private struct ClientCommand: Equatable {
-        let target: WindowID
+        var target: WindowID?
+        let readsOnArrival: Bool
         var finishedBefore: ReadNumber?
     }
 
@@ -87,6 +89,13 @@ public struct Router: Equatable {
         switch event {
         case .go(let destination, let readsOnArrival):
             return go(destination, readsOnArrival: readsOnArrival, facts)
+        case .attach(let target, let readsOnArrival):
+            if let target {
+                var unattached = facts
+                unattached.hasTerminal = false
+                return go(.window(target), readsOnArrival: readsOnArrival, unattached)
+            }
+            return [.attach(nil, intent: makeCommand(nil, readsOnArrival: false))]
         case .request(let request, let at):
             intent = .request(request, until: at.addingTimeInterval(5))
             if case .topic = request { return [] }
@@ -105,21 +114,27 @@ public struct Router: Equatable {
             intent = next.map(Intent.topic)
             return []
         case .commandFinished(let id, let result, let lastStartedRead):
+            guard var command = clientCommands[id], command.finishedBefore == nil else { return [] }
+            var effects: [Effect] = []
             switch result {
-            case .success: clientCommands[id]?.finishedBefore = lastStartedRead
-            case .failure: clientCommands[id] = nil
+            case .success:
+                command.target = command.target ?? facts.ownClientWindow
+                command.finishedBefore = lastStartedRead
+                clientCommands[id] = command
+                if command.readsOnArrival, let target = command.target { effects.append(.enterRead(target)) }
+            case .failure:
+                clientCommands[id] = nil
             }
-            guard case .window(var pending) = intent, pending.id == id else { return [] }
+            guard case .window(var pending) = intent, pending.id == id else { return effects }
             switch result {
             case .failure:
                 setLocation(pending.from, facts)
                 intent = nil
-                return []
             case .success:
                 pending.finishedBefore = lastStartedRead
                 intent = .window(pending)
-                return pending.readsOnArrival ? [.enterRead(pending.target)] : []
             }
+            return effects
         case .read(let number):
             return read(number, facts)
         case .serverChanged:
@@ -147,7 +162,7 @@ public struct Router: Equatable {
             intent = nil
             let destination = facts.entryWindows[group].map(Location.window)
                 ?? .emptyTopic(group.pageGroup)
-            return go(destination, readsOnArrival: false, facts)
+            return go(destination, readsOnArrival: true, facts)
         }
         if case .request(_, let until) = intent {
             if let effects = resolveRequest(facts) { return effects }
@@ -157,7 +172,7 @@ public struct Router: Equatable {
         if let selected = location?.windowID, !facts.windows.contains(where: { $0.id == selected.rawValue }) {
             intent = nil
             if let fallback = fallback(in: facts.windows) {
-                return go(.window(fallback), readsOnArrival: false, facts)
+                return go(.window(fallback), readsOnArrival: true, facts)
             }
             location = nil
             previousWindow = nil
@@ -167,7 +182,7 @@ public struct Router: Equatable {
         rememberInventory(facts)
         if case .emptyTopic(.topic(let topic)) = location, intent == nil {
             if let target = facts.entryWindows[.topic(topic)] {
-                return go(.window(target), readsOnArrival: false, facts)
+                return go(.window(target), readsOnArrival: true, facts)
             }
             if !facts.records.contains(where: { $0.id == topic }) {
                 let destination = facts.ownClientWindow.map(Location.window)
@@ -178,7 +193,7 @@ public struct Router: Equatable {
         if case .window = intent { intent = nil }
         var effects: [Effect] = []
         if intent == nil, !waitingForCommand, let client = facts.ownClientWindow,
-           client != commandedWindow, client != lastClientWindow,
+           (location == nil || client != commandedWindow), client != lastClientWindow,
            facts.windows.contains(where: { $0.id == client.rawValue }) {
             let destination = Location.window(client)
             if location != destination {
@@ -216,33 +231,44 @@ public struct Router: Equatable {
             return [.requestTopic(.topic(id))]
         }
         guard let target, let id = WindowID(rawValue: target.id) else { return nil }
-        return go(.window(id), readsOnArrival: false, facts)
+        return go(.window(id), readsOnArrival: true, facts)
     }
 
     private mutating func attachIfNeeded(_ facts: Facts) -> [Effect] {
         guard !facts.hasTerminal, facts.allowAttach else { return [] }
         if case .emptyTopic = location { return [] }
-        if case .window(let pending) = intent {
+        if case .window(var pending) = intent {
             guard facts.windows.contains(where: { $0.id == pending.target.rawValue }) else { return [] }
+            if pending.finishedBefore != nil {
+                pending = makeIntent(pending.target, from: pending.from, readsOnArrival: pending.readsOnArrival)
+                intent = .window(pending)
+            }
             return [.attach(pending.target, intent: pending.id)]
         }
         let remembered = facts.rememberedWindow.flatMap { id in
             facts.windows.contains(where: { $0.id == id.rawValue }) ? id : nil
         }
-        guard let target = remembered ?? facts.initialWindow else { return [.attach(nil, intent: nil)] }
+        guard let target = remembered ?? facts.initialWindow else { return [.attach(nil, intent: makeCommand(nil, readsOnArrival: false))] }
         if case .request = intent {
             setLocation(.window(target), facts)
-            return [.visit(.window(target)), .attach(target, intent: nil)]
+            return [.visit(.window(target)), .attach(target, intent: makeCommand(target, readsOnArrival: false))]
         }
         return go(.window(target), readsOnArrival: false, facts)
     }
 
     private mutating func makeIntent(_ target: WindowID, from: Location?, readsOnArrival: Bool,
                                      finishedBefore: ReadNumber? = nil) -> WindowIntent {
-        nextIntentID += 1
-        clientCommands[nextIntentID] = ClientCommand(target: target, finishedBefore: finishedBefore)
-        return WindowIntent(id: nextIntentID, target: target, from: from,
+        let id = makeCommand(target, readsOnArrival: readsOnArrival, finishedBefore: finishedBefore)
+        return WindowIntent(id: id, target: target, from: from,
                             readsOnArrival: readsOnArrival, finishedBefore: finishedBefore)
+    }
+
+    private mutating func makeCommand(_ target: WindowID?, readsOnArrival: Bool,
+                                      finishedBefore: ReadNumber? = nil) -> IntentID {
+        nextIntentID += 1
+        clientCommands[nextIntentID] = ClientCommand(target: target, readsOnArrival: readsOnArrival,
+                                                    finishedBefore: finishedBefore)
+        return nextIntentID
     }
 
     private mutating func setLocation(_ destination: Location?, _ facts: Facts) {

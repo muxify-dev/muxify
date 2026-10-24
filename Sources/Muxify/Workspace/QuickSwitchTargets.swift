@@ -176,7 +176,7 @@ extension WorkspaceStore {
                          keybinds: config.keybinds, targets: quickSwitchTargets,
                          sidebar: sidebarShown && sessionsVisible,
                          browser: panelLayout.shows(.browser), terminal: surface != nil && panelLayout.shows(.terminal)
-                            && topics.emptyTopic == nil && !topicSelection.showsEmptyNoTopic, config: config.hints)
+                            && !showsEmptyPage, config: config.hints)
     }
 
     func receiveHintInput(_ event: HintHoldState.Event) {
