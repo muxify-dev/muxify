@@ -8,6 +8,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.hover_labels_sidebar
 """
 
+import json
 import time
 import unittest
 
@@ -30,11 +31,19 @@ class HoverLabelsSidebar(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         project = s.root/'projects/alpha'
         project.mkdir(parents=True)
-        (s.root/'config/muxify/config.yaml').write_text(
+        cls.config = s.root/'config/muxify/config.yaml'
+        cls.default_config = (
             'sessions:\n  paths:\n    - path: ' + str(project) + '\n'
             'sidebar:\n  formats:\n    window:\n'
-            "      title: '#{window_title}#{?#{==:#{window_name}," + STRETCHED + "}, " + SUFFIX + ",}'\n")
+            "      title: '#{window_title}#{?#{==:#{window_name}," + STRETCHED + "}, " + SUFFIX + ",}'\n"
+            "      summary: 'Tooltips default'\n")
+        cls.config.write_text(cls.default_config)
+        topics = s.root/'state/muxify/topics'
+        topics.mkdir(parents=True)
+        (topics/'hover.json').write_text(json.dumps(dict(id='hover', title='Hover labels', slug='hover')))
         s.tmux('new-session', '-d', '-s', 'base', '-n', LONG, '-c', str(project), SHELL)
+        s.tmux('set-option', '-t', 'base', '@muxify_topic', 'hover')
+        cls.session = s.tmux('display-message', '-p', '-t', 'base:', '#{session_id}')
         s.tmux('new-window', '-d', '-t', 'base:', '-n', 'short', '-c', str(project), SHELL)
         s.tmux('new-window', '-d', '-t', 'base:', '-n', STRETCHED, '-c', str(project), SHELL)
         cls.long, cls.short, cls.stretched = s.tmux('list-windows', '-t', 'base:', '-F', '#{window_id}').split()
@@ -46,6 +55,37 @@ class HoverLabelsSidebar(unittest.TestCase):
 
     def setUp(self):
         self.rest_off_rows()
+        self.show_mode('topics')
+        self.config.write_text(self.default_config)
+        self.wait_config('default')
+        self.addCleanup(self.config.write_text, self.default_config)
+
+    def show_mode(self, mode):
+        key = 'sidebar-view-' + mode
+        if self.s.row(key).get('accessibilityValue') != 'selected':
+            self.s.act('press', key)
+        card = 'topic-hover' if mode == 'topics' else 'session-' + self.session
+        self.s.wait_rows(lambda rs: self.s.has(card, rs), 'no card in ' + mode)
+        if 'expanded' not in self.s.row(card).get('accessibilityValue', ''):
+            self.s.act('press', card)
+        self.prefix = 'topic-window-' if mode == 'topics' else 'session-window-'
+        self.s.wait_rows(lambda rs: self.s.has(self.prefix + self.short, rs), 'no Window rows in ' + mode)
+
+    def wait_config(self, value):
+        # The Summary changes in the same Config reload as the tooltip policy.
+        self.s.wait_rows(lambda rs: 'Tooltips ' + value in
+                         self.s.row(self.prefix + self.short, rs).get('accessibilityLabel', ''),
+                         'the tooltip Config did not reload: ' + value)
+
+    def set_tooltips(self, value):
+        self.config.write_text(self.default_config.replace('sidebar:\n', 'sidebar:\n  window_tooltips: ' + value + '\n')
+                               .replace('Tooltips default', 'Tooltips ' + value))
+        self.wait_config(value)
+
+    def assert_no_label_after_rest(self, key):
+        self.s.act('hover', key)
+        time.sleep(DELAY + 0.3)  # Allow a label to open before asserting it stays absent.
+        self.assertIsNone(self.label(self.s.rows()), 'a disabled label opened on ' + key)
 
     def rest_off_rows(self):
         # The Agents header has no label; resting there past the cool-down makes the next label wait its delay. The
@@ -119,6 +159,47 @@ class HoverLabelsSidebar(unittest.TestCase):
                 return
             self.s.wait_rows(moved, 'the label did not move to the next row', seconds=5)
         self.fail('the next row waited its rest delay for its label in %d tries' % TRIES)
+
+    def test_off_suppresses_short_and_truncated_titles_in_both_sidebar_modes(self):
+        self.set_tooltips('off')
+        for mode in ['topics', 'sessions']:
+            with self.subTest(mode=mode):
+                self.show_mode(mode)
+                for window in [self.short, self.long, self.stretched]:
+                    self.assert_no_label_after_rest(self.prefix + window)
+
+    def test_truncated_shows_only_cut_off_formatted_titles_in_both_sidebar_modes(self):
+        self.set_tooltips('truncated')
+        for mode in ['topics', 'sessions']:
+            with self.subTest(mode=mode):
+                self.show_mode(mode)
+                self.assert_no_label_after_rest(self.prefix + self.short)
+                for window, title in [(self.long, LONG), (self.stretched, STRETCHED + ' ' + SUFFIX)]:
+                    self.s.act('hover', self.prefix + window)
+                    texts = self.label(self.s.wait_rows(lambda rs: self.label(rs), 'no truncated tooltip'))
+                    self.assertEqual(texts[0], title)
+                self.assert_no_label_after_rest(self.prefix + self.short)
+
+    def test_always_shows_a_title_that_fits_in_both_sidebar_modes(self):
+        self.set_tooltips('always')
+        for mode in ['topics', 'sessions']:
+            with self.subTest(mode=mode):
+                self.show_mode(mode)
+                self.s.act('hover', self.prefix + self.short)
+                texts = self.label(self.s.wait_rows(lambda rs: self.label(rs), 'no always tooltip'))
+                self.assertEqual(len(texts), 1, texts)
+                self.assertTrue(texts[0].startswith(self.places[self.short] + ' — '), texts)
+
+    def test_reloading_the_policy_closes_and_reopens_the_hovered_rows_label(self):
+        self.s.act('hover', self.prefix + self.short)
+        self.s.wait_rows(lambda rs: self.label(rs), 'no initial tooltip')
+        self.set_tooltips('truncated')
+        self.s.wait_rows(lambda rs: self.label(rs) is None, 'truncated kept a fitting title tooltip open')
+        self.set_tooltips('always')
+        self.s.wait_rows(lambda rs: self.label(rs), 'always did not reopen the hovered row tooltip')
+        self.set_tooltips('off')
+        self.s.wait_rows(lambda rs: self.label(rs) is None, 'off kept the tooltip open')
+        self.assert_no_label_after_rest(self.prefix + self.long)
 
 
 if __name__ == '__main__':

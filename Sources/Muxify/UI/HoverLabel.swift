@@ -141,17 +141,29 @@ extension EnvironmentValues {
 private struct HoverLabelModifier: ViewModifier {
     let detail: String
     let onlyWhenCutOff: Bool
+    let enabled: Bool
 
     @State private var anchor = HoverAnchor()
+    @State private var hovering = false
 
     func body(content: Content) -> some View {
         content
             .environment(\.hoverAnchor, anchor)
             .onHover { inside in
-                if inside { HoverLabels.shared.enter(anchor, detail: detail, onlyWhenCutOff: onlyWhenCutOff) }
-                else { HoverLabels.shared.leave(anchor) }
+                hovering = inside
+                update()
+            }
+            .onChange(of: enabled) { _, _ in update() }
+            .onChange(of: onlyWhenCutOff) { _, _ in
+                HoverLabels.shared.leave(anchor)
+                update()
             }
             .onDisappear { HoverLabels.shared.leave(anchor) }
+    }
+
+    private func update() {
+        if hovering && enabled { HoverLabels.shared.enter(anchor, detail: detail, onlyWhenCutOff: onlyWhenCutOff) }
+        else { HoverLabels.shared.leave(anchor) }
     }
 }
 
@@ -174,9 +186,9 @@ private struct HoverTitle: View {
 extension View {
     /// Gives the row a hover label with `detail`, and with the row's full title over it when the row cuts the title
     /// off. With `onlyWhenCutOff`, for a row that already shows its detail, the label opens only when the title is cut
-    /// off. Draw the row's title with `hoverLabelTitle()`.
-    func hoverLabel(detail: String, onlyWhenCutOff: Bool = false) -> some View {
-        modifier(HoverLabelModifier(detail: detail, onlyWhenCutOff: onlyWhenCutOff))
+    /// off. `enabled: false` suppresses the label entirely. Draw the row's title with `hoverLabelTitle()`.
+    func hoverLabel(detail: String, onlyWhenCutOff: Bool = false, enabled: Bool = true) -> some View {
+        modifier(HoverLabelModifier(detail: detail, onlyWhenCutOff: onlyWhenCutOff, enabled: enabled))
     }
 }
 

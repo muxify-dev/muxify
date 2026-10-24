@@ -729,6 +729,23 @@ sidebar:
 ```
 
 
+### Window tooltips
+
+`sidebar.window_tooltips` controls the hover label on Window rows in both Sessions
+and Topics mode, including remembered Windows in Settled Topics.
+
+- `off`: never show the label.
+- `truncated`: show it only when the row's formatted title is cut off.
+- `always` (default): show it whenever the pointer rests on the row.
+
+The label shows the Window's location and, when cut off, its full title. Changes
+apply on Config reload, including to a label that is already open.
+
+```yaml
+sidebar:
+  window_tooltips: truncated
+```
+
 ### Tags on Topic cards
 
 `sidebar.tag_placement` sets where a Topic card shows its [Tags](#tags):
