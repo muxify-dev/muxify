@@ -19,7 +19,9 @@ Gatekeeper globally. [Verify the download](docs/development.md#verify-a-download
 
 From the **Muxify** menu:
 
-- **Install Command Line Tool** adds `muxify` to `~/.local/bin`.
+- **Install Command Line Tool** adds `muxify` to `~/.local/bin`. Panes of a
+  tmux server that Muxify starts have `muxify` without it. Install it for other
+  terminals, scripts, and tmux servers started before Muxify.
 - **Install Extensions** enables Agent statuses. Restart running Agents;
   see [Agent setup](extensions/README.md#install) for dependencies and Codex requirements.
 

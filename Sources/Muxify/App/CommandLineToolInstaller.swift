@@ -2,8 +2,9 @@ import AppKit
 import MuxifyCore
 
 /// Muxify ▸ Install Command Line Tool: links the `muxify` executable bundled at
-/// `Contents/Resources/bin/muxify` into `~/.local/bin`, so any Pane can run
-/// `muxify browser open <url>`.
+/// `Contents/Resources/bin/muxify` into `~/.local/bin`. Panes of a tmux server
+/// that Muxify starts already find it on the PATH that `AppEnvironment` sets;
+/// the link is for other terminals, scripts, and servers started before Muxify.
 enum CommandLineToolInstaller {
     static func run() {
         let (failed, text) = install()
@@ -36,6 +37,6 @@ enum CommandLineToolInstaller {
         } catch {
             return (true, error.localizedDescription)
         }
-        return (false, "\(Paths.tildify(link.path)) → \(Paths.tildify(tool.path))\n\nIn any Pane, run:\nmuxify browser open <url>")
+        return (false, "\(Paths.tildify(link.path)) → \(Paths.tildify(tool.path))\n\nAny shell with ~/.local/bin on its PATH can now run muxify.")
     }
 }
