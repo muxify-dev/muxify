@@ -1461,7 +1461,7 @@ final class WorkspaceStore {
             }
         } else if !changingTopic {
             followClient(snapshot.clients)
-            if surface != nil, let window = takePendingSelect(in: windows) { select(window) }
+            if surface != nil, let window = takePendingSelect(in: windows) ?? arrivedEmptyTopicWindow() { select(window) }
             if surface != nil, let topic = takePendingTopic() { goToTopic(.topic(topic)) }
         }
         updateTopicSelection()
@@ -1618,6 +1618,13 @@ final class WorkspaceStore {
         }
         if window != nil || Date() > pending.deadline { pendingSelect = nil }
         return window
+    }
+
+    /// The Session that this read first lists in the Empty Topic the user looks at. Another process made it, so the
+    /// Topic's view goes on to it, as it does when Add a Session makes one, and not back to the Window shown before.
+    private func arrivedEmptyTopicWindow() -> TmuxWindow? {
+        guard pendingSelection == nil, let id = topicSelection.emptyTopicID else { return nil }
+        return entryWindow(of: .topic(id))
     }
 
     /// The requested Topic, taken with a snapshot after the URL: the command line may have made the Topic and its

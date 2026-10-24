@@ -128,9 +128,12 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         self.create_topic('Bare rows proof')
         self.open_add_session()
         for folder in ['main', 'release']:
-            key = self.project_row(self.gamma/folder)
-            s.wait_rows(lambda rs: s.row(key, rs).get('accessibilityLabel', '').startswith('gamma/' + folder),
-                        'the row of gamma/%s is not labelled gamma/%s' % (folder, folder))
+            # The list builds only the rows it shows, and it builds them again when the Worktrees of the other
+            # repositories follow git a moment after it opens, so a plain dump can lose a row far down between two
+            # reads. find scrolls the list to the row on each read.
+            key = 'palette-row-' + os.path.realpath(self.gamma/folder)
+            rs = self.find(key, 'Add a Session lists no row for gamma/' + folder)
+            self.assertTrue(s.row(key, rs).get('accessibilityLabel', '').startswith('gamma/' + folder), self.describe(key, rs))
         s.act('set', 'palette-search', 'gamma/main')
         rs = s.wait_rows(lambda rs: s.has('palette-row-' + os.path.realpath(self.gamma/'main'), rs), 'search by repo/folder found no gamma/main row')
         self.assertFalse(s.has('palette-row-' + os.path.realpath(self.gamma), rs), 'the bare folder itself is a row')

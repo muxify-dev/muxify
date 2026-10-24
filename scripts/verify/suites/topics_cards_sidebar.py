@@ -232,6 +232,20 @@ class TopicsCardsSidebar(TopicsSidebar):
             wait(lambda: topic not in self.records(), 'Forget kept the ' + state + ' Topic')
             s.wait_rows(lambda rows: not s.has('palette-accept', rows), 'Forget palette did not close')
 
+    def test_a_session_made_in_the_empty_topic_the_user_looks_at_becomes_the_shown_window(self):
+        """A press on a Topic card goes to its Empty Topic while the app lists no Session of the Topic, as when a
+        script made one a moment before. The Session then becomes the shown Window, and the card stays open."""
+        s = self.s
+        self.write_topic('empty-arrival', 'Empty arrival', self.beta)
+        self.find('topic-empty-arrival')
+        s.act('press', 'topic-empty-arrival')
+        s.wait_rows(lambda rs: s.has('empty-topic-add-session', rs), 'the Topic without a Session did not show its Empty Topic')
+        sid = self.new_session('empty-arrival', self.beta, topic='empty-arrival')
+        s.wait_shown(sid + ':')
+        rs = self.find('topic-empty-arrival')
+        self.assertTrue(self.expanded('topic-empty-arrival', rs), self.describe('topic-empty-arrival', rs))
+        self.assertFalse(s.has('empty-topic-add-session', rs), 'the Empty Topic stayed after its Session arrived')
+
     def test_settle_shows_on_closed_open_and_dormant_topic_cards(self):
         s = self.s
         self.write_topic('corner-closed', 'Corner closed', self.beta)
