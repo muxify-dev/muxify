@@ -92,7 +92,16 @@ public struct Config: Equatable {
         /// `titles.wrap`: a Topic or Session card's title wraps onto as many lines as it needs.
         /// False keeps it on one line and cuts it with "…".
         public var wrapsTitles = true
+        public var windowTooltips = WindowTooltips.always
         public var tagPlacement = TagPlacement.none
+
+        /// When a Window row opens its hover label, in either Sidebar mode.
+        public enum WindowTooltips: String {
+            case off
+            /// Only when the row cuts off its formatted title.
+            case truncated
+            case always
+        }
 
         /// Where a Topic card shows its Tags.
         public enum TagPlacement: String {
@@ -299,6 +308,8 @@ public struct Config: Equatable {
         #   # it on one line and cuts it with "…" at the card's edge.
         #   titles:
         #     wrap: true
+        #   # Window hover labels: off, truncated (only when the title is cut off), or always.
+        #   window_tooltips: always
         #   # Titles and summaries set plain text. Each Format can have topics/sessions values.
         #   # An empty summary hides its line. An empty title uses its default.
         #   formats:
@@ -838,6 +849,13 @@ private struct ConfigReader {
                     }
                     config.sidebar.wrapsTitles = wraps
                 }
+            case "window_tooltips":
+                // YAML also tags the unquoted word off as a boolean; use the scalar's spelling.
+                guard let tooltips = value.scalar.flatMap({ Config.Sidebar.WindowTooltips(rawValue: $0.string) }) else {
+                    problem(at: value, "sidebar.window_tooltips: expected off, truncated or always")
+                    continue
+                }
+                config.sidebar.windowTooltips = tooltips
             case "tag_placement":
                 guard value.tag == Yams.Tag(.str), let placement = value.string.flatMap(Config.Sidebar.TagPlacement.init(rawValue:)) else {
                     problem(at: value, "sidebar.tag_placement: expected none, corner, title or line")

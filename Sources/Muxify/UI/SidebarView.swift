@@ -245,7 +245,9 @@ private struct RememberedSessions: View {
                     .foregroundStyle(.secondary)
                     .padding(.leading, 24).padding(.trailing, 6).padding(.vertical, 4)
                     .accessibilityElement(children: .combine)
-                    .hoverLabel(detail: Paths.tildify(window.directory))
+                    .hoverLabel(detail: Paths.tildify(window.directory),
+                                onlyWhenCutOff: store.config.sidebar.windowTooltips == .truncated,
+                                enabled: store.config.sidebar.windowTooltips != .off)
                     .accessibilityIdentifier("remembered-window-\(window.id)")
                 }
             }
@@ -342,6 +344,7 @@ private struct TopicItemRow: View {
         case .window(let window):
             Button { store.select(window) } label: {
                 WindowRow(window: window, content: store.sidebarWindowRow(window), isSelected: window.id == store.selectedWindowID,
+                          tooltips: store.config.sidebar.windowTooltips,
                           tabCount: store.tabCount(for: window), isGitViewOpen: store.isGitViewOpen(in: window.id), topicsView: true,
                           usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
                               window, record: store.topicWatcher.records.first { $0.id == window.topicID }, sessionPaths: store.sessionPaths))
@@ -885,6 +888,7 @@ private struct SessionsSection: View {
                 window: window,
                 content: store.sidebarWindowRow(window),
                 isSelected: window.id == store.selectedWindowID,
+                tooltips: store.config.sidebar.windowTooltips,
                 tabCount: store.tabCount(for: window),
                 isGitViewOpen: store.isGitViewOpen(in: window.id),
                 usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
@@ -1016,6 +1020,7 @@ struct WindowRow: View {
     let window: TmuxWindow
     var content: SidebarFormats.WindowRowContent? = nil
     let isSelected: Bool
+    var tooltips = Config.Sidebar.WindowTooltips.always
     let tabCount: Int
     var isGitViewOpen = false
     var topicsView = false
@@ -1109,7 +1114,8 @@ struct WindowRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onHover { hovering = $0 }
         .hintAnchor(.window(window.id))
-        .hoverLabel(detail: "\(window.sessionName):\(window.index) — \(window.abbreviatedPath)")
+        .hoverLabel(detail: "\(window.sessionName):\(window.index) — \(window.abbreviatedPath)",
+                    onlyWhenCutOff: tooltips == .truncated, enabled: tooltips != .off)
     }
 
     private func customPart(_ parts: [SidebarPart], side: String) -> some View {

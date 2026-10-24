@@ -204,6 +204,23 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(Config.template.contains("#   panes: false"))
     }
 
+    func testWindowTooltipsDefaultToAlwaysAndAcceptAllThreeModes() throws {
+        XCTAssertEqual(try load("").sidebar.windowTooltips, .always)
+        XCTAssertTrue(Config.template.contains("#   window_tooltips: always"))
+        for (value, expected) in [("off", Config.Sidebar.WindowTooltips.off), ("'off'", .off),
+                                  ("truncated", .truncated), ("always", .always)] {
+            let config = try load("sidebar:\n  window_tooltips: \(value)")
+            XCTAssertEqual(config.sidebar.windowTooltips, expected, value)
+            XCTAssertTrue(config.problems.isEmpty, "\(value): \(config.problems)")
+        }
+        for value in ["true", "false", "null", "1", "[]", "{}", "sometimes"] {
+            let config = try load("sidebar:\n  window_tooltips: \(value)")
+            XCTAssertEqual(config.sidebar.windowTooltips, .always, value)
+            XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 2,
+                message: "sidebar.window_tooltips: expected off, truncated or always")], value)
+        }
+    }
+
     func testSidebarWrongTypesReportProblemsAndKeepDefaults() throws {
         for value in ["1", "null", "[]", "wrong", "\"false\"", "'true'"] {
             let config = try load("sidebar:\n  topics: \(value)\n  sessions: \(value)\n  agents: \(value)\n  panes: \(value)")
