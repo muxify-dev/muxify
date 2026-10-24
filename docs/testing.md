@@ -1,7 +1,11 @@
 # Testing
 
-Run the normal suite with `make test`. Live SSH tests are skipped unless you
-provide a destination with working key authentication and a verified host key.
+Run the normal suite with `make test`. It runs the app, MuxifyCore and CLI
+tests in one `xcodebuild test`, so MuxifyCore compiles once. Live SSH tests
+are skipped unless you provide a destination with working key authentication
+and a verified host key.
+
+`swift test` runs only the CLI tests.
 
 `swift test --package-path Packages/MuxifyCore` runs only the tests of the
 MuxifyCore package: Topic records and plans, Worktrees, the Config and tmux

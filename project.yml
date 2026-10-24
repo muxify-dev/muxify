@@ -13,6 +13,8 @@ settings:
 packages:
   MuxifyCore:
     path: Packages/MuxifyCore
+  MuxifyCLI:
+    path: .
 targets:
   Muxify:
     type: application
@@ -72,10 +74,16 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
     dependencies:
       - package: MuxifyCore
+      - target: MuxifyCLITool
+        link: false
+        embed: false
     scheme:
-      testTargets: [MuxifyTests]
+      testTargets:
+        - MuxifyTests
+        - package: MuxifyCore/MuxifyCoreTests
+        - package: MuxifyCLI/MuxifyCLITests
     postBuildScripts:
-      # Build the unified CLI into Contents/Resources/bin/muxify; the app's
+      # Copy the CLI into Contents/Resources/bin/muxify; the app's
       # Install Command Line Tool action links it into ~/.local/bin.
       - name: Bundle Muxify CLI
         script: "/bin/sh \"$PROJECT_DIR/scripts/bundle-cli.sh\""
@@ -96,6 +104,10 @@ targets:
       - package: MuxifyCore
       - package: MuxifyCore
         product: MuxifyTestSupport
+      # ExtensionCommandTests runs the real CLI.
+      - target: MuxifyCLITool
+        link: false
+        embed: false
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
@@ -105,3 +117,18 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: Sources/Muxify/Muxify-Bridging-Header.h
         LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/vendor/ghostty/lib
         OTHER_LDFLAGS: "-lghostty -lc++ -framework Carbon"
+  # The `muxify` CLI, built in the same Xcode build as the app, so MuxifyCore compiles once.
+  # The package's own MuxifyCLIMain builds the same binary for `swift build`.
+  MuxifyCLITool:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/MuxifyCLIMain
+    dependencies:
+      - package: MuxifyCLI
+        product: MuxifyCLI
+    settings:
+      base:
+        PRODUCT_NAME: muxify
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual

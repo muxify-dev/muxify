@@ -32,8 +32,6 @@ build: project
 
 test: project
 	./scripts/check-folder-paths.sh
-	swift test
-	swift test --package-path Packages/MuxifyCore
 	# xcodebuild gives a test only the variables named TEST_RUNNER_<name>, as <name>.
 	TEST_RUNNER_MUXIFY_REQUIRE_TMUX="$$MUXIFY_REQUIRE_TMUX" xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages test
