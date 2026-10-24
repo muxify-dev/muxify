@@ -5,7 +5,7 @@ import MuxifyCore
 /// Lets scripts/verify drive a Debug build through its accessibility tree.
 /// The script writes `command.json` (with a fresh nonce) into the folder
 /// named by MUXIFY_TEST_DRIVER; a timer on the main run loop answers each new
-/// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, hover, snapshot, responder, each
+/// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, hover, snapshot, responder, scroll, each
 /// with the option `reveal` that scrolls the target into view first. None of
 /// them activates the app, opens a menu or moves the pointer, so a run never takes focus.
 enum TestDriver {
@@ -266,6 +266,7 @@ enum TestDriver {
         var pressed = false
         if name == "snapshot" { return ["rows": [], "pressed": snapshot(of: target, to: text)] }
         if name == "hover" { return ["rows": [], "pressed": hover(target)] }
+        if name == "scroll" { return ["rows": [], "pressed": scroll(target, fromEnd: command["from_end"] as? Double ?? 0)] }
         if name == "responder" {
             let classes = NSApp.windows.filter(\.isVisible).compactMap { $0.firstResponder.map { String(describing: type(of: $0)) } }
             return ["rows": [], "pressed": true, "responders": classes]
@@ -379,6 +380,28 @@ enum TestDriver {
         }
         guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { return false }
         return (try? png.write(to: URL(fileURLWithPath: path))) != nil
+    }
+
+    /// Scrolls the scroll view under the element so that the end of its content is `fromEnd` points below its bottom
+    /// edge, as a scroll by the user leaves it.
+    private static func scroll(_ target: String, fromEnd: CGFloat) -> Bool {
+        func scrollViews(in view: NSView?) -> [NSScrollView] {
+            guard let view, !view.isHidden else { return [] }
+            return ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap(scrollViews)
+        }
+        guard let screen = (dump().first { $0.row["accessibilityIdentifier"] == target }?.object
+                                .value(forKey: "accessibilityFrame") as? NSValue)?.rectValue,
+              let scrollView = NSApp.windows.filter(\.isVisible).flatMap({ scrollViews(in: $0.contentView) }).first(where: { scrollView in
+                  let clip = scrollView.contentView
+                  return scrollView.window.map { $0.convertToScreen(clip.convert(clip.bounds, to: nil)) }?
+                      .contains(NSPoint(x: screen.midX, y: screen.midY)) == true
+              }),
+              let document = scrollView.documentView else { return false }
+        let clip = scrollView.contentView
+        let end = max(0, document.bounds.height - clip.bounds.height)
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: min(max(0, end - fromEnd), end)))
+        scrollView.reflectScrolledClipView(clip)
+        return true
     }
 
     /// The tracking areas that the last `hover` entered, with their owners and window, so the next one can exit them.

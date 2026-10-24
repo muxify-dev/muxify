@@ -100,43 +100,16 @@ private struct TopicsSection: View {
     @State private var showingAllRows: Set<TopicGroupID> = []
     /// The No Topic Session cards whose "N more…" the user pressed, by Session ID.
     @State private var showingAllSessionRows: Set<String> = []
+    /// The cards that end below the bottom edge of the Topics list, which the "N more below" line counts.
+    @State private var cardsBelow: Set<TopicGroupID> = []
+    /// How far the end of the Topics list is below its bottom edge, up to the height of the "N more below" line.
+    @State private var listEnd: CGFloat = 0
 
     var body: some View {
         GeometryReader { proxy in
             VStack(spacing: 0) {
                 if let zen = store.topicWatcher.zen { zenLine(zen) }
-                ScrollView {
-                    // Not lazy: a lazy stack is one more accessibility element over all the cards, and a click tool
-                    // such as Homerow clicks its centre, on whichever card is there.
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(model.rows) { topic in
-                            let order = model.cardOrder(pinned: topic.isPinned)
-                            if case .locked(let sessionID) = topic.id {
-                                LockedCard(store: store, row: topic, sessionID: sessionID, titles: model.titles,
-                                           holdsSelection: topic.id == model.activeTopic,
-                                           showsAllRows: showingAllRows.contains(topic.id),
-                                           onShowAllRows: { showingAllRows.insert(topic.id) },
-                                           drag: drag, order: order, neighbors: model.neighbors(of: topic.id))
-                            } else {
-                                TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
-                                          showsAllRows: showingAllRows.contains(topic.id),
-                                          onShowAllRows: { showingAllRows.insert(topic.id) },
-                                          place: .list(TopicListPlace(drag: drag, order: order, neighbors: model.neighbors(of: topic.id),
-                                                                      rename: renameTopic)))
-                            }
-                        }
-                        if let opened = model.openedNoTopicSession { noTopicCard(opened) }
-                    }
-                    .padding(.horizontal, 6).padding(.vertical, 4)
-                }
-                .coordinateSpace(.named(TopicCard.viewport))
-                .scrollIndicators(.never)
-                .accessibilityIdentifier("topics-list")
-                .overlay {
-                    if model.rows.isEmpty && model.openedNoTopicSession == nil && model.groups.isEmpty {
-                        Text("No Topics").font(typography.font(for: .title)).foregroundStyle(.secondary)
-                    }
-                }
+                topicsList
                 if !model.groups.isEmpty {
                     // The groups stay at the bottom of the panel, so an opened group pushes its row up. They take
                     // their own height up to a third of the panel, and scroll when an open group is taller.
@@ -149,6 +122,63 @@ private struct TopicsSection: View {
                 }
             }
         }
+    }
+
+    private var topicsList: some View {
+        ScrollViewReader { scroller in
+            ScrollView {
+                // Not lazy: a lazy stack is one more accessibility element over all the cards, and a click tool
+                // such as Homerow clicks its centre, on whichever card is there.
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(model.rows) { topic in
+                        listCard(topic).tracksBottomEdge(topic.id, in: $cardsBelow)
+                    }
+                    if let opened = model.openedNoTopicSession { noTopicCard(opened) }
+                }
+                .onOverhangingBottomEdge(of: TopicCard.viewport, upTo: MoreBelowLine.height) { listEnd = $0 }
+                .padding(.horizontal, 6).padding(.vertical, 4)
+            }
+            .coordinateSpace(.named(TopicCard.viewport))
+            .scrollIndicators(.never)
+            .accessibilityIdentifier("topics-list")
+            .overlay {
+                if model.rows.isEmpty && model.openedNoTopicSession == nil && model.groups.isEmpty {
+                    Text("No Topics").font(typography.font(for: .title)).foregroundStyle(.secondary)
+                }
+            }
+            // An overlay, not a row under the list: a row would change the list's height each time it shows or goes,
+            // and at the end of the list that moves every card by the row's height.
+            .overlay(alignment: .bottom) {
+                if let first = hiddenBelow.first {
+                    MoreBelowLine(count: hiddenBelow.count, listEnd: listEnd, theme: store.theme) {
+                        withAnimation(.easeOut(duration: 0.2)) { scroller.scrollTo(first, anchor: .top) }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func listCard(_ topic: TopicsModel.Row) -> some View {
+        let order = model.cardOrder(pinned: topic.isPinned)
+        if case .locked(let sessionID) = topic.id {
+            LockedCard(store: store, row: topic, sessionID: sessionID, titles: model.titles,
+                       holdsSelection: topic.id == model.activeTopic,
+                       showsAllRows: showingAllRows.contains(topic.id),
+                       onShowAllRows: { showingAllRows.insert(topic.id) },
+                       drag: drag, order: order, neighbors: model.neighbors(of: topic.id))
+        } else {
+            TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
+                      showsAllRows: showingAllRows.contains(topic.id),
+                      onShowAllRows: { showingAllRows.insert(topic.id) },
+                      place: .list(TopicListPlace(drag: drag, order: order, neighbors: model.neighbors(of: topic.id),
+                                                  rename: renameTopic)))
+        }
+    }
+
+    /// The cards below the bottom edge, in list order, so that a click on the line scrolls to the first one.
+    private var hiddenBelow: [TopicGroupID] {
+        (model.rows.map(\.id) + [.noTopic]).filter(cardsBelow.contains)
     }
 
     private func zenLine(_ zen: ZenRecord) -> some View {
@@ -179,6 +209,7 @@ private struct TopicsSection: View {
                         onShowAllRows: { showingAllSessionRows.insert(session.id) }) { item in
                 TopicItemRow(store: store, item: item, titles: model.titles, isDimmed: false)
             }
+            .tracksBottomEdge(.noTopic, in: $cardsBelow)
         }
     }
 
@@ -217,6 +248,18 @@ private struct TopicsSection: View {
         guard let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return }
         store.palette.begin(.text(.renameTopic(topic)), text: topic.title ?? "")
         if suggest { store.palette.suggestTitle() }
+    }
+}
+
+private extension View {
+    /// Keeps the card's ID in `cardsBelow` while the card ends below the bottom edge of the Topics list. The ID also
+    /// lets the "N more below" line scroll to the card.
+    func tracksBottomEdge(_ id: TopicGroupID, in cardsBelow: Binding<Set<TopicGroupID>>) -> some View {
+        self.id(id)
+            .onPassingBottomEdge(of: TopicCard.viewport) { below in
+                if below { cardsBelow.wrappedValue.insert(id) } else { cardsBelow.wrappedValue.remove(id) }
+            }
+            .onDisappear { cardsBelow.wrappedValue.remove(id) }
     }
 }
 
