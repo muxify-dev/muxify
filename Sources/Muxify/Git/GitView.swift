@@ -297,12 +297,37 @@ final class GitView {
         /// Space: stages or unstages in Changes, and the selected lines in
         /// a change's diff; folds a folder of the Diff files.
         case toggle, collapseAll, expandAll
-        case commit, discard, filter, back, close, refresh
+        /// A: amends the last commit with what's staged, in Changes.
+        case amend
+        /// m: continues, skips or aborts the merge, rebase, cherry-pick, revert or `git am` in progress.
+        case operation
+        /// M: merges the branch selected in Branches into the one you're on.
+        case merge
+        /// r: rebases the branch you're on onto the branch selected in Branches.
+        case rebase
+        case commit, discard, stash, stashOptions, filter, back, close, refresh
+        /// n: a new branch off the branch selected in Branches.
+        case newBranch
+        /// g: pops the stash selected in Stashes, and resets the branch you're on to the commit or branch selected
+        /// in History, a branch's commits and Branches.
+        case pop
         /// W: marks the commit, branch or stash selected as the base, or
         /// ends the comparison on the base, as lazygit's diffing mode.
         case mark
         /// e: opens the file in the editor, at the line.
         case edit
+        /// f: fetches all remotes, in Changes, as lazygit's Files panel does.
+        case fetch
+        /// P: pushes the branch you're on, in every tab.
+        case push
+        /// p: pulls the branch you're on, in every tab.
+        case pull
+        /// C: copies the commit selected in History or a branch's commits, or takes it out again.
+        case copyCommit
+        /// V: cherry-picks the Copied commits onto the branch you're on, in History.
+        case pasteCommits
+        /// ⌃r: clears the Copied commits.
+        case clearCopied
     }
 
     private(set) var isOpen = false
@@ -316,6 +341,10 @@ final class GitView {
     private(set) var isWriting = false
     /// What a stage, unstage or commit that failed said.
     private(set) var writeError: String?
+    /// The network commands running beside the writes, as the toolbar names them, such as "Fetching…".
+    private(set) var networkActivity: [String] = []
+    /// Questions of network commands that wait while another prompt is open.
+    @ObservationIgnored private var waitingPrompts: [GitPrompt] = []
     /// The commit message box is open; c opens it, as in lazygit.
     private(set) var isCommitOpen = false
     /// The message being written, kept when the box closes uncommitted.
@@ -323,8 +352,18 @@ final class GitView {
     var commitDescription = ""
     private(set) var commitError: String?
     private(set) var isCommitting = false
-    /// d in Changes: lazygit's Discard changes menu, on what it's for.
-    private(set) var discard: Discard?
+    /// The Git View menu open, such as lazygit's Discard changes menu on d.
+    private(set) var menu: GitMenu?
+    /// The Git View prompt open, such as the stash message that s asks for.
+    private(set) var prompt: GitPrompt?
+    /// What the prompt's field holds.
+    var promptText = ""
+    /// The suggestion ↓/↑ chose, if it still matches what is typed.
+    private var chosenSuggestion: String?
+
+    /// The suggestions that match what the prompt's field holds.
+    var promptSuggestions: [String] { prompt?.suggestions(matching: promptText) ?? [] }
+    var promptSuggestion: String? { chosenSuggestion.flatMap { promptSuggestions.contains($0) ? $0 : nil } }
     /// The Git View tab the list pane shows.
     private(set) var tab = GitTab.changes
     /// Each tab's lists: its own, then each one gone into; the last one
@@ -372,6 +411,8 @@ final class GitView {
     @ObservationIgnored private var press: (point: TextPoint, location: CGPoint, inGutter: Bool, clicks: Int)?
 
     @ObservationIgnored weak var store: WorkspaceStore?
+    /// The commits copied with C: the store's, shared by every Window's Git View. A Git View with no store has its own.
+    var copiedStore = CopiedCommits()
     /// Holds keyboard focus while the Git View has it (see `GitKeyCatcher`).
     @ObservationIgnored weak var keyView: NSView?
     /// The tmux Window it's of.
@@ -384,6 +425,10 @@ final class GitView {
     @ObservationIgnored private var logWork: DispatchWorkItem?
     /// Git commands that change the repository, run one at a time.
     @ObservationIgnored private var writes: [Write] = []
+    /// The arguments of the writes waiting or running, for tests, which have no store to run them.
+    var queuedWriteArguments: [[String]] { writes.map(\.arguments) }
+    /// The arguments of the network commands started, for tests, which have no store to run them.
+    private(set) var networkArguments: [[String]] = []
     /// The branch and commit whose history is being read.
     @ObservationIgnored private var readingLog: String?
     @ObservationIgnored private var shownScope = Scope.all
@@ -460,7 +505,11 @@ final class GitView {
         isFiltering = false
         isCommitOpen = false
         commitError = nil
-        discard = nil
+        menu = nil
+        // A command waiting on a question stops with it.
+        for waiting in [prompt].compactMap({ $0 }) + waitingPrompts { waiting.onCancel?() }
+        waitingPrompts = []
+        prompt = nil
         writeError = nil
         wantsFocus = false
         wantsEditor = false
@@ -484,8 +533,9 @@ final class GitView {
     /// reading the repository until its Window is selected again.
     func suspend() {
         isFiltering = false
-        // Asked again when it's wanted, never waiting to be confirmed.
-        discard = nil
+        // Asked again when it's wanted, never waiting to be confirmed. A command's question stays: it waits for it.
+        menu = nil
+        if prompt?.onCancel == nil { prompt = nil }
         wantsFocus = false
         // What had focus before is gone with the Window; closing later
         // gives it to the terminal.
@@ -934,19 +984,18 @@ final class GitView {
             }
             return true
         }
-        // The Discard changes menu's keys, as lazygit's.
-        if let discard, window === keyView?.window {
+        // A Git View prompt's field takes the rest; ↩ submits from the field.
+        if prompt != nil, window === keyView?.window {
             switch trigger {
-            case Self.escape, Self.q: closeDiscard()
-            case Self.x: confirmDiscard(.all)
-            case Self.u: confirmDiscard(.unstaged)
-            case Self.enter: confirmDiscard(discard.option)
-            case Self.down, Self.j, Self.ctrlJ: moveDiscardOption(by: 1)
-            case Self.up, Self.k, Self.ctrlK: moveDiscardOption(by: -1)
+            case Self.escape: closePrompt()
+            case Self.down where !promptSuggestions.isEmpty: moveSuggestion(by: 1)
+            case Self.up where !promptSuggestions.isEmpty: moveSuggestion(by: -1)
             default: return false
             }
             return true
         }
+        // A Git View menu's keys, as lazygit's; no other Git View key acts.
+        if menu != nil, window === keyView?.window { return handleMenuKey(trigger) }
         if isFiltering, window === keyView?.window {
             switch trigger {
             case Self.escape, Self.enter:
@@ -965,6 +1014,23 @@ final class GitView {
         return true
     }
 
+    /// A key while a Git View menu is open: false for a key it doesn't
+    /// use, which goes on to Muxify's keybinds, not to the Git View's.
+    func handleMenuKey(_ trigger: KeyTrigger) -> Bool {
+        guard let menu else { return false }
+        switch trigger {
+        case Self.escape, Self.q: closeMenu()
+        case Self.enter: menu.highlightedChoice.map(choose)
+        case Self.down, Self.j, Self.ctrlJ: self.menu?.move(by: 1)
+        case Self.up, Self.k, Self.ctrlK: self.menu?.move(by: -1)
+        default:
+            // A choice's key, even a disabled one's, goes no further.
+            guard let choice = menu.choice(for: trigger) else { return false }
+            choose(choice)
+        }
+        return true
+    }
+
     private static let escape = try! KeyTrigger("escape")
     private static let enter = try! KeyTrigger("enter")
     private static let down = try! KeyTrigger("down")
@@ -975,8 +1041,6 @@ final class GitView {
     private static let j = try! KeyTrigger("j")
     private static let k = try! KeyTrigger("k")
     private static let q = try! KeyTrigger("q")
-    private static let u = try! KeyTrigger("u")
-    private static let x = try! KeyTrigger("x")
 
     /// The Git View's keys by their Config spelling; each is also an
     /// accessibility action of the Git View, named by its spelling.
@@ -988,9 +1052,10 @@ final class GitView {
             "shift+j": .scroll(lines: 3), "shift+k": .scroll(lines: -3), "ctrl+d": .halfPage(1), "ctrl+u": .halfPage(-1),
             "alt+down": .nextHunk, "alt+up": .previousHunk, "right_bracket": .nextFile, "left_bracket": .previousFile,
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
-            "space": .toggle, "minus": .collapseAll, "equal": .expandAll,
-            "c": .commit, "d": .discard, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
-            "shift+w": .mark, "e": .edit,
+            "space": .toggle, "minus": .collapseAll, "equal": .expandAll, "n": .newBranch,
+            "c": .commit, "d": .discard, "g": .pop, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
+            "shift+w": .mark, "e": .edit, "f": .fetch, "shift+a": .amend, "m": .operation, "shift+m": .merge, "r": .rebase, "shift+p": .push, "p": .pull,
+            "shift+c": .copyCommit, "shift+v": .pasteCommits, "ctrl+r": .clearCopied,
     ]
 
     static let commands: [KeyTrigger: Command] = Dictionary(uniqueKeysWithValues: keyMap.map { (try! KeyTrigger($0), $1) })
@@ -1056,14 +1121,64 @@ final class GitView {
                 toggleStaged(item)
             } else if case .folder(let tree, let path) = item {
                 toggleFolder(path, in: tree)
+            } else if case .stash(let stash) = item, list == .stashes {
+                askStashEntry(.apply, stash)
+            } else if case .branch(let branch) = item, list == .branches {
+                // On the branch you're on, it does nothing.
+                if !branch.isHead { checkout(.branch(branch.name)) }
+            } else if case .commit(let commit) = item, list == .history || list == .branch {
+                checkout(.commit(sha: commit.sha, shortSHA: commit.shortSHA))
             }
         case .commit:
-            openCommit()
+            // As in lazygit, c commits in Changes, checks out by name in Branches, and does nothing elsewhere.
+            if list == .changes { openCommit() } else if list == .branches, focus == .list { askCheckoutByName() }
+        case .amend:
+            if list == .changes { askAmend() }
+        case .operation:
+            askOperation()
+        case .merge:
+            if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askMerge(branch) }
+        case .rebase:
+            if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askRebase(branch) }
+        case .newBranch:
+            if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { askNewBranch(off: branch) }
+        case .copyCommit:
+            if list == .history || list == .branch, focus == .list, case .commit(let commit)? = selectedItem { toggleCopied(commit) }
+        case .pasteCommits:
+            if list == .history, focus == .list { askCherryPick() }
+        case .clearCopied:
+            clearCopied()
+        case .pop:
+            guard focus == .list else { return }
+            switch selectedItem {
+            case .stash(let stash)? where list == .stashes: askStashEntry(.pop, stash)
+            case .commit(let commit)? where list == .history || list == .branch:
+                askReset(to: commit.sha, named: commit.shortSHA)
+            case .branch(let branch)? where list == .branches: askReset(to: branch.sha, named: branch.name)
+            default: break
+            }
         case .discard:
+            if list == .branches {
+                if focus == .list, case .branch(let branch)? = selectedItem { askDeleteBranch(branch) }
+                return
+            }
+            if list == .stashes {
+                if focus == .list, case .stash(let stash)? = selectedItem { askStashEntry(.drop, stash) }
+                return
+            }
             guard list == .changes else { return }
             if focus == .diff { askDiscardLines() } else if let item = selectedItem { askDiscard(item) }
+        case .stash:
+            askStash(.all)
+        case .stashOptions:
+            openStashOptions()
         case .collapseAll, .expandAll:
-            if focus == .list { foldAll(command == .collapseAll) }
+            // Branches has no folders: - goes back to the previous branch, as `git checkout -` does.
+            if list == .branches, command == .collapseAll {
+                if focus == .list { checkoutPrevious() }
+            } else if focus == .list {
+                foldAll(command == .collapseAll)
+            }
         case .filter:
             wantsFilterFocus = true
         case .back:
@@ -1081,12 +1196,23 @@ final class GitView {
         case .close:
             close()
         case .refresh:
-            refresh(showingProgress: true)
+            // In Branches, R renames the selected branch, as in lazygit.
+            if list == .branches, focus == .list, case .branch(let branch)? = selectedItem {
+                askRename(branch)
+            } else {
+                refresh(showingProgress: true)
+            }
         case .mark:
             guard let item = contentItem, item.sha != nil else { return }
             mark(item.id == base?.id ? nil : item)
         case .edit:
             openInEditor()
+        case .fetch:
+            if list == .changes, focus == .list { fetch() }
+        case .push:
+            push()
+        case .pull:
+            pull()
         }
     }
 
@@ -1184,6 +1310,7 @@ final class GitView {
         default:
             return
         }
+        noteStaging(staging.stage)
         write(staging.stage ? GitRepository.stageScript : GitRepository.unstageScript, arguments: [snapshot.root] + staging.paths)
     }
 
@@ -1191,6 +1318,7 @@ final class GitView {
     private func toggleStagedAll() {
         guard let snapshot, !snapshot.changes.isEmpty else { return }
         let staging = Self.staging(snapshot.changes, path: ".")
+        noteStaging(staging.stage)
         write(staging.stage ? GitRepository.stageScript : GitRepository.unstageScript, arguments: [snapshot.root] + staging.paths)
     }
 
@@ -1222,8 +1350,8 @@ final class GitView {
         var isEmpty: Bool { paths.isEmpty && patch.isEmpty }
     }
 
-    /// lazygit's Discard changes menu, for a file or folder of Changes, or
-    /// for the lines picked in its diff.
+    /// What lazygit's Discard changes menu is on: a file or folder of
+    /// Changes, or the lines picked in its diff.
     struct Discard: Equatable {
         enum Option: CaseIterable { case all, unstaged }
 
@@ -1234,8 +1362,6 @@ final class GitView {
         let changes: [GitChange]
         /// d in the diff: the lines to discard, instead of the changes.
         var lines: LineWrite?
-        /// The option ↩ picks.
-        var option = Option.all
 
         /// As in lazygit, only when some of it is staged and some isn't.
         var canDiscardUnstaged: Bool {
@@ -1248,34 +1374,542 @@ final class GitView {
         }
     }
 
+    // MARK: Menus
+
+    /// Opens a Git View menu, in place of any other.
+    func open(_ menu: GitMenu) {
+        self.menu = menu
+        writeError = nil
+    }
+
+    /// ⎋ or q, or a click outside it: changes nothing.
+    func closeMenu() {
+        menu = nil
+    }
+
+    /// A choice's key, ↩ on the highlighted one, or a click on it.
+    func choose(_ choice: GitMenu.Choice) {
+        guard menu != nil, choice.isEnabled else { return }
+        menu = nil
+        choice.run()
+    }
+
+    /// A choice by its key, as an accessibility action of the menu does.
+    @discardableResult
+    func chooseMenu(key name: String) -> Bool {
+        guard let trigger = try? KeyTrigger(name), let choice = menu?.choice(for: trigger), choice.isEnabled else { return false }
+        choose(choice)
+        return true
+    }
+
+    // MARK: Prompts
+
+    /// Opens a Git View prompt, in place of any other, with its initial text in the field.
+    func open(_ prompt: GitPrompt) {
+        self.prompt = prompt
+        promptText = prompt.initialText
+        chosenSuggestion = nil
+        writeError = nil
+    }
+
+    /// ↓ or ↑ in a prompt with suggestions: the next or previous one; ↑ from the first goes back to what was typed.
+    func moveSuggestion(by delta: Int) {
+        let suggestions = promptSuggestions
+        let index = promptSuggestion.flatMap(suggestions.firstIndex(of:))
+        let next = (index ?? -1) + delta
+        chosenSuggestion = suggestions.indices.contains(next) ? suggestions[next] : delta < 0 ? nil : index.map { suggestions[$0] }
+    }
+
+    /// A click on a suggestion: submits it.
+    func submitSuggestion(_ name: String) {
+        chosenSuggestion = name
+        submitPrompt()
+    }
+
+    /// ⎋, or a click outside it: changes nothing, or stops the command that asked.
+    func closePrompt() {
+        guard let prompt else { return }
+        self.prompt = nil
+        promptText = ""
+        chosenSuggestion = nil
+        focusKeyView()
+        prompt.onCancel?()
+        openWaitingPrompt()
+    }
+
+    /// ↩ in the field: closes the prompt and gives what was typed to whatever asked.
+    func submitPrompt() {
+        guard let prompt else { return }
+        let text = promptSuggestion ?? promptText
+        guard prompt.accepts(text) else { return }
+        self.prompt = nil
+        promptText = ""
+        chosenSuggestion = nil
+        focusKeyView()
+        prompt.submit(text)
+        openWaitingPrompt()
+    }
+
+    /// A network command's question, asked at once unless another prompt is open.
+    private func ask(_ prompt: GitPrompt) {
+        if self.prompt == nil { open(prompt) } else { waitingPrompts.append(prompt) }
+    }
+
+    private func openWaitingPrompt() {
+        guard prompt == nil, !waitingPrompts.isEmpty else { return }
+        open(waitingPrompts.removeFirst())
+    }
+
+    // MARK: Agent guard
+
+    /// The Agents that are working or blocked in a Pane inside this Worktree. `agentsForTesting` stands in for the
+    /// Environment's Agents.
+    var guardedAgents: [Agent] {
+        guard let root = snapshot?.root else { return [] }
+        let resolver = store?.folders ?? .local
+        let worktree = resolver.folder(root)
+        return AgentGuard.agents(in: worktree, among: agentsForTesting ?? store?.agents ?? [], resolver: resolver)
+    }
+
+    @ObservationIgnored var agentsForTesting: [Agent]?
+
+    /// An Agent as the guard names it: its kind, then its Topic, else its Session.
+    func guardName(of agent: Agent) -> String {
+        let topic = store?.topics.topicTitle(ofSession: agent.sessionID)
+        return "\(agent.kind.displayName) in \(topic ?? agent.sessionName)"
+    }
+
+    /// The one entry point of the Agent guard, for an operation that already asks in `menu`: opens it as it is when
+    /// no Agent is working in the Worktree, else with the Agents named in it, so one menu asks both. ⎋ changes nothing.
+    func openGuarded(_ menu: GitMenu) {
+        var menu = menu
+        menu.agents = guardedAgents.map(guardName(of:))
+        open(menu)
+    }
+
+    /// The same entry point for an operation with no confirmation of its own: runs `run` at once when no Agent is
+    /// working in the Worktree, else asks first, in a menu with one choice. `title` is the operation's wording, such as
+    /// "Pop stash", and `confirm` the choice's, such as "Pop it".
+    func guardFiles(_ title: String, subject: GitMenu.Subject? = nil, symbol: String, confirm: String,
+                    isDestructive: Bool = false, run: @escaping () -> Void) {
+        guard !guardedAgents.isEmpty else { return run() }
+        openGuarded(GitMenu(id: "agents", title: title, subject: subject, symbol: symbol, isDestructive: isDestructive,
+                            choices: [GitMenu.Choice(key: "y", title: confirm, isDestructive: isDestructive, run: run)]))
+    }
+
+    // MARK: Discarding
+
     /// d: asks what to discard of a file or folder, as lazygit does.
     func askDiscard(_ item: Item) {
         guard let snapshot else { return }
         switch item {
         case .change(let change):
-            discard = Discard(path: change.path, isFolder: false, changes: [change])
+            openGuarded(discardMenu(Discard(path: change.path, isFolder: false, changes: [change])))
         case .folder(_, let folder):
-            discard = Discard(path: folder, isFolder: true, changes: snapshot.changes.filter { GitTree.path($0.path, isIn: folder) })
+            openGuarded(discardMenu(Discard(path: folder, isFolder: true, changes: snapshot.changes.filter { GitTree.path($0.path, isIn: folder) })))
         default:
             return
         }
-        writeError = nil
     }
 
-    func closeDiscard() {
-        discard = nil
+    /// lazygit's Discard changes menu: x discards everything, u only what
+    /// isn't staged; for lines, x discards them.
+    func discardMenu(_ discard: Discard) -> GitMenu {
+        let subject: GitMenu.Subject = discard.isFolder
+            ? .folder(discard.path, files: discard.lines == nil ? discard.changes.count : nil) : .file(discard.path)
+        let choices: [GitMenu.Choice]
+        if let lines = discard.lines {
+            // All of a new file's lines: it's deleted, as the file's discard does.
+            let deletes = discard.changes.contains { $0.isUntracked && lines.paths.contains($0.path) }
+            choices = [
+                GitMenu.Choice(key: "x", title: lines.lines == 1 ? "Discard the line" : "Discard \(lines.lines) lines",
+                               note: deletes ? "Back to what's staged. A new file with all of its lines picked is deleted." : "Back to what's staged.",
+                               isDestructive: true) { [weak self] in self?.discard(discard, .all) },
+            ]
+        } else {
+            choices = [
+                GitMenu.Choice(key: "x", title: "Discard all changes", note: "Back to the last commit. New and untracked files are deleted.",
+                               isDestructive: true) { [weak self] in self?.discard(discard, .all) },
+                GitMenu.Choice(key: "u", title: "Discard unstaged changes",
+                               note: discard.canDiscardUnstaged ? "Keep what's staged." : "Only when some of it is staged and some isn't.",
+                               isEnabled: discard.canDiscardUnstaged) { [weak self] in self?.discard(discard, .unstaged) },
+            ]
+        }
+        return GitMenu(id: "discard", title: discard.lines == nil ? "Discard changes" : "Discard lines", subject: subject,
+                       symbol: "trash", isDestructive: true, footnote: "This can't be undone.", choices: choices)
     }
 
-    /// x, u, or ↩ or a click on an option. It can't be undone.
-    func confirmDiscard(_ option: Discard.Option) {
-        guard let discard, let snapshot, option == .all || discard.canDiscardUnstaged else { return }
-        self.discard = nil
+    /// x or u in the Discard changes menu. It can't be undone.
+    private func discard(_ discard: Discard, _ option: Discard.Option) {
+        guard let snapshot, option == .all || discard.canDiscardUnstaged else { return }
         if let lines = discard.lines {
             keepCursor()
             return write(lines, .discard, root: snapshot.root)
         }
         write(option == .all ? GitRepository.discardScript : GitRepository.discardUnstagedScript,
               arguments: [snapshot.root] + discard.paths(option))
+    }
+
+    // MARK: Stashing
+
+    /// The changes `git stash push` takes: all but the untracked files.
+    private var trackedChanges: [GitChange] { snapshot?.changes.filter { !$0.isUntracked } ?? [] }
+
+    /// Why this stash would have nothing to take, else nil.
+    func nothingToStash(_ kind: GitStashKind) -> String? {
+        guard let changes = snapshot?.changes else { return nil }
+        if changes.isEmpty { return "Nothing to stash: the working tree is clean." }
+        switch kind {
+        case .all, .keepIndex:
+            return trackedChanges.isEmpty ? "Nothing to stash but untracked files. S stashes them too." : nil
+        case .untracked:
+            return nil
+        case .staged:
+            return changes.contains { $0.groups.contains(.staged) } ? nil : "Nothing is staged to stash."
+        case .unstaged:
+            return trackedChanges.contains { $0.groups.contains(.unstaged) } ? nil : "Nothing unstaged to stash."
+        }
+    }
+
+    /// s in Changes: asks for the stash's message, which may be empty, and stashes all changes. Other kinds come
+    /// from the options menu of S.
+    func askStash(_ kind: GitStashKind) {
+        guard list == .changes, snapshot != nil else { return }
+        if let reason = nothingToStash(kind) {
+            writeError = reason
+            return
+        }
+        if kind == .unstaged, let title = snapshot?.operationTitle {
+            writeError = "Stashing only the unstaged changes isn't offered while git is in the middle of something (\(title))."
+            return
+        }
+        open(GitPrompt(id: "stash", title: "Stash changes", subject: .text(kind.title), symbol: "archivebox",
+                       placeholder: "Stash message (optional)", submitTitle: "Stash") { [weak self] message in
+            self?.stash(kind, message: message)
+        })
+    }
+
+    /// S in Changes: lazygit's stash options, each then asking for the message.
+    func openStashOptions() {
+        guard list == .changes, snapshot != nil else { return }
+        if snapshot?.changes.isEmpty == true {
+            writeError = nothingToStash(.untracked)
+            return
+        }
+        let operation = snapshot?.operationTitle != nil
+        open(GitMenu(id: "stash", title: "Stash options", symbol: "archivebox", choices: GitStashKind.allCases.map { kind in
+            let reason = kind == .unstaged && operation ? "Not while git is in the middle of a merge, rebase or the like." : nothingToStash(kind)
+            return GitMenu.Choice(key: kind.key, title: kind.title, note: reason ?? kind.note, isEnabled: reason == nil) { [weak self] in
+                self?.askStash(kind)
+            }
+        }))
+    }
+
+    /// Stashes as `git stash push` does, after the Agent guard.
+    private func stash(_ kind: GitStashKind, message: String) {
+        guard let snapshot else { return }
+        let message = message.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        guardFiles("Stash changes", subject: .text(kind.title), symbol: "archivebox", confirm: "Stash them") { [weak self] in
+            self?.write(GitRepository.stashScript, arguments: [snapshot.root, kind.rawValue, message])
+        }
+    }
+
+    // MARK: Stash entries
+
+    /// What lazygit's Stash panel does with the stash selected.
+    enum StashEntryAction: String {
+        /// space: the stash stays.
+        case apply
+        /// g: applies it and drops it, unless it conflicts.
+        case pop
+        /// d.
+        case drop
+
+        var verb: String { rawValue }
+        var symbol: String { self == .drop ? "trash" : self == .apply ? "tray.and.arrow.down" : "tray.and.arrow.up" }
+    }
+
+    /// space, g or d on a stash: confirms in a menu of one choice, as lazygit does. Apply and pop change files, so
+    /// the menu also lists the Agents working there; drop doesn't.
+    func askStashEntry(_ action: StashEntryAction, _ stash: GitStash) {
+        guard list == .stashes, snapshot != nil else { return }
+        let menu = GitMenu(
+            id: "stash-\(action.verb)", title: "\(action.verb.capitalized) stash", subject: .text("\(stash.ref) \(stash.message)"),
+            symbol: action.symbol, isDestructive: action == .drop, footnote: action == .drop ? "This can't be undone." : nil,
+            choices: [GitMenu.Choice(key: "y", title: "\(action.verb.capitalized) it",
+                                     note: action == .apply ? "Are you sure you want to apply this stash entry?"
+                                         : action == .pop ? "Are you sure you want to pop this stash entry? It is applied and dropped; a conflict keeps it."
+                                         : "Are you sure you want to drop the selected stash entry?",
+                                     isDestructive: action == .drop) { [weak self] in
+                self?.stashEntry(action, stash)
+            }])
+        if action == .drop { open(menu) } else { openGuarded(menu) }
+    }
+
+    private func stashEntry(_ action: StashEntryAction, _ stash: GitStash) {
+        guard let snapshot else { return }
+        write(GitRepository.stashEntryScript, arguments: [snapshot.root, action.rawValue, stash.ref, stash.sha])
+    }
+
+    // MARK: Checking out
+
+    /// What a checkout brings the working tree to.
+    enum CheckoutTarget: Equatable {
+        case branch(String)
+        /// A commit, which leaves a detached HEAD.
+        case commit(sha: String, shortSHA: String)
+        /// A remote branch such as `origin/foo`, which makes a local branch that tracks it.
+        case remote(String)
+        /// A new branch off another one.
+        case newBranch(name: String, from: String)
+        /// What `git checkout -` goes back to, when it isn't a branch of this repository.
+        case previous
+
+        var name: String {
+            switch self {
+            case .branch(let name), .remote(let name), .newBranch(let name, _): name
+            case .commit(_, let shortSHA): shortSHA
+            case .previous: "the previous branch"
+            }
+        }
+        var ref: String {
+            switch self {
+            case .branch(let name), .remote(let name), .newBranch(let name, _): name
+            case .commit(let sha, _): sha
+            case .previous: "-"
+            }
+        }
+        var kind: String {
+            switch self {
+            case .branch: "branch"
+            case .commit: "commit"
+            case .remote: "remote"
+            case .newBranch: "new"
+            case .previous: "previous"
+            }
+        }
+    }
+
+    /// The one checkout of the Git View, which space in Branches and History takes, and later keys reuse: goes through
+    /// the Agent guard, as it changes files, then runs. When Changes would be overwritten, asks whether to stash and
+    /// pop them across, as lazygit does.
+    func checkout(_ target: CheckoutTarget) {
+        guard let snapshot else { return }
+        // A branch that another Worktree has checked out can't be checked out here: ask to go there instead.
+        if case .branch(let name) = target, let branch = snapshot.branches.first(where: { $0.name == name }),
+           !branch.isHead, let path = branch.worktreePath {
+            askToGoToWorktree(of: branch, at: path)
+            return
+        }
+        guardFiles("Check out", subject: .text(target.name), symbol: "arrow.triangle.branch", confirm: "Check it out") { [weak self] in
+            self?.runCheckout(target, autostash: false)
+        }
+    }
+
+    /// Asks to go to the Worktree that has the branch checked out: the most recent Window with a Pane there, else Go to…
+    /// on its Session Path (ADR 0041). The Git View starts no Session, and ⎋ changes nothing. It is no change of files, so
+    /// the Agent guard does not ask.
+    private func askToGoToWorktree(of branch: GitBranch, at path: String) {
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        open(GitMenu(
+            id: "other-worktree", title: "Go to Worktree?", subject: .text(branch.name), symbol: "rectangle.split.2x1",
+            choices: [GitMenu.Choice(key: "y", title: "Go to \(name)",
+                                     note: "Branch \(branch.name) is checked out by Worktree \(name). Go to that Worktree?") { [weak self] in
+                self?.goToWorktree(at: path)
+            }]))
+    }
+
+    private func goToWorktree(at path: String) {
+        if let worktreeVisitForTesting { return worktreeVisitForTesting(path) }
+        store?.goToWorktree((store?.folders ?? .local).folder(path))
+    }
+
+    /// Stands in for going to a Worktree, which needs the Environment's Windows.
+    @ObservationIgnored var worktreeVisitForTesting: ((String) -> Void)?
+
+    private func runCheckout(_ target: CheckoutTarget, autostash: Bool) {
+        guard let snapshot else { return }
+        var arguments = [snapshot.root, target.kind, target.ref, autostash ? "1" : "0"]
+        if case .newBranch(_, let base) = target { arguments.append(base) }
+        write(GitRepository.checkoutScript, arguments: arguments) { [weak self] result in
+            self?.finishCheckout(target, result)
+        }
+    }
+
+    /// A checkout ended: says what went wrong, or, when only Changes were in the way, asks about stashing them.
+    func finishCheckout(_ target: CheckoutTarget, _ result: Result<String, Error>) {
+        guard case .failure(let error) = result else { return }
+        if case TmuxError.failed(_, let stderr) = error, stderr.hasPrefix(GitRepository.checkoutBlockedMarker) {
+            open(GitMenu(
+                id: "autostash", title: "Autostash?", subject: .text(target.name), symbol: "archivebox",
+                choices: [GitMenu.Choice(key: "y", title: "Stash, check out and pop",
+                                         note: "You must stash and pop your changes to bring them across. Do this automatically?") { [weak self] in
+                    self?.runCheckout(target, autostash: true)
+                }]))
+        } else {
+            writeError = Self.message(for: error)
+        }
+    }
+
+    // MARK: Branch names
+
+    /// A branch name as typed: git has no spaces in one, so lazygit makes them dashes.
+    static func branchName(_ typed: String) -> String {
+        typed.split(whereSeparator: \.isWhitespace).joined(separator: "-")
+    }
+
+    /// n in Branches: asks for the name of a branch off the one selected, then checks it out.
+    func askNewBranch(off branch: GitBranch) {
+        guard list == .branches else { return }
+        open(GitPrompt(id: "new-branch", title: "New branch name (branch is off of '\(branch.name)')", symbol: "plus",
+                       placeholder: "Branch name", allowsEmpty: false, submitTitle: "Create") { [weak self] typed in
+            self?.checkout(.newBranch(name: Self.branchName(typed), from: branch.name))
+        })
+    }
+
+    /// R in Branches: asks for the selected branch's new name, starting at its current one.
+    func askRename(_ branch: GitBranch) {
+        guard list == .branches else { return }
+        open(GitPrompt(id: "rename-branch", title: "Rename branch", subject: .text("Enter a new name for '\(branch.name)'"),
+                       symbol: "pencil", placeholder: "Branch name", initialText: branch.name, allowsEmpty: false,
+                       submitTitle: "Rename") { [weak self] typed in
+            guard let self, let snapshot = self.snapshot else { return }
+            let name = Self.branchName(typed)
+            if name != branch.name { self.write(GitRepository.renameBranchScript, arguments: [snapshot.root, branch.name, name]) }
+        })
+    }
+
+    /// -: `git checkout -`. A previous branch that is still one goes the way a checkout of it does.
+    func checkoutPrevious() {
+        checkout(snapshot?.previousBranch.map(CheckoutTarget.branch) ?? .previous)
+    }
+
+    /// c in Branches: asks for a name, with the local and remote branches that match it offered as it is typed.
+    func askCheckoutByName() {
+        guard list == .branches, let snapshot else { return }
+        open(GitPrompt(id: "checkout-by-name", title: "Check out", subject: .text("A branch name, or choose one with ↓ and ↑"),
+                       symbol: "arrow.triangle.branch", placeholder: "Branch name", allowsEmpty: false,
+                       suggestions: snapshot.branches.map(\.name) + snapshot.remoteBranches, submitTitle: "Check out") { [weak self] typed in
+            guard let self else { return }
+            self.checkout(self.checkoutTarget(named: typed.trimmingCharacters(in: .whitespacesAndNewlines)))
+        })
+    }
+
+    /// What a name typed in `c` checks out: a local branch as it is; a remote one, a local branch that tracks it, unless
+    /// there is one already; else git is left to say what the name is.
+    func checkoutTarget(named name: String) -> CheckoutTarget {
+        guard let snapshot, !snapshot.branches.contains(where: { $0.name == name }) else { return .branch(name) }
+        guard snapshot.remoteBranches.contains(name), let slash = name.firstIndex(of: "/") else { return .branch(name) }
+        let local = String(name[name.index(after: slash)...])
+        return snapshot.branches.contains { $0.name == local } ? .branch(local) : .remote(name)
+    }
+
+    // MARK: Deleting branches
+
+    /// The Topic records of the Environment, which are on this Mac: a Remote Environment's Git View finds none.
+    /// `topicRecordsForTesting` stands in for them.
+    private var topicRecords: [TopicRecord] {
+        topicRecordsForTesting ?? (store?.isRemote == true ? [] : store?.topicWatcher.records ?? [])
+    }
+
+    @ObservationIgnored var topicRecordsForTesting: [TopicRecord]?
+
+    /// The titles of the Topics that remember this branch: open, Dormant and Settled ones.
+    func topicTitles(remembering branch: GitBranch) -> [String] {
+        guard let snapshot else { return [] }
+        let resolver = store?.folders ?? .local
+        let repository = ([snapshot.repositoryFolder, snapshot.root] + snapshot.branches.compactMap(\.worktreePath))
+            .filter { !$0.isEmpty }.map(resolver.folder)
+        return TopicBranchHolders.records(remembering: branch.name, in: repository, among: topicRecords).map {
+            store?.topics.titles[$0.id] ?? $0.title ?? $0.slug ?? "Untitled Topic"
+        }
+    }
+
+    /// d in Branches: lazygit's delete menu, with the one choice that works on a local branch for now. The branch
+    /// you're on can't be deleted, and the menu says so. A branch that another Worktree has checked out is left to
+    /// git, whose message shows. Deleting a branch changes no files, so the Agent guard does not ask.
+    func askDeleteBranch(_ branch: GitBranch) {
+        guard list == .branches, snapshot != nil else { return }
+        let reason = branch.isHead ? "You cannot delete the checked out branch!" : nil
+        var choices = [GitMenu.Choice(key: "c", title: "Delete local branch", note: reason, isEnabled: reason == nil,
+                                      isDestructive: true) { [weak self] in
+            self?.deleteBranch(branch, force: false)
+        }]
+        // A branch with no upstream, or one whose upstream is gone, has no remote branch to delete.
+        if let upstream = branch.upstream, branch.track != "gone" {
+            choices.append(GitMenu.Choice(key: "r", title: "Delete remote branch", note: upstream, isDestructive: true) { [weak self] in
+                self?.confirmDeleteRemote(branch, upstream: upstream, andLocal: false)
+            })
+            choices.append(GitMenu.Choice(key: "b", title: "Delete local and remote branch", note: reason ?? upstream,
+                                          isEnabled: reason == nil, isDestructive: true) { [weak self] in
+                self?.confirmDeleteRemote(branch, upstream: upstream, andLocal: true)
+            })
+        }
+        open(deleteBranchMenu(id: "delete-branch", title: "Delete branch", branch, choices: choices))
+    }
+
+    /// Asks before deleting the remote branch, naming it, as lazygit does.
+    private func confirmDeleteRemote(_ branch: GitBranch, upstream: String, andLocal: Bool) {
+        open(deleteBranchMenu(
+            id: "delete-remote-branch", title: andLocal ? "Delete local and remote branch" : "Delete remote branch", branch,
+            choices: [GitMenu.Choice(key: "y", title: "Delete",
+                                     note: "Are you sure you want to delete the remote branch '\(upstream)'?",
+                                     isDestructive: true) { [weak self] in
+                self?.deleteRemote(branch, andLocal: andLocal)
+            }]))
+    }
+
+    /// `git push <remote> --delete <branch>` on the network runner. For the local and remote choice the local branch
+    /// goes after it, under the rules of a local delete; a failed remote delete leaves the local branch.
+    private func deleteRemote(_ branch: GitBranch, andLocal: Bool) {
+        guard let root = snapshot?.root else { return }
+        runNetwork(GitRepository.deleteRemoteBranchScript, arguments: [root, branch.name], activity: Self.deletingRemote,
+                   cancelled: "Delete cancelled.", refreshing: !andLocal) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let error): self.writeError = Self.message(for: error, cancelled: "Delete cancelled.")
+            case .success: if andLocal { self.deleteBranch(branch, force: false) }
+            }
+        }
+    }
+
+    /// A menu that confirms deleting `branch`, which names the Topics that remember it.
+    private func deleteBranchMenu(id: String, title: String, _ branch: GitBranch, choice: GitMenu.Choice) -> GitMenu {
+        deleteBranchMenu(id: id, title: title, branch, choices: [choice])
+    }
+
+    private func deleteBranchMenu(id: String, title: String, _ branch: GitBranch, choices: [GitMenu.Choice]) -> GitMenu {
+        GitMenu(id: id, title: title, subject: .text(branch.name), symbol: "trash", isDestructive: true,
+                footnote: Self.rememberingNote(topicTitles(remembering: branch)), choices: choices)
+    }
+
+    /// What the confirmation says about the Topics that remember the branch, or nil when none does.
+    static func rememberingNote(_ titles: [String]) -> String? {
+        guard !titles.isEmpty else { return nil }
+        return titles.map { "Topic '\($0)' remembers this branch; Reopen will start it again from its base." }.joined(separator: " ")
+    }
+
+    private func deleteBranch(_ branch: GitBranch, force: Bool) {
+        guard let snapshot else { return }
+        write(GitRepository.deleteBranchScript, arguments: [snapshot.root, branch.name, force ? "1" : "0"]) { [weak self] result in
+            self?.finishDeleteBranch(branch, result)
+        }
+    }
+
+    /// A delete ended: asks to force when git refused for the branch not being fully merged, else says what went wrong.
+    func finishDeleteBranch(_ branch: GitBranch, _ result: Result<String, Error>) {
+        guard case .failure(let error) = result else { return }
+        if case TmuxError.failed(_, let stderr) = error, stderr.hasPrefix(GitRepository.branchNotMergedMarker) {
+            open(deleteBranchMenu(
+                id: "force-delete-branch", title: "Force delete branch", branch,
+                choice: GitMenu.Choice(key: "y", title: "Force delete",
+                                       note: "'\(branch.name)' is not fully merged. Are you sure you want to delete it?",
+                                       isDestructive: true) { [weak self] in
+                    self?.deleteBranch(branch, force: true)
+                }))
+        } else {
+            writeError = Self.message(for: error)
+        }
     }
 
     // MARK: Staging lines
@@ -1353,11 +1987,10 @@ final class GitView {
             return
         }
         switch content.header {
-        case .change(let change): discard = Discard(path: change.path, isFolder: false, changes: [change], lines: lines)
-        case .folder(let path, let changes): discard = Discard(path: path, isFolder: true, changes: changes, lines: lines)
+        case .change(let change): openGuarded(discardMenu(Discard(path: change.path, isFolder: false, changes: [change], lines: lines)))
+        case .folder(let path, let changes): openGuarded(discardMenu(Discard(path: path, isFolder: true, changes: changes, lines: lines)))
         default: return
         }
-        writeError = nil
     }
 
     private func write(_ lines: LineWrite, _ mode: LineWrite.Mode, root: String) {
@@ -1381,14 +2014,6 @@ final class GitView {
         keptCursor = (contentItem?.id ?? "", row, topIndex)
     }
 
-    private func moveDiscardOption(by step: Int) {
-        guard var discard else { return }
-        let options = discard.canDiscardUnstaged ? Discard.Option.allCases : [.all]
-        let index = (options.firstIndex(of: discard.option) ?? 0) + step
-        discard.option = options[min(max(index, 0), options.count - 1)]
-        self.discard = discard
-    }
-
     /// The changes staged, which a commit takes.
     var stagedCount: Int {
         snapshot?.changes.filter { $0.groups.contains(.staged) }.count ?? 0
@@ -1396,7 +2021,7 @@ final class GitView {
 
     /// c: the commit message box, once something is staged, or to conclude
     /// a merge once its conflicts are resolved. A rebase, cherry-pick or
-    /// revert goes on in the terminal.
+    /// revert goes on with m.
     func openCommit() {
         guard let snapshot else { return }
         if let block = snapshot.operation?.commitBlock {
@@ -1421,6 +2046,319 @@ final class GitView {
             commitDescription = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
         }
         isCommitOpen = true
+    }
+
+    // MARK: Continuing
+
+    /// Staging while an operation waits on conflicts: once the read after it shows none left, the Git View asks to continue.
+    private var asksToContinue = false
+
+    private func noteStaging(_ stages: Bool) {
+        guard stages, let snapshot, snapshot.operation?.noun != nil, snapshot.changes.contains(where: \.isConflict) else { return }
+        asksToContinue = true
+    }
+
+    private enum OperationStep: String {
+        case `continue`, skip, abort
+
+        var past: String {
+            switch self {
+            case .continue: "Continued"
+            case .skip: "Skipped"
+            case .abort: "Aborted"
+            }
+        }
+    }
+
+    /// m: lazygit's menu of what to do with the merge, rebase, cherry-pick, revert or `git am` in progress, through the
+    /// Agent guard, for each of them changes files.
+    func askOperation() {
+        guard let snapshot else { return }
+        guard let operation = snapshot.operation else {
+            writeError = "Nothing is in progress: there is no merge, rebase, cherry-pick, revert or git am to continue, skip or abort."
+            return
+        }
+        guard let noun = operation.noun else {
+            writeError = "A bisect is in progress; m doesn't go on with it."
+            return
+        }
+        let continues = noun == "merge" ? "Concludes the merge with git's message." : "Goes on to the next step, keeping git's message."
+        var choices = [
+            GitMenu.Choice(key: "c", title: "Continue", note: continues + " Git refuses while conflicts remain.") { [weak self] in
+                self?.run(.continue, noun: noun, command: operation.command)
+            },
+        ]
+        if operation.canSkip {
+            choices.append(GitMenu.Choice(key: "s", title: "Skip", note: "Leaves out the step it is at and goes on.") { [weak self] in
+                self?.run(.skip, noun: noun, command: operation.command)
+            })
+        }
+        choices.append(GitMenu.Choice(key: "a", title: "Abort", note: "Back to where it was before the \(noun) began.", isDestructive: true) { [weak self] in
+            self?.run(.abort, noun: noun, command: operation.command)
+        })
+        openGuarded(GitMenu(id: "operation", title: "\(noun.prefix(1).uppercased() + noun.dropFirst()) options",
+                            subject: snapshot.operationTitle.map(GitMenu.Subject.text), symbol: operation.symbol, choices: choices))
+    }
+
+    /// After staging the last conflicted file: lazygit's "All merge conflicts resolved. Continue the rebase?". ↩ continues
+    /// and ⎋ leaves it for later.
+    private func askToContinue(_ snapshot: GitSnapshot) {
+        guard let operation = snapshot.operation, let noun = operation.noun else { return }
+        openGuarded(GitMenu(
+            id: "continue", title: "Continue the \(noun)?", subject: snapshot.operationTitle.map(GitMenu.Subject.text), symbol: operation.symbol,
+            choices: [GitMenu.Choice(key: "y", title: "Continue", note: "All merge conflicts resolved. Continue the \(noun)?") { [weak self] in
+                self?.run(.continue, noun: noun, command: operation.command)
+            }]))
+    }
+
+    private func run(_ step: OperationStep, noun: String, command: String?) {
+        guard let snapshot, let command else { return }
+        write(GitRepository.operationScript, arguments: [snapshot.root, command, step.rawValue], timeout: 600) { [weak self] result in
+            switch result {
+            case .success:
+                self?.store?.palette.showCopied(title: step.past, value: noun)
+            case .failure(let error):
+                self?.writeError = Self.message(for: error)
+            }
+        }
+    }
+
+    /// How M merges, by the argument the merge script takes.
+    enum MergeKind: String {
+        case fastForward = "ff", mergeCommit = "no-ff", squashAndCommit = "squash", squashAndLeave = "squash-leave"
+    }
+
+    /// M in Branches: lazygit's merge menu, on a branch other than the one you're on, through the Agent guard, for a
+    /// merge changes files. A merge, rebase or the like already in progress is to be concluded or aborted first.
+    func askMerge(_ branch: GitBranch) {
+        guard let snapshot else { return }
+        guard !branch.isHead else {
+            writeError = "You cannot merge a branch into itself: '\(branch.name)' is the one you're on."
+            return
+        }
+        if let operation = snapshot.operation {
+            writeError = "A \(operation.noun ?? "bisect") is in progress: continue or abort it with m before merging."
+            return
+        }
+        writeError = nil
+        let into = snapshot.head
+        func choice(_ key: String, _ title: String, _ note: String, _ kind: MergeKind) -> GitMenu.Choice {
+            GitMenu.Choice(key: key, title: title, note: note) { [weak self] in self?.merge(branch, into: into, kind) }
+        }
+        openGuarded(GitMenu(
+            id: "merge", title: "Merge '\(branch.name)' into '\(into)'", subject: .text("\(branch.name) → \(into)"),
+            symbol: "arrow.triangle.merge",
+            choices: [
+                choice("f", "Regular merge (fast-forward)", "Moves '\(into)' up when it can, else makes a merge commit.", .fastForward),
+                choice("n", "Regular merge (with merge commit)", "Always makes a merge commit (--no-ff).", .mergeCommit),
+                choice("s", "Squash merge and commit", "Takes its changes as one commit, with git's message.", .squashAndCommit),
+                choice("u", "Squash merge and leave uncommitted", "Takes its changes and leaves them staged.", .squashAndLeave),
+            ]))
+    }
+
+    private func merge(_ branch: GitBranch, into: String, _ kind: MergeKind) {
+        guard let snapshot else { return }
+        write(GitRepository.mergeScript, arguments: [snapshot.root, branch.name, kind.rawValue, into], timeout: 600) { [weak self] result in
+            switch result {
+            case .success:
+                self?.store?.palette.showCopied(title: "Merged", value: branch.name)
+            case .failure(let error):
+                self?.writeError = Self.message(for: error)
+            }
+        }
+    }
+
+    /// r in Branches: lazygit's rebase menu, on a branch other than the one you're on, through the Agent guard, for a
+    /// rebase changes files. Its one choice is the simple rebase; the interactive rebase and the rebase onto a base
+    /// branch are not offered. A merge, rebase or the like already in progress is to be continued or aborted first.
+    func askRebase(_ branch: GitBranch) {
+        guard let snapshot else { return }
+        guard !branch.isHead else {
+            writeError = "You cannot rebase a branch onto itself: '\(branch.name)' is the one you're on."
+            return
+        }
+        if let operation = snapshot.operation {
+            writeError = "A \(operation.noun ?? "bisect") is in progress: continue or abort it with m before rebasing."
+            return
+        }
+        writeError = nil
+        let head = snapshot.head
+        openGuarded(GitMenu(
+            id: "rebase", title: "Rebase '\(head)'", subject: .text("\(head) → \(branch.name)"), symbol: "arrow.triangle.pull",
+            choices: [GitMenu.Choice(key: "s", title: "Simple rebase onto '\(branch.name)'",
+                                     note: "Replays the commits of '\(head)' on top of '\(branch.name)'.") { [weak self] in
+                self?.rebase(onto: branch, head: head)
+            }]))
+    }
+
+    private func rebase(onto branch: GitBranch, head: String) {
+        guard let snapshot else { return }
+        write(GitRepository.rebaseScript, arguments: [snapshot.root, branch.name, head], timeout: 600) { [weak self] result in
+            switch result {
+            case .success:
+                self?.store?.palette.showCopied(title: "Rebased", value: head)
+            case .failure(let error):
+                self?.writeError = Self.message(for: error)
+            }
+        }
+    }
+
+    // MARK: Cherry-picking
+
+    /// What Copied commits are kept by: the repository's common git directory, the same from every Worktree of it.
+    private var copiedKey: String? {
+        guard let snapshot else { return nil }
+        return snapshot.commonDirectory.isEmpty ? snapshot.root : snapshot.commonDirectory
+    }
+
+    /// The full hashes copied in this repository, in the order they were copied.
+    var copiedCommits: [String] {
+        copiedKey.map { copiedStore.shas(in: $0) } ?? []
+    }
+
+    func isCopied(_ commit: GitCommit) -> Bool {
+        copiedKey.map { copiedStore.contains(commit.sha, in: $0) } == true
+    }
+
+    /// C: copies the commit, or takes it out again.
+    func toggleCopied(_ commit: GitCommit) {
+        guard let key = copiedKey else { return }
+        writeError = nil
+        copiedStore.toggle(commit.sha, in: key)
+    }
+
+    /// ⌃r: forgets every copied commit of this repository, in every Window.
+    func clearCopied() {
+        guard let key = copiedKey else { return }
+        copiedStore.clear(in: key)
+    }
+
+    /// V: asks, through the Agent guard, to cherry-pick the Copied commits onto the branch you're on.
+    func askCherryPick() {
+        guard let snapshot else { return }
+        let shas = copiedCommits
+        guard !shas.isEmpty else {
+            writeError = "No commit is copied: C copies the selected commit."
+            return
+        }
+        if let operation = snapshot.operation {
+            writeError = "A \(operation.noun ?? "bisect") is in progress: continue or abort it with m before cherry-picking."
+            return
+        }
+        writeError = nil
+        let count = shas.count == 1 ? "1 copied commit" : "\(shas.count) copied commits"
+        openGuarded(GitMenu(
+            id: "cherry-pick", title: "Cherry-pick", subject: .text("\(count) → \(snapshot.head)"), symbol: "arrow.triangle.merge",
+            choices: [GitMenu.Choice(key: "y", title: "Cherry-pick \(count)",
+                                     note: "Are you sure you want to cherry-pick the \(count) onto this branch?") { [weak self] in
+                self?.cherryPick(shas)
+            }]))
+    }
+
+    private func cherryPick(_ shas: [String]) {
+        guard let snapshot, let key = copiedKey else { return }
+        write(GitRepository.cherryPickScript, arguments: [snapshot.root] + shas, timeout: 600) { [weak self] result in
+            switch result {
+            case .success:
+                self?.copiedStore.remove(shas, in: key)
+                self?.store?.palette.showCopied(title: "Cherry-picked", value: shas.count == 1 ? "1 commit" : "\(shas.count) commits")
+            case .failure(let error):
+                self?.writeError = Self.message(for: error)
+            }
+        }
+    }
+
+    // MARK: Resetting
+
+    /// How g resets, by the argument the reset script takes.
+    enum ResetKind: String {
+        case soft, mixed, hard
+    }
+
+    /// g on a commit or a branch: lazygit's Reset menu, which moves the branch you're on to it. Soft and mixed run at
+    /// once, as they change no file's content; a hard reset asks again (ADR 0041).
+    func askReset(to target: String, named name: String) {
+        guard let snapshot else { return }
+        writeError = nil
+        let head = snapshot.head
+        func choice(_ key: String, _ title: String, _ note: String, _ kind: ResetKind, isDestructive: Bool = false) -> GitMenu.Choice {
+            GitMenu.Choice(key: key, title: title, note: note, isDestructive: isDestructive) { [weak self] in
+                if kind == .hard { self?.askHardReset(to: target, named: name) } else { self?.reset(to: target, named: name, kind) }
+            }
+        }
+        open(GitMenu(
+            id: "reset", title: "Reset to \(name)", subject: .text("\(head) → \(name)"), symbol: "arrow.counterclockwise",
+            choices: [
+                choice("s", "Soft reset", "Keeps the changes between '\(head)' and '\(name)' as staged changes.", .soft),
+                choice("m", "Mixed reset", "Keeps the changes between '\(head)' and '\(name)' as unstaged changes.", .mixed),
+                choice("h", "Hard reset", "Discards the changes between '\(head)' and '\(name)', and all current changes.", .hard,
+                       isDestructive: true),
+            ]))
+    }
+
+    /// h in the Reset menu: with Changes, asks once more, naming how many files it discards, as d does; else runs. Either
+    /// way through the Agent guard, inside the one menu. Untracked files stay, as `git reset --hard` leaves them.
+    private func askHardReset(to target: String, named name: String) {
+        let files = trackedChanges.count
+        let run: () -> Void = { [weak self] in self?.reset(to: target, named: name, .hard) }
+        guard files > 0 else {
+            return guardFiles("Hard reset", subject: .text(name), symbol: "arrow.counterclockwise", confirm: "Hard reset to \(name)",
+                              isDestructive: true, run: run)
+        }
+        openGuarded(GitMenu(
+            id: "reset-hard", title: "Hard reset", subject: .text(name), symbol: "arrow.counterclockwise", isDestructive: true,
+            footnote: "This can't be undone.",
+            choices: [GitMenu.Choice(key: "y", title: files == 1 ? "Discard 1 file and reset" : "Discard \(files) files and reset",
+                                     note: "Are you sure you want to reset to '\(name)'? Untracked files are kept.", isDestructive: true, run: run)]))
+    }
+
+    private func reset(to target: String, named name: String, _ kind: ResetKind) {
+        guard let snapshot else { return }
+        write(GitRepository.resetScript, arguments: [snapshot.root, kind.rawValue, target]) { [weak self] result in
+            switch result {
+            case .success:
+                self?.store?.palette.showCopied(title: "Reset (\(kind.rawValue))", value: name)
+            case .failure(let error):
+                self?.writeError = Self.message(for: error)
+            }
+        }
+    }
+
+    /// A: asks, then amends the last commit with what's staged, keeping its message.
+    func askAmend() {
+        guard let snapshot else { return }
+        if let block = snapshot.operation?.amendBlock {
+            writeError = block
+            return
+        }
+        guard !snapshot.commits.isEmpty else {
+            writeError = "There is no commit to amend yet."
+            return
+        }
+        guard stagedCount > 0 else {
+            writeError = snapshot.changes.isEmpty ? "Nothing to amend with: the working tree is clean."
+                : "Nothing is staged. Stage files with space, or everything with a, to amend the last commit with them."
+            return
+        }
+        writeError = nil
+        let last = snapshot.commits[0]
+        open(GitMenu(
+            id: "amend", title: "Amend last commit", subject: .text("\(last.shortSHA) \(last.subject)"), symbol: "arrow.uturn.backward.circle",
+            choices: [GitMenu.Choice(key: "y", title: "Amend commit", note: "Are you sure you want to amend the last commit?") { [weak self] in
+                self?.amend()
+            }]))
+    }
+
+    private func amend() {
+        guard let snapshot else { return }
+        write(GitRepository.amendScript, arguments: [snapshot.root], timeout: 600) { [weak self] result in
+            switch result {
+            case .success(let output):
+                self?.store?.palette.showCopied(title: "Amended", value: output.trimmingCharacters(in: .whitespacesAndNewlines))
+            case .failure(let error):
+                self?.writeError = Self.message(for: error)
+            }
+        }
     }
 
     func closeCommit() {
@@ -1470,14 +2408,17 @@ final class GitView {
         let arguments: [String]
         let timeout: TimeInterval
         let completion: ((Result<String, Error>) -> Void)?
+        /// A command that talks to a remote, such as a pull, runs in a pseudo-terminal; the toolbar names it.
+        var network: (activity: String, cancelled: String)?
     }
 
     /// Runs commands that change the repository one at a time, so they
     /// don't race for its index, and reads it again after the last.
     private func write(_ script: String, arguments: [String], timeout: TimeInterval = 30,
+                       network: (activity: String, cancelled: String)? = nil,
                        completion: ((Result<String, Error>) -> Void)? = nil) {
         writeError = nil
-        writes.append(Write(script: script, arguments: arguments, timeout: timeout, completion: completion))
+        writes.append(Write(script: script, arguments: arguments, timeout: timeout, completion: completion, network: network))
         runNextWrite()
     }
 
@@ -1485,16 +2426,160 @@ final class GitView {
         guard !isWriting, let store, !writes.isEmpty else { return }
         let write = writes.removeFirst()
         isWriting = true
-        store.runGitScript(write.script, arguments: write.arguments, timeout: write.timeout) { [weak self] result in
+        let finish: (Result<String, Error>) -> Void = { [weak self] result in
             guard let self else { return }
             self.isWriting = false
             if let completion = write.completion {
                 completion(result)
             } else if case .failure(let error) = result {
-                self.writeError = Self.message(for: error)
+                self.writeError = Self.message(for: error, cancelled: write.network?.cancelled)
             }
             if self.writes.isEmpty { self.refresh() } else { self.runNextWrite() }
         }
+        if let network = write.network {
+            runNetwork(write.script, arguments: write.arguments, activity: network.activity, cancelled: network.cancelled,
+                       refreshing: false, completion: finish)
+        } else {
+            store.runGitScript(write.script, arguments: write.arguments, timeout: write.timeout, completion: finish)
+        }
+    }
+
+    // MARK: Network
+
+    /// f: `git fetch --all`, as lazygit's default, beside the writes, so staging and committing go on. The
+    /// repository is read again after it.
+    func fetch() {
+        guard !networkActivity.contains(Self.fetching), let root = snapshot?.root else { return }
+        runNetwork(GitRepository.fetchScript, arguments: [root], activity: Self.fetching, cancelled: "Fetch cancelled.")
+    }
+
+    static let fetching = "Fetching…"
+    static let pushing = "Pushing…"
+    static let deletingRemote = "Deleting remote branch…"
+    static let pulling = "Pulling…"
+
+    /// P: pushes the branch you're on, as lazygit's does, beside the writes like the fetch. Without an upstream it asks
+    /// for one and sets it; when the upstream has commits the branch doesn't, it asks before a force push, which is
+    /// `--force-with-lease`. A detached HEAD has no branch to push.
+    func push() {
+        guard let snapshot, !networkActivity.contains(Self.pushing) else { return }
+        guard !snapshot.isDetached else {
+            writeError = "A detached HEAD has no branch to push. Check out a branch first."
+            return
+        }
+        if snapshot.upstream == nil {
+            askUpstream(for: snapshot.head, title: "Push") { [weak self] remote, branch in self?.runPush(.upstream, remote, branch) }
+        } else if snapshot.behind > 0 {
+            open(GitMenu(
+                id: "force-push", title: "Force push?", subject: .text(snapshot.head), symbol: "arrow.up.circle", isDestructive: true,
+                choices: [GitMenu.Choice(key: "y", title: "Force push",
+                                         note: "Your branch has diverged from the remote branch. Press ⎋ to cancel, or ↩ to force push.",
+                                         isDestructive: true) { [weak self] in self?.runPush(.force) }]))
+        } else {
+            runPush(.plain)
+        }
+    }
+
+    enum PushMode: String { case plain, upstream, force }
+
+    private func runPush(_ mode: PushMode, _ remote: String = "", _ branch: String = "") {
+        guard let root = snapshot?.root, !networkActivity.contains(Self.pushing) else { return }
+        runNetwork(GitRepository.pushScript, arguments: [root, mode.rawValue, remote, branch], activity: Self.pushing,
+                   cancelled: "Push cancelled.")
+    }
+
+    /// p: pulls the branch you're on, following the user's git config, such as `pull.rebase`. It waits in the write
+    /// queue, as it changes files, and goes through the Agent guard. Without an upstream it asks for one, as push does.
+    func pull() {
+        guard let snapshot, !networkActivity.contains(Self.pulling) else { return }
+        guard !snapshot.isDetached else {
+            writeError = "A detached HEAD has no branch to pull. Check out a branch first."
+            return
+        }
+        if snapshot.upstream == nil {
+            askUpstream(for: snapshot.head, title: "Pull") { [weak self] remote, branch in self?.guardedPull(.upstream, remote, branch) }
+        } else {
+            guardedPull(.plain)
+        }
+    }
+
+    private func guardedPull(_ mode: PushMode, _ remote: String = "", _ branch: String = "") {
+        guardFiles("Pull", subject: .text(snapshot?.head ?? ""), symbol: "arrow.down.circle", confirm: "Pull it") { [weak self] in
+            guard let self, let root = self.snapshot?.root else { return }
+            self.write(GitRepository.pullScript, arguments: [root, mode.rawValue, remote, branch], timeout: 120,
+                       network: (Self.pulling, "Pull cancelled."))
+        }
+    }
+
+    /// Asks for the upstream of a branch that has none, as lazygit does, starting at `origin <branch>`.
+    private func askUpstream(for branch: String, title: String, then run: @escaping (_ remote: String, _ branch: String) -> Void) {
+        open(GitPrompt(id: "upstream", title: "Enter upstream as '<remote> <branch>'", subject: .text("\(title) \(branch)"),
+                       symbol: "arrow.up.arrow.down", placeholder: "origin \(branch)", initialText: "origin \(branch)",
+                       allowsEmpty: false, submitTitle: title) { [weak self] typed in
+            let words = typed.split(whereSeparator: \.isWhitespace).map(String.init)
+            guard words.count == 2 else {
+                self?.writeError = "Enter the upstream as '<remote> <branch>', such as 'origin \(branch)'."
+                return
+            }
+            run(words[0], words[1])
+        })
+    }
+
+    /// Runs a command that talks to a remote, such as a fetch, in a pseudo-terminal beside the write queue, and
+    /// asks git's and ssh's questions for credentials in Git View prompts. The toolbar shows `activity` while it
+    /// runs; a failure shows git's message, and a cancelled question `cancelled`.
+    private func runNetwork(_ script: String, arguments: [String], activity: String, cancelled: String,
+                            refreshing: Bool = true, completion: ((Result<String, Error>) -> Void)? = nil) {
+        networkArguments.append(arguments)
+        guard let store else { return }
+        writeError = nil
+        networkActivity.append(activity)
+        let running = RunningCommand()
+        running.command = store.runGitNetworkScript(script, arguments: arguments, onPrompt: { [weak self] question in
+            self?.ask(Self.credentialPrompt(question, id: running.id, answer: { running.command?.answer($0) },
+                                            cancel: { running.command?.cancel() }))
+        }, completion: { [weak self] result in
+            guard let self else { return }
+            running.command = nil
+            if let index = self.networkActivity.firstIndex(of: activity) { self.networkActivity.remove(at: index) }
+            // A question the command no longer waits for goes.
+            self.waitingPrompts.removeAll { $0.id == running.id }
+            if self.prompt?.id == running.id { self.closePrompt() }
+            if let completion {
+                completion(result)
+            } else if case .failure(let error) = result {
+                self.writeError = Self.message(for: error, cancelled: cancelled)
+            }
+            if refreshing { self.refresh() }
+        })
+    }
+
+    /// Holds a network command for its questions; its prompts have its id.
+    private final class RunningCommand {
+        let id = "credential-" + UUID().uuidString
+        var command: TerminalCommand?
+    }
+
+    /// The Git View prompt for a command's question: hidden text for a password, passphrase, PIN or token.
+    static func credentialPrompt(_ question: GitCredentialPrompt, id: String = "credential",
+                                 answer: @escaping (String) -> Void, cancel: @escaping () -> Void) -> GitPrompt {
+        let symbol = switch question.kind {
+        case .username: "person"
+        case .hostKey: "server.rack"
+        case .password, .passphrase, .pin, .token: "key"
+        }
+        let placeholder = switch question.kind {
+        case .username: "Username"
+        case .hostKey: "yes, no or the fingerprint"
+        case .password: "Password"
+        case .passphrase: "Passphrase"
+        case .pin: "PIN"
+        case .token: "Token"
+        }
+        return GitPrompt(id: id, title: question.question,
+                         subject: question.context.isEmpty ? nil : .text(question.context.joined(separator: "\n")),
+                         symbol: symbol, placeholder: placeholder, isSecret: question.isSecret, submitTitle: "OK",
+                         onCancel: cancel, submit: answer)
     }
 
     // MARK: Diff pane
@@ -1927,6 +3012,10 @@ final class GitView {
         }
         readBranchLog()
         loadContent(reload: true)
+        if asksToContinue, !isWriting {
+            asksToContinue = false
+            if menu == nil, prompt == nil, !next.changes.contains(where: \.isConflict) { askToContinue(next) }
+        }
     }
 
     /// A tab's lists after a read: those gone into on what was just read,
@@ -2110,6 +3199,12 @@ final class GitView {
         }
     }
 
+    /// `message(for:)`, with `cancelled` for a network command that a cancelled question stopped.
+    static func message(for error: Error, cancelled: String?) -> String {
+        if let cancelled, case TmuxError.cancelled = error { return cancelled }
+        return message(for: error)
+    }
+
     static func message(for error: Error) -> String {
         switch error {
         case let error as GitViewError: return error.message
@@ -2224,8 +3319,8 @@ final class GitView {
         if let summary = fields["summary"] { commitSummary = summary }
         if let description = fields["description"] { commitDescription = description.replacingOccurrences(of: "\\n", with: "\n") }
         if fields["commitnow"] != nil { commit() }
-        // `discardnow=1` picks the Discard changes menu's highlighted option.
-        if fields["discardnow"] != nil, let discard { confirmDiscard(discard.option) }
+        // `menunow=1` runs the Git View menu's highlighted choice.
+        if fields["menunow"] != nil, let choice = menu?.highlightedChoice { choose(choice) }
         // `shot=<path>` saves the App Window as drawn, for shells that
         // aren't allowed to record the screen.
         if let path = fields["shot"], let view = store?.terminalHost.window?.contentView,

@@ -9,4 +9,10 @@
 /// with errno set on failure.
 pid_t muxify_forkpty_exec(const char *path, char *const argv[], char *const envp[], int *master);
 
+/// Runs `path` in a new session whose controlling terminal is a pty, as a
+/// terminal would, with stdin, stdout and stderr on it, so its questions,
+/// such as git's and ssh's credential prompts, come through the pty. The pty
+/// doesn't echo. Returns as `muxify_forkpty_exec` does.
+pid_t muxify_forkpty_terminal_exec(const char *path, char *const argv[], char *const envp[], int *master);
+
 #endif

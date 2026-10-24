@@ -217,6 +217,24 @@ final class WorkspaceStore {
         }
     }
 
+    /// Goes to the Worktree because a Git View asked to (ADR 0041): the most recent Window with a Pane in it, with
+    /// that Pane active, else Go to… on the Worktree's Session Path. Nothing starts until the user picks a row.
+    func goToWorktree(_ worktree: Folder) {
+        let window = WorktreeWindow.mostRecent(in: worktree, windows: windows, panes: panes, resolver: folders) {
+            visits.last(.session(name: $0.sessionName))
+        }
+        guard let window else {
+            palette.openGoTo(at: worktree)
+            return
+        }
+        if let pane = panes.first(where: { $0.windowID == window.id && worktree.contains(folders.folder($0.path)) && !$0.path.isEmpty }),
+           !pane.isActive {
+            select(TopicsModel.PaneRow(pane: pane, window: window, agent: nil, isUnderWindowRow: true))
+        } else {
+            select(window)
+        }
+    }
+
     /// Goes to the Session's active Window, as its palette row does.
     func goToSession(_ sessionID: String) {
         if let window = EntryWindow.ofSession(windows.filter { $0.sessionID == sessionID }) { select(window) }
@@ -1057,6 +1075,8 @@ final class WorkspaceStore {
     /// Each Window's Git View, made when it first opens and kept while the
     /// Window lives. Observed, for the sidebar's Git View icons.
     private var gitViews: [String: GitView] = [:]
+    /// The Git Views' Copied commits, by repository: shared by every Window in any Worktree of it.
+    @ObservationIgnored private let copiedCommits = CopiedCommits()
     @ObservationIgnored private var persistWork: [String: DispatchWorkItem] = [:]
     /// Keep changes dirty until tmux confirms the write, including commands
     /// already submitted when a window closes. Never flush unchanged Browsers
@@ -2014,6 +2034,7 @@ final class WorkspaceStore {
         if let gitView = gitViews[windowID] { return gitView }
         let gitView = GitView(windowID: windowID)
         gitView.store = self
+        gitView.copiedStore = copiedCommits
         gitViews[windowID] = gitView
         return gitView
     }
@@ -2078,6 +2099,26 @@ final class WorkspaceStore {
             guard let self, self.generation == current else { return }
             completion(result)
         }
+    }
+
+    /// Runs a Git View network command, such as `git fetch`, on the Environment's machine in a pseudo-terminal,
+    /// so its credential prompts go to `onPrompt`. Returns the command, to answer or cancel.
+    @discardableResult
+    func runGitNetworkScript(_ script: String, arguments: [String], timeout: TimeInterval = 120,
+                             onPrompt: @escaping (GitCredentialPrompt) -> Void,
+                             completion: @escaping (Result<String, Error>) -> Void) -> TerminalCommand? {
+        guard let connection, !isTransitioning, !isRemote || isConnected else {
+            completion(.failure(GitViewError(message: "Not connected to \(environmentName).")))
+            return nil
+        }
+        let current = generation
+        return connection.startTerminalScript(script, arguments: arguments, timeout: timeout, onPrompt: { [weak self] prompt in
+            guard let self, self.generation == current else { return }
+            onPrompt(prompt)
+        }, completion: { [weak self] result in
+            guard let self, self.generation == current else { return }
+            completion(result)
+        })
     }
 
     // MARK: - Browser

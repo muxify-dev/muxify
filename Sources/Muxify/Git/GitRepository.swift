@@ -9,6 +9,11 @@ struct GitSnapshot: Equatable {
     var repositoryName: String
     /// The folder of a linked worktree, when it isn't the repository's own.
     var worktreeName: String?
+    /// The repository's own folder: where its main checkout is, or its git directory when it is bare. Topic records
+    /// name a Worktree's repository by it.
+    var repositoryFolder = ""
+    /// The repository's common git directory, the same from every Worktree of it: what Copied commits are kept by.
+    var commonDirectory = ""
     /// The current branch, or the short commit of a detached HEAD.
     var head: String
     var isDetached = false
@@ -20,6 +25,10 @@ struct GitSnapshot: Equatable {
     /// What the toolbar's ↑/↓ count against: the upstream, else main.
     var comparison: GitComparison?
     var branches: [GitBranch] = []
+    /// The names of the remote branches, such as `origin/foo`, for `c` in Branches to suggest.
+    var remoteBranches: [String] = []
+    /// The branch that `git checkout -` goes back to, if it is still a branch.
+    var previousBranch: String?
     var commits: [GitCommit] = []
     /// The History graph, a row per commit.
     var graph: [GitGraphRow] = []
@@ -59,9 +68,8 @@ struct GitSnapshot: Equatable {
     }
 }
 
-/// What git is in the middle of: a merge, which a commit concludes, or a
-/// rebase, `git am`, cherry-pick or revert, which go on with their own
-/// command, or a bisect.
+/// What git is in the middle of: a merge, a rebase, `git am`, a cherry-pick or
+/// a revert, which m continues, skips or aborts, or a bisect.
 enum GitOperation: Equatable {
     /// The commits being merged in.
     case merge([String])
@@ -72,14 +80,76 @@ enum GitOperation: Equatable {
     case revert(String)
     case bisect
 
+    /// Why A doesn't amend now, if it doesn't.
+    var amendBlock: String? {
+        switch self {
+        case .merge: "A merge is in progress: conclude it with c first, then amend."
+        case .rebase, .applying, .cherryPick, .revert:
+            (commitBlock ?? "").replacingOccurrences(of: ": continue", with: ", so the last commit isn't amended: continue")
+        case .bisect: nil
+        }
+    }
+
     /// Why c doesn't commit now, if it doesn't.
     var commitBlock: String? {
         switch self {
-        case .rebase: "A rebase is in progress: continue it in the terminal, with git rebase --continue."
-        case .applying: "git am is in progress: continue it in the terminal, with git am --continue."
-        case .cherryPick: "A cherry-pick is in progress: continue it in the terminal, with git cherry-pick --continue."
-        case .revert: "A revert is in progress: continue it in the terminal, with git revert --continue."
+        case .rebase, .applying, .cherryPick, .revert: "\(title) is in progress: continue it with m."
         case .merge, .bisect: nil
+        }
+    }
+
+    /// The operation as a sentence starts with it, such as "A rebase" or "git am".
+    private var title: String {
+        switch self {
+        case .merge: "A merge"
+        case .rebase: "A rebase"
+        case .applying: "git am"
+        case .cherryPick: "A cherry-pick"
+        case .revert: "A revert"
+        case .bisect: "A bisect"
+        }
+    }
+
+    /// What m calls it, such as "rebase" or "git am"; nil for a bisect, which m leaves alone.
+    var noun: String? {
+        switch self {
+        case .merge: "merge"
+        case .rebase: "rebase"
+        case .applying: "git am"
+        case .cherryPick: "cherry-pick"
+        case .revert: "revert"
+        case .bisect: nil
+        }
+    }
+
+    /// The git command that goes on with it, such as `rebase` for `git rebase --continue`.
+    var command: String? {
+        switch self {
+        case .merge: "merge"
+        case .rebase: "rebase"
+        case .applying: "am"
+        case .cherryPick: "cherry-pick"
+        case .revert: "revert"
+        case .bisect: nil
+        }
+    }
+
+    /// Git has no `--skip` for a merge.
+    var canSkip: Bool {
+        switch self {
+        case .merge, .bisect: false
+        case .rebase, .applying, .cherryPick, .revert: true
+        }
+    }
+
+    /// An SF Symbol for it.
+    var symbol: String {
+        switch self {
+        case .merge: "arrow.triangle.merge"
+        case .rebase, .applying: "arrow.triangle.2.circlepath"
+        case .cherryPick: "arrow.uturn.forward"
+        case .revert: "arrow.uturn.backward"
+        case .bisect: "magnifyingglass"
         }
     }
 }
@@ -236,6 +306,8 @@ enum GitRepository {
     section branches
     g for-each-ref --sort=-committerdate \\
         --format='%(HEAD)%00%(refname:short)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:unix)%00%(worktreepath)%00%(objectname)' refs/heads
+    section remotebranches; g for-each-ref --format='%(refname)' refs/remotes
+    section previous; g rev-parse --abbrev-ref '@{-1}' 2>/dev/null
     \(mainRefs)
     rev=HEAD upstream='HEAD@{upstream}'
     \(logSections)
@@ -437,6 +509,123 @@ enum GitRepository {
     exit 1
     """
 
+    /// Takes the folder; amends the last commit with what's staged and keeps
+    /// its message. Prints the commit's short hash; hooks' output goes to
+    /// stderr, where a failure shows it.
+    static let amendScript = """
+    cd "$1" || exit 1
+    git -c color.ui=never commit -q --amend --no-edit 1>&2 || exit 1
+    git rev-parse --short HEAD
+    """
+
+    /// Takes the folder, the git command of what's in progress (`merge`, `rebase`, `am`, `cherry-pick` or `revert`)
+    /// and one of `continue`, `skip` and `abort`. No editor opens, so git's message is kept. Git's own words, on
+    /// stderr, say why it refused; when conflicts are left, a line says where to resolve them.
+    static let operationScript = """
+    cd "$1" || exit 1
+    export GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true
+    git -c core.editor=true -c color.ui=never "$2" "--$3" 1>&2 && exit 0
+    code=$?
+    if [ "$3" != abort ] && [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+        printf 'Conflicts remain: resolve them in Changes and stage each file, then m continues again.\\n' >&2
+    fi
+    exit $code
+    """
+
+    /// Takes the folder, a branch, how to merge it (`ff`, `no-ff`, `squash` or `squash-leave`) and the branch it goes
+    /// into, for the words. No editor opens, so git's message is kept. A merge that conflicts is told apart from
+    /// other failures, which print what git said: the conflicts are left in the working tree, and a `ff` or `no-ff`
+    /// merge stays in progress, as git does. A squash is no merge in git's eyes, so only the conflicts remain.
+    /// `squash` commits what it took, with the message git prepared; `squash-leave` leaves it staged.
+    static let mergeScript = """
+    cd "$1" || exit 1
+    branch=$2 kind=$3 into=$4
+    export GIT_EDITOR=true GIT_MERGE_AUTOEDIT=no
+    case $kind in
+        ff) set -- --ff ;;
+        no-ff) set -- --no-ff ;;
+        squash|squash-leave) set -- --squash --ff ;;
+        *) echo "Unknown merge: $kind" >&2; exit 1 ;;
+    esac
+    out=$(LC_ALL=C git -c color.ui=never merge --no-edit "$@" "$branch" 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+            if [ "$kind" = ff ] || [ "$kind" = no-ff ]; then
+                printf "Merging '%s' into '%s' conflicted: the conflicted files are in Changes. Stage them, then c concludes the merge, or m continues or aborts it.\\n" "$branch" "$into" >&2
+            else
+                printf "Squashing '%s' into '%s' conflicted: the conflicted files are in Changes. Stage them, then c commits.\\n" "$branch" "$into" >&2
+            fi
+        else
+            printf '%s\\n' "$out" >&2
+        fi
+        exit 1
+    fi
+    if [ "$kind" = squash ] && ! git diff --cached --quiet; then
+        git -c color.ui=never commit -q --no-edit 1>&2 || exit 1
+    fi
+    """
+
+    /// Takes the folder, the branch to rebase onto and the branch you're on, for the words. `git rebase`, with no
+    /// editor, so nothing waits for input. A rebase that conflicts is told apart from other failures, which print what
+    /// git said: it stays in progress with the conflicts in Changes, where m continues, skips or aborts it.
+    static let rebaseScript = """
+    cd "$1" || exit 1
+    onto=$2 head=$3
+    export GIT_EDITOR=true GIT_SEQUENCE_EDITOR=true
+    out=$(LC_ALL=C git -c core.editor=true -c color.ui=never rebase "$onto" 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+            printf "Rebasing '%s' onto '%s' conflicted: the conflicted files are in Changes. Stage them, then m continues, skips or aborts the rebase.\\n" "$head" "$onto" >&2
+        else
+            printf '%s\\n' "$out" >&2
+        fi
+        exit 1
+    fi
+    """
+
+    /// Takes the folder and the full hashes of the Copied commits, in any order. Cherry-picks them onto the branch you're
+    /// on, oldest first: parents before their children, found by walking from the copies down to their common ancestor.
+    /// A pick that conflicts is told apart from other failures, which print what git said: it stays in progress with the
+    /// conflicts in Changes, where m continues, skips or aborts it.
+    static let cherryPickScript = """
+    cd "$1" || exit 1
+    shift
+    export GIT_EDITOR=true
+    base=$(git merge-base --octopus "$@" 2>/dev/null)
+    if [ -n "$base" ]; then
+        ordered=$(git rev-list --topo-order --reverse "$@" "^$base^@")
+    else
+        ordered=$(git rev-list --no-walk --reverse "$@")
+    fi
+    picks=
+    for commit in $ordered; do
+        case " $* " in *" $commit "*) picks="$picks $commit" ;; esac
+    done
+    out=$(LC_ALL=C git -c core.editor=true -c color.ui=never cherry-pick $picks 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+            printf 'The cherry-pick conflicted: the conflicted files are in Changes. Stage them, then m continues, skips or aborts it.\\n' >&2
+        else
+            printf '%s\\n' "$out" >&2
+        fi
+        exit 1
+    fi
+    """
+
+    /// Takes the folder, `soft`, `mixed` or `hard`, and the commit to reset the branch you're on to. Git's own message
+    /// shows when it fails. A hard reset leaves untracked files.
+    static let resetScript = """
+    cd "$1" || exit 1
+    case $2 in
+        soft|mixed|hard) ;;
+        *) echo "Unknown reset: $2" >&2; exit 1 ;;
+    esac
+    LC_ALL=C git -c color.ui=never reset -q "--$2" "$3" 1>&2 || exit 1
+    """
+
     /// Takes the folder and the message; commits what's staged. Prints the
     /// new commit's short hash; hooks' output goes to stderr, where a
     /// failure shows it.
@@ -444,6 +633,194 @@ enum GitRepository {
     cd "$1" || exit 1
     printf '%s\\n' "$2" | git -c color.ui=never commit -q -F - 1>&2 || exit 1
     git rev-parse --short HEAD
+    """
+
+    /// Takes the folder, one of `all`, `untracked`, `staged`, `unstaged` and
+    /// `keepindex`, and the message, which may be empty. Stashes as `git
+    /// stash push` does, which leaves untracked files except for `untracked`.
+    /// `unstaged` is how lazygit does it: what's staged is committed for a
+    /// moment, the rest is stashed, and the commit is undone, softly.
+    static let stashScript = """
+    cd "$1" || exit 1
+    kind=$2 message=$3
+    push() {
+        flags=$1
+        set -- push -q
+        if [ -n "$flags" ]; then set -- "$@" "$flags"; fi
+        if [ -n "$message" ]; then set -- "$@" -m "$message"; fi
+        git stash "$@"
+    }
+    case $kind in
+        all) push ;;
+        untracked) push --include-untracked ;;
+        keepindex) push --keep-index ;;
+        staged)
+            if ! git stash push -h 2>&1 | grep -q -e --staged; then
+                echo "Stashing only what's staged needs git 2.35 or newer." >&2
+                exit 1
+            fi
+            push --staged
+            ;;
+        unstaged)
+            git rev-parse -q --verify HEAD >/dev/null || { echo "There is no commit yet to stash the unstaged changes against." >&2; exit 1; }
+            if git diff --cached --quiet; then
+                push
+                exit $?
+            fi
+            git -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -q --no-verify -m '[muxify] stashing unstaged changes' || exit 1
+            push
+            status=$?
+            git reset -q --soft HEAD^ || exit 1
+            exit $status
+            ;;
+        *) echo "Unknown stash option: $kind" >&2; exit 1 ;;
+    esac
+    """
+
+    /// Takes the folder, `apply`, `pop` or `drop`, a stash's ref and its hash. Refuses when the ref is no longer the
+    /// stash that was selected. A conflict leaves the conflicted files in the working tree, and the stash in the list
+    /// even for a pop, as git does; it is told apart from other failures, which print what git said.
+    static let stashEntryScript = """
+    cd "$1" || exit 1
+    action=$2 ref=$3 sha=$4
+    if [ "$(git rev-parse -q --verify "$ref" 2>/dev/null)" != "$sha" ]; then
+        echo "$ref is no longer the stash that was selected. Look at the stashes again." >&2
+        exit 1
+    fi
+    if [ "$action" = drop ]; then exec git stash drop -q "$ref"; fi
+    out=$(LC_ALL=C git stash "$action" "$ref" 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        if printf '%s\\n' "$out" | grep -q '^CONFLICT'; then
+            echo "Applying $ref conflicted: the conflicted files are in Changes. The stash is kept." >&2
+        else
+            printf '%s\\n' "$out" >&2
+        fi
+        exit 1
+    fi
+    """
+
+    /// Takes the folder, a branch and its new name.
+    static let renameBranchScript = """
+    cd "$1" || exit 1
+    git branch -m -- "$2" "$3"
+    """
+
+    /// What the delete script's stderr is when `git branch -d` refused because the branch isn't fully merged.
+    static let branchNotMergedMarker = "muxify:branch-not-merged"
+
+    /// Takes the folder, a branch and `1` to force. Without force it tells a branch that git won't delete for not
+    /// being fully merged from any other failure, which prints what git said, such as that another Worktree has it
+    /// checked out. A Worktree is never removed.
+    static let deleteBranchScript = """
+    cd "$1" || exit 1
+    if [ "$3" = 1 ]; then exec git branch -D -- "$2"; fi
+    out=$(LC_ALL=C git branch -d -- "$2" 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        if printf '%s\\n' "$out" | grep -q 'is not fully merged'; then
+            echo "\(branchNotMergedMarker)" >&2
+        else
+            printf '%s\\n' "$out" >&2
+        fi
+        exit 1
+    fi
+    """
+
+    /// Takes the folder and a local branch, and deletes the branch it tracks on its remote with
+    /// `git push <remote> --delete <branch>`. It runs in a pseudo-terminal, so credential questions are asked in the Git View.
+    static let deleteRemoteBranchScript = """
+    cd "$1" || exit 1
+    remote=$(git config "branch.$2.remote") || { echo "'$2' has no remote branch." >&2; exit 1; }
+    ref=$(git config "branch.$2.merge") || { echo "'$2' has no remote branch." >&2; exit 1; }
+    if [ "$remote" = . ]; then echo "'$2' tracks a local branch, not a remote one." >&2; exit 1; fi
+    exec git push "$remote" --delete "${ref#refs/heads/}"
+    """
+
+    /// Takes the folder and fetches all remotes, as lazygit's `f` does by default. It runs in a pseudo-terminal
+    /// (`TerminalCommand`), so git's and ssh's questions for credentials are asked in the Git View.
+    static let fetchScript = """
+    cd "$1" || exit 1
+    exec git fetch --all
+    """
+
+    /// Takes the folder, `plain`, `upstream` or `force`, and for `upstream` a remote and a branch. `upstream` pushes
+    /// the current branch to that branch and sets it as the upstream; `force` is `--force-with-lease`, which stops when
+    /// the remote branch isn't where the last fetch saw it. It runs in a pseudo-terminal, as the fetch does.
+    static let pushScript = """
+    cd "$1" || exit 1
+    case "$2" in
+        upstream) exec git push --set-upstream "$3" "HEAD:refs/heads/$4" ;;
+        force) exec git push --force-with-lease ;;
+        *) exec git push ;;
+    esac
+    """
+
+    /// Takes the folder, `plain` or `upstream`, and for `upstream` a remote and a branch to pull, which then become
+    /// the upstream. A plain pull follows the user's git config, such as `pull.rebase`; `--no-edit` keeps a merge from
+    /// waiting for an editor. A pull that conflicts leaves the merge or rebase in progress, with the conflicts in
+    /// Changes, and says so; any other failure prints what git said.
+    static let pullScript = """
+    cd "$1" || exit 1
+    mode=$2 remote=$3 branch=$4
+    if [ "$mode" = upstream ]; then set -- pull --no-edit "$remote" "$branch"; else set -- pull --no-edit; fi
+    out=$(git "$@" 2>&1)
+    status=$?
+    if [ $status -ne 0 ]; then
+        if [ -e "$(git rev-parse --git-path MERGE_HEAD)" ]; then
+            echo "Pulling conflicted: the merge is in progress, with the conflicted files in Changes." >&2
+        elif [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
+            echo "Pulling conflicted: the rebase is in progress, with the conflicted files in Changes." >&2
+        else
+            printf '%s\\n' "$out" >&2
+        fi
+        exit 1
+    fi
+    if [ "$mode" = upstream ]; then git branch --set-upstream-to="$remote/$branch" >/dev/null 2>&1; fi
+    exit 0
+    """
+
+    /// What the checkout script's stderr starts with when only Changes kept git from checking out.
+    static let checkoutBlockedMarker = "muxify:changes-in-the-way"
+
+    /// Takes the folder, `branch`, `remote`, `new`, `previous` or `commit`, the branch, the new branch's name or the
+    /// commit, `1` to stash the changes first and pop them after, and for `new` the branch it is off of. `remote`
+    /// makes a local branch that tracks the remote one, and `previous` is `git checkout -`. Without it, a checkout that Changes would be overwritten by fails with `checkoutBlockedMarker`, then
+    /// git's message. A pop that conflicts keeps the stash, as git does, and says so.
+    static let checkoutScript = """
+    cd "$1" || exit 1
+    kind=$2 target=$3 autostash=$4 base=$5
+    if [ "$kind" = previous ] && ! git rev-parse -q --verify '@{-1}' >/dev/null 2>&1; then
+        echo 'There is no previous branch to check out.' >&2
+        exit 1
+    fi
+    checkout() {
+        case "$kind" in
+            branch) LC_ALL=C git checkout "$target" -- ;;
+            remote) LC_ALL=C git checkout --track "$target" -- ;;
+            new) LC_ALL=C git checkout -b "$target" "$base" -- ;;
+            previous) LC_ALL=C git checkout - ;;
+            *) LC_ALL=C git checkout --detach "$target" ;;
+        esac
+    }
+    if [ "$autostash" != 1 ]; then
+        out=$(checkout 2>&1) && exit 0
+        if printf '%s\n' "$out" | grep -q 'would be overwritten by checkout'; then echo 'muxify:changes-in-the-way' >&2; fi
+        printf '%s\n' "$out" >&2
+        exit 1
+    fi
+    before=$(git rev-parse -q --verify refs/stash 2>/dev/null)
+    git stash push -q --include-untracked -m "Autostash before checking out $target" || exit 1
+    after=$(git rev-parse -q --verify refs/stash 2>/dev/null)
+    if ! out=$(checkout 2>&1); then
+        if [ "$after" != "$before" ]; then git stash pop -q >/dev/null 2>&1; fi
+        printf '%s\n' "$out" >&2
+        exit 1
+    fi
+    if [ "$after" != "$before" ] && ! git stash pop -q >/dev/null 2>&1; then
+        echo "Checked out, but popping the stash conflicted: the conflicted files are in Changes. The stash is kept." >&2
+        exit 1
+    fi
     """
 
     // MARK: Parsing
@@ -467,6 +844,10 @@ enum GitRepository {
             head: isDetached ? String(headLine.dropFirst("detached ".count)) : headLine,
             isDetached: isDetached
         )
+        snapshot.commonDirectory = common
+        if !common.isEmpty {
+            snapshot.repositoryFolder = (common as NSString).lastPathComponent == ".git" ? (common as NSString).deletingLastPathComponent : common
+        }
         let status = parseStatus(sections["status"] ?? "")
         snapshot.changes = counted(status.changes, staged: parseNumstat(sections["staged"] ?? ""),
                                    unstaged: parseNumstat(sections["unstaged"] ?? ""),
@@ -482,6 +863,9 @@ enum GitRepository {
             return branch
         }
         snapshot.branches = branches.filter(\.isHead) + branches.filter { !$0.isHead }
+        snapshot.remoteBranches = parseRemoteBranches(sections["remotebranches"] ?? "")
+        let previous = trimmed(sections["previous"] ?? "")
+        snapshot.previousBranch = branches.contains { $0.name == previous } ? previous : nil
         snapshot.comparison = parseComparison(sections["comparison"] ?? "")
         let main = trimmed(sections["main"] ?? "")
         snapshot.mainBranch = main.isEmpty ? nil : main
@@ -513,6 +897,15 @@ enum GitRepository {
         let commits = parseCommits(sections["commits"] ?? "", unpushed: shaSet(sections["unpushed"]),
                                    unmerged: shaSet(sections["unmerged"]))
         return GitLog(commits: commits, graph: GitGraphRow.layout(commits))
+    }
+
+    /// `git for-each-ref refs/remotes`, as `origin/foo`; a remote's `HEAD` is no branch.
+    static func parseRemoteBranches(_ output: String) -> [String] {
+        let prefix = "refs/remotes/"
+        return output.split(separator: "\n").compactMap { line in
+            guard line.hasPrefix(prefix), !line.hasSuffix("/HEAD") else { return nil }
+            return String(line.dropFirst(prefix.count))
+        }
     }
 
     /// `git status --porcelain=v1 --branch -z`.

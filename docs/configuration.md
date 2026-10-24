@@ -431,6 +431,225 @@ all of it is staged, and a stages or unstages everything; a click on a file's
 letters does the same. d asks, as lazygit does, whether to discard all of a
 file's or folder's changes, back to the last commit, or only the unstaged ones,
 keeping what's staged. New and untracked files are deleted; it can't be undone.
+The Git View asks in a menu, as lazygit does: each choice has its key, j and k
+(or ↓ and ↑) move the highlight, ↩ picks the highlighted choice, and ⎋ or q
+close the menu and change nothing. While it is open, no other Git View key acts.
+When an operation needs one value, such as a message, the Git View asks in a
+prompt: a one-line field over the Git View, filled in when the operation has a
+suggestion. ↩ submits it and ⎋ cancels with no change; a prompt for a secret,
+such as a password, shows dots as you type.
+
+In Changes, s stashes all changes, as `git stash push` does: it asks for the
+stash's message, which may be empty (git then names the stash itself), and
+leaves untracked files where they are. S opens lazygit's stash options as a
+menu: stash all changes (a); all changes including untracked files (U); only
+what's staged (s), which needs git 2.35 or newer; only what isn't staged (u),
+which keeps what's staged as it is, as lazygit does it, by committing it for a
+moment and undoing that commit; or all changes while keeping what's staged in
+the working tree too (i). Each asks for the message next. An option with
+nothing to take is dimmed, and when there is nothing to stash at all the Git
+View says so and opens nothing. Stashing changes the files of the Worktree, so it
+asks first while an Agent is working there, as below. The new stash is the first
+in Stashes, whose count goes up.
+
+In Stashes, the selected stash is applied, popped or dropped as lazygit's Stash
+panel does, each after a confirmation menu: space applies it ("Are you sure you
+want to apply this stash entry?") and the stash stays; g pops it, which applies
+it and drops it; d drops it ("Are you sure you want to drop the selected stash
+entry?"). ↩ or y confirms and ⎋ cancels. Apply and pop change the files of the
+Worktree, so the same menu names any Agent working there, as below; drop doesn't.
+When applying conflicts, the conflicted files show in Changes and the banner
+says so; a pop that conflicts keeps the stash, as git does. If the stash list
+changed since the stash was selected, nothing is done and the banner says so.
+The lists, the Stashes count and Changes update afterwards. In the stash's Diff
+files and in other tabs the keys keep their meanings: space folds a folder, and
+d discards in Changes.
+
+In Branches, space checks out the selected branch, as in lazygit; on the branch
+you're on it does nothing. In History and in a branch's commits, space checks out
+the selected commit and leaves a detached HEAD, which the toolbar and the commit
+box show. When Changes would be overwritten by the checkout, the Git View asks
+"Autostash?" ("You must stash and pop your changes to bring them across. Do this
+automatically?"): ↩ or y stashes them, including untracked files, checks out and
+pops the stash onto the new HEAD; ⎋ changes nothing. If the pop conflicts, the
+conflicted files show in Changes, the banner says so and the stash is kept. Any
+other failure shows git's message in the banner. The toolbar, History, Branches and Changes show the new
+HEAD afterwards. Every checkout changes the files of the Worktree, so it asks
+first while an Agent is working there, as below. In a commit's Diff files, space
+still folds a folder.
+
+Four more keys in Branches check out, as lazygit's Local branches do. n asks for a
+name ("New branch name (branch is off of 'feature')"; spaces become dashes),
+creates the branch off the selected one and checks it out. R asks for a new name,
+starting at the current one, and renames the selected branch; elsewhere R still
+reads the repository again. - checks out the previous branch, as `git checkout -`
+does; elsewhere - still folds. c asks for a name in a prompt that offers the local
+and remote branches matching what you type: ↓ / ↑ choose one, and ↩ checks out
+the chosen one, else what was typed. A remote branch such as `origin/foo` makes a
+local branch `foo` that tracks it, unless `foo` exists, which is then checked out.
+Each of these goes the way space does: through Autostash?, the Agent guard and
+the offer to go to another Worktree. c now commits only in Changes and in a
+change's diff, as in lazygit; in History and Stashes it does nothing. A merge is
+still concluded with c in Changes.
+
+d in Branches opens lazygit's delete menu for the selected branch. Its first
+choice is c, "Delete local branch", which runs `git branch -d`. A branch with an
+upstream also offers r, "Delete remote branch", and b, "Delete local and remote
+branch". Each asks first, naming the remote branch: "Are you sure you want to
+delete the remote branch 'origin/x'?" The remote delete runs `git push <remote>
+--delete <branch>` beside the write queue, with the same credential prompts as
+fetch, and the toolbar says "Deleting remote branch…". b then deletes the local
+branch under the rules below, including the force question and the Topic note, and
+is dimmed on the branch you're on; if the remote delete fails, the local branch
+stays. A branch with no upstream, or whose upstream is gone, offers only c. The branch you're
+on can't be deleted: the choice is dimmed with "You cannot delete the checked out
+branch!". A branch that another Worktree has checked out is refused by git, and
+its message shows in the banner; a Worktree is never removed. When git refuses
+because the branch is not fully merged, a second menu asks "Force delete branch"
+("'X' is not fully merged. Are you sure you want to delete it?"), and y deletes it
+with `git branch -D`; ⎋ keeps it. When a Topic's record remembers the branch as the
+`branch` of one of its remembered Sessions' Worktrees, in this repository, the
+confirmation says so: "Topic 'Fix payments' remembers this branch; Reopen will
+start it again from its base." That holds for open, Dormant and Settled Topics,
+and the menu names each. The Topic records are on this Mac, so a Git View on a
+Remote Environment names none. Deleting a branch changes no files, so the Agent
+guard doesn't join the menu. In Changes d still discards, in Stashes it still
+drops, and elsewhere it does nothing.
+
+A branch that another Worktree has checked out can't be checked out here, so
+space on it asks instead, in a Git View menu: "Branch feature is checked out by
+Worktree repo-feature. Go to that Worktree?" ↩ or y goes there. If a Window of
+the Environment has a Pane whose folder is that Worktree or inside it, Muxify goes
+to the most recent such Window, as Jump To does, with the Pane active when it
+wasn't. Windows are ranked by when their Session was visited last, then by the
+active Window and the latest Session activity. Folders are compared by real path.
+If no Window has a Pane there, Go to… opens searched for that Worktree's Session
+Path, with its row under the cursor, so you can start a Session there with ↩; the
+Git View starts nothing itself. ⎋ changes nothing: nothing is checked out, and
+the Git View of the Window you were in stays as it was. This question changes no
+files, so the Agent guard doesn't join it. Every later checkout, such as one from
+another key, asks the same way.
+
+f in Changes fetches all remotes, as lazygit's does by default (`git fetch
+--all`). The fetch doesn't wait for staging, committing or other writes, and they
+don't wait for it: the toolbar shows "Fetching…" until it ends, then the
+repository is read again and the counts of commits ahead of and behind the
+upstream update. While a fetch runs, f does nothing more. When it fails, the
+banner shows git's message, without its progress lines.
+
+The fetch runs in a pseudo-terminal with `LANG`, `LC_ALL` and `LC_MESSAGES` set to
+`C`, as lazygit runs it, so git's and ssh's questions are in English. Muxify
+watches its output for lazygit's credential prompts (`Password:`, `<user>'s
+password:`, `Password for '…':`, `Username for '…':`, `Enter passphrase for key
+'…':`, `Enter PIN for … key …:`, `Enter PIN for '…':` and `2FA Token`) and for
+ssh's question about an unknown host ("Are you sure you want to continue
+connecting (yes/no/[fingerprint])?", shown with the host and fingerprint ssh
+named). Each is asked in a Git View prompt whose title is git's or ssh's
+question; for a password, passphrase, PIN or token what you type is hidden, and
+the prompt says "Hidden". ↩ writes the answer into the terminal, ⎋ stops the
+fetch and the banner says "Fetch cancelled.". The fetch's two-minute timeout
+doesn't run while a question waits. Selecting another Window keeps the question
+for when you come back; closing the Git View stops the fetch. On a Remote
+Environment the fetch runs over SSH with a remote terminal (`ssh -tt`), so the
+same questions come from the remote machine. Other git commands of the Git View
+run without a terminal and fail with git's message when they would ask.
+
+P pushes the branch you're on and p pulls it, in every tab of the Git View.
+The push runs beside the other writes, as the fetch does, and the toolbar shows
+"Pushing…" until it ends. A branch with no upstream asks for one in a Git View
+prompt, "Enter upstream as '<remote> <branch>'", starting at `origin <branch>`;
+↩ pushes the branch to that remote branch and sets it as the upstream, and an
+answer that isn't two words is told how to write it. When the upstream has
+commits the branch doesn't, a menu asks "Your branch has diverged from the remote
+branch. Press ⎋ to cancel, or ↩ to force push." and only ↩ pushes, with
+`--force-with-lease`, which stops when the remote branch has moved since the last
+fetch. Any other push is a plain `git push`, so a rejection shows git's message
+in the banner. A push changes no files here, so the Agent guard doesn't join it.
+
+The pull is `git pull --no-edit`, so it follows your git config, such as
+`pull.rebase`, and a merge doesn't wait for an editor. It waits in the write
+queue, behind the writes before it, and the writes after it wait for it; the
+toolbar shows "Pulling…" while it runs. It changes files, so it goes through the
+Agent guard: with an Agent working in the Worktree, a "Pull" menu names it and
+asks for y. A branch with no upstream asks as push does, after which the pull
+takes that remote branch and sets it as the upstream. A pull that conflicts
+leaves the merge or the rebase in progress, with the conflicted files in
+Changes, and the banner says so; any other failure shows git's message, such as
+the question of how to reconcile divergent branches. Both run in the same
+pseudo-terminal as the fetch, with its credential prompts and its "Push
+cancelled." and "Pull cancelled." banners. A detached HEAD has no branch to push
+or pull, and the banner says so.
+
+m, in every tab, goes on with a merge, rebase, cherry-pick, revert or `git am` that is in progress, as lazygit's
+does. It opens a Git View menu of c (continue), s (skip) and a (abort); a merge has no skip, as git has none. Nothing
+opens an editor: a continue keeps git's message, and `git rebase --continue` and its kin run with the editor set to
+`true`. Each goes through the Agent guard, since each changes files, so with an Agent working in the Worktree the menu
+names it. While conflicts remain, git refuses to continue and the banner shows its reason, with a line saying to
+resolve them in Changes and stage each file; a continue that reaches new conflicts, as a rebase does at its next
+commit, leaves them in Changes, and m continues again. With nothing in progress, m says so; a bisect isn't continued
+from the Git View. The toolbar's tag and the banner of c and A point at m.
+
+After you stage the last conflicted file with space or a, the Git View asks lazygit's "All merge conflicts resolved.
+Continue the rebase?", naming the operation in progress: ↩ continues and ⎋ leaves it for later, when m still does it.
+It asks only after staging in the Git View, not when conflicts were resolved elsewhere.
+
+A in Changes amends the last commit with what's staged, as lazygit does, and keeps its message. It asks first, in a
+Git View menu: "Are you sure you want to amend the last commit?". Hooks and signing run as they do for c; when one
+fails, the banner shows what it said. With nothing staged, with no commit yet, or while a merge, rebase, cherry-pick,
+revert or `git am` is in progress, A changes nothing and the banner says why. A commit that is already pushed can be
+amended; the next push then asks to force push.
+
+M in Branches merges the selected branch into the one you're on, as lazygit does. It opens a menu titled "Merge 'X'
+into 'Y'" with four choices: a regular merge, which fast-forwards when it can and else makes a merge commit (f); a
+regular merge that always makes a merge commit, as `git merge --no-ff` does (n); a squash merge that commits what it took
+in one commit, with the message git prepared (s); and a squash merge that leaves the changes staged (u). The merge runs
+without an editor and keeps git's message, and it goes through the Agent guard. When it conflicts, the banner says so
+and the conflicted files are in Changes. A merge stays in progress as git leaves it: after you stage the files, c
+concludes it, and m continues or aborts it (m then c is the same). A squash merge is not a merge to git, so it leaves
+only the conflicts: stage them, then c commits, or reset to give it up. On the branch you're on, M changes nothing and
+the banner says a branch can't be merged into itself; while a merge, rebase or the like is in progress, the banner asks
+you to continue or abort it first. When your uncommitted changes are in the way, git's own message shows.
+
+r in Branches rebases the branch you're on onto the selected one, as lazygit's simple rebase does. It opens a menu
+titled "Rebase 'Y'" with one choice, "Simple rebase onto 'X'" (s), which runs `git rebase X` without an editor, and it
+goes through the Agent guard. The interactive rebase and the rebase onto a base branch are not offered. When it
+conflicts, the banner says so and the rebase stays in progress with the conflicted files in Changes: after you stage the
+last one, Muxify asks to continue, and m continues, skips or aborts it. Commits that were already pushed can be rebased;
+their hashes change, so the next push asks to force push. On the branch you're on, r changes nothing and the banner says
+a branch can't be rebased onto itself; while a merge, rebase or the like is in progress, the banner asks you to continue
+or abort it first. When your uncommitted changes are in the way, git's own message shows.
+
+g in History, in a branch's commits and in Branches resets the branch you're on to the selected commit or branch, as
+lazygit's Reset menu does. It opens a menu titled "Reset to X" with three choices, each with a note: s, a soft reset
+(`git reset --soft`), keeps the changes between the two commits as staged changes; m, a mixed reset, keeps them as
+unstaged changes; h, a hard reset, discards them and all current Changes. Soft and mixed run at once. A hard reset that
+would discard Changes asks once more, as d does: "Discard N files and reset", with "This can't be undone." beside
+Cancel; N counts the files `git reset --hard` puts back, not the untracked files, which stay. That second menu also
+carries the Agent guard, naming any Agent working in the Worktree, and a hard reset with no Changes still asks through
+the guard. Soft and mixed don't, as they leave the files as they are. Afterwards the lists show the new HEAD. In
+Stashes, g still pops the selected stash.
+
+C in History and in a branch's commits copies the selected commit, or takes it out again, as lazygit's cherry-pick
+does. Copied commits show a "copied" mark on their rows in every commit list, and the toolbar says "N copied". V in
+History asks, in a menu, "Are you sure you want to cherry-pick the N copied commit(s) onto this branch?" and, on y,
+cherry-picks them onto the branch you're on, oldest first, whatever order you copied them in; the menu also carries the
+Agent guard, naming any Agent working in the Worktree. When the pick succeeds, the Copied commits are cleared. ⌃R
+clears them at any time. A pick that conflicts stops with the conflicted files in Changes, and m continues, skips or
+aborts it; the Copied commits stay until a paste succeeds. As in git, a cherry-pick wants staged changes committed or
+stashed first: when git refuses, its message shows. Copied commits belong to the repository, not to the Window:
+they are kept by the repository's common git directory, which every Worktree shares, so you can copy in the Git View of
+one Topic's Worktree and paste in the Git View of a Window in another. A different repository has its own. They are
+kept while Muxify runs and are not saved.
+
+An operation that changes the files of the Worktree asks first while an Agent is
+working there. If a Pane whose folder is the Worktree or inside it runs an Agent
+that is working or blocked, the menu names each such Agent, by its Topic, or by
+its Session when it has none, and the operation runs only when you confirm; ⎋
+changes nothing. Agents that are done, failed or have no Status don't count, and
+neither do Agents in other Worktrees of the same repository or in folders
+outside it. An operation that asks already, such as Discard changes, shows the
+Agents in its own menu instead of asking twice. Discard is the first to ask this
+way; the operations that follow use the same guard.
 
 In a change's diff, space stages the line under the cursor, the lines selected
 with v, or the hunk selected with a; in its Staged part, it unstages them. d
@@ -444,7 +663,7 @@ another repository. A commit takes only what's staged; with nothing staged, c
 does nothing but say so. On a detached HEAD, the box warns that the commit won't
 be on any branch. During a merge, c concludes it once its conflicts are staged,
 with git's message for it unless you've written one; during a rebase,
-cherry-pick, revert or `git am`, c says to continue it in the terminal instead.
+cherry-pick, revert or `git am`, c says to continue it with m instead.
 Hooks and signing run as they do in a terminal; when one fails, the box shows
 what it said.
 

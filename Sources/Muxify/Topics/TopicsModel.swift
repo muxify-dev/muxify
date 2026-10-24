@@ -296,6 +296,17 @@ struct TopicsModel {
         return rows[(index + 1)...].first(where: stays)?.id ?? rows[..<index].last(where: stays)?.id ?? .noTopic
     }
 
+    /// The title of the Topic whose Session this is, among the open, Snoozed and shown Settled Topics. Nil for a
+    /// Session in no Topic, and for a Locked Session, which is its own row.
+    func topicTitle(ofSession sessionID: String) -> String? {
+        let all = rows + snoozedRows + groups.flatMap(\.topics)
+        let row = all.first { row in
+            if case .topic = row.id { return row.sessions.contains { $0.id.session == sessionID } }
+            return false
+        }
+        return row?.title
+    }
+
     /// The cards of `rows`, as MuxifyCore orders them for the CLI too (`TopicCards`).
     private let cards: [TopicListEntry]
 
