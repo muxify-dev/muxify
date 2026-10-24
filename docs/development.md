@@ -101,8 +101,11 @@ library and resources, run `./scripts/setup-ghostty.sh` without overrides.
 
 From the installed app's **Muxify** menu, **Install Command Line Tool** links
 `muxify` into `~/.local/bin`. The link points into the app bundle, so install it
-from the copy you keep. See [Extensions](../extensions/README.md#install) for
-Agent setup and [Testing](testing.md) for unit and live tests.
+from the copy you keep. Every copy of the app, Debug builds too, puts its own
+bundled `muxify` first on the `PATH` of the tmux server it starts, so the link
+matters only in shells outside that server. See
+[Extensions](../extensions/README.md#install) for Agent setup and
+[Testing](testing.md) for unit and live tests.
 
 ## Beta releases
 
