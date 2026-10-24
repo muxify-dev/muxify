@@ -18,6 +18,8 @@ struct SessionGroup: Identifiable, Equatable {
 /// inside tmux (prefix+n, choose-tree, …) is reflected back into the sidebar.
 @MainActor @Observable
 final class WorkspaceStore {
+    private(set) var attachmentStatus: String?
+    @ObservationIgnored private var attachmentStatusID = UUID()
     private(set) var wakeToast: String?
     @ObservationIgnored private var wakeToastDismiss: DispatchWorkItem?
     @ObservationIgnored private var unreadVisit: String?
@@ -1172,6 +1174,8 @@ final class WorkspaceStore {
         attachmentTarget = target
         self.createSessionIfNeeded = createSessionIfNeeded
         generation = UUID()
+        attachmentStatusID = UUID()
+        attachmentStatus = nil
         reconnectWork?.cancel()
         reconnectWork = nil
         isConnected = false
@@ -1204,7 +1208,13 @@ final class WorkspaceStore {
             environmentStatus = "Local tmux was not found"
             return
         }
-        do { connection = try TmuxConnection(environment: activeEnvironment) }
+        var sshExecutable = "/usr/bin/ssh"
+        #if DEBUG
+        if TestDriver.isRunning, let fixture = ProcessInfo.processInfo.environment["MUXIFY_TEST_SSH"] {
+            sshExecutable = fixture
+        }
+        #endif
+        do { connection = try TmuxConnection(environment: activeEnvironment, sshExecutable: sshExecutable) }
         catch {
             terminalMessage = String(describing: error)
             environmentStatus = "Could not start \(environmentName)"
@@ -2437,6 +2447,46 @@ extension WorkspaceStore {
 // MARK: - libghostty actions
 
 extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
+    func ghosttyPasteAttachments(from pasteboard: NSPasteboard, into view: TerminalSurfaceView) -> Bool {
+        // Preserve Local file drops, including directory paths. Raw clipboard
+        // images are staged locally; Remote files must be transferred first.
+        if !isRemote, pasteboard.types?.contains(.fileURL) == true { return false }
+        do {
+            guard let attachments = try TerminalAttachments.capture(pasteboard) else { return false }
+            guard view === surface, isConnected, let connection, let client = clientTTY ?? view.ttyName else {
+                attachments.removeLocalCopy()
+                showAttachmentStatus("Could not paste: the Terminal is not connected.")
+                return true
+            }
+            let current = generation
+            let statusID = showAttachmentStatus(isRemote ? "Uploading attachment…" : "Preparing attachment…", dismiss: false)
+            connection.pasteAttachments(attachments, client: client) { [weak self] result in
+                guard let self, self.generation == current, self.attachmentStatusID == statusID else { return }
+                switch result {
+                case .success: self.showAttachmentStatus("Attachment pasted.")
+                case .failure(let error): self.showAttachmentStatus("Could not paste attachment: \(error)")
+                }
+            }
+        } catch {
+            showAttachmentStatus("Could not prepare attachment: \(error)")
+        }
+        return true
+    }
+
+    @discardableResult
+    private func showAttachmentStatus(_ message: String, dismiss: Bool = true) -> UUID {
+        let id = UUID()
+        attachmentStatusID = id
+        attachmentStatus = message
+        if dismiss {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
+                guard let self, self.attachmentStatusID == id else { return }
+                self.attachmentStatus = nil
+            }
+        }
+        return id
+    }
+
     func ghosttyOpenURL(_ url: URL) {
         // Cmd+click on a link in the terminal opens it as a Tab in this Window's Browser, with Focus on the page.
         if let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {

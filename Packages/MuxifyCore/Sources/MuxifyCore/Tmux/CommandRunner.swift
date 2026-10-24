@@ -23,7 +23,7 @@ public final class CommandRunner: @unchecked Sendable {
     public init() {}
 
     public func run(_ invocation: CommandInvocation, timeout: TimeInterval = 10, environment: [String: String]? = nil,
-             directory: String? = nil) throws -> String {
+             directory: String? = nil, inputFile: URL? = nil) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: invocation.executable)
         process.arguments = invocation.arguments
@@ -32,7 +32,9 @@ public final class CommandRunner: @unchecked Sendable {
         // Leave the property untouched to inherit AppEnvironment's locale,
         // PATH, SSH_AUTH_SOCK and other process-level fixes.
         if let environment { process.environment = environment }
-        process.standardInput = FileHandle.nullDevice
+        let input = try inputFile.map { try FileHandle(forReadingFrom: $0) }
+        defer { try? input?.close() }
+        process.standardInput = input ?? FileHandle.nullDevice
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout

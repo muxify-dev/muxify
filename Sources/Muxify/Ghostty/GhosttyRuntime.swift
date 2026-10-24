@@ -14,6 +14,11 @@ protocol GhosttyRuntimeDelegate: AnyObject {
     func ghosttySurfaceClosed(_ view: TerminalSurfaceView)
     func ghosttyThemeChanged(_ theme: TerminalTheme)
     func ghosttyReloadConfig()
+    func ghosttyPasteAttachments(from pasteboard: NSPasteboard, into view: TerminalSurfaceView) -> Bool
+}
+
+extension GhosttyRuntimeDelegate {
+    func ghosttyPasteAttachments(from pasteboard: NSPasteboard, into view: TerminalSurfaceView) -> Bool { false }
 }
 
 /// The colors of the active Ghostty theme, for tinting Muxify's own chrome.
@@ -267,7 +272,13 @@ final class GhosttyRuntime {
     // MARK: - Clipboard
 
     private static func readClipboard(_ userdata: UnsafeMutableRawPointer?, location: ghostty_clipboard_e, state: UnsafeMutableRawPointer?) -> Bool {
-        guard let surface = TerminalSurfaceView.from(userdata)?.surface else { return false }
+        guard let view = TerminalSurfaceView.from(userdata), let surface = view.surface else { return false }
+        // Key-bound Paste enters here synchronously. A remote OSC 52 read
+        // must never initiate an attachment upload.
+        if view.isHandlingKeyDown, view.pasteAttachments(from: .general) {
+            ghostty_surface_complete_clipboard_request(surface, "", state, false)
+            return true
+        }
         let string = NSPasteboard.general.string(forType: .string) ?? ""
         string.withCString { ghostty_surface_complete_clipboard_request(surface, $0, state, false) }
         return true

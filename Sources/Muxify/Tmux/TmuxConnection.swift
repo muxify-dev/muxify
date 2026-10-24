@@ -22,6 +22,7 @@ final class TmuxConnection: @unchecked Sendable {
     let remote: RemoteSSH?
     private let runner = CommandRunner()
     private let queue = DispatchQueue(label: "muxify.tmux.connection", qos: .userInitiated)
+    private let attachmentQueue = DispatchQueue(label: "muxify.attachments", qos: .userInitiated)
     private let lock = NSLock()
     private var retired = false
     private var localMarker: (option: String, pid: Int, registered: Bool)?
@@ -64,14 +65,51 @@ final class TmuxConnection: @unchecked Sendable {
     }
 
     /// `runScriptAsync` for a caller that is already off the main thread.
-    func runScript(_ script: String, arguments: [String] = [], timeout: TimeInterval = 20) throws -> String {
+    func runScript(_ script: String, arguments: [String] = [], timeout: TimeInterval = 20, inputFile: URL? = nil) throws -> String {
         lock.lock()
         let stopped = retired
         lock.unlock()
         guard !stopped else { throw TmuxError.cancelled }
         let invocation = remote?.script(script, arguments: arguments)
             ?? CommandInvocation(executable: "/bin/sh", arguments: ["-c", script, "muxify"] + arguments)
-        return try runner.run(invocation, timeout: timeout)
+        return try runner.run(invocation, timeout: timeout, inputFile: inputFile)
+    }
+
+    /// Resolve the actual Pane of this Client before the upload, independently
+    /// of the Sidebar's polling snapshot. A slow upload never blocks tmux reads.
+    func pasteAttachments(_ attachments: TerminalAttachments, client: String,
+                          completion: @escaping (Result<String, Error>) -> Void) {
+        queue.async {
+            let target = Result { try self.run(["display-message", "-p", "-c", client, "#{pane_id}"])
+                .trimmingCharacters(in: .newlines) }
+            self.attachmentQueue.async {
+                let result = Result {
+                    defer { if self.isRemote { attachments.removeLocalCopy() } }
+                    let pane = try target.get()
+                    guard pane.hasPrefix("%"), Int(pane.dropFirst()) != nil else { throw TmuxError.notReady }
+                    var words: [String] = []
+                    for item in attachments.items {
+                        switch item {
+                        case .text(let text): words.append(text)
+                        case .file(let file):
+                            let path = self.isRemote
+                                ? try self.runScript(TerminalAttachments.uploadScript, arguments: [file.lastPathComponent],
+                                                     timeout: 120, inputFile: file)
+                                : file.path
+                            guard path.hasPrefix("/") else { throw TmuxError.notReady }
+                            words.append(path.contains("\n") || path.contains("\r")
+                                         ? Tmux.shellQuote(path) : GhosttyInput.shellEscape(path))
+                        }
+                    }
+                    let buffer = "muxify-paste-" + UUID().uuidString
+                    defer { _ = try? self.run(["delete-buffer", "-b", buffer]) }
+                    _ = try self.run(["set-buffer", "-b", buffer, "--", words.joined(separator: " "), ";",
+                                      "paste-buffer", "-d", "-p", "-b", buffer, "-t", pane])
+                    return pane
+                }
+                DispatchQueue.main.async { completion(result) }
+            }
+        }
     }
 
     /// Serializes marker writes with removal, so a late registration cannot

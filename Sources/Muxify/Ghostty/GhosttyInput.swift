@@ -109,7 +109,7 @@ enum GhosttyInput {
 
     // MARK: - Drag and drop
 
-    static let dropTypes: [NSPasteboard.PasteboardType] = [.string, .fileURL]
+    static let dropTypes: [NSPasteboard.PasteboardType] = [.string, .fileURL, .png, .tiff]
 
     private static let promisedFileURL = NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url")
 

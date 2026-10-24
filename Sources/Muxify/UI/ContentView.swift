@@ -95,7 +95,10 @@ struct ContentView: View {
         }
         .onChange(of: configStore.config.remoteEnvironments) { _, _ in store.reconcileEnvironments() }
         .overlay(alignment: .bottom) {
-            if let message = store.wakeToast {
+            if let message = store.attachmentStatus {
+                Text(message).padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(16).accessibilityIdentifier("attachment-status")
+            } else if let message = store.wakeToast {
                 Text(message).padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
                     .padding(16).accessibilityIdentifier("wake-toast")
             }
