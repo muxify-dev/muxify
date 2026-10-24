@@ -20,13 +20,13 @@ final class ConfigTests: XCTestCase {
     func testManualReadDefaultsAndConfigurableShortcut() throws {
         let defaults = try load("")
         XCTAssertFalse(defaults.notifications.manualRead)
-        XCTAssertEqual(defaults.keybinds.action(for: trigger("cmd+shift+r")), .markRead)
+        XCTAssertEqual(defaults.keybinds.action(for: trigger("cmd+shift+r"), focus: nil), .markRead)
         XCTAssertTrue(Config.template.contains("#   manual_read: false"))
         XCTAssertTrue(Config.template.contains("#   mark_read: cmd+shift+r"))
         let custom = try load("notifications:\n  manual_read: true\nkeybindings:\n  mark_read: ctrl+alt+r")
         XCTAssertTrue(custom.notifications.manualRead)
-        XCTAssertNil(custom.keybinds.action(for: trigger("cmd+shift+r")))
-        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+alt+r")), .markRead)
+        XCTAssertNil(custom.keybinds.action(for: trigger("cmd+shift+r"), focus: nil))
+        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+alt+r"), focus: nil), .markRead)
         XCTAssertTrue(custom.problems.isEmpty)
         let invalid = try load("notifications:\n  manual_read: sometimes")
         XCTAssertFalse(invalid.notifications.manualRead)
@@ -50,14 +50,14 @@ final class ConfigTests: XCTestCase {
 
     func testUnreadAndAllReadBindingsCanBeRemappedOrDisabled() throws {
         let defaults = try load("")
-        XCTAssertEqual(defaults.keybinds.action(for: trigger("cmd+shift+u")), .markUnread)
+        XCTAssertEqual(defaults.keybinds.action(for: trigger("cmd+shift+u"), focus: nil), .markUnread)
         XCTAssertNil(defaults.keybinds.firstTrigger(for: .markAllRead))
         XCTAssertTrue(Config.template.contains("#   mark_unread: cmd+shift+u"))
         let custom = try load("keybindings:\n  mark_unread: ctrl+alt+u\n  mark_all_read: ctrl+alt+r\n  command_palette:\n    mark_unread: ctrl+u")
         XCTAssertTrue(custom.problems.isEmpty)
-        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+alt+u")), .markUnread)
-        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+alt+r")), .markAllRead)
-        XCTAssertNil(custom.keybinds.action(for: trigger("cmd+shift+u")))
+        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+alt+u"), focus: nil), .markUnread)
+        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+alt+r"), focus: nil), .markAllRead)
+        XCTAssertNil(custom.keybinds.action(for: trigger("cmd+shift+u"), focus: nil))
         XCTAssertNil(try load("keybindings:\n  mark_unread: []").keybinds.firstTrigger(for: .markUnread))
     }
 
@@ -86,7 +86,7 @@ final class ConfigTests: XCTestCase {
         XCTAssertFalse(Config.template.contains("open_switcher"))
         XCTAssertEqual(config.keybinds.firstTrigger(for: .moveSession), trigger("cmd+shift+m"))
         XCTAssertTrue(Config.template.contains("#   move_session: cmd+shift+m"))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+a")), .addSessionToTopic)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+a"), focus: nil), .addSessionToTopic)
         XCTAssertTrue(Config.template.contains("#   add_session_to_topic: cmd+shift+a"))
         XCTAssertTrue(config.problems.isEmpty)
         let old = try load("keybindings:\n  open_switcher: cmd+p")
@@ -97,9 +97,11 @@ final class ConfigTests: XCTestCase {
     func testARemovedKeybindingNameIsAProblemThatNamesItsReplacement() throws {
         let config = try load("keybindings:\n  toggle_focus: cmd+e\n  move_pane: cmd+shift+t")
         XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 2, message: "toggle_focus is gone: use toggle_maximize")])
-        XCTAssertNil(config.keybinds.action(for: trigger("cmd+e")), "a removed name still binds its trigger")
+        XCTAssertNil(config.keybinds.action(for: trigger("cmd+e"), focus: nil), "a removed name still binds its trigger")
         XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleMaximize), trigger("shift+cmd+enter"))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+t")), .movePane)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+t"), focus: .terminal), .movePane)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+t"), focus: .browser), .reopenClosedTab,
+                       "restating Move Pane's default took the key from Reopen Closed Tab")
         XCTAssertFalse(Config.template.contains("toggle_focus"))
     }
 
@@ -115,7 +117,7 @@ final class ConfigTests: XCTestCase {
             ConfigProblem(path: root, line: 4, message: "move_window is gone: use choose_window"),
             ConfigProblem(path: root, line: 5, message: "suggest_title is gone: use suggest_topic_title"),
         ])
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+w")), .moveWindow)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+w"), focus: nil), .moveWindow)
         XCTAssertNil(config.paletteKeybinds.action(for: trigger("alt+9")))
         XCTAssertEqual(config.paletteKeybinds.firstTrigger(for: .chooseWindow), trigger("alt+2"))
         XCTAssertEqual(config.paletteKeybinds.firstTrigger(for: .suggestTopicTitle), trigger("alt+s"))
@@ -130,6 +132,7 @@ final class ConfigTests: XCTestCase {
             (.focusTerminal, ["cmd+shift+j", "ctrl+backquote", "ctrl+0", "alt+0"]),
             (.focusBrowser, ["cmd+shift+b"]),
             (.movePane, ["cmd+shift+t"]),
+            (.reopenClosedTab, ["cmd+shift+t"]),
             (.moveWindow, []),
             (.moveSession, ["cmd+shift+m"]),
             (.toggleZen, ["shift+alt+cmd+s"]),
@@ -140,7 +143,7 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(config.keybinds.triggers[action] ?? [], spellings.map(trigger), action.rawValue)
         }
         XCTAssertEqual(config.paletteKeybinds.triggers[.suggestTopicTitle], [trigger("alt+s")])
-        XCTAssertNil(config.keybinds.action(for: trigger("alt+cmd+t")), "the old Maximize Terminal default is still bound")
+        XCTAssertNil(config.keybinds.action(for: trigger("alt+cmd+t"), focus: nil), "the old Maximize Terminal default is still bound")
         XCTAssertEqual(config.problems, [])
     }
 
@@ -151,14 +154,14 @@ final class ConfigTests: XCTestCase {
         XCTAssertFalse(Config.template.contains("show_settled"))
         XCTAssertFalse(Config.template.contains("go_to_topic"))
         let config = try load("keybindings:\n  settle_topic: cmd+shift+s")
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+s")), .settleTopic)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+s"), focus: nil), .settleTopic)
         XCTAssertTrue(config.problems.isEmpty)
         let cleared = try load("keybindings:\n  settle_topic: []")
         XCTAssertNil(cleared.keybinds.firstTrigger(for: .settleTopic))
         XCTAssertTrue(cleared.problems.isEmpty)
         let removed = try load("keybindings:\n  go_to_topic: cmd+o\n  show_settled: ctrl+cmd+s")
         XCTAssertEqual(removed.problems.map(\.message).sorted(), ["unknown action \"go_to_topic\"", "unknown action \"show_settled\""])
-        XCTAssertNil(removed.keybinds.action(for: trigger("cmd+o")))
+        XCTAssertNil(removed.keybinds.action(for: trigger("cmd+o"), focus: nil))
     }
 
     func testMovePaneActionDefaultsAndKeyDispatch() throws {
@@ -171,24 +174,55 @@ final class ConfigTests: XCTestCase {
                                                   timestamp: 0, windowNumber: 0, context: nil,
                                                   characters: "T", charactersIgnoringModifiers: "t",
                                                   isARepeat: false, keyCode: 0x11))
-        XCTAssertEqual(config.keybinds.action(for: try XCTUnwrap(KeyTrigger(event))), .movePane)
+        XCTAssertEqual(config.keybinds.action(for: try XCTUnwrap(KeyTrigger(event)), focus: nil), .movePane)
         XCTAssertTrue(Config.template.contains("#   move_pane: cmd+shift+t"))
         XCTAssertTrue(config.problems.isEmpty)
     }
 
     func testMovePaneCanBeRemappedDisabledAndClaimedByAnotherAction() throws {
         let remapped = try load("keybindings:\n  move_pane: ctrl+cmd+t")
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("ctrl+cmd+t")), .movePane)
-        XCTAssertNil(remapped.keybinds.action(for: trigger("cmd+shift+t")))
+        XCTAssertEqual(remapped.keybinds.action(for: trigger("ctrl+cmd+t"), focus: nil), .movePane)
+        XCTAssertNil(remapped.keybinds.action(for: trigger("cmd+shift+t"), focus: .terminal))
+        XCTAssertEqual(remapped.keybinds.action(for: trigger("cmd+shift+t"), focus: .browser), .reopenClosedTab)
         XCTAssertTrue(remapped.problems.isEmpty)
         let disabled = try load("keybindings:\n  move_pane: []")
         XCTAssertNil(disabled.keybinds.firstTrigger(for: .movePane))
-        XCTAssertNil(disabled.keybinds.action(for: trigger("cmd+shift+t")))
+        XCTAssertNil(disabled.keybinds.action(for: trigger("cmd+shift+t"), focus: .terminal))
         XCTAssertTrue(disabled.problems.isEmpty)
         let claimed = try load("keybindings:\n  new_topic: cmd+shift+t")
-        XCTAssertEqual(claimed.keybinds.action(for: trigger("cmd+shift+t")), .newTopic)
+        for focus in [PanelLayout.Side.terminal, .browser, nil] {
+            XCTAssertEqual(claimed.keybinds.action(for: trigger("cmd+shift+t"), focus: focus), .newTopic, "\(String(describing: focus))")
+        }
         XCTAssertNil(claimed.keybinds.firstTrigger(for: .movePane))
+        XCTAssertNil(claimed.keybinds.firstTrigger(for: .reopenClosedTab))
         XCTAssertTrue(claimed.problems.isEmpty)
+    }
+
+    func testReopenClosedTabSharesMovePanesKeyAndWinsWhileTheBrowserHasFocus() throws {
+        let config = try load("keybindings:\n  reopen_closed_tab: cmd+shift+t")
+        let key = trigger("cmd+shift+t")
+        XCTAssertEqual(ConfigAction.reopenClosedTab.requiredFocus, .browser)
+        XCTAssertEqual(config.keybinds.action(for: key, focus: .browser), .reopenClosedTab)
+        XCTAssertEqual(config.keybinds.action(for: key, focus: .terminal), .movePane)
+        XCTAssertEqual(config.keybinds.action(for: key, focus: nil), .movePane)
+        XCTAssertEqual(config.keybinds.firstTrigger(for: .movePane), key)
+        XCTAssertEqual(config.keybinds.firstTrigger(for: .reopenClosedTab), key)
+        XCTAssertEqual(config.problems, [])
+        XCTAssertTrue(Config.template.contains("#   reopen_closed_tab: cmd+shift+t"))
+        let both = try load("keybindings:\n  move_pane: alt+t\n  reopen_closed_tab: alt+t\n  browser_back: alt+t")
+        XCTAssertEqual(both.keybinds.action(for: trigger("alt+t"), focus: .browser), .reopenClosedTab)
+        XCTAssertEqual(both.keybinds.action(for: trigger("alt+t"), focus: .terminal), .movePane)
+        XCTAssertEqual(both.problems, [ConfigProblem(path: root, line: 4, message: "alt+t is already bound to reopen_closed_tab")])
+        let palette = try load("""
+        keybindings:
+          reopen_closed_tab: cmd+p
+        command_palettes:
+          - name: Sessions
+            keybinding: cmd+p
+            sources: [sessions]
+        """)
+        XCTAssertEqual(palette.problems, [ConfigProblem(path: root, line: 5, message: "cmd+p is already bound to reopen_closed_tab")])
+        XCTAssertEqual(palette.commandPalettes.first?.triggers, [])
     }
 
     func testSidebarViewsDefaultToTrueAndAcceptBooleans() throws {
@@ -305,16 +339,16 @@ final class ConfigTests: XCTestCase {
 
     func testMissingOrEmptyFileGivesTheDefaults() throws {
         for config in [try load([:]), try load(""), try load("# nothing here\n\n")] {
-            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+s")), .toggleSidebar)
-            XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+s")), .toggleSidebar)
-            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b")), .toggleBrowser)
-            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+n")), .newTopic)
-            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+n")), .newAppWindow)
-            XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+backquote")), .focusTerminal)
+            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+s"), focus: nil), .toggleSidebar)
+            XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+s"), focus: nil), .toggleSidebar)
+            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b"), focus: nil), .toggleBrowser)
+            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+n"), focus: nil), .newTopic)
+            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+n"), focus: nil), .newAppWindow)
+            XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+backquote"), focus: nil), .focusTerminal)
             XCTAssertEqual(config.keybinds.firstTrigger(for: .focusTerminal), trigger("cmd+shift+j"))
-            XCTAssertNil(config.keybinds.action(for: trigger("cmd+backquote")))
-            XCTAssertNil(config.keybinds.action(for: trigger("cmd+shift+backquote")))
-            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+b")), .focusBrowser)
+            XCTAssertNil(config.keybinds.action(for: trigger("cmd+backquote"), focus: nil))
+            XCTAssertNil(config.keybinds.action(for: trigger("cmd+shift+backquote"), focus: nil))
+            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+b"), focus: nil), .focusBrowser)
             XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("cmd+s"))
             XCTAssertEqual(config.headerHeight, 30)
             XCTAssertTrue(config.statusLineHeader)
@@ -487,18 +521,18 @@ final class ConfigTests: XCTestCase {
     }
 
     func testGhosttysCmdNOpensNoAppWindowUnlessTheConfigGivesItToNewAppWindow() throws {
-        XCTAssertFalse(Keybinds.defaults.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
+        XCTAssertFalse(Keybinds.defaults.suppressesDefaultAppWindowShortcut(trigger("cmd+n"), focus: nil))
         let unbound = try load("keybindings:\n  new_topic: []")
-        XCTAssertNil(unbound.keybinds.action(for: trigger("cmd+n")))
+        XCTAssertNil(unbound.keybinds.action(for: trigger("cmd+n"), focus: nil))
         XCTAssertEqual(unbound.keybinds.firstTrigger(for: .newAppWindow), trigger("cmd+shift+n"))
-        XCTAssertTrue(unbound.keybinds.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
+        XCTAssertTrue(unbound.keybinds.suppressesDefaultAppWindowShortcut(trigger("cmd+n"), focus: nil))
         let swapped = try load("keybindings:\n  new_app_window: cmd+n\n  new_topic: cmd+shift+n")
-        XCTAssertEqual(swapped.keybinds.action(for: trigger("cmd+n")), .newAppWindow)
-        XCTAssertEqual(swapped.keybinds.action(for: trigger("cmd+shift+n")), .newTopic)
-        XCTAssertFalse(swapped.keybinds.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
+        XCTAssertEqual(swapped.keybinds.action(for: trigger("cmd+n"), focus: nil), .newAppWindow)
+        XCTAssertEqual(swapped.keybinds.action(for: trigger("cmd+shift+n"), focus: nil), .newTopic)
+        XCTAssertFalse(swapped.keybinds.suppressesDefaultAppWindowShortcut(trigger("cmd+n"), focus: nil))
         let disabled = try load("keybindings:\n  new_app_window: []")
         XCTAssertNil(disabled.keybinds.firstTrigger(for: .newAppWindow))
-        XCTAssertNil(disabled.keybinds.action(for: trigger("cmd+shift+n")))
+        XCTAssertNil(disabled.keybinds.action(for: trigger("cmd+shift+n"), focus: nil))
         for config in [unbound, swapped, disabled] { XCTAssertTrue(config.problems.isEmpty) }
     }
 
@@ -521,11 +555,13 @@ final class ConfigTests: XCTestCase {
         }
         XCTAssertNil(ConfigAction.selectNextTopicWindow.requiredFocus)
         let custom = try load("keybindings:\n  resize_pane_left: ctrl+cmd+left\n  browser_back: cmd+left_bracket")
-        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+cmd+left")), .resizePaneLeft)
-        XCTAssertEqual(custom.keybinds.action(for: trigger("cmd+left_bracket")), .browserBack)
+        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+cmd+left"), focus: .terminal), .resizePaneLeft)
+        XCTAssertNil(custom.keybinds.action(for: trigger("ctrl+cmd+left"), focus: .browser))
+        XCTAssertEqual(custom.keybinds.action(for: trigger("cmd+left_bracket"), focus: .browser), .browserBack)
+        XCTAssertNil(custom.keybinds.action(for: trigger("cmd+left_bracket"), focus: .terminal))
         XCTAssertEqual(custom.problems, [])
         let claimed = try load("keybindings:\n  select_prev_topic_window: cmd+left_bracket")
-        XCTAssertEqual(claimed.keybinds.action(for: trigger("cmd+left_bracket")), .selectPrevTopicWindow)
+        XCTAssertEqual(claimed.keybinds.action(for: trigger("cmd+left_bracket"), focus: .browser), .selectPrevTopicWindow)
         XCTAssertNil(claimed.keybinds.firstTrigger(for: .browserBack))
     }
 
@@ -632,24 +668,24 @@ final class ConfigTests: XCTestCase {
 
     func testFocusTerminalCanBeRemappedToMultipleShortcutsOrDisabled() throws {
         let remapped = try load("keybindings:\n  focus_terminal: [ctrl+cmd+t, cmd+backquote]")
-        XCTAssertNil(remapped.keybinds.action(for: trigger("ctrl+backquote")))
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("ctrl+cmd+t")), .focusTerminal)
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("cmd+backquote")), .focusTerminal)
+        XCTAssertNil(remapped.keybinds.action(for: trigger("ctrl+backquote"), focus: nil))
+        XCTAssertEqual(remapped.keybinds.action(for: trigger("ctrl+cmd+t"), focus: nil), .focusTerminal)
+        XCTAssertEqual(remapped.keybinds.action(for: trigger("cmd+backquote"), focus: nil), .focusTerminal)
         XCTAssertEqual(remapped.keybinds.firstTrigger(for: .focusTerminal), trigger("ctrl+cmd+t"))
 
         let disabled = try load("keybindings:\n  focus_terminal: []")
         XCTAssertNil(disabled.keybinds.firstTrigger(for: .focusTerminal))
-        XCTAssertNil(disabled.keybinds.action(for: trigger("ctrl+backquote")))
-        XCTAssertNil(disabled.keybinds.action(for: trigger("cmd+backquote")))
+        XCTAssertNil(disabled.keybinds.action(for: trigger("ctrl+backquote"), focus: nil))
+        XCTAssertNil(disabled.keybinds.action(for: trigger("cmd+backquote"), focus: nil))
         for config in [remapped, disabled] {
-            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b")), .toggleBrowser)
+            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b"), focus: nil), .toggleBrowser)
             XCTAssertEqual(config.problems, [])
         }
     }
 
     func testFocusTerminalDefaultCanBeClaimedByAnotherAction() throws {
         let config = try load("keybindings:\n  toggle_browser: ctrl+backquote")
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+backquote")), .toggleBrowser)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+backquote"), focus: nil), .toggleBrowser)
         XCTAssertEqual(config.keybinds.triggers[.focusTerminal], [trigger("cmd+shift+j"), trigger("ctrl+0"), trigger("alt+0")])
         XCTAssertEqual(config.problems, [])
     }
@@ -660,7 +696,7 @@ final class ConfigTests: XCTestCase {
           toggle_browser: ctrl+cmd+t
           focus_terminal: [ctrl+cmd+t, ctrl+backquote]
         """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+t")), .toggleBrowser)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+t"), focus: nil), .toggleBrowser)
         XCTAssertEqual(config.keybinds.firstTrigger(for: .focusTerminal), trigger("ctrl+backquote"))
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 3, message: "ctrl+cmd+t is already bound to toggle_browser"),
@@ -704,7 +740,7 @@ final class ConfigTests: XCTestCase {
         for config in [try load([:]), try load("")] {
             for (offset, action) in actions.enumerated() {
                 let key = trigger("cmd+\(offset + 1)")
-                XCTAssertEqual(config.keybinds.action(for: key), action)
+                XCTAssertEqual(config.keybinds.action(for: key, focus: nil), action)
                 XCTAssertEqual(config.keybinds.firstTrigger(for: action), key)
             }
         }
@@ -716,13 +752,13 @@ final class ConfigTests: XCTestCase {
           select_window_1: [alt+1, ctrl+cmd+digit_1]
           select_window_2: []
         """)
-        XCTAssertNil(config.keybinds.action(for: trigger("cmd+1")))
-        XCTAssertNil(config.keybinds.action(for: trigger("cmd+2")))
-        XCTAssertEqual(config.keybinds.action(for: trigger("alt+1")), .selectWindow1)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+1")), .selectWindow1)
+        XCTAssertNil(config.keybinds.action(for: trigger("cmd+1"), focus: nil))
+        XCTAssertNil(config.keybinds.action(for: trigger("cmd+2"), focus: nil))
+        XCTAssertEqual(config.keybinds.action(for: trigger("alt+1"), focus: nil), .selectWindow1)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+1"), focus: nil), .selectWindow1)
         XCTAssertEqual(config.keybinds.firstTrigger(for: .selectWindow1), trigger("alt+1"))
         XCTAssertNil(config.keybinds.firstTrigger(for: .selectWindow2))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+3")), .selectWindow3)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+3"), focus: nil), .selectWindow3)
         XCTAssertEqual(config.problems, [])
     }
 
@@ -731,9 +767,9 @@ final class ConfigTests: XCTestCase {
         keybindings:
           toggle_browser: cmd+1
         """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1")), .toggleBrowser)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1"), focus: nil), .toggleBrowser)
         XCTAssertNil(config.keybinds.firstTrigger(for: .selectWindow1))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+2")), .selectWindow2)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+2"), focus: nil), .selectWindow2)
         XCTAssertEqual(config.problems, [])
     }
 
@@ -743,7 +779,7 @@ final class ConfigTests: XCTestCase {
           select_window_1: cmd+e
           select_window_2: cmd+e
         """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+e")), .selectWindow1)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+e"), focus: nil), .selectWindow1)
         XCTAssertNil(config.keybinds.firstTrigger(for: .selectWindow2))
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 3, message: "cmd+e is already bound to select_window_1"),
@@ -757,8 +793,8 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(config.keybinds.triggers[action], [])
             XCTAssertNil(config.keybinds.firstTrigger(for: action))
         }
-        XCTAssertNil(config.keybinds.action(for: trigger("ctrl+cmd+right")))
-        XCTAssertNil(config.keybinds.action(for: trigger("ctrl+cmd+left")))
+        XCTAssertNil(config.keybinds.action(for: trigger("ctrl+cmd+right"), focus: nil))
+        XCTAssertNil(config.keybinds.action(for: trigger("ctrl+cmd+left"), focus: nil))
         XCTAssertEqual(config.problems, [])
     }
 
@@ -768,12 +804,12 @@ final class ConfigTests: XCTestCase {
           select_next_window: [ctrl+cmd+right, cmd+shift+right_bracket]
           select_prev_window: ctrl+cmd+left
         """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+right")), .selectNextWindow)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+right_bracket")), .selectNextWindow)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+left")), .selectPrevWindow)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+right"), focus: nil), .selectNextWindow)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+right_bracket"), focus: nil), .selectNextWindow)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+left"), focus: nil), .selectPrevWindow)
         XCTAssertEqual(config.keybinds.firstTrigger(for: .selectNextWindow), trigger("ctrl+cmd+right"))
         XCTAssertEqual(config.keybinds.firstTrigger(for: .selectPrevWindow), trigger("ctrl+cmd+left"))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1")), .selectWindow1)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1"), focus: nil), .selectWindow1)
         XCTAssertEqual(config.problems, [])
     }
 
@@ -785,11 +821,11 @@ final class ConfigTests: XCTestCase {
           select_next_topic: [ctrl+alt+cmd+down, cmd+1]
           select_prev_topic: ctrl+alt+cmd+up
         """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+down")), .selectNextSession)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+up")), .selectPrevSession)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+alt+cmd+down")), .selectNextTopic)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1")), .selectNextTopic)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+alt+cmd+up")), .selectPrevTopic)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+down"), focus: nil), .selectNextSession)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+up"), focus: nil), .selectPrevSession)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+alt+cmd+down"), focus: nil), .selectNextTopic)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1"), focus: nil), .selectNextTopic)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+alt+cmd+up"), focus: nil), .selectPrevTopic)
         XCTAssertNil(config.keybinds.firstTrigger(for: .selectWindow1))
         XCTAssertEqual(config.problems, [])
     }
@@ -809,9 +845,9 @@ final class ConfigTests: XCTestCase {
         keybindings:
           select_next_window: cmd+1
         """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1")), .selectNextWindow)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1"), focus: nil), .selectNextWindow)
         XCTAssertNil(config.keybinds.firstTrigger(for: .selectWindow1))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+2")), .selectWindow2)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+2"), focus: nil), .selectWindow2)
         XCTAssertEqual(config.problems, [])
     }
 
@@ -820,10 +856,10 @@ final class ConfigTests: XCTestCase {
         keybindings:
           toggle_sidebar: ctrl+cmd+s
         """)
-        XCTAssertNil(config.keybinds.action(for: trigger("cmd+s")))
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+s")), .toggleSidebar)
+        XCTAssertNil(config.keybinds.action(for: trigger("cmd+s"), focus: nil))
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+s"), focus: nil), .toggleSidebar)
         XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("ctrl+cmd+s"))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b")), .toggleBrowser)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b"), focus: nil), .toggleBrowser)
         XCTAssertEqual(config.problems, [])
     }
 
@@ -832,9 +868,9 @@ final class ConfigTests: XCTestCase {
         keybindings:
           toggle_browser: [cmd+e, ctrl+cmd+b]
         """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+e")), .toggleBrowser)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+b")), .toggleBrowser)
-        XCTAssertNil(config.keybinds.action(for: trigger("cmd+b")))
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+e"), focus: nil), .toggleBrowser)
+        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+b"), focus: nil), .toggleBrowser)
+        XCTAssertNil(config.keybinds.action(for: trigger("cmd+b"), focus: nil))
         XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleBrowser), trigger("cmd+e"))
     }
 
@@ -844,7 +880,7 @@ final class ConfigTests: XCTestCase {
           toggle_browser: []
         """)
         XCTAssertNil(config.keybinds.firstTrigger(for: .toggleBrowser))
-        XCTAssertNil(config.keybinds.action(for: trigger("cmd+b")))
+        XCTAssertNil(config.keybinds.action(for: trigger("cmd+b"), focus: nil))
         XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("cmd+s"))
         XCTAssertEqual(config.problems, [])
     }
@@ -854,9 +890,9 @@ final class ConfigTests: XCTestCase {
         keybindings:
           toggle_browser: cmd+s
         """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+s")), .toggleBrowser)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+s"), focus: nil), .toggleBrowser)
         XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("ctrl+cmd+s"))
-        XCTAssertNil(config.keybinds.action(for: trigger("cmd+b")))
+        XCTAssertNil(config.keybinds.action(for: trigger("cmd+b"), focus: nil))
         XCTAssertEqual(config.problems, [])
     }
 
@@ -868,7 +904,7 @@ final class ConfigTests: XCTestCase {
             - cmd+e
             - cmd+j
         """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+e")), .toggleBrowser)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+e"), focus: nil), .toggleBrowser)
         XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("cmd+j"))
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 4, message: "cmd+e is already bound to toggle_browser"),
@@ -904,7 +940,7 @@ final class ConfigTests: XCTestCase {
             ConfigProblem(path: root, line: 11, message: "toggle_browser: expected a trigger or a list of triggers"),
             ConfigProblem(path: root, line: 12, message: "bad trigger \"meta+b\": unknown modifier \"meta\""),
         ])
-        XCTAssertNil(config.keybinds.action(for: trigger("cmd+e")))
+        XCTAssertNil(config.keybinds.action(for: trigger("cmd+e"), focus: nil))
         XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("cmd+s"))
         XCTAssertEqual(config.keybinds.triggers[.toggleBrowser], [trigger("cmd+j")])
     }

@@ -223,4 +223,71 @@ final class BrowserTests: XCTestCase {
         XCTAssertTrue(browser.layout.shows(.terminal))
         XCTAssertFalse(browser.layout.shows(.browser))
     }
+
+    @MainActor
+    func testReopenedTabReturnsToItsIndexWithItsBackHistory() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let first = directory.appendingPathComponent("first.html")
+        let second = directory.appendingPathComponent("second.html")
+        try "<html><title>First</title><body>First page</body></html>".write(to: first, atomically: true, encoding: .utf8)
+        try "<html><title>Second</title><body>Second page</body></html>".write(to: second, atomically: true, encoding: .utf8)
+        let browser = Browser(windowID: "@1", stored: StoredBrowser(
+            tabURLs: ["https://one.test", first.absoluteString, "https://three.test"],
+            activeTab: 1, layout: PanelLayout(shown: .both)))
+        defer { browser.tearDown() }
+        let closing = try XCTUnwrap(browser.activeTab)
+        try await waitForPage(closing.webView, title: "First")
+        closing.load(second)
+        try await waitForPage(closing.webView, title: "Second")
+        XCTAssertFalse(browser.canReopenClosedTab)
+
+        browser.closeActiveTab()
+        XCTAssertTrue(browser.canReopenClosedTab)
+        browser.reopenClosedTab()
+
+        XCTAssertFalse(browser.canReopenClosedTab)
+        XCTAssertEqual(browser.stored.tabURLs, ["https://one.test", second.absoluteString, "https://three.test"])
+        XCTAssertEqual(browser.stored.activeTab, 1)
+        XCTAssertEqual(browser.focusRequest, .page)
+        let reopened = try XCTUnwrap(browser.activeTab)
+        XCTAssertFalse(reopened === closing)
+        try await waitForPage(reopened.webView, title: "Second")
+        XCTAssertTrue(reopened.webView.canGoBack)
+        reopened.goBack()
+        try await waitForPage(reopened.webView, title: "First")
+    }
+
+    @MainActor
+    func testReopenOpensTheNewestClosedTabFirstAndShowsTheBrowser() {
+        let browser = Browser(windowID: "@1", stored: StoredBrowser(
+            tabURLs: ["https://one.test", "https://two.test"], layout: PanelLayout(shown: .both)))
+        browser.closeActiveTab()
+        browser.closeActiveTab()
+        XCTAssertFalse(browser.layout.shows(.browser))
+
+        browser.reopenClosedTab()
+        XCTAssertTrue(browser.layout.shows(.browser))
+        XCTAssertEqual(browser.stored.tabURLs, ["https://two.test"])
+        browser.reopenClosedTab()
+        XCTAssertEqual(browser.stored.tabURLs, ["https://one.test", "https://two.test"])
+        XCTAssertEqual(browser.activeTab?.urlString, "https://one.test")
+        XCTAssertFalse(browser.canReopenClosedTab)
+    }
+
+    @MainActor
+    func testOnlyClosingATabWithAPageMakesItReopenable() throws {
+        let source = Browser(windowID: "@1", stored: StoredBrowser(
+            tabURLs: ["https://one.test", "about:blank"], activeTab: 1, layout: PanelLayout(shown: .both)))
+        let destination = Browser(windowID: "@2", stored: StoredBrowser())
+        source.closeActiveTab()
+        XCTAssertFalse(source.canReopenClosedTab, "a blank Tab was reopenable")
+        source.newTab()
+        source.toggle(.browser)
+        XCTAssertFalse(source.canReopenClosedTab, "a blank Tab dropped by hiding the Browser was reopenable")
+        source.moveTab(try XCTUnwrap(source.activeTab), to: destination)
+        XCTAssertFalse(source.canReopenClosedTab, "a Tab moved to another Window was reopenable")
+        XCTAssertFalse(destination.canReopenClosedTab)
+    }
 }

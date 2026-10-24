@@ -485,6 +485,18 @@ private struct ConfigReader {
             case .palette(let name): "the \(name) Command Palette"
             }
         }
+
+        /// A Command Palette's trigger acts before every keybind, so it shares
+        /// with nothing.
+        func canShareTrigger(with other: Claimant) -> Bool {
+            guard case .action(let action) = self, case .action(let otherAction) = other else { return false }
+            return action.canShareTrigger(with: otherAction)
+        }
+
+        func takesDefault(_ trigger: KeyTrigger, from action: ConfigAction) -> Bool {
+            guard case .action(let claimant) = self else { return true }
+            return claimant.takesDefault(trigger, from: action)
+        }
     }
 
     private struct Claim<Owner> {
@@ -1162,8 +1174,9 @@ private struct ConfigReader {
             named.append(action)
             claims += listed.map { Claim(owner: action, trigger: $0.trigger, node: $0.node) }
         }
-        let kept = resolve(claims, describe: \.rawValue)
-        config.paletteKeybinds = overlay(named: named, kept: kept, claimed: Set(kept.values.joined()))
+        let kept = resolve(claims, describe: \.rawValue) { $0.canShareTrigger(with: $1) }
+        let claimed = Set(kept.values.joined())
+        config.paletteKeybinds = overlay(named: named, kept: kept) { _, trigger in claimed.contains(trigger) }
     }
 
     mutating func readCommandPalettes(_ node: Node) {
@@ -1211,14 +1224,17 @@ private struct ConfigReader {
 
     /// The overlay rules across `keybindings` and `command_palettes`. An
     /// action the user named has only the triggers listed for it; so does a
-    /// palette the Config defines. An action not named, and the default
-    /// palettes, keep their defaults minus any trigger listed for another.
+    /// palette the Config defines. The default palettes keep their defaults
+    /// minus any trigger listed for another; an action not named keeps the
+    /// defaults no listed trigger takes from it (`takesDefault(_:from:)`).
     private mutating func resolveKeybindings() {
-        let kept = resolve(claims, describe: \.description)
+        let kept = resolve(claims, describe: \.description) { $0.canShareTrigger(with: $1) }
         let claimed = Set(kept.values.joined())
         var actions: [ConfigAction: [KeyTrigger]] = [:]
         for case let (.action(action), triggers) in kept { actions[action] = triggers }
-        config.keybinds = overlay(named: namedActions, kept: actions, claimed: claimed)
+        config.keybinds = overlay(named: namedActions, kept: actions) { action, trigger in
+            kept.contains { claimant, triggers in triggers.contains(trigger) && claimant.takesDefault(trigger, from: action) }
+        }
         if let palettes {
             config.commandPalettes = palettes.map { palette in
                 var palette = palette
@@ -1234,30 +1250,32 @@ private struct ConfigReader {
         }
     }
 
-    /// A trigger listed twice stays with the first.
-    private mutating func resolve<Owner: Hashable>(_ claims: [Claim<Owner>], describe: (Owner) -> String) -> [Owner: [KeyTrigger]] {
-        var owners: [KeyTrigger: Owner] = [:]
+    /// A trigger listed for two owners that cannot share it stays with the
+    /// first.
+    private mutating func resolve<Owner: Hashable>(_ claims: [Claim<Owner>], describe: (Owner) -> String,
+                                                   canShare: (Owner, Owner) -> Bool) -> [Owner: [KeyTrigger]] {
+        var owners: [KeyTrigger: [Owner]] = [:]
         var kept: [Owner: [KeyTrigger]] = [:]
         for claim in claims {
-            switch owners[claim.trigger] {
-            case nil:
-                owners[claim.trigger] = claim.owner
-                kept[claim.owner, default: []].append(claim.trigger)
-            case claim.owner?:
-                continue
-            case let owner?:
+            let current = owners[claim.trigger, default: []]
+            if current.contains(claim.owner) { continue }
+            if let owner = current.first(where: { !canShare(claim.owner, $0) }) {
                 problem(at: claim.node, "\(claim.node.string ?? "") is already bound to \(describe(owner))")
+                continue
             }
+            owners[claim.trigger, default: []].append(claim.owner)
+            kept[claim.owner, default: []].append(claim.trigger)
         }
         return kept
     }
 
-    private func overlay<Action: KeybindAction>(named: [Action], kept: [Action: [KeyTrigger]], claimed: Set<KeyTrigger>) -> KeybindSet<Action> {
+    private func overlay<Action: KeybindAction>(named: [Action], kept: [Action: [KeyTrigger]],
+                                                takenFrom: (Action, KeyTrigger) -> Bool) -> KeybindSet<Action> {
         var triggers: [Action: [KeyTrigger]] = [:]
         for action in Action.allCases {
             triggers[action] = named.contains(action)
                 ? kept[action] ?? []
-                : Action.defaultTriggers[action, default: []].filter { !claimed.contains($0) }
+                : Action.defaultTriggers[action, default: []].filter { !takenFrom(action, $0) }
         }
         return KeybindSet(triggers: triggers)
     }

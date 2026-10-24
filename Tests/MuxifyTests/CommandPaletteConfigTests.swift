@@ -147,7 +147,7 @@ final class CommandPaletteConfigTests: XCTestCase {
             keybinding: [cmd+p, cmd+shift+p]
             sources: [sessions]
         """)
-        XCTAssertEqual(actionFirst.keybinds.action(for: trigger("cmd+p")), .toggleBrowser)
+        XCTAssertEqual(actionFirst.keybinds.action(for: trigger("cmd+p"), focus: nil), .toggleBrowser)
         XCTAssertEqual(actionFirst.commandPalettes.first?.triggers, [trigger("cmd+shift+p")])
         XCTAssertEqual(actionFirst.problems, [
             ConfigProblem(path: root, line: 5, message: "cmd+p is already bound to toggle_browser"),
@@ -177,7 +177,7 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertEqual(config.commandPalettes.first?.name, "Commands")
         XCTAssertEqual(config.commandPalettes.first?.triggers, [])
         XCTAssertEqual(config.commandPalettes.last?.triggers, [trigger("cmd+p")])
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+p")), .toggleSidebar)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+p"), focus: nil), .toggleSidebar)
         XCTAssertEqual(config.problems, [])
     }
 

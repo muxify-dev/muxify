@@ -54,6 +54,7 @@ enum PaletteCommand: String, CaseIterable {
     case installCLI = "Install Command Line Tool"
     case newTab = "New Tab"
     case closeTab = "Close Tab"
+    case reopenClosedTab = "Reopen Closed Tab"
     case openLocation = "Open Location"
     case nextTab = "Show Next Tab"
     case previousTab = "Show Previous Tab"
@@ -98,6 +99,7 @@ enum PaletteCommand: String, CaseIterable {
         case .previousTab: .selectPrevTab
         case .back: .browserBack
         case .forward: .browserForward
+        case .reopenClosedTab: .reopenClosedTab
         case .showSidebar, .hideSidebar: .toggleSidebar
         case .showTerminal, .hideTerminal: .toggleTerminal
         case .showBrowser, .hideBrowser: .toggleBrowser
@@ -139,7 +141,7 @@ enum PaletteCommand: String, CaseIterable {
              .showTerminal, .hideTerminal, .showBrowser, .hideBrowser, .nextSession, .previousSession, .nextTopic, .previousTopic,
              .newAppWindow:
             .noMirror("It changes only the view of one App Window.")
-        case .newTab, .closeTab, .openLocation, .nextTab, .previousTab, .back, .forward, .reloadPage, .copyURL, .developerTools:
+        case .newTab, .closeTab, .reopenClosedTab, .openLocation, .nextTab, .previousTab, .back, .forward, .reloadPage, .copyURL, .developerTools:
             .noMirror("It changes only the Browser of one App Window.")
         case .openConfig, .reloadConfig, .installExtensions, .installCLI:
             .noMirror("It sets up the app. An Agent edits the Config file directly.")
@@ -201,6 +203,7 @@ extension CommandPalette {
                 guard let step = command.keybinding?.step else { return false }
                 return store.stepTarget(step.level, step.direction) != nil
             case .closeTab, .nextTab, .previousTab: return store.currentBrowser?.activeTab != nil
+            case .reopenClosedTab: return store.currentBrowser?.canReopenClosedTab == true
             case .back: return store.currentBrowser?.activeTab?.canGoBack == true
             case .forward: return store.currentBrowser?.activeTab?.canGoForward == true
             case .reloadPage, .copyURL, .developerTools: return store.currentBrowser?.activeTab?.hasPage == true
@@ -289,6 +292,7 @@ extension CommandPalette {
         case .installCLI: CommandLineToolInstaller.run()
         case .newTab: store.browserCommand(opensBrowser: true) { $0.newTab() }
         case .closeTab: store.currentBrowser?.closeActiveTab()
+        case .reopenClosedTab: store.currentBrowser?.reopenClosedTab()
         case .openLocation: store.browserCommand(opensBrowser: true) { _ in store.focusAddressBar() }
         case .nextTab: store.currentBrowser?.selectTab(offset: 1)
         case .previousTab: store.currentBrowser?.selectTab(offset: -1)

@@ -1785,6 +1785,9 @@ final class WorkspaceStore {
 
     private var focusedSide: PanelLayout.Side { browserHasFocus ? .browser : .terminal }
 
+    /// The side whose keybinds act, nil while the Git View has Focus.
+    private var keyFocus: PanelLayout.Side? { terminalHasFocus ? .terminal : browserHasFocus ? .browser : nil }
+
     func moveFocus(into side: PanelLayout.Side) {
         switch side {
         case .terminal: focusTerminal()
@@ -2327,6 +2330,7 @@ final class WorkspaceStore {
         case .selectPrevTab: browserCommand { $0.selectTab(offset: -1) }
         case .browserBack: browserCommand { $0.activeTab?.goBack() }
         case .browserForward: browserCommand { $0.activeTab?.goForward() }
+        case .reopenClosedTab: currentBrowser?.reopenClosedTab()
         case .selectCard1, .selectCard2, .selectCard3, .selectCard4, .selectCard5,
              .selectCard6, .selectCard7, .selectCard8, .selectCard9,
              .selectWindow1, .selectWindow2, .selectWindow3, .selectWindow4, .selectWindow5,
@@ -2369,8 +2373,7 @@ final class WorkspaceStore {
 
     @discardableResult
     func performConfiguredShortcut(_ trigger: KeyTrigger) -> Bool {
-        guard !isShuttingDown, let action = config.keybinds.action(for: trigger) else { return false }
-        if let side = action.requiredFocus, !(side == .terminal ? terminalHasFocus : browserHasFocus) { return false }
+        guard !isShuttingDown, let action = config.keybinds.action(for: trigger, focus: keyFocus) else { return false }
         // ⌘G, the Git View's, is Find Next while the Browser is finding.
         if trigger == Self.findNext, browserHasFocus, currentBrowser?.activeTab?.isFindShown == true { return false }
         perform(action)
@@ -2402,7 +2405,7 @@ final class WorkspaceStore {
             }
             let keybinds = config.keybinds
             if performConfiguredShortcut(trigger) { return nil }
-            if keybinds.suppressesDefaultAppWindowShortcut(trigger) { return nil }
+            if keybinds.suppressesDefaultAppWindowShortcut(trigger, focus: keyFocus) { return nil }
             if trigger == Self.closeTab {
                 if browserHasFocus { browserCommand { $0.closeActiveTab() } }
                 return nil

@@ -3,11 +3,32 @@ public protocol KeybindAction: CaseIterable, Hashable, RawRepresentable where Ra
     /// The defaults as the user spells them, so the template can show them.
     static var defaultSpelling: KeyValuePairs<Self, [String]> { get }
     static var defaultTriggers: [Self: [KeyTrigger]] { get }
+    /// The side that must have Focus for the keybind to act, or nil when it
+    /// acts whatever has Focus.
+    var requiredFocus: PanelLayout.Side? { get }
 }
 
 extension KeybindAction {
     static func parse(_ spelling: KeyValuePairs<Self, [String]>) -> [Self: [KeyTrigger]] {
         Dictionary(uniqueKeysWithValues: spelling.map { action, spellings in (action, spellings.map { try! KeyTrigger($0) }) })
+    }
+
+    public var requiredFocus: PanelLayout.Side? { nil }
+
+    /// Two actions can share a trigger when no Focus has both acting on it:
+    /// one acts only while one side has Focus, and the other acts only on the
+    /// other side or everywhere else.
+    public func canShareTrigger(with other: Self) -> Bool {
+        requiredFocus != other.requiredFocus
+    }
+
+    /// Whether the user's `trigger` for this action takes the same default
+    /// trigger from `other`. It does when the two cannot share it. A trigger
+    /// new to an action that acts everywhere takes it from every default, so
+    /// a default for one side does not hide it there. Restating a default
+    /// keeps the defaults that share it.
+    func takesDefault(_ trigger: KeyTrigger, from other: Self) -> Bool {
+        !canShareTrigger(with: other) || (requiredFocus == nil && !Self.defaultTriggers[self, default: []].contains(trigger))
     }
 }
 
@@ -53,6 +74,7 @@ public enum ConfigAction: String, KeybindAction {
     case selectPrevTab = "select_prev_tab"
     case browserBack = "browser_back"
     case browserForward = "browser_forward"
+    case reopenClosedTab = "reopen_closed_tab"
     case selectCard1 = "select_card_1"
     case selectCard2 = "select_card_2"
     case selectCard3 = "select_card_3"
@@ -130,6 +152,7 @@ public enum ConfigAction: String, KeybindAction {
         .selectPrevTab: ["cmd+shift+left_bracket", "ctrl+shift+tab"],
         .browserBack: ["cmd+left_bracket"],
         .browserForward: ["cmd+right_bracket"],
+        .reopenClosedTab: ["cmd+shift+t"],
         .selectCard1: ["ctrl+1"],
         .selectCard2: ["ctrl+2"],
         .selectCard3: ["ctrl+3"],
@@ -169,14 +192,13 @@ public enum ConfigAction: String, KeybindAction {
 
     public static let defaultTriggers = parse(defaultSpelling)
 
-    /// The side that must have Focus for the keybind to act. With Focus
-    /// elsewhere, the key goes on to Ghostty, the page or the menu, so a Pane
-    /// key does not take a key from the Browser, and a Tab key does not take
-    /// one from the Terminal.
+    /// With Focus elsewhere, the key goes on to Ghostty, the page, the menu or
+    /// an action that shares the trigger, so a Pane key does not take a key
+    /// from the Browser, and a Tab key does not take one from the Terminal.
     public var requiredFocus: PanelLayout.Side? {
         switch self {
         case .toggleZoomPane, .resizePaneLeft, .resizePaneRight, .resizePaneUp, .resizePaneDown: .terminal
-        case .selectNextTab, .selectPrevTab, .browserBack, .browserForward: .browser
+        case .selectNextTab, .selectPrevTab, .browserBack, .browserForward, .reopenClosedTab: .browser
         default: nil
         }
     }
@@ -267,8 +289,9 @@ public enum PaletteAction: String, KeybindAction {
     public static let defaultTriggers = parse(defaultSpelling)
 }
 
-/// Each action's triggers, in the order they were listed. No trigger belongs
-/// to two actions.
+/// Each action's triggers, in the order they were listed. A trigger belongs to
+/// two actions only when they can share it (`canShareTrigger(with:)`), so for
+/// each Focus at most one action acts on a trigger.
 public struct KeybindSet<Action: KeybindAction>: Equatable {
     public let triggers: [Action: [KeyTrigger]]
 
@@ -278,8 +301,13 @@ public struct KeybindSet<Action: KeybindAction>: Equatable {
 
     public static var defaults: Self { Self(triggers: Action.defaultTriggers) }
 
-    public func action(for trigger: KeyTrigger) -> Action? {
-        triggers.first { $0.value.contains(trigger) }?.key
+    /// The action that acts on `trigger` while `focus`, the side with Focus
+    /// or nil for neither, has it. The action for that side wins over one
+    /// that acts everywhere.
+    public func action(for trigger: KeyTrigger, focus: PanelLayout.Side?) -> Action? {
+        let owners = triggers.filter { $0.value.contains(trigger) }.map(\.key)
+        return owners.first { $0.requiredFocus != nil && $0.requiredFocus == focus }
+            ?? owners.first { $0.requiredFocus == nil }
     }
 
     /// The trigger menus and tooltips show for `action`.
@@ -293,11 +321,19 @@ public typealias Keybinds = KeybindSet<ConfigAction>
 /// The keybinds of an open Command Palette.
 public typealias PaletteKeybinds = KeybindSet<PaletteAction>
 
+extension KeybindSet where Action == PaletteAction {
+    /// The palette's keybinds act whatever has Focus.
+    public func action(for trigger: KeyTrigger) -> PaletteAction? {
+        action(for: trigger, focus: nil)
+    }
+}
+
 extension KeybindSet where Action == ConfigAction {
     /// Ghostty's own Cmd+N opens an App Window. New App Window has only the
-    /// keys the Config gives it, so Cmd+N does nothing while no action has it.
-    public func suppressesDefaultAppWindowShortcut(_ trigger: KeyTrigger) -> Bool {
-        trigger == Self.ghosttyNewWindow && action(for: trigger) == nil
+    /// keys the Config gives it, so Cmd+N does nothing while no action acts
+    /// on it under `focus`.
+    public func suppressesDefaultAppWindowShortcut(_ trigger: KeyTrigger, focus: PanelLayout.Side?) -> Bool {
+        trigger == Self.ghosttyNewWindow && action(for: trigger, focus: focus) == nil
     }
 
     private static let ghosttyNewWindow = KeyTrigger(modifiers: .command, key: .character("n"))

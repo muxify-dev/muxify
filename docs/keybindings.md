@@ -4,16 +4,21 @@
 
 These keybindings work throughout Muxify, including while a Browser page or its
 address bar has Focus. The Pane actions act only while the Terminal has Focus,
-and the Tab and history actions only while the Browser has Focus. With Focus
-elsewhere, their keys go on to Ghostty, the page or the menu: ⌘M still minimizes
-the App Window from the Browser, and ⌘⇧] still goes to the next Window in the
-Terminal. All available `keybindings` actions are listed below.
+and the Tab, history and `reopen_closed_tab` actions only while the Browser has
+Focus. With Focus elsewhere, their keys go on to Ghostty, the page or the menu:
+⌘M still minimizes the App Window from the Browser, and ⌘⇧] still goes to the
+next Window in the Terminal. An action for one side can share its key with an
+action for the other side or for everywhere, and acts while its side has Focus:
+⌘⇧T reopens the last closed Tab from the Browser and opens Move for the Pane
+elsewhere. When you give an action for everywhere a key that is not its default,
+it takes that key from every default. All available `keybindings` actions are
+listed below.
 
 | Action | Default shortcuts | What it does |
 | --- | --- | --- |
 | `new_app_window` | ⌘⇧N | Open a new Local Muxify App Window. While no action has ⌘N, ⌘N does nothing, so Ghostty's ⌘N does not open an App Window |
 | `new_topic` | ⌘N | Open New Topic in the palette |
-| `move_pane` | ⌘⇧T | Open Move for the current Pane |
+| `move_pane` | ⌘⇧T | Open Move for the current Pane. While the Browser has Focus, ⌘⇧T is `reopen_closed_tab` |
 | `move_window` | Unbound | Open Move for the selected Window |
 | `move_session` | ⌘⇧M | Open Move for the selected Window's Session, in the Command Palette's view |
 | `add_session_to_topic` | ⌘⇧A | Open Add a Session for the Active Topic in the palette |
@@ -51,6 +56,7 @@ Terminal. All available `keybindings` actions are listed below.
 | `select_prev_tab` | ⌘⇧[, ⌃⇧Tab | Select the previous Browser Tab. Browser Focus only |
 | `browser_back` | ⌘[ | Go back in the active Tab's history. Browser Focus only |
 | `browser_forward` | ⌘] | Go forward in the active Tab's history. Browser Focus only |
+| `reopen_closed_tab` | ⌘⇧T | Open the last closed Tab again at its place, with its history. Browser Focus only |
 | `select_card_1` … `select_card_9` | ⌃1 … ⌃9 | Jump To the Topic or Session at that position in Sidebar order |
 | `select_tab_1` … `select_tab_9` | ⌥1 … ⌥9 | Select that Tab and move Focus to the Browser, showing it if hidden |
 | `select_window_1` | ⌘1 | Select the first Window in the current Session |
@@ -173,7 +179,7 @@ the Sidebar, the Terminal and the Browser. Each row shows its configured shortcu
 Zoom Pane runs at once on the current Pane, as `toggle_zoom_pane` does.
 A row appears only when its action can change something.
 
-Move opens for a Pane with ⌘⇧T, a Window with `move_window` or a Session with ⌘⇧M.
+Move opens for a Pane with ⌘⇧T (while the Browser does not have Focus), a Window with `move_window` or a Session with ⌘⇧M.
 Its Pane, Window and Session buttons select what moves. For a Pane or Window,
 New Topic is the first row. A Pane can also move to a New Window. The ＋ Tab
 button includes the active Browser Tab and keeps its history. A Topic that cannot accept the move shows
@@ -459,6 +465,7 @@ when it does not. New Tab and Open Location can reveal a hidden Browser:
 | ⌘-click (link) | Open the link in a new Browser Tab |
 | ⌘L | Move Focus to the address bar, opening the Browser if hidden |
 | ⌘W | Close the active Browser Tab |
+| ⌘⇧T | Open the last closed Tab again (`reopen_closed_tab`) |
 | ⌘⇧] or ⌃Tab | Select the next Browser Tab (`select_next_tab`) |
 | ⌘⇧[ or ⌃⇧Tab | Select the previous Browser Tab (`select_prev_tab`) |
 | ⌘[ | Go back (`browser_back`) |

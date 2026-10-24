@@ -17,7 +17,7 @@ final class GitViewConfigTests: XCTestCase {
     func testDefaultsAreAnEightyPercentPopupOnCommandG() throws {
         let config = try load("")
         XCTAssertEqual(config.gitView, GitViewConfig(display: .popup, width: 0.8, height: 0.8))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+g")), .toggleGitView)
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+g"), focus: nil), .toggleGitView)
         XCTAssertEqual(config.problems, [])
     }
 
@@ -72,8 +72,8 @@ final class GitViewConfigTests: XCTestCase {
     func testTheKeybindingCanBeRemappedOrDisabled() throws {
         let remapped = try load("keybindings:\n  toggle_git_view: [ctrl+g, cmd+shift+g]")
         XCTAssertEqual(remapped.keybinds.firstTrigger(for: .toggleGitView), trigger("ctrl+g"))
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("cmd+shift+g")), .toggleGitView)
-        XCTAssertNil(remapped.keybinds.action(for: trigger("cmd+g")))
+        XCTAssertEqual(remapped.keybinds.action(for: trigger("cmd+shift+g"), focus: nil), .toggleGitView)
+        XCTAssertNil(remapped.keybinds.action(for: trigger("cmd+g"), focus: nil))
         let disabled = try load("keybindings:\n  toggle_git_view: []")
         XCTAssertNil(disabled.keybinds.firstTrigger(for: .toggleGitView))
     }
