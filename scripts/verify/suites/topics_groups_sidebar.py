@@ -12,7 +12,7 @@ import json
 import time
 import unittest
 
-from scripts.verify.sandbox import wait
+from scripts.verify.sandbox import frame, wait
 from scripts.verify.topics_sidebar import TopicsSidebar, remembered_session
 
 
@@ -27,6 +27,36 @@ class TopicsGroupsSidebar(TopicsSidebar):
         self.s.act('set', 'palette-search', query)
         return self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue', '') == query,
                                 'Go to… did not take the query %r' % query)
+
+    def assert_group_rows_in_view(self, rs, when):
+        floor = frame(self.s.row('agents-header', rs))[1]
+        ceiling = frame(self.s.row('topics-list', rs))[0]
+        for key in ['snoozed-topics', 'settled-topics']:
+            bottom, top = frame(self.s.row(key, rs))
+            self.assertTrue(floor <= bottom and top <= ceiling,
+                            '%s: the %s row %s is not between the Topics list and the Agents section (%s..%s)'
+                            % (when, key, (bottom, top), floor, ceiling))
+
+    def test_an_open_group_keeps_both_group_rows_in_view(self):
+        s = self.s
+        snoozed = ['rows-in-view-snoozed-%02d' % i for i in range(12)]
+        for topic_id in snoozed:
+            self.write_topic(topic_id, 'Rows in view ' + topic_id[-2:], self.beta, snoozed_until='never')
+        self.write_topic('rows-in-view-settled', 'Rows in view settled', self.beta, settled_at='2031-01-01T10:00:00Z')
+        self.collapse('settled-topics')
+        self.collapse('snoozed-topics')
+        s.act('press', 'snoozed-topics')
+        last = 'topic-' + snoozed[-1]
+        rs = s.wait_rows(lambda rs: self.expanded('snoozed-topics', rs) and s.has(last, rs),
+                         'the Snoozed header did not open its group')
+        self.assertLess(frame(s.row(last, rs))[1], frame(s.row('settled-topics', rs))[1],
+                        'the 12 Snoozed cards fit in their block, so the check proves nothing')
+        self.assert_group_rows_in_view(rs, 'Snoozed open')
+        s.reveal(last)
+        rs = s.rows()
+        self.assertGreater(frame(s.row(last, rs))[0], frame(s.row('settled-topics', rs))[1],
+                           'revealing the last Snoozed card did not scroll it into its block above the Settled row')
+        self.assert_group_rows_in_view(rs, 'Snoozed scrolled to its last card')
 
     def test_opening_one_group_closes_the_other_and_a_header_press_goes_to_no_topic(self):
         s = self.s
