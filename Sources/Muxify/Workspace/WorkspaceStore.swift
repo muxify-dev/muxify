@@ -811,7 +811,7 @@ final class WorkspaceStore {
             case .edit, .newTopic, .newSession:
                 if ownsPalette { palette.close(restoringFocus: false) }
                 switch change.shown {
-                case .emptyTopic(let id)?:
+                case .emptyTopic(.topic(let id))?:
                     showEmptyTopic(id)
                     if case .newTopic = presentation, ownsPalette { presentAddSession(toTopic: id) }
                 case .window(let id)?:
@@ -826,7 +826,7 @@ final class WorkspaceStore {
                         ?? TmuxServer.app.snapshot().windows.first(where: { $0.id == id.rawValue }) {
                         attach(to: Target(window))
                     }
-                case nil:
+                case .emptyTopic?, nil:
                     break
                 }
             }

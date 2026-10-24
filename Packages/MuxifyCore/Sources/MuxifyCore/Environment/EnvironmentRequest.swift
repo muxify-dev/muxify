@@ -443,24 +443,10 @@ public struct TopicSummary: Codable, Hashable, Sendable {
 
 /// What a request changed.
 public struct TopicChange: Codable, Hashable, Sendable {
-    public enum Shown: Codable, Hashable, Sendable {
-        /// The host's client now shows this Window.
-        case window(WindowID)
-        /// An open Topic with no Session, which a host shows in place of a Window.
-        case emptyTopic(id: String)
-
-        private enum CodingKeys: String, CodingKey {
-            case window
-            case emptyTopic = "empty_topic"
-        }
-
-        private enum WindowCodingKeys: String, CodingKey { case _0 = "id" }
-    }
-
     /// The Topic whose record the request wrote; nil when it changed only tmux.
     public var topicID: String?
     public var created: Bool
-    public var shown: Shown?
+    public var shown: Location?
     /// What the request made in tmux, so the next request can name it. Nil when it made nothing.
     public var session: SessionID?
     /// The full tmux name of `session`.
@@ -471,7 +457,7 @@ public struct TopicChange: Codable, Hashable, Sendable {
     /// The Agent Panes that a Kill stopped.
     public var stopped: [PaneID]?
 
-    public init(topicID: String?, created: Bool = false, shown: Shown? = nil, session: SessionID? = nil, sessionName: String? = nil,
+    public init(topicID: String?, created: Bool = false, shown: Location? = nil, session: SessionID? = nil, sessionName: String? = nil,
                 window: WindowID? = nil, pane: PaneID? = nil, stopped: [PaneID]? = nil) {
         self.topicID = topicID
         self.created = created

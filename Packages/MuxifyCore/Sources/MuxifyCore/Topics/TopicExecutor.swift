@@ -105,14 +105,14 @@ struct TopicExecutor {
     }
 
     /// Finds what a finished edit shows, and switches `client` to it when that client is on this server.
-    func show(_ selection: TopicEdit.Selection, client: String?) throws -> TopicChange.Shown? {
+    func show(_ selection: TopicEdit.Selection, client: String?) throws -> Location? {
         var snapshot = try server.snapshot()
         let window: TmuxWindow?
         switch selection {
         case .unchanged, .made:
             return nil
         case .emptyTopic(let id):
-            return .emptyTopic(id: id)
+            return .emptyTopic(.topic(id))
         case .sessionID(let id):
             window = snapshot.windows.first { $0.sessionID == id && $0.isActive }
                 ?? snapshot.windows.first { $0.sessionID == id }

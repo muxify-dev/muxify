@@ -1,12 +1,7 @@
 import Foundation
 import MuxifyCore
 
-enum TopicGroupID: Hashable {
-    case topic(String)
-    /// A Locked Session, by Session ID: a No Topic Session with its own card among the Topics (ADR 0018).
-    case locked(String)
-    case noTopic
-
+extension TopicGroupID {
     var accessibilityID: String {
         switch self {
         case .topic(let id): return "topic-\(id)"
