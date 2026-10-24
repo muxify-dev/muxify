@@ -100,9 +100,9 @@ final class NotificationsAndSnoozeTests: XCTestCase {
         XCTAssertEqual(defaults.notifications, Config.Notifications())
         XCTAssertEqual(defaults.keybinds.firstTrigger(for: .snoozeTopic), try KeyTrigger("alt+cmd+s"))
         XCTAssertNil(defaults.keybinds.firstTrigger(for: .snoozeTopics), "shift+alt+cmd+s is Zen, so Snooze Topics has no default")
-        XCTAssertEqual(try load("keybindings:\n  snooze_topics: ctrl+alt+s").keybinds.action(for: try KeyTrigger("ctrl+alt+s")), .snoozeTopics)
+        XCTAssertEqual(try load("keybindings:\n  snooze_topics: ctrl+alt+s").keybinds.action(for: try KeyTrigger("ctrl+alt+s"), focus: nil), .snoozeTopics)
         XCTAssertNil(defaults.keybinds.firstTrigger(for: .unsnoozeTopics), "Unsnooze Topics has no default")
-        XCTAssertEqual(try load("keybindings:\n  unsnooze_topics: ctrl+alt+u").keybinds.action(for: try KeyTrigger("ctrl+alt+u")), .unsnoozeTopics)
+        XCTAssertEqual(try load("keybindings:\n  unsnooze_topics: ctrl+alt+u").keybinds.action(for: try KeyTrigger("ctrl+alt+u"), focus: nil), .unsnoozeTopics)
         let config = try load("""
         notifications:
           done_enabled: false

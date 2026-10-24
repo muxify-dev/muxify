@@ -18,6 +18,16 @@ final class Browser {
     /// Shows the Browser only while it has a Tab.
     private(set) var layout: PanelLayout
     var focusRequest: FocusRequest?
+    /// Newest last. Kept only while the app runs: tmux stores open Tabs, not closed ones.
+    private var closedTabs: [ClosedTab] = []
+    private static let closedTabLimit = 20
+
+    /// Enough of a closed Tab to bring it back where it was, with its history.
+    private struct ClosedTab {
+        let url: URL
+        let index: Int
+        let interactionState: Any?
+    }
 
     @ObservationIgnored var onChange: ((Browser) -> Void)?
     /// Called when the Terminal or the Browser appears or disappears.
@@ -123,9 +133,13 @@ final class Browser {
         changed()
     }
 
-    /// Closing the last Tab closes the Browser.
+    /// Closing the last Tab closes the Browser. A Tab with a page can be reopened.
     func close(_ tab: BrowserTab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        if tab.hasPage, let url = URL(string: tab.urlString) {
+            closedTabs.append(ClosedTab(url: url, index: index, interactionState: tab.interactionState))
+            if closedTabs.count > Self.closedTabLimit { closedTabs.removeFirst() }
+        }
         tab.close()
         tabs.remove(at: index)
         if tabs.isEmpty {
@@ -139,6 +153,20 @@ final class Browser {
 
     func closeActiveTab() {
         if let activeTab { close(activeTab) }
+    }
+
+    var canReopenClosedTab: Bool { !closedTabs.isEmpty }
+
+    /// Brings back the newest closed Tab at its old position, with its back
+    /// and forward history, and gives it Focus.
+    func reopenClosedTab() {
+        guard let closed = closedTabs.popLast() else { return }
+        let tab = makeTab(closed.url, interactionState: closed.interactionState)
+        tabs.insert(tab, at: min(closed.index, tabs.count))
+        activeTabID = tab.id
+        changeLayout { $0.reveal(.browser) }
+        requestFocus()
+        changed()
     }
 
     func moveTab(_ tab: BrowserTab, to destination: Browser) {
@@ -190,8 +218,8 @@ final class Browser {
         activeTabID = tab.id
     }
 
-    private func makeTab(_ url: URL?) -> BrowserTab {
-        let tab = BrowserTab(url: url)
+    private func makeTab(_ url: URL?, interactionState: Any? = nil) -> BrowserTab {
+        let tab = BrowserTab(url: url, interactionState: interactionState)
         bind(tab)
         return tab
     }

@@ -51,6 +51,8 @@ final class BrowserTab: NSObject, Identifiable {
     @ObservationIgnored private var loadedWebView: WKWebView?
     @ObservationIgnored private var loadedPageView: NSView?
     @ObservationIgnored private var pendingURL: URL?
+    /// A reopened Tab's history, restored in place of `pendingURL` when the web view is made.
+    @ObservationIgnored private var pendingInteractionState: Any?
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
     @ObservationIgnored private var finder: PageFinder?
 
@@ -71,8 +73,9 @@ final class BrowserTab: NSObject, Identifiable {
         return config
     }()
 
-    init(url: URL?) {
+    init(url: URL?, interactionState: Any? = nil) {
         pendingURL = url
+        pendingInteractionState = interactionState
         urlString = url?.absoluteString ?? ""
         super.init()
     }
@@ -90,11 +93,21 @@ final class BrowserTab: NSObject, Identifiable {
         self.finder = finder
         BrowserPageScripts.register(webView, finder: finder)
         observe(webView)
-        if let pendingURL {
+        if let pendingInteractionState {
+            self.pendingInteractionState = nil
+            pendingURL = nil
+            webView.interactionState = pendingInteractionState
+        } else if let pendingURL {
             self.pendingURL = nil
             load(pendingURL)
         }
         return webView
+    }
+
+    /// The back and forward list and scroll position, for Reopen Closed Tab.
+    /// Nil for a Tab whose page was never shown, which has only its URL.
+    var interactionState: Any? {
+        loadedWebView?.interactionState ?? pendingInteractionState
     }
 
     /// WebKit docks its inspector as a sibling of the page. Keep their parent
@@ -187,6 +200,7 @@ final class BrowserTab: NSObject, Identifiable {
             }
         } else {
             pendingURL = url
+            pendingInteractionState = nil
         }
         if changed { onURLChange?() }
     }

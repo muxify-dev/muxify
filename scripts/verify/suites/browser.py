@@ -1,4 +1,4 @@
-"""Find in Page, Vim Keys and Paste Path in the Browser.
+"""Find in Page, Vim Keys, Paste Path and Reopen Closed Tab in the Browser.
 
 The checks dispatch keys inside the page, because the driver must not type keys (README: "Do not take focus").
 A Vim Key dispatched there still reaches WebKit as the key it stands for, so the page scrolls for real.
@@ -99,6 +99,8 @@ PAGE = '''<!doctype html>
     if (params.has('pagekeys')) document.addEventListener('keydown', (event) => event.preventDefault());
     if (params.has('escape')) field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     if (params.has('history')) { location.hash = 'second'; await new Promise((done) => setTimeout(done, 300)); }
+    // Only from a new Tab, so going Back to this page stays on it.
+    if (params.has('goto') && history.length === 1) location.search = params.get('goto');
     if (params.has('every')) setInterval(() => send(params.get('every')), 200);
     for (const group of (params.get('keys') || '').split(',').filter(Boolean)) {
       if (params.has('held')) await hold(group); else send(group);
@@ -126,13 +128,16 @@ class Browser(unittest.TestCase):
         s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES'])
         wait(lambda: '0' in s.tmux('list-clients', '-F', '#{client_control_mode}').split(), 'the app attached no tmux client')
 
-    def open_page(self, query):
-        """A new Window whose Browser shows the fixture page with the query, selected in the app's tmux client."""
+    def open_page(self, query, left=(), right=(), shows=None):
+        """A new Window whose Browser shows the fixture page with the query, selected in the app's tmux client.
+        The Tabs with the URLs in `left` and `right` stand on each side of it. `shows` is the query of the page
+        that the Tab goes on to by itself."""
         name = self.id().rsplit('.', 1)[-1][5:]
-        self.query = query
+        self.query = shows or query
         url = self.page.as_uri() + '?' + query
+        tabs = ' '.join([*left, url, *right])
         # One tmux call, so the app never reads the Window without its Browser options.
-        options = [arg for option, value in [('@muxify_tabs', url), ('@muxify_active_tab', '0'), ('@muxify_browser', 'on')]
+        options = [arg for option, value in [('@muxify_tabs', tabs), ('@muxify_active_tab', str(len(left))), ('@muxify_browser', 'on')]
                    for arg in (';', 'set-option', '-w', '-t', 'browser:' + name, option, value)]
         self.s.tmux('new-window', '-d', '-t', self.session + ':', '-n', name, SHELL, *options)
         window = self.s.tmux('display-message', '-p', '-t', 'browser:' + name, '#{window_id}')
@@ -140,6 +145,7 @@ class Browser(unittest.TestCase):
             if tty.endswith(' 0'):
                 self.s.tmux('switch-client', '-c', tty.split()[0], '-t', window)
         self.s.wait_shown(window)
+        self.window = window
         self.wait_page(lambda page: True, 'the Tab does not show the fixture page')
 
     def page_state(self, rs=None):
@@ -162,6 +168,15 @@ class Browser(unittest.TestCase):
 
     def wait_sent(self):
         return self.wait_page(lambda page: page['sent'] == 'yes', 'the page did not send its keys')
+
+    def stored_tabs(self):
+        """The Tabs and the active Tab that the app wrote onto this check's tmux Window."""
+        option = lambda name: self.s.tmux('show-options', '-wqv', '-t', self.window, name)
+        return option('@muxify_tabs').split(), option('@muxify_active_tab')
+
+    def press_menu(self, title):
+        # SwiftUI rebuilds the View menu a moment after the state it reads changes, and a press in that moment can miss.
+        wait(lambda: self.s.driver('press', title)['pressed'], '%s stays disabled' % title, seconds=10)
 
     def find_status(self, rs=None):
         row = self.s.row('browser-find-status', rs)
@@ -328,6 +343,56 @@ class Browser(unittest.TestCase):
         self.wait_sent()
         time.sleep(1)
         self.assertEqual(self.page_state()['y'], '0', 'j scrolled with browser.vim_keys off')
+
+    # Reopen Closed Tab
+
+    def test_reopen_closed_tab_brings_the_tab_back_at_its_index_with_its_back_history(self):
+        left, right = self.page.as_uri() + '?tab=left', self.page.as_uri() + '?tab=right'
+        first, second = self.page.as_uri() + '?goto=case=reopened', self.page.as_uri() + '?case=reopened'
+        self.open_page('goto=case=reopened', left=[left], right=[right], shows='case=reopened')
+        wait(lambda: self.stored_tabs() == ([left, second, right], '1'), 'the app did not store the second page in the middle Tab')
+
+        self.press_menu('Close Tab')
+        wait(lambda: self.stored_tabs()[0] == [left, right], 'Close Tab did not close the middle Tab')
+        self.press_menu('Reopen Closed Tab')
+        wait(lambda: self.stored_tabs() == ([left, second, right], '1'),
+             'Reopen Closed Tab did not bring the second page back as the active middle Tab')
+        self.wait_page(lambda page: True, 'the reopened Tab does not show the second page')
+
+        self.press_menu('Back')
+        self.query = 'goto=case=reopened'
+        self.wait_page(lambda page: True, 'Back in the reopened Tab did not go to the first page')
+        wait(lambda: self.stored_tabs() == ([left, first, right], '1'), 'Back did not store the first page in the middle Tab')
+
+    def test_command_shift_t_reopens_a_closed_tab_with_browser_focus_and_opens_move_with_terminal_focus(self):
+        left = self.page.as_uri() + '?tab=shift-t-left'
+        url = self.page.as_uri() + '?case=shift-t'
+        self.open_page('case=shift-t', left=[left])
+        wait(lambda: self.stored_tabs() == ([left, url], '1'), 'the app did not store both Tabs')
+        self.press_menu('Close Tab')
+        wait(lambda: self.stored_tabs()[0] == [left], 'Close Tab did not close the active Tab')
+
+        self.press_menu('Focus Browser')
+        self.wait_focus(('WKWebView', 'WKContentView', 'NSTextView'), 'Focus Browser did not give the Browser Focus')
+        self.press_key('⇧⌘T')
+        wait(lambda: self.stored_tabs() == ([left, url], '1'), '⇧⌘T with Browser Focus did not reopen the closed Tab')
+        self.assertFalse(self.s.has('palette-row-new-topic'), '⇧⌘T with Browser Focus opened Move')
+
+        self.press_menu('Focus Terminal')
+        self.wait_focus(('TerminalSurfaceView',), 'Focus Terminal did not give the Terminal Focus')
+        self.press_key('⇧⌘T')
+        self.s.wait_rows(lambda rs: self.s.has('palette-row-new-topic', rs), '⇧⌘T with Terminal Focus did not open Move')
+        self.assertEqual(self.stored_tabs(), ([left, url], '1'), '⇧⌘T with Terminal Focus changed the Tabs')
+        self.s.driver('action', 'palette-search', 'Close')
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Move did not close')
+
+    def press_key(self, symbol):
+        """Runs the keybinds of a key, as a press of it does, without the keyboard (README: "Do not take focus")."""
+        wait(lambda: self.s.driver('action', 'quick-switch-input', 'Press ' + symbol)['pressed'],
+             'the app offers no Press %s' % symbol, seconds=10)
+
+    def wait_focus(self, classes, message):
+        wait(lambda: any(name.startswith(classes) for name in self.s.driver('responder')['responders']), message)
 
     # Paste Path
 

@@ -91,9 +91,9 @@ final class HintTests: XCTestCase {
         XCTAssertEqual(hints[.session("second")].map(\.symbol), ["⌃7", "⌃X"])
         XCTAssertEqual(hints[.window("@1")].map(\.symbol), ["⌃1"])
         XCTAssertEqual(hints[.terminal].map(\.symbol), ["⌃8"])
-        XCTAssertNil(config.keybinds.action(for: try KeyTrigger("ctrl+3")))
-        XCTAssertNil(config.keybinds.action(for: try KeyTrigger("ctrl+2")))
-        XCTAssertEqual(config.keybinds.action(for: try KeyTrigger("ctrl+7")), .selectCard2)
+        XCTAssertNil(config.keybinds.action(for: try KeyTrigger("ctrl+3"), focus: nil))
+        XCTAssertNil(config.keybinds.action(for: try KeyTrigger("ctrl+2"), focus: nil))
+        XCTAssertEqual(config.keybinds.action(for: try KeyTrigger("ctrl+7"), focus: nil), .selectCard2)
         XCTAssertEqual(targets.target(for: .card(2)), .session("second"))
         let combined = HintPresentation(modifiers: [.control, .command], keybinds: config.keybinds, targets: targets,
                                        sidebar: true, browser: true, terminal: true)
@@ -175,7 +175,7 @@ final class HintTests: XCTestCase {
                 XCTAssertTrue(hints[target].isEmpty)
             }
         }
-        XCTAssertEqual(config.keybinds.action(for: try KeyTrigger("ctrl+1")), .selectCard1)
+        XCTAssertEqual(config.keybinds.action(for: try KeyTrigger("ctrl+1"), focus: nil), .selectCard1)
     }
 
     func testLiveDelayChangesAndDisabledHoldPreserveSuppression() {
@@ -199,12 +199,12 @@ final class HintTests: XCTestCase {
     func testDefaultActionsAndTerminalMenuTrigger() throws {
         let config = try config("")
         for position in 1...9 {
-            XCTAssertEqual(config.keybinds.action(for: try KeyTrigger("ctrl+\(position)")), ConfigAction(rawValue: "select_card_\(position)"))
-            XCTAssertEqual(config.keybinds.action(for: try KeyTrigger("alt+\(position)")), ConfigAction(rawValue: "select_tab_\(position)"))
+            XCTAssertEqual(config.keybinds.action(for: try KeyTrigger("ctrl+\(position)"), focus: nil), ConfigAction(rawValue: "select_card_\(position)"))
+            XCTAssertEqual(config.keybinds.action(for: try KeyTrigger("alt+\(position)"), focus: nil), ConfigAction(rawValue: "select_tab_\(position)"))
         }
         XCTAssertEqual(config.keybinds.firstTrigger(for: .focusTerminal), try KeyTrigger("cmd+shift+j"))
         for modifier in ["ctrl", "alt"] {
-            XCTAssertEqual(config.keybinds.action(for: try KeyTrigger(modifier + "+0")), .focusTerminal)
+            XCTAssertEqual(config.keybinds.action(for: try KeyTrigger(modifier + "+0"), focus: nil), .focusTerminal)
         }
     }
 

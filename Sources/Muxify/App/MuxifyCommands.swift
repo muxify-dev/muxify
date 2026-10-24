@@ -120,6 +120,9 @@ import MuxifyCore
             Divider()
             Button("Close Tab") { store?.browserCommand { $0.closeActiveTab() } }
                 .keyboardShortcut("w", modifiers: .command)
+            Button("Reopen Closed Tab") { store?.currentBrowser?.reopenClosedTab() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .reopenClosedTab)?.shortcut)
+                .disabled(store?.currentBrowser?.canReopenClosedTab != true)
             Button("Show Next Tab") { store?.browserCommand { $0.selectTab(offset: 1) } }
                 .keyboardShortcut(keybinds.firstTrigger(for: .selectNextTab)?.shortcut)
             Button("Show Previous Tab") { store?.browserCommand { $0.selectTab(offset: -1) } }
