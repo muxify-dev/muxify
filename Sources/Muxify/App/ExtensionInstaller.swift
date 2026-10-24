@@ -1,4 +1,5 @@
 import AppKit
+import MuxifyCore
 
 /// Muxify ▸ Install Extensions: runs the installer bundled at
 /// `Contents/Resources/extensions/install.sh`, which installs or updates the
@@ -30,14 +31,15 @@ enum ExtensionInstaller {
         process.standardOutput = stdout
         process.standardError = stderr
         process.standardInput = FileHandle.nullDevice
+        let exit: ProcessExit
         do {
-            try process.run()
+            exit = try process.start()
         } catch {
             return (true, "Couldn't run the installer: \(error.localizedDescription)")
         }
         let out = trimmed(stdout.fileHandleForReading.readDataToEndOfFile())
         let err = trimmed(stderr.fileHandleForReading.readDataToEndOfFile())
-        process.waitUntilExit()
+        exit.wait()
 
         guard process.terminationStatus == 0 else {
             // The per-Agent lines say which Agent failed and why; stderr has

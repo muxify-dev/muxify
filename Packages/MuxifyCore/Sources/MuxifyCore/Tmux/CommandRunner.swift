@@ -40,7 +40,8 @@ public final class CommandRunner: @unchecked Sendable {
 
         lock.lock()
         guard !cancelled else { lock.unlock(); throw TmuxError.cancelled }
-        do { try process.run() } catch { lock.unlock(); throw error }
+        let exit: ProcessExit
+        do { exit = try process.start() } catch { lock.unlock(); throw error }
         processes[process.processIdentifier] = process
         lock.unlock()
         defer {
@@ -65,7 +66,7 @@ public final class CommandRunner: @unchecked Sendable {
             Self.terminate(process)
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline)
-        process.waitUntilExit()
+        exit.wait()
         deadline.cancel()
 
         // A descendant could retain a pipe even after its parent exits.
