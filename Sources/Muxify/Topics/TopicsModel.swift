@@ -1,12 +1,7 @@
 import Foundation
 import MuxifyCore
 
-enum TopicGroupID: Hashable {
-    case topic(String)
-    /// A Locked Session, by Session ID: a No Topic Session with its own card among the Topics (ADR 0018).
-    case locked(String)
-    case noTopic
-
+extension TopicGroupID {
     var accessibilityID: String {
         switch self {
         case .topic(let id): return "topic-\(id)"
@@ -108,10 +103,6 @@ struct TopicSessionID: Hashable {
 
 struct TopicSelection: Equatable {
     var windowID: String?
-    /// A Topic with no live Session that the user looks at in place of `windowID`'s Window: an empty, Dormant or
-    /// Settled Topic.
-    var emptyTopicID: String?
-    var showsEmptyNoTopic = false
     private(set) var activeTopic: TopicGroupID?
     /// The open Topic cards and Settled rows. A new Active Topic opens alone; the user opens or closes any of them.
     private(set) var openTopics: Set<TopicGroupID> = []
@@ -364,7 +355,7 @@ struct TopicsModel {
     let tags: ConfigTags?
     var showsToggle: Bool { topicsEnabled && sessionsEnabled }
 
-    init(records: [TopicRecord], windows: [TmuxWindow], config: Config, selection: TopicSelection,
+    init(records: [TopicRecord], windows: [TmuxWindow], config: Config, selection: TopicSelection, location: Location? = nil,
          mode: SidebarMode = .topics, groups groupsState: TopicGroupsState = TopicGroupsState(),
          agents: [Agent] = [], panes: [TmuxPane]? = nil, zen: ZenRecord? = nil,
          now: Date = Date()) {
@@ -415,11 +406,19 @@ struct TopicsModel {
         }
         sessionChildren = Dictionary(grouping: windows, by: \.sessionID).mapValues(children)
 
-        let selectedWindow = windows.first { $0.id == selection.windowID }
-        let emptyTopicID = selection.emptyTopicID.flatMap { id in
-            records.contains { $0.id == id } && !windows.contains { $0.topicID == id } ? id : nil
+        let selectedWindow = windows.first { $0.id == location?.windowID?.rawValue }
+        let pageTopicID: String?
+        switch location {
+        case .window:
+            activeTopic = selectedWindow.map(groupID)
+            pageTopicID = nil
+        case .emptyTopic(let group):
+            activeTopic = group
+            if case .topic(let id) = group { pageTopicID = id } else { pageTopicID = nil }
+        case nil:
+            activeTopic = nil
+            pageTopicID = nil
         }
-        activeTopic = selection.showsEmptyNoTopic ? .noTopic : (emptyTopicID.map(TopicGroupID.topic) ?? selectedWindow.map(groupID))
         let active = activeTopic
         let openTopics = selection.openTopics(for: active)
         let grouped = Dictionary(grouping: windows, by: groupID)
@@ -504,9 +503,9 @@ struct TopicsModel {
         let settled = records.filter { $0.settledAt != nil }
             .sorted { ($0.settledAt ?? "", $0.id) > ($1.settledAt ?? "", $1.id) }
         settledTopicIDs = settled.map(\.id)
-        if let id = emptyTopicID, let row = rows.first(where: { $0.id == .topic(id) }) {
+        if let id = pageTopicID, let row = rows.first(where: { $0.id == .topic(id) }) {
             emptyTopic = row
-        } else if let id = emptyTopicID, let record = settled.first(where: { $0.id == id }) {
+        } else if let id = pageTopicID, let record = settled.first(where: { $0.id == id }) {
             emptyTopic = Self.settledRow(record, sessionPaths: config.sessionPaths, tags: config.topics.tags, expanded: openTopics)
         } else {
             emptyTopic = nil
@@ -534,16 +533,15 @@ struct TopicsModel {
         }
 
         let scope: AgentsScopeTarget
-        switch (config.sidebar.agentsScope[self.mode], self.mode, selectedWindow) {
-        case (.all, _, _), (.active, _, nil), (.window, _, nil):
-            scope = .everyAgent
-        case (.window, _, let window?):
-            scope = .window(id: window.id, title: window.displayTitle)
-        case (.active, .topics, let window?):
-            let id = groupID(window)
-            scope = .topic(id, title: rows.first { $0.id == id }?.title ?? "No Topic")
-        case (.active, .sessions, let window?):
-            scope = .session(id: window.sessionID, name: window.sessionName)
+        if config.sidebar.agentsScope[self.mode] == .active, self.mode == .topics, let activeTopic {
+            let title = rows.first { $0.id == activeTopic }?.title ?? emptyTopic?.title ?? "No Topic"
+            scope = .topic(activeTopic, title: title)
+        } else {
+            switch (config.sidebar.agentsScope[self.mode], selectedWindow) {
+            case (.all, _), (_, nil): scope = .everyAgent
+            case (.window, let window?): scope = .window(id: window.id, title: window.displayTitle)
+            case (.active, let window?): scope = .session(id: window.sessionID, name: window.sessionName)
+            }
         }
         agentsScope = scope
         let scoped = shown.filter { agent in

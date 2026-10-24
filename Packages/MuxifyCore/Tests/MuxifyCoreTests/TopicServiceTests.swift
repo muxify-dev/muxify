@@ -232,7 +232,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertTrue(created.created)
         XCTAssertEqual(record.title, "Fix reward")
         XCTAssertEqual(record.sessions, [])
-        XCTAssertEqual(created.shown, .emptyTopic(id: record.id))
+        XCTAssertEqual(created.shown, .emptyTopic(.topic(record.id)))
         // Not the whole Window: tmux renames it by itself once its shell starts, which a slow machine shows here.
         let after = server.snapshot().windows
         XCTAssertEqual(after.map(\.id), windows.map(\.id), "an Empty Topic starts and moves nothing in tmux")
@@ -247,7 +247,7 @@ final class TopicServiceTests: XCTestCase {
         let created = try change(service().handle(EnvironmentRequest(.create(title: "  Plan the week "))))
         let record = try XCTUnwrap(records().first)
         XCTAssertEqual(record.title, "Plan the week")
-        XCTAssertEqual(created.shown, .emptyTopic(id: record.id))
+        XCTAssertEqual(created.shown, .emptyTopic(.topic(record.id)))
         XCTAssertEqual(server.snapshot().windows.count, sessions)
     }
 
@@ -845,7 +845,7 @@ final class TopicServiceTests: XCTestCase {
                                                                target: .session(try XCTUnwrap(SessionID(rawValue: session.sessionID))))))
         try assertEmpty(id)
         XCTAssertFalse(server.snapshot().windows.contains { $0.sessionID == session.sessionID })
-        XCTAssertEqual(removed.shown, .emptyTopic(id: id))
+        XCTAssertEqual(removed.shown, .emptyTopic(.topic(id)))
     }
 
     func testRemoveAndKillOfOneOfTwoSessionsShowsTheOtherSession() throws {

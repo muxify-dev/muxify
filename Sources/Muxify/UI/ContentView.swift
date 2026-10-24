@@ -134,7 +134,7 @@ private struct HeaderBar: View {
     var body: some View {
         HStack(spacing: 2) {
             if store.config.statusLineHeader, let window = store.selectedWindow,
-               store.topics.emptyTopic == nil, !store.topicSelection.showsEmptyNoTopic {
+               !store.showsEmptyPage {
                 Text(window.sessionName)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
@@ -149,7 +149,7 @@ private struct HeaderBar: View {
                     .padding(.leading, 8)
             }
             Spacer(minLength: 12)
-            if let window = store.selectedWindow, store.topics.emptyTopic == nil, !store.topicSelection.showsEmptyNoTopic {
+            if let window = store.selectedWindow, !store.showsEmptyPage {
                 HeaderGitButton(store: store, window: window,
                                 help: help(store.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View", .toggleGitView))
                     .id("\(window.sourceID):\(window.path)")
@@ -317,7 +317,7 @@ private struct TerminalArea: View {
             TerminalHostRepresentable(host: store.terminalHost)
             if store.surface == nil { placeholder }
             if let topic = store.topics.emptyTopic { emptyTopic(topic) }
-            if store.topicSelection.showsEmptyNoTopic {
+            if store.location == .emptyTopic(.noTopic) {
                 VStack(spacing: 12) {
                     Text("No Topic").font(.title2)
                     Text("No Sessions outside Topics").foregroundStyle(.secondary)

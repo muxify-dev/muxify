@@ -68,7 +68,8 @@ final class TopicsTests: XCTestCase {
                        window("@3", session: "$2", topic: "b"), window("@4", session: "$3")]
         var selection = TopicSelection()
         func open() -> Set<TopicGroupID> {
-            Set(TopicsModel(records: records, windows: windows, config: Config(), selection: selection).rows.filter(\.isExpanded).map(\.id))
+            Set(TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
+                            location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window)).rows.filter(\.isExpanded).map(\.id))
         }
         selection.select(windowID: "@1", activeTopic: .topic("a"))
         XCTAssertEqual(open(), [.topic("a")], "only the Active Topic is open at start")
@@ -93,7 +94,8 @@ final class TopicsTests: XCTestCase {
         selection.select(windowID: "@1", activeTopic: .topic("a"))
         selection.setTopic(.topic("a"), open: false)
         selection.windowID = "@2"
-        let rows = TopicsModel(records: records, windows: windows, config: Config(), selection: selection).rows
+        let rows = TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
+                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window)).rows
         XCTAssertEqual(rows.filter(\.isExpanded).map(\.id), [.topic("b")])
     }
 

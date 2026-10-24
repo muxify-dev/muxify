@@ -102,7 +102,8 @@ final class ZenTests: XCTestCase {
         config.sidebar.agentsScope = .init(.all)
         var selection = TopicSelection()
         selection.windowID = selected
-        return TopicsModel(records: [kept, made], windows: windows, config: config, selection: selection, mode: mode,
+        return TopicsModel(records: [kept, made], windows: windows, config: config, selection: selection,
+                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), mode: mode,
                            agents: agents, zen: zen, now: now)
     }
 
@@ -140,6 +141,7 @@ final class ZenTests: XCTestCase {
             var selection = TopicSelection()
             selection.windowID = selected
             return TopicsModel(records: [kept, made], windows: windows, config: Config(), selection: selection,
+                            location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window),
                                agents: agents, zen: zen, now: now)
         }
         let without = model(selected: "@4", zen: nil)

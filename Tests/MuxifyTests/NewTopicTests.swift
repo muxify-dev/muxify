@@ -74,7 +74,7 @@ final class NewTopicTests: XCTestCase {
         XCTAssertEqual(added.selection, .sessionName("game/fix-links-2"))
     }
 
-    func testAnEmptyTopicTheUserLooksAtIsTheActiveTopicUntilItHasAWindow() {
+    func testTheActiveTopicComesFromTheLocation() {
         var config = Config()
         config.sessionPaths = [sessionPath]
         let topic = TopicRecord(newTopic: "empty", title: "Plan", slug: "plan", now: Date())
@@ -85,24 +85,30 @@ final class NewTopicTests: XCTestCase {
         }
         var selection = TopicSelection()
         selection.windowID = "@1"
-        selection.emptyTopicID = "empty"
-        let shown = TopicsModel(records: [topic], windows: [window(topic: nil)], config: config, selection: selection)
+        let page = Location.emptyTopic(.topic("empty"))
+        let shown = TopicsModel(records: [topic], windows: [window(topic: nil)], config: config, selection: selection, location: page)
         XCTAssertEqual(shown.activeTopic, .topic("empty"))
         XCTAssertEqual(shown.emptyTopic?.title, "Plan")
-        let started = TopicsModel(records: [topic], windows: [window(topic: "empty")], config: config, selection: selection)
+        let waiting = TopicsModel(records: [topic], windows: [window(topic: "empty")], config: config,
+                                  selection: selection, location: page)
+        XCTAssertEqual(waiting.activeTopic, .topic("empty"), "the Location keeps the Active Topic when a Window appears")
+        XCTAssertNotNil(waiting.emptyTopic, "only a Location change leaves the page")
+        let started = TopicsModel(records: [topic], windows: [window(topic: "empty")], config: config, selection: selection,
+                        location: .window(WindowID(rawValue: "@1")!))
         XCTAssertNil(started.emptyTopic, "a Topic with a Window is no longer empty")
         XCTAssertEqual(started.activeTopic, .topic("empty"))
         var snoozed = topic
         snoozed.snoozedUntil = "never"
-        let shownSnoozed = TopicsModel(records: [snoozed], windows: [window(topic: nil)], config: config, selection: selection)
+        let shownSnoozed = TopicsModel(records: [snoozed], windows: [window(topic: nil)], config: config, selection: selection, location: page)
         XCTAssertEqual(shownSnoozed.emptyTopic?.title, "Plan", "a Snoozed empty Topic the user goes to stays shown")
         XCTAssertEqual(shownSnoozed.activeTopic, .topic("empty"))
         var settled = topic
         settled.settledAt = "2026-10-01T00:00:00Z"
-        let shownSettled = TopicsModel(records: [settled], windows: [window(topic: nil)], config: config, selection: selection)
+        let shownSettled = TopicsModel(records: [settled], windows: [window(topic: nil)], config: config, selection: selection, location: page)
         XCTAssertEqual(shownSettled.emptyTopic?.title, "Plan", "a Settled Topic the user goes to shows its Reopen choice")
         XCTAssertEqual(shownSettled.activeTopic, .topic("empty"))
-        let gone = TopicsModel(records: [], windows: [window(topic: nil)], config: config, selection: selection)
+        let gone = TopicsModel(records: [], windows: [window(topic: nil)], config: config, selection: selection,
+                        location: .window(WindowID(rawValue: "@1")!))
         XCTAssertNil(gone.emptyTopic)
         XCTAssertEqual(gone.activeTopic, .noTopic)
     }

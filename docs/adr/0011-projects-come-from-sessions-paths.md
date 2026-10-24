@@ -9,7 +9,7 @@ outside the discovery roots. Plain repositories offer their main checkout as
 `repo`; linked Worktrees use `repo/folder`. Aliases are display-only.
 
 The earlier folder-based matching and repository ownership model is superseded
-by [ADR 0036](0036-topics-group-sessions-not-repositories.md) and
+by [ADR 0041](0041-topics-group-sessions-not-repositories.md) and
 [ADR 0037](0037-the-sessions-source-lists-sessions-individually.md).
 Launch matching now uses exact Session names. Duplicate launch names keep the
 first configured entry and warn instead of silently renaming.

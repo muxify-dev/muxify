@@ -1,3 +1,4 @@
+import MuxifyCore
 import SwiftUI
 
 /// The Snoozed or Settled group at the bottom of the Topics panel, as a block of its own. Its row stays in view and

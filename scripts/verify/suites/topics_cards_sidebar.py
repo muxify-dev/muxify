@@ -90,7 +90,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         # (topicMembershipActions), because the menu itself takes the mouse and the keyboard.
         s.act('action', 'topic-window-' + window, 'Move Window to Topic…')
         s.wait_rows(lambda rs: s.has('palette-row-topic-move-target', rs), 'Move did not show the target Topic')
-        # The Topic has one Session, so the move skips the destination step and lands in that Session (ADR 0036).
+        # The Topic has one Session, so the move skips the destination step and lands in that Session (ADR 0041).
         s.act('press', 'palette-row-topic-move-target')
         wait(lambda: s.tmux('display-message', '-p', '-t', window, '#{session_name}') == 'alpha/move-target',
              'Window did not move to alpha/move-target', seconds=10)
@@ -203,7 +203,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def choose_kill(self, sid):
         """Turns the Session's row of the Settle or Forget palette from Keep, the default for every live Session
-        (ADR 0036), to Kill. A press toggles the row."""
+        (ADR 0041), to Kill. A press toggles the row."""
         key = 'palette-row-session-' + sid
         self.s.act('press', key)
         self.s.wait_rows(lambda rs: 'Kill' in self.s.row(key, rs).get('accessibilityLabel', ''),
@@ -231,6 +231,20 @@ class TopicsCardsSidebar(TopicsSidebar):
             s.act('press', 'palette-accept')
             wait(lambda: topic not in self.records(), 'Forget kept the ' + state + ' Topic')
             s.wait_rows(lambda rows: not s.has('palette-accept', rows), 'Forget palette did not close')
+
+    def test_a_session_made_in_the_empty_topic_the_user_looks_at_becomes_the_shown_window(self):
+        """A press on a Topic card goes to its Empty Topic while the app lists no Session of the Topic, as when a
+        script made one a moment before. The Session then becomes the shown Window, and the card stays open."""
+        s = self.s
+        self.write_topic('empty-arrival', 'Empty arrival', self.beta)
+        self.find('topic-empty-arrival')
+        s.act('press', 'topic-empty-arrival')
+        s.wait_rows(lambda rs: s.has('empty-topic-add-session', rs), 'the Topic without a Session did not show its Empty Topic')
+        sid = self.new_session('empty-arrival', self.beta, topic='empty-arrival')
+        s.wait_shown(sid + ':')
+        rs = self.find('topic-empty-arrival')
+        self.assertTrue(self.expanded('topic-empty-arrival', rs), self.describe('topic-empty-arrival', rs))
+        self.assertFalse(s.has('empty-topic-add-session', rs), 'the Empty Topic stayed after its Session arrived')
 
     def test_settle_shows_on_closed_open_and_dormant_topic_cards(self):
         s = self.s
@@ -289,7 +303,7 @@ class TopicsCardsSidebar(TopicsSidebar):
             options = s.tmux_ok('show-options', '-t', working)
             return options.returncode == 0 and '@muxify_topic' not in options.stdout
         wait(kept_without_topic, 'the Session of the working Agent is gone or still has the Topic')
-        # Keep removes the membership and gives the Session its base name back (ADR 0036).
+        # Keep removes the membership and gives the Session its base name back (ADR 0041).
         wait(lambda: s.tmux('display-message', '-p', '-t', working + ':', '#{session_name}') == 'beta',
              'Keep did not restore the base name of the kept Session')
 

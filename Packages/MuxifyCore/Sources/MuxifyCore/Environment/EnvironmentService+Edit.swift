@@ -5,7 +5,7 @@ extension EnvironmentService {
     /// A plan with what the host shows when the plan itself selects nothing.
     private struct Planned {
         var edit: TopicEdit
-        var shown: TopicChange.Shown?
+        var shown: Location?
         /// The Locked Session whose place a new Topic takes.
         var replacedLockOf: String? = nil
         /// What the plan renames, for the answer. What a plan makes comes from tmux instead.

@@ -29,8 +29,9 @@ final class TopicGroupsTests: XCTestCase {
     }
 
     private func model(_ records: [TopicRecord], windows: [TmuxWindow] = [], mode: SidebarMode = .topics,
-                       groups: TopicGroupsState = TopicGroupsState(), selection: TopicSelection = TopicSelection()) -> TopicsModel {
-        TopicsModel(records: records, windows: windows, config: Config(), selection: selection, mode: mode, groups: groups, now: now)
+                       groups: TopicGroupsState = TopicGroupsState(), selection: TopicSelection = TopicSelection(), location: Location? = nil) -> TopicsModel {
+        TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
+                        location: location ?? selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), mode: mode, groups: groups, now: now)
     }
 
     func testGroupsFollowTheOpenTopicsInTopicsModeOnlyAndHideWhenEmpty() {
@@ -172,8 +173,7 @@ final class TopicGroupsTests: XCTestCase {
         func follow(window: String? = nil, empty: String? = nil, records: [TopicRecord] = records) {
             var selection = TopicSelection()
             selection.windowID = window
-            selection.emptyTopicID = empty
-            state.follow(model(records, windows: windows, groups: state, selection: selection))
+            state.follow(model(records, windows: windows, groups: state, selection: selection, location: empty.map { .emptyTopic(.topic($0)) }))
         }
 
         follow(window: "@2")

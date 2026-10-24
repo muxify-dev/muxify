@@ -44,7 +44,7 @@ final class SidebarFormatContextTests: XCTestCase {
                     var config = Config()
                     config.sidebar.agentsScope = .init(scope)
                     let model = TopicsModel(records: records, windows: [window], config: config,
-                                            selection: TopicSelection(windowID: window.id), mode: mode, agents: agents)
+                                            selection: TopicSelection(), location: WindowID(rawValue: window.id).map(Location.window), mode: mode, agents: agents)
                     let contexts = SidebarFormatContexts(model: model, windows: [window], panes: [pane], agents: agents,
                                                          branches: TopicBranches(), records: records, sessionPaths: [], tabCounts: [:])
                     let context = try XCTUnwrap(contexts.panes[pane.id])
@@ -73,7 +73,7 @@ final class SidebarFormatContextTests: XCTestCase {
         let records = [TopicRecord(id: "topic", title: "Task", slug: "task")]
         let agents = Agent.list(panes: panes, windows: [window])
         let model = TopicsModel(records: records, windows: [window], config: Config(),
-                                selection: TopicSelection(windowID: window.id), agents: agents)
+                                selection: TopicSelection(), location: WindowID(rawValue: window.id).map(Location.window), agents: agents)
         let contexts = SidebarFormatContexts(model: model, windows: [window], panes: panes, agents: agents,
                                              branches: TopicBranches(), records: records, sessionPaths: [], tabCounts: [:])
         var formats = SidebarFormats.defaults

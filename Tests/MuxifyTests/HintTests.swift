@@ -224,7 +224,8 @@ final class HintTests: XCTestCase {
                        [.topic("pinned"), .topic("dormant")])
         var selection = TopicSelection()
         selection.windowID = "@1"
-        let opened = TopicsModel(records: records, windows: windows, config: Config(), selection: selection)
+        let opened = TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
+                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window))
         XCTAssertEqual(opened.openedNoTopicSession?.id.session, "$1")
         XCTAssertEqual(QuickSwitchTargets(model: opened, sessions: sessions, windows: windows, tabIDs: []).cards,
                        [.topic("pinned"), .topic("dormant")])
@@ -253,7 +254,8 @@ final class HintTests: XCTestCase {
         let sessions = windows.map { SessionGroup(id: $0.sessionID, name: $0.sessionName, windows: [$0]) }
         var selection = TopicSelection()
         selection.windowID = "@1"
-        let topics = TopicsModel(records: [last, first, pinned], windows: windows, config: Config(), selection: selection)
+        let topics = TopicsModel(records: [last, first, pinned], windows: windows, config: Config(), selection: selection,
+                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window))
         XCTAssertEqual(QuickSwitchTargets(model: topics, sessions: sessions, windows: windows, tabIDs: []).cards,
                        [.topic("pinned"), .topic("first"), .locked("$1"), .topic("last")])
         XCTAssertEqual(topics.activeTopic, .locked("$1"))
@@ -306,7 +308,8 @@ final class HintTests: XCTestCase {
             var selection = TopicSelection()
             selection.windowID = windowID
             let model = TopicsModel(records: [dormant, work, pinned], windows: windows, config: Config(),
-                                    selection: selection, mode: mode)
+                                    selection: selection,
+                                                    location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), mode: mode)
             return QuickSwitchTargets(model: model, sessions: sessions, windows: [], tabIDs: [])
         }
         let rows: [QuickSwitchTarget] = [.topic("pinned"), .topic("work"), .locked("$4"), .topic("dormant")]
@@ -348,7 +351,8 @@ final class HintTests: XCTestCase {
         func targets(selecting windowID: String, mode: SidebarMode = .topics) -> QuickSwitchTargets {
             var selection = TopicSelection()
             selection.windowID = windowID
-            let model = TopicsModel(records: [work], windows: windows, config: Config(), selection: selection, mode: mode)
+            let model = TopicsModel(records: [work], windows: windows, config: Config(), selection: selection,
+                            location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), mode: mode)
             let session = windows.first { $0.id == windowID }?.sessionID
             return QuickSwitchTargets(model: model, sessions: sessions, windows: windows.filter { $0.sessionID == session },
                                       tabIDs: [])

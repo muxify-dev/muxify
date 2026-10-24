@@ -110,7 +110,12 @@ class WindowOrderSidebar(unittest.TestCase):
         sid, windows = self.three_windows('order-click', topic='window-click')
         self.show_view('topics')
         self.select_window(windows[0])
-        s.wait_rows(lambda rs: self.row_order('topic-window-', windows, rs) == windows, 'the Topic card does not list the Windows')
+        # The app can list the Session before its Topic record, under No Topic, and move it into the Topic card a
+        # moment later. The Window rows move with it, and a click that lands while they move is lost or hits the
+        # next row, so wait until the Topic card lists the Session.
+        heading = 'topic-window-click-session-' + sid
+        s.wait_rows(lambda rs: s.has(heading, rs) and self.row_order('topic-window-', windows, rs) == windows,
+                    'the Topic card does not list the Session and its Windows')
         s.act('click', 'topic-window-' + windows[2])
         s.wait_shown(windows[2])
         self.assertEqual(self.tmux_order(sid), windows, 'a click moved a Window')
