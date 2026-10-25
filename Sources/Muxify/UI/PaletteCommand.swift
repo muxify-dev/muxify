@@ -17,6 +17,7 @@ enum PaletteCommand: String, CaseIterable {
     case removeSessionFromTopic = "Remove Session from Topic"
     case forgetTopic = "Forget Topic"
     case renameTopic = "Rename Topic"
+    case renameWindow = "Rename a Window"
     case editTags = "Edit Tags…"
     case moveTopicUp = "Move Topic Up"
     case moveTopicDown = "Move Topic Down"
@@ -125,6 +126,7 @@ enum PaletteCommand: String, CaseIterable {
         case .removeSessionFromTopic: .verb(.sessionRemoveFromTopic)
         case .forgetTopic: .verb(.topicForget)
         case .renameTopic: .verb(.topicRename)
+        case .renameWindow: .verb(.windowRename)
         case .editTags: .verb(.topicTag)
         case .moveTopicUp, .moveTopicDown: .verbs([.topicMove, .sessionMove])
         case .pinTopic: .verb(.topicPin)
@@ -212,7 +214,7 @@ extension CommandPalette {
             case .maximizeTerminal: return store.panelLayout.maximized != .terminal && store.canMaximize(.terminal)
             case .maximizeBrowser: return store.panelLayout.maximized != .browser && store.canMaximize(.browser)
             case .focusTerminal, .focusBrowser: return store.currentBrowser != nil
-            case .zoomPane: return store.selectedWindow != nil
+            case .zoomPane, .renameWindow: return store.selectedWindow != nil
             case .showSidebar: return !store.sidebarShown
             case .hideSidebar: return store.sidebarShown
             case .showTerminal: return !store.panelLayout.shows(.terminal) && store.canToggle(.terminal)
@@ -252,7 +254,7 @@ extension CommandPalette {
         }
         switch command {
         case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addSession, .snoozeTopic, .snoozeTopics, .settleTopic, .zen,
-             .forgetTopic, .renameTopic, .editTags, .unsnoozeTopic, .unsnoozeTopics: break
+             .forgetTopic, .renameTopic, .renameWindow, .editTags, .unsnoozeTopic, .unsnoozeTopics: break
         default: close(restoringFocus: false)
         }
         switch command {
@@ -272,6 +274,8 @@ extension CommandPalette {
         case .removeSessionFromTopic: if let window = store.selectedWindow { store.removeFromTopic(window) }
         case .forgetTopic: if let id = store.activeTopicID { store.presentForgetTopic(id, keepingHistory: true) }
         case .renameTopic: store.presentRenameTopic(keepingHistory: true)
+        case .renameWindow:
+            if let window = store.selectedWindow { begin(.text(.renameWindow(window)), text: window.name, keepingHistory: true) }
         case .editTags: if let id = store.activeTopicID { store.presentEditTags(of: id, keepingHistory: true) }
         case .zen: store.toggleZenOfActiveTopic(keepingHistory: true)
         case .endZen: store.endZen()

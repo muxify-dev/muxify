@@ -58,6 +58,32 @@ class PaletteCurrentCommands(PaletteFixture):
             self.assertEqual(after.get(key), original.get(key), key + ' changed on Cancel')
         self.assertFalse((self.s.root/'state/muxify/zen.json').exists())
 
+    def test_rename_window_prefills_name_keeps_back_and_saves_current_window(self):
+        window = self.topic('rename-window-command', session=True)
+        self.select(window)
+        self.s.tmux('rename-window', '-t', window, 'Before rename')
+        self.s.wait_rows(lambda rs: any(row.get('accessibilityIdentifier') == 'topic-window-' + window
+                                       and 'Before rename' in row.get('accessibilityLabel', '') for row in rs),
+                         'the Sidebar did not receive the Window name')
+        title = 'Rename a Window'
+        self.run_command(title)
+        self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == 'Before rename',
+                         'Rename did not prefill the current Window name')
+        self.s.act('set', 'palette-search', '')
+        self.back(title)
+        self.assertEqual(self.s.tmux('display-message', '-p', '-t', window, '#{window_name}'), 'Before rename')
+        self.run_command(title)
+        self.s.act('set', 'palette-search', 'After rename')
+        self.s.act('action', 'palette-search', 'Accept')
+        wait(lambda: self.s.tmux('display-message', '-p', '-t', window, '#{window_name}') == 'After rename',
+             'Rename did not save the current Window name')
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Rename did not close the palette')
+        self.topic('rename-empty')
+        self.s.wait_rows(lambda rs: self.s.has('topic-rename-empty', rs), 'the Empty Topic did not appear')
+        self.s.act('action', 'topic-rename-empty', 'Go to Topic')
+        self.s.wait_rows(lambda rs: self.s.has('empty-topic-title', rs), 'the Empty Topic did not open')
+        self.assertTrue(self.absent(title), 'Rename a Window shows without a Window')
+
     def test_the_topics_commands_come_before_the_topic_commands(self):
         self.current_topic('snooze-order')
         self.topic('snooze-order-snoozed', snoozed_until='never')
