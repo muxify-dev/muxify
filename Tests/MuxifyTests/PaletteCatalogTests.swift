@@ -184,11 +184,18 @@ final class PaletteCatalogTests: XCTestCase {
     }
 
     func testOnATieARunningSessionComesBeforeASessionPathThenTheMoreRecent() {
-        let windows = [window("@1", session: "note", directory: "/q/note", activity: 1),
+        let windows = [window("@1", session: "note-a", directory: "/q/note", activity: 1),
                        window("@2", session: "note-b", directory: "/q/b", activity: 7)]
         let sessionPaths = [SessionPath(path: "/q/notes", name: "note-c")]
         let list = catalog(records: [], windows: windows, mode: .sessions, sessionPaths: sessionPaths).list([.sessions], query: "note")
-        XCTAssertEqual(ids(list), ["session:$note-b", "session:$note", "session-path:/q/notes"])
+        XCTAssertEqual(ids(list), ["session:$note-b", "session:$note-a", "session-path:/q/notes"])
+    }
+
+    func testOnATieAShorterNameComesFirstEvenWhenItIsNotRunning() {
+        let windows = [window("@1", session: "note-feature", directory: "/q/note", activity: 7)]
+        let sessionPaths = [SessionPath(path: "/q/notes", name: "note")]
+        let list = catalog(records: [], windows: windows, mode: .sessions, sessionPaths: sessionPaths).list([.sessions], query: "note")
+        XCTAssertEqual(ids(list), ["session-path:/q/notes", "session:$note-feature"], "as fzf's --tiebreak=length")
     }
 
     func testRowsShowTheAgentMarkOfTheirSidebarCard() {
@@ -358,7 +365,7 @@ final class PaletteCatalogTests: XCTestCase {
     }
 
     func testTypedTopicQueryRanksMatchesWithoutPushingCurrentDownOrDormantToBottom() {
-        let records = [topic("a", "Alpha current"), topic("b", "Alpha other"), topic("c", "Alpha dormant")]
+        let records = [topic("a", "Alpha current"), topic("b", "Alpha another"), topic("c", "Alpha dormant")]
         let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
                        window("@2", session: "game/beta", directory: "/work/game/main", topic: "b")]
         let catalog = catalog(records: records, windows: windows, selected: "@1",

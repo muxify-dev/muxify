@@ -88,7 +88,7 @@ extension CommandPalette {
                                  pick: .available(PaletteItem(kind: .tag, ref: .choice(.tag(definition.tag)), color: definition.color)),
                                  titlePlace: .tag)
         }
-        let list = FuzzyRanker.list([PickSectionInput(id: "tags", title: "Tags", rule: .ranked(showsWhenEmpty: true), candidates: candidates)],
+        let list = FuzzyRanker.list([.tags(candidates, showsWhenEmpty: true)],
                                     query: FuzzyQuery(draft))
         guard list.rows.isEmpty else { return list }
         return FuzzyRanker.list([PickSectionInput(id: "no-tag", rule: .fixed, candidates: [

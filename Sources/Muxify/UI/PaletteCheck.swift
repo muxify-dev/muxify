@@ -152,7 +152,7 @@ extension CommandPalette {
                                  trailing: count + (snoozed > 0 ? " · \(snoozed) Snoozed" : ""),
                                  pick: .available(PaletteItem(kind: .tag, ref: .choice(.check(row)), color: definition.color)), titlePlace: .tag)
         }
-        var sections = [PickSectionInput(id: "tags", title: "Tags", rule: .ranked(showsWhenEmpty: true), candidates: tags)]
+        var sections: [PickSectionInput<PaletteItem>] = [.tags(tags, showsWhenEmpty: true)]
         switch draft.action {
         case .snooze:
             sections += [

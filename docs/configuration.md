@@ -556,8 +556,9 @@ name, or a Settled Topic's outcome, and the matched letters are marked. With
 nothing typed, Topics and Sessions put the current live row last among live rows,
 before entries with nothing running. Other live rows are most recently visited first.
 Typed queries use fuzzy match quality, without pushing the current row down.
-On an equal match, live entries come before unopened ones, then the more recently
-visited or active one.
+On an equal match, the shorter name comes first, as fzf's default
+`--tiebreak=length`. Then live entries come before unopened ones, then the more
+recently visited or active one.
 A Window with an Agent is left out while the Agents Source button is on. ⎋ closes the
 palette without a change. In an Action, ⌫ in an empty field goes back one step.
 A step that kills a process needs ⌘↩ to confirm. The keys inside a palette are
