@@ -63,6 +63,7 @@ struct PaletteCatalog {
     var now = Date()
     var commands: [PaletteCommand] = []
     var commandShortcuts: [PaletteCommand: String] = [:]
+    var commandSummaries: [PaletteCommand: String] = [:]
     /// The Agent mark of each Agent, by Pane ID.
     var agentMarks: [String: AgentMark] = [:]
 
@@ -87,7 +88,7 @@ struct PaletteCatalog {
             case .commands:
                 return [PickSectionInput(id: "commands", title: "Commands", rule: .ranked(showsWhenEmpty: true),
                                          candidates: commands.map {
-                    PickCandidate(id: "command-" + $0.rawValue, title: $0.rawValue, trailing: commandShortcuts[$0] ?? "",
+                    PickCandidate(id: "command-" + $0.rawValue, title: $0.rawValue, note: commandSummaries[$0], trailing: commandShortcuts[$0] ?? "",
                                   pick: .available(PaletteItem(kind: .command, ref: .command($0))))
                 })]
             case .topics:

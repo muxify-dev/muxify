@@ -444,6 +444,7 @@ final class GitView {
             clearLineSelection()
         }
         isOpen = true
+        store.terminalVisibilityChanged()
         tab = .changes
         focus = .list
         if snapshot != nil { showSelection() }
@@ -455,6 +456,7 @@ final class GitView {
     func close(restoringFocus: Bool = true) {
         guard isOpen else { return }
         isOpen = false
+        store?.terminalVisibilityChanged()
         base = nil
         closeFilesOfNothing()
         isFiltering = false

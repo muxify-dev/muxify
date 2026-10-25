@@ -88,9 +88,12 @@ The default [Command Palettes](configuration.md#command-palettes) are
 **Commands** on ⌘⇧P and **Go to…** on ⌘P. `open_switcher` is gone.
 A Config that still names it shows a problem.
 
-Commands lists Mark Read and Mark Unread for every Active Topic, with or without
-Agents. With no Active Topic, Mark Read requires Unread Agents in the current
-Session, and Mark Unread requires read Agents with done, failed or blocked Status.
+Commands lists Mark Read and Mark Unread for the current Window, or only its
+Zoomed Pane when Zoom is on. Mark Read requires an Unread Agent in that target.
+Mark Unread requires a read Agent with done, failed or blocked Status. On an
+Empty Topic page, both Commands act on the Topic mark, with or without Agents.
+The Command Summary names the target. Explicit palette row Actions still use
+the named Topic, Session, Window or Agent.
 Mark All as Read clears all Topic and Agent Unread marks in the Active Environment
 and appears when either kind of mark is set.
 

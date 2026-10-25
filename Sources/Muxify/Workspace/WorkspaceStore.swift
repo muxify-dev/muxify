@@ -22,8 +22,8 @@ final class WorkspaceStore {
     @ObservationIgnored private var attachmentStatusID = UUID()
     private(set) var wakeToast: String?
     @ObservationIgnored private var wakeToastDismiss: DispatchWorkItem?
-    @ObservationIgnored private var unreadVisit: String?
-    @ObservationIgnored private var explicitReadVisits = AgentReadVisits()
+    @ObservationIgnored private var readVisits = AgentReadVisits()
+    @ObservationIgnored private var readWindowID: String?
     @ObservationIgnored private var readGeneration = 0
     @ObservationIgnored private var pendingReads = 0
     private var readSnapshotPending = false
@@ -1060,6 +1060,7 @@ final class WorkspaceStore {
     /// Each Pane's `@muxify_agent_status` in the last snapshot, to catch changes.
     @ObservationIgnored private var agentStatuses: [String: String] = [:]
     @ObservationIgnored private var activationObserver: Any?
+    @ObservationIgnored private var deactivationObserver: Any?
     @ObservationIgnored private var started = false
     @ObservationIgnored private var connection: TmuxConnection?
     @ObservationIgnored private var generation = UUID()
@@ -1120,6 +1121,9 @@ final class WorkspaceStore {
             self.readActiveTopicOnEntry()
             self.refresh()
         } }
+        deactivationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willResignActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in MainActor.assumeIsolated { self?.stopReadingTerminal() } }
         startConnection()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
@@ -1226,8 +1230,8 @@ final class WorkspaceStore {
         removeGitViews()
         consumingOpen.removeAll()
         agentStatuses.removeAll()
-        unreadVisit = nil
-        explicitReadVisits = AgentReadVisits()
+        readVisits = AgentReadVisits()
+        readWindowID = nil
         readGeneration += 1
         pendingReads = 0
         pendingReadNavigations.removeAll()
@@ -1268,6 +1272,8 @@ final class WorkspaceStore {
         keyMonitor = nil
         if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
         activationObserver = nil
+        if let deactivationObserver { NotificationCenter.default.removeObserver(deactivationObserver) }
+        deactivationObserver = nil
         let oldConnection = connection
         let oldSurface = surface
         let flush = pendingBrowserCommands
@@ -1285,14 +1291,16 @@ final class WorkspaceStore {
 
     /// Every completion belongs to the connection that submitted it, never to
     /// whatever Environment happens to be selected when it finishes.
-    private func runAsync(_ args: [String], completion: ((Result<String, Error>) -> Void)? = nil) {
-        guard let connection, !isTransitioning, !isRemote || isConnected else { return }
+    @discardableResult
+    private func runAsync(_ args: [String], completion: ((Result<String, Error>) -> Void)? = nil) -> Bool {
+        guard let connection, !isTransitioning, !isRemote || isConnected else { return false }
         let current = generation
         connection.runAsync(args) { [weak self] result in
             guard let self, self.generation == current else { return }
             if case .failure(let error) = result { NSLog("muxify: tmux command failed: \(error)") }
             completion?(result)
         }
+        return true
     }
 
     // MARK: - Polling
@@ -1412,6 +1420,7 @@ final class WorkspaceStore {
             route(.commandFinished(command, .success, lastStartedRead: lastStartedRead), facts: facts)
         }
         route(.read(readNumber), facts: facts)
+        readWindowID = facts.ownClientWindow?.rawValue
         if isTransitioning { return }
         updateTopicSelection()
         if let unresolvedSelectedWindowID, selectedWindow?.id == unresolvedSelectedWindowID {
@@ -1555,8 +1564,8 @@ final class WorkspaceStore {
     }
 
     var currentReadTarget: ReadPlan.Place? {
-        if let id = activeTopicID { return .topic(id) }
-        return selectedWindow.map { .session($0.sessionID) }
+        if case .emptyTopic(.topic(let id)) = location { return .topic(id) }
+        return selectedWindow.map { AgentReadScope(window: $0).target }
     }
 
     private var canWriteAgentRead: Bool {
@@ -1577,8 +1586,8 @@ final class WorkspaceStore {
         guard let target, canChangeRead(change, in: target), let request = target.request(change) else { return }
         let visits = canWriteAgentRead ? unreadChanges(panes) : []
         if !canWriteAgentRead {
-            explicitReadVisits = AgentReadVisits()
-            unreadVisit = !showsEmptyPage && NSApp.isActive && terminalHost.window?.isKeyWindow == true ? selectedWindowID : nil
+            readVisits = AgentReadVisits()
+            _ = readVisits.consume(showing: shownReadScope, panes: panes, observing: observesTerminal)
         }
         // Earlier visits must not clear a later explicit mark, so they go to tmux before the request. They go also
         // when the request cannot start, because `unreadChanges` already counts them as written.
@@ -1618,17 +1627,47 @@ final class WorkspaceStore {
         }
     }
 
+    func stopReadingTerminal() {
+        readVisits.hide()
+        readGeneration += 1
+    }
+
+    func terminalVisibilityChanged() {
+        if !panelLayout.shows(.terminal) || currentGitView?.isOpen == true { stopReadingTerminal() }
+        refresh()
+    }
+
+    private var observesTerminal: Bool {
+        NSApp.isActive && terminalHost.window?.isKeyWindow == true
+    }
+
+    private var shownReadScope: AgentReadScope? {
+        guard !showsEmptyPage, panelLayout.shows(.terminal), currentGitView?.isOpen != true,
+              router.intent == nil, pendingReadNavigations.isEmpty,
+              selectedWindowID == readWindowID else { return nil }
+        return selectedWindow.map(AgentReadScope.init)
+    }
+
+    var currentReadSummary: String? {
+        switch currentReadTarget {
+        case .window:
+            return selectedWindow.map { "Window: " + $0.displayTitle }
+        case .pane(let id):
+            return "Zoomed Pane: " + (panes.first { $0.id == id }?.label ?? id)
+        case .topic(let id):
+            return "Topic: " + (topics.titles[id] ?? id)
+        default: return nil
+        }
+    }
+
     private func unreadChanges(_ panes: [TmuxPane]) -> [[String]] {
-        let lookingAt = !showsEmptyPage && NSApp.isActive && terminalHost.window?.isKeyWindow == true ? selectedWindowID : nil
-        let entering = lookingAt != unreadVisit
-        let topic = entering ? lookingAt.flatMap { id in windows.first { $0.id == id }?.topicID } : nil
-        unreadVisit = lookingAt
-        let visited = Set(windows.filter { (entering && $0.id == lookingAt) || (topic != nil && $0.topicID == topic) }.map(\.id))
-            .union(explicitReadVisits.consume(in: windows))
-        readTopicsOnVisit(Set(windows.filter { visited.contains($0.id) }.compactMap(\.topicID)))
+        let scope = shownReadScope
+        let viewed = observesTerminal ? scope?.paneIDs(in: panes) ?? [] : []
+        let visited = router.intent == nil && pendingReadNavigations.isEmpty
+            ? readVisits.consume(showing: scope, panes: panes, observing: observesTerminal) : []
         var commands: [[String]] = []
         for pane in panes {
-            let reading: AgentReading = visited.contains(pane.windowID) ? .visiting : pane.windowID == lookingAt ? .viewing : .away
+            let reading: AgentReading = visited.contains(pane.id) ? .visiting : viewed.contains(pane.id) ? .viewing : .away
             let change = AgentUnread.change(for: pane, previousStatus: agentStatuses[pane.id],
                                             reading: reading, manualRead: config.notifications.manualRead)
             agentStatuses[pane.id] = pane.agentStatus
@@ -1676,7 +1715,7 @@ final class WorkspaceStore {
                 updateTopicSelection()
                 if case .emptyTopic(.topic(let id)) = location, old != location { readTopicsOnVisit([id]) }
             case .enterRead(let id):
-                explicitReadVisits.enter(windowID: id.rawValue, windows: windows)
+                readVisits.enter(windowID: id.rawValue)
             case .requestTopic(let group):
                 goToTopic(group)
             case .switchClient(let id, let intent):
@@ -1731,7 +1770,7 @@ final class WorkspaceStore {
         clientTTY = tty
         let navigation = UUID()
         pendingReadNavigations.insert(navigation)
-        runAsync(["switch-client", "-c", tty, "-t", target.tmuxTarget]) { [weak self] result in
+        runAsync(["switch-client", "-Z", "-c", tty, "-t", target.tmuxTarget]) { [weak self] result in
             guard let self, self.pendingReadNavigations.remove(navigation) != nil else { return }
             switch result {
             case .success:
@@ -1884,12 +1923,22 @@ final class WorkspaceStore {
         // context. Another client (including the event listener) may otherwise
         // supply its current Pane. Window selection is queued before this call.
         guard let windowID = selectedWindowID else { return }
-        runAsync(["display-message", "-p", "-t", windowID, "#{pane_id} #{window_id}"]) { [weak self] result in
-            guard case .success(let output) = result else { return }
-            let ids = output.split(separator: " ").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            guard ids.count == 2 else { return }
-            self?.runAsync(makeArgs(ids[0], ids[1])) { _ in self?.refresh() }
+        readGeneration += 1
+        pendingReads += 1
+        readSnapshotPending = true
+        func finished() {
+            pendingReads -= 1
+            readGeneration += 1
+            refresh()
         }
+        let submitted = runAsync(["display-message", "-p", "-t", windowID, "#{pane_id} #{window_id}"]) { [weak self] result in
+            guard let self else { return }
+            guard case .success(let output) = result else { finished(); return }
+            let ids = output.split(separator: " ").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            guard ids.count == 2 else { finished(); return }
+            if !self.runAsync(makeArgs(ids[0], ids[1]), completion: { _ in finished() }) { finished() }
+        }
+        if !submitted { finished() }
     }
 
     // MARK: - Config and Command Palettes
@@ -2071,6 +2120,7 @@ final class WorkspaceStore {
         browser.onShownChange = { [weak self] browser in
             guard let self, self.generation == current, browser.windowID == self.selectedWindowID else { return }
             keepFocusOnScreen()
+            terminalVisibilityChanged()
         }
         browser.onCopyURL = { [weak self] url in
             guard let self, self.generation == current else { return }
