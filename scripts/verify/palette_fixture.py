@@ -48,10 +48,7 @@ class PaletteFixture(unittest.TestCase):
         self.select(self.base)
 
     def select(self, window):
-        for client in self.s.tmux('list-clients', '-F', '#{client_tty} #{client_control_mode}').splitlines():
-            if client.endswith(' 0'):
-                self.s.tmux('switch-client', '-c', client.split()[0], '-t', window)
-        self.s.wait_shown(window)
+        self.s.show(window)
 
     def topic(self, name, order=None, session=False, **fields):
         """A Topic record, and with `session` a live Session in it; returns that Session's Window."""

@@ -159,7 +159,8 @@ class TopicsGroupsSidebar(TopicsSidebar):
         latency, rs = self.rows_until(lambda rs: self.s.has('topic-group-wakes', rs)
                                       and not self.grouped('topic-group-wakes', 'snoozed-topics', rs), seconds=20)
         self.assertIsNotNone(latency, 'Topic did not wake at its deadline; Topic rows %s' % self.topic_rows(rs))
-        self.assertNotIn('snoozed_until', self.records()['group-wakes'], 'the woken Topic kept its snooze in the record')
+        # The Sidebar wakes the card at the deadline, a moment before the app writes the record.
+        wait(lambda: 'snoozed_until' not in self.records()['group-wakes'], 'the woken Topic kept its snooze in the record')
 
     def test_snoozed_topic_row_offers_settle_and_snooze_again(self):
         self.write_topic('group-again', 'Group again', self.beta, snoozed_until='never')

@@ -25,6 +25,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 import uuid
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -365,6 +366,14 @@ class Sandbox:
 
     def has(self, key, rs=None):
         return bool(self.row(key, rs))
+
+    def show(self, window):
+        """Asks this run's app copy to show the Window, as `muxify window open` does, and waits until it does. A
+        switch-client to the Window that the Client is already on does not move it, so the app keeps an Empty Topic
+        page that it shows over that Window. -a sends the URL to this copy by its path, and -g keeps it behind."""
+        url = 'muxify://select?window=' + urllib.parse.quote(window, safe='')
+        subprocess.run(['open', '-g', '-a', str(self.app), url], check=True, capture_output=True)
+        self.wait_shown(window)
 
     def wait_shown(self, target, seconds=10):
         """Waits until the app shows the tmux Window: the App Window's title names its Session, and its Sidebar row,
