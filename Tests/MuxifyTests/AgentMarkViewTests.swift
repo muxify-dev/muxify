@@ -233,6 +233,31 @@ final class AgentMarkViewTests: XCTestCase {
         }
     }
 
+    @MainActor func testZoomChangesOnlyThePaneCountAppearance() throws {
+        var window = TmuxWindow(id: "@1", sessionID: "$1", sessionName: "app", index: 0, name: "editor",
+                                paneTitle: "editor", path: "/app", command: "zsh", isActive: true, paneCount: 3,
+                                hasBell: false, sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(), openRequests: [])
+        for scheme in [ColorScheme.light, .dark] {
+            window.isZoomed = false
+            let before = try render(WindowRow(window: window, isSelected: false, tabCount: 12), scheme: scheme, width: 240, height: 30, scale: 2)
+            window.isZoomed = true
+            let after = try render(WindowRow(window: window, isSelected: false, tabCount: 12), scheme: scheme, width: 240, height: 30, scale: 2)
+            var moved = 0
+            var changed = 0
+            for y in 0..<before.pixelsHigh {
+                for x in 0..<before.pixelsWide {
+                    if try color(before, x: x, y: y) != color(after, x: x, y: y) {
+                        changed += 1
+                        // The last 40 points contain the Pane count capsule; the image uses scale 2.
+                        if x < before.pixelsWide - 80 { moved += 1 }
+                    }
+                }
+            }
+            XCTAssertGreaterThan(changed, 0, "Zoom must change the Pane count appearance")
+            XCTAssertEqual(moved, 0, "Zoom moved the Window title or Browser Tab count")
+        }
+    }
+
     /// Native production rendering without Ghostty, tmux or a visible window.
     /// An explicit scale renders independently of the machine's attached display.
     @MainActor private func render<V: View>(_ view: V, scheme: ColorScheme,

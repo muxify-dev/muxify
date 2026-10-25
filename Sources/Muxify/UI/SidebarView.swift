@@ -1058,7 +1058,7 @@ struct WindowRow: View {
                     }
                     // A Zoomed Pane hides the others, so the badge glows like the Maximized side's toggle.
                     .foregroundStyle(window.isZoomed ? Color.accentColor : secondaryStyle)
-                    .padding(.horizontal, window.isZoomed ? 4 : 0)
+                    .padding(.horizontal, 4)
                     .background(
                         Capsule().fill(Color.accentColor.opacity(window.isZoomed ? 0.2 : 0))
                     )
