@@ -43,7 +43,7 @@ public struct TopicSettleSession: Identifiable, Codable, Hashable, Sendable {
                       let repository = remembered?["repository_path"]?.string else { return nil }
                 return .init(repositoryPath: repository, path: path, branch: branch)
             }
-            return Self(id: window.sessionID, name: window.sessionName, disposition: .keep,
+            return Self(id: window.sessionID, name: window.sessionName, disposition: .kill,
                         worktree: worktree, reviewedWindows: windows(in: window.sessionID, snapshot: snapshot))
         }
     }
@@ -68,9 +68,9 @@ struct TopicSettlePlan {
                                                  mergedWorktrees: mergedWorktrees)
         var commands: [TopicPlan.Command] = []
         var taken = Set(snapshot.windows.map(\.sessionName))
+        // A Session the request does not name is kept: only an explicit choice stops it, as from a URL with no choices.
         for session in defaults {
-            let choice = choices.first { $0.id == session.id } ?? session
-            switch choice.disposition {
+            switch choices.first(where: { $0.id == session.id })?.disposition ?? .keep {
             case .kill: commands.append(.tmux(["kill-session", "-t", session.id]))
             case .keep:
                 if let window = snapshot.windows.first(where: { $0.sessionID == session.id }) {
@@ -87,7 +87,7 @@ struct TopicSettlePlan {
                   choice.removeWorktree, let worktree = session.worktree else { continue }
             let keptWindows = windows.filter { window in
                 let member = defaults.first { $0.id == window.sessionID }
-                let disposition = member.flatMap { member in choices.first { $0.id == member.id }?.disposition ?? member.disposition }
+                let disposition = member.flatMap { member in choices.first { $0.id == member.id }?.disposition ?? .keep }
                 return member == nil || disposition == .keep
             }
             let folder = Folder.local(worktree.path)

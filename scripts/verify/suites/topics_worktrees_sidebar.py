@@ -58,8 +58,8 @@ class TopicsWorktreesSidebar(TopicsSidebar):
             s.act('action', 'topic-' + topic, 'Forget Topic…')
             if live:
                 kill = 'palette-row-session-' + sid
-                s.wait_rows(lambda rows: s.has(kill, rows), 'Forget did not offer the live Session')
-                s.act('press', kill)
+                rows = s.wait_rows(lambda rows: s.has(kill, rows), 'Forget did not offer the live Session')
+                self.assertIn('Kill', s.row(kill, rows).get('accessibilityLabel', ''), 'Forget does not preset the live Session to Kill')
             key = 'palette-row-worktree-' + str(tree)
             s.wait_rows(lambda rows: s.has(key, rows), 'Forget did not offer the clean Worktree')
             s.act('press', key)

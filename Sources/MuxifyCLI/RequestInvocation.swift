@@ -399,14 +399,15 @@ extension RequestInvocation {
         case .forget(let remove, let kill):
             guard let target = target ?? caller.map(EnvironmentTarget.pane),
                   var choices = try? service.forgetChoices(for: target).get() else { return .forget(choices: [], worktrees: []) }
-            if kill { for index in choices.sessions.indices { choices.sessions[index].disposition = .kill } }
+            for index in choices.sessions.indices { choices.sessions[index].disposition = kill ? .kill : .keep }
             return .forget(choices: choices.sessions, worktrees: remove ? choices.worktrees.filter { $0.canRemove(sessions: choices.sessions) }.map(\.id) : [])
         case .settle(let remove, let kill):
+            // The palette defaults to Kill behind ⌘↩; the CLI stops a Session only with an explicit flag (ADR 0039).
             // Choices that fail to load leave the defaults, so the request itself reports why the Topic cannot settle.
             guard let settled = target ?? caller.map(EnvironmentTarget.pane),
                   var choices = try? service.settleChoices(for: settled).get() else { return .settle(choices: [], outcome: "") }
             for index in choices.indices {
-                if kill { choices[index].disposition = .kill }
+                choices[index].disposition = kill ? .kill : .keep
                 choices[index].removeWorktree = remove && choices[index].worktree != nil
             }
             return .settle(choices: choices, outcome: "")

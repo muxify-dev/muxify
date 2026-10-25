@@ -15,10 +15,10 @@ final class TopicLifecycleTests: XCTestCase {
         try XCTUnwrap(topic.remembering(snapshot([window(), window(2, name: "debug+2/fix")]), order: .oldestFirst))
     }
 
-    func testSettleDefaultsEverySessionToKeepAndRestoresItsBaseName() throws {
+    func testSettleDefaultsEverySessionToKillAndAKeptSessionRestoresItsBaseName() throws {
         let live = snapshot([window(), window(2, name: "debug+2/fix")])
         let choices = TopicSettleSession.choices(topic: topic, snapshot: live, sessionPaths: [])
-        XCTAssertEqual(choices.map(\.disposition), [.keep, .keep])
+        XCTAssertEqual(choices.map(\.disposition), [.kill, .kill])
         XCTAssertTrue(choices.allSatisfy { !$0.removeWorktree })
         let edit = TopicSettlePlan(topic: topic, snapshot: live, sessionPaths: [], choices: [], outcome: "Done").edit
         XCTAssertNotNil(edit.record?.settledAt)

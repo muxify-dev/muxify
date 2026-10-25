@@ -18,7 +18,9 @@ A Topic has no Home Project or replacement Home Session. Each remembered Session
 
 Rename Topic changes its slug and the managed suffix of its live and remembered Sessions, preserving their base names. A slug stays reserved while its Topic record exists, including while Settled. Renaming does not rename Git branches or Worktree folders. Rename Session inside a Topic edits the base name, not the suffix. External tmux renames remain authoritative and do not end membership; Muxify does not enforce its naming convention through background renames.
 
-Settle and Forget default every live Session to Keep, regardless of Agent status. Killing a Session requires an explicit choice; keeping it removes membership and restores its base name as described above.
+Settle and Forget default every live Session to Kill, also when an Agent works in it. The confirm step lists each working Agent under its Session as "will stop", and the kill still needs ⌘↩. Keep is an explicit choice per Session; it removes membership and restores its base name as described above. Kill is the palette's preset, not the request's: a request that names no choice for a Session keeps it, so a `muxify://topic/settle` URL never stops a process, and the CLI stops one only with `--kill-sessions`, as ADR 0039 requires.
+
+> **Update 2026-10-25:** The default was Keep. Kept Sessions lose their Topic and their suffix, so after a few Settles the user had many No Topic Sessions and could not tell which Topic each came from. Kill loses nothing that Reopen needs, because Settle saves the layout first.
 
 Stopping a Session or closing a Window updates the Topic's saved layout to the state the user left. Reopen must not resurrect individually stopped Sessions or closed Windows by retaining an older layout. The proposed policy of remembering every missing Session until an explicit Remove was rejected.
 

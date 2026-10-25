@@ -155,6 +155,15 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try failure(service().handle(EnvironmentRequest(.reopen, target: .topic(.id(id))))).kind, .topicUnavailable)
     }
 
+    func testForgetWithNoChoicesKeepsEveryLiveSession() throws {
+        let id = try topicWithSession("Forget by URL", at: sessionPath.folder.path, using: service())
+        let session = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id }?.sessionID)
+        try assertThrowawayServer()
+        _ = try change(service().handle(EnvironmentRequest(.forget(choices: [], worktrees: []), target: .topic(.id(id)))))
+        let kept = try XCTUnwrap(server.snapshot().windows.first { $0.sessionID == session }, "a request without choices stops nothing")
+        XCTAssertNil(kept.topicID)
+    }
+
     func testForgetRemovesDormantSnoozedAndSettledRecords() throws {
         for state in ["dormant", "snoozed", "settled"] {
             var record = TopicRecord(id: state, title: state)
@@ -598,8 +607,7 @@ final class TopicServiceTests: XCTestCase {
     func testSettleSavesTheOutcomeAndKillsOrKeepsEachSessionAsChosen() throws {
         let id = try twoSessionPathTopic("Ship")
         var choices = try service().settleChoices(for: .topic(.id(id))).get()
-        XCTAssertEqual(choices.map(\.disposition), [.keep, .keep])
-        for index in choices.indices { choices[index].disposition = .kill }
+        XCTAssertEqual(choices.map(\.disposition), [.kill, .kill])
         let toolsIndex = try XCTUnwrap(choices.firstIndex { $0.name == "tools/ship" })
         choices[toolsIndex].disposition = .keep
         _ = try change(service().handle(EnvironmentRequest(.settle(choices: choices, outcome: " Shipped 1.2 "), target: .topic(.id(id)))))

@@ -50,7 +50,8 @@ struct TopicForgetPlan {
         let available = TopicForgetChoices(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, root: root)
         let sessions = available.sessions.map { session -> TopicSettleSession in
             var result = session
-            result.disposition = choices.first { $0.id == session.id }?.disposition ?? session.disposition
+            // As in Settle, a Session the request does not name is kept.
+            result.disposition = choices.first { $0.id == session.id }?.disposition ?? .keep
             return result
         }
         var taken = Set(snapshot.windows.map(\.sessionName))

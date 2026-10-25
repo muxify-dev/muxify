@@ -353,14 +353,19 @@ extension CommandPalette {
 
     private func confirmationRows(_ draft: PaletteConfirmation) -> PickList<PaletteItem> {
         guard case .ready(let sessions, let worktrees) = draft.choices else { return .empty }
-        var rows = sessions.map { session in
+        var rows = sessions.flatMap { session in
             let windows = store?.windows.filter { $0.sessionID == session.id } ?? []
-            let working = store?.agents.contains { $0.sessionID == session.id && $0.status == .working } == true
+            let working = store?.agents.filter { $0.sessionID == session.id && $0.status == .working } ?? []
             let windowCount = session.reviewedWindows?.count ?? windows.count
             let paneCount = session.reviewedWindows?.values.reduce(0) { $0 + $1.count } ?? windows.reduce(0) { $0 + $1.paneCount }
-            return choiceRow("session-" + session.id, session.name,
-                      detail: "\(windowCount) Windows · \(paneCount) Panes" + (working ? " · Agent working" : ""),
-                      trailing: session.disposition == .kill ? "Kill" : "Keep with no Topic", choice: .session(session.id))
+            let row = choiceRow("session-" + session.id, session.name,
+                                detail: "\(windowCount) Windows · \(paneCount) Panes" + (working.isEmpty ? "" : " · Agent working"),
+                                trailing: session.disposition == .kill ? "Kill" : "Keep with no Topic", choice: .session(session.id))
+            // Kill is the default, so the user sees each working Agent it stops before ⌘↩.
+            guard session.disposition == .kill else { return [row] }
+            return [row] + working.map { agent in
+                PickCandidate(id: "agent-" + agent.id, title: agent.kind.displayName, pick: .blocked(reason: "Working · will stop"))
+            }
         }
         for session in sessions where session.worktree != nil && session.disposition == .kill {
             if case .settle = draft.target {
