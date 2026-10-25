@@ -61,7 +61,7 @@ final class CommandPalette {
     /// What the last Copy put on the pasteboard, shown briefly at the App Window's bottom.
     private(set) var copied: PaletteCopy?
 
-    @ObservationIgnored weak var store: WorkspaceStore?
+    weak var store: WorkspaceStore?
     @ObservationIgnored private var copiedWork: DispatchWorkItem?
     @ObservationIgnored private var previousResponder: NSResponder?
     #if DEBUG
@@ -118,9 +118,15 @@ final class CommandPalette {
                               }), agentMarks: store.topics.agentMarks)
     }
 
-    var results: PickList<PaletteItem> {
-        guard let catalog else { return .empty }
+    @ObservationIgnored private lazy var resultsCache = ObservedCache(expiry: { $0.expiresAt }) { [unowned self] in
+        (list: buildResults(), expiresAt: Date().addingTimeInterval(1))
+    }
+
+    var results: PickList<PaletteItem> { resultsCache.value.list }
+
+    private func buildResults() -> PickList<PaletteItem> {
         if let flow { return flowResults(flow) }
+        guard let catalog else { return .empty }
         return catalog.list(sourceButtons.filter(selection.contains), query: query, tagFilter: tagFilter)
     }
 

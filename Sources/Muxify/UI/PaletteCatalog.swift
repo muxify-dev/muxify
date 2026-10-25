@@ -194,14 +194,24 @@ struct PaletteCatalog {
         return looseSessionCandidates(windows) + paths.map(pathCandidate)
     }
 
-    /// Running Sessions from any other Topic or No Topic can be moved into this Topic.
-    func addSessionList(topic: String, query: String) -> PickList<PaletteItem> {
+    /// Running Sessions and launch folders share one rank in Add a Session.
+    func addSessionList(topic: String, query: String, rows: [SessionPathRow]) -> PickList<PaletteItem> {
         var seen: Set<String> = []
-        let rows = windows.filter { $0.topicID != topic && seen.insert($0.sessionID).inserted }.map { window in
-            PickCandidate(id: "running-" + window.sessionID, title: window.sessionName,
-                fields: [.detail(window.sessionPath)], pick: .available(PaletteItem(kind: .session, ref: .choice(.session(window.sessionID)))))
+        let sessions = windows.filter { $0.topicID != topic && seen.insert($0.sessionID).inserted }.map { window in
+            return PickCandidate(id: "running-" + window.sessionID, symbol: "■", title: window.sessionName,
+                fields: [.detail(window.sessionPath)],
+                lastVisit: visits.last(.session(name: window.sessionName)), activity: window.sessionActivity,
+                pick: .available(PaletteItem(kind: .session, ref: .choice(.session(window.sessionID)))))
         }
-        return FuzzyRanker.list([PickSectionInput(id: "running", title: "Running Sessions", rule: .ranked(showsWhenEmpty: true), candidates: rows)], query: FuzzyQuery(query))
+        let paths = rows.map { row in
+            let note = SessionPathRow(choice: row.choice, alsoIn: row.alsoIn.filter { $0.id != topic }).note
+            return PickCandidate(id: row.id, symbol: "□", title: row.choice.displayName,
+                fields: [.detail(row.choice.directory.path)] + row.choice.nameFields, note: note,
+                lastVisit: visits.last(.directory(row.choice.directory.real)),
+                pick: .available(PaletteItem(kind: .sessionPath, ref: .choice(.sessionPath(row.choice)))))
+        }
+        return FuzzyRanker.list([PickSectionInput(id: "add-session", rule: .ranked(showsWhenEmpty: true), candidates: sessions + paths)],
+                                query: FuzzyQuery(query))
     }
 
     func destinationList(_ source: TmuxWindow, topic: String?, query: String) -> PickList<PaletteItem> {

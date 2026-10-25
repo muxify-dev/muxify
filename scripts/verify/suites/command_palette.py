@@ -556,6 +556,38 @@ class CommandPalette(unittest.TestCase):
         self.s.act('press', 'palette-cancel')
         self.s.wait_rows(lambda rs: not self.s.has('palette-accept', rs), 'the Add a Session Path palette did not close')
 
+    def open_add_session(self, topic):
+        self.write_topic(topic, topic, self.beta)
+        self.addCleanup(remove_topic, self.topics_dir/(topic + '.json'))
+        sid = self.new_session('beta/' + topic, self.beta, topic=topic)
+        self.select_window(self.window_of(sid))
+        wait(lambda: self.s.driver('press', 'Add a Session to Topic…')['pressed'], 'Add a Session stays disabled', seconds=10)
+        self.s.wait_rows(lambda rs: self.s.has('palette-accept', rs), 'Add a Session did not open')
+        return sid
+
+    def test_add_session_ranks_a_strong_path_match_above_a_weak_running_match(self):
+        sid = self.new_session('a-long-plain-title', self.beta)
+        self.open_add_session('sw-add-rank')
+        path_key = 'palette-row-' + str(self.alpha.resolve())
+        running_key = 'palette-row-running-' + sid
+        self.search('alp', path_key)
+        rs = self.s.wait_rows(lambda rs: self.s.has(running_key, rs), 'the weak Session match did not show')
+        ids = self.s.ids(rs)
+        self.assertLess(ids.index(path_key), ids.index(running_key))
+        self.assertNotIn('palette-section-running', ids)
+        self.close_palette()
+
+    def test_add_session_moves_a_running_session_and_closes_the_palette(self):
+        sid = self.new_session('sw-add-candidate', self.delta)
+        self.open_add_session('sw-add-running')
+        key = 'palette-row-running-' + sid
+        self.search('sw-add-candidate', key)
+        self.s.act('press', key)
+        wait(lambda: self.s.tmux('show-options', '-qv', '-t', sid, '@muxify_topic') == 'sw-add-running',
+             'the running Session did not move into the Topic')
+        self.s.wait_shown(self.window_of(sid))
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the Session move did not finish')
+
     def test_visit_order_survives_an_app_restart(self):
         windows = {}
         for name in ['sw-first', 'sw-second']:
