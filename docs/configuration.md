@@ -761,8 +761,9 @@ sidebar:
 
 ### Switching Topics and Sessions
 
-Switch views with the Topics/Sessions buttons or a two-finger horizontal swipe over
-their section. `sidebar.animate_switching` defaults to `true`. Set it to `false`
+Switch views with the Topics/Sessions buttons or a two-finger horizontal swipe
+anywhere over the Sidebar, also over Agents. A swipe over the terminal or the
+browser scrolls there and does not switch views. `sidebar.animate_switching` defaults to `true`. Set it to `false`
 to switch instantly, without the sliding preview, spring, scale or fade. Buttons
 and swipes still work, and both lists keep their scroll positions and opened cards.
 Changes apply live. macOS Reduce Motion also disables these animations.

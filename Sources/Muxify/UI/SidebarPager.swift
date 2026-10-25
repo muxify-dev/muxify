@@ -12,6 +12,7 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
     private let topics: Topics
     private let sessions: Sessions
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.sidebarSwipeArea) private var swipeArea
     @State private var position: CGFloat
     @State private var origin: CGFloat?
     @State private var inputReference = SidebarSwipeInputReference()
@@ -46,7 +47,7 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
                 .contentShape(Rectangle())
             }
             .background {
-                SidebarSwipeInput(reference: inputReference, isEnabled: acceptsGestures, onChange: { translation in
+                SidebarSwipeInput(reference: inputReference, area: swipeArea, isEnabled: acceptsGestures, onChange: { translation in
                     if origin == nil { origin = mode == .topics ? 0 : 1 }
                     guard motionEnabled else { return }
                     let proposed = (origin ?? 0) - translation / width
@@ -143,6 +144,41 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
     }
 }
 
+/// Where a Sidebar swipe may begin: the whole Sidebar, with every section it shows, not only the pager.
+/// `SidebarView` marks it; without a mark, the pager is the area.
+final class SidebarSwipeArea {
+    fileprivate weak var view: NSView?
+}
+
+extension EnvironmentValues {
+    @Entry var sidebarSwipeArea: SidebarSwipeArea?
+}
+
+extension View {
+    /// Makes this view the area that a Sidebar swipe may begin in.
+    func sidebarSwipeArea(_ area: SidebarSwipeArea) -> some View {
+        background(SidebarSwipeAreaMark(area: area)).environment(\.sidebarSwipeArea, area)
+    }
+}
+
+private struct SidebarSwipeAreaMark: NSViewRepresentable {
+    let area: SidebarSwipeArea
+
+    func makeNSView(context: Context) -> NSView {
+        let view = SidebarSwipeAreaView()
+        area.view = view
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        area.view = view
+    }
+}
+
+private final class SidebarSwipeAreaView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
 /// A weak reference for sandbox verification, without retaining the AppKit view through its callbacks.
 private final class SidebarSwipeInputReference {
     weak var view: SidebarSwipeInputView?
@@ -152,6 +188,7 @@ private final class SidebarSwipeInputReference {
 /// only a precise, horizontally locked gesture that began inside this panel in this App Window.
 private struct SidebarSwipeInput: NSViewRepresentable {
     let reference: SidebarSwipeInputReference
+    let area: SidebarSwipeArea?
     let isEnabled: Bool
     let onChange: (CGFloat) -> Void
     let onEnd: (CGFloat, CGFloat, Bool) -> Void
@@ -165,6 +202,7 @@ private struct SidebarSwipeInput: NSViewRepresentable {
     func updateNSView(_ view: SidebarSwipeInputView, context: Context) {
         view.onChange = onChange
         view.onEnd = onEnd
+        view.area = area
         view.isEnabled = isEnabled
     }
 }
@@ -185,6 +223,7 @@ private final class SidebarSwipeInputView: NSView {
     }
     var onChange: (CGFloat) -> Void = { _ in }
     var onEnd: (CGFloat, CGFloat, Bool) -> Void = { _, _, _ in }
+    var area: SidebarSwipeArea?
     private var monitor: Any?
     private enum Axis { case undecided, horizontal, vertical }
     private var axis = Axis.undecided
@@ -225,7 +264,7 @@ private final class SidebarSwipeInputView: NSView {
             if tracking, axis == .horizontal { onEnd(translation.x, 0, true) }
             tracking = false
             consumesMomentum = false
-            guard isEnabled, !isHiddenOrHasHiddenAncestor, visibleRect.contains(convert(event.locationInWindow, from: nil)),
+            guard isEnabled, !isHiddenOrHasHiddenAncestor, covers(event.locationInWindow),
                   window.attachedSheet == nil else { return event }
             begin(at: event.timestamp)
         }
@@ -233,6 +272,14 @@ private final class SidebarSwipeInputView: NSView {
         let consumed = receive(x: event.scrollingDeltaX, y: event.scrollingDeltaY, time: event.timestamp,
                                ended: event.phase.contains(.ended), cancelled: event.phase.contains(.cancelled))
         return consumed ? nil : event
+    }
+
+    /// Only a swipe that begins over the Sidebar. A hosted view is not clipped, so its visible rectangle can
+    /// cover the whole App Window: a swipe over the terminal or the browser must scroll there.
+    private func covers(_ locationInWindow: NSPoint) -> Bool {
+        let region = area?.view.flatMap { $0.window === window ? $0 : nil } ?? self
+        let point = region.convert(locationInWindow, from: nil)
+        return region.bounds.contains(point) && region.visibleRect.contains(point)
     }
 
     private func begin(at time: TimeInterval) {
@@ -282,8 +329,21 @@ private final class SidebarSwipeInputView: NSView {
         ("Vertical scroll", -0.1, -0.8, 0.3, false)
     ]
 
+    /// Window points for samples that begin there, as a real swipe begins under the pointer.
+    private var verificationLocations: [String: NSPoint] {
+        let pager = convert(bounds, to: nil)
+        let sidebar = area?.view.map { $0.convert($0.bounds, to: nil) } ?? pager
+        // A point of the Sidebar outside the pager, such as the Agents section.
+        let section = [NSPoint(x: sidebar.midX, y: sidebar.minY + 10), NSPoint(x: sidebar.midX, y: sidebar.maxY - 10)]
+            .first { !pager.contains($0) }
+        var locations = ["Swipe left beside the Sidebar": NSPoint(x: pager.maxX + 40, y: pager.midY)]
+        locations["Swipe left below the Sidebar views"] = section
+        return locations
+    }
+
     static var verificationNames: [String] {
-        verificationSamples.map(\.name) + ["Begin swipe left", "Cancel current swipe", "Vertical then horizontal"]
+        verificationSamples.map(\.name) + ["Begin swipe left", "Cancel current swipe", "Vertical then horizontal",
+                                           "Swipe left beside the Sidebar", "Swipe left below the Sidebar views"]
     }
 
     func verify(_ name: String) {
@@ -296,6 +356,10 @@ private final class SidebarSwipeInputView: NSView {
                         time: time + sample.duration * Double(step) / 12)
             }
             receive(x: 0, y: 0, time: time + sample.duration + 0.01, ended: !sample.cancelled, cancelled: sample.cancelled)
+            return
+        }
+        if let location = verificationLocations[name] {
+            if covers(location) { verify("Swipe left") }
             return
         }
         switch name {
