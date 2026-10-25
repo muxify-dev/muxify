@@ -297,7 +297,7 @@ enum CLIVerbs {
         topicVerb(.topicSettle, synopsis: "[--kill-sessions] [--remove-worktrees] \(topicTarget) [--json]",
                   options: [.flag("--kill-sessions"), .flag("--remove-worktrees")],
                   help: """
-                  Settles this Pane's Topic. Sessions and Worktrees are kept by default.
+                  Settles this Pane's Topic. Without a flag, Sessions and Worktrees are kept.
                     --kill-sessions    explicitly stop the Topic's Sessions (also for forget)
                     --remove-worktrees  also remove each Worktree that the Topic made
                                         and that is merged, as the Settle sheet offers.

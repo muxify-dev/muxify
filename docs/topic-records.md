@@ -234,7 +234,7 @@ the kept Topic also ends Zen.
 Forget removes `topics/<id>.json` after it kills or detaches the Topic's live Sessions.
 The Topic cannot be Reopened. Forget applies to open, Dormant, Snoozed, and Settled Topics.
 Each live Session uses the same Kill or Keep with no Topic choice as Settle.
-Every Session defaults to Keep; keeping restores its base name, with `+x` on collision.
+The palette presets every Session to Kill. A request that names no choice for a Session, such as a URL or the CLI without `--kill-sessions`, keeps it. Keeping restores its base name, with `+x` on collision.
 Every Worktree defaults to Keep. Missing `worktree_created` is not permission to delete.
 Cleanup checks all live Sessions and all Panes, not just active Panes, and never deletes branches.
 

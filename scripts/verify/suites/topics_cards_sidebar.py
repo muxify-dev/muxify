@@ -194,20 +194,21 @@ class TopicsCardsSidebar(TopicsSidebar):
         rs = s.wait_rows(lambda rows: s.has('palette-accept', rows) and s.has('palette-row-session-' + sid, rows),
                          'Forget palette did not load its Sessions')
         self.assertIn('Forget', self.describe('palette-breadcrumb', rs))
-        self.choose_kill(sid)
+        self.assertIn('Kill', s.row('palette-row-session-' + sid, rs).get('accessibilityLabel', ''),
+                      'Forget does not preset the live Session to Kill: ' + self.describe('palette-row-session-' + sid, rs))
         self.assertTrue(s.tmux('display-message', '-p', '#{socket_path}').startswith(str(s.root) + '/'))
         s.act('press', 'palette-accept')
         wait(lambda: topic not in self.records(), 'Forget kept the Topic record')
         wait(lambda: s.tmux_ok('has-session', '-t', sid).returncode != 0, 'Forget did not kill the Session')
         s.wait_rows(lambda rows: not s.has('topic-' + topic, rows), 'Forget kept the Topic card')
 
-    def choose_kill(self, sid):
-        """Turns the Session's row of the Settle or Forget palette from Keep, the default for every live Session
-        (ADR 0041), to Kill. A press toggles the row."""
+    def choose_keep(self, sid):
+        """Turns the Session's row of the Settle or Forget palette from Kill, the preset for every live Session
+        (ADR 0041), to Keep. A press toggles the row."""
         key = 'palette-row-session-' + sid
         self.s.act('press', key)
-        self.s.wait_rows(lambda rs: 'Kill' in self.s.row(key, rs).get('accessibilityLabel', ''),
-                         'the Session row did not turn to Kill: ' + self.describe(key, self.s.rows()))
+        self.s.wait_rows(lambda rs: 'Keep' in self.s.row(key, rs).get('accessibilityLabel', ''),
+                         'the Session row did not turn to Keep: ' + self.describe(key, self.s.rows()))
 
     def test_forget_dormant_snoozed_and_settled_topics_confirms_before_removal(self):
         s = self.s
@@ -276,7 +277,7 @@ class TopicsCardsSidebar(TopicsSidebar):
                         'Settle opened the card: ' + self.describe('topic-card-settle', rs))
         self.assertIsNone(self.records()['card-settle'].get('settled_at'), 'Cancel settled the Topic')
 
-    def test_settle_palette_saves_the_outcome_kills_an_idle_session_and_keeps_the_session_of_a_working_agent(self):
+    def test_settle_palette_presets_kill_lists_the_working_agent_and_keeps_a_session_the_user_chooses(self):
         s = self.s
         topic = 'palette-settle'
         self.write_topic(topic, 'Palette settle', self.alpha)
@@ -287,11 +288,19 @@ class TopicsCardsSidebar(TopicsSidebar):
         s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_status', 'working')
         self.find('settle-topic-' + topic)
         s.act('press', 'settle-topic-' + topic)
-        s.wait_rows(lambda rs: s.has('palette-row-session-' + idle, rs) and s.has('palette-row-session-' + working, rs),
-                    'the Settle palette does not list both Sessions')
-        self.choose_kill(idle)
-        self.assertIn('Keep', s.row('palette-row-session-' + working).get('accessibilityLabel', ''),
-                      'the Session of the working Agent is not kept: ' + self.describe('palette-row-session-' + working, s.rows()))
+        rs = s.wait_rows(lambda rs: s.has('palette-row-session-' + idle, rs) and s.has('palette-row-session-' + working, rs),
+                         'the Settle palette does not list both Sessions')
+        for sid in [idle, working]:
+            self.assertIn('Kill', s.row('palette-row-session-' + sid, rs).get('accessibilityLabel', ''),
+                          'Settle does not preset the Session to Kill: ' + self.describe('palette-row-session-' + sid, rs))
+        def agents(rs):
+            return [r for r in rs if r.get('accessibilityIdentifier', '').startswith('palette-row-agent-')]
+        rs = s.wait_rows(lambda rs: agents(rs), 'Settle does not list the working Agent it would stop')
+        self.assertEqual(len(agents(rs)), 1, 'Settle lists more than the one working Agent: %s' % agents(rs))
+        self.assertIn('will stop', str(agents(rs)[0]), 'the Agent row does not say that Kill stops it: %s' % agents(rs)[0])
+        self.assertIn('Agent working', s.row('palette-row-session-' + working, rs).get('accessibilityLabel', ''))
+        self.choose_keep(working)
+        s.wait_rows(lambda rs: not agents(rs), 'the Agent row stayed after its Session turned to Keep')
         s.act('focus', 'palette-search')
         s.act('set', 'palette-search', 'Shipped from the palette')
         s.act('press', 'palette-accept')
