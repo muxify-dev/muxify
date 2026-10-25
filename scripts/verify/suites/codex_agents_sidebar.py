@@ -22,6 +22,8 @@ class CodexAgentsSidebar(unittest.TestCase):
         cls.home = s.root/'home'
         cls.codex_home = cls.home/'.codex'
         cls.codex_home.mkdir(parents=True)
+        # Cleanups run last in, first out: Codex's daemon stops before the Sandbox's sweep.
+        cls.addClassCleanup(cls.stop_daemon, codex)
         s.env['HOME'] = s.app_env['HOME'] = str(cls.home)
         cls.codex_env = dict(
             HOME=str(cls.home), CODEX_HOME=str(cls.codex_home),
@@ -97,6 +99,22 @@ trust_level = "trusted"
             daemon_pid=daemon_pid, panes=cls.panes, titles=cls.titles, conversations=cls.conversations)))
         s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-agentsVisible', 'YES',
                   '-sidebarWorkView', 'Sessions'])
+
+    @classmethod
+    def stop_daemon(cls, codex):
+        """Stops the app-server daemon that Codex starts for this CODEX_HOME, through Codex's own command, then by
+        the PID it recorded. The daemon ignores SIGTERM for longer than the Sandbox waits."""
+        try:
+            pid = json.loads((cls.codex_home/'app-server-daemon/daemon.pid').read_text())['pid']
+        except (FileNotFoundError, ValueError, KeyError):
+            return
+        environment = dict(cls.s.env, HOME=str(cls.home), CODEX_HOME=str(cls.codex_home))
+        try:
+            subprocess.run([codex, 'app-server', 'daemon', 'stop'], env=environment, capture_output=True, timeout=30)
+        except subprocess.TimeoutExpired:
+            pass
+        if subprocess.run(['ps', '-p', str(pid), '-o', 'command='], capture_output=True, text=True).stdout.count('--managed-daemon'):
+            cls.s._terminate([pid])
 
     def setUp(self):
         for pane, title, conversation in zip(self.panes, self.titles, self.conversations):
