@@ -356,6 +356,19 @@ in the Sidebar and in the Command Palette. The default is `true`. Reduce Motion
 in the macOS accessibility settings also keeps them still. A value that is not
 a boolean uses the default and appears in the Config problems banner.
 
+### Focus marker
+
+```yaml
+ui:
+  focus_marker: true
+```
+
+A short line in the middle of the top edge of the Terminal or the Browser
+shows which of them has Focus. It shows only while both show, and not while a
+Command Palette or the Git View has Focus. The default is `false`. Changes
+apply live. A value that is not a boolean uses the default and appears in the
+Config problems banner.
+
 ## Sidebar typography
 
 ```yaml

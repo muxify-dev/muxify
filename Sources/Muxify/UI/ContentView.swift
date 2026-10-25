@@ -41,6 +41,7 @@ struct ContentView: View {
                         .accessibilityIdentifier("terminal-panel")
                         .accessibilityHidden(!showsTerminal)
                         .quickSwitchHint(.terminal, hints: store.hintPresentation)
+                        .overlay(alignment: .top) { FocusMarker(store: store, side: .terminal) }
                     if let browser {
                         HStack(spacing: 0) {
                             if showsTerminal {
@@ -52,6 +53,7 @@ struct ContentView: View {
                             BrowserPanel(browser: browser).id(browser.windowID)
                                 .frame(width: browserWidth)
                                 .background(Color(nsColor: .windowBackgroundColor))
+                                .overlay(alignment: .top) { FocusMarker(store: store, side: .browser) }
                                 .accessibilityElement(children: .contain)
                                 .accessibilityIdentifier("browser-panel")
                                 // The verify checks open Find in Page here, because they must not type ⌘F.
@@ -304,6 +306,23 @@ extension View {
                 .environment(\.colorScheme, theme.isDark ? .dark : .light)
         } else {
             background(VisualEffectBackground(material: material))
+        }
+    }
+}
+
+/// A short line in the middle of a side's top edge while that side has Focus.
+private struct FocusMarker: View {
+    let store: WorkspaceStore
+    let side: PanelLayout.Side
+
+    var body: some View {
+        if store.focusMarkerSide == side {
+            UnevenRoundedRectangle(bottomLeadingRadius: 2, bottomTrailingRadius: 2)
+                .fill(Color.accentColor.opacity(0.45))
+                .frame(width: 32, height: 2)
+                .allowsHitTesting(false)
+                .accessibilityElement()
+                .accessibilityIdentifier("focus-marker-" + (side == .terminal ? "terminal" : "browser"))
         }
     }
 }

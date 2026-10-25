@@ -390,6 +390,15 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    func testFocusMarkerIsOffByDefaultAndTakesOnlyABoolean() throws {
+        XCTAssertFalse(try load("").focusMarker)
+        XCTAssertTrue(try load("ui:\n  focus_marker: true").focusMarker)
+        let bad = try load("ui:\n  focus_marker: yes please")
+        XCTAssertFalse(bad.focusMarker)
+        XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "ui.focus_marker: expected a boolean")])
+        XCTAssertTrue(Config.template.contains("#   focus_marker: false"))
+    }
+
     func testStatusLineHeaderTemplateShowsTheDefault() throws {
         let shown = Config.template.split(separator: "\n").filter {
             $0.hasPrefix("# ui:") || $0.hasPrefix("#   status_line_header:")

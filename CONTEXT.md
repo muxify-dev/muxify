@@ -229,6 +229,10 @@ _Avoid_: left sidebar, left panel
 Where keyboard input goes in an App Window: the Terminal, the Browser or a Command Palette. One of them has Focus at a time.
 _Avoid_: the keyboard (when you mean where input goes), active side, first responder
 
+**Focus marker**:
+A short line on the top edge of the Terminal or the Browser, whichever has Focus. It shows only while both show, and the Config turns it on.
+_Avoid_: focus ring, focus indicator, grabber
+
 **Maximize**:
 Showing one of a Window's Terminal and Browser alone, with the Sidebar hidden, until the user restores the Window; it never changes the toggles.
 _Avoid_: focus, zoom (tmux zooms a Pane), solo, full screen
