@@ -223,7 +223,6 @@ public enum PaletteAction: String, KeybindAction {
     case addSessionToTopic = "add_session_to_topic"
     case rename
     case editTags = "edit_tags"
-    case suggestTopicTitle = "suggest_topic_title"
     case startZen = "start_zen"
     case settleTopic = "settle_topic"
     case forgetTopic = "forget_topic"
@@ -262,7 +261,6 @@ public enum PaletteAction: String, KeybindAction {
         .addSessionToTopic: [],
         .rename: [],
         .editTags: [],
-        .suggestTopicTitle: ["alt+s"],
         .startZen: [],
         .settleTopic: [],
         .forgetTopic: [],

@@ -399,61 +399,6 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(.sortSessions, target: .topic(.id(id))))
     }
 
-    func suggestTopicTitle(for id: String, completion: @escaping (String) -> Void) {
-        topicWatcher.reload()
-        guard var topic = topicWatcher.records.first(where: { $0.id == id && $0.settledAt == nil }) else {
-            showTopicTitleFailure("The Topic is no longer open.")
-            return
-        }
-        topic.sessions = rememberedTopics[id]?.sessions ?? topic.sessions
-        let commands = topicConfig.titleCommandFallbacks
-        let sessionPaths = sessionPaths
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Result {
-                try TopicTitleSuggester(commands: commands).suggest(for: .topic(topic, TmuxServer.app.snapshot(), sessionPaths))
-            }
-            RunLoop.main.perform(inModes: [.default, .modalPanel]) {
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    switch result {
-                    case .success(let title): completion(title)
-                    case .failure(let error): self.showTopicTitleFailure(String(describing: error))
-                    }
-                }
-            }
-        }
-    }
-
-    func suggestNewTopicTitle(completion: @escaping (String) -> Void) {
-        let commands = topicConfig.titleCommandFallbacks
-        let windowID = selectedWindowID
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Result { () -> String in
-                let snapshot = TmuxServer.app.snapshot()
-                let window = windowID.flatMap { id in snapshot.windows.first { $0.id == id } }
-                let pane = window.flatMap { window in snapshot.panes.first { $0.id == window.activePaneID } }
-                return try TopicTitleSuggester(commands: commands).suggest(for: .newTopic(pane, nil))
-            }
-            RunLoop.main.perform(inModes: [.default, .modalPanel]) {
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    switch result {
-                    case .success(let title): completion(title)
-                    case .failure(let error): self.showTopicTitleFailure(String(describing: error))
-                    }
-                }
-            }
-        }
-    }
-
-    private func showTopicTitleFailure(_ message: String) {
-        let alert = NSAlert()
-        alert.messageText = "Could not suggest a Topic title"
-        alert.informativeText = message
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
-    }
-
     /// `newWorktree` opens the Session on a new Worktree from the chosen one, which starts as it says; it needs a
     /// repository row.
     func addSession(_ choice: SessionChoice, toTopic id: String, newWorktree: WorktreeStart?) {

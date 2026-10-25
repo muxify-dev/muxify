@@ -370,7 +370,6 @@ conflict with the actions above:
 | `add_session_to_topic` | Unbound | Add a running Session or launch a new one in the highlighted Topic |
 | `rename` | Unbound | Rename the highlighted Topic, Session or Window |
 | `edit_tags` | Unbound | Open Edit Tags for the highlighted Topic |
-| `suggest_topic_title` | ⌥S | In Rename or New Topic, type a title that the Agents suggest. On a highlighted Topic, rename it to that title |
 | `start_zen` | Unbound | Start Zen for the highlighted Topic. While Zen is on, end it |
 | `settle_topic` | Unbound | Settle the highlighted Topic |
 | `forget_topic` | Unbound | Forget the highlighted Topic |

@@ -49,7 +49,6 @@ final class CommandPalette {
         }
     }
     private(set) var queryRevision = 0
-    var suggestionRequest = UUID()
     /// nil selects the first result.
     var selectedID: String?
     /// The Source buttons that are on: the palette's `sources` when it opens.
@@ -152,7 +151,7 @@ final class CommandPalette {
                 // Zen starts only in Topics mode; while it is on, the action ends it.
                 actions += store.topics.mode == .topics || store.topicWatcher.zen != nil ? [.startZen] : []
                 actions += [.settleTopic, .addSessionToTopic, .rename] + (store.topicConfig.tags == nil ? [] : [.editTags])
-                    + [.suggestTopicTitle, topic.isPinned ? .unpinTopic : .pinTopic]
+                    + [topic.isPinned ? .unpinTopic : .pinTopic]
             }
             if topic.settledAt != nil || (!topic.sessions.isEmpty && !store.windows.contains(where: { $0.topicID == id })) {
                 actions += [.reopenTopic, .startTopicFresh]
@@ -209,7 +208,6 @@ final class CommandPalette {
         case .addSessionToTopic: return "Add a Session"
         case .rename: return "Rename"
         case .editTags: return "Edit Tags…"
-        case .suggestTopicTitle: return "Suggest title from Agents"
         case .startZen: return store?.topicWatcher.zen == nil ? "Zen" : "End Zen"
         case .settleTopic: return "Settle"
         case .forgetTopic: return "Forget"

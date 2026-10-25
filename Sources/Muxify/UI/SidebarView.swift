@@ -195,10 +195,9 @@ private struct TopicsSection: View {
         }
     }
 
-    private func renameTopic(_ id: String, suggest: Bool = false) {
+    private func renameTopic(_ id: String) {
         guard let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return }
         store.palette.begin(.text(.renameTopic(topic)), text: topic.title ?? "")
-        if suggest { store.palette.suggestTitle() }
     }
 }
 
@@ -370,7 +369,7 @@ struct TopicListPlace {
     /// The Topic and Locked cards with this card's pin, in list order, among which it moves.
     let order: [TopicListID]
     let neighbors: CardNeighbors
-    let rename: (String, Bool) -> Void
+    let rename: (String) -> Void
 }
 
 struct TopicCard: View {
@@ -546,14 +545,8 @@ struct TopicCard: View {
             Button("Forget Topic…") { store.presentForgetTopic(id) }.disabled(store.changingTopic)
             pinButton(id)
             CardMoveButtons(store: store, id: .topic(id), neighbors: list.neighbors)
-            if !store.topicConfig.titleCommandFallbacks.isEmpty {
-                Button("Suggest title from Agents") {
-                    DispatchQueue.main.async { list.rename(id, true) }
-                }
-                .disabled(store.changingTopic)
-            }
             Button("Rename Topic…") {
-                DispatchQueue.main.async { list.rename(id, false) }
+                DispatchQueue.main.async { list.rename(id) }
             }
             .disabled(store.changingTopic)
             Button("Add a Session…") { store.presentAddSession(toTopic: id) }
@@ -587,12 +580,7 @@ struct TopicCard: View {
                 .accessibilityIdentifier("settle-topic")
                 .disabled(store.changingTopic)
             Divider()
-            if !store.topicConfig.titleCommandFallbacks.isEmpty {
-                Button("Suggest title from Agents") { list.rename(id, true) }
-                    .accessibilityIdentifier("suggest-topic-title")
-                    .disabled(store.changingTopic)
-            }
-            Button("Rename Topic…") { list.rename(id, false) }
+            Button("Rename Topic…") { list.rename(id) }
                 .accessibilityIdentifier("rename-topic")
                 .disabled(store.changingTopic)
             Button("Add a Session…") { store.presentAddSession(toTopic: id) }
