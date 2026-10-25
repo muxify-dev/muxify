@@ -1872,7 +1872,7 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(.moveWindow(to: to), target: .window(id)))
     }
 
-    /// A click on a card's Window row selects it, and a long press moves it within its Session.
+    /// A click on a card's Window row selects it, and a drag moves it within its Session.
     var windowRowDrag: WindowRowDrag {
         WindowRowDrag(isEnabled: !changingTopic, select: { [weak self] in self?.select($0) },
                       move: { [weak self] in self?.moveWindow($0, to: $1) })

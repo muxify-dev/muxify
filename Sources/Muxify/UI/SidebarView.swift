@@ -78,7 +78,7 @@ private struct TopicsSection: View {
     @Environment(\.sidebarTypography) private var typography
     let store: WorkspaceStore
     let model: TopicsModel
-    @State private var drag = LongPressDrag<TopicListID>(spacing: 6)
+    @State private var drag = ListDrag<TopicListID>(spacing: 6)
     /// The cards whose "N more…" the user pressed.
     @State private var showingAllRows: Set<TopicGroupID> = []
     /// The No Topic Session cards whose "N more…" the user pressed, by Session ID.
@@ -253,7 +253,7 @@ private struct RememberedSessions: View {
 /// What a Session line of an open Topic card needs to move the Session within its Topic.
 private struct SessionOrdering {
     /// The drag of the card's Session blocks; the line starts it, and the whole block moves.
-    let drag: LongPressDrag<String>
+    let drag: ListDrag<String>
     /// The Sessions right above and below this one, where Move Up and Move Down put it.
     let above: String?
     let below: String?
@@ -262,7 +262,7 @@ private struct SessionOrdering {
 }
 
 /// The heading of one Session inside a Topic: its SessionPath. Pressing it goes to the Session's
-/// active Window. In an open Topic card a long press moves the Session, with its rows, within its Topic.
+/// active Window. In an open Topic card a drag moves the Session, with its rows, within its Topic.
 private struct SessionHeading: View {
     let store: WorkspaceStore
     let topic: TopicsModel.Row
@@ -298,7 +298,7 @@ private struct SessionHeading: View {
         .contentShape(Rectangle())
         if let ordering {
             let id = session.id.session
-            label.longPressDrag(id, drag: ordering.drag, isEnabled: !store.changingTopic, onTap: go) { drop in
+            label.listDrag(id, drag: ordering.drag, isEnabled: !store.changingTopic, onTap: go) { drop in
                 if let placement = drop.sessionPlacement { store.moveSession(id, to: placement) }
             }
         } else {
@@ -366,7 +366,7 @@ enum TopicCardPlace {
 
 /// What a card in the Topics list needs to move among the cards with its Pin.
 struct TopicListPlace {
-    let drag: LongPressDrag<TopicListID>
+    let drag: ListDrag<TopicListID>
     /// The Topic and Locked cards with this card's pin, in list order, among which it moves.
     let order: [TopicListID]
     let neighbors: CardNeighbors
@@ -381,7 +381,7 @@ struct TopicCard: View {
     let showsAllRows: Bool
     let onShowAllRows: () -> Void
     let place: TopicCardPlace
-    @State private var sessionDrag = LongPressDrag<String>(spacing: CardSpacing.block)
+    @State private var sessionDrag = ListDrag<String>(spacing: CardSpacing.block)
 
     /// The Topic list's scroll view, in which an open card's header sticks to the top.
     static let viewport = "topics-viewport"
@@ -621,7 +621,7 @@ struct TopicCard: View {
     private var listID: TopicListID? { topic.id.listID }
 }
 
-/// The press on a Topic card's header: in the Topics list a click, or a long press that drags the card; in a group a click.
+/// The press on a Topic card's header: in the Topics list a click, or a drag that moves the card; in a group a click.
 private struct CardHandle: ViewModifier {
     let list: TopicListPlace?
     let listID: TopicListID?
@@ -631,7 +631,7 @@ private struct CardHandle: ViewModifier {
 
     func body(content: Content) -> some View {
         if let list, let listID {
-            content.longPressDrag(listID, drag: list.drag, isEnabled: isEnabled, onTap: onTap, onDrop: onDrop)
+            content.listDrag(listID, drag: list.drag, isEnabled: isEnabled, onTap: onTap, onDrop: onDrop)
         } else {
             content.onTapGesture(perform: onTap).takesFirstClick()
         }
@@ -645,7 +645,7 @@ private struct CardItem: ViewModifier {
 
     func body(content: Content) -> some View {
         if let list, let listID {
-            content.longPressDragItem(listID, drag: list.drag, shown: list.order, cornerRadius: 9)
+            content.listDragItem(listID, drag: list.drag, shown: list.order, cornerRadius: 9)
         } else {
             content
         }
@@ -677,7 +677,7 @@ private struct LockedCard: View {
     let holdsSelection: Bool
     let showsAllRows: Bool
     let onShowAllRows: () -> Void
-    let drag: LongPressDrag<TopicListID>
+    let drag: ListDrag<TopicListID>
     let order: [TopicListID]
     let neighbors: CardNeighbors
 
@@ -703,7 +703,7 @@ private struct LockedCard: View {
                 TopicItemRow(store: store, item: item, titles: titles, isDimmed: false)
             }
         }
-        .longPressDragItem(id, drag: drag, shown: order, cornerRadius: 9)
+        .listDragItem(id, drag: drag, shown: order, cornerRadius: 9)
     }
 
     private var header: some View {
@@ -713,7 +713,7 @@ private struct LockedCard: View {
                 BellMark()
             }
         }
-        .longPressDrag(id, drag: drag, isEnabled: !store.changingTopic, onTap: press) { drop in
+        .listDrag(id, drag: drag, isEnabled: !store.changingTopic, onTap: press) { drop in
             store.moveTopic(id, to: drop.topicPlacement)
         }
         .accessibilityAction(.default, press)

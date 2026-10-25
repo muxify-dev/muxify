@@ -190,7 +190,7 @@ A Topic card, the Command Palette and the Topic record list a Topic's Sessions b
 tmux created them: `oldest_first`, the default, or `newest_first`. Sessions
 created in the same second follow their tmux Session ID.
 
-Move a Session with a long press on its line in an open Topic card: the Session
+Move a Session with a drag on its line in an open Topic card: the Session
 lifts with its Windows, the other Sessions slide aside, and an outlined
 placeholder shows where it lands. Move Up and Move Down in the line's context
 menu move it too. The Topic then keeps your
@@ -201,7 +201,7 @@ Creation in the context menu goes back to the creation order. No Topic and the
 Sessions mode keep the tmux order. Any other value uses the default and appears
 in the Config problems banner.
 
-A long press on a Window row moves the Window, with its Pane rows, within its
+A drag on a Window row moves the Window, with its Pane rows, within its
 Session, in any card. The Session keeps its current Window, and tmux keeps the
 new order. Topic cards and Locked Session cards move the same way among the
 cards with their pin.
