@@ -1058,6 +1058,7 @@ final class WorkspaceStore {
             return
         }
         installKeyMonitor()
+        terminalHost.onFirstResponderChange = { [weak self] in self?.readFocusedPanel() }
         // Coming back to Muxify reads the Agents in the Window on screen.
         activationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
@@ -1731,6 +1732,21 @@ final class WorkspaceStore {
     var terminalHasFocus: Bool {
         guard let surface else { return false }
         return surface.window?.firstResponder === surface
+    }
+
+    /// `keyFocus` as of the last change of the window's first responder, which SwiftUI cannot observe by itself. Nil
+    /// while no view has it.
+    private var focusedPanel: PanelLayout.Side?
+
+    func readFocusedPanel() {
+        focusedPanel = terminalHost.window?.firstResponder is NSView ? keyFocus : nil
+    }
+
+    /// `ui.focus_marker`: the side that shows the marker. None while a side is alone, with no other side to tell it
+    /// from, or while a Command Palette has Focus.
+    var focusMarkerSide: PanelLayout.Side? {
+        guard config.focusMarker, panelLayout.shows(.terminal), panelLayout.shows(.browser), !palette.isOpen else { return nil }
+        return focusedPanel
     }
 
     /// The current Window's Browser has Focus (its page or omnibox).
@@ -2577,6 +2593,16 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
 /// is swapped in and out of it without SwiftUI recreating anything.
 final class TerminalHostView: NSView {
     private weak var current: NSView?
+    /// Called when the window's first responder changes, so the Focus marker follows Focus however it moved.
+    var onFirstResponderChange: @MainActor () -> Void = {}
+    private var responderObservation: NSKeyValueObservation?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        responderObservation = window?.observe(\.firstResponder, options: [.new]) { [weak self] _, _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.onFirstResponderChange() } }
+        }
+    }
 
     func show(_ view: NSView?) {
         current?.removeFromSuperview()

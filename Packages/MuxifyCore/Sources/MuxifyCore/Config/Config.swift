@@ -153,6 +153,9 @@ public struct Config: Equatable {
     public var statusLineHeader = true
     /// `ui.pulse`: every Working mark moves. False keeps them still.
     public var pulse = true
+    /// `ui.focus_marker`: a short line on the top edge of the side that has Focus, while the Terminal and the Browser
+    /// both show.
+    public var focusMarker = false
     /// `ui.agent_colors`.
     public var agentColors = AgentColors()
     /// The keybinds of an open Command Palette (`keybindings.command_palette`).
@@ -215,6 +218,9 @@ public struct Config: Equatable {
         #   status_line_header: true
         #   # false keeps every Working mark still.
         #   pulse: true
+        #   # A short line on the top edge of the Terminal or the Browser, whichever
+        #   # has Focus. It shows only while both show.
+        #   focus_marker: false
         #   # The color of each Agent mark, in the Sidebar and the Command
         #   # Palette: blue, orange, red, green, yellow, purple, pink, teal,
         #   # gray, or a quoted '#RRGGBB'.
@@ -1024,6 +1030,12 @@ private struct ConfigReader {
                     continue
                 }
                 config.pulse = pulse
+            case "focus_marker":
+                guard value.tag == Yams.Tag(.bool), let enabled = value.bool else {
+                    problem(at: value, "ui.focus_marker: expected a boolean")
+                    continue
+                }
+                config.focusMarker = enabled
             case "sidebar":
                 readUISidebar(value)
             case "agent_colors":

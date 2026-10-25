@@ -193,6 +193,25 @@ class Panels(unittest.TestCase):
             return any(name.startswith(FOCUS_CLASSES[side]) for name in responders)
         wait(has_focus, message)
 
+    def test_the_focus_marker_follows_focus_while_both_sides_show(self):
+        markers = lambda rs: {side for side in ('terminal', 'browser') if self.s.has('focus-marker-' + side, rs)}
+        self.s.act('press', 'Focus Terminal')
+        self.wait_focus('terminal', 'Focus Terminal did not give the Terminal Focus')
+        time.sleep(SETTLE)
+        self.assertEqual(markers(None), set(), 'the Focus marker shows without ui.focus_marker')
+        config = self.s.root/'config/muxify/config.yaml'
+        self.addCleanup(config.unlink, missing_ok=True)
+        config.write_text('ui:\n  focus_marker: true\n')
+        self.s.wait_rows(lambda rs: markers(rs) == {'terminal'}, 'the Focus marker is not on the Terminal: %s' % markers(None))
+        self.s.act('press', 'Focus Browser')
+        self.wait_focus('browser', 'Focus Browser did not give the Browser Focus')
+        self.s.wait_rows(lambda rs: markers(rs) == {'browser'}, 'the Focus marker did not move to the Browser: %s' % markers(None))
+        self.s.act('press', 'toggle-terminal')
+        self.wait_panels({'sidebar', 'browser'}, 'the Terminal toggle did not hide the Terminal')
+        self.s.wait_rows(lambda rs: markers(rs) == set(), 'the Focus marker shows on the Browser alone: %s' % markers(None))
+        self.s.act('press', 'toggle-terminal')
+        self.wait_panels({'sidebar', 'terminal', 'browser'}, 'the Terminal toggle did not show the Terminal again')
+
     def test_the_tmux_client_keeps_its_width_while_the_terminal_is_hidden(self):
         time.sleep(SETTLE)
         before = self.client_width()
