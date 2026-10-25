@@ -44,6 +44,50 @@ final class NotificationsAndSnoozeTests: XCTestCase {
         XCTAssertEqual(model().groups.first { $0.kind == .settled }?.topics.first?.mark, .unread)
     }
 
+    func testActiveTopicSpinesIdentifyWindowsWithAgentMarks() {
+        var topic = TopicRecord(id: "a")
+        topic.isUnread = true
+        let windows = [window("@1", topic: "a"), window("@2", topic: "a"), window("@3", topic: "a")]
+        let agents = [agent(.done), agent(.blocked, id: "%2", window: "@2", unread: false),
+                      agent(.working, id: "%3", window: "@3")]
+        var selection = TopicSelection()
+        selection.select(windowID: "@1", activeTopic: .topic("a"))
+        var config = Config()
+        func model(_ location: Location? = .window(WindowID(rawValue: "@1")!)) -> TopicsModel {
+            TopicsModel(records: [topic], windows: windows, config: config, selection: selection,
+                        location: location, agents: agents, now: now)
+        }
+        XCTAssertEqual(model().rows[0].agentSpines, ["@1": .done, "@2": .blocked, "@3": .working])
+        XCTAssertEqual(model().rows[0].mark, .agent(.blocked), "The header keeps the strongest mark")
+        XCTAssertTrue(model(nil).rows[0].agentSpines.isEmpty, "An inactive card keeps its full spine")
+        selection.setTopic(.topic("a"), open: false)
+        XCTAssertTrue(model().rows[0].agentSpines.isEmpty, "A collapsed card keeps its full spine")
+        selection.setTopic(.topic("a"), open: true)
+        config.notifications.doneEnabled = false
+        XCTAssertEqual(model().rows[0].agentSpines, ["@2": .blocked, "@3": .working])
+        config.notifications.blockedEnabled = false
+        XCTAssertEqual(model().rows[0].agentSpines, ["@3": .working])
+        XCTAssertTrue(model().rows[0].isUnread)
+        XCTAssertTrue(model().rows[0].usesRowMarks)
+        topic.snoozedUntil = "never"
+        let snoozed = model().groups.first { $0.kind == .snoozed }!.topics[0]
+        XCTAssertTrue(snoozed.agentSpines.isEmpty)
+        XCTAssertNil(snoozed.mark)
+    }
+
+    func testReplacingPaneRowsCarryTheirOwnAgentSpines() {
+        let panes = ["%1", "%2", "%3"].enumerated().map { index, id in
+            TmuxPane(id: id, windowID: "@1", index: index, isActive: index == 0, title: "Pane", path: "/app",
+                     command: "zsh", agent: "", agentStatus: "", unread: false)
+        }
+        var selection = TopicSelection()
+        selection.select(windowID: "@1", activeTopic: .topic("a"))
+        let model = TopicsModel(records: [TopicRecord(id: "a")], windows: [window("@1", topic: "a")],
+                                config: Config(), selection: selection, location: .window(WindowID(rawValue: "@1")!),
+                                agents: [agent(.done), agent(.failed, id: "%2", unread: false), agent(.working, id: "%3")], panes: panes)
+        XCTAssertEqual(model.rows[0].agentSpines, ["%1": .done, "%3": .working])
+    }
+
     func testEveryScheduleFormAndTypedShorthand() throws {
         let forms = ["+5m": "2026-10-07T08:05:00Z", "+2h": "2026-10-07T10:00:00Z",
                      "+2d": "2026-10-09T08:00:00Z", "today": "2026-10-07T09:00:00Z",
@@ -208,19 +252,43 @@ final class NotificationsAndSnoozeTests: XCTestCase {
         XCTAssertEqual(later.visibleAgents.count, 1)
     }
 
-    func testRapidExplicitVisitsReadBothTopicsAndNoTopicReadsOnlyItsWindow() {
-        let windows = [window("@1", topic: "a"), window("@2", topic: "a"),
-                       window("@3", topic: "b"), window("@4", topic: nil), window("@5", topic: nil)]
+    func testReadScopeUsesTheWindowOrOnlyItsZoomedPane() {
+        var current = window("@1", topic: "a")
+        current.activePaneID = "%1"
+        let panes = [TmuxPane(id: "%1", windowID: "@1", command: "sleep", agent: "codex", agentStatus: "done", unread: true), TmuxPane(id: "%2", windowID: "@1", command: "sleep", agent: "codex", agentStatus: "done", unread: true),
+                     TmuxPane(id: "%3", windowID: "@2", command: "sleep", agent: "codex", agentStatus: "done", unread: true)]
+        XCTAssertEqual(AgentReadScope(window: current).target, .window("@1"))
+        XCTAssertEqual(AgentReadScope(window: current).paneIDs(in: panes), ["%1", "%2"])
+        current.isZoomed = true
+        XCTAssertEqual(AgentReadScope(window: current).target, .pane("%1"))
+        XCTAssertEqual(AgentReadScope(window: current).paneIDs(in: panes), ["%1"])
+    }
+
+    func testReadVisitsObserveNewlyShownPanesAndDiscardSupersededEntries() {
+        let panes = [TmuxPane(id: "%1", windowID: "@1", command: "sleep", agent: "codex", agentStatus: "done", unread: true), TmuxPane(id: "%2", windowID: "@1", command: "sleep", agent: "codex", agentStatus: "done", unread: true),
+                     TmuxPane(id: "%3", windowID: "@2", command: "sleep", agent: "codex", agentStatus: "done", unread: true)]
+        let zoom = AgentReadScope.pane(windowID: "@1", paneID: "%1")
         var visits = AgentReadVisits()
-        visits.enter(windowID: "@1", windows: windows)
-        visits.enter(windowID: "@3", windows: windows)
-        XCTAssertEqual(visits.consume(in: windows), ["@1", "@2", "@3"])
-        XCTAssertTrue(visits.consume(in: windows).isEmpty)
-        visits.enter(windowID: "@4", windows: windows)
-        XCTAssertEqual(visits.consume(in: windows), ["@4"])
-        visits.enter(windowID: "@6", windows: windows)
-        XCTAssertTrue(visits.consume(in: windows).isEmpty)
-        XCTAssertTrue(visits.consume(in: windows + [window("@6", topic: nil)]).isEmpty)
+        XCTAssertEqual(visits.consume(showing: zoom, panes: panes, observing: true), ["%1"])
+        XCTAssertTrue(visits.consume(showing: zoom, panes: panes, observing: true).isEmpty,
+                      "Continued viewing must preserve explicit Unread")
+        XCTAssertEqual(visits.consume(showing: .window("@1"), panes: panes, observing: true), ["%2"],
+                       "Ending Zoom reads only newly shown Panes")
+        visits.enter(windowID: "@1")
+        visits.enter(windowID: "@2")
+        XCTAssertEqual(visits.consume(showing: .window("@2"), panes: panes, observing: false), ["%3"])
+        XCTAssertTrue(visits.consume(showing: .window("@1"), panes: panes, observing: false).isEmpty,
+                      "A superseded entry must not clear a later explicit mark")
+        visits.enter(windowID: "@1")
+        XCTAssertEqual(visits.consume(showing: zoom, panes: panes, observing: false), ["%1"],
+                       "An explicit visit to the same Window reads only its confirmed Zoomed Pane")
+        visits.enter(windowID: "@1")
+        XCTAssertTrue(visits.consume(showing: nil, panes: panes, observing: true).isEmpty,
+                      "A hidden Terminal never reads its Panes")
+        XCTAssertEqual(visits.consume(showing: zoom, panes: panes, observing: true), ["%1"])
+        visits.hide()
+        XCTAssertEqual(visits.consume(showing: zoom, panes: panes, observing: true), ["%1"],
+                       "A hide and reveal between snapshots starts a new visit")
     }
 
     func testDisabledNotificationSortingPreservesSnapshotPaneOrderAfterSwap() {

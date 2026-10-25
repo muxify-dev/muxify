@@ -116,8 +116,8 @@ enum PaletteCommand: String, CaseIterable {
     var mirror: CLIMirror {
         switch self {
         case .newTopic: .verb(.topicNew)
-        case .markRead: .verbs([.topicMarkRead, .sessionMarkRead])
-        case .markUnread: .verbs([.topicMarkUnread, .sessionMarkUnread])
+        case .markRead: .verbs([.topicMarkRead, .windowMarkRead, .agentMarkRead])
+        case .markUnread: .verbs([.topicMarkUnread, .windowMarkUnread, .agentMarkUnread])
         case .markAllRead: .verb(.markAllRead)
         case .movePane, .moveWindow, .moveSession, .movePaneWithTab: .verb(.windowMove)
         case .addSession: .verb(.topicAddSession)

@@ -107,7 +107,11 @@ final class AppWindows {
                 MainActor.assumeIsolated {
                     self?.focus(id)
                     self?.stores[id]?.readActiveTopicOnEntry()
+                    self?.stores[id]?.refresh()
                 }
+            },
+            center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.stores[id]?.stopReadingTerminal() }
             },
             center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.close(id) }

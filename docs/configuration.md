@@ -259,25 +259,36 @@ notifications:
   blocked_enabled: true
 ```
 
-By default, a new visit to a Window or Topic clears Unread. Mark Unread stays set while you continue to view the same
-Window or empty Topic, until the next visit. Updates in the Window being viewed do
-not become Unread.
+By default, a new visit reads the Panes shown in the Terminal. A normal Window
+includes all its Panes. A Zoomed Window includes only its Zoomed Pane. Ending Zoom
+reads newly shown Panes. Sidebar expansion and scrolling do not read anything.
+Mark Unread stays set during continued viewing. Updates in shown Panes do not
+become Unread. Hidden Panes can become Unread. Automatic reading pauses when the
+Terminal is hidden or the Git View is open.
 
-Set `manual_read: true` to turn on Manual Read. A done, failed or blocked update
-then becomes Unread even while you look at its Window, and a visit to a Window or
-Topic does not clear it.
+Set `manual_read: true` to turn on Manual Read. Visits and Zoom changes then
+preserve Unread. A done, failed or blocked update becomes Unread even in a shown Pane.
 
-**Mark Read** clears the Active Topic, or the current Session when there is no
-Active Topic. Its default shortcut is ⌘⇧R. A palette row also offers Mark Read
-for that Topic, Session, Window or Agent. A blocked mark stays until the Agent
-is no longer blocked.
+**Mark Read** clears Unread in the current Window, or only its Zoomed Pane when
+Zoom is on. Its default shortcut is ⌘⇧R. **Mark Unread**, on ⌘⇧U, uses the same
+target. The Command Summary names that target, including when the Terminal is hidden.
+Mark Unread applies to done, failed or blocked Agents. Neither Action changes
+Status, so a blocked Agent keeps its blocked mark.
 
-**Mark Unread** marks any Topic as Unread, including an empty, Dormant, Snoozed
-or Settled Topic. The mark is saved with the Topic and does not require an Agent.
-Mark Read clears it. A Snoozed Topic keeps its mark but hides it until Snooze ends.
-Its Command and shortcut, ⌘⇧U, use the same target as Mark Read. A palette row
-also offers Mark Unread for that Topic, Session, Window or Agent. For Agents,
-Mark Unread applies to done, failed or blocked Status. It does not change Status.
+A palette row Action uses the named Topic, Session, Window or Agent. An explicit
+Window Action includes all its Panes, even during Zoom. Topic and Session Actions
+include their hidden Windows. Working Agents cannot become Unread.
+
+A Topic's Mark Unread Action also saves a separate Topic mark, with or without
+Agents. Window visits and Window or Pane Actions preserve this mark. Use the
+Topic's Mark Read Action to clear it. On an Empty Topic page, the Commands act
+on the Topic mark. A new visit to that page also clears it when Manual Read is off.
+A Snoozed Topic keeps its mark but hides it until Snooze ends.
+
+The expanded Active Topic shows Agent lines beside Window rows, or beside Pane
+rows when they replace a Window. Working has a moving line. A title line shows
+explicit Topic Unread separately. The more row shows the strongest hidden Agent
+mark. Other cards keep their aggregate line.
 
 **Mark All as Read** clears Unread in the Active Environment, including all Topic marks and Unread
 working Agents. This includes hidden, Snoozed and Settled Topics. It has no default shortcut. Set `keybindings.mark_all_read` to

@@ -400,7 +400,7 @@ struct TopicCard: View {
     }
 
     var body: some View {
-        SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, mark: topic.mark,
+        SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, mark: topic.usesRowMarks ? nil : topic.mark,
                     viewport: list == nil ? Self.groupsViewport : Self.viewport, restingOpacity: restingOpacity) {
             header
         } content: {
@@ -415,12 +415,13 @@ struct TopicCard: View {
     }
 
     private var sessionList: some View {
-        CardList(blocks: topic.sessions.compactMap { session in
+        return CardList(blocks: topic.sessions.compactMap { session in
                          guard case .live(let children) = session.contents else { return nil }
                          return CardBlock(id: session.id.session, items: children.items)
                      },
                      identifier: topic.id.accessibilityID, selectedWindowID: store.selectedWindowID,
                      showsAll: showsAllRows, onShowAll: onShowAllRows, reservesCorner: true,
+                     agentSpines: topic.agentSpines,
                      blockDrag: topic.kind == .open ? sessionDrag : nil, windows: store.windowRowDrag) { block in
                 if let session = topic.sessions.first(where: { $0.id.session == block.id }) {
                     SessionHeading(store: store, topic: topic, session: session, ordering: ordering(of: session.id.session))
@@ -487,7 +488,7 @@ struct TopicCard: View {
     private var header: some View {
         CardHeader(title: formatted.title, isOpen: topic.isExpanded, mark: topic.mark, isPinned: topic.isPinned,
                    hintTarget: list == nil ? nil : namedTopicID.map { .topic($0) },
-                   notes: (topic.isPinned ? ["Pinned"] : []) + (groupDetail.map { [$0] } ?? []) + (topic.idleLabel.map { [$0] } ?? []),
+                   notes: (topic.isPinned ? ["Pinned"] : []) + (topic.usesRowMarks && topic.isUnread && topic.mark != .unread ? ["unread"] : []) + (groupDetail.map { [$0] } ?? []) + (topic.idleLabel.map { [$0] } ?? []),
                    summary: list == nil ? "" : formatted.summary, cornerWidth: list == nil ? CardCorner.groupWidth : CardCorner.width,
                    titleNote: list == nil && !topic.isExpanded ? wake : nil, tags: tags) {
             if list != nil || topic.isExpanded {
@@ -496,6 +497,16 @@ struct TopicCard: View {
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 if let label = topic.idleLabel { Text(label).font(.system(size: 10)).foregroundStyle(.secondary) }
+            }
+        }
+        .overlay(alignment: .leading) {
+            if topic.usesRowMarks, topic.isUnread {
+                RowMarkSpine(mark: .unread)
+                    .frame(width: 3)
+                    .padding(.vertical, 8)
+                    .padding(.leading, 4)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
             }
         }
         .modifier(CardHandle(list: list, listID: listID, isEnabled: !store.changingTopic, onTap: press, onDrop: { drop in
@@ -1156,6 +1167,11 @@ private struct PaneRow: View {
     var body: some View {
         Button { store.select(row) } label: {
             HStack(spacing: 6) {
+                ZStack {
+                    Color.clear.frame(width: 10, height: 10)
+                    if let mark { AgentMarkView(mark: mark) }
+                }
+                .frame(width: 10, height: 10)
                 Image(systemName: row.pane.isActive ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
                     .font(.system(size: 10)).frame(width: 14)
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
@@ -1166,7 +1182,6 @@ private struct PaneRow: View {
                     }
                 }
                 Spacer(minLength: 4)
-                if let mark { AgentMarkView(mark: mark) }
             }
             .foregroundStyle(isSelected ? Color.primary : Color.secondary)
             .padding(.leading, row.isUnderWindowRow ? 28 : 8).padding(.trailing, 6).padding(.vertical, 3)

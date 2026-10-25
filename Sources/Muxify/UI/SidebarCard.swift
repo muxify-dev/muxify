@@ -344,6 +344,7 @@ struct CardList<Heading: View, Row: View>: View {
     /// The card shows an action in its bottom-right corner, so the list ends with a footer line for it, beside
     /// "N more…" when that shows.
     var reservesCorner = false
+    var agentSpines: [String: AgentMark] = [:]
     /// The drag of whole blocks, which the headings start; nil while the blocks keep their order.
     var blockDrag: ListDrag<String>? = nil
     let windows: WindowRowDrag
@@ -355,6 +356,7 @@ struct CardList<Heading: View, Row: View>: View {
     var body: some View {
         let total = blocks.reduce(0) { $0 + $1.items.count }
         let shown = CardRows.shownCount(blocks.flatMap(\.items), selectedWindowID: selectedWindowID, showsAll: showsAll)
+        let hiddenMark = blocks.flatMap(\.items).dropFirst(shown).compactMap { agentSpines[$0.id] }.max()
         let starts = blocks.indices.map { index in blocks[..<index].reduce(0) { $0 + $1.items.count } }
         let visible = blocks.indices.filter { starts[$0] < shown }.map { index in
             CardBlock(id: blocks[index].id, items: Array(blocks[index].items.prefix(shown - starts[index])))
@@ -392,10 +394,33 @@ struct CardList<Heading: View, Row: View>: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .overlay(alignment: .leading) {
+                if let mark = hiddenMark {
+                    AgentMarkSpine(mark: mark)
+                        .frame(width: 3)
+                        .padding(.vertical, 3)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
             .padding(.trailing, reservesCorner ? CardCorner.width : 0)
             .accessibilityIdentifier(identifier + "-more")
+            .accessibilityValue(hiddenMark?.rawValue ?? "")
         } else if reservesCorner {
             Color.clear.frame(height: 16)
+        }
+    }
+
+    private func markedRow(_ item: TopicsModel.SessionChildren.Item) -> some View {
+        row(item).overlay(alignment: .leading) {
+            if let mark = agentSpines[item.id] {
+                AgentMarkSpine(mark: mark)
+                    .frame(width: 3)
+                    .padding(.vertical, 3)
+                    .allowsHitTesting(false)
+                    .accessibilityLabel(mark.rawValue)
+                    .accessibilityIdentifier("topic-agent-mark-" + item.id)
+            }
         }
     }
 
@@ -409,16 +434,16 @@ struct CardList<Heading: View, Row: View>: View {
                     VStack(alignment: .leading, spacing: CardSpacing.row) {
                         ForEach(unit.items) { item in
                             if case .window = item {
-                                row(item).listDrag(window.id, drag: windowDrag, isEnabled: windows.isEnabled && windowIDs.count > 1,
+                                markedRow(item).listDrag(window.id, drag: windowDrag, isEnabled: windows.isEnabled && windowIDs.count > 1,
                                                         onTap: { windows.select(window) }) { windows.move(window, $0) }
                             } else {
-                                row(item)
+                                markedRow(item)
                             }
                         }
                     }
                     .listDragItem(window.id, drag: windowDrag, shown: windowIDs, cornerRadius: 6)
                 } else {
-                    ForEach(unit.items) { row($0) }
+                    ForEach(unit.items) { markedRow($0) }
                 }
             }
         }

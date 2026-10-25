@@ -84,21 +84,3 @@ public struct Agent: Identifiable, Hashable {
             + agents.filter { !$0.unread && $0.status != .working }
     }
 }
-
-public struct AgentReadVisits {
-    private var windowIDs: Set<String> = []
-
-    public init() {}
-
-    public mutating func enter(windowID: String, windows: [TmuxWindow]) {
-        windowIDs.insert(windowID)
-        guard let topic = windows.first(where: { $0.id == windowID })?.topicID else { return }
-        windowIDs.formUnion(windows.filter { $0.topicID == topic }.map(\.id))
-    }
-
-    public mutating func consume(in windows: [TmuxWindow]) -> Set<String> {
-        let observed = windowIDs.intersection(windows.map(\.id))
-        windowIDs.removeAll()
-        return observed
-    }
-}

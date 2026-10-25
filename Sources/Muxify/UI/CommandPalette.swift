@@ -115,6 +115,8 @@ final class CommandPalette {
                               lastWindowByGroup: store.topicSelection.lastWindowByGroup, visits: store.visits, commands: commands,
                               commandShortcuts: Dictionary(uniqueKeysWithValues: commands.compactMap { command in
                                   shortcut(for: command).map { (command, $0) }
+                              }), commandSummaries: Dictionary(uniqueKeysWithValues: [PaletteCommand.markRead, .markUnread].compactMap { command in
+                                  store.currentReadSummary.map { (command, $0) }
                               }), agentMarks: store.topics.agentMarks)
     }
 

@@ -57,6 +57,92 @@ class TopicsUnread(TopicsSidebar):
         self.find('topic-' + topic)
         self.s.act('action', 'topic-' + topic, 'Go to Topic')
 
+    def test_active_topic_lines_follow_notifications_and_pane_rows(self):
+        topic = 'notification-lines'
+        self.write_topic(topic, topic, self.beta)
+        sid, first, pane = self.agent_session(topic, topic=topic, status='done', unread=True)
+        second, blocked = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id} #{pane_id}',
+                                      '-t', sid + ':', 'sleep 600').split()
+        shell = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', sid + ':', '/bin/zsh -f')
+        working_window, working_pane = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id} #{pane_id}',
+                                                   '-t', sid + ':', 'sleep 600').split()
+        wait(lambda: self.s.tmux('display-message', '-p', '-t', working_pane, '#{pane_current_command}') == 'sleep',
+             'The Working Agent process did not start')
+        self.s.tmux('set-option', '-p', '-t', working_pane, '@muxify_agent', 'claude',
+                    ';', 'set-option', '-p', '-t', working_pane, '@muxify_agent_status', 'working')
+        for key, value in [('agent', 'claude'), ('agent_status', 'blocked')]:
+            self.s.tmux('set-option', '-p', '-t', blocked, '@muxify_' + key, value)
+        self.open_card('topic-' + topic)
+        self.s.wait_rows(lambda rs: self.s.has('topic-window-' + first, rs), 'the first Window did not appear')
+        self.enter(topic)
+        self.s.wait_shown(first)
+        first_mark, second_mark = 'topic-agent-mark-' + first, 'topic-agent-mark-' + second
+        rs = self.s.wait_rows(lambda rs: self.s.has(first_mark, rs) and self.s.has(second_mark, rs),
+                             'the Active Topic does not show its Window lines')
+        self.assertFalse(self.s.has('topic-agent-mark-' + shell, rs), 'a shell Window has a Notification')
+        self.s.act('snapshot', 'topics-list', str(self.s.root / 'window-notification-lines.png'))
+        self.command('Mark Read')
+        self.s.wait_rows(lambda rs: not self.s.has(first_mark, rs) and self.s.has(second_mark, rs),
+                         'Mark Read did not clear done or removed a blocked Notification')
+        self.mark_row(topic, 'Mark Unread')
+        self.s.wait_rows(lambda rs: 'unread' in self.describe('topic-' + topic, rs) and self.s.has(second_mark, rs),
+                         'Topic Unread must remain visible beside a blocked Agent line')
+        self.s.wait_rows(lambda rs: self.s.has('topic-agent-mark-' + working_window, rs), 'Working has no row line')
+        self.s.act('snapshot', 'topics-list', str(self.s.root / 'mixed-agent-topic-lines.png'))
+        for target in [pane, blocked, working_pane]:
+            self.s.tmux('set-option', '-pu', '-t', target, '@muxify_agent')
+        rs = self.s.wait_rows(lambda rs: not self.s.has(first_mark, rs) and not self.s.has(second_mark, rs),
+                             'a Topic-only mark still marks individual Windows')
+        self.assertIn('unread', self.describe('topic-' + topic, rs))
+
+    def test_replacing_pane_rows_show_only_the_affected_pane_line(self):
+        topic = 'notification-panes'
+        self.write_topic(topic, topic, self.beta)
+        _, window, pane = self.agent_session(topic, topic=topic, status='done', unread=True)
+        quiet = self.s.tmux('split-window', '-d', '-P', '-F', '#{pane_id}', '-t', window, '/bin/zsh -f')
+        self.open_card('topic-' + topic)
+        self.s.wait_rows(lambda rs: self.s.has('topic-window-' + window, rs), 'the Window did not appear')
+        self.enter(topic)
+        self.s.wait_shown(window)
+        self.s.wait_rows(lambda rs: self.s.has('topic-agent-mark-' + window, rs), 'the Window has no Notification line')
+        self.press_menu_item('Show Panes')
+        self.addCleanup(self.press_menu_item, 'Show Panes')
+        rs = self.s.wait_rows(lambda rs: self.s.has('topic-agent-mark-' + pane, rs), 'the replacing Pane has no line')
+        self.assertFalse(self.s.has('topic-agent-mark-' + quiet, rs), 'the shell Pane has a Notification line')
+        self.assertFalse(self.s.has('topic-window-' + window, rs), 'the Window row was not replaced')
+        self.s.act('snapshot', 'topics-list', str(self.s.root / 'pane-notification-lines.png'))
+        for status in ['working', 'done']:
+            self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_status', status)
+            self.s.wait_rows(lambda rs: status in self.describe('pane-' + pane, rs)
+                             and self.s.has('topic-agent-mark-' + pane, rs), 'the Pane line did not become ' + status)
+            self.s.act('snapshot', 'pane-' + pane, str(self.s.root / ('pane-' + status + '.png')))
+        self.command('Mark Read')
+        self.s.wait_rows(lambda rs: 'done' not in self.describe('pane-' + pane, rs), 'the done mark did not clear')
+        self.s.act('snapshot', 'pane-' + pane, str(self.s.root / 'pane-read.png'))
+
+    def test_hidden_agent_rows_keep_a_summary_line_until_shown(self):
+        topic = 'notification-overflow'
+        self.write_topic(topic, topic, self.beta)
+        sid, first, pane = self.agent_session(topic, topic=topic, status='done', unread=True)
+        for _ in range(5):
+            self.s.tmux('new-window', '-d', '-t', sid + ':', '/bin/zsh -f')
+        last, blocked = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id} #{pane_id}',
+                                   '-t', sid + ':', 'sleep 600').split()
+        for key, value in [('agent', 'claude'), ('agent_status', 'blocked')]:
+            self.s.tmux('set-option', '-p', '-t', blocked, '@muxify_' + key, value)
+        self.open_card('topic-' + topic)
+        self.s.wait_rows(lambda rs: self.s.has('topic-window-' + first, rs), 'the first Window did not appear')
+        self.enter(topic)
+        self.s.wait_shown(first)
+        self.s.wait_rows(lambda rs: self.s.has('topic-' + topic + '-more', rs)
+                         and 'blocked' in self.describe('topic-' + topic, rs), 'the overflow fixture is incomplete')
+        self.assertTrue(self.s.has('topic-agent-mark-' + first), 'the visible Agent line disappeared')
+        self.s.wait_rows(lambda rs: 'blocked' in self.describe('topic-' + topic + '-more', rs), 'hidden Agents have no summary line')
+        self.s.act('snapshot', 'topics-list', str(self.s.root / 'hidden-agent-summary.png'))
+        self.s.act('press', 'topic-' + topic + '-more')
+        self.s.wait_rows(lambda rs: self.s.has('topic-agent-mark-' + first, rs) and self.s.has('topic-agent-mark-' + last, rs),
+                         'the full list did not replace the full spine with Window lines')
+
     def test_empty_topic_commands_shortcuts_persist_and_show_unread(self):
         topic = 'empty-read-target'
         self.write_empty_topic(topic, future={'keep': 1})
@@ -164,7 +250,7 @@ class TopicsUnread(TopicsSidebar):
         self.enter_empty('empty-auto-target')
         self.assert_unread('empty-auto-target', False)
 
-    def test_automatic_live_topic_reads_its_record_on_next_visit(self):
+    def test_automatic_live_topic_preserves_its_record_on_next_visit(self):
         self.configure(manual_read=False)
         topic = 'live-auto-target'
         self.write_topic(topic, topic, self.beta)
@@ -175,13 +261,13 @@ class TopicsUnread(TopicsSidebar):
         self.s.wait_rows(lambda rs: self.s.has('topic-window-' + window, rs), 'the Topic card does not list ' + window)
         self.enter(topic)
         self.s.wait_shown(window)
-        self.command('Mark Unread')
+        self.mark_row(topic, 'Mark Unread')
         self.assert_unread(topic, True)
         time.sleep(2.2)
         self.assert_unread(topic, True)
         self.enter('live-auto-away')
         self.enter(topic)
-        self.assert_unread(topic, False)
+        self.assert_unread(topic, True)
 
 
 if __name__ == '__main__':

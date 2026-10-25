@@ -235,6 +235,10 @@ struct TopicsModel {
         let kind: Kind
         /// The Topic Unread mark or its strongest Agent mark; nil while the Topic is quiet.
         let mark: RowMark?
+        /// Agent marks beside the rows of an expanded Active Topic, keyed by Window or replacing Pane ID.
+        var agentSpines: [String: AgentMark] = [:]
+        var usesRowMarks = false
+        var isUnread = false
         let isPinned: Bool
         let sessions: [Session]
         let isExpanded: Bool
@@ -399,6 +403,7 @@ struct TopicsModel {
         func mark(_ agents: [Agent]) -> AgentMark? { agents.compactMap { agentMarks[$0.paneID] }.max() }
         let shown = agents.filter { !isQuiet($0) }
         sessionMarks = Dictionary(grouping: shown, by: \.sessionID).compactMapValues(mark)
+        let windowMarks = Dictionary(grouping: shown, by: \.windowID).compactMapValues(mark)
         let panesByWindow = panes.map { Dictionary(grouping: $0, by: \.windowID) }
         let agentsByPane = Dictionary(agents.map { ($0.paneID, $0) }, uniquingKeysWith: { first, _ in first })
         func children(_ windows: [TmuxWindow]) -> SessionChildren {
@@ -440,8 +445,24 @@ struct TopicsModel {
             let id = TopicGroupID.topic(record.id)
             let kind: Row.Kind = (record.isSnoozed(at: now) ? record.snoozeDeadline : nil).map { .snoozed(wake: $0.wakeLabel) } ?? .open
             let agents = isQuiet(id) ? [] : agentsByGroup[id] ?? []
-            return Row(id: id, title: title, kind: kind, mark: isQuiet(id) ? nil : RowMark(unread: record.isUnread, agent: mark(agents)), isPinned: record.isPinned,
-                       sessions: sessions(of: id, members: grouped[id] ?? [], record: record), isExpanded: openTopics.contains(id),
+            let sessions = sessions(of: id, members: grouped[id] ?? [], record: record)
+            var spines: [String: AgentMark] = [:]
+            if id == active, openTopics.contains(id), !isQuiet(id) {
+                for session in sessions {
+                    guard case .live(let children) = session.contents else { continue }
+                    for item in children.items {
+                        switch item {
+                        case .window(let window): spines[item.id] = windowMarks[window.id]
+                        case .pane(let row) where !row.isUnderWindowRow:
+                            spines[item.id] = agentMarks[row.id]
+                        case .pane: break
+                        }
+                    }
+                }
+            }
+            return Row(id: id, title: title, kind: kind, mark: isQuiet(id) ? nil : RowMark(unread: record.isUnread, agent: mark(agents)),
+                       agentSpines: spines, usesRowMarks: id == active && openTopics.contains(id) && !isQuiet(id),
+                       isUnread: record.isUnread && !isQuiet(id), isPinned: record.isPinned, sessions: sessions, isExpanded: openTopics.contains(id),
                        remembersSessions: !record.sessions.isEmpty, tags: config.topics.tags?.shown(record.tags) ?? [])
         }
         /// A Locked Session's row: one Session, quiet only as No Topic is, and titled by the Session card Formats.
