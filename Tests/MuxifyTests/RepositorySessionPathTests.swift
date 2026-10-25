@@ -126,11 +126,11 @@ final class RepositorySessionPathTests: XCTestCase {
         let rows = SessionPathRows.build(sessionPaths: [gameServer, notes], windows: [], records: [], titles: [:])
         XCTAssertEqual(rows.map(\.choice.name), ["game_server/main", "game_server/release", "notes"])
         XCTAssertEqual(rows.map(\.choice.directory.path), [main.folder.path, release.folder.path, notes.folder.path])
-        XCTAssertEqual(SessionPathRows.list(rows, query: "game_server/rel", visits: VisitLog()).rows.map(\.title.text), ["game_server/release"])
+        XCTAssertEqual(PaletteCatalog(windows: [], agents: []).addSessionList(topic: "target", query: "game_server/rel", rows: rows).rows.map(\.title.text), ["game_server/release"])
     }
 
     private func shown(_ rows: [SessionPathRow]) -> [String] {
-        SessionPathRows.list(rows, query: "", visits: VisitLog()).rows.map { "\($0.title.text) | \($0.detail.text) | \($0.pick.payload?.id ?? "blocked")" }
+        PaletteCatalog(windows: [], agents: []).addSessionList(topic: "target", query: "", rows: rows).rows.map { "\($0.title.text) | \($0.detail.text) | \($0.id)" }
     }
 
     func testWorktreeOfLiveSessionsInOtherOpenTopicsCanBePickedAndSaysAlsoInThoseTopics() {

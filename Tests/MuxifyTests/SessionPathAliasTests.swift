@@ -90,7 +90,7 @@ final class SessionPathAliasTests: XCTestCase {
 
     func testSessionPathListsShowTheAliasAndFindTheRowByAliasOrFolder() {
         let rows = SessionPathRows.build(sessionPaths: [vault, game], windows: [], records: [], titles: [:])
-        func titles(_ query: String) -> [String] { SessionPathRows.list(rows, query: query, visits: VisitLog()).rows.map(\.title.text) }
+        func titles(_ query: String) -> [String] { PaletteCatalog(windows: [], agents: []).addSessionList(topic: "target", query: query, rows: rows).rows.map(\.title.text) }
         XCTAssertEqual(titles(""), ["My Obsidian", "Game Server/main"])
         XCTAssertEqual(titles("obsidian"), ["My Obsidian"])
         XCTAssertEqual(titles("vault"), ["My Obsidian"])

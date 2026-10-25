@@ -23,33 +23,6 @@ final class NewTopicTests: XCTestCase {
         XCTAssertEqual(TopicNaming.slug(title: "Fix links", records: [open]), "fix-links-2")
     }
 
-    func testSessionPathOrderUsesScoreThenLastVisitThenConfigOrderAndTypingWins() {
-        let sessionPaths = ["alpha", "bravo", "charlie", "delta"].map { SessionPath(path: "/" + $0, name: $0) }
-        func window(_ directory: String) -> TmuxWindow {
-            TmuxWindow(id: "@1", sessionID: "$1", sessionName: "s", index: 0, name: "shell", paneTitle: "", path: directory + "/src",
-                       command: "zsh", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
-                       storedBrowser: StoredBrowser(), openRequests: [], topicID: nil, sessionPath: directory)
-        }
-        var visits = VisitLog()
-        _ = visits.record(window("/bravo"), group: .noTopic, sessionPaths: sessionPaths, folders: .local, at: Date(timeIntervalSince1970: 10))
-        _ = visits.record(window("/charlie"), group: .noTopic, sessionPaths: sessionPaths, folders: .local, at: Date(timeIntervalSince1970: 20))
-        func order(_ query: String, visits: VisitLog = visits) -> [String] {
-            SessionPathRows.list(SessionPathRows.build(sessionPaths: sessionPaths, windows: [window("/delta")], records: [], titles: [:]),
-                             query: query, visits: visits).rows.map(\.title.text)
-        }
-        XCTAssertEqual(order(""), ["charlie", "bravo", "alpha", "delta"], "last visit, then Config order; a live Session does not rank")
-        XCTAssertEqual(order("", visits: VisitLog()), ["alpha", "bravo", "charlie", "delta"])
-        XCTAssertEqual(order("alp"), ["alpha"])
-        XCTAssertTrue(order("unmatched").isEmpty)
-        XCTAssertEqual(order("brv").first, "bravo")
-        let byDirectory = SessionPathRows.list(SessionPathRows.build(sessionPaths: [sessionPath], windows: [], records: [], titles: [:]),
-                                           query: "work", visits: VisitLog())
-        XCTAssertEqual(byDirectory.rows.compactMap { $0.pick.payload?.sessionPath }, [sessionPath], "the directory matches too")
-        XCTAssertEqual(byDirectory.rows.first?.detail, Highlighted(text: "/work/game", marks: [1, 2, 3, 4]))
-        XCTAssertEqual(SessionPath.containing(.local("/alpha/subdir"), in: sessionPaths), sessionPaths[0])
-        XCTAssertNil(SessionPath.containing(.local("/alphabet"), in: sessionPaths))
-    }
-
     func testKeysAreTypedAsTheTerminalClientOrAsNoClient() {
         XCTAssertEqual(Tmux.sendKeysArguments(target: "=game/fix-links:", keys: ["printf 'hello world'"], literal: true, client: "/dev/ttys001"),
                        ["send-keys", "-c", "/dev/ttys001", "-l", "-t", "=game/fix-links:", "--", "printf 'hello world'"])

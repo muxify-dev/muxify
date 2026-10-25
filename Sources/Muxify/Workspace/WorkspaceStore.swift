@@ -75,12 +75,11 @@ final class WorkspaceStore {
         }
     }
 
-    /// The New Topic list, or the Add Session list of `topic`, ranked for `query`.
-    func sessionPathList(query: String, addingTo topic: TopicRecord? = nil) -> PickList<SessionChoice> {
-        let rows = SessionPathRows.build(sessionPaths: sessionPaths, windows: windows, records: topicWatcher.records, titles: topics.titles,
-                                     addingTo: topic)
-        return SessionPathRows.list(rows, query: query, visits: visits)
+    @ObservationIgnored private lazy var sessionPathRowsCache = ObservedCache { [unowned self] in
+        SessionPathRows.build(sessionPaths: sessionPaths, windows: windows, records: topicWatcher.records, titles: topics.titles)
     }
+
+    var sessionPathRows: [SessionPathRow] { sessionPathRowsCache.value }
 
     func presentNewTopic(keepingHistory: Bool = false) {
         guard !isRemote, !changingTopic else { return }
@@ -781,6 +780,7 @@ final class WorkspaceStore {
         case .changed(let change):
             switch presentation {
             case .membership(let windowID):
+                if ownsPalette, case .addSession = palette.flow { palette.close(restoringFocus: false) }
                 if let id = windowID.flatMap(WindowID.init(rawValue:)) { route(.result(.window(id), lastStartedRead: lastStartedRead)) }
             case .settle(let next):
                 if ownsPalette { palette.close(restoringFocus: false) }

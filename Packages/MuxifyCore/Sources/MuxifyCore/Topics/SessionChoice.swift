@@ -64,8 +64,12 @@ public enum SessionPathRows {
     /// The rows of the New Topic list, or of the Add Session list of `topic`, in Config order.
     public static func build(sessionPaths: [SessionPath], windows: [TmuxWindow], records: [TopicRecord], titles: [String: String],
                              addingTo topic: TopicRecord? = nil) -> [SessionPathRow] {
+        let folders = windows.compactMap { window -> (folder: Folder, topic: String)? in
+            guard let topic = window.topicID else { return nil }
+            return (.local(window.sessionPath), topic)
+        }
         return SessionChoice.launches(in: sessionPaths).map { choice in
-            let ids = Set(windows.filter { choice.directory.contains(.local($0.sessionPath)) }.compactMap(\.topicID))
+            let ids = Set(folders.filter { choice.directory.contains($0.folder) }.map(\.topic))
             let alsoIn = records.filter { $0.settledAt == nil && $0.id != topic?.id && ids.contains($0.id) }
                 .map { TopicSummary(id: $0.id, label: titles[$0.id] ?? TopicSummary(record: $0).label, tags: $0.tags.sorted()) }
             return SessionPathRow(choice: choice, alsoIn: alsoIn)

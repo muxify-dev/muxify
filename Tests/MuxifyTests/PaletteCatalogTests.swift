@@ -52,6 +52,77 @@ final class PaletteCatalogTests: XCTestCase {
     private func ids(_ list: PickList<PaletteItem>) -> [String] { list.rows.map(\.id) }
     private let goTo: [PaletteSource] = [.topics, .sessions]
 
+    func testAddSessionRanksBothKindsInOneSectionByScore() {
+        let running = window("@1", session: "a-long-plain-title", directory: "/beta")
+        let own = window("@2", session: "alpha/target", directory: "/alpha", topic: "target")
+        let paths = [SessionPath(path: "/alpha", name: "alpha"), SessionPath(path: "/beta", name: "beta")]
+        let rows = SessionPathRows.build(sessionPaths: paths, windows: [running, own], records: [], titles: [:])
+        let catalog = PaletteCatalog(windows: [running, own], agents: [], sessionPaths: paths, now: now)
+        let empty = catalog.addSessionList(topic: "target", query: "", rows: rows)
+        XCTAssertEqual(empty.sections.count, 1)
+        XCTAssertNil(empty.sections.first?.title)
+        XCTAssertEqual(empty.rows.first?.id, "running-$a-long-plain-title")
+        XCTAssertEqual(empty.rows.map(\.symbol), ["■", "□", "□"])
+        let typed = catalog.addSessionList(topic: "target", query: "alp", rows: rows)
+        XCTAssertEqual(typed.rows.map(\.id), ["/alpha", "running-$a-long-plain-title"])
+    }
+
+    func testAddSessionKeepsAlsoInOtherTopics() {
+        let running = window("@1", session: "debug", directory: "/work/game/main/src")
+        let records = [topic("target", "Target"), topic("other", "Other")]
+        let windows = [running, window("@2", session: "own", directory: "/work/game/main", topic: "target"),
+                       window("@3", session: "other", directory: "/work/game/main", topic: "other")]
+        let rows = SessionPathRows.build(sessionPaths: [game, notes], windows: windows, records: records, titles: [:])
+        let catalog = PaletteCatalog(windows: [running], agents: [], sessionPaths: [game, notes], now: now)
+        let list = catalog.addSessionList(topic: "target", query: "", rows: rows)
+        XCTAssertEqual(Array(list.rows.prefix(2).map(\.id)), ["running-$debug", "/work/game/main"])
+        let main = list.rows.first { $0.id == "/work/game/main" }
+        XCTAssertTrue(main?.detail.text.contains("Other") == true)
+        XCTAssertFalse(main?.detail.text.contains("Target") == true)
+    }
+
+    func testAddSessionBreaksEqualScoresByVisitThenActivityAcrossBothKinds() {
+        let path = SessionPath(path: "/work/game", name: "game")
+        let running = window("@1", session: "game", directory: "/elsewhere", activity: 100)
+        let rows = SessionPathRows.build(sessionPaths: [path], windows: [], records: [], titles: [:])
+        var visits = VisitLog()
+        _ = visits.record(running, group: .noTopic, sessionPaths: [path], folders: .local, at: now)
+        _ = visits.record(window("@2", session: "visitor", directory: path.folder.path), group: .noTopic,
+                          sessionPaths: [path], folders: .local, at: now.addingTimeInterval(1))
+        var catalog = PaletteCatalog(windows: [running], agents: [], sessionPaths: [path], visits: visits, now: now)
+        for query in ["", "game"] {
+            XCTAssertEqual(catalog.addSessionList(topic: "target", query: query, rows: rows).rows.first?.id,
+                           path.folder.real)
+        }
+        catalog.visits = VisitLog()
+        XCTAssertEqual(catalog.addSessionList(topic: "target", query: "game", rows: rows).rows.first?.id,
+                       "running-$game")
+    }
+
+    func testAddSessionPathsUseLastVisitThenConfigOrderAndMatchDirectory() {
+        let paths = ["alpha", "bravo", "charlie", "delta"].map { SessionPath(path: "/" + $0, name: $0) }
+        let rows = SessionPathRows.build(sessionPaths: paths, windows: [], records: [], titles: [:])
+        var visits = VisitLog()
+        _ = visits.record(window("@1", session: "b", directory: "/bravo"), group: .noTopic, sessionPaths: paths,
+                          folders: .local, at: Date(timeIntervalSince1970: 10))
+        _ = visits.record(window("@2", session: "c", directory: "/charlie"), group: .noTopic, sessionPaths: paths,
+                          folders: .local, at: Date(timeIntervalSince1970: 20))
+        var catalog = PaletteCatalog(windows: [], agents: [], sessionPaths: paths, visits: visits)
+        func order(_ query: String) -> [String] {
+            catalog.addSessionList(topic: "target", query: query, rows: rows).rows.map(\.title.text)
+        }
+        XCTAssertEqual(order(""), ["charlie", "bravo", "alpha", "delta"])
+        XCTAssertEqual(order("alp"), ["alpha"])
+        XCTAssertTrue(order("unmatched").isEmpty)
+        XCTAssertEqual(order("brv"), ["bravo"])
+        catalog.visits = VisitLog()
+        XCTAssertEqual(order(""), ["alpha", "bravo", "charlie", "delta"])
+        let path = SessionPath(path: "/work/game", name: "game")
+        let directoryRows = SessionPathRows.build(sessionPaths: [path], windows: [], records: [], titles: [:])
+        let matched = catalog.addSessionList(topic: "target", query: "work", rows: directoryRows)
+        XCTAssertEqual(matched.rows.first?.detail, Highlighted(text: "/work/game", marks: [1, 2, 3, 4]))
+    }
+
     func testGoToListsOtherLiveTopicsThenCurrentThenDormantBeforeSessionsSnoozedAndSettled() {
         var snoozed = topic("z", "Zzz")
         snoozed.snoozedUntil = "never"

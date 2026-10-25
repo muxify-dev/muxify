@@ -302,20 +302,7 @@ extension CommandPalette {
         case .check(let draft): return checkRows(draft)
         case .unsnoozeTopic: return unsnoozeRows()
         case .addSession(let topic):
-            let list = store.sessionPathList(query: query, addingTo: topic)
-            let paths = PickList(sections: list.sections.map { section in
-                PickSection(id: section.id, title: section.title, rows: section.rows.map { row in
-                    let pick: Pick<PaletteItem>
-                    switch row.pick {
-                    case .available(let choice): pick = .available(PaletteItem(kind: .sessionPath, ref: .choice(.sessionPath(choice))))
-                    case .blocked(let reason): pick = .blocked(reason: reason)
-                    }
-                    return PickRow(id: row.id, symbol: row.symbol, title: row.title, detail: row.detail,
-                                   tags: row.tags, trailing: row.trailing, mark: row.mark,
-                                   pick: pick, paste: nil, snooze: nil)
-                })
-            })
-            return PickList(sections: (catalog?.addSessionList(topic: topic.id, query: query).sections ?? []) + paths.sections)
+            return catalog?.addSessionList(topic: topic.id, query: query, rows: store.sessionPathRows) ?? .empty
         case .worktreeStart(let draft): return worktreeStartRows(draft)
         case .snoozeUntil, .zen:
             let now = Date()
