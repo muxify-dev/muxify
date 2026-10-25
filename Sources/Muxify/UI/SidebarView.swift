@@ -11,9 +11,12 @@ struct SidebarView: View {
 
     /// The share of the sidebar's height the Agents section gets.
     @AppStorage("sidebarAgentsFraction") private var agentsFraction: Double = 0.35
+    @State private var swipeArea = SidebarSwipeArea()
 
     var body: some View {
-        content.environment(\.sidebarTypography, typography)
+        // A swipe anywhere in the Sidebar switches Topics and Sessions, also over Agents.
+        content.sidebarSwipeArea(swipeArea)
+            .environment(\.sidebarTypography, typography)
             .environment(\.wrapsCardTitles, store.config.sidebar.wrapsTitles)
     }
 
@@ -59,7 +62,7 @@ private struct WorkSection: View {
         if model.showsToggle {
             SidebarPager(mode: Binding(get: { model.mode }, set: { store.sidebarMode = $0 }),
                          animateSwitching: store.config.sidebar.animateSwitching,
-                         acceptsGestures: !store.palette.isOpen && store.currentGitView == nil) {
+                         acceptsGestures: !store.palette.isOpen && store.currentGitView?.isOpen != true) {
                 TopicsSection(store: store, model: model)
             } sessions: {
                 SessionsSection(store: store)

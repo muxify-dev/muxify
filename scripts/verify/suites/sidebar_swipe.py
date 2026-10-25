@@ -5,6 +5,7 @@ the real gesture recognizer and release path; no check needs to move the pointer
 """
 
 import json
+import time
 import unittest
 
 from scripts.verify.sandbox import Sandbox
@@ -60,6 +61,34 @@ class SidebarSwipe(unittest.TestCase):
         self.assertFalse(self.s.has('session-' + self.session, rs), 'the offscreen Sessions page is accessible')
         self.assertEqual(self.s.tmux('list-clients', '-F', '#{client_tty}|#{window_id}'), before)
         self.assertEqual(self.s.driver('responder')['responders'], responder)
+
+    def test_swipe_works_again_after_the_git_view_closes(self):
+        self.s.wait_rows(lambda rs: self.s.has('toggle-git-view', rs), 'the header has no Git View button')
+        self.s.act('press', 'toggle-git-view')
+        self.s.wait_rows(lambda rs: self.s.row('toggle-git-view', rs).get('accessibilityValue') == 'on', 'the Git View did not open')
+        self.s.act('press', 'toggle-git-view')
+        self.s.wait_rows(lambda rs: self.s.row('toggle-git-view', rs).get('accessibilityValue') == 'off', 'the Git View did not close')
+        self.sample('Swipe left')
+        self.wait_mode('sessions')
+        self.sample('Swipe right')
+        self.wait_mode('topics')
+
+    def test_a_swipe_beside_the_sidebar_does_not_switch_views(self):
+        self.sample('Swipe left beside the Sidebar')
+        time.sleep(1)
+        rs = self.wait_mode('topics')
+        self.assertTrue(self.s.has('topic-swipe', rs), 'a swipe over the terminal switched the Sidebar to Sessions')
+
+    def test_a_swipe_over_the_agents_section_switches_views(self):
+        def hide_agents():
+            self.config.write_text('sidebar:\n  agents: false\n')
+            self.s.wait_rows(lambda rs: not self.s.has('agents-header', rs), 'the Sidebar kept Agents')
+        self.addCleanup(hide_agents)
+        self.config.write_text('sidebar:\n  agents: true\n')
+        self.s.wait_rows(lambda rs: self.s.has('agents-header', rs), 'the Sidebar did not show Agents')
+        self.sample('Swipe left below the Sidebar views')
+        rs = self.wait_mode('sessions')
+        self.assertTrue(self.s.has('agents-header', rs), 'Sessions did not keep the Agents section')
 
     def test_partial_swipe_previews_the_next_page_before_committing(self):
         self.require_motion()
