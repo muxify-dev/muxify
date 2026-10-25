@@ -96,6 +96,10 @@ enum TestDriver {
             pending = Reveal(nonce: nonce, target: target, command: command)
             return
         }
+        if ["drag", "click", "hover"].contains(command["command"] as? String), SidebarPagerMotion.isMoving {
+            pending = Settle(nonce: nonce, command: command)
+            return
+        }
         if ["drag", "click"].contains(command["command"] as? String) {
             pending = Drag(nonce: nonce, command: command)
             return
@@ -123,6 +127,29 @@ enum TestDriver {
     }
 
     private static var pending: Steps?
+
+    /// A `click`, `drag` or `hover` that comes while the Sidebar slides between Topics and Sessions waits until the
+    /// page is at rest: these aim at the centre of the target's frame, and a dump mid-slide gives a frame that the
+    /// row has left by the time the event comes. After two seconds the command runs anyway.
+    private final class Settle: Steps {
+        let nonce: String
+        private let command: [String: Any]
+        private let started = Date()
+        private var drag: Drag?
+
+        init(nonce: String, command: [String: Any]) {
+            self.nonce = nonce
+            self.command = command
+        }
+
+        func step() -> [String: Any]? {
+            if let drag { return drag.step() }
+            if SidebarPagerMotion.isMoving, Date().timeIntervalSince(started) < 2 { return nil }
+            guard ["drag", "click"].contains(command["command"] as? String) else { return TestDriver.run(command) }
+            drag = Drag(nonce: nonce, command: command)
+            return nil
+        }
+    }
 
     /// `click` presses the target at its centre and lets go there, without moving: a plain click of the mouse.
     /// The option `command_key` holds ⌘ through the click, as a ⌘-click does.
