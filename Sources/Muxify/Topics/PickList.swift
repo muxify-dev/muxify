@@ -182,11 +182,36 @@ struct PickSectionInput<Payload: Equatable> {
     let rule: SectionRule
     let candidates: [PickCandidate<Payload>]
     var currentLast = false
+    /// False for a list whose candidate order means something, such as Commands or Tags in Config order.
+    var shorterTitleFirst = true
+
+    /// The `topics.tags` Tags, which keep Config order on a tie.
+    static func tags(_ candidates: [PickCandidate<Payload>], showsWhenEmpty: Bool) -> PickSectionInput {
+        PickSectionInput(id: "tags", title: "Tags", rule: .ranked(showsWhenEmpty: showsWhenEmpty), candidates: candidates, shorterTitleFirst: false)
+    }
 }
 
-/// The one ranking pipeline: match, drop non-matches, sort by score, then a row you can go to before an
-/// unopened one, then last visit, then activity, then candidate order; on an empty query only, Pinned rows go
-/// first in candidate order, then current rows. Empty sections drop out.
+/// A candidate that matched the query, and where it stood in its section.
+private struct Ranked<Payload: Equatable> {
+    let index: Int
+    let candidate: PickCandidate<Payload>
+    let match: FieldsMatch
+
+    func precedes(_ other: Ranked, shorterTitleFirst: Bool) -> Bool {
+        let (left, right) = (candidate, other.candidate)
+        if match.score != other.match.score { return match.score > other.match.score }
+        if shorterTitleFirst, left.title.count != right.title.count { return left.title.count < right.title.count }
+        if left.unopened != right.unopened { return right.unopened }
+        if left.lastVisit != right.lastVisit { return (left.lastVisit ?? .distantPast) > (right.lastVisit ?? .distantPast) }
+        if left.activity != right.activity { return left.activity > right.activity }
+        return index < other.index
+    }
+}
+
+/// The one ranking pipeline: match, drop non-matches, sort by score, then the shorter title for a query when the
+/// section wants it, as fzf's default `--tiebreak=length`, then a row you can go to before an unopened one, then
+/// last visit, then activity, then candidate order; on an empty query only, Pinned rows go first in candidate
+/// order, then current rows. Empty sections drop out.
 enum FuzzyRanker {
     static func list<Payload>(_ sections: [PickSectionInput<Payload>], query: FuzzyQuery) -> PickList<Payload> {
         PickList(sections: sections.compactMap { section in
@@ -194,27 +219,20 @@ enum FuzzyRanker {
             switch section.rule {
             case .ranked(let showsWhenEmpty):
                 guard showsWhenEmpty || !query.isEmpty else { return nil }
+                let shorterTitleFirst = section.shorterTitleFirst && !query.isEmpty
                 let ranked = section.candidates.enumerated()
-                    .compactMap { index, candidate in FieldsMatch.best(query, in: candidate.searchFields).map { (index, candidate, $0) } }
-                    .sorted { lhs, rhs in
-                        if lhs.2.score != rhs.2.score { return lhs.2.score > rhs.2.score }
-                        if lhs.1.unopened != rhs.1.unopened { return rhs.1.unopened }
-                        switch (lhs.1.lastVisit, rhs.1.lastVisit) {
-                        case (let left?, let right?) where left != right: return left > right
-                        case (.some, nil): return true
-                        case (nil, .some): return false
-                        default:
-                            if lhs.1.activity != rhs.1.activity { return lhs.1.activity > rhs.1.activity }
-                            return lhs.0 < rhs.0
-                        }
+                    .compactMap { index, candidate in
+                        FieldsMatch.best(query, in: candidate.searchFields).map { Ranked(index: index, candidate: candidate, match: $0) }
                     }
-                let pinned = ranked.filter { $0.1.isPinned }.sorted { $0.0 < $1.0 }
-                let others = ranked.filter { !$0.1.isPinned }
+                    .sorted { $0.precedes($1, shorterTitleFirst: shorterTitleFirst) }
+                let pinned = ranked.filter { $0.candidate.isPinned }.sorted { $0.index < $1.index }
+                let others = ranked.map(\.candidate).filter { !$0.isPinned }
                 let emptyOrder = section.currentLast
-                    ? others.filter { !$0.1.isCurrent && !$0.1.unopened } + others.filter { $0.1.isCurrent && !$0.1.unopened } + others.filter { $0.1.unopened }
-                    : others.filter { $0.1.isCurrent } + others.filter { !$0.1.isCurrent }
-                let shown = query.isEmpty ? pinned + emptyOrder : ranked
-                rows = shown.map { row($0.1, match: query.isEmpty ? nil : $0.2) }
+                    ? others.filter { !$0.isCurrent && !$0.unopened } + others.filter { $0.isCurrent && !$0.unopened } + others.filter(\.unopened)
+                    : others.filter(\.isCurrent) + others.filter { !$0.isCurrent }
+                rows = query.isEmpty
+                    ? (pinned.map(\.candidate) + emptyOrder).map { row($0, match: nil) }
+                    : ranked.map { row($0.candidate, match: $0.match) }
             case .fixed:
                 rows = section.candidates.map { row($0, match: nil) }
             }

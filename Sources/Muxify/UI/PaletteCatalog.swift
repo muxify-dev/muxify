@@ -90,7 +90,7 @@ struct PaletteCatalog {
                                          candidates: commands.map {
                     PickCandidate(id: "command-" + $0.rawValue, title: $0.rawValue, note: commandSummaries[$0], trailing: commandShortcuts[$0] ?? "",
                                   pick: .available(PaletteItem(kind: .command, ref: .command($0))))
-                })]
+                }, shorterTitleFirst: false)]
             case .topics:
                 return (openTopicSection(only: nil).map { [$0] } ?? []) + (tagSection.map { [$0] } ?? [])
             case .sessions:
@@ -117,13 +117,13 @@ struct PaletteCatalog {
     /// Each Tag of `topics.tags` that a Topic record has, in Config order. A plain word matches its name too.
     private var tagSection: PickSectionInput<PaletteItem>? {
         guard offersTopics, let definitions = topics?.tags?.definitions else { return nil }
-        return PickSectionInput(id: "tags", title: "Tags", rule: .ranked(showsWhenEmpty: false), candidates: definitions.compactMap { definition in
+        return .tags(definitions.compactMap { definition in
             let count = records.filter { $0.tags.contains(definition.tag) }.count
             guard count > 0 else { return nil }
             return PickCandidate(id: "tag-" + definition.tag.name, title: definition.tag.description, fields: [.hidden(definition.tag.name)],
                                  trailing: count == 1 ? "1 Topic" : "\(count) Topics",
                                  pick: .available(PaletteItem(kind: .tag, ref: .tag(definition.tag), color: definition.color)), titlePlace: .tag)
-        })
+        }, showsWhenEmpty: false)
     }
 
     private func snoozedAndSettledSections(only tag: Tag?) -> [PickSectionInput<PaletteItem>] {

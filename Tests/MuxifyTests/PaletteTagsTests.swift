@@ -17,11 +17,11 @@ final class PaletteTagsTests: XCTestCase {
             PickCandidate(id: "u", title: "Docs pass", pick: .available("u")),
             PickCandidate(id: "tag", title: "#backend", pick: .available("tag"), titlePlace: .tag),
         ])], query: FuzzyQuery("#ba"))
-        XCTAssertEqual(tagged.rows.map(\.id), ["t", "tag"])
-        XCTAssertEqual(tagged.rows[0].tags.map(\.text), [Highlighted(text: "#backend", marks: [0, 1, 2])], "the matched Tag shows after the title")
-        XCTAssertEqual(tagged.rows[0].detail.text, "", "a Tag is not in the detail line")
-        XCTAssertEqual(tagged.rows[1].title, Highlighted(text: "#backend", marks: [0, 1, 2]))
-        XCTAssertEqual(tagged.rows[1].tags, [], "a Tag row's title is not repeated as a chip")
+        XCTAssertEqual(tagged.rows.map(\.id), ["tag", "t"], "on a tie the shorter title goes first")
+        XCTAssertEqual(tagged.rows[1].tags.map(\.text), [Highlighted(text: "#backend", marks: [0, 1, 2])], "the matched Tag shows after the title")
+        XCTAssertEqual(tagged.rows[1].detail.text, "", "a Tag is not in the detail line")
+        XCTAssertEqual(tagged.rows[0].title, Highlighted(text: "#backend", marks: [0, 1, 2]))
+        XCTAssertEqual(tagged.rows[0].tags, [], "a Tag row's title is not repeated as a chip")
         let unmatched = FuzzyRanker.list([PickSectionInput(id: "s", rule: .ranked(showsWhenEmpty: true), candidates: [
             PickCandidate(id: "t", title: "Fix reward drop", fields: [defined("backend"), defined("release")], pick: .available("t")),
         ])], query: FuzzyQuery(""))

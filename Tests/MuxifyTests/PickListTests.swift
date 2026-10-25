@@ -8,8 +8,9 @@ final class PickListTests: XCTestCase {
     }
 
     private func list(_ candidates: [PickCandidate<String>], _ query: String, rule: SectionRule = .ranked(showsWhenEmpty: true),
-                       title: String? = nil, currentLast: Bool = false) -> PickList<String> {
-        FuzzyRanker.list([PickSectionInput(id: "s", title: title, rule: rule, candidates: candidates, currentLast: currentLast)], query: FuzzyQuery(query))
+                       title: String? = nil, currentLast: Bool = false, shorterTitleFirst: Bool = true) -> PickList<String> {
+        FuzzyRanker.list([PickSectionInput(id: "s", title: title, rule: rule, candidates: candidates, currentLast: currentLast,
+                                           shorterTitleFirst: shorterTitleFirst)], query: FuzzyQuery(query))
     }
 
     func testEachWordTakesItsBestFieldAndTheTitleWinsATie() throws {
@@ -26,18 +27,21 @@ final class PickListTests: XCTestCase {
         XCTAssertEqual(both.score, sett.score + gs.score)
     }
 
-    func testRankingIsScoreThenLastVisitThenCandidateOrder() {
+    func testRankingIsScoreThenShorterTitleThenLastVisitThenCandidateOrder() {
         let candidates = [
             candidate("old", "alpha one", visit: 10),
             candidate("never", "alpha two"),
             candidate("new", "alpha three", visit: 20),
             candidate("exact", "alpha"),
+            candidate("twin", "alpha 1"),
             candidate("other", "beta"),
         ]
-        XCTAssertEqual(list(candidates, "alpha").rows.map(\.id), ["new", "old", "never", "exact"],
-                       "fzf scores a prefix like the exact name, so the visit decides, then the candidate order")
-        XCTAssertEqual(list(candidates, "alpha").rows.last?.title, Highlighted(text: "alpha", marks: [0, 1, 2, 3, 4]))
-        XCTAssertEqual(list(candidates, "").rows.map(\.id), ["new", "old", "never", "exact", "other"],
+        XCTAssertEqual(list(candidates, "alpha").rows.map(\.id), ["exact", "twin", "old", "never", "new"],
+                       "fzf scores a prefix like the exact name, so the shorter title wins, then the visit, then the candidate order")
+        XCTAssertEqual(list(candidates, "alpha", shorterTitleFirst: false).rows.map(\.id), ["new", "old", "never", "exact", "twin"],
+                       "a section whose candidate order means something skips the length tiebreak")
+        XCTAssertEqual(list(candidates, "alpha").rows.first?.title, Highlighted(text: "alpha", marks: [0, 1, 2, 3, 4]))
+        XCTAssertEqual(list(candidates, "").rows.map(\.id), ["new", "old", "never", "exact", "twin", "other"],
                        "an empty query lists the newest visit first, then candidate order")
     }
 
@@ -58,7 +62,7 @@ final class PickListTests: XCTestCase {
         var first = candidate("first-pin", "alpha pin", visit: 10), second = candidate("second-pin", "beta pin", visit: 30)
         first.isPinned = true
         second.isPinned = true
-        let candidates = [candidate("other", "alpha beta", visit: 20), first, second, candidate("active", "alpha", visit: 5, current: true)]
+        let candidates = [candidate("other", "alpha bet", visit: 20), first, second, candidate("active", "alpha cur", visit: 5, current: true)]
         XCTAssertEqual(list(candidates, "").rows.map(\.id), ["first-pin", "second-pin", "active", "other"],
                        "Pinned rows keep candidate order, before the current row")
         XCTAssertEqual(list(candidates, "alpha").rows.map(\.id), ["other", "first-pin", "active"], "a typed query ranks by match, then visit")
