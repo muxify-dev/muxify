@@ -40,10 +40,7 @@ class QuickSwitchHints(unittest.TestCase):
         self.s.act('action', 'quick-switch-input', action)
 
     def select(self, window):
-        for client in self.s.tmux('list-clients', '-F', '#{client_tty} #{client_control_mode}').splitlines():
-            if client.endswith(' 0'):
-                self.s.tmux('switch-client', '-c', client.split()[0], '-t', window)
-        self.s.wait_shown(window)
+        self.s.show(window)
 
     def value(self, key, rows=None):
         return self.s.row(key, rows).get('accessibilityValue') if self.s.has(key, rows) else None

@@ -72,7 +72,7 @@ final class CLIIntegrationTests: XCTestCase {
             let id = try XCTUnwrap((try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])?["id"] as? String)
             try Data(text.utf8).write(to: topics.appendingPathComponent(id + ".json"))
         }
-        let binary = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("muxify")
+        let binary = cli
         let result = try await run(binary, arguments: ["topic", "list"], environment: ["XDG_STATE_HOME": state.path])
         XCTAssertEqual(result.status, 0, result.output)
         XCTAssertEqual(Array(result.output.utf8), Array("""
@@ -93,7 +93,7 @@ final class CLIIntegrationTests: XCTestCase {
     func testTopicListLeavesOutFilesThatAreNotValidRecords() async throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-cli-invalid-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: state) }
-        let binary = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("muxify")
+        let binary = cli
         let empty = try await run(binary, arguments: ["topic", "list"], environment: ["XDG_STATE_HOME": state.path])
         XCTAssertEqual(empty.status, 0, empty.output)
         XCTAssertEqual(empty.output, "")
@@ -126,7 +126,7 @@ final class CLIIntegrationTests: XCTestCase {
         try Data(#"{"id":"a","title":"Valid"}"#.utf8).write(to: topics.appendingPathComponent("a.json"))
         // The read takes the record lock, and it cannot make the lock file in a read-only state folder.
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
-        let binary = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("muxify")
+        let binary = cli
         let result = try await run(binary, arguments: ["topic", "list"], environment: ["XDG_STATE_HOME": state.path])
         XCTAssertEqual(result.status, 1, result.output)
         XCTAssertEqual(result.output, "muxify: Muxify could not read or write the Topic records in \(folder.path). Permission denied. No changes were made.\n")
@@ -1167,7 +1167,12 @@ final class CLIIntegrationTests: XCTestCase {
         return try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(stdout.utf8)) as? [String: Any], stdout)
     }
 
-    private var cli: URL { Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("muxify") }
+    /// The CLI beside this test bundle: `muxify-app-cli` from the app's Xcode build, `muxify` from `swift test`.
+    private var cli: URL {
+        let folder = Bundle(for: Self.self).bundleURL.deletingLastPathComponent()
+        let appCLI = folder.appendingPathComponent("muxify-app-cli")
+        return FileManager.default.isExecutableFile(atPath: appCLI.path) ? appCLI : folder.appendingPathComponent("muxify")
+    }
 
     /// Makes a Topic with a Session in `sessionPath` through the CLI, as a user would before the command under test:
     /// an Empty Topic, then Add a Session.
@@ -1181,7 +1186,7 @@ final class CLIIntegrationTests: XCTestCase {
     }
 
     private func standaloneCLI() throws -> URL {
-        let binary = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("muxify")
+        let binary = cli
         XCTAssertTrue(FileManager.default.isExecutableFile(atPath: binary.path))
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let folder = root.appendingPathComponent(".build/cli-smoke-\(UUID().uuidString)")

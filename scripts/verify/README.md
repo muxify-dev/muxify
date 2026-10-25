@@ -57,6 +57,7 @@ When a driver command times out, read `logs/app.log` and `driver/stall-<n>.txt` 
 - Find UI elements by their accessibility identifier. If an element has no identifier, add `.accessibilityIdentifier(...)` to the SwiftUI view.
 - Use generous time limits. The app reads tmux once per second, so a limit under 2 seconds is not reliable.
 - Do not sleep for a fixed time to let the app see a change. Wait for what the app shows: `sandbox.wait_shown(window)` after you move the client, or `sandbox.wait_rows(...)`. Sleep only before you assert that something did not happen.
+- To make the app show a Window before a check, use `sandbox.show(window)`. It asks the app, as `muxify window open` does. A `switch-client` to the Window that the client is already on does not move the client, so the app stays on an Empty Topic page.
 - If a check fails because of a known app bug, mark it `@unittest.expectedFailure`. Write a one-line comment above it that names the bug. When the bug is fixed, the run reports "unexpected success". Then remove the mark.
 
 ## Do not take focus

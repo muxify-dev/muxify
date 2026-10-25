@@ -39,6 +39,11 @@ class SidebarSwipe(unittest.TestCase):
                                 and self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').endswith(' ' + position),
                                 'the Sidebar did not settle on ' + mode)
 
+    def require_motion(self):
+        """The Sidebar follows a swipe only while it animates. Reduce Motion in System Settings stops that for every app."""
+        if self.s.row('sidebar-swipe-input').get('accessibilityLabel', '').startswith('Sidebar swipe input instant'):
+            self.skipTest('Reduce Motion is on, so the Sidebar does not follow a swipe')
+
     def sample(self, name):
         self.s.act('action', 'sidebar-swipe-input', name)
 
@@ -57,6 +62,7 @@ class SidebarSwipe(unittest.TestCase):
         self.assertEqual(self.s.driver('responder')['responders'], responder)
 
     def test_partial_swipe_previews_the_next_page_before_committing(self):
+        self.require_motion()
         self.sample('Begin swipe left')
         self.addCleanup(lambda: self.sample('Cancel current swipe'))
         rs = self.s.wait_rows(lambda rs: self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').endswith(' 0.400'),
@@ -66,6 +72,7 @@ class SidebarSwipe(unittest.TestCase):
         self.wait_mode('topics')
 
     def test_animation_can_be_disabled_and_reenabled_live_without_disabling_switching(self):
+        self.require_motion()
         self.addCleanup(self.config.write_text, 'sidebar:\n  agents: false\n')
         self.addCleanup(lambda: self.sample('Cancel current swipe'))
         frames = []
