@@ -50,9 +50,6 @@ extension CommandPalette {
             case .rename: begin(.text(.renameTopic(topic)), text: topic.title ?? "", keepingHistory: true)
             case .editTags: store.presentEditTags(of: id, keepingHistory: true)
             case .addSessionToTopic: store.refreshSessionPaths(); begin(.addSession(topic), keepingHistory: true)
-            case .suggestTopicTitle:
-                close()
-                store.suggestTopicTitle(for: id) { store.renameTopic(id, to: $0) }
             case .pinTopic: close(); store.pinTopic(id, true)
             case .unpinTopic: close(); store.pinTopic(id, false)
             case .unsnoozeTopic: close(); store.unsnoozeTopic(id)

@@ -182,10 +182,6 @@ private struct SpotlightPalette: View {
                     .accessibilityIdentifier("palette-new-worktree")
                     .accessibilityValue(palette.newWorktree ? "on" : "off")
             }
-            if palette.canSuggestTitle {
-                Button(controlTitle("Suggest title", .suggestTopicTitle)) { palette.suggestTitle() }
-                    .accessibilityIdentifier("palette-suggest-title")
-            }
             Spacer()
         }
         .font(.system(size: 12)).padding(.horizontal, 20).padding(.vertical, 6)

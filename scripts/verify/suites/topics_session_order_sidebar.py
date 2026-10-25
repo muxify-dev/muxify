@@ -42,7 +42,7 @@ class TopicsSessionOrderSidebar(TopicsSidebar):
         older, newer = self.two_session_topic('order-auto')
         self.wait_order('order-auto', [older, newer], 'the Sessions are not oldest first')
         self.addCleanup(self.config.write_text, self.config_text)
-        self.config.write_text(self.config_text + '  session_order: newest_first\n')
+        self.config.write_text(self.config_text + 'topics:\n  session_order: newest_first\n')
         self.wait_order('order-auto', [newer, older], 'topics.session_order: newest_first did not put the newest Session first')
 
     def test_a_drag_on_a_session_line_moves_it_within_its_topic(self):

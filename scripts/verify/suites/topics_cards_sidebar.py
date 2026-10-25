@@ -56,7 +56,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.write_topic('insert-top', 'Existing', self.beta, order=0)
         self.addCleanup(self.s.act, 'press', 'Reload Config')
         self.addCleanup(self.config.write_text, self.config_text)
-        self.config.write_text(self.config_text + '  insert_position: top\n')
+        self.config.write_text(self.config_text + 'topics:\n  insert_position: top\n')
         self.s.act('press', 'Reload Config')
         record = self.create_topic('Inserted at top')
         key = 'topic-' + record['id']

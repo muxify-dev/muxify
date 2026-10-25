@@ -249,15 +249,6 @@ extension CommandPalette {
         }
     }
 
-    var canSuggestTitle: Bool {
-        switch flow {
-        case .text(.tags(let field)):
-            if case .newTopic = field.mode { true } else { false }
-        case .text(.renameTopic): true
-        default: false
-        }
-    }
-
     func topicTitle(_ topic: TopicRecord) -> String {
         store?.topics.titles[topic.id] ?? topic.title ?? topic.slug ?? "Untitled Topic"
     }
@@ -497,25 +488,6 @@ extension CommandPalette {
         }
     }
 
-    func suggestTitle() {
-        guard let store else { return }
-        let token = invocation
-        let revision = queryRevision
-        let request = UUID()
-        suggestionRequest = request
-        let receive: (String) -> Void = { [weak self] title in
-            guard let self, self.invocation == token, self.queryRevision == revision,
-                  self.suggestionRequest == request else { return }
-            self.query = title
-        }
-        switch flow {
-        case .text(.tags(let field)):
-            if case .newTopic = field.mode { store.suggestNewTopicTitle(completion: receive) }
-        case .text(.renameTopic(let topic)): store.suggestTopicTitle(for: topic.id, completion: receive)
-        default: break
-        }
-    }
-
     func changeMoveScope(_ scope: MoveDraft.Scope) {
         guard case .move(var draft) = flow else { return }
         draft.scope = scope
@@ -672,7 +644,6 @@ extension CommandPalette {
             case .toggleIncludeTab: toggleTab()
             case .toggleNewWorktree:
                 if case .addSession = flow { newWorktree.toggle() }
-            case .suggestTopicTitle: suggestTitle()
             default: return false
             }
             return true

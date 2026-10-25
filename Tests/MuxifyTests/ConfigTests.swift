@@ -111,16 +111,13 @@ final class ConfigTests: XCTestCase {
           move_window: ctrl+cmd+w
           command_palette:
             move_window: alt+9
-            suggest_title: alt+r
         """)
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 4, message: "move_window is gone: use choose_window"),
-            ConfigProblem(path: root, line: 5, message: "suggest_title is gone: use suggest_topic_title"),
         ])
         XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+w"), focus: nil), .moveWindow)
         XCTAssertNil(config.paletteKeybinds.action(for: trigger("alt+9")))
         XCTAssertEqual(config.paletteKeybinds.firstTrigger(for: .chooseWindow), trigger("alt+2"))
-        XCTAssertEqual(config.paletteKeybinds.firstTrigger(for: .suggestTopicTitle), trigger("alt+s"))
     }
 
     func testLayoutAndFocusDefaults() throws {
@@ -142,7 +139,6 @@ final class ConfigTests: XCTestCase {
         for (action, spellings) in expected {
             XCTAssertEqual(config.keybinds.triggers[action] ?? [], spellings.map(trigger), action.rawValue)
         }
-        XCTAssertEqual(config.paletteKeybinds.triggers[.suggestTopicTitle], [trigger("alt+s")])
         XCTAssertNil(config.keybinds.action(for: trigger("alt+cmd+t"), focus: nil), "the old Maximize Terminal default is still bound")
         XCTAssertEqual(config.problems, [])
     }
@@ -1078,33 +1074,6 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.problems, [])
     }
 
-    func testTopicTitleCommandsAcceptOneCommandAnOrderedListAndAnEmptyList() throws {
-        XCTAssertEqual(try load("topics:\n  title_command_fallbacks: claude -p").topics.titleCommandFallbacks, ["claude -p"])
-        XCTAssertEqual(try load("topics:\n  title_command_fallbacks: [first, second]").topics.titleCommandFallbacks, ["first", "second"])
-        XCTAssertEqual(try load("topics:\n  title_command_fallbacks: []").topics.titleCommandFallbacks, [])
-    }
-
-    func testTopicTitleCommandsReportBadShapesAtTheirLinesAndKeepValidItems() throws {
-        let list = try load("""
-        topics:
-          title_command_fallbacks:
-            - first
-            - ""
-            - 42
-            - second
-        """)
-        XCTAssertEqual(list.topics.titleCommandFallbacks, ["first", "second"])
-        XCTAssertEqual(list.problems, [
-            ConfigProblem(path: root, line: 4, message: "topics.title_command_fallbacks: expected a nonempty string"),
-            ConfigProblem(path: root, line: 5, message: "topics.title_command_fallbacks: expected a nonempty string"),
-        ])
-        for text in ["topics:\n  title_command_fallbacks: ''", "topics:\n  title_command_fallbacks: {}", "topics:\n  title_command_fallbacks: 42"] {
-            let config = try load(text)
-            XCTAssertTrue(config.topics.titleCommandFallbacks.isEmpty)
-            XCTAssertEqual(config.problems.first?.line, 2)
-        }
-    }
-
     func testTopicInsertPosition() throws {
         XCTAssertEqual(try load("").topics.insertPosition, .bottom)
         XCTAssertEqual(try load("topics:\n  insert_position: top").topics.insertPosition, .top)
@@ -1122,12 +1091,6 @@ final class ConfigTests: XCTestCase {
         let bad = try load("topics:\n  session_order: manual")
         XCTAssertEqual(bad.topics.sessionOrder, .oldestFirst)
         XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "topics.session_order: expected oldest_first or newest_first")])
-    }
-
-    func testTemplateShowsTopicTitleCommandExamplesWithoutEnablingThem() throws {
-        XCTAssertTrue(Config.template.contains("#   title_command_fallbacks:"))
-        XCTAssertTrue(Config.template.contains("#     - claude -p --model haiku"))
-        XCTAssertTrue(try load(Config.template).topics.titleCommandFallbacks.isEmpty)
     }
 
     func testTheSidebarTypographyTheTemplateShowsIsTheDefault() throws {

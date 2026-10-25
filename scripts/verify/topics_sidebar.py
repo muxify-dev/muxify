@@ -49,16 +49,6 @@ class TopicsSidebar(unittest.TestCase):
         zdot_dir = s.root/'zdot'
         for directory in [cls.topics_dir, cls.alpha, cls.beta, s.root/'codex-home', bin_dir, zdot_dir]:
             directory.mkdir(parents=True, exist_ok=True)
-        opencode = bin_dir/'opencode'
-        opencode.write_text("""#!/bin/sh
-test "$1" = export || exit 2
-printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","text":"Title suggestion verification prompt"}]}]}'
-""")
-        opencode.chmod(0o755)
-        cls.title_prompt = s.root/'title-prompt.txt'
-        title_model = bin_dir/'title-model'
-        title_model.write_text("#!/bin/sh\ncat > " + str(cls.title_prompt) + "\nprintf 'Verified Agent Title\\n'\n")
-        title_model.chmod(0o755)
         (zdot_dir/'.zprofile').write_text('export PATH=' + str(bin_dir) + ':/usr/bin:/bin:/usr/sbin:/sbin\n')
         s.app_env['ZDOTDIR'] = str(zdot_dir)
         for repository in [cls.alpha, cls.delta, cls.epsilon]:
@@ -85,8 +75,7 @@ printf '%s\\n' '{"messages":[{"info":{"role":"user"},"parts":[{"type":"text","te
         # The base of the Worktrees that the New Worktree checks create; no check opens a Session in it.
         subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma/'base'), '-b', 'base-line'], check=True)
         cls.config = s.root/'config/muxify/config.yaml'
-        cls.config_text = ('sessions:\n  paths:\n    - path: ' + str(s.root/'projects') + '/*\n'
-                           'topics:\n  title_command_fallbacks: /bin/sh ' + str(title_model) + '\n')
+        cls.config_text = 'sessions:\n  paths:\n    - path: ' + str(s.root/'projects') + '/*\n'
         cls.config.write_text(cls.config_text)
         # A running tmux server at launch, as a user has; no check uses this Session.
         s.tmux('new-session', '-d', '-s', 'base', '-c', str(cls.beta), SHELL)

@@ -63,7 +63,6 @@ public struct Config: Equatable {
 
     public struct Topics: Equatable, Sendable {
         public var snoozePresets = SnoozePreset.defaults
-        public var titleCommandFallbacks: [String] = []
         public var sessionOrder = SessionOrder.oldestFirst
         public var insertPosition = TopicInsertPosition.bottom
         /// Nil: Tags are off, and `#` in New Topic is plain title text.
@@ -369,12 +368,6 @@ public struct Config: Equatable {
         #       at: tomorrow
         #     - label: Next Monday
         #       at: mon
-        #   # Commands that suggest a Topic title. Muxify writes the prompt to stdin
-        #   # and reads the title from stdout. It tries each command in order and
-        #   # uses the first that succeeds.
-        #   title_command_fallbacks:
-        #     - claude -p --model haiku
-        #     - codex exec --model gpt-5-mini -
         #   # The order of a Topic's Sessions, by when tmux created them:
         #   # oldest_first or newest_first. Once you move a Session, the Topic
         #   # keeps your order, and a new Session goes to this order's end.
@@ -646,7 +639,6 @@ private struct ConfigReader {
         for (name, key, value) in entries(of: node, "topics") {
             switch name {
             case "snooze_presets": readSnoozePresets(value)
-            case "title_command_fallbacks": readTitleCommands(value)
             case "insert_position":
                 guard value.tag == Yams.Tag(.str), let position = value.string.flatMap(TopicInsertPosition.init(rawValue:)) else {
                     problem(at: value, "topics.insert_position: expected bottom or top")
@@ -687,27 +679,6 @@ private struct ConfigReader {
             definitions.append(TagDefinition(tag: tag, color: color))
         }
         config.topics.tags = ConfigTags(definitions)
-    }
-
-    public mutating func readTitleCommands(_ node: Node) {
-        if node.tag == Yams.Tag(.str), let command = node.string,
-           !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            config.topics.titleCommandFallbacks = [command]
-            return
-        }
-        guard let sequence = node.sequence else {
-            problem(at: node, "topics.title_command_fallbacks: expected a nonempty string or a list of nonempty strings")
-            return
-        }
-        config.topics.titleCommandFallbacks = []
-        for item in sequence {
-            guard item.tag == Yams.Tag(.str), let command = item.string,
-                  !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                problem(at: item, "topics.title_command_fallbacks: expected a nonempty string")
-                continue
-            }
-            config.topics.titleCommandFallbacks.append(command)
-        }
     }
 
     mutating func readHints(_ node: Node) {
@@ -1134,8 +1105,6 @@ private struct ConfigReader {
         "move_session": .chooseSession,
         "include_tab": .toggleIncludeTab,
         "new_worktree": .toggleNewWorktree,
-        "suggest": .suggestTopicTitle,
-        "suggest_title": .suggestTopicTitle,
     ]
 
     mutating func readKeybindings(_ node: Node) {

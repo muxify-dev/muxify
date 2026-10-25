@@ -37,7 +37,6 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertEqual(keys.action(for: trigger("alt+3")), .chooseSession)
         XCTAssertEqual(keys.action(for: trigger("alt+t")), .toggleIncludeTab)
         XCTAssertEqual(keys.action(for: trigger("alt+w")), .toggleNewWorktree)
-        XCTAssertEqual(keys.action(for: trigger("alt+s")), .suggestTopicTitle)
         XCTAssertEqual(config.sessionRoots, [])
         XCTAssertEqual(config.problems, [])
     }
@@ -93,12 +92,10 @@ final class CommandPaletteConfigTests: XCTestCase {
           command_palette:
             toggle_include_tab: alt+1
             choose_window: []
-            suggest_topic_title: alt+r
         """)
         XCTAssertEqual(config.paletteKeybinds.action(for: trigger("alt+1")), .toggleIncludeTab)
         XCTAssertEqual(config.paletteKeybinds.triggers[.choosePane], [])
         XCTAssertNil(config.paletteKeybinds.action(for: trigger("alt+2")))
-        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("alt+r")), .suggestTopicTitle)
         XCTAssertEqual(config.problems, [])
     }
 

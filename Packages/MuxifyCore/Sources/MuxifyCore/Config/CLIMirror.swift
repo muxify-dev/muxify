@@ -87,7 +87,6 @@ extension PaletteAction {
         case .addSessionToTopic, .toggleNewWorktree: .verb(.topicAddSession)
         case .rename: .verbs([.topicRename, .sessionRename, .windowRename])
         case .editTags: .verb(.topicTag)
-        case .suggestTopicTitle: .noMirror("It changes only the title that the palette shows.")
         case .startZen: .verbs([.zenStart, .zenEnd])
         case .settleTopic: .verb(.topicSettle)
         case .forgetTopic: .verb(.topicForget)

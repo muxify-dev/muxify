@@ -59,7 +59,7 @@ One checkout of a repository at its own path, such as a folder inside a bare rep
 _Avoid_: checkout, clone, Session Path (when you mean one checkout)
 
 **Untitled Topic**:
-A Topic that has no title yet. A rename or a title suggested from its Agents gives it one.
+A Topic that has no title yet. A rename gives it one.
 _Avoid_: draft, scratch, temp Topic
 
 **Active Topic**:

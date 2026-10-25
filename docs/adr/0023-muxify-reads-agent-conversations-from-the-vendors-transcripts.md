@@ -1,6 +1,6 @@
 # Muxify reads Agent conversations from the vendors' own Transcripts
 
-A Chief of Staff Agent must read what the other Agents of a Topic said and did, from the command line. `muxify agent conversation` reads the Transcript that each Agent's CLI writes (Claude Code, Codex and Pi JSONL files, and `opencode export` for OpenCode). It changes each vendor format into one list of Entries, and gives the caller filters and windows over them. We decided this because only Muxify knows which conversation runs in which Pane and in which Topic, and because the title suggester already reads these formats. The vendor formats are not a public contract. Muxify owns this coupling in one decoder for each vendor in MuxifyCore, which the app and the CLI share.
+A Chief of Staff Agent must read what the other Agents of a Topic said and did, from the command line. `muxify agent conversation` reads the Transcript that each Agent's CLI writes (Claude Code, Codex and Pi JSONL files, and `opencode export` for OpenCode). It changes each vendor format into one list of Entries, and gives the caller filters and windows over them. We decided this because only Muxify knows which conversation runs in which Pane and in which Topic. The vendor formats are not a public contract. Muxify owns this coupling in one decoder for each vendor in MuxifyCore, which the app and the CLI share.
 
 ## Considered Options
 
