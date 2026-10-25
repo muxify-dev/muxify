@@ -300,7 +300,7 @@ enum CardSpacing {
     static let block: CGFloat = 9
 }
 
-/// What a click and a long press on a card's Window row do: a click selects the Window, and a long press moves it,
+/// What a click and a drag on a card's Window row do: a click selects the Window, and a drag moves it,
 /// with its Pane rows, before or after another Window of its Session.
 struct WindowRowDrag {
     var isEnabled = true
@@ -332,8 +332,8 @@ private struct WindowUnit: Identifiable {
 }
 
 /// An open card's list: each block's heading and rows, cut at `CardRows.limit` with "N more…" below.
-/// A block whose rows are all cut loses its heading too. A long press on a Window row moves the Window within its
-/// Session; with `blockDrag`, a long press on a heading moves its whole block.
+/// A block whose rows are all cut loses its heading too. A drag on a Window row moves the Window within its
+/// Session; with `blockDrag`, a drag on a heading moves its whole block.
 struct CardList<Heading: View, Row: View>: View {
     let blocks: [CardBlock]
     /// The card header's identifier; the button is `<identifier>-more`.
@@ -345,12 +345,12 @@ struct CardList<Heading: View, Row: View>: View {
     /// "N more…" when that shows.
     var reservesCorner = false
     /// The drag of whole blocks, which the headings start; nil while the blocks keep their order.
-    var blockDrag: LongPressDrag<String>? = nil
+    var blockDrag: ListDrag<String>? = nil
     let windows: WindowRowDrag
     @ViewBuilder var heading: (CardBlock) -> Heading
     @ViewBuilder var row: (TopicsModel.SessionChildren.Item) -> Row
 
-    @State private var windowDrag = LongPressDrag<String>(spacing: CardSpacing.row)
+    @State private var windowDrag = ListDrag<String>(spacing: CardSpacing.row)
 
     var body: some View {
         let total = blocks.reduce(0) { $0 + $1.items.count }
@@ -375,7 +375,7 @@ struct CardList<Heading: View, Row: View>: View {
                 // A moving Window stays above the next block when it gives way past the end of its own.
                 let holdsMovingWindow = windowDrag.dragged.map { id in block.items.contains { $0.id == id } } ?? false
                 if let blockDrag {
-                    view.longPressDragItem(block.id, drag: blockDrag, shown: blockIDs, cornerRadius: 7)
+                    view.listDragItem(block.id, drag: blockDrag, shown: blockIDs, cornerRadius: 7)
                         .zIndex(blockDrag.dragged == block.id ? 30 : holdsMovingWindow ? 20 : 0)
                 } else {
                     view.zIndex(holdsMovingWindow ? 20 : 0)
@@ -409,14 +409,14 @@ struct CardList<Heading: View, Row: View>: View {
                     VStack(alignment: .leading, spacing: CardSpacing.row) {
                         ForEach(unit.items) { item in
                             if case .window = item {
-                                row(item).longPressDrag(window.id, drag: windowDrag, isEnabled: windows.isEnabled && windowIDs.count > 1,
+                                row(item).listDrag(window.id, drag: windowDrag, isEnabled: windows.isEnabled && windowIDs.count > 1,
                                                         onTap: { windows.select(window) }) { windows.move(window, $0) }
                             } else {
                                 row(item)
                             }
                         }
                     }
-                    .longPressDragItem(window.id, drag: windowDrag, shown: windowIDs, cornerRadius: 6)
+                    .listDragItem(window.id, drag: windowDrag, shown: windowIDs, cornerRadius: 6)
                 } else {
                     ForEach(unit.items) { row($0) }
                 }

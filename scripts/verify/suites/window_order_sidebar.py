@@ -1,6 +1,6 @@
-"""The order of a Session's Windows in the Sidebar. A long press on a Window row moves the Window within its Session,
-in a Topic card and in a Session card, which the driver's drag with `hold` does. The row's own Button keeps its
-accessibility press, and a click goes to the long-press handle around it (CardList in UI/SidebarCard.swift).
+"""The order of a Session's Windows in the Sidebar. A drag on a Window row moves the Window within its Session,
+in a Topic card and in a Session card. The row's own Button keeps its
+accessibility press, and a click goes to the drag handle around it (CardList in UI/SidebarCard.swift).
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.window_order_sidebar
@@ -72,7 +72,7 @@ class WindowOrderSidebar(unittest.TestCase):
     def current_window(self, sid):
         return self.s.tmux('display-message', '-p', '-t', sid, '#{window_id}')
 
-    def test_a_long_press_on_a_window_row_moves_it_up_within_its_session_in_a_topic_card(self):
+    def test_a_drag_on_a_window_row_moves_it_up_within_its_session_in_a_topic_card(self):
         s = self.s
         sid, windows = self.three_windows('order-topic', topic='window-order')
         self.show_view('topics')
@@ -82,14 +82,14 @@ class WindowOrderSidebar(unittest.TestCase):
         s.wait_shown(windows[0])
         s.wait_rows(lambda rs: self.row_order('topic-window-', windows, rs) == windows,
                     'the Topic card does not list the Windows in tmux order: %s' % self.row_order('topic-window-', windows))
-        s.act('drag', 'topic-window-' + windows[2], 'topic-window-' + windows[0], hold=0.7)
+        s.act('drag', 'topic-window-' + windows[2], 'topic-window-' + windows[0])
         moved = [windows[2], windows[0], windows[1]]
-        wait(lambda: self.tmux_order(sid) == moved, 'tmux order after the long press: %s' % self.tmux_order(sid))
+        wait(lambda: self.tmux_order(sid) == moved, 'tmux order after the drag: %s' % self.tmux_order(sid))
         s.wait_rows(lambda rs: self.row_order('topic-window-', windows, rs) == moved,
                     'the card does not show the new order: %s' % self.row_order('topic-window-', windows))
         self.assertEqual(self.current_window(sid), windows[0], 'the move changed the Session\'s current Window')
 
-    def test_a_long_press_on_a_window_row_moves_it_down_within_its_session_in_a_session_card(self):
+    def test_a_drag_on_a_window_row_moves_it_down_within_its_session_in_a_session_card(self):
         s = self.s
         sid, windows = self.three_windows('order-session')
         self.addCleanup(self.show_view, 'topics')
@@ -98,9 +98,9 @@ class WindowOrderSidebar(unittest.TestCase):
         s.wait_shown(windows[1])
         s.wait_rows(lambda rs: self.row_order('session-window-', windows, rs) == windows,
                     'the Session card does not list the Windows in tmux order: %s' % self.row_order('session-window-', windows))
-        s.act('drag', 'session-window-' + windows[0], 'session-window-' + windows[2], hold=0.7, edge='bottom')
+        s.act('drag', 'session-window-' + windows[0], 'session-window-' + windows[2], edge='bottom')
         moved = [windows[1], windows[2], windows[0]]
-        wait(lambda: self.tmux_order(sid) == moved, 'tmux order after the long press: %s' % self.tmux_order(sid))
+        wait(lambda: self.tmux_order(sid) == moved, 'tmux order after the drag: %s' % self.tmux_order(sid))
         s.wait_rows(lambda rs: self.row_order('session-window-', windows, rs) == moved,
                     'the card does not show the new order: %s' % self.row_order('session-window-', windows))
         self.assertEqual(self.current_window(sid), windows[1], 'the move changed the Session\'s current Window')

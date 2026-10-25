@@ -176,29 +176,26 @@ class TopicsOptionSidebar(TopicsSidebar):
         subprocess.run(['open', '-g', '-a', str(self.s.app), 'muxify://select?topic=select-there'], check=True, capture_output=True)
         self.s.wait_shown(window)
 
-    def test_a_long_press_drags_a_topic_card_and_a_quick_drag_does_not(self):
-        # TestDriver `drag` hands the mouse events to the window, so the pointer stays with the user; `hold` keeps
-        # the press still before it moves, as a person does to lift the card.
+    def test_a_drag_moves_a_topic_card_without_a_long_press(self):
+        # TestDriver `drag` hands the mouse events to the window, so the pointer stays with the user. It moves as soon
+        # as it presses, so the card lifts on the move, with no hold.
         self.write_topic('press-upper', 'Press upper', self.beta, order=-2000001)
         self.write_topic('press-lower', 'Press lower', self.beta, order=-2000000)
         cards = lambda rs: [k for k in self.topic_rows(rs) if k.startswith('topic-press-')]
         self.s.wait_rows(lambda rs: len(cards(rs)) == 2, 'no cards for the two Topics')
         self.s.reveal('topic-press-upper')
         self.s.act('drag', 'topic-press-lower', 'topic-press-upper')
-        time.sleep(REFRESH_LIMIT)
-        self.assertEqual(cards(self.s.rows()), ['topic-press-upper', 'topic-press-lower'], 'a quick drag moved the Topic')
-        self.s.act('drag', 'topic-press-lower', 'topic-press-upper', hold=2.0)
         # The dropped card shows at its new place while it glides there, and the order is saved when it lands. So the
         # saved order is the proof, and a check that ends on the rows would delete the records before the save.
         orders = lambda: {i: r.get('order') for i, r in self.records().items() if i.startswith('press-')}
         wait(lambda: orders()['press-lower'] < orders()['press-upper'],
-             'the long press did not save press-lower above press-upper', seconds=5)
+             'the drag did not save press-lower above press-upper', seconds=5)
         self.s.wait_rows(lambda rs: cards(rs) == ['topic-press-lower', 'topic-press-upper'],
                          'the Sidebar does not show the saved order', seconds=5)
 
     def test_move_up_and_move_down_move_the_topic_card_and_save_the_order(self):
-        # A long press drags a card; the driver cannot hold a press, so the card's Move Up and Move Down
-        # accessibility actions (TopicCard in UI/SidebarView.swift) move it the way a drop does.
+        # The card's Move Up and Move Down accessibility actions (TopicCard in UI/SidebarView.swift) move it the way
+        # a drop does.
         self.write_topic('order-upper', 'Order upper', self.beta, order=-1000002)
         self.write_topic('order-middle', 'Order middle', self.beta, order=-1000001)
         self.write_topic('order-lower', 'Order lower', self.beta, order=-1000000)

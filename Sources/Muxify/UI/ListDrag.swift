@@ -64,23 +64,20 @@ struct StackLayout<ID: Hashable> {
     }
 }
 
-/// The long-press drag of a list's items. Nothing shows for the first 0.2 s, so a click stays a click; until 0.5 s the
-/// item shrinks a little; then it lifts and follows the pointer, and the items it passes slide aside to leave a
-/// placeholder where it would land. Let go, it glides into the placeholder and stays there until the list shows the
+/// The drag of a list's items. A press that moves a few points lifts the item at once, and a press that lets go before
+/// that is a click. The lifted item follows the pointer, and the items it passes slide aside to leave a placeholder
+/// where it would land. Let go, it glides into the placeholder and stays there until the list shows the
 /// new order, so nothing jumps. A list holds one for all its items, since only one item moves at a time.
 @MainActor @Observable
-final class LongPressDrag<ID: Hashable> {
+final class ListDrag<ID: Hashable> {
     enum Phase: Equatable {
         case idle
         case pressing(ID)
-        case shrinking(ID)
         case lifted(ID)
         /// Let go: the item glides to where it lands and stays there until the list shows the new order.
         case settling(ID)
     }
 
-    static var shrinkDelay: Duration { .milliseconds(200) }
-    static var liftDelay: Duration { .milliseconds(500) }
     /// How long a dropped item waits for the list to show the new order before the list goes back to the order it shows.
     private static var settleLimit: Duration { .seconds(3) }
     /// A lifted item grows by this much around this point.
@@ -143,22 +140,15 @@ final class LongPressDrag<ID: Hashable> {
         }
     }
 
-    func press(_ id: ID, isEnabled: Bool) {
+    func press(_ id: ID) {
         timer?.cancel()
         withTransaction(Transaction(animation: nil)) { placement = nil }
         phase = .pressing(id)
-        guard isEnabled else { return }
-        timer = Task { [weak self] in
-            try? await Task.sleep(for: Self.shrinkDelay)
-            guard let self, !Task.isCancelled, phase == .pressing(id) else { return }
-            withAnimation(.timingCurve(0.2, 0.7, 0.3, 1, duration: 0.3)) { self.phase = .shrinking(id) }
-            try? await Task.sleep(for: Self.liftDelay - Self.shrinkDelay)
-            guard !Task.isCancelled, phase == .shrinking(id) else { return }
-            lift(id)
-        }
     }
 
-    private func lift(_ id: ID) {
+    /// The pressed item moved far enough to be a drag.
+    func lift(_ id: ID) {
+        guard phase == .pressing(id) else { return }
         order = lists[id] ?? [id]
         layout.heights = heights.filter { order.contains($0.key) }
         // Grown by the lift, its top stands a little higher than its place.
@@ -178,19 +168,19 @@ final class LongPressDrag<ID: Hashable> {
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 
-    /// The pointer moved before the item lifted: the press is neither a click nor a drag.
+    /// The pointer moved on an item that cannot move: the press is neither a click nor a drag.
     func cancel() {
         timer?.cancel()
         withAnimation(.spring(duration: 0.25)) { phase = .idle }
     }
 
-    /// The press on `id` ended: a click before the item lifted. A lifted item glides to where it lands, and `onDrop`
+    /// The press on `id` ended: a click if the item did not lift. A lifted item glides to where it lands, and `onDrop`
     /// gets its placement once it is there; with no placement it glides back.
     func end(_ id: ID, onTap: () -> Void, onDrop: @escaping (DropPlacement<ID>) -> Void) {
         timer?.cancel()
         switch phase {
-        case .pressing(id), .shrinking(id):
-            withAnimation(.spring(duration: 0.25)) { phase = .idle }
+        case .pressing(id):
+            phase = .idle
             onTap()
         case .lifted(id):
             NSCursor.pop()
@@ -223,7 +213,7 @@ final class LongPressDrag<ID: Hashable> {
     /// The press on `id` stopped without an end, as when its view went away: a lifted item glides back.
     func abandon(_ id: ID) {
         switch phase {
-        case .pressing(id), .shrinking(id):
+        case .pressing(id):
             cancel()
         case .lifted(id):
             NSCursor.pop()
@@ -237,18 +227,18 @@ final class LongPressDrag<ID: Hashable> {
     }
 }
 
-private struct LongPressDragHandle<ID: Hashable>: ViewModifier {
+private struct ListDragHandle<ID: Hashable>: ViewModifier {
     let id: ID
-    let drag: LongPressDrag<ID>
+    let drag: ListDrag<ID>
     let isEnabled: Bool
     let onTap: () -> Void
     let onDrop: (DropPlacement<ID>) -> Void
 
-    /// The pointer moved before the item lifted: the press is neither a click nor a drag.
+    /// The pointer moved on an item that cannot move: the press is neither a click nor a drag.
     @State private var cancelled = false
     @GestureState private var isPressed = false
 
-    /// Movement the pointer may make before the item lifts and still count as a held press.
+    /// How far the pointer moves before the press is a drag; a press that moves less is still a click.
     private static var slop: CGFloat { 4 }
 
     func body(content: Content) -> some View {
@@ -268,13 +258,17 @@ private struct LongPressDragHandle<ID: Hashable>: ViewModifier {
         switch drag.phase {
         case .lifted(id):
             drag.follow(id, translation: value.translation.height)
-        case .pressing(id), .shrinking(id):
-            if hypot(value.translation.width, value.translation.height) > Self.slop {
+        case .pressing(id):
+            guard hypot(value.translation.width, value.translation.height) > Self.slop else { return }
+            if isEnabled {
+                drag.lift(id)
+                drag.follow(id, translation: value.translation.height)
+            } else {
                 cancelled = true
                 drag.cancel()
             }
         default:
-            drag.press(id, isEnabled: isEnabled)
+            drag.press(id)
         }
     }
 
@@ -287,9 +281,9 @@ private struct LongPressDragHandle<ID: Hashable>: ViewModifier {
     }
 }
 
-private struct LongPressDragItem<ID: Hashable>: ViewModifier {
+private struct ListDragItem<ID: Hashable>: ViewModifier {
     let id: ID
-    let drag: LongPressDrag<ID>
+    let drag: ListDrag<ID>
     let shown: [ID]
     let cornerRadius: CGFloat
     @Environment(\.chromeTheme) private var chromeTheme
@@ -306,8 +300,7 @@ private struct LongPressDragItem<ID: Hashable>: ViewModifier {
             .background {
                 if isLifted { plate.transition(.opacity) }
             }
-            .scaleEffect(isLifted ? LongPressDrag<ID>.liftScale : drag.phase == .shrinking(id) ? 0.982 : 1,
-                         anchor: LongPressDrag<ID>.liftAnchor)
+            .scaleEffect(isLifted ? ListDrag<ID>.liftScale : 1, anchor: ListDrag<ID>.liftAnchor)
             .shadow(color: .black.opacity(isLifted ? 0.4 : 0), radius: isLifted ? 14 : 0, y: isLifted ? 10 : 0)
             .animation(.spring(duration: 0.25, bounce: 0.3), value: isLifted)
             .offset(y: isLifted ? drag.translation : shift)
@@ -344,7 +337,7 @@ private struct LiftedByDragKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    /// The view is in an item that a `LongPressDrag` lifted: it follows the pointer, not its place in the list.
+    /// The view is in an item that a `ListDrag` lifted: it follows the pointer, not its place in the list.
     var isLiftedByDrag: Bool {
         get { self[LiftedByDragKey.self] }
         set { self[LiftedByDragKey.self] = newValue }
@@ -376,22 +369,22 @@ private struct DropSlot: View {
 }
 
 extension View {
-    /// Makes the view the handle of a `LongPressDrag` item: a click calls `onTap`, a long press lifts the item, and
-    /// letting go of a lifted item calls `onDrop` with its placement once it glided there. While disabled, a long press
-    /// does nothing and a click still works.
-    func longPressDrag<ID: Hashable>(_ id: ID, drag: LongPressDrag<ID>, isEnabled: Bool = true, onTap: @escaping () -> Void,
+    /// Makes the view the handle of a `ListDrag` item: a click calls `onTap`, a press that moves lifts the item, and
+    /// letting go of a lifted item calls `onDrop` with its placement once it glided there. While disabled, a press that
+    /// moves does nothing and a click still works.
+    func listDrag<ID: Hashable>(_ id: ID, drag: ListDrag<ID>, isEnabled: Bool = true, onTap: @escaping () -> Void,
                                      onDrop: @escaping (DropPlacement<ID>) -> Void) -> some View {
-        modifier(LongPressDragHandle(id: id, drag: drag, isEnabled: isEnabled, onTap: onTap, onDrop: onDrop))
+        modifier(ListDragHandle(id: id, drag: drag, isEnabled: isEnabled, onTap: onTap, onDrop: onDrop))
     }
 
-    /// Makes the view an item of a `LongPressDrag` list, whose handle may be the view or a part of it. `shown` is its
+    /// Makes the view an item of a `ListDrag` list, whose handle may be the view or a part of it. `shown` is its
     /// list as the stack shows it now, and `cornerRadius` the item's corners, for the plate it stands on while lifted
     /// and the placeholder where it would land.
-    func longPressDragItem<ID: Hashable>(_ id: ID, drag: LongPressDrag<ID>, shown: [ID], cornerRadius: CGFloat) -> some View {
-        modifier(LongPressDragItem(id: id, drag: drag, shown: shown, cornerRadius: cornerRadius))
+    func listDragItem<ID: Hashable>(_ id: ID, drag: ListDrag<ID>, shown: [ID], cornerRadius: CGFloat) -> some View {
+        modifier(ListDragItem(id: id, drag: drag, shown: shown, cornerRadius: cornerRadius))
     }
 
-    /// A press in a window that is not key reaches this view's gestures, so a press or a long press works on the first click.
+    /// A press in a window that is not key reaches this view's gestures, so a click or a drag works on the first click.
     @ViewBuilder
     func takesFirstClick() -> some View {
         if #available(macOS 15, *) { allowsWindowActivationEvents(true) } else { self }

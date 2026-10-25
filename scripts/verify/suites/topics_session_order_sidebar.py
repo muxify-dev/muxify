@@ -1,6 +1,6 @@
 """The order of a Topic's Sessions in its Sidebar card: by creation in the Config's order, or as the user moved them.
 
-A long press on a Session line moves it, which the driver's drag with `hold` does. The context menu's Move Up and Sort
+A drag on a Session line moves it. The context menu's Move Up and Sort
 Sessions by Creation are also accessibility actions of the line (SessionHeading in UI/SidebarView.swift), so the
 checks reach them without the menu.
 
@@ -45,11 +45,11 @@ class TopicsSessionOrderSidebar(TopicsSidebar):
         self.config.write_text(self.config_text + '  session_order: newest_first\n')
         self.wait_order('order-auto', [newer, older], 'topics.session_order: newest_first did not put the newest Session first')
 
-    def test_a_long_press_on_a_session_line_moves_it_within_its_topic(self):
+    def test_a_drag_on_a_session_line_moves_it_within_its_topic(self):
         older, newer = self.two_session_topic('order-pressed')
         self.wait_order('order-pressed', [older, newer], 'the Sessions are not oldest first')
-        self.s.act('drag', 'topic-order-pressed-session-' + newer, 'topic-order-pressed-session-' + older, hold=0.7)
-        self.wait_order('order-pressed', [newer, older], 'the long press did not move the Session up')
+        self.s.act('drag', 'topic-order-pressed-session-' + newer, 'topic-order-pressed-session-' + older)
+        self.wait_order('order-pressed', [newer, older], 'the drag did not move the Session up')
         wait(lambda: self.records()['order-pressed'].get('session_order') == 'manual', 'the record does not keep the manual order')
 
     def test_move_up_keeps_the_users_order_in_the_record_and_sort_by_creation_ends_it(self):
