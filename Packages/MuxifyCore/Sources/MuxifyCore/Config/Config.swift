@@ -1105,7 +1105,6 @@ private struct ConfigReader {
     /// Old `keybindings` names and the actions that replaced them. A Config
     /// that names one gets a problem, so the old name never silently stops working.
     static let removedActions: [String: ConfigAction] = [
-        "toggle_focus": .toggleMaximize,
         "move_keyboard_to_terminal": .focusTerminal,
         "new_topic_from_pane": .movePane,
         "move_session_to_topic": .moveSession,

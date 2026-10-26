@@ -2201,6 +2201,12 @@ final class WorkspaceStore {
         moveFocus(into: side)
     }
 
+    /// Moves Focus from the Browser to the Terminal, and from anywhere else to
+    /// the Browser (`toggle_focus`).
+    func toggleFocus() {
+        focus(browserHasFocus ? .terminal : .browser)
+    }
+
     /// A toggle used while Maximized starts from what is on screen: the
     /// Maximized side alone, and no Sidebar.
     private func commitMaximize() {
@@ -2358,6 +2364,7 @@ final class WorkspaceStore {
         case .toggleMaximizeBrowser: toggleMaximize(.browser)
         case .focusTerminal: focus(.terminal)
         case .focusBrowser: focus(.browser)
+        case .toggleFocus: toggleFocus()
         case .toggleZoomPane: toggleZoomOfCurrentPane()
         case .resizePaneLeft: resizeCurrentPane("-L")
         case .resizePaneRight: resizeCurrentPane("-R")

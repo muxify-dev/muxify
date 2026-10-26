@@ -95,14 +95,14 @@ final class ConfigTests: XCTestCase {
     }
 
     func testARemovedKeybindingNameIsAProblemThatNamesItsReplacement() throws {
-        let config = try load("keybindings:\n  toggle_focus: cmd+e\n  move_pane: cmd+shift+t")
-        XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 2, message: "toggle_focus is gone: use toggle_maximize")])
+        let config = try load("keybindings:\n  zen_mode: cmd+e\n  move_pane: cmd+shift+t")
+        XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 2, message: "zen_mode is gone: use toggle_zen")])
         XCTAssertNil(config.keybinds.action(for: trigger("cmd+e"), focus: nil), "a removed name still binds its trigger")
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleMaximize), trigger("shift+cmd+enter"))
+        XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleZen), trigger("shift+alt+cmd+s"))
         XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+t"), focus: .terminal), .movePane)
         XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+t"), focus: .browser), .reopenClosedTab,
                        "restating Move Pane's default took the key from Reopen Closed Tab")
-        XCTAssertFalse(Config.template.contains("toggle_focus"))
+        XCTAssertFalse(Config.template.contains("zen_mode"))
     }
 
     func testARemovedPaletteNameIsAProblemEvenWhereTheGlobalScopeUsesIt() throws {
@@ -128,6 +128,7 @@ final class ConfigTests: XCTestCase {
             (.toggleMaximizeBrowser, ["alt+cmd+b"]),
             (.focusTerminal, ["cmd+shift+j", "ctrl+backquote", "ctrl+0", "alt+0"]),
             (.focusBrowser, ["cmd+shift+b"]),
+            (.toggleFocus, ["cmd+0"]),
             (.movePane, ["cmd+shift+t"]),
             (.reopenClosedTab, ["cmd+shift+t"]),
             (.moveWindow, []),

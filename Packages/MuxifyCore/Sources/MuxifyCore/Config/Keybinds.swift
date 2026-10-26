@@ -65,6 +65,7 @@ public enum ConfigAction: String, KeybindAction {
     case toggleMaximizeBrowser = "toggle_maximize_browser"
     case focusTerminal = "focus_terminal"
     case focusBrowser = "focus_browser"
+    case toggleFocus = "toggle_focus"
     case toggleZoomPane = "toggle_zoom_pane"
     case resizePaneLeft = "resize_pane_left"
     case resizePaneRight = "resize_pane_right"
@@ -143,6 +144,7 @@ public enum ConfigAction: String, KeybindAction {
         .toggleMaximizeBrowser: ["alt+cmd+b"],
         .focusTerminal: ["cmd+shift+j", "ctrl+backquote", "ctrl+0", "alt+0"],
         .focusBrowser: ["cmd+shift+b"],
+        .toggleFocus: ["cmd+0"],
         .toggleZoomPane: ["cmd+m"],
         .resizePaneLeft: [],
         .resizePaneRight: [],

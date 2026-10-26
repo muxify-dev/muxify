@@ -187,6 +187,14 @@ class Panels(unittest.TestCase):
         self.s.act('press', key)
         self.wait_focus('browser', 'the Focus Browser Command did not give the Browser Focus')
 
+    def test_toggle_focus_moves_focus_between_the_terminal_and_the_browser(self):
+        self.s.act('press', 'Focus Terminal')
+        self.wait_focus('terminal', 'Focus Terminal did not give the Terminal Focus')
+        self.s.act('press', 'Toggle Focus')
+        self.wait_focus('browser', 'Toggle Focus did not move Focus from the Terminal to the Browser')
+        self.s.act('press', 'Toggle Focus')
+        self.wait_focus('terminal', 'Toggle Focus did not move Focus from the Browser to the Terminal')
+
     def wait_focus(self, side, message):
         def has_focus():
             responders = self.s.driver('responder')['responders']
