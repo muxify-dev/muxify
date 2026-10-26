@@ -293,6 +293,10 @@ public struct Config: Equatable {
         #   - name: Go to…
         #     keybinding: cmd+p
         #     sources: [topics, sessions]
+        #     # The kinds of rows it lists; without show, every kind:
+        #     # topic, snoozed, settled, session, topic-session,
+        #     # session-path, worktree, window, agent, command or tag.
+        #     show: [topic, snoozed, settled, session, session-path, worktree]
         #   - name: Agents
         #     keybinding: cmd+shift+o
         #     sources: [agents]
@@ -1201,7 +1205,7 @@ private struct ConfigReader {
             let problemCount = config.problems.count
             var values: [String: Node] = [:]
             for (name, key, value) in entries(of: item, "a Command Palette") {
-                guard ["name", "keybinding", "sources"].contains(name) else {
+                guard ["name", "keybinding", "sources", "show"].contains(name) else {
                     problem(at: key, "unknown Command Palette key \"\(name)\"")
                     continue
                 }
@@ -1224,14 +1228,40 @@ private struct ConfigReader {
             if sources.isEmpty, config.problems.count == problemCount {
                 problem(at: values["sources"] ?? item, "Command Palette sources: expected a list of topics, sessions, windows, agents or commands")
             }
-            guard config.problems.count == problemCount, let name else { continue }
-            palettes.append(CommandPaletteConfig(name: name, triggers: [], sources: sources))
+            let rules = readPickRules(values, label: { "Command Palette " + $0 }, kinds: RowKind.all)
+            guard config.problems.count == problemCount, let name, let rules else { continue }
+            palettes.append(CommandPaletteConfig(name: name, triggers: [], sources: sources, rules: rules))
             // A bad trigger is skipped; the palette still applies.
             if let value = values["keybinding"], value.null == nil, let listed = triggers(in: value, of: "Command Palette keybinding") {
                 claims += listed.map { Claim(owner: .palette(name), trigger: $0.trigger, node: $0.node) }
             }
         }
         self.palettes = palettes
+    }
+
+    /// The `show` key of a Command Palette, which `values` holds when it is set. Nil, with a problem, when `show` is empty
+    /// or names a word outside `kinds`.
+    private mutating func readPickRules(_ values: [String: Node], label: (String) -> String, kinds: Set<RowKind>) -> PickRules? {
+        var rules = PickRules.standard
+        var valid = true
+        let kindWords = spelledOut(RowKind.allCases.filter(kinds.contains).map(\.rawValue))
+        if let node = values["show"] {
+            var show: Set<RowKind> = []
+            for value in node.sequence ?? [node] {
+                guard let kind = string(value).flatMap(RowKind.init(rawValue:)), kinds.contains(kind) else {
+                    problem(at: value, label("show") + ": expected " + kindWords)
+                    valid = false
+                    continue
+                }
+                show.insert(kind)
+            }
+            if show.isEmpty, valid {
+                problem(at: node, label("show") + ": expected a list of " + kindWords)
+                valid = false
+            }
+            rules.show = show
+        }
+        return valid ? rules : nil
     }
 
     /// The overlay rules across `keybindings` and `command_palettes`. An

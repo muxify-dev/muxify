@@ -79,6 +79,34 @@ final class PickListTests: XCTestCase {
         XCTAssertEqual(list([candidate("a", "alpha")], "zzz").sections, [])
     }
 
+    func testShowListsOnlyItsKindsOfRankedRowsAndEveryFixedRow() {
+        let sections = [
+            PickSectionInput(id: "ranked", rule: .ranked(showsWhenEmpty: true), candidates: [
+                candidate("loose", "alpha loose", kind: .session), candidate("member", "alpha member", kind: .topicSession),
+                candidate("topic", "alpha topic"),
+            ]),
+            PickSectionInput(id: "fixed", rule: .fixed, candidates: [candidate("new", "New Topic", kind: .command)]),
+        ]
+        let rules = PickRules(show: [.session, .topic])
+        for query in ["", "alpha"] {
+            XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery(query), rules: rules).rows.map(\.id), ["loose", "topic", "new"],
+                           "a Topic Session is left out, and the fixed row stays though show leaves out command, for \(query.debugDescription)")
+        }
+        XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery(""), rules: .standard).rows.map(\.id), ["loose", "member", "topic", "new"],
+                       "a list with no rules of its own lists every kind")
+    }
+
+    func testAShadowedRowShowsOnlyWhileTheRowThatShadowsItIsLeftOut() {
+        var path = candidate("path", "notes", kind: .sessionPath)
+        path.shadowedBy = "running"
+        let sections = [PickSectionInput(id: "s", rule: .ranked(showsWhenEmpty: true),
+                                         candidates: [candidate("running", "notes", kind: .topicSession), path])]
+        XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery("notes"), rules: .standard).rows.map(\.id), ["running"],
+                       "a Session Path whose Session is listed is redundant")
+        XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery("notes"), rules: PickRules(show: [.session, .sessionPath])).rows.map(\.id),
+                       ["path"], "with its Session's row left out, the path comes back")
+    }
+
     func testBlockedRowShowsItsReasonAndHasNoPayload() {
         let rows = list([candidate("taken", "alpha", blocked: "Taken by Fix drops"), candidate("free", "alpha2")], "")
         XCTAssertNil(rows.payload(of: "taken"))

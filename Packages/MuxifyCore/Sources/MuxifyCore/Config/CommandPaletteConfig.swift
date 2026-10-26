@@ -18,11 +18,14 @@ public struct CommandPaletteConfig: Equatable, Identifiable {
     /// The Sources that are on when it opens, in Config order, without
     /// repeats; never empty. The other Sources can be switched on.
     public let sources: [PaletteSource]
+    /// The kinds of rows it lists.
+    public let rules: PickRules
 
-    public init(name: String, triggers: [KeyTrigger], sources: [PaletteSource]) {
+    public init(name: String, triggers: [KeyTrigger], sources: [PaletteSource], rules: PickRules = .standard) {
         self.name = name
         self.triggers = triggers
         self.sources = sources
+        self.rules = rules
     }
 
     public var id: String { name }

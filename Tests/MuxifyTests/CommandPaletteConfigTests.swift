@@ -86,6 +86,41 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertEqual(config.problems, [])
     }
 
+    func testAPaletteShowsOnlyTheKindsItsShowNamesAndABadShowDropsThePalette() throws {
+        let config = try load("""
+        command_palettes:
+          - name: Go to…
+            sources: [topics, sessions]
+            show: [topic, session, session-path, worktree, session]
+          - name: Everything
+            sources: [topics, sessions]
+          - name: One kind
+            sources: [agents]
+            show: agent
+          - name: Typo
+            sources: [sessions]
+            show: [sesion]
+          - name: Nothing
+            sources: [sessions]
+            show: []
+        """)
+        XCTAssertEqual(config.commandPalettes.map(\.name), ["Go to…", "Everything", "One kind"])
+        XCTAssertEqual(config.commandPalettes.map(\.rules.show), [[.topic, .session, .sessionPath, .worktree], RowKind.all, [.agent]])
+        let every = "topic, snoozed, settled, session, topic-session, session-path, worktree, window, agent, command or tag"
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 12, message: "Command Palette show: expected " + every),
+            ConfigProblem(path: root, line: 15, message: "Command Palette show: expected a list of " + every),
+        ])
+    }
+
+    func testTheConfigurationGuideNamesEveryRowKind() throws {
+        let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let guide = try String(contentsOf: repository.appendingPathComponent("docs/configuration.md"), encoding: .utf8)
+        for word in RowKind.allCases.map(\.rawValue) {
+            XCTAssertTrue(guide.contains("| `\(word)` |"), "docs/configuration.md has no table row for `\(word)`")
+        }
+    }
+
     func testMoveKeysCanBeReboundAndDisabled() throws {
         let config = try load("""
         keybindings:

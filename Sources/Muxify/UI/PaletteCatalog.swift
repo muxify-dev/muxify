@@ -66,10 +66,10 @@ struct PaletteCatalog {
     var offersTopics: Bool { topics?.topicsEnabled == true }
 
     /// With `tagFilter`, only the Topics that have the Tag: open, Snoozed and Settled.
-    func list(_ sources: [PaletteSource], query: String, tagFilter: Tag? = nil) -> PickList<PaletteItem> {
-        guard let tagFilter else { return FuzzyRanker.list(sections(sources), query: FuzzyQuery(query)) }
+    func list(_ sources: [PaletteSource], query: String, tagFilter: Tag? = nil, rules: PickRules) -> PickList<PaletteItem> {
+        guard let tagFilter else { return FuzzyRanker.list(sections(sources), query: FuzzyQuery(query), rules: rules) }
         return FuzzyRanker.list((openTopicSection(only: tagFilter).map { [$0] } ?? []) + snoozedAndSettledSections(only: tagFilter),
-                                query: FuzzyQuery(query))
+                                query: FuzzyQuery(query), rules: rules)
     }
 
     /// The rows before any query, in the order of `sources`, then the Snoozed and Settled Topics, which rank
@@ -192,9 +192,10 @@ struct PaletteCatalog {
 
     /// All running Sessions, plus paths whose exact launch names are not running. Sidebar mode is irrelevant.
     private var sessionCandidates: [PickCandidate<PaletteItem>] {
-        var names = Set(windows.map(\.sessionName))
+        let running = Dictionary(windows.map { ($0.sessionName, "session:\($0.sessionID)") }, uniquingKeysWith: { first, _ in first })
+        var names: Set<String> = []
         let paths = sessionPaths.flatMap(SessionChoice.choices).filter { names.insert($0.name).inserted }
-        return looseSessionCandidates(windows) + paths.map(pathCandidate)
+        return looseSessionCandidates(windows) + paths.map { pathCandidate($0, shadowedBy: running[$0.name]) }
     }
 
     /// Running Sessions and launch folders share one rank in Add a Session.
@@ -233,10 +234,10 @@ struct PaletteCatalog {
             PickSectionInput(id: "new", rule: .fixed, candidates: [new])], query: FuzzyQuery(query))
     }
 
-    private func pathCandidate(_ choice: SessionChoice) -> PickCandidate<PaletteItem> {
+    private func pathCandidate(_ choice: SessionChoice, shadowedBy: String?) -> PickCandidate<PaletteItem> {
         let visit = visits.last(.directory(choice.directory.real))
         return PickCandidate(
-            id: "session-path:\(choice.directory.path)", kind: choice.isWorktree ? .worktree : .sessionPath,
+            id: "session-path:\(choice.directory.path)", kind: choice.isWorktree ? .worktree : .sessionPath, shadowedBy: shadowedBy,
             symbol: "□", title: choice.displayName,
             fields: [.typeWord(choice.isWorktree ? "worktree" : "session"), .detail(Paths.tildify(choice.directory.path, home: homeDirectory))] + choice.nameFields,
             trailing: "↩ open", lastVisit: visit, unopened: true,

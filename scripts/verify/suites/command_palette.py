@@ -49,8 +49,14 @@ class CommandPalette(unittest.TestCase):
         subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma/'main'), 'main'], check=True)
         subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma/'release'), '-b', 'release-line'],
                        check=True)
+        # No Topic Sessions is Go to… without the Sessions of open Topics.
         (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(s.root/'projects') + '/*\n'
-                                                       '  aliases:\n    - ' + str(cls.delta) + ': Delta Notes\n')
+                                                       '  aliases:\n    - ' + str(cls.delta) + ': Delta Notes\n'
+                                                       'command_palettes:\n'
+                                                       '  - {name: Commands, keybinding: cmd+shift+p, sources: [commands]}\n'
+                                                       '  - {name: Go to…, keybinding: cmd+p, sources: [topics, sessions]}\n'
+                                                       '  - {name: No Topic Sessions, sources: [topics, sessions],'
+                                                       ' show: [topic, snoozed, settled, session, session-path, worktree]}\n')
         cls.base = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'base', '-c', str(cls.beta), SHELL)
         cls.base_window = s.tmux('display-message', '-p', '-t', cls.base + ':', '#{window_id}')
         s.launch(LAUNCH_ARGS)
@@ -117,11 +123,11 @@ class CommandPalette(unittest.TestCase):
             self.s.act('press', key)
         self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityValue') == 'selected', key + ' not selected')
 
-    def open_palette(self):
+    def open_palette(self, name='Go to…'):
         """Presses the View menu item until the palette shows. SwiftUI rebuilds the menu a moment after the state it
         reads changes, and a press in that moment can miss."""
         def opened():
-            self.s.driver('press', 'Go to…')
+            self.s.driver('press', name)
             return self.rows_until(lambda rs: self.s.has('palette-search', rs), seconds=3)[0] is not None
         wait(opened, 'the palette did not open', seconds=20)
         return self.s.rows()
@@ -214,6 +220,19 @@ class CommandPalette(unittest.TestCase):
         self.choose_reopen('alpha/sw-settled')
         wait(lambda: 'settled_at' not in self.records().get('sw-settled', {'settled_at': 1}), 'Reopen did not clear settled_at', seconds=15)
         wait(lambda: 'alpha/sw-settled' in self.client_sessions(), 'the client did not go to the reopened Session', seconds=10)
+
+    def test_a_palette_whose_show_leaves_out_topic_session_lists_a_no_topic_session_but_not_a_topics_session(self):
+        self.write_topic('sw-show-member', 'Sw show member', self.beta)
+        self.addCleanup(remove_topic, self.topics_dir/'sw-show-member.json')
+        member = self.session_row(self.new_session('beta/sw-show-member', self.beta, topic='sw-show-member'))
+        loose = self.session_row(self.new_session('sw-show-loose', self.beta))
+        self.open_palette()
+        rs = self.search('sw-show', member)
+        self.assertIn(loose, self.s.ids(rs), 'Go to… does not list the No Topic Session')
+        self.close_palette()
+        self.open_palette('No Topic Sessions')
+        rs = self.search('sw-show', loose)
+        self.assertNotIn(member, self.s.ids(rs), 'show without topic-session lists the Topic\'s Session')
 
     def test_launch_row_opens_exact_name_and_is_replaced_by_its_running_session_row(self):
         key = self.session_path_row(self.gamma/'release')

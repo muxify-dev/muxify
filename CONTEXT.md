@@ -272,7 +272,7 @@ One kind of thing a Command Palette searches: Topics, Sessions, Windows, Agents 
 _Avoid_: provider, category, section
 
 **Row kind**:
-What one row of a Command Palette or of an Action's list is: `topic`, `snoozed`, `settled`, `session`, `topic-session`, `session-path`, `worktree`, `window`, `agent`, `command` or `tag`. A running Session is a `topic-session` when its Topic is not Settled, and a `session` in all other cases.
+What one row of a Command Palette or of an Action's list is: `topic`, `snoozed`, `settled`, `session`, `topic-session`, `session-path`, `worktree`, `window`, `agent`, `command` or `tag`. A Command Palette's `show` names the Row kinds that it lists. A running Session is a `topic-session` when its Topic is not Settled, and a `session` in all other cases.
 _Avoid_: type, category, Source (when you mean one kind of row)
 
 **Check step**:

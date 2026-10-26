@@ -840,6 +840,43 @@ Typed queries use fuzzy match quality, without pushing the current row down.
 On an equal match, the shorter name comes first, as fzf's default
 `--tiebreak=length`. Then live entries come before unopened ones, then the more
 recently visited or active one.
+
+`show` gives the kinds of rows that a palette lists. Without `show`, the
+palette lists every kind. The [row kinds](#row-kinds) are the words of `show`. A
+word that is not a row kind, or an empty list, is a problem, and the palette is
+not added. `show` does not change which sources a palette searches: a kind
+that the selected sources do not have shows no rows.
+
+To list No Topic Sessions in Go to… but not the Sessions of open Topics:
+
+```yaml
+command_palettes:
+  - name: Go to…
+    keybinding: cmd+p
+    sources: [topics, sessions]
+    show: [topic, snoozed, settled, session, session-path, worktree]
+```
+
+When a Session runs with the launch name of a Session Path, the palette lists
+the Session and not the path. When `show` leaves out the kind of that Session,
+the palette lists the path again.
+
+### Row kinds
+
+| Kind | Row |
+| --- | --- |
+| `topic` | An open Topic |
+| `snoozed` | A Snoozed Topic |
+| `settled` | A Settled Topic |
+| `session` | A running Session in no open Topic: a No Topic Session, or a Session of a Settled Topic |
+| `topic-session` | A running Session in an open Topic, Snoozed or not |
+| `session-path` | A Session Path with no running Session |
+| `worktree` | A Worktree of a Session Path, with no running Session |
+| `window` | A Window |
+| `agent` | An Agent |
+| `command` | A Command, or a choice in an Action |
+| `tag` | A Tag |
+
 A Window with an Agent is left out while the Agents Source button is on. ⎋ closes the
 palette without a change. In an Action, ⌫ in an empty field goes back one step.
 A step that kills a process needs ⌘↩ to confirm. The keys inside a palette are

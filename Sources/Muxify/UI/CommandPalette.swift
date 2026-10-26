@@ -128,7 +128,8 @@ final class CommandPalette {
     private func buildResults() -> PickList<PaletteItem> {
         if let flow { return flowResults(flow) }
         guard let catalog else { return .empty }
-        return catalog.list(sourceButtons.filter(selection.contains), query: query, tagFilter: tagFilter)
+        return catalog.list(sourceButtons.filter(selection.contains), query: query, tagFilter: tagFilter,
+                            rules: current?.rules ?? .standard)
     }
 
     func selected(in list: PickList<PaletteItem>) -> PickRow<PaletteItem>? {

@@ -99,8 +99,11 @@ enum Pick<Payload: Equatable>: Equatable {
 struct PickCandidate<Payload: Equatable> {
     /// The accessibility id suffix, stable across queries.
     let id: String
-    /// The view picks the row's icon by it.
+    /// `show` keeps or drops the row; the view picks its icon by it.
     let kind: RowKind
+    /// The id of a row that makes this one redundant: while that row is listed, this one is not. A Session Path names
+    /// the row of the Session with its launch name, so `show` without that Session's kind lists the path again.
+    var shadowedBy: String? = nil
     var symbol: String? = nil
     let title: String
     var fields: [SearchField] = []
@@ -172,7 +175,7 @@ struct PickList<Payload: Equatable>: Equatable {
     }
 }
 
-enum SectionRule {
+enum SectionRule: Equatable {
     /// Fuzzy filter and sort; hidden on an empty query when `showsWhenEmpty` is false.
     case ranked(showsWhenEmpty: Bool)
     /// Never filtered or sorted: the Move form's New Topic row.
@@ -183,7 +186,7 @@ struct PickSectionInput<Payload: Equatable> {
     let id: String
     var title: String? = nil
     let rule: SectionRule
-    let candidates: [PickCandidate<Payload>]
+    var candidates: [PickCandidate<Payload>]
     var currentLast = false
     /// False for a list whose candidate order means something, such as Commands or Tags in Config order.
     var shorterTitleFirst = true
@@ -211,13 +214,14 @@ private struct Ranked<Payload: Equatable> {
     }
 }
 
-/// The one ranking pipeline: match, drop non-matches, sort by score, then the shorter title for a query when the
-/// section wants it, as fzf's default `--tiebreak=length`, then a row you can go to before an unopened one, then
-/// last visit, then activity, then candidate order; on an empty query only, Pinned rows go first in candidate
-/// order, then current rows. Empty sections drop out.
+/// The one ranking pipeline: drop the ranked rows whose kind `show` leaves out, then those a listed row shadows; match,
+/// drop non-matches, sort by score, then the shorter title for a query when the section wants it, as fzf's default
+/// `--tiebreak=length`, then a row you can go to before an unopened one, then last visit, then activity, then
+/// candidate order; on an empty query only, Pinned rows go first in candidate order, then current rows. Empty
+/// sections drop out. A fixed section keeps every row.
 enum FuzzyRanker {
-    static func list<Payload>(_ sections: [PickSectionInput<Payload>], query: FuzzyQuery) -> PickList<Payload> {
-        PickList(sections: sections.compactMap { section in
+    static func list<Payload>(_ sections: [PickSectionInput<Payload>], query: FuzzyQuery, rules: PickRules = .standard) -> PickList<Payload> {
+        PickList(sections: shown(sections, show: rules.show).compactMap { section in
             let rows: [PickRow<Payload>]
             switch section.rule {
             case .ranked(let showsWhenEmpty):
@@ -242,6 +246,23 @@ enum FuzzyRanker {
             guard !rows.isEmpty else { return nil }
             return PickSection(id: section.id, title: section.title, rows: rows)
         })
+    }
+
+    /// Over every ranked section at once, because a row can shadow one in another section.
+    private static func shown<Payload>(_ sections: [PickSectionInput<Payload>], show: Set<RowKind>) -> [PickSectionInput<Payload>] {
+        let kept = sections.map { section in
+            guard section.rule != .fixed else { return section }
+            var section = section
+            section.candidates.removeAll { !show.contains($0.kind) }
+            return section
+        }
+        let listed = Set(kept.filter { $0.rule != .fixed }.flatMap { $0.candidates.map(\.id) })
+        return kept.map { section in
+            guard section.rule != .fixed else { return section }
+            var section = section
+            section.candidates.removeAll { $0.shadowedBy.map(listed.contains) == true }
+            return section
+        }
     }
 
     private static func row<Payload>(_ candidate: PickCandidate<Payload>, match: FieldsMatch?) -> PickRow<Payload> {
