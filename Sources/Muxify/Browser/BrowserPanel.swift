@@ -34,7 +34,10 @@ private struct TabStrip: View {
                             tab: tab,
                             isActive: tab.id == browser.activeTabID,
                             width: tabWidth(available: proxy.size.width),
-                            onSelect: { browser.select(tab) },
+                            onSelect: {
+                                browser.select(tab)
+                                browser.requestFocus()
+                            },
                             onClose: { browser.close(tab) }
                         )
                     }
@@ -110,6 +113,7 @@ private struct TabItem: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
         .onTapGesture(perform: onSelect)
+        .takesFirstClick()
         .onHover { hovering = $0 }
         .help(tab.hasPage ? tab.urlString : "New Tab")
         .opacity(hints[.tab(tab.id)].isEmpty ? 1 : 0.5)
