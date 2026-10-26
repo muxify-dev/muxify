@@ -278,7 +278,7 @@ _Avoid_: pick step, chips, mark, multi-select, selection
 ### Git
 
 **Git View**:
-A view of the repository in the current Window's folder: its Changes, history, branches and stashes in Git View tabs, with the selected one's diff. Changes, or lines of them, can be staged and discarded from it, and what's staged committed. A branch goes into its commits, and a selected commit or stash shows its Diff files under them. It opens as a popup over the App Window or in the terminal's place. Each Window has its own, kept as it was left while another Window is shown.
+A view of the repository in its Window's folder: its Changes, history, branches and stashes in Git View tabs, with the selected one's diff. Changes, or lines of them, can be staged and discarded from it, and what's staged committed. A branch goes into its commits, and a selected commit or stash shows its Diff files under them. It opens as a popup over the App Window or in the terminal's place. Each Window has its own, which shows only while that Window is the Location and is kept as it was left meanwhile. An Empty Topic page has none.
 _Avoid_: lazygit (when you mean ours), git panel, diff viewer
 
 **Git View tab**:
