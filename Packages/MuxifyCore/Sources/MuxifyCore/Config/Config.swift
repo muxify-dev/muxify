@@ -298,6 +298,9 @@ public struct Config: Equatable {
         #   - name: Go to…
         #     keybinding: cmd+p
         #     sources: [topics, sessions]
+        #     # grouped puts each source under its own header; ranked ranks
+        #     # the rows of every source in one list for a query.
+        #     order: grouped
         #     # The kinds of rows it lists; without show, every kind:
         #     # topic, snoozed, settled, session, topic-session,
         #     # session-path, worktree, window, agent, command or tag.
@@ -1218,7 +1221,7 @@ private struct ConfigReader {
             let problemCount = config.problems.count
             var values: [String: Node] = [:]
             for (name, key, value) in entries(of: item, "a Command Palette") {
-                guard ["name", "keybinding", "sources", "show"].contains(name) else {
+                guard ["name", "keybinding", "sources", "order", "show"].contains(name) else {
                     problem(at: key, "unknown Command Palette key \"\(name)\"")
                     continue
                 }
@@ -1241,9 +1244,15 @@ private struct ConfigReader {
             if sources.isEmpty, config.problems.count == problemCount {
                 problem(at: values["sources"] ?? item, "Command Palette sources: expected a list of topics, sessions, windows, agents or commands")
             }
+            var order = PaletteOrder.grouped
+            if let value = values["order"] {
+                if let parsed = string(value).flatMap(PaletteOrder.init(rawValue:)) { order = parsed } else {
+                    problem(at: value, "Command Palette order: expected grouped or ranked")
+                }
+            }
             let rules = readPickRules(values, label: { "Command Palette " + $0 }, kinds: RowKind.all)
             guard config.problems.count == problemCount, let name, let rules else { continue }
-            palettes.append(CommandPaletteConfig(name: name, triggers: [], sources: sources, rules: rules))
+            palettes.append(CommandPaletteConfig(name: name, triggers: [], sources: sources, order: order, rules: rules))
             // A bad trigger is skipped; the palette still applies.
             if let value = values["keybinding"], value.null == nil, let listed = triggers(in: value, of: "Command Palette keybinding") {
                 claims += listed.map { Claim(owner: .palette(name), trigger: $0.trigger, node: $0.node) }

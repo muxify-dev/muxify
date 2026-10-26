@@ -66,12 +66,13 @@ struct PaletteCatalog {
     var offersTopics: Bool { topics?.topicsEnabled == true }
 
     /// With `tagFilter`, only the Topics that have the Tag: open, Snoozed and Settled.
-    func list(_ sources: [PaletteSource], query: String, tagFilter: Tag? = nil, rules: PickRules) -> PickList<PaletteItem> {
+    func list(_ sources: [PaletteSource], query: String, tagFilter: Tag? = nil, rules: PickRules,
+              order: PaletteOrder = .grouped) -> PickList<PaletteItem> {
         let query = FuzzyQuery(query)
-        // A query ranks Snoozed and Settled Topics by score beside the open ones.
-        let ranksSetAside = !query.isEmpty
+        // Under headers, a query ranks Snoozed and Settled Topics by score beside the open ones; in one list they already are.
+        let ranksSetAside = order == .grouped && !query.isEmpty
         let sections = tagFilter.map { topicSections(only: $0, ranksSetAside: ranksSetAside) } ?? sections(sources, ranksSetAside: ranksSetAside)
-        return FuzzyRanker.list(sections, query: query, rules: rules)
+        return FuzzyRanker.list(sections, query: query, rules: rules, order: order)
     }
 
     /// The rows before any query, in the order of `sources`, then the Snoozed and Settled Topics, which are set aside:

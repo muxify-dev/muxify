@@ -129,7 +129,7 @@ final class CommandPalette {
         if let flow { return flowResults(flow) }
         guard let catalog else { return .empty }
         return catalog.list(sourceButtons.filter(selection.contains), query: query, tagFilter: tagFilter,
-                            rules: current?.rules ?? .standard)
+                            rules: current?.rules ?? .standard, order: current?.order ?? .grouped)
     }
 
     func selected(in list: PickList<PaletteItem>) -> PickRow<PaletteItem>? {

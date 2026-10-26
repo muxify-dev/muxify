@@ -11,6 +11,14 @@ public enum PaletteSource: String, CaseIterable {
     public var title: String { rawValue.capitalized }
 }
 
+/// How a Command Palette lays out the rows of its Sources.
+public enum PaletteOrder: String, CaseIterable {
+    /// Each Source under its own header, in Source order, ranked on its own.
+    case grouped
+    /// One list without headers. A query ranks the rows of every Source together; an empty query keeps Source order.
+    case ranked
+}
+
 public struct CommandPaletteConfig: Equatable, Identifiable {
     /// Unique among the Config's palettes.
     public let name: String
@@ -18,13 +26,16 @@ public struct CommandPaletteConfig: Equatable, Identifiable {
     /// The Sources that are on when it opens, in Config order, without
     /// repeats; never empty. The other Sources can be switched on.
     public let sources: [PaletteSource]
+    public let order: PaletteOrder
     /// The kinds of rows it lists.
     public let rules: PickRules
 
-    public init(name: String, triggers: [KeyTrigger], sources: [PaletteSource], rules: PickRules = .standard) {
+    public init(name: String, triggers: [KeyTrigger], sources: [PaletteSource], order: PaletteOrder = .grouped,
+                rules: PickRules = .standard) {
         self.name = name
         self.triggers = triggers
         self.sources = sources
+        self.order = order
         self.rules = rules
     }
 

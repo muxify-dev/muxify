@@ -157,6 +157,12 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(grouped.sections.map(\.title), ["Topics", "Sessions"], "under headers, a query puts them among the open Topics")
         XCTAssertEqual(grouped.sections[0].rows.map(\.id), ["topic-s", "topic-z", "topic-a"],
                        "the Settled and Snoozed Topics match better than the open one")
+        let oneList = catalog.list(goTo, query: "claude mods", rules: .standard, order: .ranked)
+        XCTAssertEqual(oneList.sections.map(\.title), [nil])
+        XCTAssertEqual(ids(oneList), ["session:$muxify/claude-mods-later", "session:$chezmoi/what-are-claude-code-mods", "topic-s", "topic-z", "topic-a"],
+                       "in one list, a separator earns no more than another, so the Sessions tie the set-aside Topics and go first, and the weak open Topic is last")
+        XCTAssertEqual(ids(catalog.list(goTo, query: "", rules: .standard, order: .ranked)).suffix(2), ["topic-z", "topic-s"],
+                       "with nothing typed, Snoozed and Settled Topics stay last")
         XCTAssertEqual(catalog.list(goTo, query: "", rules: .standard).sections.map(\.title), ["Topics", "Sessions", "Snoozed", "Settled"])
     }
 

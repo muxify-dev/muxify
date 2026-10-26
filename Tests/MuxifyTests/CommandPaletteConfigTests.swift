@@ -86,6 +86,24 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertEqual(config.problems, [])
     }
 
+    func testAPaletteCanRankEverySourceInOneList() throws {
+        let config = try load("""
+        command_palettes:
+          - name: Go to…
+            sources: [topics, sessions]
+            order: ranked
+          - name: Commands
+            sources: [commands]
+          - name: Broken order
+            sources: [agents]
+            order: mixed
+        """)
+        XCTAssertEqual(config.commandPalettes.map(\.order), [.ranked, .grouped])
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 9, message: "Command Palette order: expected grouped or ranked"),
+        ])
+    }
+
     func testAPaletteShowsOnlyTheKindsItsShowNamesAndABadShowDropsThePalette() throws {
         let config = try load("""
         command_palettes:

@@ -832,8 +832,9 @@ keeps it. Each palette is also in the View menu. Its own keybinding closes a
 palette; another palette's keybinding switches to that one and keeps what you
 typed.
 
-Results stay in sections, one or more for each source. Words match in any
-order, fzf style, on the name, a type word (`topic`, `dormant`, `snoozed`,
+Results stay in sections, one or more for each source. With `order: ranked` on
+a palette, they show in one list without headers, and a query ranks the rows of
+every source together. Words match in any order, fzf style, on the name, a type word (`topic`, `dormant`, `snoozed`,
 `settled`, `session`, `worktree`, `window`), the details under the
 name, or a Settled Topic's outcome, and the matched letters are marked. A word
 must match at least 55% as well as it matches itself, so its letters spread

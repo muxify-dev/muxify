@@ -38,6 +38,19 @@ final class PickListTests: XCTestCase {
         XCTAssertNotNil(FieldsMatch.best(FuzzyQuery("x"), in: [.title("muxify")]), "one letter matches anywhere")
     }
 
+    func testOneListRanksEverySectionTogetherAndKeepsSectionOrderWhenEmpty() {
+        let sections = [
+            PickSectionInput(id: "a", title: "A", rule: .ranked(showsWhenEmpty: true), candidates: [candidate("weak", "the alpha notes")]),
+            PickSectionInput(id: "b", title: "B", rule: .ranked(showsWhenEmpty: true), candidates: [candidate("strong", "alpha")]),
+            PickSectionInput(id: "c", title: "C", rule: .ranked(showsWhenEmpty: false), candidates: [candidate("hidden", "alpha one")]),
+        ]
+        let typed = FuzzyRanker.list(sections, query: FuzzyQuery("alpha"), rules: .standard, order: .ranked)
+        XCTAssertEqual(typed.sections.map(\.title), [nil])
+        XCTAssertEqual(typed.rows.map(\.id), ["strong", "hidden", "weak"])
+        XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery("alpha"), rules: .standard).rows.map(\.id), ["weak", "strong", "hidden"])
+        XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery(""), rules: .standard, order: .ranked).rows.map(\.id), ["weak", "strong"])
+    }
+
     func testEverySeparatorEarnsTheSameBonus() throws {
         let words: [SearchField] = [.title("fix game")], slashed: [SearchField] = [.title("fix/game")], dashed: [SearchField] = [.title("fix-game")]
         let scores = try [words, slashed, dashed].map { try XCTUnwrap(FieldsMatch.best(FuzzyQuery("game"), in: $0)).score }
@@ -107,6 +120,8 @@ final class PickListTests: XCTestCase {
         for query in ["", "alpha"] {
             XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery(query), rules: rules).rows.map(\.id), ["loose", "topic", "new"],
                            "a Topic Session is left out, and the fixed row stays though show leaves out command, for \(query.debugDescription)")
+            XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery(query), rules: rules, order: .ranked).rows.map(\.id).sorted(),
+                           ["loose", "new", "topic"], "in one list too")
         }
         XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery(""), rules: .standard).rows.map(\.id), ["loose", "member", "topic", "new"],
                        "a list with no rules of its own lists every kind")

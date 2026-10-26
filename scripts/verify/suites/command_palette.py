@@ -52,12 +52,13 @@ class CommandPalette(unittest.TestCase):
                        check=True)
         subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma_hotfix), '-b', 'hotfix'],
                        check=True)
-        # No Topic Sessions is Go to… without the Sessions of open Topics.
+        # One list is Go to… without Source headers. No Topic Sessions is Go to… without the Sessions of open Topics.
         (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(s.root/'projects') + '/*\n'
                                                        '  aliases:\n    - ' + str(cls.delta) + ': Delta Notes\n'
                                                        'command_palettes:\n'
                                                        '  - {name: Commands, keybinding: cmd+shift+p, sources: [commands]}\n'
                                                        '  - {name: Go to…, keybinding: cmd+p, sources: [topics, sessions]}\n'
+                                                       '  - {name: One list, sources: [topics, sessions], order: ranked}\n'
                                                        '  - {name: No Topic Sessions, sources: [topics, sessions],'
                                                        ' show: [topic, snoozed, settled, session, session-path, worktree]}\n')
         cls.base = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'base', '-c', str(cls.beta), SHELL)
@@ -234,6 +235,19 @@ class CommandPalette(unittest.TestCase):
         self.assertNotIn('palette-section-snoozed', ids, 'a query still lists Snoozed Topics under their own header')
         self.assertEqual(self.topic_row_ids(rs), ['palette-row-topic-sw-rank-snoozed', 'palette-row-topic-sw-rank-open'],
                          'the Snoozed Topic does not rank by its score')
+
+    def test_one_list_ranks_sessions_and_topics_together_without_headers(self):
+        self.write_topic('sw-one-weak', 'Sw wom-bat later', self.beta)
+        self.addCleanup(remove_topic, self.topics_dir/'sw-one-weak.json')
+        sid = self.new_session('wombat', self.beta)
+        session = 'palette-row-session:' + sid
+        self.open_palette('One list')
+        rs = self.search('wombat', 'palette-row-topic-sw-one-weak')
+        ids = self.s.ids(rs)
+        self.assertFalse([key for key in ids if key.startswith('palette-section-')], 'One list shows section headers: %s' % ids)
+        self.assertIn(session, ids, 'no row for the Session wombat: %s' % ids)
+        self.assertLess(ids.index(session), ids.index('palette-row-topic-sw-one-weak'),
+                        'the exact Session does not rank above the weaker Topic match')
 
     def test_a_palette_whose_show_leaves_out_topic_session_lists_a_no_topic_session_but_not_a_topics_session(self):
         self.write_topic('sw-show-member', 'Sw show member', self.beta)
