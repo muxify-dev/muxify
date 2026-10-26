@@ -276,7 +276,7 @@ What one row of a Command Palette or of an Action's list is: `topic`, `snoozed`,
 _Avoid_: type, category, Source (when you mean one kind of row)
 
 **Pick list**:
-The ranked list of an Action's step, such as Add a Session or Move. Each has a name in `pick_lists` and takes `show`, as a Command Palette does.
+The ranked list of an Action's step, such as Add a Session or Move. Each has a name in `pick_lists` and takes `show` and `tiebreak`, as a Command Palette does.
 _Avoid_: picker, dropdown, menu
 
 **Check step**:

@@ -58,7 +58,7 @@ class CommandPalette(unittest.TestCase):
                                                        'command_palettes:\n'
                                                        '  - {name: Commands, keybinding: cmd+shift+p, sources: [commands]}\n'
                                                        '  - {name: Go to…, keybinding: cmd+p, sources: [topics, sessions]}\n'
-                                                       '  - {name: One list, sources: [topics, sessions], order: ranked}\n'
+                                                       '  - {name: One list, sources: [topics, sessions], order: ranked, tiebreak: [open, visit, length]}\n'
                                                        '  - {name: No Topic Sessions, sources: [topics, sessions],'
                                                        ' show: [topic, snoozed, settled, session, session-path, worktree]}\n')
         cls.base = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'base', '-c', str(cls.beta), SHELL)

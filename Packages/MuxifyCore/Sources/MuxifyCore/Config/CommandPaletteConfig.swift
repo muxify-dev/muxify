@@ -19,6 +19,24 @@ public enum PaletteOrder: String, CaseIterable {
     case ranked
 }
 
+/// A rule that orders two rows with an equal match, in the order a palette lists them. Candidate order, which is
+/// Source order, decides when every listed rule ties.
+public enum PaletteTiebreak: String, CaseIterable {
+    /// A row that is not a Snoozed or Settled Topic first.
+    case open
+    /// A row with something running first: not a Dormant or Empty Topic, nor a Session Path with no Session.
+    case running
+    /// The most recently visited first.
+    case visit
+    /// The most recent tmux activity first.
+    case activity
+    /// The shorter title first, as fzf's default `--tiebreak=length`. Commands and Tags skip it: their Config order counts.
+    case length
+
+    /// The order of a palette whose Config gives none, and of every other pick list, such as Add a Session.
+    public static let standard: [PaletteTiebreak] = [.open, .length, .running, .visit, .activity]
+}
+
 public struct CommandPaletteConfig: Equatable, Identifiable {
     /// Unique among the Config's palettes.
     public let name: String
@@ -27,7 +45,7 @@ public struct CommandPaletteConfig: Equatable, Identifiable {
     /// repeats; never empty. The other Sources can be switched on.
     public let sources: [PaletteSource]
     public let order: PaletteOrder
-    /// The kinds of rows it lists.
+    /// The kinds of rows it lists, and its tiebreak.
     public let rules: PickRules
 
     public init(name: String, triggers: [KeyTrigger], sources: [PaletteSource], order: PaletteOrder = .grouped,

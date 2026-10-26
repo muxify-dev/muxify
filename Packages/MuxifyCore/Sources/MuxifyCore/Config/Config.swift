@@ -173,7 +173,7 @@ public struct Config: Equatable {
     /// How the Git View opens.
     public var gitView = GitViewConfig()
 
-    /// An Action list's rules: its `pick_lists` entry, else every kind.
+    /// An Action list's rules: its `pick_lists` entry, else every kind and the standard tiebreak.
     public func rules(for list: ActionList) -> PickRules { pickLists[list] ?? .standard }
     /// The Ghostty config file the terminal loads on top of Ghostty's
     /// default files, as an absolute path.
@@ -301,6 +301,9 @@ public struct Config: Equatable {
         #     # grouped puts each source under its own header; ranked ranks
         #     # the rows of every source in one list for a query.
         #     order: grouped
+        #     # On an equal match, the first rule that differs decides:
+        #     # open, running, visit, activity or length.
+        #     tiebreak: [open, length, running, visit, activity]
         #     # The kinds of rows it lists; without show, every kind:
         #     # topic, snoozed, settled, session, topic-session,
         #     # session-path, worktree, window, agent, command or tag.
@@ -310,7 +313,7 @@ public struct Config: Equatable {
         #     sources: [agents]
         #
         # pick_lists:
-        #   # An Action's list takes show as a palette does:
+        #   # An Action's list takes show and tiebreak as a palette does:
         #   # add_session, move, move_session, snooze_topics,
         #   # unsnooze_topics, unsnooze_topic, tags or worktree_start.
         #   add_session:
@@ -1221,7 +1224,7 @@ private struct ConfigReader {
             let problemCount = config.problems.count
             var values: [String: Node] = [:]
             for (name, key, value) in entries(of: item, "a Command Palette") {
-                guard ["name", "keybinding", "sources", "order", "show"].contains(name) else {
+                guard ["name", "keybinding", "sources", "order", "tiebreak", "show"].contains(name) else {
                     problem(at: key, "unknown Command Palette key \"\(name)\"")
                     continue
                 }
@@ -1261,7 +1264,7 @@ private struct ConfigReader {
         self.palettes = palettes
     }
 
-    /// A bad entry is left out with a problem, so its list keeps every kind.
+    /// A bad entry is left out with a problem, so its list keeps every kind and the standard tiebreak.
     mutating func readPickLists(_ node: Node) {
         for (name, key, value) in entries(of: node, "pick_lists") {
             guard let list = ActionList(rawValue: name) else {
@@ -1271,7 +1274,7 @@ private struct ConfigReader {
             let problemCount = config.problems.count
             var values: [String: Node] = [:]
             for (keyName, key, value) in entries(of: value, "pick_lists.\(name)") {
-                guard keyName == "show" else {
+                guard ["show", "tiebreak"].contains(keyName) else {
                     problem(at: key, "unknown key \"pick_lists.\(name).\(keyName)\"")
                     continue
                 }
@@ -1283,8 +1286,8 @@ private struct ConfigReader {
         }
     }
 
-    /// The `show` key of a Command Palette or a `pick_lists` entry, which `values` holds when it is set. Nil, with a
-    /// problem, when `show` is empty or names a word outside `kinds`.
+    /// The `show` and `tiebreak` keys of a Command Palette or a `pick_lists` entry, which `values` holds when they are
+    /// set. Nil, with a problem, when `show` is empty or names a word outside `kinds`, or a tiebreak word is unknown.
     private mutating func readPickRules(_ values: [String: Node], label: (String) -> String, kinds: Set<RowKind>) -> PickRules? {
         var rules = PickRules.standard
         var valid = true
@@ -1305,6 +1308,16 @@ private struct ConfigReader {
             }
             rules.show = show
         }
+        var tiebreak: [PaletteTiebreak] = []
+        for value in values["tiebreak"].map({ $0.sequence ?? [$0] }) ?? [] {
+            guard let rule = string(value).flatMap(PaletteTiebreak.init(rawValue:)) else {
+                problem(at: value, label("tiebreak") + ": expected open, running, visit, activity or length")
+                valid = false
+                continue
+            }
+            if !tiebreak.contains(rule) { tiebreak.append(rule) }
+        }
+        if !tiebreak.isEmpty { rules.tiebreak = tiebreak }
         return valid ? rules : nil
     }
 

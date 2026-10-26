@@ -51,6 +51,20 @@ final class PickListTests: XCTestCase {
         XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery(""), rules: .standard, order: .ranked).rows.map(\.id), ["weak", "strong"])
     }
 
+    func testTiesFollowTheTiebreakRulesInTheirOrder() {
+        var snoozed = candidate("snoozed", "alpha", visit: 30)
+        snoozed.isSetAside = true
+        let candidates = [candidate("long", "alpha beta", visit: 20), candidate("short", "alpha", visit: 10), snoozed]
+        func ids(_ tiebreak: [PaletteTiebreak]) -> [String] {
+            FuzzyRanker.list([PickSectionInput(id: "s", rule: .ranked(showsWhenEmpty: true), candidates: candidates)],
+                             query: FuzzyQuery("alpha"), rules: PickRules(tiebreak: tiebreak)).rows.map(\.id)
+        }
+        XCTAssertEqual(ids([.open, .visit, .length]), ["long", "short", "snoozed"])
+        XCTAssertEqual(ids([.open, .length, .visit]), ["short", "long", "snoozed"])
+        XCTAssertEqual(ids([.visit]), ["snoozed", "long", "short"], "a rule not listed does not count")
+        XCTAssertEqual(ids([]), ["long", "short", "snoozed"], "with no rule, candidate order decides")
+    }
+
     func testEverySeparatorEarnsTheSameBonus() throws {
         let words: [SearchField] = [.title("fix game")], slashed: [SearchField] = [.title("fix/game")], dashed: [SearchField] = [.title("fix-game")]
         let scores = try [words, slashed, dashed].map { try XCTUnwrap(FieldsMatch.best(FuzzyQuery("game"), in: $0)).score }

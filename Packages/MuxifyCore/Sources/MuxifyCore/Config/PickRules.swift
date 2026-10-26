@@ -46,17 +46,20 @@ public enum ActionList: String, CaseIterable {
     }
 }
 
-/// How one pick list filters its ranked rows: the `show` key, which a Command Palette and a `pick_lists` entry read the
-/// same way.
+/// How one pick list filters and orders its ranked rows: the `show` and `tiebreak` keys, which a Command Palette and
+/// a `pick_lists` entry read the same way.
 public struct PickRules: Equatable {
     /// Never empty. The Config reader allows only the kinds the list can show.
     public var show: Set<RowKind>
+    /// Never empty, without repeats.
+    public var tiebreak: [PaletteTiebreak]
 
-    public init(show: Set<RowKind> = RowKind.all) {
+    public init(show: Set<RowKind> = RowKind.all, tiebreak: [PaletteTiebreak] = PaletteTiebreak.standard) {
         self.show = show
+        self.tiebreak = tiebreak
     }
 
-    /// Every kind: the rules of a list that the Config does not name.
+    /// Every kind, the standard tiebreak: the rules of a list that the Config does not name.
     public static let standard = PickRules()
 }
 

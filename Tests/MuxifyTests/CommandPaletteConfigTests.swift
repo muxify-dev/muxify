@@ -86,21 +86,27 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertEqual(config.problems, [])
     }
 
-    func testAPaletteCanRankEverySourceInOneList() throws {
+    func testAPaletteCanRankEverySourceInOneListWithItsOwnTiebreaks() throws {
         let config = try load("""
         command_palettes:
           - name: Go to…
             sources: [topics, sessions]
             order: ranked
+            tiebreak: [visit, open, visit]
           - name: Commands
             sources: [commands]
           - name: Broken order
             sources: [agents]
             order: mixed
+          - name: Broken tiebreak
+            sources: [agents]
+            tiebreak: [visit, frecency]
         """)
         XCTAssertEqual(config.commandPalettes.map(\.order), [.ranked, .grouped])
+        XCTAssertEqual(config.commandPalettes.map(\.rules.tiebreak), [[.visit, .open], PaletteTiebreak.standard])
         XCTAssertEqual(config.problems, [
-            ConfigProblem(path: root, line: 9, message: "Command Palette order: expected grouped or ranked"),
+            ConfigProblem(path: root, line: 10, message: "Command Palette order: expected grouped or ranked"),
+            ConfigProblem(path: root, line: 13, message: "Command Palette tiebreak: expected open, running, visit, activity or length"),
         ])
     }
 
@@ -131,15 +137,19 @@ final class CommandPaletteConfigTests: XCTestCase {
         ])
     }
 
-    func testPickListsGiveAnActionListItsShow() throws {
+    func testPickListsGiveAnActionListItsShowAndTiebreak() throws {
         let config = try load("""
         pick_lists:
           add_session:
             show: [session-path]
+            tiebreak: [visit, length]
+          move_session:
+            tiebreak: activity
         """)
         XCTAssertEqual(config.problems, [])
-        XCTAssertEqual(config.rules(for: .addSession), PickRules(show: [.sessionPath]))
-        XCTAssertEqual(config.rules(for: .move), .standard, "a list with no entry keeps every kind")
+        XCTAssertEqual(config.rules(for: .addSession), PickRules(show: [.sessionPath], tiebreak: [.visit, .length]))
+        XCTAssertEqual(config.rules(for: .moveSession), PickRules(tiebreak: [.activity]))
+        XCTAssertEqual(config.rules(for: .move), .standard, "a list with no entry keeps every kind and the standard tiebreak")
         XCTAssertEqual(try load("").rules(for: .addSession), .standard)
     }
 
@@ -166,7 +176,7 @@ final class CommandPaletteConfigTests: XCTestCase {
             ConfigProblem(path: root, line: 5, message: "pick_lists.add_session.show: expected session, topic-session, session-path or worktree"),
             ConfigProblem(path: root, line: 8, message: "unknown key \"pick_lists.move.order\""),
             ConfigProblem(path: root, line: 10, message: "pick_lists.tags.show: expected a list of tag"),
-            ConfigProblem(path: root, line: 12, message: "unknown key \"pick_lists.unsnooze_topic.tiebreak\""),
+            ConfigProblem(path: root, line: 12, message: "pick_lists.unsnooze_topic.tiebreak: expected open, running, visit, activity or length"),
         ])
         for list in [ActionList.addSession, .move, .tags, .unsnoozeTopic] {
             XCTAssertEqual(config.rules(for: list), .standard, "\(list)")

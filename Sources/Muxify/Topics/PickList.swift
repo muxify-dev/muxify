@@ -207,32 +207,42 @@ private struct Ranked<Payload: Equatable> {
     /// From its section, and only for a query.
     let shorterTitleFirst: Bool
 
-    func precedes(_ other: Ranked) -> Bool {
-        let (left, right) = (candidate, other.candidate)
+    func precedes(_ other: Ranked, tiebreak: [PaletteTiebreak]) -> Bool {
         if match.score != other.match.score { return match.score > other.match.score }
-        if left.isSetAside != right.isSetAside { return right.isSetAside }
-        if shorterTitleFirst, other.shorterTitleFirst, left.title.count != right.title.count { return left.title.count < right.title.count }
-        if left.unopened != right.unopened { return right.unopened }
-        if left.lastVisit != right.lastVisit { return (left.lastVisit ?? .distantPast) > (right.lastVisit ?? .distantPast) }
-        if left.activity != right.activity { return left.activity > right.activity }
+        for rule in tiebreak {
+            if let first = candidate.precedes(other.candidate, by: rule, length: shorterTitleFirst && other.shorterTitleFirst) { return first }
+        }
         return index < other.index
     }
 }
 
+private extension PickCandidate {
+    /// Nil when the rule ties.
+    func precedes(_ other: PickCandidate, by rule: PaletteTiebreak, length: Bool) -> Bool? {
+        switch rule {
+        case .open: isSetAside == other.isSetAside ? nil : other.isSetAside
+        case .running: unopened == other.unopened ? nil : other.unopened
+        case .visit: lastVisit == other.lastVisit ? nil : (lastVisit ?? .distantPast) > (other.lastVisit ?? .distantPast)
+        case .activity: activity == other.activity ? nil : activity > other.activity
+        case .length: !length || title.count == other.title.count ? nil : title.count < other.title.count
+        }
+    }
+}
+
 /// The one ranking pipeline: drop the ranked rows whose kind `show` leaves out, then those a listed row shadows; match,
-/// drop non-matches, sort by score, then a row that is not set aside, then the shorter title for a query when the
-/// section wants it, as fzf's default `--tiebreak=length`, then a row you can go to before an unopened one, then last
-/// visit, then activity, then candidate order; on an empty query only, Pinned rows go first in candidate order, then
-/// current rows. Empty sections drop out. `ranked` merges the sections into one list. A fixed section keeps every row.
+/// drop non-matches, sort by score, then by each `tiebreak` rule in turn (`length` only for a query, in a section that
+/// wants it), then candidate order; on an empty query only, Pinned rows go first in candidate order, then current rows.
+/// Empty sections drop out. `ranked` merges the sections into one list. A fixed section keeps every row.
 enum FuzzyRanker {
     /// `rules` has no default, so every ranked list is ranked by its own Config rules.
     static func list<Payload>(_ sections: [PickSectionInput<Payload>], query: FuzzyQuery, rules: PickRules,
                               order: PaletteOrder = .grouped) -> PickList<Payload> {
         let sections = shown(sections, show: rules.show)
+        let tiebreak = rules.tiebreak
         var start = 0
         let ranked = sections.map { section in
             defer { start += section.candidates.count }
-            return (section: section, matches: matches(section, query: query, start: start))
+            return (section: section, matches: matches(section, query: query, start: start, tiebreak: tiebreak))
         }
         switch order {
         case .grouped:
@@ -243,7 +253,7 @@ enum FuzzyRanker {
         case .ranked:
             let rows = query.isEmpty
                 ? ranked.flatMap { ordered($0.section, $0.matches, query: query) }
-                : ranked.flatMap(\.matches).sorted { $0.precedes($1) }.map { row($0.candidate, match: $0.match) }
+                : ranked.flatMap(\.matches).sorted { $0.precedes($1, tiebreak: tiebreak) }.map { row($0.candidate, match: $0.match) }
                     + ranked.filter { $0.section.rule == .fixed }.flatMap { ordered($0.section, [], query: query) }
             return PickList(sections: rows.isEmpty ? [] : [PickSection(id: "results", title: nil, rows: rows)])
         }
@@ -272,7 +282,8 @@ enum FuzzyRanker {
     }
 
     /// A ranked section's matches in rank order; none for a fixed section, or a hidden one on an empty query.
-    private static func matches<Payload>(_ section: PickSectionInput<Payload>, query: FuzzyQuery, start: Int) -> [Ranked<Payload>] {
+    private static func matches<Payload>(_ section: PickSectionInput<Payload>, query: FuzzyQuery, start: Int,
+                                         tiebreak: [PaletteTiebreak]) -> [Ranked<Payload>] {
         guard case .ranked(let showsWhenEmpty) = section.rule, showsWhenEmpty || !query.isEmpty else { return [] }
         let shorterTitleFirst = section.shorterTitleFirst && !query.isEmpty
         return section.candidates.enumerated()
@@ -280,7 +291,7 @@ enum FuzzyRanker {
                 FieldsMatch.best(query, in: candidate.searchFields)
                     .map { Ranked(index: start + index, candidate: candidate, match: $0, shorterTitleFirst: shorterTitleFirst) }
             }
-            .sorted { $0.precedes($1) }
+            .sorted { $0.precedes($1, tiebreak: tiebreak) }
     }
 
     private static func ordered<Payload>(_ section: PickSectionInput<Payload>, _ ranked: [Ranked<Payload>], query: FuzzyQuery) -> [PickRow<Payload>] {

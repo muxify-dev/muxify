@@ -10,11 +10,11 @@ A checkout is a `worktree` row only when its folder is outside the folder of its
 
 A running Session is a `topic-session` when its Topic is not Settled. A Snoozed Topic's Session is a `topic-session`. A Locked Session and the Session of a Settled Topic are `session`. Move's destination list uses the same rule.
 
-## A list takes `show`
+## A list takes `show` and `tiebreak`
 
 - A Command Palette in `command_palettes` takes `show`, the Row kinds that it lists.
-- The new section `pick_lists` names an Action's list and takes `show`. The list names are `add_session`, `move`, `move_session`, `snooze_topics`, `unsnooze_topics`, `unsnooze_topic`, `tags` and `worktree_start`.
-- A list with no `show` lists every Row kind. So a list without an entry keeps the rows it had before.
+- The new section `pick_lists` names an Action's list and takes `show` and `tiebreak`. The list names are `add_session`, `move`, `move_session`, `snooze_topics`, `unsnooze_topics`, `unsnooze_topic`, `tags` and `worktree_start`.
+- A list with no `show` lists every Row kind, and a list with no `tiebreak` uses the default list from [ADR 0049](0049-a-query-ranks-by-score-across-the-palettes-rows.md). So a list without an entry keeps the order it had before.
 - `show` filters ranked rows only. Fixed rows, such as New Topic and New Session, always show.
 - A list accepts only the Row kinds that it can show. An unknown list name, an unknown Row kind, or a Row kind that the list cannot show is a Config problem. A bad `pick_lists` entry does not apply. A bad `show` in a palette drops the palette, as every other palette problem does.
 

@@ -844,9 +844,29 @@ scheme, so a Topic title does not beat a Session name only for its spaces. With
 nothing typed, Topics and Sessions put the current live row last among live rows,
 before entries with nothing running. Other live rows are most recently visited first.
 Typed queries use fuzzy match quality, without pushing the current row down.
-On an equal match, a row that is not a Snoozed or Settled Topic comes first,
-then the shorter name, as fzf's default `--tiebreak=length`. Then live entries
-come before unopened ones, then the more recently visited or active one.
+An equal match follows the palette's `tiebreak` rules, in order. The first
+rule that differs decides:
+
+- `open`: a row that is not a Snoozed or Settled Topic first.
+- `running`: a row with something running first, not a Dormant or Empty Topic or
+  a Session Path with no Session.
+- `visit`: the most recently visited first.
+- `activity`: the most recent tmux activity first.
+- `length`: the shorter name first, as fzf's default `--tiebreak=length`.
+  Commands and Tags skip it and keep their Config order.
+
+A rule that is not listed does not count, and the Source order decides last.
+The default is `[open, length, running, visit, activity]`. To rank everything in
+one list and prefer the row you used last:
+
+```yaml
+command_palettes:
+  - name: Go to…
+    keybinding: cmd+p
+    sources: [topics, sessions]
+    order: ranked
+    tiebreak: [open, visit, length]
+```
 
 `show` gives the kinds of rows that a palette lists. Without `show`, the
 palette lists every kind. The [row kinds](#row-kinds) are the words of `show`. A
@@ -903,13 +923,14 @@ A step that kills a process needs ⌘↩ to confirm. The keys inside a palette a
 ## Pick lists
 
 An Action that asks you to choose a row, such as Add a Session, shows a pick
-list. `pick_lists` gives a pick list the `show` key of a
+list. `pick_lists` gives a pick list the `show` and `tiebreak` keys of a
 [Command Palette](#command-palettes). Each entry has the name of a pick list:
 
 ```yaml
 pick_lists:
   add_session:
     show: [session-path]    # no running Sessions and no Worktrees
+    tiebreak: [visit, length]
 ```
 
 | Pick list | Action | Kinds for `show` |
@@ -923,11 +944,12 @@ pick_lists:
 | `tags` | The Tags of New Topic and Edit Tags… | `tag` |
 | `worktree_start` | Add a Session › New Worktree from | `command` |
 
-A pick list without an entry lists every kind. The rows that a pick list always
-shows, such as New Topic in Move to…, ignore `show`. These problems apply to one
-entry: a name that is not in the table, a key other than `show`, an empty
-`show`, or a kind that the pick list does not have. Muxify shows the problem,
-and that pick list lists every kind.
+A pick list without an entry lists every kind, with the default `tiebreak`. The
+rows that a pick list always shows, such as New Topic in Move to…, ignore `show`.
+These problems apply to one entry: a name that is not in the table, a key other
+than `show` and `tiebreak`, an empty `show`, or a kind that the pick list does
+not have. Muxify shows the problem, and that pick list keeps every kind and the
+default `tiebreak`.
 
 ## A Remote Environment's own Config
 

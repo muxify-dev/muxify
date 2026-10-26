@@ -1,6 +1,6 @@
 # Topics are a Source of the Command Palette, and Move stays a separate picker
 
-> **Update 2026-10-26:** A query now ranks Snoozed and Settled Topics by their score among the open Topics, without their own headers. They stay last only with an empty query. A palette can rank every Source in one list. See [0049](0049-a-query-ranks-by-score-across-the-palettes-rows.md).
+> **Update 2026-10-26:** A query now ranks Snoozed and Settled Topics by their score among the open Topics, without their own headers. They stay last only with an empty query. Ties follow the palette's `tiebreak` rules, and a palette can rank every Source in one list. See [0049](0049-a-query-ranks-by-score-across-the-palettes-rows.md).
 >
 > **Update 2026-10-25:** On an equal score, a typed query now puts the shorter title first, as fzf's default `--tiebreak=length`. The order below and in the update after this one applies only to titles of the same length. A base Session Path such as `note` now comes before a running `note-feature`.
 >
