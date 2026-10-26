@@ -456,7 +456,8 @@ Git View, and closing the Git View. When git fails, the diff pane says why.
 
 e opens the file in your editor, in a new tmux Window right after the current
 one, and switches to it; the Git View stays open in the Window you left, as you
-left it. When the editor's Window closes, Muxify goes back to that Window. In
+left it. When the editor's Window closes, Muxify goes back to that Window. With
+`editor_in_window: false`, e opens no Window and the Git View keeps Focus. In
 the diff, it opens the file of the cursor's line, or of the selection's first
 line, at that line's number in the new file; a removed line opens at the new line
 beside it. In a list, a change or a file of the Diff files opens at its first
@@ -725,6 +726,7 @@ git_view:
   width: 80%
   height: 80%
   editor: nvim +{line} {file}   # without it: ${VISUAL:-${EDITOR:-vi}} +{line} {file}
+  editor_in_window: true
 ```
 
 The sizes are the defaults. `popup` floats over the whole App Window, Sidebar and
@@ -734,8 +736,23 @@ takes the terminal's place, leaving the Sidebar and Browser. `editor` is the
 shell command that e runs, in the repository's root folder, such as
 `hx {file}:{line}`. It must name `{file}`; `{line}` is the line number. Both are
 filled in for you, and `{file}` is the file's absolute path, shell-quoted.
-Without `editor`, e runs `${VISUAL:-${EDITOR:-vi}} +{line} {file}`. Changes apply
-live; invalid values use the defaults and appear in the Config problems banner.
+Without `editor`, e runs `${VISUAL:-${EDITOR:-vi}} +{line} {file}`.
+
+`editor_in_window: false` runs `editor` in the background, on the Environment's
+machine, with no tmux Window: for a command that hands the file to an editor
+that already runs. When it fails or runs over 10 seconds, the Git View says so.
+For example, to open the file in a Neovim that listens on a socket:
+
+```yaml
+git_view:
+  editor: >-
+    nvim --server /tmp/nvim.sock --remote {file} &&
+    nvim --server /tmp/nvim.sock --remote-send '<C-\><C-N>{line}G'
+  editor_in_window: false
+```
+
+Changes apply live; invalid values use the defaults and appear in the Config
+problems banner.
 
 The Git View reads the repository when it opens, every 10 seconds, when Muxify
 comes to the front, with R, and after you stage or commit. On a Remote

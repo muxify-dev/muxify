@@ -1270,11 +1270,25 @@ final class GitView {
             switch result {
             case .success(let output) where output.contains("missing"):
                 self.writeError = "\(target.path) is no longer in the working tree."
+            case .success where !store.config.gitView.editorInWindow:
+                // The editor runs elsewhere, so the Git View keeps Focus.
+                let script = store.config.gitView.editorScript(file: file, line: target.line)
+                store.runGitScript(script, arguments: [root], timeout: 10) { [weak self] result in
+                    if case .failure(let error) = result { self?.writeError = Self.editorMessage(for: error) }
+                }
             case .success:
                 store.openInEditor(file: file, line: target.line, from: self.windowID, in: root)
             case .failure(let error):
                 self.writeError = Self.message(for: error)
             }
+        }
+    }
+
+    static func editorMessage(for error: Error) -> String {
+        switch error {
+        case TmuxError.failed(let status, let stderr): return stderr.isEmpty ? "The editor command failed with status \(status)." : stderr
+        case TmuxError.timedOut: return "The editor command took too long to finish."
+        default: return message(for: error)
         }
     }
 
