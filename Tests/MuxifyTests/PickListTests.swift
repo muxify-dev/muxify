@@ -23,8 +23,8 @@ final class PickListTests: XCTestCase {
         let hidden = try XCTUnwrap(FieldsMatch.best(FuzzyQuery("cap"), in: fields))
         XCTAssertEqual(hidden.positions, [3: [7, 8, 9]])
         XCTAssertNil(FieldsMatch.best(FuzzyQuery("sett zzz"), in: fields), "every word must match some field")
-        let sett = try XCTUnwrap(FuzzyMatcher.match("sett", in: "Settle GS drops"))
-        let gs = try XCTUnwrap(FuzzyMatcher.match("gs", in: "Settle GS drops"))
+        let sett = try XCTUnwrap(FuzzyMatcher.match("sett", in: "Settle GS drops", scheme: .history))
+        let gs = try XCTUnwrap(FuzzyMatcher.match("gs", in: "Settle GS drops", scheme: .history))
         XCTAssertEqual(both.score, sett.score + gs.score)
     }
 
@@ -36,6 +36,12 @@ final class PickListTests: XCTestCase {
         XCTAssertNotNil(FieldsMatch.best(FuzzyQuery("mfs"), in: [.title("muxify-focus-something")]), "initials still match")
         XCTAssertNotNil(FieldsMatch.best(FuzzyQuery("ify"), in: [.title("muxify")]), "a part of a word still matches")
         XCTAssertNotNil(FieldsMatch.best(FuzzyQuery("x"), in: [.title("muxify")]), "one letter matches anywhere")
+    }
+
+    func testEverySeparatorEarnsTheSameBonus() throws {
+        let words: [SearchField] = [.title("fix game")], slashed: [SearchField] = [.title("fix/game")], dashed: [SearchField] = [.title("fix-game")]
+        let scores = try [words, slashed, dashed].map { try XCTUnwrap(FieldsMatch.best(FuzzyQuery("game"), in: $0)).score }
+        XCTAssertEqual(Set(scores).count, 1, "a Topic title with spaces does not beat a Session name with / or -: \(scores)")
     }
 
     func testRankingIsScoreThenShorterTitleThenLastVisitThenCandidateOrder() {

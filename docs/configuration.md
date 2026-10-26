@@ -837,7 +837,9 @@ order, fzf style, on the name, a type word (`topic`, `dormant`, `snoozed`,
 `settled`, `session`, `worktree`, `window`), the details under the
 name, or a Settled Topic's outcome, and the matched letters are marked. A word
 must match at least 55% as well as it matches itself, so its letters spread
-over a long path do not match. A word of one letter matches anywhere. With
+over a long path do not match. A word of one letter matches anywhere. A word
+that starts after a space, `/` or `-` earns the same bonus, as in fzf's history
+scheme, so a Topic title does not beat a Session name only for its spaces. With
 nothing typed, Topics and Sessions put the current live row last among live rows,
 before entries with nothing running. Other live rows are most recently visited first.
 Typed queries use fuzzy match quality, without pushing the current row down.

@@ -49,7 +49,7 @@ struct FieldsMatch: Equatable {
             var best: (index: Int, match: FuzzyMatch)?
             let wantsTag = word.hasPrefix("#")
             for (index, field) in fields.enumerated() where field.place != .label && (field.place == .tag) == wantsTag {
-                guard let match = FuzzyMatcher.match(word, in: field.text), match.score >= minimum else { continue }
+                guard let match = FuzzyMatcher.match(word, in: field.text, scheme: .history), match.score >= minimum else { continue }
                 if best.map({ match.score > $0.match.score }) ?? true { best = (index, match) }
             }
             guard let best else { return nil }

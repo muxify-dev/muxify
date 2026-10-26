@@ -8,6 +8,12 @@ fzf shows every row that holds the letters of a word in order. Every Worktree pa
 
 Now a word counts as a match in a field only when its score there is at least 55% of the score of the word against itself. In real searches, initials ("mfs" for `muxify-focus-something`) and parts of a word ("ify" in `muxify`) scored 64% or more. Letters spread over a path scored 25% to 46%. A word of one character has no minimum, so a letter inside a word still matches.
 
+## Every separator earns the same bonus
+
+fzf's default scheme gives a word that starts after a space a bonus of 10, after `/` 9, and after `-` or other punctuation 8. Topic titles separate words with spaces, and Session names with `/` and `-`. So a Topic beat a Session for the same word: "woodoku" scored 100% in "GS - Block Blitz from Woodoku Blast" and 92% in `game_server/gs-woodoku-blast-in-echidna`.
+
+The palettes now use fzf's history scheme, which gives every separator a bonus of 8. Those rows now tie, and the rules for an equal match decide. The matcher keeps fzf's default scheme too, and its tests still compare it with fzf's own scores.
+
 ## Considered Options
 
 - **Drop rows below a fraction of the best row's score.** Rejected: the list changes when the best row changes, so rows appear and go while the user types.
