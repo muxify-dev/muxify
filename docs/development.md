@@ -55,11 +55,21 @@ make run       # vendor libghostty, generate the Xcode project, build and open
 make install   # install a Release build into /Applications (or INSTALL_DIR)
 ```
 
-`make build`, `make run` and `make install` sign ad-hoc. macOS then sees each
-build as a new app, and you must grant Accessibility and Input Monitoring again.
-To keep the grants, set `MUXIFY_SIGN_IDENTITY` to a certificate in your
+`make build` and `make run` sign ad-hoc. macOS then sees each build as a new
+app, and you must grant Local Network, Accessibility and Input Monitoring again.
+
+`make install` re-signs the Release build with `scripts/sign-local.sh`. On first
+use the script creates a self-signed "Muxify Local Signing" certificate in its
+own keychain, `~/Library/Keychains/muxify-local-signing.keychain-db`, and adds
+that keychain to your search list. A random password for that keychain is kept
+in your login keychain. Every installed build then has the same designated
+requirement, and macOS keeps the grants. If the script reports a broken
+keychain, delete it with `security delete-keychain` and run `make install`
+again; macOS then asks for the grants once more.
+
+To sign every build instead, set `MUXIFY_SIGN_IDENTITY` to a certificate in your
 keychain and `MUXIFY_DEVELOPMENT_TEAM` to its team ID, for example in your shell
-profile:
+profile. `make install` then uses that certificate and skips the script:
 
 ```sh
 export MUXIFY_SIGN_IDENTITY="Apple Development"

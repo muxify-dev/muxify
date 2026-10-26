@@ -1,8 +1,10 @@
 APP := build/Build/Products/Debug/Muxify.app
 RELEASE_APP := build/Build/Products/Release/Muxify.app
 INSTALL_DIR ?= /Applications
-# Ad-hoc by default. Name a certificate and its team, and macOS keeps
-# Accessibility and Input Monitoring grants across rebuilds.
+# Ad-hoc by default, and make install re-signs with a local self-signed
+# certificate. Name a certificate and its team to sign every build instead.
+# A certificate lets macOS keep Local Network, Accessibility and Input
+# Monitoring grants across rebuilds.
 MUXIFY_SIGN_IDENTITY ?= -
 MUXIFY_DEVELOPMENT_TEAM ?=
 
@@ -60,6 +62,7 @@ release:
 install: project
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Release -destination "platform=macOS,arch=arm64" \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
+	$(if $(filter -,$(MUXIFY_SIGN_IDENTITY)),./scripts/sign-local.sh "$(RELEASE_APP)")
 	rm -rf "$(INSTALL_DIR)/Muxify.app"
 	cp -R "$(RELEASE_APP)" "$(INSTALL_DIR)/"
 
