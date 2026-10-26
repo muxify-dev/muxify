@@ -386,6 +386,31 @@ class Browser(unittest.TestCase):
         self.s.driver('action', 'palette-search', 'Close')
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Move did not close')
 
+    def test_command_w_closes_a_tab_with_browser_focus_and_goes_to_ghostty_with_terminal_focus(self):
+        # Like a Ghostty cmd+w keybind to tmux: the text shows at the Pane's prompt only if Ghostty got the key.
+        ghostty = self.s.root/'config/ghostty/config'
+        ghostty.parent.mkdir(parents=True, exist_ok=True)
+        ghostty.write_text('keybind = cmd+w=text:cmdw-reached-ghostty\n')
+        self.addCleanup(self.reload_config, '')
+        self.addCleanup(ghostty.unlink)
+        self.reload_config('')
+        left = self.page.as_uri() + '?tab=cmd-w-left'
+        url = self.page.as_uri() + '?case=cmd-w'
+        self.open_page('case=cmd-w', left=[left])
+        wait(lambda: self.stored_tabs() == ([left, url], '1'), 'the app did not store both Tabs')
+
+        self.press_menu('Focus Terminal')
+        self.wait_focus(('TerminalSurfaceView',), 'Focus Terminal did not give the Terminal Focus')
+        self.s.driver('action', 'quick-switch-input', 'Send ⌘W')
+        wait(lambda: 'cmdw-reached-ghostty' in self.s.tmux('capture-pane', '-p', '-t', self.window),
+             '⌘W with Terminal Focus did not reach the Ghostty keybind')
+        self.assertEqual(self.stored_tabs(), ([left, url], '1'), '⌘W with Terminal Focus closed a Tab')
+
+        self.press_menu('Focus Browser')
+        self.wait_focus(('WKWebView', 'WKContentView', 'NSTextView'), 'Focus Browser did not give the Browser Focus')
+        self.s.driver('action', 'quick-switch-input', 'Send ⌘W')
+        wait(lambda: self.stored_tabs()[0] == [left], '⌘W with Browser Focus did not close the active Tab')
+
     def press_key(self, symbol):
         """Runs the keybinds of a key, as a press of it does, without the keyboard (README: "Do not take focus")."""
         wait(lambda: self.s.driver('action', 'quick-switch-input', 'Press ' + symbol)['pressed'],

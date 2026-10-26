@@ -119,7 +119,7 @@ import MuxifyCore
                 .disabled(!activeTabHasPage)
             Divider()
             Button("Close Tab") { store?.browserCommand { $0.closeActiveTab() } }
-                .keyboardShortcut("w", modifiers: .command)
+                .keyboardShortcut(keybinds.firstTrigger(for: .closeTab)?.shortcut)
             Button("Reopen Closed Tab") { store?.currentBrowser?.reopenClosedTab() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .reopenClosedTab)?.shortcut)
                 .disabled(store?.currentBrowser?.canReopenClosedTab != true)

@@ -22,6 +22,7 @@ struct HintVerification: ViewModifier {
                         store.receiveHintInput(.keyUp(0))
                     }
                     Button("Reset Hints") { store.receiveHintInput(.reset) }
+                    Button("Send ⌘W") { store.deliverKeyDown("w", keyCode: 13, modifiers: .command) }
                     ForEach(ConfigAction.allCases.filter { ($0.quickSwitchSelection != nil || $0.step != nil || $0 == .focusTerminal || $0 == .reopenClosedTab || $0 == .markRead || $0 == .markUnread || $0 == .markAllRead) && canPress($0) }, id: \.self) { action in
                         ForEach(store.config.keybinds.triggers[action] ?? [], id: \.self) { trigger in
                             Button("Press " + trigger.symbol) {

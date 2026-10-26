@@ -2381,6 +2381,7 @@ final class WorkspaceStore {
         case .selectPrevTab: browserCommand { $0.selectTab(offset: -1) }
         case .browserBack: browserCommand { $0.activeTab?.goBack() }
         case .browserForward: browserCommand { $0.activeTab?.goForward() }
+        case .closeTab: browserCommand { $0.closeActiveTab() }
         case .reopenClosedTab: currentBrowser?.reopenClosedTab()
         case .selectCard1, .selectCard2, .selectCard3, .selectCard4, .selectCard5,
              .selectCard6, .selectCard7, .selectCard8, .selectCard9,
@@ -2411,9 +2412,8 @@ final class WorkspaceStore {
     }
 
     /// The Config's keybinds, which act before the terminal, Browser and menu
-    /// see the key, so they win over Ghostty and page keybinds. Then a shortcut
-    /// the menu can't express: ⌘W closes a Tab when the Browser has focus and
-    /// never the app window (which would quit Muxify).
+    /// see the key, so they win over Ghostty and page keybinds. ⌘W never
+    /// closes the app window (which would quit Muxify).
     /// Other keys in the terminal are left to Ghostty/tmux bindings.
     private func installKeyMonitor() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
@@ -2431,8 +2431,22 @@ final class WorkspaceStore {
         return true
     }
 
-    private static let closeTab = KeyTrigger(modifiers: .command, key: .character("w"))
+    private static let closeWindow = KeyTrigger(modifiers: .command, key: .character("w"))
     private static let findNext = KeyTrigger(modifiers: .command, key: .character("g"))
+
+    #if DEBUG
+    /// Delivers a key press as AppKit does, without the keyboard: the keybinds,
+    /// then the App Window's views, then the menu (scripts/verify/README.md).
+    func deliverKeyDown(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags) {
+        guard let window = terminalHost.window,
+              let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
+                                           timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                                           context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                                           isARepeat: false, keyCode: keyCode),
+              let passed = handleKeyEvent(event) else { return }
+        if !window.performKeyEquivalent(with: passed) { _ = NSApp.mainMenu?.performKeyEquivalent(with: passed) }
+    }
+    #endif
 
     func handleKeyEvent(_ event: NSEvent) -> NSEvent? {
         guard !isShuttingDown, let window = terminalHost.window, event.window === window else { return event }
@@ -2457,10 +2471,9 @@ final class WorkspaceStore {
             let keybinds = config.keybinds
             if performConfiguredShortcut(trigger) { return nil }
             if keybinds.suppressesDefaultAppWindowShortcut(trigger, focus: keyFocus) { return nil }
-            if trigger == Self.closeTab {
-                if browserHasFocus { browserCommand { $0.closeActiveTab() } }
-                return nil
-            }
+            // ⌘W that no keybind took goes on to Ghostty from the Terminal, and
+            // elsewhere does nothing, so it never closes the App Window.
+            if trigger == Self.closeWindow, keyFocus != .terminal { return nil }
         }
         return event
     }

@@ -195,6 +195,22 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(claimed.problems.isEmpty)
     }
 
+    func testCloseTabTakesCommandWOnlyWhileTheBrowserHasFocus() throws {
+        let config = try load("")
+        let key = trigger("cmd+w")
+        XCTAssertEqual(ConfigAction.closeTab.requiredFocus, .browser)
+        XCTAssertEqual(config.keybinds.firstTrigger(for: .closeTab), key)
+        XCTAssertEqual(config.keybinds.action(for: key, focus: .browser), .closeTab)
+        XCTAssertNil(config.keybinds.action(for: key, focus: .terminal), "⌘W did not go on to Ghostty from the Terminal")
+        XCTAssertNil(config.keybinds.action(for: key, focus: nil))
+        XCTAssertTrue(Config.template.contains("#   close_tab: cmd+w"))
+        let shared = try load("keybindings:\n  close_tab: cmd+shift+w\n  move_window: cmd+shift+w")
+        XCTAssertEqual(shared.problems, [])
+        XCTAssertEqual(shared.keybinds.action(for: trigger("cmd+shift+w"), focus: .browser), .closeTab)
+        XCTAssertEqual(shared.keybinds.action(for: trigger("cmd+shift+w"), focus: .terminal), .moveWindow)
+        XCTAssertNil(shared.keybinds.action(for: key, focus: .browser), "a new key for close_tab kept ⌘W")
+    }
+
     func testReopenClosedTabSharesMovePanesKeyAndWinsWhileTheBrowserHasFocus() throws {
         let config = try load("keybindings:\n  reopen_closed_tab: cmd+shift+t")
         let key = trigger("cmd+shift+t")

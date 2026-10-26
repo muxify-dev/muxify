@@ -4,7 +4,7 @@
 
 These keybindings work throughout Muxify, including while a Browser page or its
 address bar has Focus. The Pane actions act only while the Terminal has Focus,
-and the Tab, history and `reopen_closed_tab` actions only while the Browser has
+and the Tab, history, `close_tab` and `reopen_closed_tab` actions only while the Browser has
 Focus. With Focus elsewhere, their keys go on to Ghostty, the page or the menu:
 ⌘M still minimizes the App Window from the Browser, and ⌘⇧] still goes to the
 next Window in the Terminal. An action for one side can share its key with an
@@ -57,6 +57,7 @@ listed below.
 | `select_prev_tab` | ⌘⇧[, ⌃⇧Tab | Select the previous Browser Tab. Browser Focus only |
 | `browser_back` | ⌘[ | Go back in the active Tab's history. Browser Focus only |
 | `browser_forward` | ⌘] | Go forward in the active Tab's history. Browser Focus only |
+| `close_tab` | ⌘W | Close the active Browser Tab. Browser Focus only. From the Terminal, ⌘W goes on to Ghostty |
 | `reopen_closed_tab` | ⌘⇧T | Open the last closed Tab again at its place, with its history. Browser Focus only |
 | `select_card_1` … `select_card_9` | ⌃1 … ⌃9 | Jump To the Topic or Session at that position in Sidebar order |
 | `select_tab_1` … `select_tab_9` | ⌥1 … ⌥9 | Select that Tab and move Focus to the Browser, showing it if hidden |
@@ -483,7 +484,7 @@ when it does not. New Tab and Open Location can reveal a hidden Browser:
 | ⌘T | Open a new Browser Tab |
 | ⌘-click (link) | Open the link in a new Browser Tab |
 | ⌘L | Move Focus to the address bar, opening the Browser if hidden |
-| ⌘W | Close the active Browser Tab |
+| ⌘W | Close the active Browser Tab (`close_tab`) |
 | ⌘⇧T | Open the last closed Tab again (`reopen_closed_tab`) |
 | ⌘⇧] or ⌃Tab | Select the next Browser Tab (`select_next_tab`) |
 | ⌘⇧[ or ⌃⇧Tab | Select the previous Browser Tab (`select_prev_tab`) |
@@ -501,9 +502,9 @@ when it does not. New Tab and Open Location can reveal a hidden Browser:
 | Escape (Find in Page) | Close Find in Page, remove the highlight and focus the page |
 
 The Tab and history keys above are the defaults of their actions, and the Config
-can change them. ⌘W never closes the
-Muxify app window; when the terminal has Focus, it does nothing unless you
-assign it to a configurable action.
+can change them. ⌘W never closes the Muxify app window. While the Terminal has
+Focus, it goes on to Ghostty, so a Ghostty `cmd+w` keybind, such as one that
+closes a tmux Pane, works. With other Focus, such as the Git View, it does nothing.
 
 Find in Page highlights every match in the page and shows the number of the
 current match, for example “3 of 7”. Each Tab keeps its own query while the Tab

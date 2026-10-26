@@ -163,18 +163,18 @@ What an Agent is doing: working (a turn is running), blocked (waiting for the us
 _Avoid_: state, idle
 
 **Unread**:
-A Topic explicitly marked with Mark Unread, or an Agent with a done, failed or blocked update that the user has not marked read. Topic Unread is saved independently of Agents and remains when they exit. With Manual Read, updates stay Unread until Mark Read or Mark All as Read. Without Manual Read, a new visit to a Window or Topic clears Unread; continued viewing preserves an explicit mark. A Topic mark is not an Agent Status and does not add to an Agent count. Snooze hides its mark without clearing it.
+A separate mark saved on a Topic, or a done, failed or blocked Agent update that the user has not read. Automatic visits read shown Terminal Panes only and preserve Topic Unread except on a new Empty Topic page visit.
 _Avoid_: unseen, new
 
 **Manual Read**:
-A behavior the user turns on in the Config, in which visiting a Window or Topic does not clear Unread, and Agent updates become Unread even while the user looks at their Window. It is off by default, so a visit reads the Window or Topic.
+A Config behavior that preserves Unread during visits and Zoom changes. Agent updates become Unread even in shown Panes.
 
 **Mark Read**:
-An Action that clears the Topic Unread mark and Unread for Agents in its target. Its Command and direct shortcut use the Active Topic, or the current Session when there is no Active Topic. It is available for every Topic, with or without Agents. A blocked Agent keeps its blocked Notification until its Status changes.
+An Action that clears Unread in its named target without changing Agent Status. Its Command and direct shortcut target the current Window or its Zoomed Pane, or the Topic mark on an Empty Topic page.
 _Avoid_: dismiss Status
 
 **Mark Unread**:
-An Action that marks any Topic as Unread, with or without Agents. It also marks read Agents with done, failed or blocked Status as Unread. Its Command and direct shortcut use the Active Topic, or the current Session when there is no Active Topic. Its row Action uses the selected Topic, Session, Window or Agent.
+An Action that marks a Topic or eligible Agents in its named target Unread. Its Command and shortcut target the current Window or its Zoomed Pane, or the Topic mark on an Empty Topic page.
 
 **Mark All as Read**:
 A Command that clears Unread for all Topics and Agents in the Active Environment, including hidden, Snoozed and Settled Topics.
@@ -226,8 +226,8 @@ The panel on the left of the Muxify window that lists Sessions, Windows and Agen
 _Avoid_: left sidebar, left panel
 
 **Focus**:
-Where keyboard input goes in an App Window: the Terminal, the Browser or a Command Palette. One of them has Focus at a time.
-_Avoid_: the keyboard (when you mean where input goes), active side, first responder
+Where keyboard input goes in an App Window: the Terminal, the Browser, the Git View or a Command Palette. One of them has Focus at a time, and a keybind for one of them acts only while it has Focus.
+_Avoid_: the keyboard (when you mean where input goes), active side, first responder, context (when you mean Focus)
 
 **Focus marker**:
 A short line on the top edge of the Terminal or the Browser, whichever has Focus. It shows only while both show, and the Config turns it on.
@@ -278,12 +278,16 @@ _Avoid_: pick step, chips, mark, multi-select, selection
 ### Git
 
 **Git View**:
-A view of the repository in its Window's folder: its Changes, history, branches and stashes in Git View tabs, with the selected one's diff. Changes, or lines of them, can be staged and discarded from it, and what's staged committed. A branch goes into its commits, and a selected commit or stash shows its Diff files under them. It opens as a popup over the App Window or in the terminal's place. Each Window has its own, which shows only while that Window is the Location and is kept as it was left meanwhile. An Empty Topic page has none.
+A view of the repository in its Window's folder: its Changes, history, branches and stashes in Git View tabs, with the selected one's diff. From it, the user stages, discards and commits Changes, or lines of them, and runs lazygit's git operations on branches, commits and stashes, such as push, checkout, merge and cherry-pick. A branch goes into its commits, and a selected commit or stash shows its Diff files under them. It opens as a popup over the App Window or in the terminal's place. Each Window has its own, which shows only while that Window is the Location and is kept as it was left meanwhile. An Empty Topic page has none.
 _Avoid_: lazygit (when you mean ours), git panel, diff viewer
 
 **Git View tab**:
 One of the Git View's four lists: Changes, History, Branches and Stashes. Always qualified; a plain Tab is a Browser's.
 _Avoid_: Tab (alone), panel, section
+
+**Git View menu**:
+A list of choices that a key opens in the Git View, each choice with its own key, such as Discard changes or Reset. A confirmation is a Git View menu with one choice.
+_Avoid_: popup, dialog, sheet, palette step
 
 **Git View prompt**:
 A one-line field inside the Git View that asks for one value, as for the message of a stash. ↩ submits it and ⎋ cancels with no change. It can start with text filled in, and it can hide what is typed, as for a password. Like the Git View menu, it keeps the keyboard in the Git View.
