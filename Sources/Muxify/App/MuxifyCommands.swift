@@ -147,6 +147,9 @@ import MuxifyCore
             Button("Focus Browser") { store?.focus(.browser) }
                 .keyboardShortcut(keybinds.firstTrigger(for: .focusBrowser)?.shortcut)
                 .disabled(store?.currentBrowser == nil)
+            Button("Toggle Focus") { store?.toggleFocus() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .toggleFocus)?.shortcut)
+                .disabled(store?.currentBrowser == nil)
         }
         CommandGroup(after: .appSettings) {
             Button("Open Config") {

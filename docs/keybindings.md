@@ -47,6 +47,7 @@ listed below.
 | `toggle_maximize_browser` | ⌥⌘B | Maximize the Browser and move Focus to it, also when the Browser is hidden. While the Browser is Maximized, Restore the Window |
 | `focus_terminal` | ⌘⇧J, ⌃ + backquote, ⌃0, ⌥0 | Move Focus to the Terminal. If the Terminal is hidden, show it. If the Browser is Maximized, Restore first |
 | `focus_browser` | ⌘⇧B | Move Focus to the Browser: to its page, or to the address field of a blank Tab. If the Browser is hidden, show it. If the Terminal is Maximized, Restore first |
+| `toggle_focus` | ⌘0 | Move Focus to the Terminal while the Browser has Focus, and to the Browser otherwise, as `focus_terminal` and `focus_browser` do. ⌘0 is also Ghostty's default for `reset_font_size` |
 | `toggle_zoom_pane` | ⌘M | Zoom the current Pane: show it alone in its Window, or show all the Panes again. While a Pane is Zoomed, its Window's Pane badge in the Sidebar is on an accent capsule. Terminal Focus only |
 | `resize_pane_left` | Unbound | Move the current Pane's border 10 cells left. Terminal Focus only |
 | `resize_pane_right` | Unbound | Move the current Pane's border 10 cells right. Terminal Focus only |
@@ -204,8 +205,8 @@ again in a Window that is not Maximized. ⇧⌘↩ is also Ghostty's default for
 own key, ⌘M (`toggle_zoom_pane`).
 
 Focus is where keyboard input goes: the Terminal, the Browser or a Command
-Palette. `focus_terminal` and `focus_browser` move Focus only. They never
-Maximize a side.
+Palette. `focus_terminal`, `focus_browser` and `toggle_focus` move Focus only.
+They never Maximize a side.
 
 All tmux Window navigation stays within the focused App Window's current Session
 and follows sidebar order, not tmux's window indices.
@@ -247,6 +248,7 @@ keybindings:
   toggle_maximize_browser: alt+cmd+b
   focus_terminal: [cmd+shift+j, ctrl+backquote, ctrl+0, alt+0]
   focus_browser: cmd+shift+b
+  toggle_focus: cmd+0
   select_card_1: ctrl+1
   select_card_2: ctrl+2
   select_card_3: ctrl+3
@@ -311,11 +313,12 @@ and Option + 0. This leaves Command + backquote for macOS App Window switching.
 Use `focus_terminal: []` to disable it, or `focus_terminal: cmd+backquote` to
 use that key instead. Then macOS App Window switching does not work.
 
-The old names `toggle_focus`, `move_keyboard_to_terminal`, `new_topic_from_pane`,
+The old names `move_keyboard_to_terminal`, `new_topic_from_pane`,
 `move_session_to_topic` and `zen_mode` are gone. A Config that names one shows a
-problem that names the new action. `focus_terminal` and `focus_browser` keep their
-names with a new meaning. A Config that binds them changes behavior and shows no
-problem.
+problem that names the new action. `focus_terminal`, `focus_browser` and
+`toggle_focus` keep their names with a new meaning. A Config that binds them
+changes behavior and shows no problem. `toggle_focus` was the old name of
+`toggle_maximize`.
 
 ## Hints
 

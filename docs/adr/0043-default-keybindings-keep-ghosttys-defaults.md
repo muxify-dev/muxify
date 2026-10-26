@@ -1,5 +1,7 @@
 # Default keybindings keep Ghostty's defaults reachable
 
+> **Update 2026-10-26:** `toggle_focus` takes `cmd+0` by default, by the user's choice. This breaks the rule below: `cmd+0` is Ghostty's only default key for `reset_font_size`, so Muxify's default hides it. A user who wants it back gives `toggle_focus` another key, or gives `reset_font_size` a key in the Ghostty config.
+
 Muxify's keybinds act before the Terminal, the Browser and the menu see a key. So a Muxify default on a Ghostty default key removes that Ghostty function. Three defaults did this: Move Topic Up/Down took `goto_split:up/down`, Maximize took `toggle_split_zoom`, and the Git View took terminal search Next.
 
 We decide that a Muxify default must not use a key that Ghostty's defaults use. There is one exception: Muxify can take the key when the Ghostty function still has a key, either another Ghostty default or a Muxify Action. Inside this rule, a key tells the level and the direction. Brackets mean previous or next, with `cmd+shift` for Windows and Tabs and `ctrl+cmd` for Topics. Arrows mean move or resize.
