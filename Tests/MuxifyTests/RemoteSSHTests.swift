@@ -136,14 +136,14 @@ final class RemoteSSHTests: XCTestCase {
         }
     }
 
-    func testBootstrapKeepsSupportedTermAndFallbackStillAdvertisesTrueColor() throws {
+    func testBootstrapPreservesTerminalIdentityAndAdvertisesTrueColor() throws {
         let directory = try TestDirectory()
         defer { withExtendedLifetime(directory) {} }
         let tmux = directory.url.appendingPathComponent("tmux")
         try """
         #!/bin/sh
         if [ "$2" = -V ]; then printf 'tmux 3.2\\n'; fi
-        if [ "$2" = -T ]; then printf '%s|%s|%s' "$TERM" "$COLORTERM" "$*"; fi
+        if [ "$2" = -T ]; then printf '%s|%s|%s|%s' "$TERM" "$COLORTERM" "$MUXIFY_TERMINAL" "$*"; fi
 
         """.write(to: tmux, atomically: true, encoding: .utf8)
         let infocmp = directory.url.appendingPathComponent("infocmp")
@@ -155,13 +155,14 @@ final class RemoteSSHTests: XCTestCase {
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = directory.url.path + ":/usr/bin:/bin"
         environment["SSH_TTY"] = "/dev/fake"
+        environment["MUXIFY_TERMINAL"] = "not-muxify"
         for term in ["xterm-ghostty", "missing-terminfo", ""] {
             environment["TERM"] = term
             let expectedTerm = term == "xterm-ghostty" ? term : "xterm-256color"
             for target in [nil, "$0:@0"] as [String?] {
                 let output = try CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", ssh.bootstrap(target: target)]),
                                                      environment: environment)
-                XCTAssertEqual(output, "\(expectedTerm)|truecolor|-u -T RGB attach-session" + (target.map { " -t \($0)" } ?? ""))
+                XCTAssertEqual(output, "\(expectedTerm)|truecolor|1|-u -T RGB attach-session" + (target.map { " -t \($0)" } ?? ""))
             }
         }
     }

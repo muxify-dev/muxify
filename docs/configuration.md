@@ -24,6 +24,23 @@ To build and start the Debug app with a Config, use `make run`:
 make run CONFIG=path/to/config.yaml
 ```
 
+## Terminal environment
+
+Muxify sets `MUXIFY_TERMINAL=1` for its terminal processes, locally and on the
+remote host over SSH. It leaves Ghostty's `TERM` and `TERM_PROGRAM` unchanged.
+
+tmux Panes are separate processes: attaching Muxify does not change the
+environment of an existing shell. To copy the variable into a Session's
+environment on attach (for new Panes), add this to your tmux config:
+
+```tmux
+set -ga update-environment ' MUXIFY_TERMINAL'
+```
+
+This records the attaching terminal, not which terminal is currently showing a
+Pane. It is not a per-client status-bar setting; tmux's `status` option belongs
+to the Session.
+
 ## Remote Environments
 
 Manage tmux on Linux or macOS over SSH. The remote needs **tmux 3.2+**, not

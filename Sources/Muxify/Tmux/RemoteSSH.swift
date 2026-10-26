@@ -188,7 +188,8 @@ final class RemoteSSH {
         if [ -z "${TERM:-}" ] || ! command -v infocmp >/dev/null 2>&1 || ! infocmp "$TERM" >/dev/null 2>&1; then
             TERM=xterm-256color
         fi
-        export TERM COLORTERM=truecolor
+        # Set this here rather than relying on the SSH server's AcceptEnv.
+        export TERM COLORTERM=truecolor MUXIFY_TERMINAL=1
         if ! tmux -u has-session 2>/dev/null; then
             \(createSessionIfNeeded ? "tmux -u new-session -d -s main -c \"$HOME\" || exit $?" : reportSnapshot + "\n    exit 0")
         fi
