@@ -208,9 +208,17 @@ final class BrowserTab: NSObject, Identifiable {
     func goBack() { loadedWebView?.goBack() }
     func goForward() { loadedWebView?.goForward() }
 
+    /// A Tab whose first load failed has no page in its history, and
+    /// WKWebView's reload does nothing then: load the Tab's URL again.
     func reloadOrStop() {
         guard let loadedWebView else { return }
-        if loadedWebView.isLoading { loadedWebView.stopLoading() } else { loadedWebView.reload() }
+        if loadedWebView.isLoading {
+            loadedWebView.stopLoading()
+        } else if loadedWebView.backForwardList.currentItem == nil, let url = URL(string: urlString) {
+            load(url)
+        } else {
+            loadedWebView.reload()
+        }
     }
 
     func openInDefaultBrowser() {
