@@ -122,6 +122,8 @@ struct PickCandidate<Payload: Equatable> {
     var unopened = false
     /// The Session's last activity in tmux, which breaks a tie after the last visit.
     var activity = 0
+    /// A Snoozed or Settled Topic: seldom the place to go, so it goes after an equal match.
+    var isSetAside = false
     let pick: Pick<Payload>
     /// The text ⌃Y types where the Focus was before the picker opened, as pop's Yank does. A terminal gets it as one shell word.
     var paste: String? = nil
@@ -206,6 +208,7 @@ private struct Ranked<Payload: Equatable> {
     func precedes(_ other: Ranked, shorterTitleFirst: Bool) -> Bool {
         let (left, right) = (candidate, other.candidate)
         if match.score != other.match.score { return match.score > other.match.score }
+        if left.isSetAside != right.isSetAside { return right.isSetAside }
         if shorterTitleFirst, left.title.count != right.title.count { return left.title.count < right.title.count }
         if left.unopened != right.unopened { return right.unopened }
         if left.lastVisit != right.lastVisit { return (left.lastVisit ?? .distantPast) > (right.lastVisit ?? .distantPast) }
@@ -215,10 +218,10 @@ private struct Ranked<Payload: Equatable> {
 }
 
 /// The one ranking pipeline: drop the ranked rows whose kind `show` leaves out, then those a listed row shadows; match,
-/// drop non-matches, sort by score, then the shorter title for a query when the section wants it, as fzf's default
-/// `--tiebreak=length`, then a row you can go to before an unopened one, then last visit, then activity, then
-/// candidate order; on an empty query only, Pinned rows go first in candidate order, then current rows. Empty
-/// sections drop out. A fixed section keeps every row.
+/// drop non-matches, sort by score, then a row that is not set aside, then the shorter title for a query when the
+/// section wants it, as fzf's default `--tiebreak=length`, then a row you can go to before an unopened one, then last
+/// visit, then activity, then candidate order; on an empty query only, Pinned rows go first in candidate order, then
+/// current rows. Empty sections drop out. A fixed section keeps every row.
 enum FuzzyRanker {
     /// `rules` has no default, so every ranked list is ranked by its own Config rules.
     static func list<Payload>(_ sections: [PickSectionInput<Payload>], query: FuzzyQuery, rules: PickRules) -> PickList<Payload> {

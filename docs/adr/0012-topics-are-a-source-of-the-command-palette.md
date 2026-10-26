@@ -1,5 +1,7 @@
 # Topics are a Source of the Command Palette, and Move stays a separate picker
 
+> **Update 2026-10-26:** A query now ranks Snoozed and Settled Topics by their score among the open Topics, without their own headers. They stay last only with an empty query. See [0049](0049-a-query-ranks-by-score-across-the-palettes-rows.md).
+>
 > **Update 2026-10-25:** On an equal score, a typed query now puts the shorter title first, as fzf's default `--tiebreak=length`. The order below and in the update after this one applies only to titles of the same length. A base Session Path such as `note` now comes before a running `note-feature`.
 >
 > **Update 2026-10-22:** The Topics Source now follows the Sessions Source's switching order on an empty query: other live Topics by most recent visit, the current Topic last among live Topics, then Dormant and Empty Topics. Activity breaks visit ties using the most active member Session. Pins still affect Sidebar order, not this palette order. Typed queries keep fuzzy ranking; equal matches prefer live entries, then visits and activity. Snoozed and Settled sections stay last. The Sessions Source's current model is recorded in [0037](0037-the-sessions-source-lists-sessions-individually.md).

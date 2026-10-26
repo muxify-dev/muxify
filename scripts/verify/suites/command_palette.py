@@ -215,14 +215,25 @@ class CommandPalette(unittest.TestCase):
         self.open_palette()
         rs = self.search('sett proof', key)
         ids = self.s.ids(rs)
-        self.assertIn('palette-section-settled', ids, 'no Settled section header')
-        self.assertLess(ids.index('palette-section-settled'), ids.index(key), 'the Settled row is not under its header')
+        self.assertNotIn('palette-section-settled', ids, 'a query still lists Settled Topics under their own header')
+        self.assertLess(ids.index('palette-section-topics'), ids.index(key), 'the Settled row is not among the Topics')
         self.assertIn('Shipped proof', self.describe(key, rs), 'the row does not show the outcome that matched')
         self.s.act('press', key)
         self.assertIn('settled_at', self.records()['sw-settled'], 'the Reopen choice changed the record')
         self.choose_reopen('alpha/sw-settled')
         wait(lambda: 'settled_at' not in self.records().get('sw-settled', {'settled_at': 1}), 'Reopen did not clear settled_at', seconds=15)
         wait(lambda: 'alpha/sw-settled' in self.client_sessions(), 'the client did not go to the reopened Session', seconds=10)
+
+    def test_a_snoozed_topic_that_matches_better_ranks_above_an_open_topic(self):
+        for topic_id, title, fields in [('sw-rank-open', 'Sw quokkas frank', {}), ('sw-rank-snoozed', 'Sw quokka rank', dict(snoozed_until='never'))]:
+            self.write_topic(topic_id, title, self.beta, **fields)
+            self.addCleanup(remove_topic, self.topics_dir/(topic_id + '.json'))
+        self.open_palette()
+        rs = self.search('quokka rank', 'palette-row-topic-sw-rank-open')
+        ids = self.s.ids(rs)
+        self.assertNotIn('palette-section-snoozed', ids, 'a query still lists Snoozed Topics under their own header')
+        self.assertEqual(self.topic_row_ids(rs), ['palette-row-topic-sw-rank-snoozed', 'palette-row-topic-sw-rank-open'],
+                         'the Snoozed Topic does not rank by its score')
 
     def test_a_palette_whose_show_leaves_out_topic_session_lists_a_no_topic_session_but_not_a_topics_session(self):
         self.write_topic('sw-show-member', 'Sw show member', self.beta)

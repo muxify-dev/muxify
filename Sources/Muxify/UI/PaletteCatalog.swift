@@ -67,17 +67,20 @@ struct PaletteCatalog {
 
     /// With `tagFilter`, only the Topics that have the Tag: open, Snoozed and Settled.
     func list(_ sources: [PaletteSource], query: String, tagFilter: Tag? = nil, rules: PickRules) -> PickList<PaletteItem> {
-        guard let tagFilter else { return FuzzyRanker.list(sections(sources), query: FuzzyQuery(query), rules: rules) }
-        return FuzzyRanker.list((openTopicSection(only: tagFilter).map { [$0] } ?? []) + snoozedAndSettledSections(only: tagFilter),
-                                query: FuzzyQuery(query), rules: rules)
+        let query = FuzzyQuery(query)
+        // A query ranks Snoozed and Settled Topics by score beside the open ones.
+        let ranksSetAside = !query.isEmpty
+        let sections = tagFilter.map { topicSections(only: $0, ranksSetAside: ranksSetAside) } ?? sections(sources, ranksSetAside: ranksSetAside)
+        return FuzzyRanker.list(sections, query: query, rules: rules)
     }
 
-    /// The rows before any query, in the order of `sources`, then the Snoozed and Settled Topics, which rank
-    /// below every other Source's rows for any query. Windows show on an empty query only when theirs is the
-    /// only Source, and a Window with an Agent is left out beside the agents Source. The Tags follow the Topics, for
-    /// a query only: a Tag is not a place, but a filter that leads to places.
-    func sections(_ sources: [PaletteSource]) -> [PickSectionInput<PaletteItem>] {
-        let laterTopics = sources.contains(.topics) ? snoozedAndSettledSections(only: nil) : []
+    /// The rows before any query, in the order of `sources`, then the Snoozed and Settled Topics, which are set aside:
+    /// last with an empty query, and after an equal match for a query. With `ranksSetAside`, they join the open Topics'
+    /// section. Windows show on an empty query only when theirs is the only Source, and a Window with an Agent is left
+    /// out beside the agents Source. The Tags follow the Topics, for a query only: a Tag is not a place, but a filter
+    /// that leads to places.
+    func sections(_ sources: [PaletteSource], ranksSetAside: Bool = false) -> [PickSectionInput<PaletteItem>] {
+        let laterTopics = sources.contains(.topics) && !ranksSetAside ? snoozedAndSettledSections(only: nil) : []
         return sources.flatMap { source -> [PickSectionInput<PaletteItem>] in
             switch source {
             case .commands:
@@ -87,7 +90,8 @@ struct PaletteCatalog {
                                   pick: .available(PaletteItem(ref: .command($0))))
                 }, shorterTitleFirst: false)]
             case .topics:
-                return (openTopicSection(only: nil).map { [$0] } ?? []) + (tagSection.map { [$0] } ?? [])
+                return (ranksSetAside ? topicSections(only: nil, ranksSetAside: true) : openTopicSection(only: nil).map { [$0] } ?? [])
+                    + (tagSection.map { [$0] } ?? [])
             case .sessions:
                 return [PickSectionInput(id: "sessions", title: "Sessions", rule: .ranked(showsWhenEmpty: true),
                                          candidates: sessionCandidates, currentLast: true)]
@@ -102,6 +106,15 @@ struct PaletteCatalog {
     }
 
     // MARK: Topics
+
+    /// The open Topics, then the Snoozed and Settled ones: in their own sections, or with `ranksSetAside` in one.
+    private func topicSections(only tag: Tag?, ranksSetAside: Bool) -> [PickSectionInput<PaletteItem>] {
+        let open = openTopicSection(only: tag)
+        let later = snoozedAndSettledSections(only: tag)
+        guard ranksSetAside, var open else { return (open.map { [$0] } ?? []) + later }
+        open.candidates += later.flatMap(\.candidates)
+        return [open]
+    }
 
     private func openTopicSection(only tag: Tag?) -> PickSectionInput<PaletteItem>? {
         guard offersTopics, let topics else { return nil }
@@ -164,7 +177,7 @@ struct PaletteCatalog {
         let window = EntryWindow.of(row, lastWindowByGroup: lastWindowByGroup, visits: visits)
         return PickCandidate(
             id: row.id.accessibilityID, kind: .snoozed, symbol: "z", title: row.title, fields: topicFields(row, type: "snoozed"),
-            note: wake, trailing: window == nil ? "Reopen" : "", lastVisit: visits.last(.topic(row.id)), isPinned: row.isPinned,
+            note: wake, trailing: window == nil ? "Reopen" : "", lastVisit: visits.last(.topic(row.id)), isPinned: row.isPinned, isSetAside: true,
             pick: .available(PaletteItem(ref: .topic(id: id, window: window))), snooze: id)
     }
 
@@ -177,7 +190,7 @@ struct PaletteCatalog {
             id: row.id.accessibilityID, kind: .settled, symbol: "✓", title: row.title,
             fields: [.typeWord("settled")] + (outcome.isEmpty ? [] : [.detail(outcome)]) + SearchField.tags(row.tags),
             note: settledOn, trailing: ["Reopen", age(.topic(row.id))].compactMap { $0 }.joined(separator: " · "), mark: row.mark,
-            lastVisit: visits.last(.topic(row.id)),
+            lastVisit: visits.last(.topic(row.id)), isSetAside: true,
             pick: .available(PaletteItem(ref: .topic(id: record.id, window: nil))))
     }
 

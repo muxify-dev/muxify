@@ -145,14 +145,19 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(topics[0].trailing, "2h")
     }
 
-    func testSnoozedAndSettledTopicsRankBelowAWeakerSessionMatch() {
-        var snoozed = topic("z", "Scratch")
+    func testSnoozedAndSettledTopicsRankByScoreForAQueryAndComeLastWithout() {
+        var snoozed = topic("z", "What are Claude Code mods?")
         snoozed.snoozedUntil = "never"
-        var settled = topic("s", "Scratch")
+        var settled = topic("s", "Claude mods notes")
         settled.settledAt = "2026-01-01T00:00:00Z"
-        let windows = [window("@1", session: "old-scratch-2", directory: "/tmp/old")]
-        let list = catalog(records: [snoozed, settled], windows: windows).list(goTo, query: "scratch", rules: .standard)
-        XCTAssertEqual(ids(list), ["session:$old-scratch-2", "topic-z", "topic-s"])
+        let windows = [window("@1", session: "chezmoi/what-are-claude-code-mods", directory: "/tmp/chezmoi"),
+                       window("@2", session: "muxify/claude-mods-later", directory: "/tmp/muxify")]
+        let catalog = catalog(records: [topic("a", "Clean up old modules"), snoozed, settled], windows: windows)
+        let grouped = catalog.list(goTo, query: "claude mods", rules: .standard)
+        XCTAssertEqual(grouped.sections.map(\.title), ["Topics", "Sessions"], "under headers, a query puts them among the open Topics")
+        XCTAssertEqual(grouped.sections[0].rows.map(\.id), ["topic-s", "topic-z", "topic-a"],
+                       "the Settled and Snoozed Topics match better than the open one")
+        XCTAssertEqual(catalog.list(goTo, query: "", rules: .standard).sections.map(\.title), ["Topics", "Sessions", "Snoozed", "Settled"])
     }
 
     func testEveryRunningSessionHasItsOwnRowInBothModesAndDifferentNamesDoNotOccupyPaths() {
@@ -263,12 +268,12 @@ final class PaletteCatalogTests: XCTestCase {
                        window("@2", session: "game-scratch", directory: "/tmp/scratch")]
         let catalog = catalog(records: records, windows: windows)
         let list = catalog.list(goTo, query: "game", rules: .standard)
-        XCTAssertEqual(list.sections.map(\.title), ["Topics", "Sessions", "Snoozed", "Settled"])
-        XCTAssertEqual(list.sections[0].rows.map(\.id), ["topic-a"])
-        XCTAssertEqual(list.sections[2].rows[0].pick.payload?.ref, .topic(id: "z", window: nil), "a Dormant Snoozed Topic Reopens")
-        XCTAssertEqual(list.sections[2].rows[0].trailing, "Reopen")
-        XCTAssertEqual(list.sections[2].rows[0].detail.text, "until never")
-        XCTAssertEqual(list.sections[3].rows[0].detail.text, "Shipped the GS reward cap")
+        XCTAssertEqual(list.sections.map(\.title), ["Topics", "Sessions"])
+        XCTAssertEqual(list.sections[0].rows.map(\.id), ["topic-a", "topic-z", "topic-s"], "on an equal score, the open Topic goes first")
+        XCTAssertEqual(list.sections[0].rows[1].pick.payload?.ref, .topic(id: "z", window: nil), "a Dormant Snoozed Topic Reopens")
+        XCTAssertEqual(list.sections[0].rows[1].trailing, "Reopen")
+        XCTAssertEqual(list.sections[0].rows[1].detail.text, "until never")
+        XCTAssertEqual(list.sections[0].rows[2].detail.text, "Shipped the GS reward cap")
         XCTAssertEqual(list.sections[1].rows.first?.id, "session:$game/fix", "all running Sessions, including Topic members, are searchable")
         let byOutcome = catalog.list(goTo, query: "sett gs", rules: .standard)
         XCTAssertEqual(ids(byOutcome), ["topic-s"], "one word on the type word, one on the outcome")

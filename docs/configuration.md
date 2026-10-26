@@ -808,9 +808,9 @@ Without `command_palettes`, Muxify has two palettes. **Commands** opens on
 - `topics`: with no query, other live Topics by most recent visit, then the current
   Topic, then Dormant and Empty Topics. Pins do not override this order; they
   still determine Sidebar order. Activity breaks visit ties using the most active
-  member Session. Its Snoozed and Settled Topics
-  come after the rows of every other Source, even when they match the query
-  better. Only a Local App Window with Topics on has them.
+  member Session. With no query, its Snoozed and Settled Topics come after the
+  rows of every other Source. With a query, they rank by their match among the
+  open Topics. Only a Local App Window with Topics on has them.
 - `sessions`: one row per running Session, including Topic members in either
   Sidebar mode, then [Session Paths](#session-paths) whose exact launch names are not
   running. ↩ selects that Session or launches that exact name. ⌘↩ starts another
@@ -843,9 +843,9 @@ scheme, so a Topic title does not beat a Session name only for its spaces. With
 nothing typed, Topics and Sessions put the current live row last among live rows,
 before entries with nothing running. Other live rows are most recently visited first.
 Typed queries use fuzzy match quality, without pushing the current row down.
-On an equal match, the shorter name comes first, as fzf's default
-`--tiebreak=length`. Then live entries come before unopened ones, then the more
-recently visited or active one.
+On an equal match, a row that is not a Snoozed or Settled Topic comes first,
+then the shorter name, as fzf's default `--tiebreak=length`. Then live entries
+come before unopened ones, then the more recently visited or active one.
 
 `show` gives the kinds of rows that a palette lists. Without `show`, the
 palette lists every kind. The [row kinds](#row-kinds) are the words of `show`. A
