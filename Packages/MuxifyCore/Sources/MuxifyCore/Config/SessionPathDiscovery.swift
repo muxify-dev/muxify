@@ -8,12 +8,20 @@ public enum SessionPathDiscovery {
     /// kind (`directory`, `plain` or `bare`) and its real path, followed by its `git worktree list --porcelain`
     /// lines after `W`. Missing roots and hidden folders are skipped. With wanted folders, a folder that is not one
     /// of them or a parent of one is skipped before git runs in it.
+    ///
+    /// The git work runs in `width` background workers, each in every `width`th folder, and then the folders print
+    /// in order. It stays POSIX `sh`, without `xargs -P`, because it also runs on Remote Environments (ADR 0050).
     public static let script = """
     s='\(Tmux.separator)'
     nl='
     '
+    width=8
     wanted=$1
     shift
+    tmp=$(mktemp -d) || exit 1
+    trap 'rm -rf "$tmp"' EXIT
+    # dash runs the EXIT trap only on a normal exit.
+    trap 'exit 1' HUP INT TERM
     printf 'H%s%s\\n' "$s" "$HOME"
     index=0
     while [ "$#" -ge 2 ]; do
@@ -24,7 +32,7 @@ public enum SessionPathDiscovery {
             "~") pattern=$HOME ;;
             "~/"*) pattern=$HOME/${pattern#"~/"} ;;
         esac
-        printf 'R%s%s\\n' "$s" "$index"
+        printf 'R%s\\n' "$index"
         index=$((index + 1))
         old=$IFS
         IFS=$nl
@@ -43,24 +51,47 @@ public enum SessionPathDiscovery {
                         *) continue ;;
                     esac
                 fi
-                kind=directory
-                if [ -e "$dir/.git" ] || { [ -f "$dir/HEAD" ] && [ -d "$dir/objects" ]; }; then
-                    if [ "$(git -C "$dir" config --bool core.bare 2>/dev/null)" = true ]; then
-                        kind=bare
-                    elif top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) \\
-                        && [ "$(cd "$dir" && pwd -P)" = "$(cd "$top" && pwd -P)" ]; then
-                        kind=plain
-                    fi
-                fi
-                printf 'D%s%s%s%s%s%s\\n' "$s" "$dir" "$s" "$kind" "$s" "$(cd "$dir" && pwd -P)"
-                [ "$kind" = directory ] && continue
-                git -C "$dir" worktree list --porcelain 2>/dev/null | while IFS= read -r line; do
-                    printf 'W%s%s\\n' "$s" "$line"
-                done
+                printf 'D%s\\n' "$dir"
             done
         done
         IFS=$old
+    done > "$tmp/list"
+    folder() {
+        dir=$1
+        kind=directory
+        if [ -e "$dir/.git" ] || { [ -f "$dir/HEAD" ] && [ -d "$dir/objects" ]; }; then
+            if [ "$(git -C "$dir" config --bool core.bare 2>/dev/null)" = true ]; then
+                kind=bare
+            elif top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) \\
+                && [ "$(cd "$dir" && pwd -P)" = "$(cd "$top" && pwd -P)" ]; then
+                kind=plain
+            fi
+        fi
+        printf 'D%s%s%s%s%s%s\\n' "$s" "$dir" "$s" "$kind" "$s" "$(cd "$dir" && pwd -P)"
+        [ "$kind" = directory ] && return
+        git -C "$dir" worktree list --porcelain 2>/dev/null | while IFS= read -r line; do
+            printf 'W%s%s\\n' "$s" "$line"
+        done
+    }
+    worker=0
+    while [ "$worker" -lt "$width" ]; do
+        n=0
+        while IFS= read -r entry; do
+            n=$((n + 1))
+            case $entry in D*) ;; *) continue ;; esac
+            [ $((n % width)) -eq "$worker" ] && folder "${entry#D}" > "$tmp/$n"
+        done < "$tmp/list" &
+        worker=$((worker + 1))
     done
+    wait
+    n=0
+    while IFS= read -r entry; do
+        n=$((n + 1))
+        case $entry in
+            R*) printf 'R%s%s\\n' "$s" "${entry#R}" ;;
+            D*) cat "$tmp/$n" ;;
+        esac
+    done < "$tmp/list"
     """
 
     /// `within` nil wants every folder.
