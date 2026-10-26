@@ -116,7 +116,9 @@ new folder joins without a Config edit.
 
 A repository is one Session Path, plain or bare. Its Worktrees are rows of it, found
 with `git worktree list`, wherever they are. Muxify does not look for Session Paths
-inside a repository.
+inside a repository. In a list, a checkout inside the folder of a bare repository,
+such as `game/main`, is a Session Path row. A Worktree outside that folder is a
+Worktree row.
 
 A Session Path's name is its last `display_depth` folder names (1 by default), so
 `~/Dev/tripledot/game` with `display_depth: 2` is `tripledot/game`. Topic
@@ -806,9 +808,9 @@ Without `command_palettes`, Muxify has two palettes. **Commands** opens on
 - `topics`: with no query, other live Topics by most recent visit, then the current
   Topic, then Dormant and Empty Topics. Pins do not override this order; they
   still determine Sidebar order. Activity breaks visit ties using the most active
-  member Session. Its Snoozed and Settled Topics
-  come after the rows of every other Source, even when they match the query
-  better. Only a Local App Window with Topics on has them.
+  member Session. With no query, its Snoozed and Settled Topics come after the
+  rows of every other Source. With a query, they rank by their match among the
+  open Topics. Only a Local App Window with Topics on has them.
 - `sessions`: one row per running Session, including Topic members in either
   Sidebar mode, then [Session Paths](#session-paths) whose exact launch names are not
   running. ↩ selects that Session or launches that exact name. ⌘↩ starts another
@@ -830,16 +832,78 @@ keeps it. Each palette is also in the View menu. Its own keybinding closes a
 palette; another palette's keybinding switches to that one and keeps what you
 typed.
 
-Results stay in sections, one or more for each source. Words match in any
-order, fzf style, on the name, a type word (`topic`, `dormant`, `snoozed`,
+Results stay in sections, one or more for each source. With `order: ranked` on
+a palette, they show in one list without headers, and a query ranks the rows of
+every source together. Words match in any order, fzf style, on the name, a type word (`topic`, `dormant`, `snoozed`,
 `settled`, `session`, `worktree`, `window`), the details under the
-name, or a Settled Topic's outcome, and the matched letters are marked. With
+name, or a Settled Topic's outcome, and the matched letters are marked. A word
+must match at least 55% as well as it matches itself, so its letters spread
+over a long path do not match. A word of one letter matches anywhere. A word
+that starts after a space, `/` or `-` earns the same bonus, as in fzf's history
+scheme, so a Topic title does not beat a Session name only for its spaces. With
 nothing typed, Topics and Sessions put the current live row last among live rows,
 before entries with nothing running. Other live rows are most recently visited first.
 Typed queries use fuzzy match quality, without pushing the current row down.
-On an equal match, the shorter name comes first, as fzf's default
-`--tiebreak=length`. Then live entries come before unopened ones, then the more
-recently visited or active one.
+An equal match follows the palette's `tiebreak` rules, in order. The first
+rule that differs decides:
+
+- `open`: a row that is not a Snoozed or Settled Topic first.
+- `running`: a row with something running first, not a Dormant or Empty Topic or
+  a Session Path with no Session.
+- `visit`: the most recently visited first.
+- `activity`: the most recent tmux activity first.
+- `length`: the shorter name first, as fzf's default `--tiebreak=length`.
+  Commands and Tags skip it and keep their Config order.
+
+A rule that is not listed does not count, and the Source order decides last.
+The default is `[open, length, running, visit, activity]`. To rank everything in
+one list and prefer the row you used last:
+
+```yaml
+command_palettes:
+  - name: Go to…
+    keybinding: cmd+p
+    sources: [topics, sessions]
+    order: ranked
+    tiebreak: [open, visit, length]
+```
+
+`show` gives the kinds of rows that a palette lists. Without `show`, the
+palette lists every kind. The [row kinds](#row-kinds) are the words of `show`. A
+word that is not a row kind, or an empty list, is a problem, and the palette is
+not added. `show` does not change which sources a palette searches: a kind
+that the selected sources do not have shows no rows.
+
+To list No Topic Sessions in Go to… but not the Sessions of open Topics:
+
+```yaml
+command_palettes:
+  - name: Go to…
+    keybinding: cmd+p
+    sources: [topics, sessions]
+    show: [topic, snoozed, settled, session, session-path, worktree]
+```
+
+When a Session runs with the launch name of a Session Path, the palette lists
+the Session and not the path. When `show` leaves out the kind of that Session,
+the palette lists the path again.
+
+### Row kinds
+
+| Kind | Row |
+| --- | --- |
+| `topic` | An open Topic |
+| `snoozed` | A Snoozed Topic |
+| `settled` | A Settled Topic |
+| `session` | A running Session in no open Topic: a No Topic Session, or a Session of a Settled Topic |
+| `topic-session` | A running Session in an open Topic, Snoozed or not |
+| `session-path` | A Session Path, or a checkout inside the folder of a bare repository, with no running Session |
+| `worktree` | A Worktree outside the folder of its Session Path, with no running Session |
+| `window` | A Window |
+| `agent` | An Agent |
+| `command` | A Command, or a choice in an Action |
+| `tag` | A Tag |
+
 A Window with an Agent is left out while the Agents Source button is on. ⎋ closes the
 palette without a change. In an Action, ⌫ in an empty field goes back one step.
 A step that kills a process needs ⌘↩ to confirm. The keys inside a palette are
@@ -855,6 +919,37 @@ A step that kills a process needs ⌘↩ to confirm. The keys inside a palette a
 | Snooze (⌃S) | Open the Snooze sheet, except when Settled | — | — | — | — |
 
 ⌘K opens these actions in a menu by the highlighted row.
+
+## Pick lists
+
+An Action that asks you to choose a row, such as Add a Session, shows a pick
+list. `pick_lists` gives a pick list the `show` and `tiebreak` keys of a
+[Command Palette](#command-palettes). Each entry has the name of a pick list:
+
+```yaml
+pick_lists:
+  add_session:
+    show: [session-path]    # no running Sessions and no Worktrees
+    tiebreak: [visit, length]
+```
+
+| Pick list | Action | Kinds for `show` |
+| --- | --- | --- |
+| `add_session` | Add a Session, also after New Topic | `session`, `topic-session`, `session-path`, `worktree` |
+| `move` | Move to…, the Topic step | `topic` |
+| `move_session` | Move to…, the step that chooses a Session | `session`, `topic-session` |
+| `snooze_topics` | Snooze Topics…, the step that checks Topics | `tag`, `topic`, `snoozed` |
+| `unsnooze_topics` | Unsnooze Topics…, the step that checks Topics | `tag`, `snoozed` |
+| `unsnooze_topic` | Unsnooze Topic, when the Active Topic is not Snoozed | `snoozed` |
+| `tags` | The Tags of New Topic and Edit Tags… | `tag` |
+| `worktree_start` | Add a Session › New Worktree from | `command` |
+
+A pick list without an entry lists every kind, with the default `tiebreak`. The
+rows that a pick list always shows, such as New Topic in Move to…, ignore `show`.
+These problems apply to one entry: a name that is not in the table, a key other
+than `show` and `tiebreak`, an empty `show`, or a kind that the pick list does
+not have. Muxify shows the problem, and that pick list keeps every kind and the
+default `tiebreak`.
 
 ## A Remote Environment's own Config
 

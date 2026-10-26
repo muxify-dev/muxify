@@ -128,7 +128,8 @@ final class CommandPalette {
     private func buildResults() -> PickList<PaletteItem> {
         if let flow { return flowResults(flow) }
         guard let catalog else { return .empty }
-        return catalog.list(sourceButtons.filter(selection.contains), query: query, tagFilter: tagFilter)
+        return catalog.list(sourceButtons.filter(selection.contains), query: query, tagFilter: tagFilter,
+                            rules: current?.rules ?? .standard, order: current?.order ?? .grouped)
     }
 
     func selected(in list: PickList<PaletteItem>) -> PickRow<PaletteItem>? {
@@ -138,7 +139,7 @@ final class CommandPalette {
     /// The actions menu's entries; Jump To is the first. A blocked row has none.
     func actions(for row: PickRow<PaletteItem>) -> [PaletteAction] {
         guard let item = row.pick.payload else { return [] }
-        if flow != nil || item.kind == .command { return [.jumpTo] }
+        if flow != nil || row.kind == .command { return [.jumpTo] }
         if case .tag = item.ref { return [.jumpTo, .snoozeTopic] }
         var actions: [PaletteAction] = [.jumpTo]
         if store?.canChangeRead(.read, in: item.readTarget) == true { actions.append(.markRead) }
@@ -182,15 +183,15 @@ final class CommandPalette {
         guard let item = row.pick.payload else { return action.rawValue }
         switch action {
         case .jumpTo:
-            switch item.kind {
+            switch row.kind {
             case _ where moving != nil: return "Move Here"
-            case .topic, .snoozedTopic:
+            case .topic, .snoozed:
                 guard case .topic(let id, nil) = item.ref,
                       store?.topicWatcher.records.first(where: { $0.id == id })?.sessions.isEmpty == false else { return "Go to Topic" }
                 return "Reopen Topic"
-            case .settledTopic: return "Reopen Topic"
+            case .settled: return "Reopen Topic"
             case .tag: return flow == nil ? "Show its Topics" : "Choose Tag"
-            case .session: return "Switch to Session"
+            case .session, .topicSession: return "Switch to Session"
             // A SessionPath row's target is the Session ↩ goes to; without one, ↩ starts it.
             case .sessionPath, .worktree: return item.target == nil ? "Open as Session" : "Switch to Session"
             case .window: return "Open Window"
@@ -201,9 +202,9 @@ final class CommandPalette {
         case .markUnread: return "Mark Unread"
         case .newSession: return "New Session"
         case .copyFolder: return "Copy Path"
-        case .copyTmuxTarget: return item.kind == .agent ? "Copy Pane ID" : "Copy tmux Target"
+        case .copyTmuxTarget: return row.kind == .agent ? "Copy Pane ID" : "Copy tmux Target"
         case .pasteFolder: return "Paste Path"
-        case .snoozeTopic: return item.kind == .tag ? "Snooze its Topics…" : "Snooze Topic"
+        case .snoozeTopic: return row.kind == .tag ? "Snooze its Topics…" : "Snooze Topic"
         case .move: return "Move to…"
         case .addSessionToTopic: return "Add a Session"
         case .rename: return "Rename"
@@ -380,7 +381,7 @@ final class CommandPalette {
             copy(item.path, title: "Copied Path", shown: Paths.tildify(item.path, home: store.homeDirectory))
         case .copyTmuxTarget:
             guard let target = item.target else { return }
-            copy(target, title: item.kind == .agent ? "Copied Pane ID" : "Copied tmux Target", shown: target)
+            copy(target, title: row.kind == .agent ? "Copied Pane ID" : "Copied tmux Target", shown: target)
         case .pasteFolder:
             guard let paste = row.paste else { return }
             let responder = previousResponder

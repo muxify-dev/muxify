@@ -76,21 +76,21 @@ final class SessionPathAliasTests: XCTestCase {
 
     func testThePaletteShowsTheAliasFindsTheRowByAliasOrFolderAndOpensASessionNamedAfterTheFolder() {
         let catalog = catalog()
-        func titles(_ query: String) -> [String] { catalog.list([.topics, .sessions], query: query).rows.map(\.title.text) }
+        func titles(_ query: String) -> [String] { catalog.list([.topics, .sessions], query: query, rules: .standard).rows.map(\.title.text) }
         XCTAssertEqual(titles("obsidian"), ["My Obsidian"])
         XCTAssertEqual(titles("my obs"), ["My Obsidian"])
         XCTAssertEqual(titles("vault"), ["My Obsidian"], "typing the folder name finds the aliased row")
         XCTAssertEqual(titles("game/main"), ["Game Server/main"])
-        let row = catalog.list([.sessions], query: "obsidian").rows[0]
+        let row = catalog.list([.sessions], query: "obsidian", rules: .standard).rows[0]
         XCTAssertEqual(row.pick.payload?.ref, .sessionPath(OpenDirectory(directory: .local("/work/vault"), name: "vault")))
-        let sessions = self.catalog(mode: .sessions).list([.sessions], query: "").rows
+        let sessions = self.catalog(mode: .sessions).list([.sessions], query: "", rules: .standard).rows
         XCTAssertEqual(sessions.map(\.title.text), ["My Obsidian", "Game Server/main"])
         XCTAssertEqual(sessions[1].pick.payload?.ref, .sessionPath(OpenDirectory(directory: .local("/work/game/main"), name: "game/main")))
     }
 
     func testSessionPathListsShowTheAliasAndFindTheRowByAliasOrFolder() {
         let rows = SessionPathRows.build(sessionPaths: [vault, game], windows: [], records: [], titles: [:])
-        func titles(_ query: String) -> [String] { PaletteCatalog(windows: [], agents: []).addSessionList(topic: "target", query: query, rows: rows).rows.map(\.title.text) }
+        func titles(_ query: String) -> [String] { PaletteCatalog(windows: [], agents: []).addSessionList(topic: "target", query: query, rows: rows, rules: .standard).rows.map(\.title.text) }
         XCTAssertEqual(titles(""), ["My Obsidian", "Game Server/main"])
         XCTAssertEqual(titles("obsidian"), ["My Obsidian"])
         XCTAssertEqual(titles("vault"), ["My Obsidian"])

@@ -36,7 +36,7 @@ struct SearchField: Equatable {
     static func tags(_ shown: [ShownTag]) -> [SearchField] { shown.compactMap(\.definition).map(tag) }
 }
 
-/// The best field per word, summed over words. Nil when some word matches no field.
+/// The best field per word, summed over words. Nil when some word matches no field at its minimum score.
 struct FieldsMatch: Equatable {
     let score: Int
     /// Per field index, the positions of every word whose best field it is.
@@ -45,11 +45,11 @@ struct FieldsMatch: Equatable {
     static func best(_ query: FuzzyQuery, in fields: [SearchField]) -> FieldsMatch? {
         var score = 0
         var positions: [Int: [Int]] = [:]
-        for word in query.words {
+        for (word, minimum) in zip(query.words, query.minimumScores) {
             var best: (index: Int, match: FuzzyMatch)?
             let wantsTag = word.hasPrefix("#")
             for (index, field) in fields.enumerated() where field.place != .label && (field.place == .tag) == wantsTag {
-                guard let match = FuzzyMatcher.match(word, in: field.text) else { continue }
+                guard let match = FuzzyMatcher.match(word, in: field.text, scheme: .history), match.score >= minimum else { continue }
                 if best.map({ match.score > $0.match.score }) ?? true { best = (index, match) }
             }
             guard let best else { return nil }
@@ -99,6 +99,11 @@ enum Pick<Payload: Equatable>: Equatable {
 struct PickCandidate<Payload: Equatable> {
     /// The accessibility id suffix, stable across queries.
     let id: String
+    /// `show` keeps or drops the row; the view picks its icon by it.
+    let kind: RowKind
+    /// The id of a row that makes this one redundant: while that row is listed, this one is not. A Session Path names
+    /// the row of the Session with its launch name, so `show` without that Session's kind lists the path again.
+    var shadowedBy: String? = nil
     var symbol: String? = nil
     let title: String
     var fields: [SearchField] = []
@@ -117,6 +122,8 @@ struct PickCandidate<Payload: Equatable> {
     var unopened = false
     /// The Session's last activity in tmux, which breaks a tie after the last visit.
     var activity = 0
+    /// A Snoozed or Settled Topic: seldom the place to go, so it goes after an equal match.
+    var isSetAside = false
     let pick: Pick<Payload>
     /// The text ⌃Y types where the Focus was before the picker opened, as pop's Yank does. A terminal gets it as one shell word.
     var paste: String? = nil
@@ -131,6 +138,7 @@ struct PickCandidate<Payload: Equatable> {
 
 struct PickRow<Payload: Equatable>: Identifiable, Equatable {
     let id: String
+    let kind: RowKind
     let symbol: String?
     let title: Highlighted
     let detail: Highlighted
@@ -169,7 +177,7 @@ struct PickList<Payload: Equatable>: Equatable {
     }
 }
 
-enum SectionRule {
+enum SectionRule: Equatable {
     /// Fuzzy filter and sort; hidden on an empty query when `showsWhenEmpty` is false.
     case ranked(showsWhenEmpty: Bool)
     /// Never filtered or sorted: the Move form's New Topic row.
@@ -180,7 +188,7 @@ struct PickSectionInput<Payload: Equatable> {
     let id: String
     var title: String? = nil
     let rule: SectionRule
-    let candidates: [PickCandidate<Payload>]
+    var candidates: [PickCandidate<Payload>]
     var currentLast = false
     /// False for a list whose candidate order means something, such as Commands or Tags in Config order.
     var shorterTitleFirst = true
@@ -191,58 +199,114 @@ struct PickSectionInput<Payload: Equatable> {
     }
 }
 
-/// A candidate that matched the query, and where it stood in its section.
+/// A candidate that matched the query, and where it stood among all candidates.
 private struct Ranked<Payload: Equatable> {
     let index: Int
     let candidate: PickCandidate<Payload>
     let match: FieldsMatch
+    /// From its section, and only for a query.
+    let shorterTitleFirst: Bool
 
-    func precedes(_ other: Ranked, shorterTitleFirst: Bool) -> Bool {
-        let (left, right) = (candidate, other.candidate)
+    func precedes(_ other: Ranked, tiebreak: [PaletteTiebreak]) -> Bool {
         if match.score != other.match.score { return match.score > other.match.score }
-        if shorterTitleFirst, left.title.count != right.title.count { return left.title.count < right.title.count }
-        if left.unopened != right.unopened { return right.unopened }
-        if left.lastVisit != right.lastVisit { return (left.lastVisit ?? .distantPast) > (right.lastVisit ?? .distantPast) }
-        if left.activity != right.activity { return left.activity > right.activity }
+        for rule in tiebreak {
+            if let first = candidate.precedes(other.candidate, by: rule, length: shorterTitleFirst && other.shorterTitleFirst) { return first }
+        }
         return index < other.index
     }
 }
 
-/// The one ranking pipeline: match, drop non-matches, sort by score, then the shorter title for a query when the
-/// section wants it, as fzf's default `--tiebreak=length`, then a row you can go to before an unopened one, then
-/// last visit, then activity, then candidate order; on an empty query only, Pinned rows go first in candidate
-/// order, then current rows. Empty sections drop out.
+private extension PickCandidate {
+    /// Nil when the rule ties.
+    func precedes(_ other: PickCandidate, by rule: PaletteTiebreak, length: Bool) -> Bool? {
+        switch rule {
+        case .open: isSetAside == other.isSetAside ? nil : other.isSetAside
+        case .running: unopened == other.unopened ? nil : other.unopened
+        case .visit: lastVisit == other.lastVisit ? nil : (lastVisit ?? .distantPast) > (other.lastVisit ?? .distantPast)
+        case .activity: activity == other.activity ? nil : activity > other.activity
+        case .length: !length || title.count == other.title.count ? nil : title.count < other.title.count
+        }
+    }
+}
+
+/// The one ranking pipeline: drop the ranked rows whose kind `show` leaves out, then those a listed row shadows; match,
+/// drop non-matches, sort by score, then by each `tiebreak` rule in turn (`length` only for a query, in a section that
+/// wants it), then candidate order; on an empty query only, Pinned rows go first in candidate order, then current rows.
+/// Empty sections drop out. `ranked` merges the sections into one list. A fixed section keeps every row.
 enum FuzzyRanker {
-    static func list<Payload>(_ sections: [PickSectionInput<Payload>], query: FuzzyQuery) -> PickList<Payload> {
-        PickList(sections: sections.compactMap { section in
-            let rows: [PickRow<Payload>]
-            switch section.rule {
-            case .ranked(let showsWhenEmpty):
-                guard showsWhenEmpty || !query.isEmpty else { return nil }
-                let shorterTitleFirst = section.shorterTitleFirst && !query.isEmpty
-                let ranked = section.candidates.enumerated()
-                    .compactMap { index, candidate in
-                        FieldsMatch.best(query, in: candidate.searchFields).map { Ranked(index: index, candidate: candidate, match: $0) }
-                    }
-                    .sorted { $0.precedes($1, shorterTitleFirst: shorterTitleFirst) }
-                let pinned = ranked.filter { $0.candidate.isPinned }.sorted { $0.index < $1.index }
-                let others = ranked.map(\.candidate).filter { !$0.isPinned }
-                let emptyOrder = section.currentLast
-                    ? others.filter { !$0.isCurrent && !$0.unopened } + others.filter { $0.isCurrent && !$0.unopened } + others.filter(\.unopened)
-                    : others.filter(\.isCurrent) + others.filter { !$0.isCurrent }
-                rows = query.isEmpty
-                    ? (pinned.map(\.candidate) + emptyOrder).map { row($0, match: nil) }
-                    : ranked.map { row($0.candidate, match: $0.match) }
-            case .fixed:
-                rows = section.candidates.map { row($0, match: nil) }
+    /// `rules` has no default, so every ranked list is ranked by its own Config rules.
+    static func list<Payload>(_ sections: [PickSectionInput<Payload>], query: FuzzyQuery, rules: PickRules,
+                              order: PaletteOrder = .grouped) -> PickList<Payload> {
+        let sections = shown(sections, show: rules.show)
+        let tiebreak = rules.tiebreak
+        var start = 0
+        let ranked = sections.map { section in
+            defer { start += section.candidates.count }
+            return (section: section, matches: matches(section, query: query, start: start, tiebreak: tiebreak))
+        }
+        switch order {
+        case .grouped:
+            return PickList(sections: ranked.compactMap { section, matches in
+                let rows = ordered(section, matches, query: query)
+                return rows.isEmpty ? nil : PickSection(id: section.id, title: section.title, rows: rows)
+            })
+        case .ranked:
+            let rows = query.isEmpty
+                ? ranked.flatMap { ordered($0.section, $0.matches, query: query) }
+                : ranked.flatMap(\.matches).sorted { $0.precedes($1, tiebreak: tiebreak) }.map { row($0.candidate, match: $0.match) }
+                    + ranked.filter { $0.section.rule == .fixed }.flatMap { ordered($0.section, [], query: query) }
+            return PickList(sections: rows.isEmpty ? [] : [PickSection(id: "results", title: nil, rows: rows)])
+        }
+    }
+
+    /// Rows no rule touches, in candidate order: a step's choices, a confirmation.
+    static func fixed<Payload>(_ candidates: [PickCandidate<Payload>]) -> PickList<Payload> {
+        list([PickSectionInput(id: "choices", rule: .fixed, candidates: candidates)], query: FuzzyQuery(""), rules: .standard)
+    }
+
+    /// Over every ranked section at once, because a row can shadow one in another section.
+    private static func shown<Payload>(_ sections: [PickSectionInput<Payload>], show: Set<RowKind>) -> [PickSectionInput<Payload>] {
+        let kept = sections.map { section in
+            guard section.rule != .fixed else { return section }
+            var section = section
+            section.candidates.removeAll { !show.contains($0.kind) }
+            return section
+        }
+        let listed = Set(kept.filter { $0.rule != .fixed }.flatMap { $0.candidates.map(\.id) })
+        return kept.map { section in
+            guard section.rule != .fixed else { return section }
+            var section = section
+            section.candidates.removeAll { $0.shadowedBy.map(listed.contains) == true }
+            return section
+        }
+    }
+
+    /// A ranked section's matches in rank order; none for a fixed section, or a hidden one on an empty query.
+    private static func matches<Payload>(_ section: PickSectionInput<Payload>, query: FuzzyQuery, start: Int,
+                                         tiebreak: [PaletteTiebreak]) -> [Ranked<Payload>] {
+        guard case .ranked(let showsWhenEmpty) = section.rule, showsWhenEmpty || !query.isEmpty else { return [] }
+        let shorterTitleFirst = section.shorterTitleFirst && !query.isEmpty
+        return section.candidates.enumerated()
+            .compactMap { index, candidate in
+                FieldsMatch.best(query, in: candidate.searchFields)
+                    .map { Ranked(index: start + index, candidate: candidate, match: $0, shorterTitleFirst: shorterTitleFirst) }
             }
-            guard !rows.isEmpty else { return nil }
-            return PickSection(id: section.id, title: section.title, rows: rows)
-        })
+            .sorted { $0.precedes($1, tiebreak: tiebreak) }
+    }
+
+    private static func ordered<Payload>(_ section: PickSectionInput<Payload>, _ ranked: [Ranked<Payload>], query: FuzzyQuery) -> [PickRow<Payload>] {
+        guard section.rule != .fixed else { return section.candidates.map { row($0, match: nil) } }
+        guard query.isEmpty else { return ranked.map { row($0.candidate, match: $0.match) } }
+        let pinned = ranked.filter { $0.candidate.isPinned }.sorted { $0.index < $1.index }
+        let others = ranked.map(\.candidate).filter { !$0.isPinned }
+        let emptyOrder = section.currentLast
+            ? others.filter { !$0.isCurrent && !$0.unopened } + others.filter { $0.isCurrent && !$0.unopened } + others.filter(\.unopened)
+            : others.filter(\.isCurrent) + others.filter { !$0.isCurrent }
+        return (pinned.map(\.candidate) + emptyOrder).map { row($0, match: nil) }
     }
 
     private static func row<Payload>(_ candidate: PickCandidate<Payload>, match: FieldsMatch?) -> PickRow<Payload> {
-        PickRow(id: candidate.id, symbol: candidate.symbol,
+        PickRow(id: candidate.id, kind: candidate.kind, symbol: candidate.symbol,
                 title: Highlighted(text: candidate.title, marks: match?.positions[0] ?? []),
                 detail: detail(candidate.searchFields, note: candidate.note, match: match),
                 tags: tags(candidate.searchFields, match: match),

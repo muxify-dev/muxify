@@ -1,16 +1,17 @@
 import XCTest
+import MuxifyCore
 
 final class PickListTests: XCTestCase {
-    private func candidate(_ id: String, _ title: String, note: String? = nil, visit: TimeInterval? = nil,
+    private func candidate(_ id: String, _ title: String, kind: RowKind = .topic, note: String? = nil, visit: TimeInterval? = nil,
                            current: Bool = false, blocked: String? = nil) -> PickCandidate<String> {
-        PickCandidate(id: id, title: title, note: note, lastVisit: visit.map { Date(timeIntervalSince1970: $0) },
+        PickCandidate(id: id, kind: kind, title: title, note: note, lastVisit: visit.map { Date(timeIntervalSince1970: $0) },
                       isCurrent: current, pick: blocked.map { .blocked(reason: $0) } ?? .available(id))
     }
 
     private func list(_ candidates: [PickCandidate<String>], _ query: String, rule: SectionRule = .ranked(showsWhenEmpty: true),
                        title: String? = nil, currentLast: Bool = false, shorterTitleFirst: Bool = true) -> PickList<String> {
         FuzzyRanker.list([PickSectionInput(id: "s", title: title, rule: rule, candidates: candidates, currentLast: currentLast,
-                                           shorterTitleFirst: shorterTitleFirst)], query: FuzzyQuery(query))
+                                           shorterTitleFirst: shorterTitleFirst)], query: FuzzyQuery(query), rules: .standard)
     }
 
     func testEachWordTakesItsBestFieldAndTheTitleWinsATie() throws {
@@ -22,9 +23,52 @@ final class PickListTests: XCTestCase {
         let hidden = try XCTUnwrap(FieldsMatch.best(FuzzyQuery("cap"), in: fields))
         XCTAssertEqual(hidden.positions, [3: [7, 8, 9]])
         XCTAssertNil(FieldsMatch.best(FuzzyQuery("sett zzz"), in: fields), "every word must match some field")
-        let sett = try XCTUnwrap(FuzzyMatcher.match("sett", in: "Settle GS drops"))
-        let gs = try XCTUnwrap(FuzzyMatcher.match("gs", in: "Settle GS drops"))
+        let sett = try XCTUnwrap(FuzzyMatcher.match("sett", in: "Settle GS drops", scheme: .history))
+        let gs = try XCTUnwrap(FuzzyMatcher.match("gs", in: "Settle GS drops", scheme: .history))
         XCTAssertEqual(both.score, sett.score + gs.score)
+    }
+
+    func testAWordSpreadThinlyOverALongTextDoesNotMatch() {
+        let path: [SearchField] = [.title("muxify/unify-app-focus-and-move-its"),
+                                   .detail("~/.local/state/muxify/worktrees/muxify/unify-app-focus-and-move-its")]
+        XCTAssertNotNil(FuzzyMatcher.match("claude", in: path[1].text), "fzf alone matches it, letter by letter")
+        XCTAssertNil(FieldsMatch.best(FuzzyQuery("claude"), in: path))
+        XCTAssertNotNil(FieldsMatch.best(FuzzyQuery("mfs"), in: [.title("muxify-focus-something")]), "initials still match")
+        XCTAssertNotNil(FieldsMatch.best(FuzzyQuery("ify"), in: [.title("muxify")]), "a part of a word still matches")
+        XCTAssertNotNil(FieldsMatch.best(FuzzyQuery("x"), in: [.title("muxify")]), "one letter matches anywhere")
+    }
+
+    func testOneListRanksEverySectionTogetherAndKeepsSectionOrderWhenEmpty() {
+        let sections = [
+            PickSectionInput(id: "a", title: "A", rule: .ranked(showsWhenEmpty: true), candidates: [candidate("weak", "the alpha notes")]),
+            PickSectionInput(id: "b", title: "B", rule: .ranked(showsWhenEmpty: true), candidates: [candidate("strong", "alpha")]),
+            PickSectionInput(id: "c", title: "C", rule: .ranked(showsWhenEmpty: false), candidates: [candidate("hidden", "alpha one")]),
+        ]
+        let typed = FuzzyRanker.list(sections, query: FuzzyQuery("alpha"), rules: .standard, order: .ranked)
+        XCTAssertEqual(typed.sections.map(\.title), [nil])
+        XCTAssertEqual(typed.rows.map(\.id), ["strong", "hidden", "weak"])
+        XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery("alpha"), rules: .standard).rows.map(\.id), ["weak", "strong", "hidden"])
+        XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery(""), rules: .standard, order: .ranked).rows.map(\.id), ["weak", "strong"])
+    }
+
+    func testTiesFollowTheTiebreakRulesInTheirOrder() {
+        var snoozed = candidate("snoozed", "alpha", visit: 30)
+        snoozed.isSetAside = true
+        let candidates = [candidate("long", "alpha beta", visit: 20), candidate("short", "alpha", visit: 10), snoozed]
+        func ids(_ tiebreak: [PaletteTiebreak]) -> [String] {
+            FuzzyRanker.list([PickSectionInput(id: "s", rule: .ranked(showsWhenEmpty: true), candidates: candidates)],
+                             query: FuzzyQuery("alpha"), rules: PickRules(tiebreak: tiebreak)).rows.map(\.id)
+        }
+        XCTAssertEqual(ids([.open, .visit, .length]), ["long", "short", "snoozed"])
+        XCTAssertEqual(ids([.open, .length, .visit]), ["short", "long", "snoozed"])
+        XCTAssertEqual(ids([.visit]), ["snoozed", "long", "short"], "a rule not listed does not count")
+        XCTAssertEqual(ids([]), ["long", "short", "snoozed"], "with no rule, candidate order decides")
+    }
+
+    func testEverySeparatorEarnsTheSameBonus() throws {
+        let words: [SearchField] = [.title("fix game")], slashed: [SearchField] = [.title("fix/game")], dashed: [SearchField] = [.title("fix-game")]
+        let scores = try [words, slashed, dashed].map { try XCTUnwrap(FieldsMatch.best(FuzzyQuery("game"), in: $0)).score }
+        XCTAssertEqual(Set(scores).count, 1, "a Topic title with spaces does not beat a Session name with / or -: \(scores)")
     }
 
     func testRankingIsScoreThenShorterTitleThenLastVisitThenCandidateOrder() {
@@ -78,6 +122,36 @@ final class PickListTests: XCTestCase {
         XCTAssertEqual(list([candidate("a", "alpha")], "zzz").sections, [])
     }
 
+    func testShowListsOnlyItsKindsOfRankedRowsAndEveryFixedRow() {
+        let sections = [
+            PickSectionInput(id: "ranked", rule: .ranked(showsWhenEmpty: true), candidates: [
+                candidate("loose", "alpha loose", kind: .session), candidate("member", "alpha member", kind: .topicSession),
+                candidate("topic", "alpha topic"),
+            ]),
+            PickSectionInput(id: "fixed", rule: .fixed, candidates: [candidate("new", "New Topic", kind: .command)]),
+        ]
+        let rules = PickRules(show: [.session, .topic])
+        for query in ["", "alpha"] {
+            XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery(query), rules: rules).rows.map(\.id), ["loose", "topic", "new"],
+                           "a Topic Session is left out, and the fixed row stays though show leaves out command, for \(query.debugDescription)")
+            XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery(query), rules: rules, order: .ranked).rows.map(\.id).sorted(),
+                           ["loose", "new", "topic"], "in one list too")
+        }
+        XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery(""), rules: .standard).rows.map(\.id), ["loose", "member", "topic", "new"],
+                       "a list with no rules of its own lists every kind")
+    }
+
+    func testAShadowedRowShowsOnlyWhileTheRowThatShadowsItIsLeftOut() {
+        var path = candidate("path", "notes", kind: .sessionPath)
+        path.shadowedBy = "running"
+        let sections = [PickSectionInput(id: "s", rule: .ranked(showsWhenEmpty: true),
+                                         candidates: [candidate("running", "notes", kind: .topicSession), path])]
+        XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery("notes"), rules: .standard).rows.map(\.id), ["running"],
+                       "a Session Path whose Session is listed is redundant")
+        XCTAssertEqual(FuzzyRanker.list(sections, query: FuzzyQuery("notes"), rules: PickRules(show: [.session, .sessionPath])).rows.map(\.id),
+                       ["path"], "with its Session's row left out, the path comes back")
+    }
+
     func testBlockedRowShowsItsReasonAndHasNoPayload() {
         let rows = list([candidate("taken", "alpha", blocked: "Taken by Fix drops"), candidate("free", "alpha2")], "")
         XCTAssertNil(rows.payload(of: "taken"))
@@ -93,7 +167,7 @@ final class PickListTests: XCTestCase {
         let match = FieldsMatch.best(FuzzyQuery("snoo cap"), in: fields)
         XCTAssertEqual(FuzzyRanker.detail(fields, note: "until Mon 9:00", match: match),
                        Highlighted(text: "snoozed · game_server/main · reward cap · until Mon 9:00", marks: [0, 1, 2, 3, 36, 37, 38]))
-        let row = list([PickCandidate(id: "t", title: "Fix drops", fields: Array(fields.dropFirst()), note: "until Mon 9:00", pick: .available("t"))], "snoo cap").rows[0]
+        let row = list([PickCandidate(id: "t", kind: .snoozed, title: "Fix drops", fields: Array(fields.dropFirst()), note: "until Mon 9:00", pick: .available("t"))], "snoo cap").rows[0]
         XCTAssertEqual(row.detail.marks, [0, 1, 2, 3, 36, 37, 38])
         XCTAssertEqual(row.title, Highlighted(text: "Fix drops", marks: []))
     }

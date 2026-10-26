@@ -31,12 +31,13 @@ class CommandPalette(unittest.TestCase):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(s.teardown)
         cls.topics_dir = s.root/'state/muxify/topics'
-        # alpha is a plain repository, beta a plain directory, gamma a bare repository with two Worktrees,
-        # delta a plain directory with an alias.
+        # alpha is a plain repository, beta a plain directory, gamma a bare repository with two checkouts inside its
+        # folder and a Worktree outside it, delta a plain directory with an alias.
         cls.alpha = s.root/'projects/alpha'
         cls.beta = s.root/'projects/beta'
         cls.gamma = s.root/'projects/gamma'
         cls.delta = s.root/'projects/delta'
+        cls.gamma_hotfix = s.root/'trees/gamma-hotfix'
         for directory in [cls.topics_dir, cls.alpha, cls.beta, cls.delta]:
             directory.mkdir(parents=True, exist_ok=True)
         git = ['/usr/bin/git', '-C', str(cls.alpha), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid',
@@ -49,8 +50,17 @@ class CommandPalette(unittest.TestCase):
         subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma/'main'), 'main'], check=True)
         subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma/'release'), '-b', 'release-line'],
                        check=True)
+        subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma_hotfix), '-b', 'hotfix'],
+                       check=True)
+        # One list is Go to… without Source headers. No Topic Sessions is Go to… without the Sessions of open Topics.
         (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(s.root/'projects') + '/*\n'
-                                                       '  aliases:\n    - ' + str(cls.delta) + ': Delta Notes\n')
+                                                       '  aliases:\n    - ' + str(cls.delta) + ': Delta Notes\n'
+                                                       'command_palettes:\n'
+                                                       '  - {name: Commands, keybinding: cmd+shift+p, sources: [commands]}\n'
+                                                       '  - {name: Go to…, keybinding: cmd+p, sources: [topics, sessions]}\n'
+                                                       '  - {name: One list, sources: [topics, sessions], order: ranked, tiebreak: [open, visit, length]}\n'
+                                                       '  - {name: No Topic Sessions, sources: [topics, sessions],'
+                                                       ' show: [topic, snoozed, settled, session, session-path, worktree]}\n')
         cls.base = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'base', '-c', str(cls.beta), SHELL)
         cls.base_window = s.tmux('display-message', '-p', '-t', cls.base + ':', '#{window_id}')
         s.launch(LAUNCH_ARGS)
@@ -117,11 +127,11 @@ class CommandPalette(unittest.TestCase):
             self.s.act('press', key)
         self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityValue') == 'selected', key + ' not selected')
 
-    def open_palette(self):
+    def open_palette(self, name='Go to…'):
         """Presses the View menu item until the palette shows. SwiftUI rebuilds the menu a moment after the state it
         reads changes, and a press in that moment can miss."""
         def opened():
-            self.s.driver('press', 'Go to…')
+            self.s.driver('press', name)
             return self.rows_until(lambda rs: self.s.has('palette-search', rs), seconds=3)[0] is not None
         wait(opened, 'the palette did not open', seconds=20)
         return self.s.rows()
@@ -206,14 +216,51 @@ class CommandPalette(unittest.TestCase):
         self.open_palette()
         rs = self.search('sett proof', key)
         ids = self.s.ids(rs)
-        self.assertIn('palette-section-settled', ids, 'no Settled section header')
-        self.assertLess(ids.index('palette-section-settled'), ids.index(key), 'the Settled row is not under its header')
+        self.assertNotIn('palette-section-settled', ids, 'a query still lists Settled Topics under their own header')
+        self.assertLess(ids.index('palette-section-topics'), ids.index(key), 'the Settled row is not among the Topics')
         self.assertIn('Shipped proof', self.describe(key, rs), 'the row does not show the outcome that matched')
         self.s.act('press', key)
         self.assertIn('settled_at', self.records()['sw-settled'], 'the Reopen choice changed the record')
         self.choose_reopen('alpha/sw-settled')
         wait(lambda: 'settled_at' not in self.records().get('sw-settled', {'settled_at': 1}), 'Reopen did not clear settled_at', seconds=15)
         wait(lambda: 'alpha/sw-settled' in self.client_sessions(), 'the client did not go to the reopened Session', seconds=10)
+
+    def test_a_snoozed_topic_that_matches_better_ranks_above_an_open_topic(self):
+        for topic_id, title, fields in [('sw-rank-open', 'Sw quokkas frank', {}), ('sw-rank-snoozed', 'Sw quokka rank', dict(snoozed_until='never'))]:
+            self.write_topic(topic_id, title, self.beta, **fields)
+            self.addCleanup(remove_topic, self.topics_dir/(topic_id + '.json'))
+        self.open_palette()
+        rs = self.search('quokka rank', 'palette-row-topic-sw-rank-open')
+        ids = self.s.ids(rs)
+        self.assertNotIn('palette-section-snoozed', ids, 'a query still lists Snoozed Topics under their own header')
+        self.assertEqual(self.topic_row_ids(rs), ['palette-row-topic-sw-rank-snoozed', 'palette-row-topic-sw-rank-open'],
+                         'the Snoozed Topic does not rank by its score')
+
+    def test_one_list_ranks_sessions_and_topics_together_without_headers(self):
+        self.write_topic('sw-one-weak', 'Sw wom-bat later', self.beta)
+        self.addCleanup(remove_topic, self.topics_dir/'sw-one-weak.json')
+        sid = self.new_session('wombat', self.beta)
+        session = 'palette-row-session:' + sid
+        self.open_palette('One list')
+        rs = self.search('wombat', 'palette-row-topic-sw-one-weak')
+        ids = self.s.ids(rs)
+        self.assertFalse([key for key in ids if key.startswith('palette-section-')], 'One list shows section headers: %s' % ids)
+        self.assertIn(session, ids, 'no row for the Session wombat: %s' % ids)
+        self.assertLess(ids.index(session), ids.index('palette-row-topic-sw-one-weak'),
+                        'the exact Session does not rank above the weaker Topic match')
+
+    def test_a_palette_whose_show_leaves_out_topic_session_lists_a_no_topic_session_but_not_a_topics_session(self):
+        self.write_topic('sw-show-member', 'Sw show member', self.beta)
+        self.addCleanup(remove_topic, self.topics_dir/'sw-show-member.json')
+        member = self.session_row(self.new_session('beta/sw-show-member', self.beta, topic='sw-show-member'))
+        loose = self.session_row(self.new_session('sw-show-loose', self.beta))
+        self.open_palette()
+        rs = self.search('sw-show', member)
+        self.assertIn(loose, self.s.ids(rs), 'Go to… does not list the No Topic Session')
+        self.close_palette()
+        self.open_palette('No Topic Sessions')
+        rs = self.search('sw-show', loose)
+        self.assertNotIn(member, self.s.ids(rs), 'show without topic-session lists the Topic\'s Session')
 
     def test_launch_row_opens_exact_name_and_is_replaced_by_its_running_session_row(self):
         key = self.session_path_row(self.gamma/'release')
@@ -576,6 +623,39 @@ class CommandPalette(unittest.TestCase):
         self.assertLess(ids.index(path_key), ids.index(running_key))
         self.assertNotIn('palette-section-running', ids)
         self.close_palette()
+
+    def add_session_rows(self, shown):
+        """Opens Add a Session for the selected Window's Topic, and returns its rows once the row with key `shown` is
+        listed. Add a Session lists every Session Path folder, so `shown` can be a folder row."""
+        wait(lambda: self.s.driver('press', 'Add a Session to Topic…')['pressed'], 'Add a Session stays disabled', seconds=10)
+        rs = self.s.wait_rows(lambda rs: self.s.has(shown, rs), 'Add a Session does not list ' + shown)
+        self.close_palette()
+        return self.s.ids(rs)
+
+    def test_add_session_whose_pick_list_shows_only_session_paths_lists_folders_and_no_running_session_or_worktree(self):
+        running = 'palette-row-running-' + self.new_session('sw-pick-running', self.delta)
+        folder = 'palette-row-' + str(self.alpha.resolve())
+        checkout = 'palette-row-' + str((self.gamma/'release').resolve())
+        worktree = 'palette-row-' + str(self.gamma_hotfix.resolve())
+        self.open_add_session('sw-pick-paths')
+        self.close_palette()
+        ids = self.add_session_rows(folder)
+        self.assertTrue(running in ids and worktree in ids, 'without pick_lists, Add a Session lists running Sessions and Worktrees: %s' % ids)
+        config = self.s.root/'config/muxify/config.yaml'
+        text = config.read_text()
+
+        def restore():
+            config.write_text(text)
+            # The app reads the Config every 2 s; a later check must not see this one's pick_lists.
+            wait(lambda: running in self.add_session_rows(folder), 'Add a Session did not list running Sessions again', seconds=20)
+        self.addCleanup(restore)
+        config.write_text(text + 'pick_lists:\n  add_session:\n    show: [session-path]\n')
+        wait(lambda: running not in self.add_session_rows(folder), 'Add a Session still lists the running Session', seconds=20)
+        ids = self.add_session_rows(folder)
+        self.assertNotIn(running, ids)
+        self.assertNotIn(worktree, ids, 'show: [session-path] lists a Worktree: %s' % ids)
+        self.assertIn(checkout, ids, 'a checkout inside a bare repository is a Session Path: %s' % ids)
+        self.assertIn('palette-row-' + str(self.beta.resolve()), ids, 'a folder is missing: %s' % ids)
 
     def test_add_session_moves_a_running_session_and_closes_the_palette(self):
         sid = self.new_session('sw-add-candidate', self.delta)

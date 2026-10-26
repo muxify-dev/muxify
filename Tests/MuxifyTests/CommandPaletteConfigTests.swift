@@ -86,6 +86,112 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertEqual(config.problems, [])
     }
 
+    func testAPaletteCanRankEverySourceInOneListWithItsOwnTiebreaks() throws {
+        let config = try load("""
+        command_palettes:
+          - name: Go to…
+            sources: [topics, sessions]
+            order: ranked
+            tiebreak: [visit, open, visit]
+          - name: Commands
+            sources: [commands]
+          - name: Broken order
+            sources: [agents]
+            order: mixed
+          - name: Broken tiebreak
+            sources: [agents]
+            tiebreak: [visit, frecency]
+        """)
+        XCTAssertEqual(config.commandPalettes.map(\.order), [.ranked, .grouped])
+        XCTAssertEqual(config.commandPalettes.map(\.rules.tiebreak), [[.visit, .open], PaletteTiebreak.standard])
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 10, message: "Command Palette order: expected grouped or ranked"),
+            ConfigProblem(path: root, line: 13, message: "Command Palette tiebreak: expected open, running, visit, activity or length"),
+        ])
+    }
+
+    func testAPaletteShowsOnlyTheKindsItsShowNamesAndABadShowDropsThePalette() throws {
+        let config = try load("""
+        command_palettes:
+          - name: Go to…
+            sources: [topics, sessions]
+            show: [topic, session, session-path, worktree, session]
+          - name: Everything
+            sources: [topics, sessions]
+          - name: One kind
+            sources: [agents]
+            show: agent
+          - name: Typo
+            sources: [sessions]
+            show: [sesion]
+          - name: Nothing
+            sources: [sessions]
+            show: []
+        """)
+        XCTAssertEqual(config.commandPalettes.map(\.name), ["Go to…", "Everything", "One kind"])
+        XCTAssertEqual(config.commandPalettes.map(\.rules.show), [[.topic, .session, .sessionPath, .worktree], RowKind.all, [.agent]])
+        let every = "topic, snoozed, settled, session, topic-session, session-path, worktree, window, agent, command or tag"
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 12, message: "Command Palette show: expected " + every),
+            ConfigProblem(path: root, line: 15, message: "Command Palette show: expected a list of " + every),
+        ])
+    }
+
+    func testPickListsGiveAnActionListItsShowAndTiebreak() throws {
+        let config = try load("""
+        pick_lists:
+          add_session:
+            show: [session-path]
+            tiebreak: [visit, length]
+          move_session:
+            tiebreak: activity
+        """)
+        XCTAssertEqual(config.problems, [])
+        XCTAssertEqual(config.rules(for: .addSession), PickRules(show: [.sessionPath], tiebreak: [.visit, .length]))
+        XCTAssertEqual(config.rules(for: .moveSession), PickRules(tiebreak: [.activity]))
+        XCTAssertEqual(config.rules(for: .move), .standard, "a list with no entry keeps every kind and the standard tiebreak")
+        XCTAssertEqual(try load("").rules(for: .addSession), .standard)
+    }
+
+    func testABadPickListEntryIsAProblemAndOnlyThatListKeepsItsStandardRules() throws {
+        let config = try load("""
+        pick_lists:
+          add_sesion:
+            show: [session-path]
+          add_session:
+            show: [session-path, window]
+          move:
+            show: [topic]
+            order: ranked
+          tags:
+            show: []
+          unsnooze_topic:
+            tiebreak: [frecency]
+          snooze_topics:
+            show: [tag, topic]
+        """)
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 2, message: "unknown pick list \"add_sesion\": expected add_session, move, move_session, "
+                          + "snooze_topics, unsnooze_topics, unsnooze_topic, tags or worktree_start"),
+            ConfigProblem(path: root, line: 5, message: "pick_lists.add_session.show: expected session, topic-session, session-path or worktree"),
+            ConfigProblem(path: root, line: 8, message: "unknown key \"pick_lists.move.order\""),
+            ConfigProblem(path: root, line: 10, message: "pick_lists.tags.show: expected a list of tag"),
+            ConfigProblem(path: root, line: 12, message: "pick_lists.unsnooze_topic.tiebreak: expected open, running, visit, activity or length"),
+        ])
+        for list in [ActionList.addSession, .move, .tags, .unsnoozeTopic] {
+            XCTAssertEqual(config.rules(for: list), .standard, "\(list)")
+        }
+        XCTAssertEqual(config.rules(for: .snoozeTopics), PickRules(show: [.tag, .topic]), "a good entry applies beside bad ones")
+    }
+
+    func testTheConfigurationGuideNamesEveryPickListAndRowKind() throws {
+        let repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let guide = try String(contentsOf: repository.appendingPathComponent("docs/configuration.md"), encoding: .utf8)
+        for word in ActionList.allCases.map(\.rawValue) + RowKind.allCases.map(\.rawValue) {
+            XCTAssertTrue(guide.contains("| `\(word)` |"), "docs/configuration.md has no table row for `\(word)`")
+        }
+    }
+
     func testMoveKeysCanBeReboundAndDisabled() throws {
         let config = try load("""
         keybindings:

@@ -166,10 +166,15 @@ public struct Config: Equatable {
     public var paletteKeybinds = PaletteKeybinds.defaults
     /// In Config order (ADR 0009).
     public var commandPalettes = CommandPaletteConfig.defaults
+    /// `pick_lists`: the rules of the Action lists it names.
+    public var pickLists: [ActionList: PickRules] = [:]
     /// Typography of the Sidebar's Sessions and Agents, not the terminal.
     public var sidebarTypography = SidebarTypography()
     /// How the Git View opens.
     public var gitView = GitViewConfig()
+
+    /// An Action list's rules: its `pick_lists` entry, else every kind and the standard tiebreak.
+    public func rules(for list: ActionList) -> PickRules { pickLists[list] ?? .standard }
     /// The Ghostty config file the terminal loads on top of Ghostty's
     /// default files, as an absolute path.
     public var ghosttyConfigFile: String?
@@ -293,9 +298,26 @@ public struct Config: Equatable {
         #   - name: Go to…
         #     keybinding: cmd+p
         #     sources: [topics, sessions]
+        #     # grouped puts each source under its own header; ranked ranks
+        #     # the rows of every source in one list for a query.
+        #     order: grouped
+        #     # On an equal match, the first rule that differs decides:
+        #     # open, running, visit, activity or length.
+        #     tiebreak: [open, length, running, visit, activity]
+        #     # The kinds of rows it lists; without show, every kind:
+        #     # topic, snoozed, settled, session, topic-session,
+        #     # session-path, worktree, window, agent, command or tag.
+        #     show: [topic, snoozed, settled, session, session-path, worktree]
         #   - name: Agents
         #     keybinding: cmd+shift+o
         #     sources: [agents]
+        #
+        # pick_lists:
+        #   # An Action's list takes show and tiebreak as a palette does:
+        #   # add_session, move, move_session, snooze_topics,
+        #   # unsnooze_topics, unsnooze_topic, tags or worktree_start.
+        #   add_session:
+        #     show: [session-path]
         #
         # remote_environments:
         #   # A Remote Environment's App Window uses that machine's own Config
@@ -544,6 +566,7 @@ private struct ConfigReader {
         "ui": { $0.readUI($1) },
         "keybindings": { $0.readKeybindings($1) },
         "command_palettes": { $0.readCommandPalettes($1) },
+        "pick_lists": { $0.readPickLists($1) },
         "git_view": { $0.readGitView($1) },
         "sessions": { $0.readSessions($1) },
         "remote_environments": { $0.readRemoteEnvironments($1) },
@@ -1201,7 +1224,7 @@ private struct ConfigReader {
             let problemCount = config.problems.count
             var values: [String: Node] = [:]
             for (name, key, value) in entries(of: item, "a Command Palette") {
-                guard ["name", "keybinding", "sources"].contains(name) else {
+                guard ["name", "keybinding", "sources", "order", "tiebreak", "show"].contains(name) else {
                     problem(at: key, "unknown Command Palette key \"\(name)\"")
                     continue
                 }
@@ -1224,14 +1247,78 @@ private struct ConfigReader {
             if sources.isEmpty, config.problems.count == problemCount {
                 problem(at: values["sources"] ?? item, "Command Palette sources: expected a list of topics, sessions, windows, agents or commands")
             }
-            guard config.problems.count == problemCount, let name else { continue }
-            palettes.append(CommandPaletteConfig(name: name, triggers: [], sources: sources))
+            var order = PaletteOrder.grouped
+            if let value = values["order"] {
+                if let parsed = string(value).flatMap(PaletteOrder.init(rawValue:)) { order = parsed } else {
+                    problem(at: value, "Command Palette order: expected grouped or ranked")
+                }
+            }
+            let rules = readPickRules(values, label: { "Command Palette " + $0 }, kinds: RowKind.all)
+            guard config.problems.count == problemCount, let name, let rules else { continue }
+            palettes.append(CommandPaletteConfig(name: name, triggers: [], sources: sources, order: order, rules: rules))
             // A bad trigger is skipped; the palette still applies.
             if let value = values["keybinding"], value.null == nil, let listed = triggers(in: value, of: "Command Palette keybinding") {
                 claims += listed.map { Claim(owner: .palette(name), trigger: $0.trigger, node: $0.node) }
             }
         }
         self.palettes = palettes
+    }
+
+    /// A bad entry is left out with a problem, so its list keeps every kind and the standard tiebreak.
+    mutating func readPickLists(_ node: Node) {
+        for (name, key, value) in entries(of: node, "pick_lists") {
+            guard let list = ActionList(rawValue: name) else {
+                problem(at: key, "unknown pick list \"\(name)\": expected " + spelledOut(ActionList.allCases.map(\.rawValue)))
+                continue
+            }
+            let problemCount = config.problems.count
+            var values: [String: Node] = [:]
+            for (keyName, key, value) in entries(of: value, "pick_lists.\(name)") {
+                guard ["show", "tiebreak"].contains(keyName) else {
+                    problem(at: key, "unknown key \"pick_lists.\(name).\(keyName)\"")
+                    continue
+                }
+                values[keyName] = value
+            }
+            let rules = readPickRules(values, label: { "pick_lists.\(name).\($0)" }, kinds: list.kinds)
+            guard config.problems.count == problemCount, let rules else { continue }
+            config.pickLists[list] = rules
+        }
+    }
+
+    /// The `show` and `tiebreak` keys of a Command Palette or a `pick_lists` entry, which `values` holds when they are
+    /// set. Nil, with a problem, when `show` is empty or names a word outside `kinds`, or a tiebreak word is unknown.
+    private mutating func readPickRules(_ values: [String: Node], label: (String) -> String, kinds: Set<RowKind>) -> PickRules? {
+        var rules = PickRules.standard
+        var valid = true
+        let kindWords = spelledOut(RowKind.allCases.filter(kinds.contains).map(\.rawValue))
+        if let node = values["show"] {
+            var show: Set<RowKind> = []
+            for value in node.sequence ?? [node] {
+                guard let kind = string(value).flatMap(RowKind.init(rawValue:)), kinds.contains(kind) else {
+                    problem(at: value, label("show") + ": expected " + kindWords)
+                    valid = false
+                    continue
+                }
+                show.insert(kind)
+            }
+            if show.isEmpty, valid {
+                problem(at: node, label("show") + ": expected a list of " + kindWords)
+                valid = false
+            }
+            rules.show = show
+        }
+        var tiebreak: [PaletteTiebreak] = []
+        for value in values["tiebreak"].map({ $0.sequence ?? [$0] }) ?? [] {
+            guard let rule = string(value).flatMap(PaletteTiebreak.init(rawValue:)) else {
+                problem(at: value, label("tiebreak") + ": expected open, running, visit, activity or length")
+                valid = false
+                continue
+            }
+            if !tiebreak.contains(rule) { tiebreak.append(rule) }
+        }
+        if !tiebreak.isEmpty { rules.tiebreak = tiebreak }
+        return valid ? rules : nil
     }
 
     /// The overlay rules across `keybindings` and `command_palettes`. An
