@@ -112,7 +112,8 @@ the root itself; 1 lists its subfolders, and 2 also their subfolders. Hidden
 folders are skipped, and so are folders this machine doesn't have, so one
 Config can serve several Macs. When two entries find the same folder, the first
 names it. Muxify looks for the folders each time a list or palette opens, so a
-new folder joins without a Config edit.
+new folder joins without a Config edit. While it looks, the list shows the
+folders it found last, also after Muxify starts again.
 
 A repository is one Session Path, plain or bare. Its Worktrees are rows of it, found
 with `git worktree list`, wherever they are. Muxify does not look for Session Paths
