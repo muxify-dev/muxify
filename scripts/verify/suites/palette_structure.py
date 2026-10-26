@@ -20,7 +20,7 @@ class PaletteStructure(unittest.TestCase):
             'Sources/Muxify/App/CommandLineToolInstaller.swift': 1,
             'Sources/Muxify/App/ExtensionInstaller.swift': 1,
             'Sources/Muxify/Browser/BrowserTab.swift': 1,
-            'Sources/Muxify/Workspace/WorkspaceStore.swift': 4,
+            'Sources/Muxify/Workspace/WorkspaceStore.swift': 3,
         }
         found = {}
         for path in (root / 'Sources/Muxify').rglob('*.swift'):
