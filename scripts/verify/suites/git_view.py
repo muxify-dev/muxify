@@ -369,8 +369,7 @@ class GitView(unittest.TestCase):
     def leave(self, new):
         """Closes the editor's Window and goes back to the one with the Git View, which is as it was left."""
         self.s.tmux('kill-window', '-t', new)
-        self.s.tmux('select-window', '-t', self.window)
-        self.s.wait_shown(self.window)
+        self.s.show(self.window)
         self.assertTrue(self.is_open(), 'the Git View did not stay open in the Window it was left in')
 
     def test_e_in_a_list_opens_the_files_first_changed_line_in_a_new_window(self):
@@ -953,9 +952,7 @@ class GitView(unittest.TestCase):
         self.assertEqual(self.head(), 'main', 'the branch was checked out')
 
     def back_to_fixture_window(self):
-        for tty in self.s.tmux('list-clients', '-F', '#{client_tty}').split():
-            self.s.tmux('switch-client', '-c', tty, '-t', self.window)
-        self.s.wait_shown(self.window)
+        self.s.show(self.window)
 
     def test_confirming_with_no_window_in_that_worktree_opens_go_to_on_its_session_path_and_starts_nothing(self):
         path = self.add_worktree('other-wt-none')
@@ -1675,9 +1672,10 @@ class GitView(unittest.TestCase):
 
     def test_shift_m_s_squashes_into_one_commit_and_u_leaves_the_changes_staged(self):
         before = self.merge_fixture('diverged')
+        diverged = self.git('rev-parse', 'HEAD').strip()
         self.ask_merge()
         self.s.act('action', 'git-menu', 's')
-        wait(lambda: self.git('rev-parse', 'HEAD').strip() != before, 's did not commit the squash', seconds=10)
+        wait(lambda: self.git('rev-parse', 'HEAD').strip() != diverged, 's did not commit the squash', seconds=10)
         self.assertEqual(self.parents(), 1, 'a squash has one parent')
         self.assertIn('Squashed commit of the following:', self.git('log', '-1', '--format=%B'))
         self.assertIn('merged.txt', self.git('show', '--name-only', '--format=', 'HEAD'))
@@ -2093,11 +2091,7 @@ class GitView(unittest.TestCase):
         self.addCleanup(self.back_to_fixture_window)
         commits = self.copy_feature_commits()
         self.close_git_view()
-        # Muxify reads tmux on its own timer, about once a second: let it see the Window before going there.
-        time.sleep(3)
-        for tty in self.s.tmux('list-clients', '-F', '#{client_tty}').split():
-            self.s.tmux('switch-client', '-c', tty, '-t', window)
-        self.s.wait_shown(window)
+        self.s.show(window)
         self.open_git_view()
         self.key('2')
         rs = self.s.wait_rows(lambda rs: self.copied_count(rs) == 2, 'the other Worktree\'s Git View does not show the copies')
