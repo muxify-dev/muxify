@@ -16,7 +16,9 @@ enum ConfigSessions {
             FileHandle.standardError.write(Data("muxify: \(problem.description)\n".utf8))
         }
         var discovered = config
-        discovered.sessionPaths = SessionPathDiscovery.discover(config.sessionRoots, aliases: config.sessionAliases, within: folders)
+        discovered.sessionPaths = SessionPathDiscovery.output(for: config.sessionRoots, within: folders).map {
+            SessionPathDiscovery.sessionPaths(in: $0, roots: config.sessionRoots, aliases: config.sessionAliases)
+        } ?? []
         return discovered
     }
 }

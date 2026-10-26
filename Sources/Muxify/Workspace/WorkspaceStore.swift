@@ -41,7 +41,8 @@ final class WorkspaceStore {
     var topicConfig: Config.Topics { configStore.config.topics }
 
     /// Looks for the Config's SessionPaths again, on the Environment's machine and off the main thread. A sheet
-    /// or palette opens at once, and a folder made since the last look joins it a moment later. Topics read
+    /// or palette opens at once, and a folder made since the last look joins it a moment later. Until the first
+    /// look finishes, the output of the last saved look shows. Topics read
     /// the Local SessionPaths from the Config, so a Local App Window hands them over.
     func refreshSessionPaths() {
         let config = self.config
@@ -55,21 +56,30 @@ final class WorkspaceStore {
             }
             if !self.isRemote { self.configStore.updateSessionPaths(sessionPaths, foundFor: config) }
         }
+        let roots = config.sessionRoots, aliases = config.sessionAliases
+        guard !roots.isEmpty else { return found([]) }
+        let arguments = SessionPathDiscovery.arguments(for: roots)
+        let cache = SessionPathCache(file: MuxifyPaths().sessionPathCache(remote: activeEnvironment?.name))
+        if sessionPaths.isEmpty, let output = cache.output(for: arguments) {
+            found(SessionPathDiscovery.sessionPaths(in: output, roots: roots, aliases: aliases))
+        }
         guard isRemote else {
-            let roots = config.sessionRoots, aliases = config.sessionAliases
             DispatchQueue.global(qos: .userInitiated).async {
-                let sessionPaths = SessionPathDiscovery.discover(roots, aliases: aliases)
+                guard let output = SessionPathDiscovery.output(for: roots) else { return }
+                cache.save(output, for: arguments)
+                let sessionPaths = SessionPathDiscovery.sessionPaths(in: output, roots: roots, aliases: aliases)
                 DispatchQueue.main.async { found(sessionPaths) }
             }
             return
         }
         guard let connection else { return }
-        guard !config.sessionRoots.isEmpty else { return found([]) }
         let current = generation
-        connection.runScriptAsync(SessionPathDiscovery.script, arguments: SessionPathDiscovery.arguments(for: config.sessionRoots)) { [weak self] result in
+        connection.runScriptAsync(SessionPathDiscovery.script, arguments: arguments) { [weak self] result in
             guard let self, self.generation == current else { return }
             switch result {
-            case .success(let output): found(SessionPathDiscovery.sessionPaths(in: output, roots: config.sessionRoots, aliases: config.sessionAliases))
+            case .success(let output):
+                DispatchQueue.global(qos: .utility).async { cache.save(output, for: arguments) }
+                found(SessionPathDiscovery.sessionPaths(in: output, roots: roots, aliases: aliases))
             case .failure(let error): NSLog("muxify: SessionPaths: \(error)")
             }
         }

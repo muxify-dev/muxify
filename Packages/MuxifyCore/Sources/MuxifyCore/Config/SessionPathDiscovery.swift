@@ -142,12 +142,11 @@ public enum SessionPathDiscovery {
         return sessionPaths
     }
 
-    /// Runs the script on this Mac. With `within`, only the SessionPaths that hold one of those folders, as the full
-    /// run names them, are found.
-    public static func discover(_ roots: [SessionPathRoot], aliases: [String: String], within folders: [String]? = nil) -> [SessionPath] {
-        guard !roots.isEmpty, folders?.isEmpty != true,
-              let output = try? Shell.run("/bin/sh", ["-c", script, "muxify"] + arguments(for: roots, within: folders)) else { return [] }
-        return sessionPaths(in: output, roots: roots, aliases: aliases)
+    /// Runs the script on this Mac. With `within`, the output gives only the SessionPaths that hold one of those
+    /// folders, as the full run names them. Nil when there is no root or no wanted folder, or when the script fails.
+    public static func output(for roots: [SessionPathRoot], within folders: [String]? = nil) -> String? {
+        guard !roots.isEmpty, folders?.isEmpty != true else { return nil }
+        return try? Shell.run("/bin/sh", ["-c", script, "muxify"] + arguments(for: roots, within: folders))
     }
 
     public static func warnings(in paths: [SessionPath]) -> [String] {

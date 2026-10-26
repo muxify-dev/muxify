@@ -33,7 +33,9 @@ public enum RepositoryLayout: Equatable, Sendable {
     /// What `SessionPathDiscovery` finds at `path` alone. A folder inside somebody else's checkout is a plain
     /// directory, so a SessionPath that is a subfolder of a repository does not list that repository's Worktrees.
     public static func detect(at path: String) -> RepositoryLayout {
-        SessionPathDiscovery.discover([SessionPathRoot(path: path)], aliases: [:]).first?.layout ?? .directory
+        let roots = [SessionPathRoot(path: path)]
+        return SessionPathDiscovery.output(for: roots)
+            .flatMap { SessionPathDiscovery.sessionPaths(in: $0, roots: roots, aliases: [:]).first?.layout } ?? .directory
     }
 
     /// The layout the discovery script reports for a folder of `kind`.

@@ -20,7 +20,8 @@ final class SessionPathAliasTests: XCTestCase {
     }
 
     private func discovered(_ config: Config) -> [SessionPath] {
-        SessionPathDiscovery.discover(config.sessionRoots, aliases: config.sessionAliases)
+        SessionPathDiscovery.output(for: config.sessionRoots)
+            .map { SessionPathDiscovery.sessionPaths(in: $0, roots: config.sessionRoots, aliases: config.sessionAliases) } ?? []
     }
 
     func testConfigGivesASessionPathItsAliasByFullPathRelativePathOrHomePath() throws {
