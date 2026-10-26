@@ -11,7 +11,7 @@ final class PickListTests: XCTestCase {
     private func list(_ candidates: [PickCandidate<String>], _ query: String, rule: SectionRule = .ranked(showsWhenEmpty: true),
                        title: String? = nil, currentLast: Bool = false, shorterTitleFirst: Bool = true) -> PickList<String> {
         FuzzyRanker.list([PickSectionInput(id: "s", title: title, rule: rule, candidates: candidates, currentLast: currentLast,
-                                           shorterTitleFirst: shorterTitleFirst)], query: FuzzyQuery(query))
+                                           shorterTitleFirst: shorterTitleFirst)], query: FuzzyQuery(query), rules: .standard)
     }
 
     func testEachWordTakesItsBestFieldAndTheTitleWinsATie() throws {

@@ -58,12 +58,12 @@ final class PaletteCatalogTests: XCTestCase {
         let paths = [SessionPath(path: "/alpha", name: "alpha"), SessionPath(path: "/beta", name: "beta")]
         let rows = SessionPathRows.build(sessionPaths: paths, windows: [running, own], records: [], titles: [:])
         let catalog = PaletteCatalog(windows: [running, own], agents: [], sessionPaths: paths, now: now)
-        let empty = catalog.addSessionList(topic: "target", query: "", rows: rows)
+        let empty = catalog.addSessionList(topic: "target", query: "", rows: rows, rules: .standard)
         XCTAssertEqual(empty.sections.count, 1)
         XCTAssertNil(empty.sections.first?.title)
         XCTAssertEqual(empty.rows.first?.id, "running-$a-long-plain-title")
         XCTAssertEqual(empty.rows.map(\.symbol), ["■", "□", "□"])
-        let typed = catalog.addSessionList(topic: "target", query: "alp", rows: rows)
+        let typed = catalog.addSessionList(topic: "target", query: "alp", rows: rows, rules: .standard)
         XCTAssertEqual(typed.rows.map(\.id), ["/alpha", "running-$a-long-plain-title"])
     }
 
@@ -74,7 +74,7 @@ final class PaletteCatalogTests: XCTestCase {
                        window("@3", session: "other", directory: "/work/game/main", topic: "other")]
         let rows = SessionPathRows.build(sessionPaths: [game, notes], windows: windows, records: records, titles: [:])
         let catalog = PaletteCatalog(windows: [running], agents: [], sessionPaths: [game, notes], now: now)
-        let list = catalog.addSessionList(topic: "target", query: "", rows: rows)
+        let list = catalog.addSessionList(topic: "target", query: "", rows: rows, rules: .standard)
         XCTAssertEqual(Array(list.rows.prefix(2).map(\.id)), ["running-$debug", "/work/game/main"])
         let main = list.rows.first { $0.id == "/work/game/main" }
         XCTAssertTrue(main?.detail.text.contains("Other") == true)
@@ -91,11 +91,11 @@ final class PaletteCatalogTests: XCTestCase {
                           sessionPaths: [path], folders: .local, at: now.addingTimeInterval(1))
         var catalog = PaletteCatalog(windows: [running], agents: [], sessionPaths: [path], visits: visits, now: now)
         for query in ["", "game"] {
-            XCTAssertEqual(catalog.addSessionList(topic: "target", query: query, rows: rows).rows.first?.id,
+            XCTAssertEqual(catalog.addSessionList(topic: "target", query: query, rows: rows, rules: .standard).rows.first?.id,
                            path.folder.real)
         }
         catalog.visits = VisitLog()
-        XCTAssertEqual(catalog.addSessionList(topic: "target", query: "game", rows: rows).rows.first?.id,
+        XCTAssertEqual(catalog.addSessionList(topic: "target", query: "game", rows: rows, rules: .standard).rows.first?.id,
                        "running-$game")
     }
 
@@ -109,7 +109,7 @@ final class PaletteCatalogTests: XCTestCase {
                           folders: .local, at: Date(timeIntervalSince1970: 20))
         var catalog = PaletteCatalog(windows: [], agents: [], sessionPaths: paths, visits: visits)
         func order(_ query: String) -> [String] {
-            catalog.addSessionList(topic: "target", query: query, rows: rows).rows.map(\.title.text)
+            catalog.addSessionList(topic: "target", query: query, rows: rows, rules: .standard).rows.map(\.title.text)
         }
         XCTAssertEqual(order(""), ["charlie", "bravo", "alpha", "delta"])
         XCTAssertEqual(order("alp"), ["alpha"])
@@ -119,7 +119,7 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(order(""), ["alpha", "bravo", "charlie", "delta"])
         let path = SessionPath(path: "/work/game", name: "game")
         let directoryRows = SessionPathRows.build(sessionPaths: [path], windows: [], records: [], titles: [:])
-        let matched = catalog.addSessionList(topic: "target", query: "work", rows: directoryRows)
+        let matched = catalog.addSessionList(topic: "target", query: "work", rows: directoryRows, rules: .standard)
         XCTAssertEqual(matched.rows.first?.detail, Highlighted(text: "/work/game", marks: [1, 2, 3, 4]))
     }
 
@@ -327,13 +327,72 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertTrue(shown.contains("topic-a"), "\(shown)")
     }
 
-    func testAddSessionListsWorktreesAsWorktreesAndTellsTopicSessionsApart() {
+    func testAddSessionListsWorktreesAsWorktreesAndOnlyTheKindsItsRulesShow() {
         let windows = [window("@1", session: "loose", directory: "/beta"),
                        window("@2", session: "game/other", directory: "/work/game/main", topic: "other")]
         let rows = SessionPathRows.build(sessionPaths: [game, notes], windows: [], records: [], titles: [:])
         let catalog = catalog(records: [topic("other", "Other")], windows: windows)
-        let all = catalog.addSessionList(topic: "target", query: "", rows: rows)
+        let all = catalog.addSessionList(topic: "target", query: "", rows: rows, rules: .standard)
         XCTAssertEqual(Set(all.rows.map(\.kind)), [.session, .topicSession, .worktree, .sessionPath], "\(all.rows.map { ($0.id, $0.kind) })")
+        let folders = catalog.addSessionList(topic: "target", query: "", rows: rows, rules: PickRules(show: [.sessionPath]))
+        XCTAssertEqual(folders.rows.map(\.title.text), ["notes"], "no running Session and no Worktree")
+    }
+
+    /// A list whose `show` names every kind it can show lists what it lists with no entry, so its builder makes no row
+    /// that `show` could not name.
+    private func assertShowsOnlyItsKinds(_ list: ActionList, _ build: (PickRules) -> PickList<PaletteItem>,
+                                         file: StaticString = #filePath, line: UInt = #line) {
+        let built = build(.standard)
+        XCTAssertFalse(built.rows.isEmpty, "\(list) has no rows to check", file: file, line: line)
+        XCTAssertEqual(build(PickRules(show: list.kinds)), built, "\(list) makes a ranked row of a kind outside \(list.kinds)", file: file, line: line)
+    }
+
+    func testEachCatalogActionListMakesOnlyTheKindsItsShowCanName() {
+        let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
+                       window("@2", session: "game/beta", directory: "/work/game/release", topic: "a"),
+                       window("@3", session: "scratch", directory: "/tmp"),
+                       window("@4", session: "spare", directory: "/tmp")]
+        let catalog = catalog(records: [topic("a", "Alpha"), topic("b", "Beta")], windows: windows)
+        let rows = SessionPathRows.build(sessionPaths: [game, notes], windows: windows, records: [], titles: [:])
+        for list in ActionList.allCases {
+            switch list {
+            case .addSession: assertShowsOnlyItsKinds(list) { catalog.addSessionList(topic: "b", query: "", rows: rows, rules: $0) }
+            case .move:
+                assertShowsOnlyItsKinds(list) { catalog.moveList(windows[2], query: "", rules: $0) }
+                assertShowsOnlyItsKinds(list) { catalog.moveList(windows[2], query: "", scope: .pane, rules: $0) }
+            case .moveSession:
+                assertShowsOnlyItsKinds(list) { catalog.destinationList(windows[2], topic: "a", query: "", rules: $0) }
+                assertShowsOnlyItsKinds(list) { catalog.destinationList(windows[0], topic: nil, query: "", rules: $0) }
+            // CommandPalette builds these from the WorkspaceStore: testEachPaletteActionList… checks them.
+            case .snoozeTopics, .unsnoozeTopics, .unsnoozeTopic, .tags, .worktreeStart: break
+            }
+        }
+    }
+
+    @MainActor func testEachPaletteActionListMakesOnlyTheKindsItsShowCanName() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-pick-list-tests-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("config.yaml").path
+        try ("pick_lists:\n" + ActionList.allCases.map { list in
+            "  \(list.rawValue):\n    show: [\(RowKind.allCases.filter(list.kinds.contains).map(\.rawValue).joined(separator: ", "))]\n"
+        }.joined()).write(toFile: path, atomically: true, encoding: .utf8)
+        let narrowed = WorkspaceStore(configStore: ConfigStore(path: path))
+        XCTAssertEqual(narrowed.config.problems, [])
+        XCTAssertEqual(Set(narrowed.config.pickLists.keys), Set(ActionList.allCases))
+        let standard = WorkspaceStore(configStore: ConfigStore(path: directory.appendingPathComponent("none.yaml").path))
+        let defined = ConfigTags([TagDefinition(tag: Tag(name: "backend")!), TagDefinition(tag: Tag(name: "ops")!)])
+        let draft = WorktreeStartDraft(topic: TopicRecord(id: "t", title: "T"), choice: SessionChoice(sessionPath: game, worktree: nil))
+        draft.starts = .ready([WorktreeStartChoice(branch: "main", checkedOutAt: "/work/game/main"),
+                               WorktreeStartChoice(branch: "feature", checkedOutAt: nil)])
+        for (list, flow, query) in [(ActionList.tags, PaletteFlow.text(.tags(TagField(mode: .newTopic, defined: defined))), "#"),
+                                    (.worktreeStart, .worktreeStart(draft), "")] {
+            narrowed.palette.query = query
+            standard.palette.query = query
+            let built = standard.palette.flowResults(flow)
+            XCTAssertFalse(built.rows.isEmpty, "\(list) has no rows to check")
+            XCTAssertEqual(narrowed.palette.flowResults(flow), built, "\(list) makes a ranked row of a kind outside \(list.kinds)")
+        }
     }
 
     func testARemoteAppWindowHasNoTopicsSource() {
@@ -352,15 +411,15 @@ final class PaletteCatalogTests: XCTestCase {
                        window("@3", session: "notes/charlie", directory: "/work/notes", topic: "c"),
                        window("@4", session: "scratch", directory: "/work/game/release")]
         let catalog = catalog(records: records, windows: windows, selected: "@4")
-        let list = catalog.moveList(windows[3], query: "")
+        let list = catalog.moveList(windows[3], query: "", rules: .standard)
         XCTAssertEqual(ids(list), ["topic-a", "topic-b", "topic-c", "new-topic", "no-topic"])
         XCTAssertNotNil(list.rows[0].pick.payload, "folders never block membership")
         XCTAssertEqual(list.rows[2].pick.payload?.ref, .choice(.move(.topic(id: "c"))))
         XCTAssertEqual(list.rows[3].detail.text, "Untitled")
-        let typed = catalog.moveList(windows[3], query: " Reward cap ")
+        let typed = catalog.moveList(windows[3], query: " Reward cap ", rules: .standard)
         XCTAssertEqual(ids(typed), ["new-topic"], "a query no Topic matches leaves only New Topic")
         XCTAssertEqual(typed.rows[0].pick.payload?.ref, .choice(.move(.newTopic(title: "Reward cap"))))
-        XCTAssertEqual(ids(catalog.moveList(windows[0], query: "")), ["topic-b", "topic-c", "new-topic", "no-topic"],
+        XCTAssertEqual(ids(catalog.moveList(windows[0], query: "", rules: .standard)), ["topic-b", "topic-c", "new-topic", "no-topic"],
                        "the source's own Topic is not a target")
     }
 

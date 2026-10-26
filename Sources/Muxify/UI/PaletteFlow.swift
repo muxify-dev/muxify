@@ -288,13 +288,16 @@ extension CommandPalette {
         switch flow {
         case .move(let draft):
             guard let catalog else { return .empty }
-            if case .sessions(let topic) = draft.destination { return catalog.destinationList(draft.window, topic: topic, query: query) }
-            return catalog.moveList(draft.window, query: query, scope: draft.scope)
-        case .check(let draft): return checkRows(draft)
-        case .unsnoozeTopic: return unsnoozeRows()
+            if case .sessions(let topic) = draft.destination {
+                return catalog.destinationList(draft.window, topic: topic, query: query, rules: store.config.rules(for: .moveSession))
+            }
+            return catalog.moveList(draft.window, query: query, scope: draft.scope, rules: store.config.rules(for: .move))
+        case .check(let draft):
+            return checkRows(draft, rules: store.config.rules(for: draft.action == .snooze ? .snoozeTopics : .unsnoozeTopics))
+        case .unsnoozeTopic: return unsnoozeRows(rules: store.config.rules(for: .unsnoozeTopic))
         case .addSession(let topic):
-            return catalog?.addSessionList(topic: topic.id, query: query, rows: store.sessionPathRows) ?? .empty
-        case .worktreeStart(let draft): return worktreeStartRows(draft)
+            return catalog?.addSessionList(topic: topic.id, query: query, rows: store.sessionPathRows, rules: store.config.rules(for: .addSession)) ?? .empty
+        case .worktreeStart(let draft): return worktreeStartRows(draft, rules: store.config.rules(for: .worktreeStart))
         case .snoozeUntil, .zen:
             let now = Date()
             var choices: [(String, String, SnoozeDeadline)] = []
@@ -307,8 +310,8 @@ extension CommandPalette {
                 if !choices.contains(where: { $0.2 == .never }) { choices.append(("never", "Until I unsnooze", .never)) }
                 choices = choices.filter { query.isEmpty || $0.1.localizedCaseInsensitiveContains(query) }
             }
-            return fixed(choices.map { choiceRow($0.0, $0.1, detail: $0.2.description, choice: .deadline($0.2)) })
-        case .text(.tags(let field)): return tagRows(field)
+            return FuzzyRanker.fixed(choices.map { choiceRow($0.0, $0.1, detail: $0.2.description, choice: .deadline($0.2)) })
+        case .text(.tags(let field)): return tagRows(field, rules: store.config.rules(for: .tags))
         case .text: return .empty
         case .confirm(let draft): return confirmationRows(draft)
         }
@@ -316,12 +319,12 @@ extension CommandPalette {
 
     /// A typed ref first, then HEAD, then each local branch. A branch that another Worktree has checked out cannot be
     /// chosen: git checks out a branch in one Worktree only.
-    private func worktreeStartRows(_ draft: WorktreeStartDraft) -> PickList<PaletteItem> {
+    private func worktreeStartRows(_ draft: WorktreeStartDraft, rules: PickRules) -> PickList<PaletteItem> {
         let typed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         var top: [PickCandidate<PaletteItem>] = []
         if !typed.isEmpty { top.append(choiceRow("typed", "Start at \(typed)", choice: .worktreeStart(.ref(typed)))) }
         top.append(choiceRow("head", "HEAD of " + (draft.choice.worktree?.branch ?? draft.choice.displayName), choice: .worktreeStart(.head)))
-        guard case .ready(let branches) = draft.starts else { return fixed(top) }
+        guard case .ready(let branches) = draft.starts else { return FuzzyRanker.fixed(top) }
         let rows = branches.map { start in
             PickCandidate(id: "branch-" + start.branch, kind: .command, title: "Check out \(start.branch)", fields: [.detail(start.checkedOutAt ?? "")],
                           pick: start.checkedOutAt == nil ? .available(PaletteItem(ref: .choice(.worktreeStart(.branch(start.branch)))))
@@ -329,17 +332,13 @@ extension CommandPalette {
         }
         return FuzzyRanker.list([PickSectionInput(id: "start", rule: .fixed, candidates: top),
                                  PickSectionInput(id: "branches", rule: .ranked(showsWhenEmpty: true), candidates: rows)],
-                                query: FuzzyQuery(typed))
+                                query: FuzzyQuery(typed), rules: rules)
     }
 
     private func choiceRow(_ id: String, _ title: String, detail: String = "", trailing: String = "",
                            choice: PaletteChoice) -> PickCandidate<PaletteItem> {
         PickCandidate(id: id, kind: .command, title: title, fields: [.detail(detail)], trailing: trailing,
                       pick: .available(PaletteItem(ref: .choice(choice))))
-    }
-
-    private func fixed(_ candidates: [PickCandidate<PaletteItem>]) -> PickList<PaletteItem> {
-        FuzzyRanker.list([PickSectionInput(id: "choices", rule: .fixed, candidates: candidates)], query: FuzzyQuery(""))
     }
 
     private func confirmationRows(_ draft: PaletteConfirmation) -> PickList<PaletteItem> {
@@ -394,7 +393,7 @@ extension CommandPalette {
                 rows.append(PickCandidate(id: "agent-" + agent.id, kind: .agent, title: agent.kind.displayName, pick: .blocked(reason: "Will stop")))
             }
         }
-        return fixed(rows)
+        return FuzzyRanker.fixed(rows)
     }
 
     func loadFlow() {

@@ -199,7 +199,7 @@ struct PaletteCatalog {
     }
 
     /// Running Sessions and launch folders share one rank in Add a Session.
-    func addSessionList(topic: String, query: String, rows: [SessionPathRow]) -> PickList<PaletteItem> {
+    func addSessionList(topic: String, query: String, rows: [SessionPathRow], rules: PickRules) -> PickList<PaletteItem> {
         var seen: Set<String> = []
         let open = openTopicIDs
         let sessions = windows.filter { $0.topicID != topic && seen.insert($0.sessionID).inserted }.map { window in
@@ -216,10 +216,10 @@ struct PaletteCatalog {
                 pick: .available(PaletteItem(ref: .choice(.sessionPath(row.choice)))))
         }
         return FuzzyRanker.list([PickSectionInput(id: "add-session", rule: .ranked(showsWhenEmpty: true), candidates: sessions + paths)],
-                                query: FuzzyQuery(query))
+                                query: FuzzyQuery(query), rules: rules)
     }
 
-    func destinationList(_ source: TmuxWindow, topic: String?, query: String) -> PickList<PaletteItem> {
+    func destinationList(_ source: TmuxWindow, topic: String?, query: String, rules: PickRules) -> PickList<PaletteItem> {
         var seen: Set<String> = []
         let open = openTopicIDs
         let rows = windows.filter {
@@ -231,7 +231,7 @@ struct PaletteCatalog {
         let new = PickCandidate(id: "new-session", kind: .session, title: "New Session",
                                 pick: .available(PaletteItem(ref: .choice(.move(.newSession(topic: topic))))))
         return FuzzyRanker.list([PickSectionInput(id: "sessions", rule: .ranked(showsWhenEmpty: true), candidates: rows),
-            PickSectionInput(id: "new", rule: .fixed, candidates: [new])], query: FuzzyQuery(query))
+            PickSectionInput(id: "new", rule: .fixed, candidates: [new])], query: FuzzyQuery(query), rules: rules)
     }
 
     private func pathCandidate(_ choice: SessionChoice, shadowedBy: String?) -> PickCandidate<PaletteItem> {
@@ -313,7 +313,7 @@ struct PaletteCatalog {
 
     /// The open, not Snoozed Topics minus the source's own, ranked for `query`, then the New Topic row titled
     /// by it. A Topic with a Session in the source's folder is offered too: Topics group Sessions, not folders.
-    func moveList(_ source: TmuxWindow, query: String, scope: MoveDraft.Scope = .session) -> PickList<PaletteItem> {
+    func moveList(_ source: TmuxWindow, query: String, scope: MoveDraft.Scope = .session, rules: PickRules) -> PickList<PaletteItem> {
         guard let topics else { return .empty }
         let candidates = topics.rows.compactMap { row -> PickCandidate<PaletteItem>? in
             guard case .topic(let id) = row.id, scope != .session || id != source.topicID,
@@ -341,7 +341,7 @@ struct PaletteCatalog {
         }
         let destinations = PickSectionInput(id: "move", rule: .ranked(showsWhenEmpty: true), candidates: candidates)
         let create = PickSectionInput(id: "new-topic", rule: .fixed, candidates: newRows)
-        return FuzzyRanker.list(scope == .session ? [destinations, create] : [create, destinations], query: FuzzyQuery(query))
+        return FuzzyRanker.list(scope == .session ? [destinations, create] : [create, destinations], query: FuzzyQuery(query), rules: rules)
     }
 
     /// The path as one shell word: bare when the shell reads it as is, quoted otherwise.

@@ -166,10 +166,15 @@ public struct Config: Equatable {
     public var paletteKeybinds = PaletteKeybinds.defaults
     /// In Config order (ADR 0009).
     public var commandPalettes = CommandPaletteConfig.defaults
+    /// `pick_lists`: the rules of the Action lists it names.
+    public var pickLists: [ActionList: PickRules] = [:]
     /// Typography of the Sidebar's Sessions and Agents, not the terminal.
     public var sidebarTypography = SidebarTypography()
     /// How the Git View opens.
     public var gitView = GitViewConfig()
+
+    /// An Action list's rules: its `pick_lists` entry, else every kind.
+    public func rules(for list: ActionList) -> PickRules { pickLists[list] ?? .standard }
     /// The Ghostty config file the terminal loads on top of Ghostty's
     /// default files, as an absolute path.
     public var ghosttyConfigFile: String?
@@ -300,6 +305,13 @@ public struct Config: Equatable {
         #   - name: Agents
         #     keybinding: cmd+shift+o
         #     sources: [agents]
+        #
+        # pick_lists:
+        #   # An Action's list takes show as a palette does:
+        #   # add_session, move, move_session, snooze_topics,
+        #   # unsnooze_topics, unsnooze_topic, tags or worktree_start.
+        #   add_session:
+        #     show: [session-path]
         #
         # remote_environments:
         #   # A Remote Environment's App Window uses that machine's own Config
@@ -548,6 +560,7 @@ private struct ConfigReader {
         "ui": { $0.readUI($1) },
         "keybindings": { $0.readKeybindings($1) },
         "command_palettes": { $0.readCommandPalettes($1) },
+        "pick_lists": { $0.readPickLists($1) },
         "git_view": { $0.readGitView($1) },
         "sessions": { $0.readSessions($1) },
         "remote_environments": { $0.readRemoteEnvironments($1) },
@@ -1239,8 +1252,30 @@ private struct ConfigReader {
         self.palettes = palettes
     }
 
-    /// The `show` key of a Command Palette, which `values` holds when it is set. Nil, with a problem, when `show` is empty
-    /// or names a word outside `kinds`.
+    /// A bad entry is left out with a problem, so its list keeps every kind.
+    mutating func readPickLists(_ node: Node) {
+        for (name, key, value) in entries(of: node, "pick_lists") {
+            guard let list = ActionList(rawValue: name) else {
+                problem(at: key, "unknown pick list \"\(name)\": expected " + spelledOut(ActionList.allCases.map(\.rawValue)))
+                continue
+            }
+            let problemCount = config.problems.count
+            var values: [String: Node] = [:]
+            for (keyName, key, value) in entries(of: value, "pick_lists.\(name)") {
+                guard keyName == "show" else {
+                    problem(at: key, "unknown key \"pick_lists.\(name).\(keyName)\"")
+                    continue
+                }
+                values[keyName] = value
+            }
+            let rules = readPickRules(values, label: { "pick_lists.\(name).\($0)" }, kinds: list.kinds)
+            guard config.problems.count == problemCount, let rules else { continue }
+            config.pickLists[list] = rules
+        }
+    }
+
+    /// The `show` key of a Command Palette or a `pick_lists` entry, which `values` holds when it is set. Nil, with a
+    /// problem, when `show` is empty or names a word outside `kinds`.
     private mutating func readPickRules(_ values: [String: Node], label: (String) -> String, kinds: Set<RowKind>) -> PickRules? {
         var rules = PickRules.standard
         var valid = true

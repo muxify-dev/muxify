@@ -220,7 +220,8 @@ private struct Ranked<Payload: Equatable> {
 /// candidate order; on an empty query only, Pinned rows go first in candidate order, then current rows. Empty
 /// sections drop out. A fixed section keeps every row.
 enum FuzzyRanker {
-    static func list<Payload>(_ sections: [PickSectionInput<Payload>], query: FuzzyQuery, rules: PickRules = .standard) -> PickList<Payload> {
+    /// `rules` has no default, so every ranked list is ranked by its own Config rules.
+    static func list<Payload>(_ sections: [PickSectionInput<Payload>], query: FuzzyQuery, rules: PickRules) -> PickList<Payload> {
         PickList(sections: shown(sections, show: rules.show).compactMap { section in
             let rows: [PickRow<Payload>]
             switch section.rule {
@@ -246,6 +247,11 @@ enum FuzzyRanker {
             guard !rows.isEmpty else { return nil }
             return PickSection(id: section.id, title: section.title, rows: rows)
         })
+    }
+
+    /// Rows no rule touches, in candidate order: a step's choices, a confirmation.
+    static func fixed<Payload>(_ candidates: [PickCandidate<Payload>]) -> PickList<Payload> {
+        list([PickSectionInput(id: "choices", rule: .fixed, candidates: candidates)], query: FuzzyQuery(""), rules: .standard)
     }
 
     /// Over every ranked section at once, because a row can shadow one in another section.

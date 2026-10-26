@@ -126,7 +126,7 @@ extension CommandPalette {
 
     /// Tags in Config order, then Topics, then Already Snoozed for Snooze, or Snoozed for Unsnooze. A Tag that reaches no
     /// Topic has no row. A row stays in its place when it is checked.
-    func checkRows(_ draft: CheckDraft) -> PickList<PaletteItem> {
+    func checkRows(_ draft: CheckDraft, rules: PickRules) -> PickList<PaletteItem> {
         guard let topics = store?.topics else { return .empty }
         let checked = Set(checkedIDs(draft))
         func plural(_ count: Int) -> String { count == 1 ? "1 Topic" : "\(count) Topics" }
@@ -165,7 +165,7 @@ extension CommandPalette {
             sections.append(PickSectionInput(id: "snoozed", title: "Snoozed", rule: .ranked(showsWhenEmpty: true),
                                              candidates: topics.snoozedRows.compactMap(candidate)))
         }
-        return FuzzyRanker.list(sections, query: FuzzyQuery(query))
+        return FuzzyRanker.list(sections, query: FuzzyQuery(query), rules: rules)
     }
 
     private func checkRow(of row: PickRow<PaletteItem>?) -> CheckRow? {
@@ -261,7 +261,7 @@ extension CommandPalette {
     }
 
     /// Unsnooze Topic while the Active Topic is not Snoozed: one row for each Snoozed Topic.
-    func unsnoozeRows() -> PickList<PaletteItem> {
+    func unsnoozeRows(rules: PickRules) -> PickList<PaletteItem> {
         let candidates = checkable(.unsnooze).map { id, row in
             var trailing = ""
             if case .snoozed(let wake) = row.kind { trailing = "until " + wake }
@@ -271,6 +271,6 @@ extension CommandPalette {
                                  pick: .available(PaletteItem(ref: .choice(.unsnooze(id)))))
         }
         return FuzzyRanker.list([PickSectionInput(id: "snoozed", title: "Snoozed", rule: .ranked(showsWhenEmpty: true),
-                                                  candidates: candidates)], query: FuzzyQuery(query))
+                                                  candidates: candidates)], query: FuzzyQuery(query), rules: rules)
     }
 }

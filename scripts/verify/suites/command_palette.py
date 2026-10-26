@@ -596,6 +596,37 @@ class CommandPalette(unittest.TestCase):
         self.assertNotIn('palette-section-running', ids)
         self.close_palette()
 
+    def add_session_rows(self, shown):
+        """Opens Add a Session for the selected Window's Topic, and returns its rows once the row with key `shown` is
+        listed. Add a Session lists every Session Path folder, so `shown` can be a folder row."""
+        wait(lambda: self.s.driver('press', 'Add a Session to Topic…')['pressed'], 'Add a Session stays disabled', seconds=10)
+        rs = self.s.wait_rows(lambda rs: self.s.has(shown, rs), 'Add a Session does not list ' + shown)
+        self.close_palette()
+        return self.s.ids(rs)
+
+    def test_add_session_whose_pick_list_shows_only_session_paths_lists_folders_and_no_running_session_or_worktree(self):
+        running = 'palette-row-running-' + self.new_session('sw-pick-running', self.delta)
+        folder = 'palette-row-' + str(self.alpha.resolve())
+        worktree = 'palette-row-' + str((self.gamma/'release').resolve())
+        self.open_add_session('sw-pick-paths')
+        self.close_palette()
+        ids = self.add_session_rows(folder)
+        self.assertTrue(running in ids and worktree in ids, 'without pick_lists, Add a Session lists running Sessions and Worktrees: %s' % ids)
+        config = self.s.root/'config/muxify/config.yaml'
+        text = config.read_text()
+
+        def restore():
+            config.write_text(text)
+            # The app reads the Config every 2 s; a later check must not see this one's pick_lists.
+            wait(lambda: running in self.add_session_rows(folder), 'Add a Session did not list running Sessions again', seconds=20)
+        self.addCleanup(restore)
+        config.write_text(text + 'pick_lists:\n  add_session:\n    show: [session-path]\n')
+        wait(lambda: running not in self.add_session_rows(folder), 'Add a Session still lists the running Session', seconds=20)
+        ids = self.add_session_rows(folder)
+        self.assertNotIn(running, ids)
+        self.assertNotIn(worktree, ids, 'show: [session-path] lists a Worktree: %s' % ids)
+        self.assertIn('palette-row-' + str(self.beta.resolve()), ids, 'a folder is missing: %s' % ids)
+
     def test_add_session_moves_a_running_session_and_closes_the_palette(self):
         sid = self.new_session('sw-add-candidate', self.delta)
         self.open_add_session('sw-add-running')

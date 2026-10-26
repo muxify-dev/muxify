@@ -272,8 +272,12 @@ One kind of thing a Command Palette searches: Topics, Sessions, Windows, Agents 
 _Avoid_: provider, category, section
 
 **Row kind**:
-What one row of a Command Palette or of an Action's list is: `topic`, `snoozed`, `settled`, `session`, `topic-session`, `session-path`, `worktree`, `window`, `agent`, `command` or `tag`. A Command Palette's `show` names the Row kinds that it lists. A running Session is a `topic-session` when its Topic is not Settled, and a `session` in all other cases.
+What one row of a Command Palette or of an Action's list is: `topic`, `snoozed`, `settled`, `session`, `topic-session`, `session-path`, `worktree`, `window`, `agent`, `command` or `tag`. A list's `show` names the Row kinds that it lists. A running Session is a `topic-session` when its Topic is not Settled, and a `session` in all other cases.
 _Avoid_: type, category, Source (when you mean one kind of row)
+
+**Pick list**:
+The ranked list of an Action's step, such as Add a Session or Move. Each has a name in `pick_lists` and takes `show`, as a Command Palette does.
+_Avoid_: picker, dropdown, menu
 
 **Check step**:
 A palette step that lists Topics with a box on each, and Tag rows that check or uncheck all their Topics in the list, before an Action on the checked Topics. In Snooze Topics, a Tag row does not check its Already Snoozed Topics. The user checks each of them by its own row. A Tag row is not a member of the set. Snooze Topics and Unsnooze Topics start with it.

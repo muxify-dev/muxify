@@ -893,6 +893,35 @@ A step that kills a process needs ⌘↩ to confirm. The keys inside a palette a
 
 ⌘K opens these actions in a menu by the highlighted row.
 
+## Pick lists
+
+An Action that asks you to choose a row, such as Add a Session, shows a pick
+list. `pick_lists` gives a pick list the `show` key of a
+[Command Palette](#command-palettes). Each entry has the name of a pick list:
+
+```yaml
+pick_lists:
+  add_session:
+    show: [session-path]    # no running Sessions and no Worktrees
+```
+
+| Pick list | Action | Kinds for `show` |
+| --- | --- | --- |
+| `add_session` | Add a Session, also after New Topic | `session`, `topic-session`, `session-path`, `worktree` |
+| `move` | Move to…, the Topic step | `topic` |
+| `move_session` | Move to…, the step that chooses a Session | `session`, `topic-session` |
+| `snooze_topics` | Snooze Topics…, the step that checks Topics | `tag`, `topic`, `snoozed` |
+| `unsnooze_topics` | Unsnooze Topics…, the step that checks Topics | `tag`, `snoozed` |
+| `unsnooze_topic` | Unsnooze Topic, when the Active Topic is not Snoozed | `snoozed` |
+| `tags` | The Tags of New Topic and Edit Tags… | `tag` |
+| `worktree_start` | Add a Session › New Worktree from | `command` |
+
+A pick list without an entry lists every kind. The rows that a pick list always
+shows, such as New Topic in Move to…, ignore `show`. These problems apply to one
+entry: a name that is not in the table, a key other than `show`, an empty
+`show`, or a kind that the pick list does not have. Muxify shows the problem,
+and that pick list lists every kind.
+
 ## A Remote Environment's own Config
 
 A Remote Environment's App Window uses the Config on that machine
