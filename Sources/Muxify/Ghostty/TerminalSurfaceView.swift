@@ -41,7 +41,7 @@ final class TerminalSurfaceView: NSView {
         // libghostty otherwise appends Contents/MacOS and points GHOSTTY_BIN_DIR
         // there. That folder holds only the app, so the tmux client, and a
         // server it starts, would not have the bundled CLI.
-        let environment = ["PATH", "GHOSTTY_BIN_DIR"].compactMap { key -> (String, String)? in
+        let environment = [("MUXIFY_TERMINAL", "1")] + ["PATH", "GHOSTTY_BIN_DIR"].compactMap { key -> (String, String)? in
             ProcessInfo.processInfo.environment[key].map { (key, $0) }
         }
         let strings = environment.flatMap { [strdup($0.0), strdup($0.1)] }

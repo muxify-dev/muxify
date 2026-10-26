@@ -16,10 +16,11 @@ class ClientTerminal(unittest.TestCase):
         cls.sandbox = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(cls.sandbox.teardown)
         cls.sandbox.app_env['SHELL'] = '/bin/sh'
+        cls.sandbox.app_env['MUXIFY_TERMINAL'] = 'not-muxify'
         cls.sandbox.tmux('new-session', '-d', '-s', 'client', '-c', str(cls.sandbox.root), '/bin/sh',
                          ';', 'set-option', '-g', 'default-shell', '/bin/sh',
                          ';', 'set-option', '-g', 'update-environment',
-                         'PATH GHOSTTY_BIN_DIR GHOSTTY_RESOURCES_DIR TERMINFO')
+                         'PATH GHOSTTY_BIN_DIR GHOSTTY_RESOURCES_DIR TERMINFO MUXIFY_TERMINAL')
         cls.sandbox.launch()
         wait(lambda: cls.sandbox.tmux_ok('list-clients').returncode == 0, 'app did not start tmux')
         wait(lambda: '@muxify_client_' in cls.sandbox.tmux('show-options', '-s'),
@@ -69,6 +70,11 @@ class ClientTerminal(unittest.TestCase):
         wait(lambda: self.muxify_pid in self.clients(), 'marked Client did not attach')
         self.assertEqual(self.clients()[self.muxify_pid]['tty'], self.fields[1])
 
+    def test_terminal_identifies_itself_when_attaching_to_an_existing_server(self):
+        session = self.sandbox.tmux('display-message', '-p', '-c', self.fields[1], '#{session_id}')
+        self.assertEqual(self.sandbox.tmux('show-environment', '-t', session, 'MUXIFY_TERMINAL'),
+                         'MUXIFY_TERMINAL=1')
+
     def test_new_pane_uses_bundled_cli_and_resources(self):
         sandbox, fields = self.sandbox, self.fields
         previous_pane = sandbox.tmux('display-message', '-p', '-c', fields[1], '#{pane_id}')
@@ -78,6 +84,9 @@ class ClientTerminal(unittest.TestCase):
             return pane if pane != previous_pane else None
         pane = wait(new_pane, 'Muxify did not create a Window')
 
+        marker = sandbox.root/'terminal-marker'
+        self.pane_command(pane, 'printf \'%s\' "$MUXIFY_TERMINAL" > ' + shlex.quote(str(marker)))
+        self.assertEqual(wait(lambda: marker.read_text().strip(), 'Pane did not report its terminal marker'), '1')
         result = sandbox.root/'cli-path'
         self.pane_command(pane, 'command -v muxify > ' + shlex.quote(str(result)))
         cli = wait(lambda: result.read_text().strip(), 'Pane did not resolve muxify')
