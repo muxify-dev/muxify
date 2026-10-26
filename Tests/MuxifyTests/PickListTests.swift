@@ -28,6 +28,16 @@ final class PickListTests: XCTestCase {
         XCTAssertEqual(both.score, sett.score + gs.score)
     }
 
+    func testAWordSpreadThinlyOverALongTextDoesNotMatch() {
+        let path: [SearchField] = [.title("muxify/unify-app-focus-and-move-its"),
+                                   .detail("~/.local/state/muxify/worktrees/muxify/unify-app-focus-and-move-its")]
+        XCTAssertNotNil(FuzzyMatcher.match("claude", in: path[1].text), "fzf alone matches it, letter by letter")
+        XCTAssertNil(FieldsMatch.best(FuzzyQuery("claude"), in: path))
+        XCTAssertNotNil(FieldsMatch.best(FuzzyQuery("mfs"), in: [.title("muxify-focus-something")]), "initials still match")
+        XCTAssertNotNil(FieldsMatch.best(FuzzyQuery("ify"), in: [.title("muxify")]), "a part of a word still matches")
+        XCTAssertNotNil(FieldsMatch.best(FuzzyQuery("x"), in: [.title("muxify")]), "one letter matches anywhere")
+    }
+
     func testRankingIsScoreThenShorterTitleThenLastVisitThenCandidateOrder() {
         let candidates = [
             candidate("old", "alpha one", visit: 10),

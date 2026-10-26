@@ -36,7 +36,7 @@ struct SearchField: Equatable {
     static func tags(_ shown: [ShownTag]) -> [SearchField] { shown.compactMap(\.definition).map(tag) }
 }
 
-/// The best field per word, summed over words. Nil when some word matches no field.
+/// The best field per word, summed over words. Nil when some word matches no field at its minimum score.
 struct FieldsMatch: Equatable {
     let score: Int
     /// Per field index, the positions of every word whose best field it is.
@@ -45,11 +45,11 @@ struct FieldsMatch: Equatable {
     static func best(_ query: FuzzyQuery, in fields: [SearchField]) -> FieldsMatch? {
         var score = 0
         var positions: [Int: [Int]] = [:]
-        for word in query.words {
+        for (word, minimum) in zip(query.words, query.minimumScores) {
             var best: (index: Int, match: FuzzyMatch)?
             let wantsTag = word.hasPrefix("#")
             for (index, field) in fields.enumerated() where field.place != .label && (field.place == .tag) == wantsTag {
-                guard let match = FuzzyMatcher.match(word, in: field.text) else { continue }
+                guard let match = FuzzyMatcher.match(word, in: field.text), match.score >= minimum else { continue }
                 if best.map({ match.score > $0.match.score }) ?? true { best = (index, match) }
             }
             guard let best else { return nil }

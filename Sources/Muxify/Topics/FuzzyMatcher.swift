@@ -2,9 +2,14 @@ import Foundation
 
 struct FuzzyQuery: Equatable {
     let words: [String]
+    /// Per word, the lowest score that counts as a match: 55% of what the word scores against itself. A word spread
+    /// thinly over a long path, such as "claude" over "~/.local/state/…", scored at most 46%; initials and parts of a
+    /// word at least 64%. A one-character word has no minimum, so the letter inside a word still matches.
+    let minimumScores: [Int]
 
     init(_ text: String) {
         words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        minimumScores = words.map { $0.count < 2 ? 0 : (FuzzyMatcher.match($0, in: $0)?.score ?? 0) * 11 / 20 }
     }
 
     var isEmpty: Bool { words.isEmpty }
