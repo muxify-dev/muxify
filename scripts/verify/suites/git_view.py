@@ -88,6 +88,9 @@ Window in any Worktree of the repository.
 f in Changes fetches beside the writes; the toolbar's label ends with "Fetching…" until it ends. A credential question
 of git or ssh is asked in `git-prompt`, whose label is the question; ⎋ stops the fetch, and `git-write-error` says
 "Fetch cancelled.".
+e goes to the editor's Window only while the Git View's Window is still the Location; a move made while the diff
+or tmux answered wins, and the editor's Window opens behind it. An Empty Topic page shows no Git View, and the
+Window's Git View shows again, as it was left, when the Window is the Location again.
 The diff pane builds only the lines on screen, so keep a fixture's diffs short.
 
 Run from the repo root after `make build`:
@@ -101,7 +104,7 @@ import subprocess
 import time
 import unittest
 
-from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.sandbox import Sandbox, remove_topic, wait
 
 SHELL = '/bin/zsh -f'
 LAUNCH_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES']
@@ -407,6 +410,53 @@ class GitView(unittest.TestCase):
             self.assertFalse(self.editor_out.exists(), 'the editor ran')
         finally:
             (self.repo/'moved.txt').rename(self.repo/'new.txt')
+
+    def test_e_opens_the_editor_behind_a_window_gone_to_while_the_diff_was_read(self):
+        # git runs a textconv for a patch and not for --numstat, so only the diff of tracked.txt waits 6 seconds.
+        self.addCleanup(self.back_to_fixture_window)
+        elsewhere = self.s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', 'gv-elsewhere', '-c', str(self.repo), SHELL)
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', 'gv-elsewhere')
+        self.git('config', 'diff.slow.textconv', 'sleep 3; cat')
+        self.addCleanup(self.git, 'config', '--unset', 'diff.slow.textconv')
+        attributes = self.repo/'.git/info/attributes'
+        attributes.write_text('tracked.txt diff=slow\n')
+        self.addCleanup(attributes.unlink, missing_ok=True)
+        # Away and back, so the diff of tracked.txt is read again with the textconv.
+        self.select_row('git-row-change:new.txt')
+        self.select_row('git-row-change:tracked.txt')
+        self.editor_out.unlink(missing_ok=True)
+        before = self.windows()
+        self.key('e')
+        self.s.show(elsewhere)
+        wait(self.editor_out.exists, 'the editor command did not run', seconds=20)
+        (new,) = self.windows() - before
+        self.addCleanup(self.s.tmux_ok, 'kill-window', '-t', new)
+        self.assertEqual(self.editor_out.read_text().split('\n')[0], str(self.repo.resolve()/'tracked.txt'))
+        # The app goes to a new Window at its next read of tmux, about once a second.
+        time.sleep(2)
+        self.s.wait_shown(elsewhere, seconds=2)
+
+    def empty_topic(self, name):
+        """A Topic with no Session, and its card."""
+        topics = self.s.root/'state/muxify/topics'
+        topics.mkdir(parents=True, exist_ok=True)
+        path = topics/(name + '.json')
+        path.write_text(json.dumps(dict(id=name, title=name, slug=name)))
+        self.addCleanup(remove_topic, path)
+        self.s.wait_rows(lambda rs: self.s.has('topic-' + name, rs), 'the Topic card of %s did not show' % name)
+
+    def test_an_empty_topic_page_shows_no_git_view_and_its_window_shows_it_again_as_it_was_left(self):
+        self.go_to('3')
+        self.s.wait_rows(lambda rs: self.s.row('git-tab-branches', rs).get('accessibilityValue') == 'selected', '3 did not show Branches')
+        self.empty_topic('gv-empty-page')
+        self.addCleanup(self.back_to_fixture_window)
+        self.s.act('action', 'topic-gv-empty-page', 'Go to Topic')
+        rs = self.s.wait_rows(lambda rs: self.s.row('empty-topic-title', rs).get('accessibilityValue') == 'gv-empty-page',
+                              'the Empty Topic page did not show')
+        self.assertFalse(self.is_open(rs), 'the Git View shows over the Empty Topic page')
+        self.s.show(self.window)
+        rs = self.s.wait_rows(lambda rs: self.is_open(rs), 'the Git View did not show again in its Window')
+        self.assertEqual(self.s.row('git-tab-branches', rs).get('accessibilityValue'), 'selected', 'the Git View was not as it was left')
 
     def menu(self, rs=None):
         return self.s.row('git-menu', rs)

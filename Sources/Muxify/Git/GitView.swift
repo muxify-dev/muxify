@@ -461,7 +461,8 @@ final class GitView {
         self.windowID = windowID
     }
 
-    /// Its Window is the one selected, so it's on screen when open.
+    /// Its Window is the Location, so it's on screen when open. Never on an
+    /// Empty Topic page, which has no Window.
     var isCurrent: Bool { store?.selectedWindowID == windowID }
 
     // MARK: Opening and closing
@@ -531,8 +532,9 @@ final class GitView {
         }
     }
 
-    /// Another Window was selected: it stays open as it is, but stops
-    /// reading the repository until its Window is selected again.
+    /// The Location left its Window, for another Window or an Empty Topic
+    /// page: it stays open as it is, but stops reading the repository until
+    /// its Window is the Location again.
     func suspend() {
         isFiltering = false
         // Asked again when it's wanted, never waiting to be confirmed. A command's question stays: it waits for it.
@@ -545,7 +547,7 @@ final class GitView {
         stopRefreshing()
     }
 
-    /// Its Window is selected again: shown as it was left, with the keys,
+    /// Its Window is the Location again: shown as it was left, with the keys,
     /// and read again.
     func resume() {
         guard isOpen else { return }
@@ -588,7 +590,7 @@ final class GitView {
         if !hasKeyFocus(in: window) { window.makeFirstResponder(keyView) }
     }
 
-    /// Focus once the key view is on screen, as selecting its Window draws a
+    /// Focus once the key view is on screen, as going to its Window draws a
     /// new one. The commit message box focuses its own field.
     func takeFocus() {
         guard !isCommitOpen else { return }
@@ -1251,7 +1253,8 @@ final class GitView {
 
     /// Opens the file in the editor, unless it's gone from the working tree.
     /// The selection's diff is read a moment after the selection moves, so
-    /// `e` right after `j` waits for it: the line comes from the diff.
+    /// `e` right after `j` waits for it: the line comes from the diff. Leaving
+    /// the Window meanwhile still opens the editor, but doesn't come back to it.
     func openInEditor() {
         guard let store, let root = snapshot?.root, let request = request() else { return }
         guard content?.id == request.id else {

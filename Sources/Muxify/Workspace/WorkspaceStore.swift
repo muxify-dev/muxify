@@ -1800,7 +1800,7 @@ final class WorkspaceStore {
     /// to its Terminal, or to its Browser while the Terminal is hidden.
     func moveFocusIntoWindow() {
         guard !palette.isOpen else { return }
-        // The Window's Git View, open over its sides; one just selected
+        // The Window's Git View, open over its sides; one just gone to
         // takes Focus once it's on screen.
         if let gitView = selectedWindowID.flatMap({ gitViews[$0] }), gitView.isOpen { return gitView.takeFocus() }
         moveFocus(into: panelLayout.shows(.terminal) ? .terminal : .browser)
@@ -2008,16 +2008,18 @@ final class WorkspaceStore {
     }
 
     /// Runs the Git View's editor command for `file` at `line` in a new Window of
-    /// the Session of `windowID`, in `directory`, and switches to it. On a
-    /// Remote Environment tmux runs it there, so it edits that machine's file.
+    /// the Session of `windowID`, in `directory`, and goes to it while the
+    /// Location is still `windowID`. A move made while git and tmux answered
+    /// is newer, so it wins (ADR 0044). On a Remote Environment tmux runs the
+    /// command there, so it edits that machine's file.
     func openInEditor(file: String, line: Int, from windowID: String, in directory: String) {
         guard let sessionID = windows.first(where: { $0.id == windowID })?.sessionID ?? selectedWindow?.sessionID else { return }
         let command = config.gitView.editorShellCommand(file: file, line: line)
         let args = ["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "\(sessionID):", "-c", directory, command]
         runAsync(args) { [weak self] result in
-            guard let self, case .success(let output) = result else { return }
-            let windowID = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            self.switchClient(to: Target(sessionID: sessionID, windowID: windowID, path: nil))
+            guard let self, case .success(let output) = result, self.selectedWindowID == windowID else { return }
+            let editorID = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.switchClient(to: Target(sessionID: sessionID, windowID: editorID, path: nil))
         }
     }
 
@@ -2033,8 +2035,9 @@ final class WorkspaceStore {
         return gitView
     }
 
-    /// The selected Window's Git View, once it has opened there. Views
-    /// don't make one, so `gitViews` changes only in actions.
+    /// The Git View of the Location's Window, once it has opened there; nil
+    /// on an Empty Topic page. Views don't make one, so `gitViews` changes
+    /// only in actions.
     var currentGitView: GitView? {
         selectedWindowID.flatMap { gitViews[$0] }
     }
