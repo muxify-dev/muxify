@@ -1,5 +1,7 @@
 # Pane and Browser keybinds act only while their side has Focus
 
+> **Update 2026-10-26:** Close Tab follows this rule too. It was the last key built into the code: Muxify took `cmd+w` with any Focus, so from the Terminal the key never reached Ghostty, and a Ghostty `cmd+w` binding to tmux did nothing. `close_tab` is now a Browser Action with the default `cmd+w`. From the Terminal, `cmd+w` goes on to Ghostty. With other Focus, such as the Git View, `cmd+w` still does nothing, so it never closes the App Window.
+
 Muxify's keybinds act before the Terminal, the Browser and the menu see a key. A keybind that acts everywhere takes its key from every side. Maximize had Ghostty's `toggle_split_zoom` key, `shift+cmd+enter`, so the user could not zoom a Pane by key. The next and previous Tab keys and Back and Forward were built into the code, so the Config could not change them.
 
 We decide that an Action for one side acts only while that side has Focus. With Focus elsewhere, Muxify does not take the key, and Ghostty, the page or the menu gets it.
