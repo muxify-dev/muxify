@@ -1737,15 +1737,25 @@ final class WorkspaceStore {
     /// `keyFocus` as of the last change of the window's first responder, which SwiftUI cannot observe by itself. Nil
     /// while no view has it.
     private var focusedPanel: PanelLayout.Side?
+    /// The side a Focus move goes to, until the first responder changes. The marker hides meanwhile, so it never
+    /// shows the side that Focus is leaving.
+    private var incomingFocus: PanelLayout.Side?
 
     func readFocusedPanel() {
         focusedPanel = terminalHost.window?.firstResponder is NSView ? keyFocus : nil
+        incomingFocus = nil
+    }
+
+    /// Only a move to the other side changes the first responder, which ends the move.
+    private func expectFocus(in side: PanelLayout.Side) {
+        if focusedPanel != side { incomingFocus = side }
     }
 
     /// `ui.focus_marker`: the side that shows the marker. None while a side is alone, with no other side to tell it
     /// from, or while a Command Palette has Focus.
     var focusMarkerSide: PanelLayout.Side? {
-        guard config.focusMarker, panelLayout.shows(.terminal), panelLayout.shows(.browser), !palette.isOpen else { return nil }
+        guard config.focusMarker, panelLayout.shows(.terminal), panelLayout.shows(.browser), !palette.isOpen,
+              incomingFocus == nil else { return nil }
         return focusedPanel
     }
 
@@ -1790,6 +1800,7 @@ final class WorkspaceStore {
     func focusTerminal() {
         DispatchQueue.main.async { [weak self] in
             guard let self, let surface, panelLayout.shows(.terminal), !showsEmptyPage, !palette.isOpen else { return }
+            expectFocus(in: .terminal)
             surface.window?.makeFirstResponder(surface)
         }
     }
@@ -2082,6 +2093,10 @@ final class WorkspaceStore {
             guard let self, self.generation == current, browser.windowID == self.selectedWindowID else { return }
             keepFocusOnScreen()
             terminalVisibilityChanged()
+        }
+        browser.onFocusRequest = { [weak self] browser in
+            guard let self, self.generation == current, browser.windowID == self.selectedWindowID else { return }
+            expectFocus(in: .browser)
         }
         browser.onCopyURL = { [weak self] url in
             guard let self, self.generation == current else { return }

@@ -17,7 +17,9 @@ final class Browser {
     private(set) var activeTabID: UUID?
     /// Shows the Browser only while it has a Tab.
     private(set) var layout: PanelLayout
-    var focusRequest: FocusRequest?
+    var focusRequest: FocusRequest? {
+        didSet { if focusRequest != nil { onFocusRequest?(self) } }
+    }
     /// Newest last. Kept only while the app runs: tmux stores open Tabs, not closed ones.
     private var closedTabs: [ClosedTab] = []
     private static let closedTabLimit = 20
@@ -33,6 +35,8 @@ final class Browser {
     /// Called when the Terminal or the Browser appears or disappears.
     @ObservationIgnored var onShownChange: ((Browser) -> Void)?
     @ObservationIgnored var onCopyURL: ((String) -> Void)?
+    /// Called when something asks for Focus in this Browser, before the page or the address field takes it.
+    @ObservationIgnored var onFocusRequest: ((Browser) -> Void)?
 
     init(windowID: String, stored: StoredBrowser, discoversLocalServers: Bool = true) {
         self.windowID = windowID
