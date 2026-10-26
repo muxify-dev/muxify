@@ -37,15 +37,20 @@ struct AgentMarkSpine: View {
 extension MarkColor {
     /// A pair follows the appearance of the view that draws it.
     var color: Color {
+        if case .single(let color) = self { return Color(nsColor: color.nsColor) }
+        return Color(nsColor: NSColor(name: nil) { nsColor(in: $0) })
+    }
+
+    func nsColor(in appearance: NSAppearance) -> NSColor {
         switch self {
-        case .single(let color):
-            return Color(nsColor: color.nsColor)
-        case .pair(let light, let dark):
-            return Color(nsColor: NSColor(name: nil) { appearance in
-                appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark.nsColor : light.nsColor
-            })
+        case .single(let color): color.nsColor
+        case .pair(let light, let dark): appearance.isDark ? dark.nsColor : light.nsColor
         }
     }
+}
+
+extension NSAppearance {
+    var isDark: Bool { bestMatch(from: [.aqua, .darkAqua]) == .darkAqua }
 }
 
 extension MarkColor.Single {

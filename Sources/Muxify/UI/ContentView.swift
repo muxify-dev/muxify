@@ -318,12 +318,22 @@ private struct FocusMarker: View {
     var body: some View {
         if store.focusMarkerSide == side {
             UnevenRoundedRectangle(bottomLeadingRadius: 2, bottomTrailingRadius: 2)
-                .fill(Color.accentColor.opacity(0.45))
+                .fill(color)
                 .frame(width: 32, height: 2)
                 .allowsHitTesting(false)
                 .accessibilityElement()
                 .accessibilityIdentifier("focus-marker-" + (side == .terminal ? "terminal" : "browser"))
         }
+    }
+
+    /// `ui.focus_marker_color` at `ui.focus_marker_opacity`, each picked for the appearance that draws it.
+    private var color: Color {
+        let config = store.config
+        return Color(nsColor: NSColor(name: nil) { appearance in
+            let color = config.focusMarkerColor?.nsColor(in: appearance) ?? .controlAccentColor
+            let opacity = appearance.isDark ? config.focusMarkerOpacity.dark : config.focusMarkerOpacity.light
+            return color.withAlphaComponent(opacity)
+        })
     }
 }
 

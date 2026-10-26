@@ -156,6 +156,10 @@ public struct Config: Equatable {
     /// `ui.focus_marker`: a short line on the top edge of the side that has Focus, while the Terminal and the Browser
     /// both show.
     public var focusMarker = false
+    /// `ui.focus_marker_color`. Nil is the system accent color.
+    public var focusMarkerColor: MarkColor?
+    /// `ui.focus_marker_opacity`.
+    public var focusMarkerOpacity = AppearanceOpacity(light: 0.45, dark: 0.45)
     /// `ui.agent_colors`.
     public var agentColors = AgentColors()
     /// The keybinds of an open Command Palette (`keybindings.command_palette`).
@@ -221,6 +225,11 @@ public struct Config: Equatable {
         #   # A short line on the top edge of the Terminal or the Browser, whichever
         #   # has Focus. It shows only while both show.
         #   focus_marker: false
+        #   # The marker's color: accent (the macOS accent color), a color as in
+        #   # agent_colors, or a mapping with light and dark.
+        #   focus_marker_color: accent
+        #   # Above 0 and at most 1, or a mapping with light and dark.
+        #   focus_marker_opacity: 0.45
         #   # The color of each Agent mark, in the Sidebar and the Command
         #   # Palette: blue, orange, red, green, yellow, purple, pink, teal,
         #   # gray, or a quoted '#RRGGBB'.
@@ -1036,6 +1045,14 @@ private struct ConfigReader {
                     continue
                 }
                 config.focusMarker = enabled
+            case "focus_marker_color":
+                if value.tag == Yams.Tag(.str), string(value)?.lowercased() == "accent" {
+                    config.focusMarkerColor = nil
+                } else if let color = markColor(value, "ui.focus_marker_color") {
+                    config.focusMarkerColor = color
+                }
+            case "focus_marker_opacity":
+                if let opacity = appearanceOpacity(value, "ui.focus_marker_opacity") { config.focusMarkerOpacity = opacity }
             case "sidebar":
                 readUISidebar(value)
             case "agent_colors":
@@ -1370,6 +1387,44 @@ private struct ConfigReader {
         }
         guard valid, let light = colors["light"], let dark = colors["dark"] else { return nil }
         return .pair(light: light, dark: dark)
+    }
+
+    /// One opacity, or a mapping with one for `light` and one for `dark` appearance. Nil after a problem.
+    private mutating func appearanceOpacity(_ node: Node, _ place: String) -> AppearanceOpacity? {
+        let expected = "expected a number above 0 and at most 1"
+        func single(_ node: Node) -> Double? {
+            guard node.mapping == nil, let value = node.float, value > 0, value <= 1 else { return nil }
+            return value
+        }
+        guard node.mapping != nil else {
+            guard let opacity = single(node) else {
+                problem(at: node, "\(place): \(expected), or a mapping with light and dark")
+                return nil
+            }
+            return AppearanceOpacity(light: opacity, dark: opacity)
+        }
+        let fields = entries(of: node, place)
+        var opacities: [String: Double] = [:]
+        var valid = true
+        for (name, key, value) in fields {
+            guard ["light", "dark"].contains(name) else {
+                problem(at: key, "unknown key \"\(place).\(name)\"")
+                valid = false
+                continue
+            }
+            guard let opacity = single(value) else {
+                problem(at: value, "\(place).\(name): \(expected)")
+                valid = false
+                continue
+            }
+            opacities[name] = opacity
+        }
+        let missing = ["light", "dark"].filter { side in !fields.contains { $0.name == side } }
+        if !missing.isEmpty {
+            problem(at: node, "\(place): missing \(missing.joined(separator: " and "))")
+        }
+        guard valid, let light = opacities["light"], let dark = opacities["dark"] else { return nil }
+        return AppearanceOpacity(light: light, dark: dark)
     }
 
     /// A scalar other than null (empty, `~` or `null`).

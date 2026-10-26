@@ -30,6 +30,17 @@ public enum MarkColor: Hashable, Sendable {
     }
 }
 
+/// An opacity for light appearance and one for dark, each above 0 and at most 1.
+public struct AppearanceOpacity: Hashable, Sendable {
+    public var light: Double
+    public var dark: Double
+
+    public init(light: Double, dark: Double) {
+        self.light = light
+        self.dark = dark
+    }
+}
+
 /// `ui.agent_colors`: the color of each kind of Agent mark, on every surface.
 public struct AgentColors: Equatable, Sendable {
     public var working = MarkColor.single(.system(.gray))
