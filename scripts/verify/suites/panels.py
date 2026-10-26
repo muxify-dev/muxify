@@ -212,6 +212,15 @@ class Panels(unittest.TestCase):
         self.s.act('click', tab)
         self.wait_focus('browser', 'a click on a Browser Tab did not give the Browser Focus')
         self.s.wait_rows(lambda rs: markers(rs) == {'browser'}, 'the Focus marker did not follow a click on a Tab: %s' % markers(None))
+        self.s.act('press', 'Focus Terminal')
+        self.s.wait_rows(lambda rs: markers(rs) == {'terminal'}, 'the Focus marker did not move back to the Terminal: %s' % markers(None))
+        self.s.act('press', 'toggle-browser')
+        self.wait_panels({'sidebar', 'terminal'}, 'the Browser toggle did not hide the Browser')
+        self.s.act('press', 'toggle-browser')
+        seen = []
+        wait(lambda: seen.append(markers(self.s.rows())) or seen[-1] == {'browser'},
+             'the Focus marker did not reach the opened Browser: %s' % seen)
+        self.assertNotIn({'terminal'}, seen, 'the Focus marker showed the Terminal while Focus moved to the opened Browser')
         self.s.act('press', 'toggle-terminal')
         self.wait_panels({'sidebar', 'browser'}, 'the Terminal toggle did not hide the Terminal')
         self.s.wait_rows(lambda rs: markers(rs) == set(), 'the Focus marker shows on the Browser alone: %s' % markers(None))
