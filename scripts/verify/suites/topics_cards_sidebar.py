@@ -90,7 +90,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         # (topicMembershipActions), because the menu itself takes the mouse and the keyboard.
         s.act('action', 'topic-window-' + window, 'Move Window to Topic…')
         s.wait_rows(lambda rs: s.has('palette-row-topic-move-target', rs), 'Move did not show the target Topic')
-        # The Topic has one Session, so the move skips the destination step and lands in that Session (ADR 0041).
+        # The Topic has one Session, so the move skips the destination step and lands in that Session (ADR 0047).
         s.act('press', 'palette-row-topic-move-target')
         wait(lambda: s.tmux('display-message', '-p', '-t', window, '#{session_name}') == 'alpha/move-target',
              'Window did not move to alpha/move-target', seconds=10)
@@ -204,7 +204,7 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def choose_keep(self, sid):
         """Turns the Session's row of the Settle or Forget palette from Kill, the preset for every live Session
-        (ADR 0041), to Keep. A press toggles the row."""
+        (ADR 0047), to Keep. A press toggles the row."""
         key = 'palette-row-session-' + sid
         self.s.act('press', key)
         self.s.wait_rows(lambda rs: 'Keep' in self.s.row(key, rs).get('accessibilityLabel', ''),
@@ -312,7 +312,7 @@ class TopicsCardsSidebar(TopicsSidebar):
             options = s.tmux_ok('show-options', '-t', working)
             return options.returncode == 0 and '@muxify_topic' not in options.stdout
         wait(kept_without_topic, 'the Session of the working Agent is gone or still has the Topic')
-        # Keep removes the membership and gives the Session its base name back (ADR 0041).
+        # Keep removes the membership and gives the Session its base name back (ADR 0047).
         wait(lambda: s.tmux('display-message', '-p', '-t', working + ':', '#{session_name}') == 'beta',
              'Keep did not restore the base name of the kept Session')
 
