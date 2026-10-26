@@ -16,12 +16,17 @@ public struct GitViewConfig: Equatable {
     /// A shell command with `{file}` and `{line}`, which `e` runs in a new
     /// tmux Window. Nil runs `defaultEditor`.
     public var editor: String?
+    /// False runs `editor` with no Window, in the background, for a command
+    /// that hands the file to an editor that already runs.
+    public var editorInWindow = true
 
-    public init(display: Display = .popup, width: Double = 0.8, height: Double = 0.8, editor: String? = nil) {
+    public init(display: Display = .popup, width: Double = 0.8, height: Double = 0.8, editor: String? = nil,
+                editorInWindow: Bool = true) {
         self.display = display
         self.width = width
         self.height = height
         self.editor = editor
+        self.editorInWindow = editorInWindow
     }
 
     /// What `e` runs without `git_view.editor`.
@@ -52,6 +57,12 @@ public struct GitViewConfig: Equatable {
             }
         }
         return command + rest
+    }
+
+    /// What `e` runs with no Window: a /bin/sh script that takes the
+    /// repository's folder.
+    public func editorScript(file: String, line: Int) -> String {
+        "cd \"$1\" || exit 1\n" + editorCommand(file: file, line: line)
     }
 
     /// What tmux runs in the new Window: plain words, because tmux's default

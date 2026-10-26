@@ -397,6 +397,63 @@ class GitView(unittest.TestCase):
         self.assertEqual((file, line), (str(self.repo.resolve()/'tracked.txt'), 3), 'the added line does not open at its number')
         self.leave(new)
 
+    def test_closing_the_editor_goes_back_to_the_window_with_the_git_view(self):
+        # The Git View's Window is not the Session's last Window.
+        later = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', self.session + ':', '-c', str(self.repo), SHELL)
+        try:
+            self.select_change('tracked.txt')
+            new, _, _ = self.press_e()
+            self.s.tmux('kill-window', '-t', new)
+            self.s.wait_shown(self.window)
+            time.sleep(2)
+            self.assertEqual(self.s.tmux('display-message', '-p', '-t', self.session + ':', '#{window_id}'), self.window,
+                             'the app left the Window with the Git View after the editor closed')
+            self.assertTrue(self.is_open(), 'the Git View did not stay open in the Window it was left in')
+        finally:
+            self.s.tmux('kill-window', '-t', later)
+            self.s.wait_shown(self.window)
+
+    def run_editor_in_background(self, command):
+        """Sets `editor_in_window: false` with the editor command, and sets it back after the check. A Window Summary
+        changes in the same Config reload, so the check waits until the app reads it."""
+        config = self.s.root/'config/muxify/config.yaml'
+        original = config.read_text()
+        marker = 'Editor in background'
+        def reloaded(present):
+            keys = ('topic-window-' + self.window, 'session-window-' + self.window)
+            return lambda rs: any((marker in r.get('accessibilityLabel', '')) == present
+                                  for r in rs if r.get('accessibilityIdentifier') in keys)
+        def restore():
+            config.write_text(original)
+            self.s.wait_rows(reloaded(False), 'the Config did not reload')
+        self.addCleanup(restore)
+        config.write_text('git_view:\n  editor: ' + json.dumps(command) + '\n  editor_in_window: false\n'
+                          'sidebar:\n  formats:\n    window:\n      summary: ' + marker + '\n')
+        self.s.wait_rows(reloaded(True), 'the Config did not reload')
+
+    def test_e_with_editor_in_window_off_runs_the_editor_and_opens_no_window(self):
+        self.run_editor_in_background("printf '%s\\n%s\\n' {file} {line} > " + shlex.quote(str(self.editor_out)))
+        self.select_change('tracked.txt')
+        before = self.windows()
+        self.editor_out.unlink(missing_ok=True)
+        self.key('e')
+        wait(self.editor_out.exists, 'the editor command did not run', seconds=10)
+        file, line = self.editor_out.read_text().split('\n')[:2]
+        self.assertEqual((file, int(line)), (str(self.repo.resolve()/'tracked.txt'), 2))
+        time.sleep(2)  # Allow a Window to open before asserting none did.
+        self.assertEqual(self.windows(), before, 'e opened a Window')
+        self.assertEqual(self.s.tmux('display-message', '-p', '-t', self.session + ':', '#{window_id}'), self.window,
+                         'the app left the Window with the Git View')
+        self.assertTrue(self.is_open(), 'the Git View closed')
+        self.assertFalse(self.s.has('git-write-error'), 'the Git View shows an error')
+
+    def test_e_with_editor_in_window_off_says_when_the_editor_command_fails(self):
+        self.run_editor_in_background('echo no editor {file} >&2; exit 3')
+        self.select_change('tracked.txt')
+        self.key('e')
+        rs = self.s.wait_rows(lambda rs: self.s.has('git-write-error', rs), 'the Git View did not say the editor failed')
+        self.assertIn('no editor', self.s.row('git-write-error', rs).get('accessibilityValue', ''))
+
     def test_e_on_a_file_that_is_gone_says_so_and_opens_nothing(self):
         self.select_row('git-row-change:new.txt')
         (self.repo/'new.txt').rename(self.repo/'moved.txt')

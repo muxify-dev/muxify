@@ -258,6 +258,10 @@ public struct Config: Equatable {
         #   # repository's folder: {file} and {line} are filled in and
         #   # quoted. Without it: ${VISUAL:-${EDITOR:-vi}} +{line} {file}
         #   editor: nvim +{line} {file}
+        #   # false runs editor with no Window, for a command that hands the
+        #   # file to an editor that already runs, such as
+        #   # nvim --server <socket> --remote {file}.
+        #   editor_in_window: true
         #
         # sessions:
         #   # Folders where you open Sessions. A path may be a glob, and each
@@ -775,6 +779,12 @@ private struct ConfigReader {
                     continue
                 }
                 config.gitView.editor = editor
+            case "editor_in_window":
+                guard value.tag == Yams.Tag(.bool), let inWindow = value.bool else {
+                    problem(at: value, "git_view.editor_in_window: expected a boolean")
+                    continue
+                }
+                config.gitView.editorInWindow = inWindow
             default:
                 problem(at: key, "unknown key \"git_view.\(name)\"")
             }

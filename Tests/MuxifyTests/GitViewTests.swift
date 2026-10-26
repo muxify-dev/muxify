@@ -58,6 +58,29 @@ final class GitViewConfigTests: XCTestCase {
         XCTAssertNotNil(try load("git_view:\n  editor: \"\"").problems.first)
     }
 
+    func testTheEditorRunsInAWindowUnlessEditorInWindowIsFalse() throws {
+        XCTAssertTrue(try load("").gitView.editorInWindow)
+        let background = try load("git_view:\n  editor: nvim --remote {file}\n  editor_in_window: false")
+        XCTAssertFalse(background.gitView.editorInWindow)
+        XCTAssertEqual(background.problems, [])
+        let invalid = try load("git_view:\n  editor_in_window: never\n  display: fullscreen")
+        XCTAssertTrue(invalid.gitView.editorInWindow)
+        XCTAssertEqual(invalid.gitView.display, .fullscreen)
+        XCTAssertEqual(invalid.problems.map(\.line), [2])
+        XCTAssertEqual(invalid.problems.first?.message, "git_view.editor_in_window: expected a boolean")
+    }
+
+    func testTheEditorScriptRunsTheCommandInTheFolderItTakes() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let script = GitViewConfig(editor: "printf '%s %s %s' \"$PWD\" {file} {line} > out").editorScript(file: "/r/a b", line: 4)
+        _ = try CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", script, "muxify", folder.path]))
+        let out = try String(contentsOf: folder.appendingPathComponent("out"), encoding: .utf8)
+        XCTAssertEqual(out, "\(folder.path) /r/a b 4")
+        XCTAssertThrowsError(try CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", script, "muxify", "/no/such/folder"])))
+    }
+
     func testTheEditorCommandQuotesTheFileAndFillsTheLine() {
         let custom = GitViewConfig(editor: "nvim +{line} {file} # {line}")
         XCTAssertEqual(custom.editorCommand(file: "/r/a b.swift", line: 12), "nvim +12 '/r/a b.swift' # 12")
