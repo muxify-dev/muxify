@@ -100,6 +100,7 @@ enum PaletteCommand: String, CaseIterable {
         case .previousTab: .selectPrevTab
         case .back: .browserBack
         case .forward: .browserForward
+        case .closeTab: .closeTab
         case .reopenClosedTab: .reopenClosedTab
         case .showSidebar, .hideSidebar: .toggleSidebar
         case .showTerminal, .hideTerminal: .toggleTerminal
@@ -230,7 +231,6 @@ extension CommandPalette {
         if let action = command.keybinding { return store?.config.keybinds.firstTrigger(for: action)?.symbol }
         switch command {
         case .newTab: return "⌘T"
-        case .closeTab: return "⌘W"
         case .openLocation: return "⌘L"
         case .nextTab: return "⇧⌘]"
         case .previousTab: return "⇧⌘["

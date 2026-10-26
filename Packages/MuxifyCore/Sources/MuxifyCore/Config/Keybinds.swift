@@ -75,6 +75,7 @@ public enum ConfigAction: String, KeybindAction {
     case selectPrevTab = "select_prev_tab"
     case browserBack = "browser_back"
     case browserForward = "browser_forward"
+    case closeTab = "close_tab"
     case reopenClosedTab = "reopen_closed_tab"
     case selectCard1 = "select_card_1"
     case selectCard2 = "select_card_2"
@@ -154,6 +155,7 @@ public enum ConfigAction: String, KeybindAction {
         .selectPrevTab: ["cmd+shift+left_bracket", "ctrl+shift+tab"],
         .browserBack: ["cmd+left_bracket"],
         .browserForward: ["cmd+right_bracket"],
+        .closeTab: ["cmd+w"],
         .reopenClosedTab: ["cmd+shift+t"],
         .selectCard1: ["ctrl+1"],
         .selectCard2: ["ctrl+2"],
@@ -200,7 +202,7 @@ public enum ConfigAction: String, KeybindAction {
     public var requiredFocus: PanelLayout.Side? {
         switch self {
         case .toggleZoomPane, .resizePaneLeft, .resizePaneRight, .resizePaneUp, .resizePaneDown: .terminal
-        case .selectNextTab, .selectPrevTab, .browserBack, .browserForward, .reopenClosedTab: .browser
+        case .selectNextTab, .selectPrevTab, .browserBack, .browserForward, .closeTab, .reopenClosedTab: .browser
         default: nil
         }
     }
