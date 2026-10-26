@@ -399,6 +399,27 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(Config.template.contains("#   focus_marker: false"))
     }
 
+    func testFocusMarkerColorAndOpacityTakeOneValueOrOnePerAppearance() throws {
+        let defaults = try load("")
+        XCTAssertNil(defaults.focusMarkerColor)
+        XCTAssertEqual(defaults.focusMarkerOpacity, AppearanceOpacity(light: 0.45, dark: 0.45))
+        let set = try load("ui:\n  focus_marker_color: {light: '#3366ff', dark: orange}\n  focus_marker_opacity: 1")
+        XCTAssertEqual(set.focusMarkerColor, .pair(light: .rgb(red: 0x33, green: 0x66, blue: 0xff), dark: .system(.orange)))
+        XCTAssertEqual(set.focusMarkerOpacity, AppearanceOpacity(light: 1, dark: 1))
+        XCTAssertEqual(set.problems, [])
+        let pair = try load("ui:\n  focus_marker_color: Accent\n  focus_marker_opacity: {light: 0.9, dark: 0.6}")
+        XCTAssertNil(pair.focusMarkerColor)
+        XCTAssertEqual(pair.focusMarkerOpacity, AppearanceOpacity(light: 0.9, dark: 0.6))
+        XCTAssertEqual(pair.problems, [])
+        let bad = try load("ui:\n  focus_marker_opacity: 0\n  focus_marker_color: {light: blue}")
+        XCTAssertEqual(bad.focusMarkerOpacity, defaults.focusMarkerOpacity)
+        XCTAssertNil(bad.focusMarkerColor)
+        XCTAssertEqual(bad.problems.map(\.message), [
+            "ui.focus_marker_opacity: expected a number above 0 and at most 1, or a mapping with light and dark",
+            "ui.focus_marker_color: missing dark",
+        ])
+    }
+
     func testStatusLineHeaderTemplateShowsTheDefault() throws {
         let shown = Config.template.split(separator: "\n").filter {
             $0.hasPrefix("# ui:") || $0.hasPrefix("#   status_line_header:")

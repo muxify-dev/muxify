@@ -369,6 +369,20 @@ Command Palette or the Git View has Focus. The default is `false`. Changes
 apply live. A value that is not a boolean uses the default and appears in the
 Config problems banner.
 
+```yaml
+ui:
+  focus_marker_color: {light: '#3366ff', dark: '#88aaff'}
+  focus_marker_opacity: {light: 0.9, dark: 0.7}
+```
+
+`focus_marker_color` is `accent`, the macOS accent color, or a color as in
+[Agent colors](#agent-colors): one color, or a mapping with `light` and
+`dark`. The default is `accent`. `focus_marker_opacity` is a number above 0
+and at most 1, or a mapping with `light` and `dark`. The default is `0.45`.
+The Terminal and the Browser each pick the value for their own appearance.
+Changes apply live. An invalid value uses the default and appears in the Config
+problems banner.
+
 ## Sidebar typography
 
 ```yaml
