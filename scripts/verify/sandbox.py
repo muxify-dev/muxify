@@ -138,8 +138,8 @@ class Sandbox:
         Killing the app is not enough: a `tmux -C` client that outlives it
         keeps the server alive even after kill-server, and Agents such as
         Codex leave daemons behind. Clients are found through the server;
-        everything else carries the root path in its command line or, like a
-        server or client the app started, in its environment (TMUX_TMPDIR).
+        everything else carries the root path in its command line, in its
+        environment (TMUX_TMPDIR, CODEX_HOME) or as its working directory.
         """
         try:
             self._stop_all()
@@ -199,22 +199,39 @@ class Sandbox:
             pass
 
     def processes(self):
-        """PIDs of every process whose command line or environment names this sandbox root."""
+        """PIDs of every process whose command line, environment or working directory names this sandbox root."""
         roots = {str(self.root), str(self.root.resolve())}
-        # -e appends the environment, which ps shows for the user's own processes.
-        listing = subprocess.run(['ps', '-axeww', '-o', 'pid=,ppid=,command='], capture_output=True, text=True).stdout
+        # -E appends the environment. `ps -e` with -o leaves it out, and ps cannot read it for a protected system
+        # binary, so the working directory below covers a process that names the root only there.
+        listing = subprocess.run(['ps', '-axE', '-ww', '-o', 'pid=,ppid=,command='], capture_output=True, text=True).stdout
         parents, commands = {}, {}
         for line in listing.splitlines():
             pid, ppid, command = line.split(None, 2) + [''] * (3 - len(line.split(None, 2)))
             parents[int(pid)], commands[int(pid)] = int(ppid), command
+        # A root ends at a slash, a space or the end of the line: a variable can hold the root itself.
+        names_root = re.compile('(?:%s)(?:/|\\s|$)' % '|'.join(re.escape(root) for root in roots))
+        named = {pid for pid, command in commands.items() if names_root.search(command)}
+        named.update(pid for pid, cwd in self._working_directories() if pid in commands
+                     and any(cwd == root or cwd.startswith(root + '/') for root in roots))
         # The shell or agent that runs this script may name the root too
         # (`| tee root/log`); it is the caller, not a leftover.
         callers, pid = set(), os.getpid()
         while pid > 1 and pid not in callers:
             callers.add(pid)
             pid = parents.get(pid, 1)
-        return [pid for pid, command in commands.items()
-                if pid not in callers and any(root + '/' in command for root in roots)]
+        return sorted(named - callers)
+
+    @staticmethod
+    def _working_directories():
+        """(pid, path) of the working directory of every process lsof can see."""
+        listing = subprocess.run(['lsof', '-n', '-w', '-d', 'cwd', '-Fpn'], capture_output=True, text=True).stdout
+        pid, found = None, []
+        for line in listing.splitlines():
+            if line.startswith('p') and line[1:].isdigit():
+                pid = int(line[1:])
+            elif line.startswith('n') and pid is not None:
+                found.append((pid, line[1:]))
+        return found
 
     def _app_pid(self):
         """The recorded app PID, if that process still runs this sandbox's app copy."""

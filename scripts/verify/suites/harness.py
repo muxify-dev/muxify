@@ -85,6 +85,24 @@ class Harness(unittest.TestCase):
                         'sweep touched the live run %s (server %d)' % (live.root, live_server))
         self.assertEqual(live.tmux('display-message', '-p', '-t', 'live', '#{session_name}'), 'live')
 
+    def test_teardown_stops_a_process_that_names_the_root_only_in_its_environment_or_working_directory(self):
+        run = Sandbox(NAME)
+        self.addCleanup(run.teardown)
+        # The command line is the same for both; the root is in the environment of one and the working directory of
+        # the other. A process that is not a descendant of this one, as the Codex daemon is not, must still be found.
+        code = 'import time; time.sleep(600)'
+        with_environment = subprocess.Popen([sys.executable, '-c', code], cwd='/', env=dict(os.environ, SANDBOX_ROOT=str(run.root)),
+                                            start_new_session=True)
+        with_directory = subprocess.Popen([sys.executable, '-c', code], cwd=run.root, start_new_session=True)
+        self.addCleanup(with_environment.kill)
+        self.addCleanup(with_directory.kill)
+        wait(lambda: {with_environment.pid, with_directory.pid} <= set(run.processes()),
+             'processes() missed %s: it lists %s' % ([with_environment.pid, with_directory.pid], run.processes()), seconds=10)
+
+        run.teardown()
+        for process in (with_environment, with_directory):
+            self.assertIsNotNone(process.wait(timeout=10), 'teardown left process %d running' % process.pid)
+
     def test_run_whose_owner_pid_was_reused_is_swept(self):
         reused, server = self.live_run()
         # The owner PID still runs, but it is a later process than the one that made the run.

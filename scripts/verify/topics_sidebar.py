@@ -110,11 +110,13 @@ class TopicsSidebar(unittest.TestCase):
         return sid
 
     def end_session(self, sid):
-        """Kills the Session. A client on it moves to base first, and the check waits for the app to follow, so the
-        Active Topic does not change under the next check."""
+        """Kills the Session. A client on it moves to base first, and the check waits for the app to show base, so the
+        Active Topic does not change under the next check. The app is asked to show base, as a script does: when the
+        client came into the Session less than one app read ago, a switch-client back to base looks to the app as if
+        the client never moved, and the app keeps showing the Session."""
         if sid in self.s.tmux('list-clients', '-F', '#{session_id}').split():
             self.select_window('base:')
-            self.s.wait_shown('base:')
+            self.s.show(self.s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}'))
         self.s.tmux_ok('kill-session', '-t', sid)
 
     def write_topic(self, topic_id, title, home, **fields):

@@ -69,6 +69,9 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
             settle(newMode)
         }
         .onChange(of: motionEnabled) { _, _ in settle(mode) }
+        #if DEBUG
+        .onDisappear { SidebarPagerMotion.forget(inputReference) }
+        #endif
     }
 
     private var selector: some View {
@@ -138,8 +141,19 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
     }
 
     private func settle(_ target: SidebarMode) {
-        withAnimation(motionEnabled ? .spring(response: 0.34, dampingFraction: 0.86) : nil) {
-            position = target == .topics ? 0 : 1
+        let destination: CGFloat = target == .topics ? 0 : 1
+        // A press settles twice, from select and from the mode change. The second has nothing to move, and its
+        // animation would end at once while the first still slides.
+        guard position != destination else { return }
+        #if DEBUG
+        let settle = SidebarPagerMotion.begin(inputReference, animated: motionEnabled)
+        #endif
+        withAnimation(motionEnabled ? .spring(response: 0.34, dampingFraction: 0.86) : nil, completionCriteria: .removed) {
+            position = destination
+        } completion: {
+            #if DEBUG
+            SidebarPagerMotion.end(settle)
+            #endif
         }
     }
 }
@@ -178,6 +192,35 @@ private struct SidebarSwipeAreaMark: NSViewRepresentable {
 private final class SidebarSwipeAreaView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
+
+#if DEBUG
+/// The Sidebar pagers whose pages still slide to rest after a switch. A row's frame moves until its page stops, so
+/// the verify driver holds a click, drag or hover until no pager moves; sent mid-slide, it misses its row.
+enum SidebarPagerMotion {
+    /// The number of the latest animated settle of each moving pager.
+    private static var moving: [ObjectIdentifier: Int] = [:]
+    private static var settles = 0
+
+    static var isMoving: Bool { !moving.isEmpty }
+
+    /// Marks the pager as moving when its settle animates. A later settle takes over, so only the end of the
+    /// latest one marks the pager at rest.
+    static func begin(_ pager: AnyObject, animated: Bool) -> (pager: ObjectIdentifier, number: Int) {
+        settles += 1
+        moving[ObjectIdentifier(pager)] = animated ? settles : nil
+        return (ObjectIdentifier(pager), settles)
+    }
+
+    static func end(_ settle: (pager: ObjectIdentifier, number: Int)) {
+        if moving[settle.pager] == settle.number { moving[settle.pager] = nil }
+    }
+
+    /// A pager that leaves the window mid-slide is at rest.
+    static func forget(_ pager: AnyObject) {
+        moving[ObjectIdentifier(pager)] = nil
+    }
+}
+#endif
 
 /// A weak reference for sandbox verification, without retaining the AppKit view through its callbacks.
 private final class SidebarSwipeInputReference {
