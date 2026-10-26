@@ -314,7 +314,7 @@ private struct SpotlightPalette: View {
         let check = palette.rowCheck(row)
         return HStack(spacing: 12) {
             if let check { CheckBoxView(check: check) }
-            if let item { PaletteIcon(source: .item(item), theme: theme) } else { Color.clear.frame(width: 32, height: 32) }
+            if let item { PaletteIcon(source: .item(item, row.kind), theme: theme) } else { Color.clear.frame(width: 32, height: 32) }
             VStack(alignment: .leading, spacing: 1) {
                 titleLine(row, theme: theme)
                 let detail = row.pick.reason.map(Highlighted.plain) ?? row.detail
@@ -402,7 +402,7 @@ private struct SelectedRowBounds: PreferenceKey {
 /// branch, actions as a tile in a theme color.
 struct PaletteIcon: View {
     enum Source {
-        case item(PaletteItem)
+        case item(PaletteItem, RowKind)
         case action(PaletteAction)
     }
 
@@ -413,27 +413,27 @@ struct PaletteIcon: View {
     var body: some View {
         let tile = RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
         switch source {
-        case .item(let item) where item.kind == .session:
+        case .item(_, .session), .item(_, .topicSession):
             Image(systemName: "folder.fill")
                 .font(.system(size: size * 0.78))
                 .foregroundStyle(theme.cyan.gradient)
                 .frame(width: size, height: size)
-        case .item(let item) where item.kind == .sessionPath || item.kind == .worktree:
-            Image(systemName: item.kind == .worktree ? "arrow.triangle.branch" : "folder")
-                .font(.system(size: size * (item.kind == .worktree ? 0.6 : 0.72)))
+        case .item(_, let kind) where kind == .sessionPath || kind == .worktree:
+            Image(systemName: kind == .worktree ? "arrow.triangle.branch" : "folder")
+                .font(.system(size: size * (kind == .worktree ? 0.6 : 0.72)))
                 .foregroundStyle(theme.cyan)
                 .frame(width: size, height: size)
-        case .item(let item) where item.kind == .tag:
+        case .item(let item, .tag):
             Image(systemName: "number")
                 .font(.system(size: size * 0.5, weight: .semibold))
                 .foregroundStyle(item.color?.color ?? theme.magenta)
                 .frame(width: size, height: size)
-        case .item(let item) where [.topic, .snoozedTopic, .settledTopic].contains(item.kind):
-            Image(systemName: topicSymbol(item))
+        case .item(let item, let kind) where [.topic, .snoozed, .settled].contains(kind):
+            Image(systemName: topicSymbol(item, kind))
                 .font(.system(size: size * 0.6))
-                .foregroundStyle(item.kind == .topic ? theme.magenta : Color.secondary)
+                .foregroundStyle(kind == .topic ? theme.magenta : Color.secondary)
                 .frame(width: size, height: size)
-        case .item(let item):
+        case .item(let item, _):
             tile.fill(theme.background)
                 .overlay(tile.strokeBorder(Color.primary.opacity(0.14)))
                 .overlay(Logo(name: item.logo ?? "terminal", size: size * 0.56))
@@ -487,10 +487,10 @@ struct PaletteIcon: View {
     }
 
     /// Open, Dormant (no live Session), Snoozed or Settled.
-    private func topicSymbol(_ item: PaletteItem) -> String {
-        switch item.kind {
-        case .snoozedTopic: return "moon.zzz"
-        case .settledTopic: return "checkmark.circle"
+    private func topicSymbol(_ item: PaletteItem, _ kind: RowKind) -> String {
+        switch kind {
+        case .snoozed: return "moon.zzz"
+        case .settled: return "checkmark.circle"
         default:
             if case .topic(_, nil) = item.ref { return "diamond" }
             return "diamond.fill"

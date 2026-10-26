@@ -292,7 +292,7 @@ final class PaletteCatalogTests: XCTestCase {
                        window("@2", session: "game/paused", directory: "/work/game/main", topic: "z")]
         let row = catalog(records: [snoozed], windows: windows).list([.topics], query: "paused").rows[0]
         XCTAssertEqual(row.pick.payload?.ref, .topic(id: "z", window: windows[1]))
-        XCTAssertEqual(row.pick.payload?.kind, .snoozedTopic)
+        XCTAssertEqual(row.kind, .snoozed)
         XCTAssertEqual(row.snooze, "z")
     }
 
@@ -302,7 +302,16 @@ final class PaletteCatalogTests: XCTestCase {
                                                         Worktree(path: "/home/.cache/git-pile/98400b", branch: nil)]))
         let list = catalog(records: [], windows: [], sessionPaths: [chezmoi]).list([.sessions], query: "chez")
         XCTAssertEqual(list.rows.map(\.title.text), ["chezmoi", "chezmoi/98400b"])
-        XCTAssertEqual(list.rows.map { $0.pick.payload?.kind }, [.sessionPath, .worktree])
+        XCTAssertEqual(list.rows.map(\.kind), [.sessionPath, .worktree])
+    }
+
+    func testAddSessionListsWorktreesAsWorktreesAndTellsTopicSessionsApart() {
+        let windows = [window("@1", session: "loose", directory: "/beta"),
+                       window("@2", session: "game/other", directory: "/work/game/main", topic: "other")]
+        let rows = SessionPathRows.build(sessionPaths: [game, notes], windows: [], records: [], titles: [:])
+        let catalog = catalog(records: [topic("other", "Other")], windows: windows)
+        let all = catalog.addSessionList(topic: "target", query: "", rows: rows)
+        XCTAssertEqual(Set(all.rows.map(\.kind)), [.session, .topicSession, .worktree, .sessionPath], "\(all.rows.map { ($0.id, $0.kind) })")
     }
 
     func testARemoteAppWindowHasNoTopicsSource() {

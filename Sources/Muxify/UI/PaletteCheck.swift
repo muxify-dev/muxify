@@ -133,13 +133,13 @@ extension CommandPalette {
         func candidate(_ row: TopicsModel.Row) -> PickCandidate<PaletteItem>? {
             guard case .topic(let id) = row.id else { return nil }
             var trailing = topics.activeTopic == row.id ? "Active" : ""
-            var kind = PaletteItem.Kind.topic
-            if case .snoozed(let wake) = row.kind { trailing = "until " + wake; kind = .snoozedTopic }
-            return PickCandidate(id: row.id.accessibilityID, title: row.title,
+            var kind = RowKind.topic
+            if case .snoozed(let wake) = row.kind { trailing = "until " + wake; kind = .snoozed }
+            return PickCandidate(id: row.id.accessibilityID, kind: kind, title: row.title,
                                  fields: (row.idleLabel.map { [.detail($0)] } ?? []) + row.sessions.map { .label($0.baseName) }
                                     + SearchField.tags(row.tags),
                                  trailing: trailing, mark: row.mark,
-                                 pick: .available(PaletteItem(kind: kind, ref: .choice(.check(.topic(id))))))
+                                 pick: .available(PaletteItem(ref: .choice(.check(.topic(id))))))
         }
         let reached = tagged(draft.action.tagReach(topics))
         let listed = tagged(draft.action.listed(topics))
@@ -148,9 +148,9 @@ extension CommandPalette {
             let row = CheckRow.tag(definition.tag, topics: ids)
             let snoozed = (listed[definition.tag]?.count ?? 0) - ids.count
             let count = row.box(checked: checked) == .some ? "\(ids.intersection(checked).count)/\(ids.count)" : plural(ids.count)
-            return PickCandidate(id: "tag-" + definition.tag.name, title: definition.tag.description, fields: [.hidden(definition.tag.name)],
+            return PickCandidate(id: "tag-" + definition.tag.name, kind: .tag, title: definition.tag.description, fields: [.hidden(definition.tag.name)],
                                  trailing: count + (snoozed > 0 ? " · \(snoozed) Snoozed" : ""),
-                                 pick: .available(PaletteItem(kind: .tag, ref: .choice(.check(row)), color: definition.color)), titlePlace: .tag)
+                                 pick: .available(PaletteItem(ref: .choice(.check(row)), color: definition.color)), titlePlace: .tag)
         }
         var sections: [PickSectionInput<PaletteItem>] = [.tags(tags, showsWhenEmpty: true)]
         switch draft.action {
@@ -265,10 +265,10 @@ extension CommandPalette {
         let candidates = checkable(.unsnooze).map { id, row in
             var trailing = ""
             if case .snoozed(let wake) = row.kind { trailing = "until " + wake }
-            return PickCandidate(id: row.id.accessibilityID, title: row.title,
+            return PickCandidate(id: row.id.accessibilityID, kind: .snoozed, title: row.title,
                                  fields: row.sessions.map { .label($0.baseName) } + SearchField.tags(row.tags),
                                  trailing: trailing, mark: row.mark,
-                                 pick: .available(PaletteItem(kind: .snoozedTopic, ref: .choice(.unsnooze(id)))))
+                                 pick: .available(PaletteItem(ref: .choice(.unsnooze(id)))))
         }
         return FuzzyRanker.list([PickSectionInput(id: "snoozed", title: "Snoozed", rule: .ranked(showsWhenEmpty: true),
                                                   candidates: candidates)], query: FuzzyQuery(query))

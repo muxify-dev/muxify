@@ -1,12 +1,8 @@
 import Foundation
 import MuxifyCore
 
-/// What a Command Palette row is, for its icon and its actions.
+/// What a Command Palette row acts on. Its row's kind picks the icon.
 struct PaletteItem: Equatable {
-    enum Kind: Equatable {
-        case topic, snoozedTopic, settledTopic, session, sessionPath, worktree, window, agent, command, tag
-    }
-
     enum Ref: Equatable {
         /// Nil `window`: Dormant or Settled, so ↩ shows the Topic's Reopen choice.
         case topic(id: String, window: TmuxWindow?)
@@ -20,7 +16,6 @@ struct PaletteItem: Equatable {
         case tag(Tag)
     }
 
-    let kind: Kind
     let ref: Ref
     /// What Copy Path copies; empty for a Topic.
     var path = ""
@@ -88,8 +83,8 @@ struct PaletteCatalog {
             case .commands:
                 return [PickSectionInput(id: "commands", title: "Commands", rule: .ranked(showsWhenEmpty: true),
                                          candidates: commands.map {
-                    PickCandidate(id: "command-" + $0.rawValue, title: $0.rawValue, note: commandSummaries[$0], trailing: commandShortcuts[$0] ?? "",
-                                  pick: .available(PaletteItem(kind: .command, ref: .command($0))))
+                    PickCandidate(id: "command-" + $0.rawValue, kind: .command, title: $0.rawValue, note: commandSummaries[$0], trailing: commandShortcuts[$0] ?? "",
+                                  pick: .available(PaletteItem(ref: .command($0))))
                 }, shorterTitleFirst: false)]
             case .topics:
                 return (openTopicSection(only: nil).map { [$0] } ?? []) + (tagSection.map { [$0] } ?? [])
@@ -120,9 +115,9 @@ struct PaletteCatalog {
         return .tags(definitions.compactMap { definition in
             let count = records.filter { $0.tags.contains(definition.tag) }.count
             guard count > 0 else { return nil }
-            return PickCandidate(id: "tag-" + definition.tag.name, title: definition.tag.description, fields: [.hidden(definition.tag.name)],
+            return PickCandidate(id: "tag-" + definition.tag.name, kind: .tag, title: definition.tag.description, fields: [.hidden(definition.tag.name)],
                                  trailing: count == 1 ? "1 Topic" : "\(count) Topics",
-                                 pick: .available(PaletteItem(kind: .tag, ref: .tag(definition.tag), color: definition.color)), titlePlace: .tag)
+                                 pick: .available(PaletteItem(ref: .tag(definition.tag), color: definition.color)), titlePlace: .tag)
         }, showsWhenEmpty: false)
     }
 
@@ -154,12 +149,12 @@ struct PaletteCatalog {
         let age = age(.topic(row.id))
         let trailing = window == nil ? [row.isDormant ? "Reopen" : "Empty", age].compactMap { $0 }.joined(separator: " · ") : isCurrent ? "Active" : age ?? ""
         return PickCandidate(
-            id: row.id.accessibilityID, symbol: row.hasNoLiveSession ? "◇" : "◆", title: row.title,
+            id: row.id.accessibilityID, kind: .topic, symbol: row.hasNoLiveSession ? "◇" : "◆", title: row.title,
             fields: topicFields(row, type: row.idleLabel?.lowercased() ?? "topic"),
             trailing: trailing, mark: row.mark,
             lastVisit: visits.last(.topic(row.id)), isCurrent: isCurrent, unopened: row.hasNoLiveSession,
             activity: row.sessions.flatMap(\.windows).map(\.sessionActivity).max() ?? 0,
-            pick: .available(PaletteItem(kind: .topic, ref: .topic(id: id, window: window))), snooze: id)
+            pick: .available(PaletteItem(ref: .topic(id: id, window: window))), snooze: id)
     }
 
     private func snoozedCandidate(_ row: TopicsModel.Row) -> PickCandidate<PaletteItem>? {
@@ -168,9 +163,9 @@ struct PaletteCatalog {
         if case .snoozed(let label) = row.kind { wake = "until " + label }
         let window = EntryWindow.of(row, lastWindowByGroup: lastWindowByGroup, visits: visits)
         return PickCandidate(
-            id: row.id.accessibilityID, symbol: "z", title: row.title, fields: topicFields(row, type: "snoozed"),
+            id: row.id.accessibilityID, kind: .snoozed, symbol: "z", title: row.title, fields: topicFields(row, type: "snoozed"),
             note: wake, trailing: window == nil ? "Reopen" : "", lastVisit: visits.last(.topic(row.id)), isPinned: row.isPinned,
-            pick: .available(PaletteItem(kind: .snoozedTopic, ref: .topic(id: id, window: window))), snooze: id)
+            pick: .available(PaletteItem(ref: .topic(id: id, window: window))), snooze: id)
     }
 
     private func settledCandidate(_ record: TopicRecord) -> PickCandidate<PaletteItem> {
@@ -179,14 +174,21 @@ struct PaletteCatalog {
         var settledOn: String?
         if outcome.isEmpty, case .settled(let detail) = row.kind { settledOn = detail }
         return PickCandidate(
-            id: row.id.accessibilityID, symbol: "✓", title: row.title,
+            id: row.id.accessibilityID, kind: .settled, symbol: "✓", title: row.title,
             fields: [.typeWord("settled")] + (outcome.isEmpty ? [] : [.detail(outcome)]) + SearchField.tags(row.tags),
             note: settledOn, trailing: ["Reopen", age(.topic(row.id))].compactMap { $0 }.joined(separator: " · "), mark: row.mark,
             lastVisit: visits.last(.topic(row.id)),
-            pick: .available(PaletteItem(kind: .settledTopic, ref: .topic(id: record.id, window: nil))))
+            pick: .available(PaletteItem(ref: .topic(id: record.id, window: nil))))
     }
 
     // MARK: Sessions and SessionPaths
+
+    /// The ids of the Topic records that are not Settled. A Session in one of them is a Topic Session.
+    var openTopicIDs: Set<String> { Set(records.filter { $0.settledAt == nil }.map(\.id)) }
+
+    private func sessionKind(_ window: TmuxWindow, open: Set<String>) -> RowKind {
+        window.topicID.map(open.contains) == true ? .topicSession : .session
+    }
 
     /// All running Sessions, plus paths whose exact launch names are not running. Sidebar mode is irrelevant.
     private var sessionCandidates: [PickCandidate<PaletteItem>] {
@@ -198,18 +200,19 @@ struct PaletteCatalog {
     /// Running Sessions and launch folders share one rank in Add a Session.
     func addSessionList(topic: String, query: String, rows: [SessionPathRow]) -> PickList<PaletteItem> {
         var seen: Set<String> = []
+        let open = openTopicIDs
         let sessions = windows.filter { $0.topicID != topic && seen.insert($0.sessionID).inserted }.map { window in
-            return PickCandidate(id: "running-" + window.sessionID, symbol: "■", title: window.sessionName,
+            return PickCandidate(id: "running-" + window.sessionID, kind: sessionKind(window, open: open), symbol: "■", title: window.sessionName,
                 fields: [.detail(window.sessionPath)],
                 lastVisit: visits.last(.session(name: window.sessionName)), activity: window.sessionActivity,
-                pick: .available(PaletteItem(kind: .session, ref: .choice(.session(window.sessionID)))))
+                pick: .available(PaletteItem(ref: .choice(.session(window.sessionID)))))
         }
         let paths = rows.map { row in
             let note = SessionPathRow(choice: row.choice, alsoIn: row.alsoIn.filter { $0.id != topic }).note
-            return PickCandidate(id: row.id, symbol: "□", title: row.choice.displayName,
+            return PickCandidate(id: row.id, kind: row.choice.isWorktree ? .worktree : .sessionPath, symbol: "□", title: row.choice.displayName,
                 fields: [.detail(row.choice.directory.path)] + row.choice.nameFields, note: note,
                 lastVisit: visits.last(.directory(row.choice.directory.real)),
-                pick: .available(PaletteItem(kind: .sessionPath, ref: .choice(.sessionPath(row.choice)))))
+                pick: .available(PaletteItem(ref: .choice(.sessionPath(row.choice)))))
         }
         return FuzzyRanker.list([PickSectionInput(id: "add-session", rule: .ranked(showsWhenEmpty: true), candidates: sessions + paths)],
                                 query: FuzzyQuery(query))
@@ -217,14 +220,15 @@ struct PaletteCatalog {
 
     func destinationList(_ source: TmuxWindow, topic: String?, query: String) -> PickList<PaletteItem> {
         var seen: Set<String> = []
-        let open = Set(records.filter { $0.settledAt == nil }.map(\.id))
+        let open = openTopicIDs
         let rows = windows.filter {
             $0.topicID.flatMap { open.contains($0) ? $0 : nil } == topic && $0.sessionID != source.sessionID && seen.insert($0.sessionID).inserted
         }.map { window in
-            PickCandidate(id: "destination-" + window.sessionID, title: window.sessionName,
-                fields: [.detail(window.sessionPath)], pick: .available(PaletteItem(kind: .session, ref: .choice(.move(.session(id: window.sessionID))))))
+            PickCandidate(id: "destination-" + window.sessionID, kind: sessionKind(window, open: open), title: window.sessionName,
+                fields: [.detail(window.sessionPath)], pick: .available(PaletteItem(ref: .choice(.move(.session(id: window.sessionID))))))
         }
-        let new = PickCandidate(id: "new-session", title: "New Session", pick: .available(PaletteItem(kind: .session, ref: .choice(.move(.newSession(topic: topic))))))
+        let new = PickCandidate(id: "new-session", kind: .session, title: "New Session",
+                                pick: .available(PaletteItem(ref: .choice(.move(.newSession(topic: topic))))))
         return FuzzyRanker.list([PickSectionInput(id: "sessions", rule: .ranked(showsWhenEmpty: true), candidates: rows),
             PickSectionInput(id: "new", rule: .fixed, candidates: [new])], query: FuzzyQuery(query))
     }
@@ -232,16 +236,17 @@ struct PaletteCatalog {
     private func pathCandidate(_ choice: SessionChoice) -> PickCandidate<PaletteItem> {
         let visit = visits.last(.directory(choice.directory.real))
         return PickCandidate(
-            id: "session-path:\(choice.directory.path)", symbol: "□", title: choice.displayName,
+            id: "session-path:\(choice.directory.path)", kind: choice.isWorktree ? .worktree : .sessionPath,
+            symbol: "□", title: choice.displayName,
             fields: [.typeWord(choice.isWorktree ? "worktree" : "session"), .detail(Paths.tildify(choice.directory.path, home: homeDirectory))] + choice.nameFields,
             trailing: "↩ open", lastVisit: visit, unopened: true,
-            pick: .available(PaletteItem(kind: choice.isWorktree ? .worktree : .sessionPath,
-                                         ref: .sessionPath(OpenDirectory(directory: choice.directory, name: choice.name)),
+            pick: .available(PaletteItem(ref: .sessionPath(OpenDirectory(directory: choice.directory, name: choice.name)),
                                          path: choice.directory.path)),
             paste: choice.directory.path)
     }
 
     private func looseSessionCandidates(_ windows: [TmuxWindow]) -> [PickCandidate<PaletteItem>] {
+        let open = openTopicIDs
         var groups: [SessionGroup] = []
         for window in windows {
             if let index = groups.firstIndex(where: { $0.id == window.sessionID }) { groups[index].windows.append(window) }
@@ -253,13 +258,13 @@ struct PaletteCatalog {
             let count = session.windows.count
             let isCurrent = session.windows.contains { $0.id == selectedWindowID }
             return PickCandidate(
-                id: "session:\(session.id)", symbol: "■", title: session.name,
+                id: "session:\(session.id)", kind: sessionKind(session.windows[0], open: open), symbol: "■", title: session.name,
                 fields: [.typeWord("session"), .detail("\(count) window\(count == 1 ? "" : "s")"),
                          .detail(Paths.tildify(folder, home: homeDirectory))],
                 trailing: isCurrent ? "Current" : age(.session(name: session.name)) ?? "",
                 mark: topics?.sessionMarks[session.id].map(RowMark.agent),
                 lastVisit: visits.last(.session(name: session.name)), isCurrent: isCurrent, activity: active.sessionActivity,
-                pick: .available(PaletteItem(kind: .session, ref: .session(session), path: folder, target: session.name)),
+                pick: .available(PaletteItem(ref: .session(session), path: folder, target: session.name)),
                 paste: folder)
         }
     }
@@ -270,10 +275,10 @@ struct PaletteCatalog {
         let target = "\(window.sessionName):\(window.index)"
         let isCurrent = window.id == selectedWindowID
         return PickCandidate(
-            id: "window:\(window.id)", title: window.displayTitle,
+            id: "window:\(window.id)", kind: .window, title: window.displayTitle,
             fields: [.typeWord("window"), .detail(target), .detail(window.abbreviatedPath), .hidden(window.command)],
             trailing: isCurrent ? "Current" : "", isCurrent: isCurrent, activity: window.sessionActivity,
-            pick: .available(PaletteItem(kind: .window, ref: .window(window), path: window.path, target: target, logo: window.logoName)),
+            pick: .available(PaletteItem(ref: .window(window), path: window.path, target: target, logo: window.logoName)),
             paste: window.path)
     }
 
@@ -292,11 +297,11 @@ struct PaletteCatalog {
             let window = windowsByID[agent.windowID]
             let path = agent.path.isEmpty ? window?.path ?? "" : agent.path
             return PickCandidate(
-                id: "agent:\(agent.paneID)", title: agent.label,
+                id: "agent:\(agent.paneID)", kind: .agent, title: agent.label,
                 fields: [.detail(agent.kind.displayName), .detail(agent.location), .hidden(agent.status?.rawValue ?? ""),
                          .hidden(Paths.tildify(path, home: homeDirectory))],
                 isCurrent: agent.windowID == selectedWindowID, activity: window?.sessionActivity ?? 0,
-                pick: .available(PaletteItem(kind: .agent, ref: .agent(agent), path: path, target: agent.paneID,
+                pick: .available(PaletteItem(ref: .agent(agent), path: path, target: agent.paneID,
                                              logo: agent.kind.rawValue, status: agent.status,
                                              mark: agentMarks[agent.paneID].map(RowMark.agent))),
                 paste: path.isEmpty ? nil : path)
@@ -313,25 +318,25 @@ struct PaletteCatalog {
             guard case .topic(let id) = row.id, scope != .session || id != source.topicID,
                   records.contains(where: { $0.id == id }) else { return nil }
             return PickCandidate(
-                id: row.id.accessibilityID, symbol: row.hasNoLiveSession ? "◇" : "◆", title: row.title,
+                id: row.id.accessibilityID, kind: .topic, symbol: row.hasNoLiveSession ? "◇" : "◆", title: row.title,
                 fields: topicFields(row, type: row.idleLabel?.lowercased() ?? "topic"),
                 trailing: age(.topic(row.id)) ?? "", mark: row.mark,
                 lastVisit: visits.last(.topic(row.id)), isPinned: row.isPinned,
-                pick: .available(PaletteItem(kind: .topic, ref: .choice(.move(.topic(id: id))))))
+                pick: .available(PaletteItem(ref: .choice(.move(.topic(id: id))))))
         }
         let title = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let newTopic = PickCandidate(
-            id: "new-topic", symbol: "＋", title: "New Topic", note: title.isEmpty ? "Untitled" : "“" + title + "”",
-            pick: .available(PaletteItem(kind: .topic, ref: .choice(.move(.newTopic(title: title))))))
+            id: "new-topic", kind: .topic, symbol: "＋", title: "New Topic", note: title.isEmpty ? "Untitled" : "“" + title + "”",
+            pick: .available(PaletteItem(ref: .choice(.move(.newTopic(title: title))))))
         var newRows = [newTopic]
         if query.isEmpty || "No Topic".localizedCaseInsensitiveContains(query) {
-            newRows.append(PickCandidate(id: "no-topic", title: "No Topic",
-                pick: .available(PaletteItem(kind: .session, ref: .choice(.move(.noTopic))))))
+            newRows.append(PickCandidate(id: "no-topic", kind: .session, title: "No Topic",
+                pick: .available(PaletteItem(ref: .choice(.move(.noTopic))))))
         }
         if scope == .pane {
-            newRows.append(PickCandidate(id: "new-window", symbol: "＋", title: "New Window in " + source.sessionName,
+            newRows.append(PickCandidate(id: "new-window", kind: .window, symbol: "＋", title: "New Window in " + source.sessionName,
                                         note: title.isEmpty ? nil : title,
-                                        pick: .available(PaletteItem(kind: .window, ref: .choice(.move(.newWindow(title: title)))))))
+                                        pick: .available(PaletteItem(ref: .choice(.move(.newWindow(title: title)))))))
         }
         let destinations = PickSectionInput(id: "move", rule: .ranked(showsWhenEmpty: true), candidates: candidates)
         let create = PickSectionInput(id: "new-topic", rule: .fixed, candidates: newRows)

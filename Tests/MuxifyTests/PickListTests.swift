@@ -1,9 +1,10 @@
 import XCTest
+import MuxifyCore
 
 final class PickListTests: XCTestCase {
-    private func candidate(_ id: String, _ title: String, note: String? = nil, visit: TimeInterval? = nil,
+    private func candidate(_ id: String, _ title: String, kind: RowKind = .topic, note: String? = nil, visit: TimeInterval? = nil,
                            current: Bool = false, blocked: String? = nil) -> PickCandidate<String> {
-        PickCandidate(id: id, title: title, note: note, lastVisit: visit.map { Date(timeIntervalSince1970: $0) },
+        PickCandidate(id: id, kind: kind, title: title, note: note, lastVisit: visit.map { Date(timeIntervalSince1970: $0) },
                       isCurrent: current, pick: blocked.map { .blocked(reason: $0) } ?? .available(id))
     }
 
@@ -93,7 +94,7 @@ final class PickListTests: XCTestCase {
         let match = FieldsMatch.best(FuzzyQuery("snoo cap"), in: fields)
         XCTAssertEqual(FuzzyRanker.detail(fields, note: "until Mon 9:00", match: match),
                        Highlighted(text: "snoozed · game_server/main · reward cap · until Mon 9:00", marks: [0, 1, 2, 3, 36, 37, 38]))
-        let row = list([PickCandidate(id: "t", title: "Fix drops", fields: Array(fields.dropFirst()), note: "until Mon 9:00", pick: .available("t"))], "snoo cap").rows[0]
+        let row = list([PickCandidate(id: "t", kind: .snoozed, title: "Fix drops", fields: Array(fields.dropFirst()), note: "until Mon 9:00", pick: .available("t"))], "snoo cap").rows[0]
         XCTAssertEqual(row.detail.marks, [0, 1, 2, 3, 36, 37, 38])
         XCTAssertEqual(row.title, Highlighted(text: "Fix drops", marks: []))
     }

@@ -2,8 +2,7 @@
 public enum PaletteSource: String, CaseIterable {
     /// Open Topics, then Snoozed and Settled ones. Only a Local App Window with Topics on has them.
     case topics
-    /// Running Sessions and the SessionPaths that have none. In Topics mode, only No Topic Sessions, and the
-    /// SessionPaths that have no No Topic Session.
+    /// Every running Session, in either Sidebar mode, and the SessionPaths whose launch name has no running Session.
     case sessions
     case windows
     case agents

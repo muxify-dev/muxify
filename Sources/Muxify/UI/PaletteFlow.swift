@@ -323,8 +323,8 @@ extension CommandPalette {
         top.append(choiceRow("head", "HEAD of " + (draft.choice.worktree?.branch ?? draft.choice.displayName), choice: .worktreeStart(.head)))
         guard case .ready(let branches) = draft.starts else { return fixed(top) }
         let rows = branches.map { start in
-            PickCandidate(id: "branch-" + start.branch, title: "Check out \(start.branch)", fields: [.detail(start.checkedOutAt ?? "")],
-                          pick: start.checkedOutAt == nil ? .available(PaletteItem(kind: .command, ref: .choice(.worktreeStart(.branch(start.branch)))))
+            PickCandidate(id: "branch-" + start.branch, kind: .command, title: "Check out \(start.branch)", fields: [.detail(start.checkedOutAt ?? "")],
+                          pick: start.checkedOutAt == nil ? .available(PaletteItem(ref: .choice(.worktreeStart(.branch(start.branch)))))
                                                           : .blocked(reason: "Checked out"))
         }
         return FuzzyRanker.list([PickSectionInput(id: "start", rule: .fixed, candidates: top),
@@ -334,8 +334,8 @@ extension CommandPalette {
 
     private func choiceRow(_ id: String, _ title: String, detail: String = "", trailing: String = "",
                            choice: PaletteChoice) -> PickCandidate<PaletteItem> {
-        PickCandidate(id: id, title: title, fields: [.detail(detail)], trailing: trailing,
-                      pick: .available(PaletteItem(kind: .command, ref: .choice(choice))))
+        PickCandidate(id: id, kind: .command, title: title, fields: [.detail(detail)], trailing: trailing,
+                      pick: .available(PaletteItem(ref: .choice(choice))))
     }
 
     private func fixed(_ candidates: [PickCandidate<PaletteItem>]) -> PickList<PaletteItem> {
@@ -355,7 +355,7 @@ extension CommandPalette {
             // Kill is the default, so the user sees each working Agent it stops before ⌘↩.
             guard session.disposition == .kill else { return [row] }
             return [row] + working.map { agent in
-                PickCandidate(id: "agent-" + agent.id, title: agent.kind.displayName, pick: .blocked(reason: "Working · will stop"))
+                PickCandidate(id: "agent-" + agent.id, kind: .agent, title: agent.kind.displayName, pick: .blocked(reason: "Working · will stop"))
             }
         }
         for session in sessions where session.worktree != nil && session.disposition == .kill {
@@ -370,20 +370,20 @@ extension CommandPalette {
             rows.append(choiceRow("kill-session", "Kill \(window.sessionName)",
                                   detail: "\(windows.count) Windows · \(windows.reduce(0) { $0 + $1.paneCount }) Panes", choice: .accept))
             for agent in store?.agents.filter({ $0.sessionID == window.sessionID }) ?? [] {
-                rows.append(PickCandidate(id: "agent-" + agent.id, title: agent.kind.displayName, pick: .blocked(reason: "Will stop")))
+                rows.append(PickCandidate(id: "agent-" + agent.id, kind: .agent, title: agent.kind.displayName, pick: .blocked(reason: "Will stop")))
             }
         }
         for tree in worktrees {
             let canRemove = draft.canRemove(tree)
-            rows.append(PickCandidate(id: "worktree-" + tree.id, title: tree.id,
+            rows.append(PickCandidate(id: "worktree-" + tree.id, kind: .worktree, title: tree.id,
                                       trailing: canRemove && draft.removedWorktrees.contains(tree.id) ? "Remove" : "Keep",
-                                      pick: canRemove ? .available(PaletteItem(kind: .worktree, ref: .choice(.worktree(tree.id))))
+                                      pick: canRemove ? .available(PaletteItem(ref: .choice(.worktree(tree.id))))
                                         : .blocked(reason: tree.isClean ? "A kept Session uses it" : "Has changes or cannot be checked")))
         }
         if case .killWindow(let window) = draft.target {
             rows.append(choiceRow("kill-window", "Kill \(window.displayTitle)", detail: "\(window.paneCount) Panes", choice: .accept))
             for agent in store?.agents.filter({ $0.windowID == window.id }) ?? [] {
-                rows.append(PickCandidate(id: "agent-" + agent.id, title: agent.kind.displayName, pick: .blocked(reason: "Will stop")))
+                rows.append(PickCandidate(id: "agent-" + agent.id, kind: .agent, title: agent.kind.displayName, pick: .blocked(reason: "Will stop")))
             }
         }
         if case .killSession(let window) = draft.target {
@@ -391,7 +391,7 @@ extension CommandPalette {
             rows.append(choiceRow("kill-session", "Kill \(window.sessionName)",
                                   detail: "\(windows.count) Windows · \(draft.reviewedPaneIDs?.count ?? 0) Panes", choice: .accept))
             for agent in store?.agents.filter({ $0.sessionID == window.sessionID }) ?? [] {
-                rows.append(PickCandidate(id: "agent-" + agent.id, title: agent.kind.displayName, pick: .blocked(reason: "Will stop")))
+                rows.append(PickCandidate(id: "agent-" + agent.id, kind: .agent, title: agent.kind.displayName, pick: .blocked(reason: "Will stop")))
             }
         }
         return fixed(rows)
@@ -539,7 +539,7 @@ extension CommandPalette {
                     store.move(draft, to: destination)
                     return
                 }
-                let open = Set(store.topicWatcher.records.filter { $0.settledAt == nil }.map(\.id))
+                let open = catalog?.openTopicIDs ?? []
                 let ids = Set(store.windows.filter {
                     $0.topicID.flatMap { open.contains($0) ? $0 : nil } == target && $0.sessionID != draft.window.sessionID
                 }.map(\.sessionID))

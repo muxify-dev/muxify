@@ -13,9 +13,9 @@ final class PaletteTagsTests: XCTestCase {
         XCTAssertNil(FieldsMatch.best(FuzzyQuery("backend"), in: fields), "a word without # does not match a Tag")
         XCTAssertNil(FieldsMatch.best(FuzzyQuery("#ba"), in: [.title("#backend notes")]))
         let tagged = FuzzyRanker.list([PickSectionInput(id: "s", rule: .ranked(showsWhenEmpty: true), candidates: [
-            PickCandidate(id: "t", title: "Fix reward drop", fields: [defined("backend")], pick: .available("t")),
-            PickCandidate(id: "u", title: "Docs pass", pick: .available("u")),
-            PickCandidate(id: "tag", title: "#backend", pick: .available("tag"), titlePlace: .tag),
+            PickCandidate(id: "t", kind: .topic, title: "Fix reward drop", fields: [defined("backend")], pick: .available("t")),
+            PickCandidate(id: "u", kind: .topic, title: "Docs pass", pick: .available("u")),
+            PickCandidate(id: "tag", kind: .tag, title: "#backend", pick: .available("tag"), titlePlace: .tag),
         ])], query: FuzzyQuery("#ba"))
         XCTAssertEqual(tagged.rows.map(\.id), ["tag", "t"], "on a tie the shorter title goes first")
         XCTAssertEqual(tagged.rows[1].tags.map(\.text), [Highlighted(text: "#backend", marks: [0, 1, 2])], "the matched Tag shows after the title")
@@ -23,7 +23,7 @@ final class PaletteTagsTests: XCTestCase {
         XCTAssertEqual(tagged.rows[0].title, Highlighted(text: "#backend", marks: [0, 1, 2]))
         XCTAssertEqual(tagged.rows[0].tags, [], "a Tag row's title is not repeated as a chip")
         let unmatched = FuzzyRanker.list([PickSectionInput(id: "s", rule: .ranked(showsWhenEmpty: true), candidates: [
-            PickCandidate(id: "t", title: "Fix reward drop", fields: [defined("backend"), defined("release")], pick: .available("t")),
+            PickCandidate(id: "t", kind: .topic, title: "Fix reward drop", fields: [defined("backend"), defined("release")], pick: .available("t")),
         ])], query: FuzzyQuery(""))
         XCTAssertEqual(unmatched.rows[0].tags.map(\.text), [.plain("#backend"), .plain("#release")], "a Topic's Tags show with no query")
     }
@@ -92,7 +92,7 @@ final class PaletteTagsTests: XCTestCase {
                      ShownTag(tag: tag("old"), definition: nil)]
         let rows = { (query: String) in
             FuzzyRanker.list([PickSectionInput(id: "s", rule: .ranked(showsWhenEmpty: true), candidates: [
-                PickCandidate(id: "topic", title: "Fix drop", fields: SearchField.tags(shown), pick: .available("topic")),
+                PickCandidate(id: "topic", kind: .topic, title: "Fix drop", fields: SearchField.tags(shown), pick: .available("topic")),
             ])], query: FuzzyQuery(query)).rows
         }
         XCTAssertEqual(rows("#be").map(\.id), ["topic"], "the name finds the Tag")

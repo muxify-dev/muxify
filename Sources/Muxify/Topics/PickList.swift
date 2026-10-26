@@ -99,6 +99,8 @@ enum Pick<Payload: Equatable>: Equatable {
 struct PickCandidate<Payload: Equatable> {
     /// The accessibility id suffix, stable across queries.
     let id: String
+    /// The view picks the row's icon by it.
+    let kind: RowKind
     var symbol: String? = nil
     let title: String
     var fields: [SearchField] = []
@@ -131,6 +133,7 @@ struct PickCandidate<Payload: Equatable> {
 
 struct PickRow<Payload: Equatable>: Identifiable, Equatable {
     let id: String
+    let kind: RowKind
     let symbol: String?
     let title: Highlighted
     let detail: Highlighted
@@ -242,7 +245,7 @@ enum FuzzyRanker {
     }
 
     private static func row<Payload>(_ candidate: PickCandidate<Payload>, match: FieldsMatch?) -> PickRow<Payload> {
-        PickRow(id: candidate.id, symbol: candidate.symbol,
+        PickRow(id: candidate.id, kind: candidate.kind, symbol: candidate.symbol,
                 title: Highlighted(text: candidate.title, marks: match?.positions[0] ?? []),
                 detail: detail(candidate.searchFields, note: candidate.note, match: match),
                 tags: tags(candidate.searchFields, match: match),

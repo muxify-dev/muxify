@@ -83,16 +83,16 @@ extension CommandPalette {
         let records = store.topicWatcher.records
         let candidates = defined.definitions.filter { !field.chipField.chips.contains($0.tag) }.map { definition in
             let count = records.filter { $0.tags.contains(definition.tag) }.count
-            return PickCandidate(id: "tag-" + definition.tag.name, title: definition.tag.description,
+            return PickCandidate(id: "tag-" + definition.tag.name, kind: .tag, title: definition.tag.description,
                                  trailing: count == 1 ? "1 Topic" : "\(count) Topics",
-                                 pick: .available(PaletteItem(kind: .tag, ref: .choice(.tag(definition.tag)), color: definition.color)),
+                                 pick: .available(PaletteItem(ref: .choice(.tag(definition.tag)), color: definition.color)),
                                  titlePlace: .tag)
         }
         let list = FuzzyRanker.list([.tags(candidates, showsWhenEmpty: true)],
                                     query: FuzzyQuery(draft))
         guard list.rows.isEmpty else { return list }
         return FuzzyRanker.list([PickSectionInput(id: "no-tag", rule: .fixed, candidates: [
-            PickCandidate(id: "no-tag", title: "No Tag “\(draft.dropFirst())” matches", note: "The Config defines the Tags in topics.tags",
+            PickCandidate(id: "no-tag", kind: .tag, title: "No Tag “\(draft.dropFirst())” matches", note: "The Config defines the Tags in topics.tags",
                           pick: .blocked(reason: "")),
         ])], query: FuzzyQuery(""))
     }
