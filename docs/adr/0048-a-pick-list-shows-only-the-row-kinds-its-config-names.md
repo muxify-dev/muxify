@@ -6,6 +6,8 @@ Go to… lists every running Session, also the Sessions in Topics. The user goes
 
 A row has exactly one Row kind: `topic`, `snoozed`, `settled`, `session`, `topic-session`, `session-path`, `worktree`, `window`, `agent`, `command` or `tag`. The Row kind decides the row's icon, the title of its ↩ Action, and if `show` lists it. It replaces the earlier `PaletteItem.Kind`, so the filter and the icon cannot disagree.
 
+A checkout is a `worktree` row only when its folder is outside the folder of its Session Path. The checkouts inside a bare repository's folder, such as `main`, are `session-path` rows. For a bare repository, they are the folders that the user opens, so `show: [session-path]` must keep them.
+
 A running Session is a `topic-session` when its Topic is not Settled. A Snoozed Topic's Session is a `topic-session`. A Locked Session and the Session of a Settled Topic are `session`. Move's destination list uses the same rule.
 
 ## A list takes `show`

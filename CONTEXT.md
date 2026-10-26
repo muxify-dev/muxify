@@ -272,7 +272,7 @@ One kind of thing a Command Palette searches: Topics, Sessions, Windows, Agents 
 _Avoid_: provider, category, section
 
 **Row kind**:
-What one row of a Command Palette or of an Action's list is: `topic`, `snoozed`, `settled`, `session`, `topic-session`, `session-path`, `worktree`, `window`, `agent`, `command` or `tag`. A list's `show` names the Row kinds that it lists. A running Session is a `topic-session` when its Topic is not Settled, and a `session` in all other cases.
+What one row of a Command Palette or of an Action's list is: `topic`, `snoozed`, `settled`, `session`, `topic-session`, `session-path`, `worktree`, `window`, `agent`, `command` or `tag`. A list's `show` names the Row kinds that it lists. A running Session is a `topic-session` when its Topic is not Settled, and a `session` in all other cases. A checkout is a `worktree` when its folder is outside the folder of its Session Path, and a `session-path` in all other cases, so the checkouts inside a bare repository's folder are `session-path` rows.
 _Avoid_: type, category, Source (when you mean one kind of row)
 
 **Pick list**:

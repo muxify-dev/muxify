@@ -327,15 +327,27 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertTrue(shown.contains("topic-a"), "\(shown)")
     }
 
+    func testABareRepositorysCheckoutInsideItsFolderIsASessionPathAndOneOutsideIsAWorktree() {
+        let forge = SessionPath(path: "/work/forge", name: "forge",
+                                layout: .bareRepository([Worktree(path: "/work/forge/main", branch: "main"),
+                                                         Worktree(path: "/work/trees/forge-fix", branch: "fix")]))
+        let list = catalog(records: [], windows: [], sessionPaths: [forge]).list([.sessions], query: "", rules: .standard)
+        let kinds = Dictionary(uniqueKeysWithValues: list.rows.map { ($0.id, $0.kind) })
+        XCTAssertEqual(kinds, ["session-path:/work/forge/main": .sessionPath, "session-path:/work/trees/forge-fix": .worktree])
+    }
+
     func testAddSessionListsWorktreesAsWorktreesAndOnlyTheKindsItsRulesShow() {
+        let forge = SessionPath(path: "/work/forge", name: "forge",
+                                layout: .bareRepository([Worktree(path: "/work/forge/main", branch: "main"),
+                                                         Worktree(path: "/work/trees/forge-fix", branch: "fix")]))
         let windows = [window("@1", session: "loose", directory: "/beta"),
                        window("@2", session: "game/other", directory: "/work/game/main", topic: "other")]
-        let rows = SessionPathRows.build(sessionPaths: [game, notes], windows: [], records: [], titles: [:])
-        let catalog = catalog(records: [topic("other", "Other")], windows: windows)
+        let rows = SessionPathRows.build(sessionPaths: [forge, notes], windows: [], records: [], titles: [:])
+        let catalog = catalog(records: [topic("other", "Other")], windows: windows, sessionPaths: [forge, notes])
         let all = catalog.addSessionList(topic: "target", query: "", rows: rows, rules: .standard)
         XCTAssertEqual(Set(all.rows.map(\.kind)), [.session, .topicSession, .worktree, .sessionPath], "\(all.rows.map { ($0.id, $0.kind) })")
         let folders = catalog.addSessionList(topic: "target", query: "", rows: rows, rules: PickRules(show: [.sessionPath]))
-        XCTAssertEqual(folders.rows.map(\.title.text), ["notes"], "no running Session and no Worktree")
+        XCTAssertEqual(Set(folders.rows.map(\.id)), ["/work/forge/main", "/work/notes"], "no running Session and no Worktree")
     }
 
     /// A list whose `show` names every kind it can show lists what it lists with no entry, so its builder makes no row

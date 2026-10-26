@@ -21,8 +21,9 @@ public struct SessionChoice: Identifiable, Equatable, Sendable {
     /// Names the Session this row opens.
     public var name: String { worktree.map { sessionPath.name(ofWorktreeAt: $0.folder) } ?? sessionPath.name }
     public var displayName: String { worktree.map { sessionPath.displayName(ofWorktreeAt: $0.folder) } ?? sessionPath.displayName }
-    /// A checkout in its own folder, not the SessionPath folder itself.
-    public var isWorktree: Bool { directory != sessionPath.folder }
+    /// A checkout outside the SessionPath folder. A bare repository's checkouts inside its folder, such as `main`,
+    /// are rows of the SessionPath itself, as is a plain repository's own folder.
+    public var isWorktree: Bool { !sessionPath.folder.contains(directory) }
 
     /// `newWorktree` asks for a new Worktree from this row's Worktree, which starts as `start` says; a plain
     /// directory has none to start from.

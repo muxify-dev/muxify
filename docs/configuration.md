@@ -116,7 +116,9 @@ new folder joins without a Config edit.
 
 A repository is one Session Path, plain or bare. Its Worktrees are rows of it, found
 with `git worktree list`, wherever they are. Muxify does not look for Session Paths
-inside a repository.
+inside a repository. In a list, a checkout inside the folder of a bare repository,
+such as `game/main`, is a Session Path row. A Worktree outside that folder is a
+Worktree row.
 
 A Session Path's name is its last `display_depth` folder names (1 by default), so
 `~/Dev/tripledot/game` with `display_depth: 2` is `tripledot/game`. Topic
@@ -870,8 +872,8 @@ the palette lists the path again.
 | `settled` | A Settled Topic |
 | `session` | A running Session in no open Topic: a No Topic Session, or a Session of a Settled Topic |
 | `topic-session` | A running Session in an open Topic, Snoozed or not |
-| `session-path` | A Session Path with no running Session |
-| `worktree` | A Worktree of a Session Path, with no running Session |
+| `session-path` | A Session Path, or a checkout inside the folder of a bare repository, with no running Session |
+| `worktree` | A Worktree outside the folder of its Session Path, with no running Session |
 | `window` | A Window |
 | `agent` | An Agent |
 | `command` | A Command, or a choice in an Action |

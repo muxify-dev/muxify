@@ -31,12 +31,13 @@ class CommandPalette(unittest.TestCase):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(s.teardown)
         cls.topics_dir = s.root/'state/muxify/topics'
-        # alpha is a plain repository, beta a plain directory, gamma a bare repository with two Worktrees,
-        # delta a plain directory with an alias.
+        # alpha is a plain repository, beta a plain directory, gamma a bare repository with two checkouts inside its
+        # folder and a Worktree outside it, delta a plain directory with an alias.
         cls.alpha = s.root/'projects/alpha'
         cls.beta = s.root/'projects/beta'
         cls.gamma = s.root/'projects/gamma'
         cls.delta = s.root/'projects/delta'
+        cls.gamma_hotfix = s.root/'trees/gamma-hotfix'
         for directory in [cls.topics_dir, cls.alpha, cls.beta, cls.delta]:
             directory.mkdir(parents=True, exist_ok=True)
         git = ['/usr/bin/git', '-C', str(cls.alpha), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid',
@@ -48,6 +49,8 @@ class CommandPalette(unittest.TestCase):
         subprocess.run(['/usr/bin/git', 'clone', '-q', '--bare', str(cls.alpha), str(cls.gamma)], check=True)
         subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma/'main'), 'main'], check=True)
         subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma/'release'), '-b', 'release-line'],
+                       check=True)
+        subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma_hotfix), '-b', 'hotfix'],
                        check=True)
         # No Topic Sessions is Go to… without the Sessions of open Topics.
         (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(s.root/'projects') + '/*\n'
@@ -607,7 +610,8 @@ class CommandPalette(unittest.TestCase):
     def test_add_session_whose_pick_list_shows_only_session_paths_lists_folders_and_no_running_session_or_worktree(self):
         running = 'palette-row-running-' + self.new_session('sw-pick-running', self.delta)
         folder = 'palette-row-' + str(self.alpha.resolve())
-        worktree = 'palette-row-' + str((self.gamma/'release').resolve())
+        checkout = 'palette-row-' + str((self.gamma/'release').resolve())
+        worktree = 'palette-row-' + str(self.gamma_hotfix.resolve())
         self.open_add_session('sw-pick-paths')
         self.close_palette()
         ids = self.add_session_rows(folder)
@@ -625,6 +629,7 @@ class CommandPalette(unittest.TestCase):
         ids = self.add_session_rows(folder)
         self.assertNotIn(running, ids)
         self.assertNotIn(worktree, ids, 'show: [session-path] lists a Worktree: %s' % ids)
+        self.assertIn(checkout, ids, 'a checkout inside a bare repository is a Session Path: %s' % ids)
         self.assertIn('palette-row-' + str(self.beta.resolve()), ids, 'a folder is missing: %s' % ids)
 
     def test_add_session_moves_a_running_session_and_closes_the_palette(self):
