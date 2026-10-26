@@ -114,6 +114,26 @@ final class BrowserTests: XCTestCase {
     }
 
     @MainActor
+    func testReloadLoadsTheTabsURLWhenItsFirstLoadFailed() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let page = directory.appendingPathComponent("page.html")
+        let tab = BrowserTab(url: page)
+        defer { tab.close() }
+        let webView = tab.webView
+        let deadline = Date().addingTimeInterval(15)
+        while webView.isLoading || tab.progress == 0, Date() < deadline { try await Task.sleep(nanoseconds: 20_000_000) }
+        XCTAssertNil(webView.backForwardList.currentItem, "the missing page was committed")
+        XCTAssertEqual(tab.urlString, page.absoluteString)
+        try "<html><title>Back</title><body>Back</body></html>".write(to: page, atomically: true, encoding: .utf8)
+
+        tab.reloadOrStop()
+
+        try await waitForPage(webView, title: "Back")
+    }
+
+    @MainActor
     private func waitForPage(_ webView: WKWebView, title: String) async throws {
         let deadline = Date().addingTimeInterval(15)
         while webView.isLoading || webView.title != title {
