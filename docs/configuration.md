@@ -454,9 +454,10 @@ note instead, and Changes show their own diff. W on another one moves the base
 there; W on the base ends the comparison, and so do ⎋ where it would close the
 Git View, and closing the Git View. When git fails, the diff pane says why.
 
-e opens the file in your editor, in a new tmux Window of the current Session, and
-switches to it; the Git View stays open in the Window you left, as you left it.
-In the diff, it opens the file of the cursor's line, or of the selection's first
+e opens the file in your editor, in a new tmux Window right after the current
+one, and switches to it; the Git View stays open in the Window you left, as you
+left it. When the editor's Window closes, Muxify goes back to that Window. In
+the diff, it opens the file of the cursor's line, or of the selection's first
 line, at that line's number in the new file; a removed line opens at the new line
 beside it. In a list, a change or a file of the Diff files opens at its first
 changed line. A folder, a commit, a branch or a stash does nothing. The file is

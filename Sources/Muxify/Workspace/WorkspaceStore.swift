@@ -2007,15 +2007,19 @@ final class WorkspaceStore {
         }
     }
 
-    /// Runs the Git View's editor command for `file` at `line` in a new Window of
-    /// the Session of `windowID`, in `directory`, and goes to it while the
+    /// Runs the Git View's editor command for `file` at `line` in a new Window
+    /// right after `windowID`, in `directory`, and goes to it while the
     /// Location is still `windowID`. A move made while git and tmux answered
-    /// is newer, so it wins (ADR 0044). On a Remote Environment tmux runs the
-    /// command there, so it edits that machine's file.
+    /// is newer, so it wins (ADR 0044). When the editor's Window closes, the
+    /// Router goes to its earlier sibling, the Window with the Git View. On a
+    /// Remote Environment tmux runs the command there, so it edits that
+    /// machine's file.
     func openInEditor(file: String, line: Int, from windowID: String, in directory: String) {
-        guard let sessionID = windows.first(where: { $0.id == windowID })?.sessionID ?? selectedWindow?.sessionID else { return }
+        let origin = windows.first(where: { $0.id == windowID })
+        guard let sessionID = origin?.sessionID ?? selectedWindow?.sessionID else { return }
         let command = config.gitView.editorShellCommand(file: file, line: line)
-        let args = ["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "\(sessionID):", "-c", directory, command]
+        let place = origin.map { ["-a", "-t", "\(sessionID):\($0.id)"] } ?? ["-t", "\(sessionID):"]
+        let args = ["new-window", "-d", "-P", "-F", "#{window_id}"] + place + ["-c", directory, command]
         runAsync(args) { [weak self] result in
             guard let self, case .success(let output) = result, self.selectedWindowID == windowID else { return }
             let editorID = output.trimmingCharacters(in: .whitespacesAndNewlines)

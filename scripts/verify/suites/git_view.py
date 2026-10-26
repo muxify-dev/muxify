@@ -397,6 +397,22 @@ class GitView(unittest.TestCase):
         self.assertEqual((file, line), (str(self.repo.resolve()/'tracked.txt'), 3), 'the added line does not open at its number')
         self.leave(new)
 
+    def test_closing_the_editor_goes_back_to_the_window_with_the_git_view(self):
+        # The Git View's Window is not the Session's last Window.
+        later = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', self.session + ':', '-c', str(self.repo), SHELL)
+        try:
+            self.select_change('tracked.txt')
+            new, _, _ = self.press_e()
+            self.s.tmux('kill-window', '-t', new)
+            self.s.wait_shown(self.window)
+            time.sleep(2)
+            self.assertEqual(self.s.tmux('display-message', '-p', '-t', self.session + ':', '#{window_id}'), self.window,
+                             'the app left the Window with the Git View after the editor closed')
+            self.assertTrue(self.is_open(), 'the Git View did not stay open in the Window it was left in')
+        finally:
+            self.s.tmux('kill-window', '-t', later)
+            self.s.wait_shown(self.window)
+
     def test_e_on_a_file_that_is_gone_says_so_and_opens_nothing(self):
         self.select_row('git-row-change:new.txt')
         (self.repo/'new.txt').rename(self.repo/'moved.txt')
