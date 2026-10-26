@@ -309,6 +309,10 @@ enum TestDriver {
                         editor.didChangeText()
                     } else {
                         _ = object.perform(Selectors.setValue, with: text)
+                        // A hidden field's binding hears only its delegate, as when the user types.
+                        if let field = field as? NSSecureTextField {
+                            field.delegate?.controlTextDidChange?(Notification(name: NSControl.textDidChangeNotification, object: field))
+                        }
                     }
                     pressed = true
                 case "focus" where object.responds(to: Selectors.setFocused):

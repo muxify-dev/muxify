@@ -250,6 +250,17 @@ final class CommandPalette {
         selection = openingSelection
     }
 
+    /// Opens Go to… on the Session Path that holds `worktree`, highlighting its row so ↩ starts a Session there.
+    /// It starts nothing itself. A Worktree no Session Path holds opens it searched for by its folder's name.
+    func openGoTo(at worktree: Folder) {
+        guard let store else { return }
+        let palette = store.config.commandPalettes.first { $0.name == CommandPaletteConfig.goTo.name } ?? .goTo
+        if current?.name != palette.name { toggle(palette) }
+        let choice = SessionChoice.containing(worktree, in: store.sessionPaths)
+        query = choice?.displayName ?? URL(fileURLWithPath: worktree.path).lastPathComponent
+        if let choice { selectedID = "session-path:\(choice.directory.path)" }
+    }
+
     func openMove(_ window: TmuxWindow, scope: MoveDraft.Scope = .session, paneID: String? = nil,
                   includesTab: Bool = false, keepingHistory: Bool = false) {
         begin(.move(MoveDraft(window: window, paneID: paneID ?? window.activePaneID, scope: scope, includesTab: includesTab)),

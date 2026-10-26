@@ -131,13 +131,18 @@ private struct GitNavigator: View {
                     GitCommitBox(gitView: gitView, snapshot: snapshot, palette: palette)
                         .transition(.opacity)
                 }
-                if let discard = gitView.discard {
-                    GitDiscardMenu(gitView: gitView, discard: discard, palette: palette)
+                if let menu = gitView.menu {
+                    GitMenuView(gitView: gitView, menu: menu, palette: palette)
+                        .transition(.opacity)
+                }
+                if let prompt = gitView.prompt {
+                    GitPromptView(gitView: gitView, prompt: prompt, palette: palette)
                         .transition(.opacity)
                 }
             }
             .animation(.easeOut(duration: 0.15), value: gitView.isCommitOpen)
-            .animation(.easeOut(duration: 0.15), value: gitView.discard != nil)
+            .animation(.easeOut(duration: 0.15), value: gitView.menu != nil)
+            .animation(.easeOut(duration: 0.15), value: gitView.prompt != nil)
         }
         .background(GitKeyCatcher(gitView: gitView))
         .environment(\.colorScheme, colors.isDark ? .dark : .light)
@@ -205,12 +210,16 @@ private struct GitToolbar: View {
             }
             if let title = snapshot.operationTitle {
                 GitTag(text: title, symbol: Self.symbol(for: snapshot.operation), style: .tint(palette.colors.yellow), palette: palette)
-                    .help(snapshot.operation?.commitBlock ?? title)
+                    .help(snapshot.operation?.commitBlock ?? "\(title): m continues or aborts it.")
             }
             if let comparison = snapshot.comparison { aheadBehind(comparison) }
             if let text = comparingText {
                 GitTag(text: text, symbol: "arrow.left.arrow.right", style: .tint(palette.colors.magenta), palette: palette)
                     .help("W on the base, or ⎋, ends the comparison")
+            }
+            if let text = copiedText {
+                GitTag(text: text, symbol: "doc.on.doc", style: .tint(palette.colors.cyan), palette: palette)
+                    .help("V cherry-picks the copied commits onto the branch you're on; ⌃R forgets them")
             }
             Spacer(minLength: 8)
             filterField
@@ -222,6 +231,14 @@ private struct GitToolbar: View {
             .labelsHidden()
             .fixedSize()
             .help("Show the diff unified or side by side")
+            ForEach(gitView.networkActivity, id: \.self) { activity in
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.mini)
+                    Text(activity).font(.system(size: 11.5, weight: .medium)).foregroundStyle(.secondary)
+                }
+                .lineLimit(1)
+                .fixedSize()
+            }
             if gitView.isReading || gitView.isWriting {
                 ProgressView().controlSize(.small).frame(width: 28, height: 28)
             } else {
@@ -246,6 +263,8 @@ private struct GitToolbar: View {
         if let title = snapshot.operationTitle { parts.append(title) }
         if let comparison = snapshot.comparison { parts.append("↑\(comparison.ahead) ↓\(comparison.behind) vs \(comparison.base)") }
         if let text = comparingText { parts.append(text) }
+        if let text = copiedText { parts.append(text) }
+        parts += gitView.networkActivity
         return parts.joined(separator: " · ")
     }
 
@@ -256,14 +275,14 @@ private struct GitToolbar: View {
         return gitView.compared.map { "\(base.name) → \($0.name)" } ?? "Comparing \(base.name)"
     }
 
+    /// C: "2 copied", while commits are copied.
+    private var copiedText: String? {
+        let count = gitView.copiedCommits.count
+        return count == 0 ? nil : "\(count) copied"
+    }
+
     private static func symbol(for operation: GitOperation?) -> String {
-        switch operation {
-        case .merge?: "arrow.triangle.merge"
-        case .rebase?, .applying?: "arrow.triangle.2.circlepath"
-        case .cherryPick?: "arrow.uturn.forward"
-        case .revert?: "arrow.uturn.backward"
-        case .bisect?, nil: "magnifyingglass"
-        }
+        operation?.symbol ?? "magnifyingglass"
     }
 
     private var closeHelp: String {
@@ -613,15 +632,17 @@ private struct GitListView: View {
     }
 
     /// `selected=1 status="M "`: whether the row is the selection, and a
-    /// change's or file's two status letters; ` base=1` on the base.
+    /// change's or file's two status letters; ` base=1` on the base, ` copied=1` on a copied commit.
     private func accessibilityValue(_ item: GitView.Item, isSelected: Bool, level: GitView.Level) -> String {
         let status: String? = switch item {
         case .change(let change): String(change.index) + String(change.worktree)
         case .file(let path): Self.letter(gitView.ownerFiles(for: level)?.first { $0.path == path }?.change).text
         case .folder, .commit, .stash, .branch: nil
         }
+        let copied: Bool = if case .commit(let commit) = item { gitView.isCopied(commit) } else { false }
         return "selected=\(isSelected ? 1 : 0)" + (status.map { " status=\"\($0)\"" } ?? "")
             + (item.id == gitView.base?.id ? " base=1" : "")
+            + (copied ? " copied=1" : "")
     }
 
     @ViewBuilder
@@ -680,6 +701,7 @@ private struct GitListView: View {
                 refs(commit, onAccent: onAccent)
                 Text(commit.subject).font(.system(size: 13)).lineLimit(1).truncationMode(.tail)
                 Spacer(minLength: 4)
+                copiedMark(commit, onAccent: onAccent)
                 baseMark(item, onAccent: onAccent)
                 Text(GitRepository.age(of: commit.date)).font(.system(size: 11)).foregroundStyle(secondary)
             case .stash(let stash):
@@ -710,6 +732,16 @@ private struct GitListView: View {
                 // A click goes into its commits.
                 Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(secondary)
             }
+        }
+    }
+
+    /// C copied it: V cherry-picks it onto the branch you're on.
+    @ViewBuilder
+    private func copiedMark(_ commit: GitCommit, onAccent: Bool) -> some View {
+        if gitView.isCopied(commit) {
+            GitTag(text: "copied", symbol: "doc.on.doc", style: .tint(palette.colors.cyan), palette: palette,
+                   height: 16, fontSize: 10, onAccent: onAccent)
+                .help("Copied: V cherry-picks it onto the branch you're on, C takes it out again")
         }
     }
 
@@ -1728,6 +1760,8 @@ private struct GitCommitBox: View {
                     .contentShape(Rectangle())
                     .onTapGesture { gitView.closeCommit() }
                 card(staged: staged)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("git-commit-box")
                     .frame(width: min(620, proxy.size.width - 48))
                     .padding(.top, max(20, proxy.size.height * 0.1))
                     .scaleEffect(isShown ? 1 : 0.97, anchor: .top)
@@ -1979,17 +2013,17 @@ private struct GitCommitBox: View {
     }
 }
 
-// MARK: - Discarding
+// MARK: - Menus
 
-/// d: lazygit's Discard changes menu for a file or folder of Changes, or
-/// for the lines picked in its diff. x, or ↩ on it, discards everything;
-/// u only what isn't staged; ⎋ closes it.
-private struct GitDiscardMenu: View {
+/// A Git View menu, such as lazygit's Discard changes menu on d: its title
+/// and what it's on, then its choices, each with its key. j and k move the
+/// highlight, ↩ runs the highlighted choice, and ⎋ closes it.
+private struct GitMenuView: View {
     let gitView: GitView
-    let discard: GitView.Discard
+    let menu: GitMenu
     let palette: Palette
     @State private var isShown = false
-    @State private var hovered: GitView.Discard.Option?
+    @State private var hovered: String?
 
     private var red: Color { palette.color(palette.colors.strong(palette.colors.red)) }
 
@@ -1998,7 +2032,7 @@ private struct GitDiscardMenu: View {
             ZStack(alignment: .top) {
                 Color.black.opacity(palette.colors.isDark ? 0.32 : 0.14)
                     .contentShape(Rectangle())
-                    .onTapGesture { gitView.closeDiscard() }
+                    .onTapGesture { gitView.closeMenu() }
                 card
                     .frame(width: min(460, proxy.size.width - 48))
                     .padding(.top, max(20, proxy.size.height * 0.16))
@@ -2015,17 +2049,10 @@ private struct GitDiscardMenu: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
                 .padding(.bottom, 12)
+            if !menu.agents.isEmpty { agents }
             VStack(spacing: 2) {
-                if let lines = discard.lines {
-                    // All of a new file's lines: it's deleted, as the file's discard does.
-                    let deletes = discard.changes.contains { $0.isUntracked && lines.paths.contains($0.path) }
-                    option(.all, key: "x", title: lines.lines == 1 ? "Discard the line" : "Discard \(lines.lines) lines",
-                           detail: deletes ? "Back to what's staged. A new file with all of its lines picked is deleted." : "Back to what's staged.")
-                } else {
-                    option(.all, key: "x", title: "Discard all changes",
-                           detail: "Back to the last commit. New and untracked files are deleted.")
-                    option(.unstaged, key: "u", title: "Discard unstaged changes",
-                           detail: discard.canDiscardUnstaged ? "Keep what's staged." : "Only when some of it is staged and some isn't.")
+                ForEach(Array(menu.choices.enumerated()), id: \.element.id) { index, choice in
+                    row(choice, isHighlighted: menu.highlighted == index)
                 }
             }
             .padding(.horizontal, 8)
@@ -2036,52 +2063,92 @@ private struct GitDiscardMenu: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(palette.separator))
         .shadow(color: .black.opacity(0.35), radius: 32, y: 14)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("git-menu")
+        .accessibilityLabel(menu.title)
+        // Each choice by its key, and the menu's own keys, so scripts/verify can press them without typing.
+        .accessibilityActions {
+            ForEach(menu.choices) { choice in
+                Button { gitView.chooseMenu(key: choice.key) } label: { Text(verbatim: choice.key) }
+            }
+            ForEach(["enter", "escape", "j", "k"], id: \.self) { name in
+                Button { gitView.performKey(named: name) } label: { Text(verbatim: name) }
+            }
+        }
     }
 
     private var header: some View {
         HStack(spacing: 12) {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(red.gradient)
+                .fill(menu.isDestructive ? red.gradient : palette.color(palette.colors.strong(palette.colors.blue)).gradient)
                 .frame(width: 30, height: 30)
-                .overlay(Image(systemName: "trash").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white))
+                .overlay(Image(systemName: menu.symbol).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white))
             VStack(alignment: .leading, spacing: 3) {
-                Text(discard.lines == nil ? "Discard changes" : "Discard lines").font(.system(size: 14.5, weight: .semibold))
-                HStack(spacing: 5) {
-                    if discard.isFolder {
-                        Image(systemName: "folder").font(.system(size: 11))
-                        Text(discard.path).fontWeight(.medium).lineLimit(1).truncationMode(.head)
-                        if discard.lines == nil {
-                            Text(verbatim: "·").foregroundStyle(.tertiary)
-                            Text(discard.changes.count == 1 ? "1 file" : "\(discard.changes.count) files")
-                        }
-                    } else {
-                        GitFileTile(path: discard.path, size: 13)
-                        Text((discard.path as NSString).lastPathComponent).fontWeight(.medium).lineLimit(1)
-                        let folder = (discard.path as NSString).deletingLastPathComponent
-                        if !folder.isEmpty {
-                            Text(folder).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
+                Text(menu.title).font(.system(size: 14.5, weight: .semibold))
+                if let subject = menu.subject {
+                    HStack(spacing: 5) {
+                        switch subject {
+                        case .folder(let path, let files):
+                            Image(systemName: "folder").font(.system(size: 11))
+                            Text(path).fontWeight(.medium).lineLimit(1).truncationMode(.head)
+                            if let files {
+                                Text(verbatim: "·").foregroundStyle(.tertiary)
+                                Text(files == 1 ? "1 file" : "\(files) files")
+                            }
+                        case .file(let path):
+                            GitFileTile(path: path, size: 13)
+                            Text((path as NSString).lastPathComponent).fontWeight(.medium).lineLimit(1)
+                            let folder = (path as NSString).deletingLastPathComponent
+                            if !folder.isEmpty {
+                                Text(folder).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
+                            }
+                        case .text(let text):
+                            Text(text).lineLimit(2)
                         }
                     }
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
                 }
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
         }
     }
 
-    /// ↩ picks the highlighted one; j and k move between them.
-    private func option(_ option: GitView.Discard.Option, key: String, title: String, detail: String) -> some View {
-        let isEnabled = option == .all || discard.canDiscardUnstaged
-        let isHighlighted = isEnabled && discard.option == option
-        return Button { gitView.confirmDiscard(option) } label: {
+    /// The Agent guard's warning: the Agents working in the Worktree, which this would change the files under.
+    private var agents: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Label(menu.agents.count == 1 ? "An Agent is working here" : "\(menu.agents.count) Agents are working here",
+                  systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 12, weight: .semibold))
+            ForEach(menu.agents, id: \.self) { name in
+                Text(name).font(.system(size: 11.5)).lineLimit(1).padding(.leading, 20)
+            }
+        }
+        .foregroundStyle(red)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(red.opacity(0.12)))
+        .padding(.horizontal, 8)
+        .padding(.bottom, 6)
+        .accessibilityElement(children: .ignore)
+        .accessibilityIdentifier("git-menu-agents")
+        .accessibilityLabel(menu.agents.joined(separator: "\n"))
+    }
+
+    /// ↩ runs the highlighted one; j and k move between them.
+    private func row(_ choice: GitMenu.Choice, isHighlighted: Bool) -> some View {
+        Button { gitView.choose(choice) } label: {
             HStack(spacing: 10) {
-                GitKeyCap(text: key, palette: palette)
+                GitKeyCap(text: choice.key.hasPrefix("shift+") ? choice.key.dropFirst("shift+".count).uppercased() : choice.key,
+                          palette: palette)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
+                    Text(choice.title)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(option == .all ? red : Color.primary)
-                    Text(detail).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                        .foregroundStyle(choice.isDestructive ? red : Color.primary)
+                    if let note = choice.note {
+                        Text(note).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    }
                 }
                 Spacer(minLength: 0)
                 if isHighlighted {
@@ -2089,25 +2156,31 @@ private struct GitDiscardMenu: View {
                 }
             }
             .padding(.horizontal, 10)
-            .frame(height: 48)
+            .frame(height: choice.note == nil ? 36 : 48)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(isHighlighted ? palette.fill2 : hovered == option && isEnabled ? palette.fill : .clear)
+                    .fill(isHighlighted ? palette.fill2 : hovered == choice.id && choice.isEnabled ? palette.fill : .clear)
             )
-            .opacity(isEnabled ? 1 : 0.45)
+            .opacity(choice.isEnabled ? 1 : 0.45)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .onHover { hovered = $0 ? option : hovered == option ? nil : hovered }
+        .disabled(!choice.isEnabled)
+        .onHover { hovered = $0 ? choice.id : hovered == choice.id ? nil : hovered }
+        .accessibilityIdentifier("git-menu-choice-\(choice.key)")
+        .accessibilityLabel(choice.title)
+        .accessibilityValue("highlighted=\(isHighlighted ? 1 : 0) enabled=\(choice.isEnabled ? 1 : 0)")
     }
 
     private var footer: some View {
         HStack(spacing: 6) {
-            Image(systemName: "exclamationmark.triangle").font(.system(size: 11))
-            Text("This can't be undone.").font(.system(size: 11.5))
+            if let footnote = menu.footnote {
+                Image(systemName: "exclamationmark.triangle").font(.system(size: 11))
+                Text(footnote).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("git-menu-footnote")
+            }
             Spacer(minLength: 8)
-            Button { gitView.closeDiscard() } label: {
+            Button { gitView.closeMenu() } label: {
                 HStack(spacing: 6) {
                     Text("Cancel").font(.system(size: 12.5, weight: .medium))
                     Text(verbatim: "esc").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.tertiary)
@@ -2120,8 +2193,194 @@ private struct GitDiscardMenu: View {
             }
             .buttonStyle(.plain)
             .help("Close (⎋)")
+            .accessibilityIdentifier("git-menu-cancel")
         }
         .foregroundStyle(.secondary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .frame(minHeight: 48)
+        .background(Color.primary.opacity(palette.colors.isDark ? 0.03 : 0.025))
+        .overlay(alignment: .top) { palette.softSeparator.frame(height: 1) }
+    }
+}
+
+// MARK: - Prompts
+
+/// A Git View prompt: one line for one value, over the Git View as a menu is.
+/// ↩ submits and ⎋ cancels; the field is `git-prompt-field`, and the prompt's
+/// actions are `enter` and `escape`.
+private struct GitPromptView: View {
+    @Bindable var gitView: GitView
+    let prompt: GitPrompt
+    let palette: Palette
+    @FocusState private var isFocused: Bool
+    @State private var isShown = false
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .top) {
+                Color.black.opacity(palette.colors.isDark ? 0.32 : 0.14)
+                    .contentShape(Rectangle())
+                    .onTapGesture { gitView.closePrompt() }
+                card
+                    .frame(width: min(520, proxy.size.width - 48))
+                    .padding(.top, max(20, proxy.size.height * 0.16))
+                    .scaleEffect(isShown ? 1 : 0.97, anchor: .top)
+                    .offset(y: isShown ? 0 : -6)
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(duration: 0.28, bounce: 0.2)) { isShown = true }
+            DispatchQueue.main.async { isFocused = true }
+        }
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                .padding(.bottom, 12)
+            field
+                .padding(.horizontal, 16)
+                .padding(.bottom, suggestions.isEmpty ? 16 : 8)
+            if !suggestions.isEmpty {
+                suggestionList
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+            }
+            footer
+        }
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(palette.chrome))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(palette.separator))
+        .shadow(color: .black.opacity(0.35), radius: 32, y: 14)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("git-prompt")
+        .accessibilityLabel(prompt.title)
+        // The keys, so scripts/verify can press them without typing.
+        .accessibilityActions {
+            ForEach(["enter", "escape"] + (suggestions.isEmpty ? [] : ["down", "up"]), id: \.self) { name in
+                Button {
+                    switch name {
+                    case "enter": gitView.submitPrompt()
+                    case "escape": gitView.closePrompt()
+                    default: gitView.moveSuggestion(by: name == "down" ? 1 : -1)
+                    }
+                } label: { Text(verbatim: name) }
+            }
+        }
+    }
+
+    private var suggestions: [String] { gitView.promptSuggestions }
+
+    /// What matches as it is typed; ↓/↑ choose, and a click takes one. Each row is `git-prompt-suggestion-<n>`, and its
+    /// value says whether it is the one chosen.
+    private var suggestionList: some View {
+        let chosen = gitView.promptSuggestion
+        return VStack(spacing: 2) {
+            ForEach(Array(suggestions.enumerated()), id: \.element) { index, name in
+                let isChosen = name == chosen
+                Button { gitView.submitSuggestion(name) } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.triangle.branch").font(.system(size: 10.5)).foregroundStyle(.secondary)
+                        Text(name).font(.system(size: 12.5)).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 26)
+                    .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(isChosen ? Color.accentColor.opacity(0.22) : .clear))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("git-prompt-suggestion-\(index)")
+                .accessibilityLabel(name)
+                .accessibilityValue(isChosen ? "chosen" : "")
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(palette.color(palette.colors.strong(palette.colors.blue)).gradient)
+                .frame(width: 30, height: 30)
+                .overlay(Image(systemName: prompt.symbol).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(prompt.title).font(.system(size: 14.5, weight: .semibold))
+                if case .text(let text)? = prompt.subject {
+                    Text(text).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(4)
+                }
+            }
+            Spacer(minLength: 0)
+            if prompt.isSecret {
+                Label("Hidden", systemImage: "lock.fill")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .help("What you type is hidden")
+                    .accessibilityIdentifier("git-prompt-secret")
+            }
+        }
+    }
+
+    private var field: some View {
+        Group {
+            if prompt.isSecret {
+                SecureField("", text: $gitView.promptText, prompt: Text(prompt.placeholder).foregroundColor(.secondary))
+            } else {
+                TextField("", text: $gitView.promptText, prompt: Text(prompt.placeholder).foregroundColor(.secondary))
+            }
+        }
+        .textFieldStyle(.plain)
+        .font(.system(size: 13.5))
+        .focused($isFocused)
+        .onSubmit { gitView.submitPrompt() }
+        .padding(.horizontal, 12)
+        .frame(height: 38)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(palette.background))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(isFocused ? Color.accentColor.opacity(0.8) : palette.softSeparator, lineWidth: isFocused ? 1.5 : 1)
+        )
+        .accessibilityIdentifier("git-prompt-field")
+        .accessibilityLabel(prompt.title)
+    }
+
+    private var footer: some View {
+        let canSubmit = prompt.accepts(gitView.promptText)
+        return HStack(spacing: 8) {
+            Spacer(minLength: 8)
+            Button { gitView.closePrompt() } label: {
+                HStack(spacing: 6) {
+                    Text("Cancel").font(.system(size: 12.5, weight: .medium))
+                    Text(verbatim: "esc").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.tertiary)
+                }
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(palette.fill2))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close (⎋)")
+            .accessibilityIdentifier("git-prompt-cancel")
+            Button { gitView.submitPrompt() } label: {
+                HStack(spacing: 6) {
+                    Text(prompt.submitTitle).font(.system(size: 12.5, weight: .semibold))
+                    Text(verbatim: "↩").font(.system(size: 10.5, weight: .medium)).opacity(0.7)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.accentColor))
+                .opacity(canSubmit ? 1 : 0.45)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!canSubmit)
+            .help("\(prompt.submitTitle) (↩)")
+            .accessibilityIdentifier("git-prompt-submit")
+        }
         .padding(.horizontal, 16)
         .frame(height: 48)
         .background(Color.primary.opacity(palette.colors.isDark ? 0.03 : 0.025))
