@@ -122,15 +122,16 @@ struct QuickSwitchTargets {
 extension QuickSwitchTargets {
     init(model: TopicsModel, sessions: [SessionGroup], windows: [TmuxWindow], tabIDs: [UUID]) {
         // No Topic Sessions get no number: the Topics list shows at most one of them, and only while it is open.
-        // A Locked Session's card is numbered by its place among the Topics.
-        let topics = model.rows.compactMap(\.id.quickSwitchTarget)
+        // A Locked Session's card is numbered by its place among the Topics. A hidden Benched card gets no number,
+        // and a Topic step skips it, so repeated steps do not go through the whole Bench.
+        let cards = model.list.compactMap { $0.cardID?.quickSwitchTarget }
         let allSessions = sessions.map { QuickSwitchTarget.session($0.id) }
         let sessionWindows = windows.map { QuickSwitchTarget.window($0.id) }
         let shown = model.mode == .topics ? Self.sessions(of: model) : nil
-        self.init(cards: model.mode == .topics ? topics : allSessions, windows: sessionWindows,
+        self.init(cards: model.mode == .topics ? cards : allSessions, windows: sessionWindows,
                   topicWindows: shown.map { $0.flatMap(\.windows).map { .window($0.id) } } ?? sessionWindows,
                   tabs: tabIDs.map { .tab($0) }, sessions: shown.map { $0.map { .session($0.id.session) } } ?? allSessions,
-                  topics: topics)
+                  topics: cards)
     }
 
     /// The Sessions the Active Topic's card shows. No Topic has no card, so it gives its Sessions that have no

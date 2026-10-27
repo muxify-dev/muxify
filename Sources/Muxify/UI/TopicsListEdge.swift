@@ -22,6 +22,31 @@ extension View {
     }
 }
 
+/// The line between the In Play cards and the Bench. A click shows or hides the Bench. It has no count and no Agent
+/// marks, so it does not pull the user's attention to the Bench.
+struct BenchLine: View {
+    let isBenchShown: Bool
+    let action: () -> Void
+
+    var body: some View {
+        let title = isBenchShown ? "Hide Bench" : "Bench"
+        Button(action: action) {
+            HStack(spacing: 8) {
+                Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
+                Text(title).font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
+                Image(systemName: isBenchShown ? "chevron.up" : "chevron.down").font(.system(size: 9, weight: .bold))
+                Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8).frame(height: 20)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("topics-bench-line")
+    }
+}
+
 /// Tells the user that the last card they see is not the last card. It lies over the bottom of the list, under a
 /// shadow, and a click scrolls the first hidden card to the top. In the last stretch of the list it moves down with
 /// the cards, so it slides out under the last card and does not go away in one frame.

@@ -35,6 +35,9 @@ import MuxifyCore
                 .disabled(store.map { config.sidebar.agents[$0.shownSidebarMode] != nil } ?? true)
             Toggle("Show Panes", isOn: Binding(get: { store?.panesVisible ?? false }, set: { store?.panesVisible = $0 }))
                 .disabled(store == nil || config.sidebar.panes != nil)
+            Button(store?.topics.isBenchShown == true ? "Hide Bench" : "Show Bench") { store?.toggleBench() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .toggleBench)?.shortcut)
+                .disabled(store?.topics.isBenchShown == nil)
             Button(store?.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View") { store?.toggleGitView() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .toggleGitView)?.shortcut)
                 .disabled(store?.selectedWindow == nil)

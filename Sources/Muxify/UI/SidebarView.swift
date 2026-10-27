@@ -115,10 +115,17 @@ private struct TopicsSection: View {
                 // Not lazy: a lazy stack is one more accessibility element over all the cards, and a click tool
                 // such as Homerow clicks its centre, on whichever card is there.
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(model.rows) { topic in
-                        listCard(topic).tracksBottomEdge(topic.id, in: $cardsBelow)
+                    ForEach(model.list) { item in
+                        switch item {
+                        case .card(let topic):
+                            listCard(topic, order: dragSlots(around: item.id)).tracksBottomEdge(topic.id, in: $cardsBelow)
+                        case .benchLine(let isBenchShown):
+                            BenchLine(isBenchShown: isBenchShown) { withAnimation(.easeOut(duration: 0.15)) { store.toggleBench() } }
+                                .listDragFixed(item.id, drag: drag, shown: dragSlots(around: item.id))
+                        case .noTopicSession(let opened):
+                            noTopicCard(opened).listDragFixed(item.id, drag: drag, shown: dragSlots(around: item.id))
+                        }
                     }
-                    if let opened = model.openedNoTopicSession { noTopicCard(opened) }
                 }
                 .onOverhangingBottomEdge(of: TopicCard.viewport, upTo: MoreBelowLine.height) { listEnd = $0 }
                 .padding(.horizontal, 6).padding(.vertical, 4)
@@ -144,8 +151,7 @@ private struct TopicsSection: View {
     }
 
     @ViewBuilder
-    private func listCard(_ topic: TopicsModel.Row) -> some View {
-        let order = model.cardOrder(pinned: topic.isPinned)
+    private func listCard(_ topic: TopicsModel.Row, order: [StackSlot<TopicListID>]) -> some View {
         if case .locked(let sessionID) = topic.id {
             LockedCard(store: store, row: topic, sessionID: sessionID, titles: model.titles,
                        holdsSelection: topic.id == model.activeTopic,
@@ -161,9 +167,17 @@ private struct TopicsSection: View {
         }
     }
 
+    /// The Topic and Locked cards that move in the drag of the item `id`, and the views between them that slide.
+    private func dragSlots(around id: TopicsModel.ListItem.ID) -> [StackSlot<TopicListID>] {
+        model.dragItems(around: id).map { item in
+            if case .card(let row) = item, let listID = row.id.listID { return .item(listID) }
+            return .fixed(item.id)
+        }
+    }
+
     /// The cards below the bottom edge, in list order, so that a click on the line scrolls to the first one.
     private var hiddenBelow: [TopicGroupID] {
-        (model.rows.map(\.id) + [.noTopic]).filter(cardsBelow.contains)
+        model.list.compactMap(\.cardID).filter(cardsBelow.contains)
     }
 
     private func zenLine(_ zen: ZenRecord) -> some View {
@@ -369,8 +383,8 @@ enum TopicCardPlace {
 /// What a card in the Topics list needs to move among the cards with its Pin.
 struct TopicListPlace {
     let drag: ListDrag<TopicListID>
-    /// The Topic and Locked cards with this card's pin, in list order, among which it moves.
-    let order: [TopicListID]
+    /// The Topic and Locked cards among which it moves, in list order, and the views between them that slide.
+    let order: [StackSlot<TopicListID>]
     let neighbors: CardNeighbors
     let rename: (String) -> Void
 }
@@ -680,7 +694,7 @@ private struct LockedCard: View {
     let showsAllRows: Bool
     let onShowAllRows: () -> Void
     let drag: ListDrag<TopicListID>
-    let order: [TopicListID]
+    let order: [StackSlot<TopicListID>]
     let neighbors: CardNeighbors
 
     private var id: TopicListID { .lock(sessionID: sessionID) }

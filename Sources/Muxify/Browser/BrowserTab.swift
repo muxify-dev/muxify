@@ -50,6 +50,13 @@ final class BrowserTab: NSObject, Identifiable {
     @ObservationIgnored private var finder: PageFinder?
 
     private static let configuration: WKWebViewConfiguration = {
+        // Pages here take code and formulas, which curly quotes and long dashes break. Without its own key, WebKit
+        // follows the system's Smart Quotes setting. A registered default is not written to disk, so a value the
+        // user saves still wins. WebKit reads these keys once, before the first web view.
+        UserDefaults.standard.register(defaults: [
+            "WebAutomaticQuoteSubstitutionEnabled": false,
+            "WebAutomaticDashSubstitutionEnabled": false,
+        ])
         let config = WKWebViewConfiguration()
         // One persistent profile shared by every Tab, like a normal browser.
         config.websiteDataStore = .default()

@@ -39,6 +39,7 @@ listed below.
 | `unsnooze_topic` | Unbound | Unsnooze the Active Topic while it is Snoozed. Else, while a Snoozed Topic exists, choose one Snoozed Topic to Unsnooze |
 | `unsnooze_topics` | Unbound | Open Unsnooze Topics, with no Topic checked |
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
+| `toggle_bench` | ⇧⌘S | Show or hide the Bench, the Topics after the ones [In Play](configuration.md#topics-in-play). It does nothing while the Topics list has no Bench line |
 | `toggle_terminal` | ⌘J | Show or hide the current Window's Terminal. It does nothing while the Terminal is the only side shown |
 | `toggle_browser` | ⌘B | Show or hide the current Window's Browser. It does nothing while the Browser is the only side shown |
 | `toggle_git_view` | ⌘G | Show or hide the [Git View](configuration.md#git-view) of the current Window's repository |
@@ -61,7 +62,7 @@ listed below.
 | `browser_forward` | ⌘] | Go forward in the active Tab's history. Browser Focus only |
 | `close_tab` | ⌘W | Close the active Browser Tab. Browser Focus only. From the Terminal, ⌘W goes on to Ghostty |
 | `reopen_closed_tab` | ⌘⇧T | Open the last closed Tab again at its place, with its history. Browser Focus only |
-| `select_card_1` … `select_card_9` | ⌃1 … ⌃9 | Jump To the Topic or Session at that position in Sidebar order |
+| `select_card_1` … `select_card_9` | ⌃1 … ⌃9 | Jump To the Topic or Session at that position in Sidebar order. A Benched card that does not show has no position |
 | `select_tab_1` … `select_tab_9` | ⌥1 … ⌥9 | Select that Tab and move Focus to the Browser, showing it if hidden |
 | `select_window_1` | ⌘1 | Select the first Window in the current Session |
 | `select_window_2` | ⌘2 | Select the second Window |
@@ -85,7 +86,7 @@ select the next or previous Tab, so Windows and Tabs share their step keys.
 | --- | --- | --- |
 | `select_next_session` | Unbound | Go to the next Session the Sidebar shows, wrapping to the first. In Topics mode, only the Active Topic's Sessions take part; for No Topic, the No Topic Sessions |
 | `select_prev_session` | Unbound | Go to the previous Session the Sidebar shows, wrapping to the last. In Topics mode, only the Active Topic's Sessions take part |
-| `select_next_topic` | Unbound | Go to the Topic below in the Topics list, wrapping to the first. Locked Sessions take part in their place; No Topic and Snoozed Topics do not. A Dormant Topic is Reopened. Works in both Sidebar modes |
+| `select_next_topic` | Unbound | Go to the Topic below in the Topics list, wrapping to the first. Locked Sessions take part in their place; No Topic, Snoozed Topics and Benched cards that do not show do not. A Dormant Topic is Reopened. Works in both Sidebar modes |
 | `select_prev_topic` | Unbound | Go to the Topic above in the Topics list, wrapping to the last |
 
 The default [Command Palettes](configuration.md#command-palettes) are
@@ -182,7 +183,7 @@ shortcut.
 
 Commands also lists the layout and Focus actions: Maximize or Restore, Maximize
 Terminal, Maximize Browser, Focus Terminal, Focus Browser, and Show or Hide for
-the Sidebar, the Terminal and the Browser. Each row shows its configured shortcut.
+the Sidebar, the Terminal and the Browser, and Toggle Bench while the Topics list has a Bench line. Each row shows its configured shortcut.
 Zoom Pane runs at once on the current Pane, as `toggle_zoom_pane` does.
 A row appears only when its action can change something.
 
@@ -245,6 +246,7 @@ keybindings:
   unsnooze_topic: []
   unsnooze_topics: []
   toggle_sidebar: [cmd+s, ctrl+cmd+s]
+  toggle_bench: shift+cmd+s
   toggle_terminal: cmd+j
   toggle_browser: cmd+b
   toggle_git_view: cmd+g

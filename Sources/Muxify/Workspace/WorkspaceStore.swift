@@ -841,6 +841,8 @@ final class WorkspaceStore {
 
     /// The open Snoozed or Settled group, and the Settled pages shown.
     var topicGroups = TopicGroupsState()
+    /// Whether the Bench shows. Only the user shows or hides it. Each App Window has its own, and no restart keeps it.
+    var benchShown = false
 
     /// Built again only after a change to what it reads, or when a Snooze deadline passes. The Sidebar, the menus
     /// and the terminal area read it many times in each update, and each build is expensive.
@@ -852,7 +854,7 @@ final class WorkspaceStore {
         // Topic records and SessionPaths are on this Mac; a Remote App Window shows Sessions only.
         if isRemote { config.sidebar.topics = false }
         return TopicsModel(records: topicWatcher.records, windows: windows, config: config,
-                           selection: topicSelection, location: location, mode: sidebarMode, groups: topicGroups, agents: agents,
+                           selection: topicSelection, location: location, mode: sidebarMode, groups: topicGroups, benchShown: benchShown, agents: agents,
                            panes: panesVisible ? panes : nil, zen: isRemote ? nil : topicWatcher.zen)
     }
 
@@ -879,6 +881,12 @@ final class WorkspaceStore {
             row.tags.indices.contains(item.index) ? CardTags.Item(shown: row.tags[item.index], text: item.text) : nil
         }
         return items.isEmpty ? nil : CardTags(placement: config.sidebar.tagPlacement, items: items, identifier: row.id.accessibilityID)
+    }
+
+    /// Shows or hides the Bench, while the Topics list has one.
+    func toggleBench() {
+        guard topics.isBenchShown != nil else { return }
+        benchShown.toggle()
     }
 
     /// Going to a Snoozed or Settled Topic opens its group, so the Sidebar shows it; leaving the group closes it.
@@ -2381,6 +2389,7 @@ final class WorkspaceStore {
         case .markUnread: changeRead(.unread, in: currentReadTarget)
         case .markAllRead: changeRead(.read, in: .environment)
         case .toggleSidebar: toggleSidebar()
+        case .toggleBench: toggleBench()
         case .toggleTerminal: toggle(.terminal)
         case .toggleBrowser: toggle(.browser)
         case .toggleGitView: toggleGitView()

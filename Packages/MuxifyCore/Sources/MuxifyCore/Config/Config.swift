@@ -67,6 +67,9 @@ public struct Config: Equatable {
         public var insertPosition = TopicInsertPosition.bottom
         /// Nil: Tags are off, and `#` in New Topic is plain title text.
         public var tags: ConfigTags?
+        /// How many cards that are not Pinned the Sidebar shows In Play; the others are on the Bench. Nil: the Sidebar
+        /// shows every card and has no Bench.
+        public var inPlay: Int?
 
         public init() {}
     }
@@ -441,6 +444,10 @@ public struct Config: Equatable {
         #   # New and returning Settled Topics go at the bottom or top of their
         #   # part of the list. Dormant Topics keep their place.
         #   insert_position: bottom
+        #   # The Sidebar shows the Pinned Topics and this many other Topics and
+        #   # Locked Sessions In Play. The rest wait on the Bench, behind one line
+        #   # that shows them. Not set: the Sidebar shows them all.
+        #   in_play: 5
         #   # The only Tags a Topic can have, in this order. A key is lower case
         #   # letters, digits and -. color is as in ui.agent_colors; a Tag
         #   # without one gets a fixed color from its name. No tags: Tags are off.
@@ -724,6 +731,7 @@ private struct ConfigReader {
                 }
                 config.topics.sessionOrder = order
             case "tags": readTags(value)
+            case "in_play": config.topics.inPlay = count(value, "topics.in_play", atLeast: 1)
             default: problem(at: key, "unknown key \"topics.\(name)\"")
             }
         }
