@@ -77,6 +77,38 @@ class HeaderNavigation(unittest.TestCase):
             self.assertGreaterEqual(x, left, key + ' moved before the App Window')
             self.assertLessEqual(x + width, left + window_width + 1, key + ' overflowed the App Window')
 
+    def rename_and_measure(self, name):
+        """The Session name's and the selected Window's frames, and the Terminal's left edge."""
+        self.s.tmux('rename-session', '-t', self.name, name)
+        rs = self.s.wait_rows(lambda rs: self.s.row('header-session-name', rs).get('accessibilityValue') == name
+                              and self.s.has('header-window-' + self.window, rs),
+                              'header did not show the Session ' + name)
+        terminal_x = bounds(self.s.row('terminal-panel', rs))[0]
+        return bounds(self.s.row('header-session-name', rs)), bounds(self.s.row('header-window-' + self.window, rs)), terminal_x
+
+    def test_window_list_starts_at_the_terminal_edge_after_a_short_session_name(self):
+        self.assertTrue(self.s.has('sidebar-panel'), 'the check needs the sidebar shown')
+        name, window, terminal_x = self.rename_and_measure('edge')
+        self.assertAlmostEqual(window[0], terminal_x, delta=1,
+                               msg='Window list starts at %s, not at the Terminal edge %s' % (window[0], terminal_x))
+        self.assertLess(name[0] + name[2], terminal_x, 'short Session name reaches past the sidebar')
+
+    def test_session_name_longer_than_the_sidebar_pushes_the_window_list_right(self):
+        self.assertTrue(self.s.has('sidebar-panel'), 'the check needs the sidebar shown')
+        name, window, terminal_x = self.rename_and_measure('a-session-name-that-is-much-longer-than-the-sidebar-is-wide')
+        self.assertGreater(name[0] + name[2], terminal_x, 'the Session name fits the sidebar, so it tests nothing')
+        self.assertGreaterEqual(window[0], name[0] + name[2],
+                                'Window list at %s overlaps the Session name ending at %s' % (window[0], name[0] + name[2]))
+
+    def test_window_list_follows_the_session_name_while_the_sidebar_is_hidden(self):
+        self.s.act('press', 'toggle-sidebar')
+        self.addCleanup(lambda: self.s.wait_rows(lambda rs: self.s.has('sidebar-panel', rs), 'sidebar did not come back'))
+        self.addCleanup(self.s.act, 'press', 'toggle-sidebar')
+        self.s.wait_rows(lambda rs: not self.s.has('sidebar-panel', rs), 'sidebar did not hide')
+        name, window, _ = self.rename_and_measure('edge-hidden')
+        gap = window[0] - (name[0] + name[2])
+        self.assertTrue(0 <= gap <= 12, 'Window list is %s points after the Session name, not beside it' % gap)
+
     def test_status_line_header_can_be_disabled_live_without_hiding_git_or_controls(self):
         self.wait_head('header-main')
         config = self.s.root/'config/muxify/config.yaml'

@@ -15,7 +15,7 @@ struct ContentView: View {
             let layout = store.panelLayout
             let showsTerminal = layout.shows(.terminal)
             let browser = layout.shows(.browser) ? store.currentBrowser : nil
-            let sidebar = store.sidebarShown ? clamp(sidebarWidth, 180, 420) : 0
+            let sidebar = shownSidebarWidth
             let room = proxy.size.width - sidebar
             let browserMax = max(320, room - 360)
             let browserWidth = showsTerminal ? clamp(browserShare * room, 320, browserMax) : room
@@ -82,7 +82,9 @@ struct ContentView: View {
         // (sidebar list, tab strip) reach up under the title bar area and would
         // otherwise swallow clicks on the toggles.
         .overlay(alignment: .top) {
-            HeaderBar(store: store, keybinds: store.config.keybinds, height: headerHeight)
+            // The sidebar's divider is 1 point wide.
+            HeaderBar(store: store, keybinds: store.config.keybinds, height: headerHeight,
+                      panelsLeading: store.sidebarShown ? shownSidebarWidth + 1 : 0)
         }
         .modifier(HintVerification(store: store))
         .modifier(ClientVerification(store: store))
@@ -122,6 +124,8 @@ struct ContentView: View {
 
     private var headerHeight: CGFloat { CGFloat(store.config.headerHeight) }
 
+    private var shownSidebarWidth: Double { store.sidebarShown ? clamp(sidebarWidth, 180, 420) : 0 }
+
     private func clamp(_ value: Double, _ low: Double, _ high: Double) -> Double {
         min(max(value, low), high)
     }
@@ -132,9 +136,12 @@ private struct HeaderBar: View {
     let store: WorkspaceStore
     let keybinds: Keybinds
     let height: CGFloat
+    /// Where the Terminal and Browser start, beside the sidebar.
+    let panelsLeading: CGFloat
+    private let spacing: CGFloat = 2
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: spacing) {
             if store.config.statusLineHeader, let window = store.selectedWindow,
                !store.showsEmptyPage {
                 Text(window.sessionName)
@@ -147,8 +154,12 @@ private struct HeaderBar: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .help(window.sessionName)
                     .accessibilityIdentifier("header-session-name")
+                    .padding(.trailing, 8)
+                    // The Window list starts at the Terminal's edge, never over the sidebar.
+                    // A Session name too long for the sidebar pushes it right.
+                    .frame(minWidth: max(0, panelsLeading - TitlebarMetrics.trafficLightsWidth - spacing),
+                           alignment: .leading)
                 HeaderWindowSelector(store: store, current: window)
-                    .padding(.leading, 8)
             }
             Spacer(minLength: 12)
             if let window = store.selectedWindow, !store.showsEmptyPage {
