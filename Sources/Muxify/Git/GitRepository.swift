@@ -737,6 +737,18 @@ enum GitRepository {
     exec git push "$remote" --delete "${ref#refs/heads/}"
     """
 
+    /// Takes the folder and a local branch, and prints the URL of its upstream's remote, with `insteadOf` rules applied,
+    /// then the upstream branch's name. A branch with no upstream, or one on the remote `.`, prints the reason to stderr.
+    static let pullRequestLinkScript = """
+    cd "$1" || exit 1
+    remote=$(git config "branch.$2.remote") && ref=$(git config "branch.$2.merge") && [ "$remote" != . ] || {
+        echo "\(GitHosting.Failure.noUpstream.message)" >&2
+        exit 1
+    }
+    url=$(git ls-remote --get-url "$remote") || exit 1
+    printf '%s\\n%s\\n' "$url" "${ref#refs/heads/}"
+    """
+
     /// Takes the folder and fetches all remotes, as lazygit's `f` does by default. It runs in a pseudo-terminal
     /// (`TerminalCommand`), so git's and ssh's questions for credentials are asked in the Git View.
     static let fetchScript = """

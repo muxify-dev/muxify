@@ -149,6 +149,7 @@ class GitView(unittest.TestCase):
         command = "printf '%s\\n%s\\n' {file} {line} > " + shlex.quote(str(cls.editor_out)) + '; sleep 60'
         # Every folder of projects/ is a Session Path, so a Worktree beside the fixture has a Go to… row.
         (s.root/'config/muxify/config.yaml').write_text('git_view:\n  editor: ' + json.dumps(command) + '\n'
+                                                       '  services:\n    git.muxify.test: github:git.muxify.test\n'
                                                        'sessions:\n  paths:\n    - path: ' + str(s.root/'projects') + '/*\n')
         s.launch(LAUNCH_ARGS)
         s.wait_shown(cls.window)
@@ -2215,6 +2216,76 @@ class GitView(unittest.TestCase):
         self.assertEqual(self.copied_count(), 0, 'the first Worktree\'s Git View still shows the copies')
         self.assertEqual(self.git('log', '--format=%s', '-1').strip(), 'third commit', 'the paste changed the first Worktree')
         self.assertEqual(len(commits), 2)
+
+    # `o` in Branches. `.test` is reserved, so no page it opens reaches a real server; the Config maps the host.
+
+    def stored_tabs(self):
+        return self.s.tmux('show-options', '-wqv', '-t', self.window, '@muxify_tabs').split()
+
+    def close_browser_tabs(self):
+        for _ in range(len(self.stored_tabs())):
+            self.s.driver('press', 'Close Tab')
+        wait(lambda: not self.stored_tabs(), 'the Browser still has Tabs', seconds=10)
+
+    def track(self, branch, url, merge=None, remote='muxify-test'):
+        """Gives `branch` an upstream on a remote with `url`, which nothing fetches."""
+        self.git('remote', 'add', remote, url)
+        self.addCleanup(self.git, 'remote', 'remove', remote)
+        self.git('config', 'branch.%s.remote' % branch, remote)
+        self.git('config', 'branch.%s.merge' % branch, 'refs/heads/' + (merge or branch))
+
+    def press_o_on(self, branch):
+        self.go_to('3')
+        self.select_row('git-row-branch:' + branch)
+        self.key('o')
+
+    def banner(self):
+        self.s.wait_rows(lambda rs: self.s.has('git-write-error', rs), 'o showed no banner', seconds=10)
+        return self.s.row('git-write-error').get('accessibilityValue')
+
+    def test_o_on_a_branch_with_an_upstream_opens_its_pull_request_page_in_the_browser_and_closes_the_popup(self):
+        self.addCleanup(self.close_browser_tabs)
+        self.track('feature-x', 'git@git.muxify.test:owner/repo.git', merge='topic/feature-x')
+        self.assertEqual(self.stored_tabs(), [])
+        # main is checked out, not feature-x.
+        self.press_o_on('feature-x')
+        link = 'https://git.muxify.test/owner/repo/compare/topic%2Ffeature-x?expand=1'
+        wait(lambda: link in self.stored_tabs(), 'o did not open %s; Tabs are %s' % (link, self.stored_tabs()), seconds=10)
+        self.assertEqual(len(self.stored_tabs()), 1)
+        wait(lambda: not self.is_open(), 'the popup Git View did not close', seconds=10)
+        wait(lambda: 'WKWebView' in self.s.driver('responder')['responders'], 'the page did not get Focus')
+
+    def test_o_on_a_branch_with_no_upstream_a_host_nobody_claims_and_a_url_that_does_not_parse_says_why_and_opens_nothing(self):
+        self.addCleanup(self.close_browser_tabs)
+        self.press_o_on('feature-x')
+        self.assertEqual(self.banner(), 'Cannot open a pull request for a branch with no upstream')
+        self.git('remote', 'add', 'other', 'git@other.muxify.test:owner/repo.git')
+        self.addCleanup(self.git, 'remote', 'remove', 'other')
+        self.git('config', 'branch.feature-x.remote', 'other')
+        self.git('config', 'branch.feature-x.merge', 'refs/heads/feature-x')
+        self.key('o')
+        wait(lambda: self.banner() == 'Unsupported git service', 'the banner does not name the unclaimed host')
+        self.git('config', 'branch.feature-x.remote', '.')
+        self.key('o')
+        wait(lambda: self.banner() == 'Cannot open a pull request for a branch with no upstream', 'a remote . is not refused')
+        self.git('remote', 'set-url', 'other', 'git@git.muxify.test')
+        self.git('config', 'branch.feature-x.remote', 'other')
+        self.key('o')
+        wait(lambda: self.banner() == 'Failed to parse repo information from url', 'the banner does not say the URL fails to parse')
+        time.sleep(.5)
+        self.assertEqual(self.stored_tabs(), [], 'o opened a page')
+        self.assertTrue(self.is_open(), 'the Git View closed')
+
+    def test_o_does_nothing_in_changes_and_history(self):
+        self.addCleanup(self.close_browser_tabs)
+        self.track('main', 'git@git.muxify.test:owner/repo.git')
+        for tab in ['1', '2']:
+            self.go_to(tab)
+            self.key('o')
+        time.sleep(.5)
+        self.assertEqual(self.stored_tabs(), [], 'o opened a page outside Branches')
+        self.assertFalse(self.s.has('git-write-error'))
+        self.assertTrue(self.is_open())
 
 
 if __name__ == '__main__':

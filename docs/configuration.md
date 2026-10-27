@@ -746,6 +746,10 @@ git_view:
   height: 80%
   editor: nvim +{line} {file}   # without it: ${VISUAL:-${EDITOR:-vi}} +{line} {file}
   editor_in_window: true
+  services:           # a git host, mapped to <provider>:<web domain>
+    github.mycompany.com: github:github.mycompany.com
+    github-work: github:github.com                # an ssh Host alias: git@github-work:org/repo.git
+    git.internal: github:git.internal:8443        # the web domain may carry a :port
 ```
 
 The sizes are the defaults. `popup` floats over the whole App Window, Sidebar and
@@ -770,8 +774,23 @@ git_view:
   editor_in_window: false
 ```
 
+o in Branches opens the selected branch's "create pull request" page as a Tab in
+the Window's Browser, as a ⌘-click on a link does, and the page gets Focus. A
+popup Git View closes, because it floats over the Browser; a `fullscreen` one
+stays open. The link is
+`https://<web domain>/<owner>/<repo>/compare/<upstream branch>?expand=1`, with
+the repository read from the URL of the branch's upstream remote, which may
+not be `origin`. `services` maps a git host to `<provider>:<web domain>`. The
+provider is `github`, and github.com is built in. A git host is the host of
+the remote's URL, without user or port: `github-work` in
+`git@github-work:org/repo.git`. A host matches exactly, and your entries come
+before the built-in ones, so `github.company.com` needs an entry of its own. A
+branch with no upstream, or a host no service claims, shows a message in the Git
+View's banner and opens nothing.
+
 Changes apply live; invalid values use the defaults and appear in the Config
-problems banner.
+problems banner, as does a `services` entry with no `:` or with an unknown
+provider, which is skipped.
 
 The Git View reads the repository when it opens, every 10 seconds, when Muxify
 comes to the front, with R, and after you stage or commit. On a Remote

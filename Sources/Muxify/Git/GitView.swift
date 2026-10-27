@@ -328,6 +328,8 @@ final class GitView {
         case pasteCommits
         /// ⌃r: clears the Copied commits.
         case clearCopied
+        /// o: opens the "create pull request" page of the branch selected in Branches.
+        case openPage
     }
 
     private(set) var isOpen = false
@@ -1059,7 +1061,7 @@ final class GitView {
             "space": .toggle, "minus": .collapseAll, "equal": .expandAll, "n": .newBranch,
             "c": .commit, "d": .discard, "g": .pop, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
             "shift+w": .mark, "e": .edit, "f": .fetch, "shift+a": .amend, "m": .operation, "shift+m": .merge, "r": .rebase, "shift+p": .push, "p": .pull,
-            "shift+c": .copyCommit, "shift+v": .pasteCommits, "ctrl+r": .clearCopied,
+            "shift+c": .copyCommit, "shift+v": .pasteCommits, "ctrl+r": .clearCopied, "o": .openPage,
     ]
 
     static let commands: [KeyTrigger: Command] = Dictionary(uniqueKeysWithValues: keyMap.map { (try! KeyTrigger($0), $1) })
@@ -1217,6 +1219,8 @@ final class GitView {
             push()
         case .pull:
             pull()
+        case .openPage:
+            if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { openPullRequest(of: branch) }
         }
     }
 
@@ -1796,6 +1800,39 @@ final class GitView {
             let name = Self.branchName(typed)
             if name != branch.name { self.write(GitRepository.renameBranchScript, arguments: [snapshot.root, branch.name, name]) }
         })
+    }
+
+    /// o in Branches: opens the page that creates a pull request from the branch's upstream, as a Tab in the Window's
+    /// Browser. Nothing is checked first: not that the branch is pushed, nor that a pull request exists.
+    func openPullRequest(of branch: GitBranch) {
+        guard list == .branches, let store, let root = snapshot?.root else { return }
+        writeError = nil
+        store.runGitScript(GitRepository.pullRequestLinkScript, arguments: [root, branch.name], timeout: 10) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let output):
+                let lines = output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                guard lines.count >= 2 else {
+                    self.writeError = GitHosting.Failure.noUpstream.message
+                    return
+                }
+                switch GitHosting.pullRequestURL(remoteURL: lines[0], upstreamBranch: lines[1], services: store.config.gitView.services) {
+                case .success(let url): self.openInBrowser(url)
+                case .failure(let failure): self.writeError = failure.message
+                }
+            case .failure(let error):
+                self.writeError = Self.message(for: error)
+            }
+        }
+    }
+
+    /// Opens `url` as a Tab in this Window's Browser and gives the page Focus. A popup floats over the Browser, so it
+    /// closes; a fullscreen Git View stays open beside it.
+    private func openInBrowser(_ url: URL) {
+        guard let store else { return }
+        store.openInBrowser(url, windowID: windowID)
+        if store.config.gitView.display == .popup { close(restoringFocus: false) }
+        if isCurrent { store.browser(for: windowID).requestFocus() }
     }
 
     /// -: `git checkout -`. A previous branch that is still one goes the way a checkout of it does.

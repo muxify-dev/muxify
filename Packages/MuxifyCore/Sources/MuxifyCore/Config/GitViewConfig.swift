@@ -19,14 +19,17 @@ public struct GitViewConfig: Equatable {
     /// False runs `editor` with no Window, in the background, for a command
     /// that hands the file to an editor that already runs.
     public var editorInWindow = true
+    /// The hosting services of `git_view.services`, which `o` tries before the built-in hosts.
+    public var services: [GitHosting.Service] = []
 
     public init(display: Display = .popup, width: Double = 0.8, height: Double = 0.8, editor: String? = nil,
-                editorInWindow: Bool = true) {
+                editorInWindow: Bool = true, services: [GitHosting.Service] = []) {
         self.display = display
         self.width = width
         self.height = height
         self.editor = editor
         self.editorInWindow = editorInWindow
+        self.services = services
     }
 
     /// What `e` runs without `git_view.editor`.
