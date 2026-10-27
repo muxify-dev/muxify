@@ -2,6 +2,8 @@
 
 from pathlib import Path
 import json
+import os
+import signal
 import time
 import unittest
 
@@ -218,6 +220,32 @@ class TopicsUnread(TopicsSidebar):
         self.command('Mark Read')
         self.assert_unread(topic, False)
         self.assertNotEqual(self.s.tmux_ok('list-sessions').returncode, 0)
+
+    def test_detached_client_can_reattach_after_a_local_inventory_read_times_out(self):
+        topic = 'timeout-read-target'
+        self.write_empty_topic(topic)
+        self.enter_empty(topic)
+        socket = self.s.tmux('display-message', '-p', '#{socket_path}')
+        self.assertTrue(Path(socket).resolve().is_relative_to(self.s.root.resolve()))
+        server = int(self.s.tmux('display-message', '-p', '#{pid}'))
+        clients = self.s.tmux('list-clients', '-F', '#{client_control_mode}|#{client_tty}').splitlines()
+        for client in clients:
+            control, tty = client.split('|')
+            if control == '0':
+                self.s.tmux('detach-client', '-t', tty)
+        self.s.wait_rows(lambda rs: any(r.get('accessibilityLabel') == 'Reattach' for r in rs),
+                         'The detached Client has no Reattach button')
+        os.kill(server, signal.SIGSTOP)
+        try:
+            self.s.wait_rows(lambda rs: 'timed out' in self.s.row('header-environment-selector', rs).get('accessibilityHelp', ''),
+                             'The Local Inventory read did not time out', seconds=20)
+        finally:
+            os.kill(server, signal.SIGCONT)
+        self.s.act('press', 'Reattach')
+        window = self.s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}')
+        self.s.show(window)
+        wait(lambda: '0|' + window in self.s.tmux('list-clients', '-F', '#{client_control_mode}|#{window_id}').splitlines(),
+             'The Terminal Client did not reattach after the Local Inventory read timed out')
 
     def test_empty_topic_view_stays_when_the_tmux_server_stops(self):
         topic = 'offline-stays-target'
