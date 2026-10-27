@@ -368,7 +368,7 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+b"), focus: nil), .focusBrowser)
             XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("cmd+s"))
             XCTAssertEqual(config.headerHeight, 30)
-            XCTAssertTrue(config.statusLineHeader)
+            XCTAssertEqual(config.statusLine, Config.StatusLine())
             XCTAssertEqual(config.sidebarTypography, SidebarTypography())
             XCTAssertNil(config.ghosttyConfigFile)
             XCTAssertEqual(config.problems, [])
@@ -384,27 +384,69 @@ final class ConfigTests: XCTestCase {
         }
     }
 
-    func testStatusLineHeaderAcceptsBooleansAndDefaultsToVisible() throws {
-        for text in ["", "ui: {}", "ui:\n  header_height: 26", "ui:\n  status_line_header: true"] {
+    func testStatusLineEnabledAcceptsBooleansAndDefaultsToVisible() throws {
+        for text in ["", "ui: {}", "ui:\n  header_height: 26", "ui:\n  status_line: {}", "ui:\n  status_line:\n    enabled: true"] {
             let config = try load(text)
-            XCTAssertTrue(config.statusLineHeader, text)
+            XCTAssertTrue(config.statusLine.enabled, text)
             XCTAssertEqual(config.problems, [], text)
         }
-        let hidden = try load("ui:\n  status_line_header: false\n  header_height: 26")
-        XCTAssertFalse(hidden.statusLineHeader)
+        let hidden = try load("ui:\n  status_line:\n    enabled: false\n  header_height: 26")
+        XCTAssertFalse(hidden.statusLine.enabled)
         XCTAssertEqual(hidden.headerHeight, 26)
         XCTAssertEqual(hidden.problems, [])
     }
 
-    func testInvalidStatusLineHeaderFallsBackWithoutBlockingOtherSettings() throws {
+    func testInvalidStatusLineEnabledFallsBackWithoutBlockingOtherSettings() throws {
         for value in ["", "null", "~", "0", "1", "wrong", "'false'", "'true'", "[]", "{}"] {
-            let config = try load("ui:\n  status_line_header: \(value)\n  header_height: 26")
-            XCTAssertTrue(config.statusLineHeader, value)
+            let config = try load("ui:\n  status_line:\n    enabled: \(value)\n  header_height: 26")
+            XCTAssertTrue(config.statusLine.enabled, value)
             XCTAssertEqual(config.headerHeight, 26, value)
             XCTAssertEqual(config.problems, [
-                ConfigProblem(path: root, line: 2, message: "ui.status_line_header: expected a boolean"),
+                ConfigProblem(path: root, line: 3, message: "ui.status_line.enabled: expected a boolean"),
             ], value)
         }
+    }
+
+    func testStatusLineSessionWrapsByDefaultAndTakesOnlyABoolean() throws {
+        for text in ["", "ui: {}", "ui:\n  status_line: {}", "ui:\n  status_line:\n    session: {}",
+                     "ui:\n  status_line:\n    session:\n      wrap: true"] {
+            let config = try load(text)
+            XCTAssertTrue(config.statusLine.wrapsSession, text)
+            XCTAssertEqual(config.problems, [], text)
+        }
+        let whole = try load("ui:\n  status_line:\n    session:\n      wrap: false\n  header_height: 26")
+        XCTAssertFalse(whole.statusLine.wrapsSession)
+        XCTAssertEqual(whole.headerHeight, 26)
+        XCTAssertEqual(whole.problems, [])
+        for value in ["", "null", "0", "wrong", "'false'", "[]"] {
+            let config = try load("ui:\n  status_line:\n    session:\n      wrap: \(value)\n  header_height: 26")
+            XCTAssertTrue(config.statusLine.wrapsSession, value)
+            XCTAssertEqual(config.headerHeight, 26, value)
+            XCTAssertEqual(config.problems, [
+                ConfigProblem(path: root, line: 4, message: "ui.status_line.session.wrap: expected a boolean"),
+            ], value)
+        }
+    }
+
+    func testStatusLineSessionTakesOnlyWrap() throws {
+        let config = try load("ui:\n  status_line:\n    window: {}\n    session:\n      cut: middle\n      wrap: false")
+        XCTAssertFalse(config.statusLine.wrapsSession)
+        XCTAssertEqual(config.problems.map(\.message), [
+            "unknown key \"ui.status_line.window\"", "unknown key \"ui.status_line.session.cut\"",
+        ])
+        XCTAssertEqual(try load("ui:\n  status_line: false").problems.map(\.message), ["ui.status_line: expected a mapping"])
+        XCTAssertEqual(try load("ui:\n  status_line:\n    session: false").problems.map(\.message),
+                       ["ui.status_line.session: expected a mapping"])
+    }
+
+    func testStatusLineTemplateShowsTheDefaults() throws {
+        let lines = Config.template.split(separator: "\n").map(String.init)
+        let start = try XCTUnwrap(lines.firstIndex(of: "#   status_line:"))
+        let block = lines[start...].prefix { $0 == lines[start] || $0.hasPrefix("#     ") }
+        XCTAssertTrue(block.contains("#     enabled: true") && block.contains("#       wrap: true"), "\(block)")
+        let config = try load((["# ui:"] + block).map { String($0.dropFirst(2)) }.joined(separator: "\n"))
+        XCTAssertEqual(config.statusLine, Config().statusLine)
+        XCTAssertEqual(config.problems, [])
     }
 
     func testFocusMarkerIsOffByDefaultAndTakesOnlyABoolean() throws {
@@ -435,16 +477,6 @@ final class ConfigTests: XCTestCase {
             "ui.focus_marker_opacity: expected a number above 0 and at most 1, or a mapping with light and dark",
             "ui.focus_marker_color: missing dark",
         ])
-    }
-
-    func testStatusLineHeaderTemplateShowsTheDefault() throws {
-        let shown = Config.template.split(separator: "\n").filter {
-            $0.hasPrefix("# ui:") || $0.hasPrefix("#   status_line_header:")
-        }.map { $0.dropFirst(2) }
-        XCTAssertEqual(shown.count, 2)
-        let config = try load(shown.joined(separator: "\n"))
-        XCTAssertEqual(config.statusLineHeader, Config().statusLineHeader)
-        XCTAssertEqual(config.problems, [])
     }
 
     func testSidebarTypographyDefaultsPreserveExistingConfig() throws {

@@ -142,22 +142,26 @@ private struct HeaderBar: View {
 
     var body: some View {
         HStack(spacing: spacing) {
-            if store.config.statusLineHeader, let window = store.selectedWindow,
+            if store.config.statusLine.enabled, let window = store.selectedWindow,
                !store.showsEmptyPage {
+                let overSidebar = max(0, panelsLeading - TitlebarMetrics.trafficLightsWidth - spacing)
                 Text(window.sessionName)
                     .font(.system(size: 13, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     // Keep the full name whenever it fits. The Window list can collapse first;
-                    // only the remaining titlebar width, not a fixed cap, truncates the name.
+                    // only the room over the sidebar or the remaining titlebar width, not a fixed cap,
+                    // truncates the name.
                     .layoutPriority(1)
                     .fixedSize(horizontal: false, vertical: true)
                     .help(window.sessionName)
                     .accessibilityIdentifier("header-session-name")
                     .padding(.trailing, 8)
                     // The Window list starts at the Terminal's edge, never over the sidebar.
-                    // A Session name too long for the sidebar pushes it right.
-                    .frame(minWidth: max(0, panelsLeading - TitlebarMetrics.trafficLightsWidth - spacing),
+                    // A Session name too long for the sidebar is cut in the middle to stay over it,
+                    // or, with status_line.session.wrap off, pushes the list right.
+                    .frame(minWidth: overSidebar,
+                           maxWidth: store.config.statusLine.wrapsSession && panelsLeading > 0 ? overSidebar : nil,
                            alignment: .leading)
                 HeaderWindowSelector(store: store, current: window)
             }

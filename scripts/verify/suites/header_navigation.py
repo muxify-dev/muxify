@@ -52,19 +52,29 @@ class HeaderNavigation(unittest.TestCase):
                               'header did not follow Session rename')
         self.assertEqual(self.s.row('header-session-name', rs)['accessibilityValue'], 'header-renamed')
 
+    def show_whole_session_names(self):
+        """Turns ui.status_line.session.wrap off until the check ends."""
+        config = self.s.root/'config/muxify/config.yaml'
+        self.addCleanup(config.unlink, missing_ok=True)
+        config.write_text('ui:\n  status_line:\n    session:\n      wrap: false\n')
+
     def test_session_name_uses_available_space_instead_of_a_fixed_width_cap(self):
+        self.show_whole_session_names()
         name = 'session-name-long-enough-to-use-more-than-two-hundred-points'
         self.s.tmux('rename-session', '-t', self.name, name)
-        rs = self.s.wait_rows(lambda rs: self.s.row('header-session-name', rs).get('accessibilityValue') == name,
-                             'header did not show the long Session name')
+        rs = self.s.wait_rows(lambda rs: self.s.row('header-session-name', rs).get('accessibilityValue') == name
+                              and bounds(self.s.row('header-session-name', rs))[2] > 300,
+                             'header did not show the long Session name past the sidebar')
         _, _, width, _ = bounds(self.s.row('header-session-name', rs))
         self.assertGreater(width, 300, 'Session name is still limited to a fixed width: %s' % width)
 
     def test_oversized_session_name_shrinks_without_pushing_controls_out_of_the_header(self):
+        self.show_whole_session_names()
         name = 'a-very-long-session-name-' * 40
         self.s.tmux('rename-session', '-t', self.name, name)
-        rs = self.s.wait_rows(lambda rs: self.s.row('header-session-name', rs).get('accessibilityValue') == name,
-                             'header did not show the oversized Session name')
+        rs = self.s.wait_rows(lambda rs: self.s.row('header-session-name', rs).get('accessibilityValue') == name
+                              and bounds(self.s.row('header-session-name', rs))[2] > 200,
+                             'header did not show the oversized Session name past the sidebar')
         app_window = next(row for row in rs if row.get('accessibilityRole') == 'AXWindow')
         left, _, window_width, _ = bounds(app_window)
         name_x, _, name_width, _ = bounds(self.s.row('header-session-name', rs))
@@ -77,11 +87,11 @@ class HeaderNavigation(unittest.TestCase):
             self.assertGreaterEqual(x, left, key + ' moved before the App Window')
             self.assertLessEqual(x + width, left + window_width + 1, key + ' overflowed the App Window')
 
-    def rename_and_measure(self, name):
+    def rename_and_measure(self, name, until=lambda rs: True):
         """The Session name's and the selected Window's frames, and the Terminal's left edge."""
         self.s.tmux('rename-session', '-t', self.name, name)
         rs = self.s.wait_rows(lambda rs: self.s.row('header-session-name', rs).get('accessibilityValue') == name
-                              and self.s.has('header-window-' + self.window, rs),
+                              and self.s.has('header-window-' + self.window, rs) and until(rs),
                               'header did not show the Session ' + name)
         terminal_x = bounds(self.s.row('terminal-panel', rs))[0]
         return bounds(self.s.row('header-session-name', rs)), bounds(self.s.row('header-window-' + self.window, rs)), terminal_x
@@ -93,9 +103,28 @@ class HeaderNavigation(unittest.TestCase):
                                msg='Window list starts at %s, not at the Terminal edge %s' % (window[0], terminal_x))
         self.assertLess(name[0] + name[2], terminal_x, 'short Session name reaches past the sidebar')
 
-    def test_session_name_longer_than_the_sidebar_pushes_the_window_list_right(self):
+    def ends_past_the_terminal_edge(self, rs):
+        name = bounds(self.s.row('header-session-name', rs))
+        return name[0] + name[2] > bounds(self.s.row('terminal-panel', rs))[0]
+
+    def test_session_name_longer_than_the_sidebar_is_cut_to_stay_over_it(self):
         self.assertTrue(self.s.has('sidebar-panel'), 'the check needs the sidebar shown')
-        name, window, terminal_x = self.rename_and_measure('a-session-name-that-is-much-longer-than-the-sidebar-is-wide')
+        whole = 'a-session-name-that-is-much-longer-than-the-sidebar-is-wide-and-cut-in-the-middle'
+        # The wait also lets a reload after a check with status_line.session.wrap: false apply.
+        name, window, terminal_x = self.rename_and_measure(
+            whole, until=lambda rs: not self.ends_past_the_terminal_edge(rs))
+        self.assertLess(name[0] + name[2], terminal_x,
+                        'Session name ends at %s, past the Terminal edge %s' % (name[0] + name[2], terminal_x))
+        self.assertAlmostEqual(window[0], terminal_x, delta=1,
+                               msg='Window list starts at %s, not at the Terminal edge %s' % (window[0], terminal_x))
+        self.assertEqual(self.s.row('header-session-name')['accessibilityValue'], whole,
+                         'the cut Session name no longer names the whole Session')
+
+    def test_session_name_longer_than_the_sidebar_pushes_the_window_list_right_when_it_need_not_fit(self):
+        self.assertTrue(self.s.has('sidebar-panel'), 'the check needs the sidebar shown')
+        self.show_whole_session_names()
+        name, window, terminal_x = self.rename_and_measure('a-session-name-that-is-much-longer-than-the-sidebar-is-wide',
+                                                           until=self.ends_past_the_terminal_edge)
         self.assertGreater(name[0] + name[2], terminal_x, 'the Session name fits the sidebar, so it tests nothing')
         self.assertGreaterEqual(window[0], name[0] + name[2],
                                 'Window list at %s overlaps the Session name ending at %s' % (window[0], name[0] + name[2]))
@@ -109,17 +138,17 @@ class HeaderNavigation(unittest.TestCase):
         gap = window[0] - (name[0] + name[2])
         self.assertTrue(0 <= gap <= 12, 'Window list is %s points after the Session name, not beside it' % gap)
 
-    def test_status_line_header_can_be_disabled_live_without_hiding_git_or_controls(self):
+    def test_status_line_can_be_disabled_live_without_hiding_git_or_controls(self):
         self.wait_head('header-main')
         config = self.s.root/'config/muxify/config.yaml'
         self.addCleanup(config.unlink, missing_ok=True)
-        config.write_text('ui:\n  status_line_header: false\n')
+        config.write_text('ui:\n  status_line:\n    enabled: false\n')
         rs = self.s.wait_rows(lambda rs: not self.s.has('header-session-name', rs)
                              and not any(key.startswith('header-window-') for key in self.s.ids(rs)),
-                             'status_line_header: false did not hide Session and Window navigation')
+                             'status_line.enabled: false did not hide Session and Window navigation')
         for key in ['toggle-git-view', 'header-environment-selector', 'toggle-sidebar',
                     'toggle-terminal', 'toggle-browser', 'toggle-maximize']:
-            self.assertTrue(self.s.has(key, rs), key + ' disappeared with status_line_header: false')
+            self.assertTrue(self.s.has(key, rs), key + ' disappeared with status_line.enabled: false')
         self.assertEqual(self.s.row('toggle-git-view', rs)['accessibilityLabel'], 'header-main')
         self.s.act('click', 'toggle-git-view')
         self.s.wait_rows(lambda rs: self.s.has('git-view', rs), 'Git View stopped opening with the Session header hidden')
@@ -127,7 +156,7 @@ class HeaderNavigation(unittest.TestCase):
         config.write_text('')
         rs = self.s.wait_rows(lambda rs: self.s.has('header-session-name', rs)
                              and self.s.has('header-window-' + self.window, rs),
-                             'removing status_line_header did not restore Session and Window navigation')
+                             'removing status_line.enabled did not restore Session and Window navigation')
         self.assertEqual(self.s.row('header-window-' + self.window, rs)['accessibilityValue'], 'selected')
 
     def test_branch_button_opens_git_view_and_is_before_environment_on_the_right(self):
