@@ -112,7 +112,11 @@ snapshot does not write a file. Confirmed Muxify closures and removals observed
 between complete inventories of the same running server remove the stopped Session
 or Window. A confirmed last closure leaves an Empty Topic. An absent server,
 failed read, initial reconnect inventory or a different server incarnation does not
-prove closure: unknown disappearances preserve the last saved layout. Settle saves
+prove closure: unknown disappearances preserve the last saved layout of a
+Session that is not live. A live Session is different. Its saved Windows are
+the Windows that tmux lists for it, because that list is complete. A Window
+saved on an earlier server stays only until Reopen makes it again under a new
+id, and then the new Window replaces it. Settle saves
 the layout before its explicit Kill choices, so Reopen can restore it.
 
 Remove from Topic, Remove from Topic and Kill, and a Move of a Session take
