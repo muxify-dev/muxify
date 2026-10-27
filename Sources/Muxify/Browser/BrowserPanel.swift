@@ -146,7 +146,12 @@ private struct TabContent: View {
             toolbar
             Divider()
             if tab.isFindShown {
-                FindBar(tab: tab, onClose: closeFind)
+                // Find in Page, between the toolbar and the page (ADR-0033).
+                FindBar(finder: tab, placeholder: "Find in Page", identifier: "browser-find",
+                        window: { tab.webView.window }, onClose: closeFind)
+                    .padding(.horizontal, 10)
+                    .frame(height: 30)
+                    .background(Color.primary.opacity(0.035))
                 Divider()
             }
             ZStack {
@@ -330,70 +335,6 @@ private struct TabContent: View {
     private func scanPorts() {
         guard browser.discoversLocalServers else { return }
         DevServerScanner.scan(windowID: browser.windowID) { ports = $0 }
-    }
-}
-
-/// Find in Page for the active Tab, between its toolbar and its page (ADR-0033).
-private struct FindBar: View {
-    @Bindable var tab: BrowserTab
-    let onClose: () -> Void
-
-    @FocusState private var fieldFocused: Bool
-
-    var body: some View {
-        HStack(spacing: 8) {
-            TextField("Find in Page", text: $tab.findQuery)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 260)
-                .focused($fieldFocused)
-                .onSubmit {
-                    if NSApp.currentEvent?.modifierFlags.contains(.shift) == true { tab.findPrevious() } else { tab.findNext() }
-                }
-                .onExitCommand(perform: onClose)
-                .accessibilityIdentifier("browser-find-field")
-            Text(status)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .monospacedDigit()
-                .accessibilityIdentifier("browser-find-status")
-            HStack(spacing: 2) {
-                Button(action: tab.findPrevious) { Image(systemName: "chevron.left") }
-                    .help("Find Previous (⌘⇧G)")
-                    .accessibilityLabel("Find Previous")
-                    .accessibilityIdentifier("browser-find-previous")
-                Button(action: tab.findNext) { Image(systemName: "chevron.right") }
-                    .help("Find Next (⌘G)")
-                    .accessibilityLabel("Find Next")
-                    .accessibilityIdentifier("browser-find-next")
-            }
-            .disabled(tab.findQuery.isEmpty)
-            Spacer(minLength: 0)
-            Button("Done", action: onClose)
-                .accessibilityIdentifier("browser-find-done")
-        }
-        .controlSize(.small)
-        .padding(.horizontal, 10)
-        .frame(height: 30)
-        .background(Color.primary.opacity(0.035))
-        .onAppear(perform: consumeFocusRequest)
-        .onChange(of: tab.findFieldFocusRequested) { _, _ in consumeFocusRequest() }
-    }
-
-    private var status: String {
-        switch tab.findStatus {
-        case .idle: ""
-        case .notFound: "Not found"
-        case let .match(index, total): "\(index + 1) of \(total)"
-        }
-    }
-
-    private func consumeFocusRequest() {
-        guard tab.findFieldFocusRequested else { return }
-        tab.findFieldFocusRequested = false
-        DispatchQueue.main.async {
-            fieldFocused = true
-            DispatchQueue.main.async { (tab.webView.window?.firstResponder as? NSText)?.selectAll(nil) }
-        }
     }
 }
 

@@ -109,13 +109,11 @@ import MuxifyCore
                 .keyboardShortcut("l", modifiers: .command)
             Divider()
             Button("Find…") { store?.browserCommand { $0.activeTab?.showFind() } }
-                .keyboardShortcut("f", modifiers: .command)
+                .keyboardShortcut(keybinds.firstTrigger(for: .findInPage)?.shortcut)
                 .disabled(!activeTabHasPage)
             Button("Find Next") { store?.browserCommand { $0.activeTab?.findNext() } }
-                .keyboardShortcut("g", modifiers: .command)
                 .disabled(!activeTabHasPage)
             Button("Find Previous") { store?.browserCommand { $0.activeTab?.findPrevious() } }
-                .keyboardShortcut("g", modifiers: [.command, .shift])
                 .disabled(!activeTabHasPage)
             Divider()
             Button("Close Tab") { store?.browserCommand { $0.closeActiveTab() } }

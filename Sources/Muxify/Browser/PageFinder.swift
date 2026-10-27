@@ -55,7 +55,7 @@ final class PageFinder {
     /// new search in the frame the user last clicked, scrolled or typed in, else
     /// in the frame that shows the most of the page, at its first match at or
     /// below the top of its viewport.
-    func find(_ query: String, step: Int) async -> BrowserTab.FindStatus? {
+    func find(_ query: String, step: Int) async -> FindStatus? {
         generation += 1
         let generation = generation
         guard !query.isEmpty else {
@@ -97,7 +97,7 @@ final class PageFinder {
         return frames[..<frame].reduce(0) { $0 + $1.count } + position.match
     }
 
-    private var status: BrowserTab.FindStatus {
+    private var status: FindStatus {
         guard let current, let index = offset(of: current) else { return .notFound }
         return .match(index: index, total: total)
     }

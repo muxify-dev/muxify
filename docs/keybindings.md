@@ -41,7 +41,7 @@ listed below.
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
 | `toggle_terminal` | ⌘J | Show or hide the current Window's Terminal. It does nothing while the Terminal is the only side shown |
 | `toggle_browser` | ⌘B | Show or hide the current Window's Browser. It does nothing while the Browser is the only side shown |
-| `toggle_git_view` | ⌘G | Show or hide the [Git View](configuration.md#git-view) of the current Window's repository. While the Browser has Focus with Find in Page open, ⌘G is Find Next |
+| `toggle_git_view` | ⌘G | Show or hide the [Git View](configuration.md#git-view) of the current Window's repository |
 | `toggle_maximize` | ⇧⌘↩ | Maximize the side that has Focus: show it alone and hide the Sidebar. While the Window is Maximized, Restore it |
 | `toggle_maximize_terminal` | ⌥⌘J | Maximize the Terminal and move Focus to it. While the Terminal is Maximized, Restore the Window |
 | `toggle_maximize_browser` | ⌥⌘B | Maximize the Browser and move Focus to it, also when the Browser is hidden. While the Browser is Maximized, Restore the Window |
@@ -53,6 +53,8 @@ listed below.
 | `resize_pane_right` | Unbound | Move the current Pane's border 10 cells right. Terminal Focus only |
 | `resize_pane_up` | Unbound | Move the current Pane's border 10 cells up. Terminal Focus only |
 | `resize_pane_down` | Unbound | Move the current Pane's border 10 cells down. Terminal Focus only |
+| `find_in_pane` | ⌘F | Open [Find in Pane](#find-in-pane) over the Terminal, or select its query while it is open. Terminal Focus only. From the Browser, ⌘F is `find_in_page` |
+| `find_in_page` | ⌘F | Open Find in Page above the page, and select the text in its field. Browser Focus only. From the Terminal, ⌘F is `find_in_pane` |
 | `select_next_tab` | ⌘⇧], ⌃Tab | Select the next Browser Tab. Browser Focus only |
 | `select_prev_tab` | ⌘⇧[, ⌃⇧Tab | Select the previous Browser Tab. Browser Focus only |
 | `browser_back` | ⌘[ | Go back in the active Tab's history. Browser Focus only |
@@ -410,6 +412,26 @@ as Config problems.
 ⎋ and ⌘1–⌘5 (the Source buttons) are not configurable. With no results, ⌘C
 copies the search text.
 
+## Find bar keybindings
+
+While the field of [Find in Pane](#find-in-pane) or Find in Page has Focus,
+these actions win over every other keybinding. They are configured under
+`keybindings.find`, with the same rules among themselves, and never conflict
+with the actions above. `find_in_pane` and `find_in_page` open the bars.
+
+| Action | Default shortcuts | What it does |
+| --- | --- | --- |
+| `next` | Enter | Go to the next match. In a Pane, that is up, in older output |
+| `prev` | ⇧Enter | Go to the previous match. In a Pane, that is down, in newer output |
+| `close` | Escape | Close the find bar and focus the Terminal or the page. In the Terminal, the key goes on to the active Pane, and it also closes Find in Pane when that Pane is the searched one |
+
+```yaml
+keybindings:
+  find:
+    next: [enter, ctrl+n]
+    prev: [shift+enter, ctrl+p]
+```
+
 ## Git View keys
 
 While the [Git View](configuration.md#git-view) has focus, it uses keys like
@@ -493,13 +515,11 @@ when it does not. New Tab and Open Location can reveal a hidden Browser:
 | ⌘R | Reload the page, or stop it while loading |
 | ⌘⇧C | Copy the active Browser Tab's current URL and show a “Copied URL” confirmation |
 | ⌘⌥I | Open or focus Developer Tools for the active Browser Tab |
-| ⌘F | Open Find in Page above the page, and select the text in its field |
-| ⌘G | Go to the next match of Find in Page. With no query, open Find in Page |
-| ⌘⇧G | Go to the previous match of Find in Page |
+| ⌘F | Open Find in Page above the page, and select the text in its field (`find_in_page`) |
 | Enter (address bar) | Navigate to the entered URL or search |
 | Escape (address bar) | Restore the current URL and focus the page |
-| Enter / ⇧Enter (Find in Page) | Go to the next / previous match |
-| Escape (Find in Page) | Close Find in Page, remove the highlight and focus the page |
+| Enter / ⇧Enter (Find in Page) | Go to the next / previous match ([find bar keybindings](#find-bar-keybindings)) |
+| Escape (Find in Page) | Close Find in Page, remove the highlight and focus the page ([find bar keybindings](#find-bar-keybindings)) |
 
 The Tab and history keys above are the defaults of their actions, and the Config
 can change them. ⌘W never closes the Muxify app window. While the Terminal has
@@ -508,10 +528,35 @@ closes a tmux Pane, works. With other Focus, such as the Git View, it does nothi
 
 Find in Page highlights every match in the page and shows the number of the
 current match, for example “3 of 7”. Each Tab keeps its own query while the Tab
-is open. When you close Find in Page, ⌘G and ⌘⇧G still go to the next and the
-previous match of the last query. Find in Page also searches the text in
+is open. Find in Page also searches the text in
 iframes. A new query starts in the frame that you last clicked, scrolled or
-typed in. Before that, it starts in the frame that shows the most of the page. In the Terminal, Ghostty keeps ⌘F and ⌘G.
+typed in. Before that, it starts in the frame that shows the most of the page. In the Terminal, ⌘F opens
+[Find in Pane](#find-in-pane).
+
+### Find in Pane
+
+⌘F (`find_in_pane`) in the Terminal opens a find bar over the Terminal's top
+right corner. It searches the history of the current Window's active Pane through
+tmux copy mode: tmux highlights every match and scrolls the Pane to the current
+one. The bar shows the number of the current match, counted from the newest
+output, for example “1 of 7”. A query ignores case unless it has a capital letter.
+
+| Key | Action |
+| --- | --- |
+| ⌘F | Open Find in Pane, or select its query while it is open (`find_in_pane`) |
+| ↩ (in the field) | Go to the next match up, in older output (`find.next`) |
+| ⇧↩ (in the field) | Go to the previous match down, in newer output (`find.prev`) |
+| Esc | Close Find in Pane, leave copy mode and focus the Terminal (`find.close`). In the Terminal, only while the searched Pane is the active one |
+| ‹ / › / Done | Go to the previous / next match, or close Find in Pane |
+
+↩ and ⇧↩ act only while the find field has Focus. Esc in the find field closes
+Find in Pane. In the Terminal, Esc goes to the active Pane as usual, and it also
+closes Find in Pane when that Pane is the searched one. After you select another
+Pane, Esc is that Pane's key, and the bar stays. Every other key, such as ⌘G for
+the Git View, keeps its usual action. The [find bar keybindings](#find-bar-keybindings) change these keys. Ghostty's
+`start_search` keybind also opens Find in Pane. While the Pane is in copy mode,
+keys typed in the Terminal are copy mode keys, as usual in tmux: `q` leaves copy
+mode, and the next step enters it again. Going to another Window closes the bar.
 
 ### Vim Keys
 

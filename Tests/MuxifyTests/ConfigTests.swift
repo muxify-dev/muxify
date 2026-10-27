@@ -591,6 +591,8 @@ final class ConfigTests: XCTestCase {
             (.resizePaneRight, [], .terminal),
             (.resizePaneUp, [], .terminal),
             (.resizePaneDown, [], .terminal),
+            (.findInPane, ["cmd+f"], .terminal),
+            (.findInPage, ["cmd+f"], .browser),
             (.selectNextTab, ["cmd+shift+right_bracket", "ctrl+tab"], .browser),
             (.selectPrevTab, ["cmd+shift+left_bracket", "ctrl+shift+tab"], .browser),
             (.browserBack, ["cmd+left_bracket"], .browser),
@@ -676,6 +678,62 @@ final class ConfigTests: XCTestCase {
             ConfigProblem(path: root, line: 5, message: "ui.agent_colors.failed: " + expected),
             ConfigProblem(path: root, line: 6, message: "ui.agent_colors.blocked: " + expected),
             ConfigProblem(path: root, line: 7, message: "unknown key \"ui.agent_colors.idle\""),
+        ])
+    }
+
+    func testFindColorsTakeOneColorAndKeepTheDefaultOfAKeyLeftOut() throws {
+        XCTAssertEqual(try load("").findColors, FindColors())
+        let config = try load("""
+        ui:
+          find_colors:
+            match: yellow
+            current: '#444422'
+        """)
+        XCTAssertEqual(config.problems, [])
+        XCTAssertEqual(config.findColors.match, .system(.yellow))
+        XCTAssertEqual(config.findColors.current, .rgb(red: 0x44, green: 0x44, blue: 0x22))
+    }
+
+    func testAFindColorPairOrInvalidColorKeepsTheDefaultAndAnUnknownKeyIsAProblem() throws {
+        let config = try load("""
+        ui:
+          find_colors:
+            match: {light: yellow, dark: '#444422'}
+            current: bright
+            selected: red
+        """)
+        XCTAssertEqual(config.findColors, FindColors())
+        let expected = "expected one of blue, orange, red, green, yellow, purple, pink, teal, gray, or a quoted '#RRGGBB'"
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 3, message: "ui.find_colors.match: " + expected),
+            ConfigProblem(path: root, line: 4, message: "ui.find_colors.current: " + expected),
+            ConfigProblem(path: root, line: 5, message: "unknown key \"ui.find_colors.selected\""),
+        ])
+    }
+
+    func testTheFindBarKeysAreKeybindingsOfTheirOwn() throws {
+        let defaults = try load("")
+        XCTAssertEqual(defaults.findKeybinds.action(for: trigger("enter")), .next)
+        XCTAssertEqual(defaults.findKeybinds.action(for: trigger("shift+enter")), .prev)
+        XCTAssertEqual(defaults.findKeybinds.action(for: trigger("escape")), .close)
+        XCTAssertEqual(defaults.keybinds.action(for: trigger("cmd+g"), focus: .terminal), .toggleGitView)
+        XCTAssertEqual(defaults.keybinds.action(for: trigger("cmd+g"), focus: .browser), .toggleGitView)
+        let config = try load("""
+        keybindings:
+          toggle_git_view: cmd+shift+g
+          find:
+            next: [enter, cmd+g]
+            prev: enter
+            close: []
+            done: escape
+        """)
+        XCTAssertEqual(config.findKeybinds.triggers[.next], [trigger("enter"), trigger("cmd+g")])
+        XCTAssertEqual(config.findKeybinds.triggers[.prev], [])
+        XCTAssertNil(config.findKeybinds.action(for: trigger("escape")))
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+g"), focus: .terminal), .toggleGitView)
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 5, message: "enter is already bound to next"),
+            ConfigProblem(path: root, line: 7, message: "unknown find action \"done\""),
         ])
     }
 
