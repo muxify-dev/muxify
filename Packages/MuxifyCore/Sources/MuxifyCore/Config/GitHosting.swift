@@ -4,26 +4,61 @@ import Foundation
 /// providers, patterns and templates are lazygit's (`pkg/commands/hosting_service`, v0.61.1).
 public enum GitHosting {
     public enum Provider: String, CaseIterable {
-        case github
+        case github, gitlab, bitbucket, bitbucketServer, azuredevops, gitea, codeberg
 
-        /// `{{.From}}`, the escaped upstream branch, goes after this.
-        var pullRequestPath: String {
+        /// The page that creates a pull request from `branch`, the escaped upstream branch (`{{.From}}`).
+        func pullRequestPage(from branch: String) -> String {
             switch self {
-            case .github: return "/compare/"
+            case .github: return "/compare/\(branch)?expand=1"
+            case .gitlab: return "/-/merge_requests/new?merge_request%5Bsource_branch%5D=\(branch)"
+            case .bitbucket: return "/pull-requests/new?source=\(branch)&t=1"
+            case .bitbucketServer: return "/pull-requests?create&sourceBranch=\(branch)"
+            case .azuredevops: return "/pullrequestcreate?sourceRef=\(branch)"
+            case .gitea, .codeberg: return "/compare/\(branch)"
             }
         }
 
-        var pullRequestSuffix: String {
+        /// The page of a commit, from its full hash (`{{.CommitHash}}`).
+        func commitPage(_ hash: String) -> String {
             switch self {
-            case .github: return "?expand=1"
+            case .github, .azuredevops, .gitea, .codeberg: return "/commit/\(hash)"
+            case .gitlab: return "/-/commit/\(hash)"
+            case .bitbucket, .bitbucketServer: return "/commits/\(hash)"
             }
         }
 
-        /// The full hash goes after this.
-        var commitPath: String {
+        /// The patterns that read a remote URL, tried in order, and the repository's path on the web domain they
+        /// make from their named groups.
+        fileprivate var repository: (patterns: [NSRegularExpression], path: ([String: String]) -> String) {
             switch self {
-            case .github: return "/commit/"
+            case .github, .gitlab, .gitea, .codeberg: return (Self.defaultPatterns, { "\($0["owner"]!)/\($0["repo"]!)" })
+            case .bitbucket: return (Self.bitbucketPatterns, { "\($0["owner"]!)/\($0["repo"]!)" })
+            case .bitbucketServer: return (Self.bitbucketServerPatterns, { "projects/\($0["project"]!)/repos/\($0["repo"]!)" })
+            case .azuredevops: return (Self.azurePatterns, { "\($0["org"]!)/\($0["project"]!)/_git/\($0["repo"]!)" })
             }
+        }
+
+        private static let defaultPatterns = compile([
+            #"^(?:https?|ssh)://[^/]+/(?<owner>.*)/(?<repo>.*?)(?:\.git)?$"#,
+            #"^(.*?@)?.*:/*(?<owner>.*)/(?<repo>.*?)(?:\.git)?$"#,
+        ])
+        private static let bitbucketPatterns = compile([
+            #"^(?:https?|ssh)://.*/(?<owner>.*)/(?<repo>.*?)(?:\.git)?$"#,
+            #"^.*@.*:/*(?<owner>.*)/(?<repo>.*?)(?:\.git)?$"#,
+        ])
+        private static let bitbucketServerPatterns = compile([
+            #"^ssh://git@.*/(?<project>.*)/(?<repo>.*?)(?:\.git)?$"#,
+            #"^https://.*/scm/(?<project>.*)/(?<repo>.*?)(?:\.git)?$"#,
+        ])
+        private static let azurePatterns = compile([
+            #"^.+@vs-ssh\.visualstudio\.com[:/](?:v3/)?(?<org>[^/]+)/(?<project>[^/]+)/(?<repo>[^/]+?)(?:\.git)?$"#,
+            #"^git@ssh.dev.azure.com.*/(?<org>.*)/(?<project>.*)/(?<repo>.*?)(?:\.git)?$"#,
+            #"^https://.*@dev.azure.com/(?<org>.*?)/(?<project>.*?)/_git/(?<repo>.*?)(?:\.git)?$"#,
+            #"^https://.*/(?<org>.*?)/(?<project>.*?)/_git/(?<repo>.*?)(?:\.git)?$"#,
+        ])
+
+        private static func compile(_ patterns: [String]) -> [NSRegularExpression] {
+            patterns.map { try! NSRegularExpression(pattern: $0) }
         }
     }
 
@@ -40,9 +75,16 @@ public enum GitHosting {
         }
     }
 
-    /// The hosts that need no Config. A host matches exactly, so `ssh.dev.azure.com` would need its own entry.
+    /// The hosts that need no Config. A host matches exactly, so `ssh.dev.azure.com` has its own entry, with
+    /// the web domain `dev.azure.com`. Bitbucket Server has no built-in host.
     public static let builtIn = [
         Service(host: "github.com", provider: .github, webDomain: "github.com"),
+        Service(host: "gitlab.com", provider: .gitlab, webDomain: "gitlab.com"),
+        Service(host: "bitbucket.org", provider: .bitbucket, webDomain: "bitbucket.org"),
+        Service(host: "dev.azure.com", provider: .azuredevops, webDomain: "dev.azure.com"),
+        Service(host: "ssh.dev.azure.com", provider: .azuredevops, webDomain: "dev.azure.com"),
+        Service(host: "try.gitea.io", provider: .gitea, webDomain: "try.gitea.io"),
+        Service(host: "codeberg.org", provider: .codeberg, webDomain: "codeberg.org"),
     ]
 
     /// What `o` says when it opens nothing, as lazygit words it.
@@ -93,12 +135,12 @@ public enum GitHosting {
     /// The page that creates a pull request from the upstream branch `branch` of the repository at `remoteURL`,
     /// into its default branch. `services` are tried before the built-in ones.
     public static func pullRequestURL(remoteURL: String, upstreamBranch branch: String, services: [Service]) -> Result<URL, Failure> {
-        link(remoteURL: remoteURL, services: services) { "\($0.provider.pullRequestPath)\(queryEscape(branch))\($0.provider.pullRequestSuffix)" }
+        link(remoteURL: remoteURL, services: services) { $0.provider.pullRequestPage(from: queryEscape(branch)) }
     }
 
     /// The page of the commit `hash`, its full hash, in the repository at `remoteURL`.
     public static func commitURL(remoteURL: String, hash: String, services: [Service]) -> Result<URL, Failure> {
-        link(remoteURL: remoteURL, services: services) { "\($0.provider.commitPath)\(hash)" }
+        link(remoteURL: remoteURL, services: services) { $0.provider.commitPage(hash) }
     }
 
     /// `https://<web domain>/<owner>/<repo>` and what `page` makes of the service, for the remote's URL.
@@ -107,7 +149,7 @@ public enum GitHosting {
         guard let host = host(of: url),
               let service = (services + builtIn).first(where: { $0.host == host })
         else { return .failure(.unsupportedService) }
-        guard let repository = repositoryPath(of: url),
+        guard let repository = repositoryPath(of: url, provider: service.provider),
               let link = URL(string: "https://\(service.webDomain)/\(repository)\(page(service))")
         else { return .failure(.unparsableURL) }
         return .success(link)
@@ -128,23 +170,23 @@ public enum GitHosting {
         return rest.isEmpty ? nil : String(rest)
     }
 
-    /// `<owner>/<repo>` by lazygit's two default patterns. `owner` is greedy, so subgroups stay in it.
-    static func repositoryPath(of url: String) -> String? {
-        for pattern in defaultPatterns {
+    /// The repository's path on the web domain, by the provider's patterns. `owner` is greedy, so GitLab
+    /// subgroups stay in it.
+    static func repositoryPath(of url: String, provider: Provider) -> String? {
+        let (patterns, path) = provider.repository
+        let names = ["owner", "project", "org", "repo"]
+        for pattern in patterns {
             let range = NSRange(url.startIndex..., in: url)
-            guard let match = pattern.firstMatch(in: url, range: range),
-                  let owner = Range(match.range(withName: "owner"), in: url),
-                  let repo = Range(match.range(withName: "repo"), in: url)
-            else { continue }
-            return "\(url[owner])/\(url[repo])"
+            guard let match = pattern.firstMatch(in: url, range: range) else { continue }
+            var groups: [String: String] = [:]
+            for name in names where pattern.pattern.contains("(?<\(name)>") {
+                guard let found = Range(match.range(withName: name), in: url) else { continue }
+                groups[name] = String(url[found])
+            }
+            return path(groups)
         }
         return nil
     }
-
-    private static let defaultPatterns = [
-        #"^(?:https?|ssh)://[^/]+/(?<owner>.*)/(?<repo>.*?)(?:\.git)?$"#,
-        #"^(.*?@)?.*:/*(?<owner>.*)/(?<repo>.*?)(?:\.git)?$"#,
-    ].map { try! NSRegularExpression(pattern: $0) }
 
     /// Go's `url.QueryEscape`: everything but letters, digits and `-_.~` is `%XX`, and a space is `+`.
     static func queryEscape(_ text: String) -> String {
