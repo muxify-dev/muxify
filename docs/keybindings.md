@@ -192,6 +192,7 @@ the reason. Move does nothing while `sidebar.topics` is off.
 
 Every Action uses the palette's view, including Actions from Sidebar and menu
 bar items. ⎋ closes without a change. ⌫ in an empty field goes back one step.
+At the first step it does nothing, so only ⎋ closes a palette.
 A step that kills a process needs ⌘↩ to confirm.
 
 Maximize never changes the toggles. On Restore, the Window shows what its

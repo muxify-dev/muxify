@@ -167,6 +167,14 @@ class CommandPalette(unittest.TestCase):
         self.assertNotEqual(self.s.tmux_ok('has-session', '-t', '=' + session).returncode, 0, 'the Reopen choice created a Session')
         self.s.act('press', 'reopen-choice-reopen')
 
+    def test_backspace_in_the_empty_field_keeps_go_to_and_commands_open(self):
+        for name in ['Go to…', 'Commands']:
+            self.open_palette(name)
+            self.s.act('action', 'palette-search', 'Back')
+            time.sleep(REFRESH_LIMIT)
+            self.assertTrue(self.s.has('palette-search'), 'Backspace in the empty field closed ' + name)
+            self.close_palette()
+
     def test_return_on_a_dormant_topic_reopens_it_and_goes_there(self):
         self.write_topic('sw-dormant', 'Sw dormant', self.beta,
                          sessions=[remembered_session(self.beta, 'sw-dormant', windows=[dict(directory=str(self.beta), name='shell')])])

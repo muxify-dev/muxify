@@ -289,9 +289,12 @@ final class CommandPalette {
         if showsActions { showsActions = false; return }
         if receiveChipKey(.deleteBackward(textIsEmpty: true)) { return }
         if case .search(let config, _?) = presentation { presentation = .search(config); selectedID = nil; return }
+        // At the first step ⌫ does nothing: a typo never closes the palette, only ⎋ does.
+        let earlier = flow?.earlierStep
+        guard earlier != nil || !history.isEmpty else { return }
         invocation = UUID()
-        if let earlier = flow?.earlierStep { replaceFlow(earlier); return }
-        guard let previous = history.popLast() else { close(); return }
+        if let earlier { replaceFlow(earlier); return }
+        let previous = history.removeLast()
         presentation = previous.presentation
         query = previous.query
         selectedID = previous.selectedID
