@@ -57,6 +57,7 @@ public enum ConfigAction: String, KeybindAction {
     case markUnread = "mark_unread"
     case markAllRead = "mark_all_read"
     case toggleSidebar = "toggle_sidebar"
+    case toggleBench = "toggle_bench"
     case toggleTerminal = "toggle_terminal"
     case toggleBrowser = "toggle_browser"
     case toggleGitView = "toggle_git_view"
@@ -139,6 +140,7 @@ public enum ConfigAction: String, KeybindAction {
         .snoozeTopics: [],
         .toggleZen: ["shift+alt+cmd+s"],
         .toggleSidebar: ["cmd+s", "ctrl+cmd+s"],
+        .toggleBench: ["shift+cmd+s"],
         .toggleTerminal: ["cmd+j"],
         .toggleBrowser: ["cmd+b"],
         .toggleGitView: ["cmd+g"],

@@ -30,9 +30,9 @@ final class TopicOrderTests: XCTestCase {
 
     func testADraggedCardPassesAnotherWhenItsLeadingEdgeCoversHalfOfIt() {
         // a at 0–40, b at 46–146, c at 152–192.
-        let layout = StackLayout(heights: ["a": 40, "b": 100, "c": 40], spacing: 6)
-        let order = ["a", "b", "c"]
-        XCTAssertEqual(layout.top(of: "c", in: order), 152)
+        let layout = StackLayout(heights: [.item("a"): 40, .item("b"): 100, .item("c"): 40], spacing: 6)
+        let order: [StackSlot<String>] = [.item("a"), .item("b"), .item("c")]
+        XCTAssertEqual(layout.top(of: .item("c"), in: order), 152)
         XCTAssertNil(layout.placement(of: "c", movedBy: -50, in: order), "c's top at 102 has not passed b's middle at 96")
         XCTAssertEqual(layout.placement(of: "c", movedBy: -57, in: order), .before("b"))
         XCTAssertEqual(layout.placement(of: "c", movedBy: -140, in: order), .before("a"), "c's top at 12 passed a's middle at 20")
@@ -44,14 +44,33 @@ final class TopicOrderTests: XCTestCase {
     }
 
     func testADraggedCardStopsAtTheEndsOfItsListAndAtTheTopOfTheView() {
-        let layout = StackLayout(heights: ["a": 40, "b": 100, "c": 40], spacing: 6)
-        let order = ["a", "b", "c"]
+        let layout = StackLayout(heights: [.item("a"): 40, .item("b"): 100, .item("c"): 40], spacing: 6)
+        let order: [StackSlot<String>] = [.item("a"), .item("b"), .item("c")]
         XCTAssertEqual(layout.bounded(-30, of: "b", in: order), -30, "within the list it follows the pointer")
         XCTAssertEqual(layout.bounded(1000, of: "b", in: order), 46, "it stops at the bottom of the last card")
         XCTAssertEqual(layout.bounded(-1000, of: "b", in: order), -46, "it stops at the top of the first card")
         XCTAssertEqual(layout.bounded(-1000, of: "b", in: order, headroom: 20), -20, "it stops at the top of the view first")
         XCTAssertEqual(layout.bounded(-1000, of: "b", in: order, headroom: -15), 0, "a card already past the top does not go up")
         XCTAssertEqual(layout.bounded(30, of: "b", in: order, headroom: -15), 30, "it still goes down")
+    }
+
+    func testADraggedCardPassesAFixedLineButDoesNotLandOnIt() {
+        // a at 0–40, the line at 46–66, b at 72–112, c at 118–158.
+        let layout = StackLayout(heights: [.item("a"): 40, .fixed("line"): 20, .item("b"): 40, .item("c"): 40], spacing: 6)
+        let order: [StackSlot<String>] = [.item("a"), .fixed("line"), .item("b"), .item("c")]
+        XCTAssertNil(layout.placement(of: "a", movedBy: 40, in: order), "a's bottom at 80 is on the line, above b's middle at 92")
+        XCTAssertEqual(layout.placement(of: "a", movedBy: 53, in: order), .after("b"))
+        XCTAssertNil(layout.placement(of: "b", movedBy: -45, in: order), "b's top at 27 is on the line, below a's middle at 20")
+        XCTAssertEqual(layout.placement(of: "b", movedBy: -53, in: order), .before("a"))
+        XCTAssertEqual(layout.bounded(-1000, of: "b", in: [.fixed("line"), .item("b"), .item("c")]), 0,
+                       "it stops at the top of the first card, not of the line above it")
+    }
+
+    func testAPlacementKeepsTheFixedSlotsInTheirPlaces() {
+        let order: [StackSlot<String>] = [.item("a"), .fixed("line"), .item("b"), .item("c")]
+        XCTAssertEqual(DropPlacement.after("b").placing("a", in: order), [.item("b"), .fixed("line"), .item("a"), .item("c")])
+        XCTAssertEqual(DropPlacement.before("a").placing("c", in: order), [.item("c"), .fixed("line"), .item("a"), .item("b")])
+        XCTAssertEqual(DropPlacement.after("x").placing("a", in: order), order, "an anchor that left keeps the list")
     }
 
     func testAPlacementMovesTheItemNextToItsAnchor() {

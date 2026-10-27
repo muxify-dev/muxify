@@ -271,6 +271,25 @@ struct TopicsModel {
         var count: Int { topics.count + hiddenCount }
     }
 
+    /// One item of the Topics list, in the order the Sidebar shows them.
+    enum ListItem: Identifiable {
+        case card(Row)
+        /// The line between the In Play cards and the Bench.
+        case benchLine(isBenchShown: Bool)
+        case noTopicSession(Session)
+
+        var id: String { cardID?.accessibilityID ?? "bench-line" }
+
+        /// The card's Topic, Locked Session or No Topic; nil for the Bench line.
+        var cardID: TopicGroupID? {
+            switch self {
+            case .card(let row): return row.id
+            case .noTopicSession: return .noTopic
+            case .benchLine: return nil
+            }
+        }
+    }
+
     struct Wake {
         let id: String
         let title: String
@@ -302,13 +321,34 @@ struct TopicsModel {
         return row?.title
     }
 
+    /// The Pinned and In Play cards, then the Bench line, the opened No Topic Session and the Benched cards that
+    /// show. Without a Bench: the cards of `rows`, then the opened No Topic Session.
+    let list: [ListItem]
+    /// Whether the Bench shows; nil while the Topics list has no Bench line.
+    var isBenchShown: Bool? {
+        list.lazy.compactMap { item -> Bool? in
+            if case .benchLine(let shown) = item { return shown }
+            return nil
+        }.first
+    }
+
     /// The cards of `rows`, as MuxifyCore orders them for the CLI too (`TopicCards`).
     private let cards: [TopicListEntry]
 
-    /// The Pinned Topic cards, or the Topic and Locked cards that are not Pinned, in list order: a drag reorders a card
-    /// among these only.
-    func cardOrder(pinned: Bool) -> [TopicListID] {
-        cards.filter { $0.isPinned == pinned }.map(\.id)
+    /// The items of `list` that move or slide in the drag of the item `id`: the cards with its Pin and, among the cards
+    /// that are not Pinned, the Bench line and the opened No Topic Session. While the Bench is hidden, they are the
+    /// items on the side of the line that `id` is on, and none for the line: a card that crossed the line would put a
+    /// card that the Bench hides In Play.
+    func dragItems(around id: ListItem.ID) -> [ListItem] {
+        func isPinned(_ item: ListItem) -> Bool {
+            if case .card(let row) = item { return row.isPinned }
+            return false
+        }
+        guard let dragged = list.first(where: { $0.id == id }) else { return [] }
+        let items = list.filter { isPinned($0) == isPinned(dragged) }
+        guard isBenchShown == false, let line = items.firstIndex(where: { $0.cardID == nil }) else { return items }
+        if items[..<line].contains(where: { $0.id == id }) { return Array(items[..<line]) }
+        return items[(line + 1)...].contains { $0.id == id } ? Array(items[(line + 1)...]) : []
     }
 
     /// The cards right above and below a card in the Topics list, among those with its Pin. None for a Topic outside it.
@@ -324,7 +364,8 @@ struct TopicsModel {
     let noTopicSessions: [Session]
     /// The Locked Sessions, by Session ID, also while Zen hides their cards.
     let lockedSessionIDs: Set<String>
-    /// The No Topic Session of the selected Window. The Topic list shows it as one card after the open Topics.
+    /// The No Topic Session of the selected Window. The Topic list shows it as one card after the open Topics, or under
+    /// the Bench line.
     /// Nil while the Active Topic is a Topic.
     let openedNoTopicSession: Session?
     /// Snoozed, then Settled, after the Topics rows in Topics mode. Empty in Sessions mode.
@@ -371,7 +412,7 @@ struct TopicsModel {
     var showsToggle: Bool { topicsEnabled && sessionsEnabled }
 
     init(records: [TopicRecord], windows: [TmuxWindow], config: Config, selection: TopicSelection, location: Location? = nil,
-         mode: SidebarMode = .topics, groups groupsState: TopicGroupsState = TopicGroupsState(),
+         mode: SidebarMode = .topics, groups groupsState: TopicGroupsState = TopicGroupsState(), benchShown: Bool = false,
          agents: [Agent] = [], panes: [TmuxPane]? = nil, zen: ZenRecord? = nil,
          now: Date = Date()) {
         topicsEnabled = config.sidebar.topics
@@ -531,6 +572,8 @@ struct TopicsModel {
         let rowsByCard = Dictionary(rows.compactMap { row in row.id.listID.map { ($0, row) } }, uniquingKeysWith: { first, _ in first })
         let openRows = cards.compactMap { rowsByCard[$0.id] }
         self.rows = openRows
+        list = Self.list(openRows, inPlay: self.mode == .topics ? config.topics.inPlay : nil, benchShown: benchShown,
+                         location: active, noTopic: openedNoTopicSession)
         self.snoozedRows = snoozedRows
         let settled = records.filter { $0.settledAt != nil }
             .sorted { ($0.settledAt ?? "", $0.id) > ($1.settledAt ?? "", $1.id) }
@@ -594,6 +637,29 @@ struct TopicsModel {
         visibleAgents = scoped.filter { agentMarks[$0.paneID]?.isNotification == true }
             + scoped.filter { agentMarks[$0.paneID] == .working }
             + scoped.filter { agentMarks[$0.paneID] == nil }
+    }
+
+    /// The first `inPlay` cards that are not Pinned are In Play, and the cards after them are on the Bench. While the
+    /// Bench is hidden, only the Location's card shows from it. The opened No Topic Session counts toward nothing and
+    /// shows right under the line, so it does not move when the Bench shows or hides.
+    private static func list(_ rows: [Row], inPlay: Int?, benchShown: Bool, location: TopicGroupID?,
+                             noTopic: Session?) -> [ListItem] {
+        let opened = noTopic.map { [ListItem.noTopicSession($0)] } ?? []
+        var front: [Row] = [], bench: [Row] = []
+        var unpinned = 0
+        for row in rows {
+            if row.isPinned {
+                front.append(row)
+            } else if let inPlay, unpinned >= inPlay {
+                bench.append(row)
+            } else {
+                unpinned += 1
+                front.append(row)
+            }
+        }
+        guard !bench.isEmpty else { return front.map(ListItem.card) + opened }
+        let benchCards = benchShown ? bench : bench.filter { $0.id == location }
+        return front.map(ListItem.card) + [.benchLine(isBenchShown: benchShown)] + opened + benchCards.map(ListItem.card)
     }
 
     /// A Settled Topic's row, with the Sessions and Windows its record remembers.

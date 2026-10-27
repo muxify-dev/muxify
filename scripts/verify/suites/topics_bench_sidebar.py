@@ -1,0 +1,134 @@
+"""Topics in the Sidebar: with topics.in_play, the Topics after the ones In Play wait on the Bench, behind one line.
+
+The Bench line is a button, so `press` shows or hides the Bench through its accessibility action.
+
+Run from the repo root after `make build`:
+    python3 -m unittest -v scripts.verify.suites.topics_bench_sidebar
+"""
+
+import time
+import unittest
+
+from scripts.verify.sandbox import wait
+from scripts.verify.topics_sidebar import TopicsSidebar
+
+LINE = 'topics-bench-line'
+
+
+class TopicsBenchSidebar(TopicsSidebar):
+    def bench_topics(self, prefix):
+        """Topics <prefix>-a, -b and -c in that order, each with one live Session, and only one In Play. Returns the
+        Window of each Topic by its card identifier."""
+        self.addCleanup(self.config.write_text, self.config_text)
+        self.config.write_text(self.config_text + 'topics:\n  in_play: 1\n')
+        windows = {}
+        for order, name in enumerate(['a', 'b', 'c']):
+            topic = '%s-%s' % (prefix, name)
+            self.write_topic(topic, topic.capitalize(), self.beta, order=order)
+            sid = self.new_session('beta/' + topic, self.beta, topic=topic)
+            windows['topic-' + topic] = self.s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
+        return windows
+
+    def line(self, rs):
+        return self.s.row(LINE, rs).get('accessibilityLabel')
+
+    def shown_after_line(self, rs):
+        """The cards under the Bench line, in Sidebar order."""
+        ids = self.s.ids(rs)
+        return [key for key in ids[ids.index(LINE) + 1:] if key in self.topic_rows(rs)] if LINE in ids else None
+
+    def hide_bench(self):
+        if self.line(self.s.rows()) == 'Hide Bench':
+            self.s.act('press', LINE)
+        self.s.wait_rows(lambda rs: self.line(rs) == 'Bench', 'the Bench did not hide')
+
+    def test_the_bench_line_shows_the_bench_and_going_to_a_topic_leaves_it_shown(self):
+        s = self.s
+        windows = self.bench_topics('bench-toggle')
+        s.wait_rows(lambda rs: s.has('topic-bench-toggle-a', rs) and self.line(rs) is not None,
+                    'with topics.in_play: 1, the Sidebar shows no Bench line')
+        self.hide_bench()
+        rs = s.rows()
+        self.assertEqual(self.shown_after_line(rs), [], 'a hidden Bench shows cards: %s' % s.ids(rs))
+        self.assertLess(s.ids(rs).index('topic-bench-toggle-a'), s.ids(rs).index(LINE), 'the In Play card is not above the line')
+
+        s.act('press', LINE)
+        s.wait_rows(lambda rs: self.line(rs) == 'Hide Bench'
+                    and self.shown_after_line(rs) == ['topic-bench-toggle-b', 'topic-bench-toggle-c'],
+                    'a press on the line did not show the Benched cards: %s' % self.shown_after_line(s.rows()))
+
+        s.show(windows['topic-bench-toggle-b'])
+        s.show(windows['topic-bench-toggle-c'])
+        rs = s.rows()
+        self.assertEqual(self.line(rs), 'Hide Bench', 'going from one Benched Topic to another hid the Bench')
+
+        s.show(windows['topic-bench-toggle-a'])
+        time.sleep(2)
+        rs = s.rows()
+        self.assertEqual(self.line(rs), 'Hide Bench', 'going to the Topic In Play hid the Bench: %s' % s.ids(rs))
+
+    def test_the_card_of_a_benched_location_shows_alone_under_the_hidden_line(self):
+        s = self.s
+        windows = self.bench_topics('bench-visit')
+        s.wait_rows(lambda rs: s.has('topic-bench-visit-a', rs) and self.line(rs) is not None,
+                    'with topics.in_play: 1, the Sidebar shows no Bench line')
+        self.hide_bench()
+        s.show(windows['topic-bench-visit-c'])
+        s.wait_rows(lambda rs: self.shown_after_line(rs) == ['topic-bench-visit-c'],
+                    'the Benched card of the Location does not show alone under the line: %s' % s.ids())
+        self.assertEqual(self.line(s.rows()), 'Bench', 'going to a Benched Topic showed the whole Bench')
+
+    def cards(self, prefix, rs):
+        """The cards of the check's Topics and the Bench line, in Sidebar order."""
+        return [key for key in self.s.ids(rs) if key.startswith('topic-' + prefix) or key == LINE]
+
+    def test_a_card_dragged_across_the_shown_bench_line_changes_places_with_the_cards_it_passes(self):
+        s = self.s
+        self.bench_topics('bench-drag')
+        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        if self.line(s.rows()) == 'Bench':
+            s.act('press', LINE)
+        s.wait_rows(lambda rs: self.cards('bench-drag', rs)
+                    == ['topic-bench-drag-a', LINE, 'topic-bench-drag-b', 'topic-bench-drag-c'],
+                    'the Bench did not show: %s' % self.cards('bench-drag', s.rows()))
+        s.act('drag', 'topic-bench-drag-c', 'topic-bench-drag-a')
+        # The Sidebar shows the new order before the app saves it. Wait for the save, so that the cleanup removes the
+        # records after it and the save does not bring a Topic back for the next check.
+        orders = lambda: {i: r.get('order') for i, r in self.records().items() if i.startswith('bench-drag-')}
+        wait(lambda: orders()['bench-drag-c'] < orders()['bench-drag-a'],
+             'the drag did not save bench-drag-c above bench-drag-a', seconds=5)
+        s.wait_rows(lambda rs: self.cards('bench-drag', rs)
+                    == ['topic-bench-drag-c', LINE, 'topic-bench-drag-a', 'topic-bench-drag-b'],
+                    'the Benched card dragged onto the card In Play did not go In Play: %s' % self.cards('bench-drag', s.rows()))
+
+    def test_a_card_let_go_on_the_shown_bench_line_stays_in_its_place(self):
+        # The line is between the cards, so a card that reaches only the line has not passed the card under it.
+        s = self.s
+        self.bench_topics('bench-line-drop')
+        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        if self.line(s.rows()) == 'Bench':
+            s.act('press', LINE)
+        before = ['topic-bench-line-drop-a', LINE, 'topic-bench-line-drop-b', 'topic-bench-line-drop-c']
+        s.wait_rows(lambda rs: self.cards('bench-line-drop', rs) == before,
+                    'the Bench did not show: %s' % self.cards('bench-line-drop', s.rows()))
+        s.act('drag', 'topic-bench-line-drop-a', LINE)
+        s.act('drag', 'topic-bench-line-drop-b', LINE, edge='bottom')
+        time.sleep(2)
+        self.assertEqual(self.cards('bench-line-drop', s.rows()), before, 'a card let go on the line moved')
+
+    def test_a_card_in_play_does_not_go_to_the_hidden_bench(self):
+        # The hidden Bench shows no place to drop a card, and the cards it hides would come In Play in its place.
+        s = self.s
+        self.bench_topics('bench-hidden-drop')
+        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        self.hide_bench()
+        before = ['topic-bench-hidden-drop-a', LINE]
+        s.wait_rows(lambda rs: self.cards('bench-hidden-drop', rs) == before,
+                    'the hidden Bench shows cards: %s' % self.cards('bench-hidden-drop', s.rows()))
+        s.act('drag', 'topic-bench-hidden-drop-a', LINE, edge='bottom')
+        time.sleep(2)
+        self.assertEqual(self.cards('bench-hidden-drop', s.rows()), before, 'the card In Play went to the hidden Bench')
+
+
+if __name__ == '__main__':
+    unittest.main()

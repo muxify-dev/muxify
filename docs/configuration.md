@@ -159,6 +159,48 @@ A Dormant Topic keeps its place, including when it is Pinned.
 A Topic made from a Locked Session takes that Lock's place.
 An unknown value uses `bottom` and appears in the Config problems banner.
 
+## Topics In Play
+
+```yaml
+topics:
+  in_play: 5
+```
+
+`topics.in_play` limits how many Topics the Sidebar shows at one time. The
+Sidebar shows the Pinned Topics and the first `in_play` other cards, Topics or
+Locked Sessions. These cards are In Play. The other open Topics and Locked
+Sessions are the Bench. They keep their place in the list, their Sessions and
+their Agents, but they hide behind one line under the In Play cards. Without
+`topics.in_play` the Sidebar shows every card. The value is a whole number of
+1 or more. Any other value appears in the Config problems banner, and the
+Sidebar then shows every card.
+
+- Pinned Topics always show, and they do not count toward `in_play`. A Locked
+  Session counts.
+- The line reads "Bench" while the Bench is hidden and "Hide Bench" while it
+  shows. A click on it, `toggle_bench` (⇧⌘S), View > Show Bench and the Toggle
+  Bench Command show or hide the Bench. The line shows only while the Bench has
+  a card. It has no count and no Agent marks.
+- The Bench stays as you leave it. Going to a card, by a click, a Hint, a
+  Topic step or a Command Palette, does not show or hide it.
+- The card that you are on always shows. When it is on the hidden Bench, after
+  a Command Palette jump for example, it shows alone under the line. The Bench
+  does not show for a jump.
+- The No Topic Session that you are on shows directly under the line, above the
+  first Benched card. It does not count toward `in_play`.
+- Hints and ⌃1 … ⌃9 number only the cards that show. To reach a hidden Benched
+  card, show the Bench or use a Command Palette. Show Next Topic, Move Topic Up
+  and Move Topic Down still go through every card.
+- To put a Benched card In Play, show the Bench and drag the card above the
+  line. The line stays under the same number of cards, so the last card In
+  Play goes to the Bench. A card dragged below the line goes to the Bench the
+  same way. While the Bench is hidden, a drag moves a card only on its side of
+  the line.
+- The "N more below" line counts only the cards that show.
+
+Each App Window shows or hides its own Bench, and a restart hides it. The
+Sessions mode and the Snoozed and Settled groups have no Bench.
+
 ## Tags
 
 ```yaml

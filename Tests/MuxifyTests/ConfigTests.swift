@@ -1190,6 +1190,17 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    func testTopicsInPlayTakesAWholeNumberOfOneOrMoreAndIsOffWhenAbsent() throws {
+        XCTAssertNil(try load("").topics.inPlay)
+        XCTAssertEqual(try load("topics:\n  in_play: 3").topics.inPlay, 3)
+        XCTAssertNil(try load("topics:\n  in_play:").topics.inPlay)
+        for value in ["0", "-2", "2.5", "three", "true"] {
+            let bad = try load("topics:\n  in_play: " + value)
+            XCTAssertNil(bad.topics.inPlay, value)
+            XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "topics.in_play: expected a whole number of 1 or more")], value)
+        }
+    }
+
     func testTopicSessionOrderTakesOldestOrNewestFirstAndReportsAnythingElse() throws {
         XCTAssertEqual(try load("").topics.sessionOrder, .oldestFirst)
         XCTAssertEqual(try load("topics:\n  session_order: newest_first").topics.sessionOrder, .newestFirst)

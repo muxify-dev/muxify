@@ -38,6 +38,7 @@ enum PaletteCommand: String, CaseIterable {
     case zoomPane = "Zoom Pane"
     case showSidebar = "Show Sidebar"
     case hideSidebar = "Hide Sidebar"
+    case toggleBench = "Toggle Bench"
     case showTerminal = "Show Terminal"
     case hideTerminal = "Hide Terminal"
     case showBrowser = "Show Browser"
@@ -103,6 +104,7 @@ enum PaletteCommand: String, CaseIterable {
         case .closeTab: .closeTab
         case .reopenClosedTab: .reopenClosedTab
         case .showSidebar, .hideSidebar: .toggleSidebar
+        case .toggleBench: .toggleBench
         case .showTerminal, .hideTerminal: .toggleTerminal
         case .showBrowser, .hideBrowser: .toggleBrowser
         case .nextSession: .selectNextSession
@@ -142,7 +144,7 @@ enum PaletteCommand: String, CaseIterable {
         case .zoomPane: .verb(.windowZoom)
         case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser, .showSidebar, .hideSidebar,
              .showTerminal, .hideTerminal, .showBrowser, .hideBrowser, .nextSession, .previousSession, .nextTopic, .previousTopic,
-             .newAppWindow:
+             .newAppWindow, .toggleBench:
             .noMirror("It changes only the view of one App Window.")
         case .newTab, .closeTab, .reopenClosedTab, .openLocation, .nextTab, .previousTab, .back, .forward, .reloadPage, .copyURL, .developerTools:
             .noMirror("It changes only the Browser of one App Window.")
@@ -218,6 +220,7 @@ extension CommandPalette {
             case .zoomPane, .renameWindow: return store.selectedWindow != nil
             case .showSidebar: return !store.sidebarShown
             case .hideSidebar: return store.sidebarShown
+            case .toggleBench: return store.topics.isBenchShown != nil
             case .showTerminal: return !store.panelLayout.shows(.terminal) && store.canToggle(.terminal)
             case .hideTerminal: return store.panelLayout.shows(.terminal) && store.canToggle(.terminal)
             case .showBrowser: return !store.panelLayout.shows(.browser) && store.canToggle(.browser)
@@ -283,6 +286,7 @@ extension CommandPalette {
         case .moveTopicUp: store.moveActiveCard(.previous)
         case .moveTopicDown: store.moveActiveCard(.next)
         case .pinTopic, .unpinTopic: store.togglePinOfActiveTopic()
+        case .toggleBench: store.toggleBench()
         case .unsnoozeTopic: store.presentUnsnoozeTopic(keepingHistory: true)
         case .nextSession, .previousSession, .nextTopic, .previousTopic:
             if let step = command.keybinding?.step { store.step(step.level, step.direction) }

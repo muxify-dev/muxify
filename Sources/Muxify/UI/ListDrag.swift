@@ -22,44 +22,67 @@ enum DropPlacement<ID: Hashable>: Equatable {
         }
         return rest
     }
+
+    /// `slots` with `id` moved here. The fixed slots keep their places, and the items fill the others in their new order.
+    func placing(_ id: ID, in slots: [StackSlot<ID>]) -> [StackSlot<ID>] {
+        var items = placing(id, in: slots.compactMap(\.item)).makeIterator()
+        return slots.compactMap { slot in slot.item == nil ? slot : items.next().map(StackSlot.item) }
+    }
 }
 
-/// A list's items stacked by their heights, with `spacing` between two items, measured from the top of the first.
+/// A place in a list's stack: an item that a drag moves, or a fixed view between the items, such as a line. A fixed
+/// view keeps the number of slots above it, so it slides only when the items above it change height.
+enum StackSlot<ID: Hashable>: Hashable {
+    case item(ID)
+    case fixed(String)
+
+    var item: ID? {
+        if case .item(let id) = self { return id }
+        return nil
+    }
+}
+
+/// A list's slots stacked by their heights, with `spacing` between two slots, measured from the top of the first.
 struct StackLayout<ID: Hashable> {
-    var heights: [ID: CGFloat]
+    var heights: [StackSlot<ID>: CGFloat]
     var spacing: CGFloat
 
-    func top(of id: ID, in order: [ID]) -> CGFloat {
+    func top(of slot: StackSlot<ID>, in order: [StackSlot<ID>]) -> CGFloat {
         var top: CGFloat = 0
-        for item in order {
-            if item == id { break }
-            top += height(item) + spacing
+        for other in order {
+            if other == slot { break }
+            top += height(other) + spacing
         }
         return top
     }
 
-    func height(_ id: ID) -> CGFloat { heights[id] ?? 0 }
+    func height(_ slot: StackSlot<ID>) -> CGFloat { heights[slot] ?? 0 }
 
     /// Where `id` lands after it moved `translation` down from its place in `order`: before the first item above it
     /// whose middle its top edge passed, after the last item below it whose middle its bottom edge passed, or nil at
     /// its own place. Each edge leads the way it moves, so a tall item passes a short one as soon as it covers half of it.
-    func placement(of id: ID, movedBy translation: CGFloat, in order: [ID]) -> DropPlacement<ID>? {
-        guard let index = order.firstIndex(of: id) else { return nil }
-        let top = top(of: id, in: order) + translation
-        let bottom = top + height(id)
-        let middle = { (item: ID) in self.top(of: item, in: order) + self.height(item) / 2 }
-        if let passed = order[..<index].first(where: { top < middle($0) }) { return .before(passed) }
-        if let passed = order[(index + 1)...].last(where: { bottom > middle($0) }) { return .after(passed) }
+    /// A fixed slot is no place to land, so the item passes it as it passes the gap between two items.
+    func placement(of id: ID, movedBy translation: CGFloat, in order: [StackSlot<ID>]) -> DropPlacement<ID>? {
+        guard let index = order.firstIndex(of: .item(id)) else { return nil }
+        let top = top(of: .item(id), in: order) + translation
+        let bottom = top + height(.item(id))
+        let middle = { (slot: StackSlot<ID>) in self.top(of: slot, in: order) + self.height(slot) / 2 }
+        if let passed = order[..<index].first(where: { $0.item != nil && top < middle($0) })?.item { return .before(passed) }
+        if let passed = order[(index + 1)...].last(where: { $0.item != nil && bottom > middle($0) })?.item {
+            return .after(passed)
+        }
         return nil
     }
 
     /// `translation` held so `id` stays within the list, from the top of its first item to the bottom of its last, and
     /// moves up no more than `headroom`. An item that is already past the headroom does not move up at all.
-    func bounded(_ translation: CGFloat, of id: ID, in order: [ID], headroom: CGFloat = .infinity) -> CGFloat {
-        guard let last = order.last else { return translation }
-        let top = top(of: id, in: order)
-        let low = max(-top, -max(headroom, 0))
-        let high = max(low, self.top(of: last, in: order) + height(last) - top - height(id))
+    func bounded(_ translation: CGFloat, of id: ID, in order: [StackSlot<ID>], headroom: CGFloat = .infinity) -> CGFloat {
+        guard let first = order.first(where: { $0.item != nil }), let last = order.last(where: { $0.item != nil }) else {
+            return translation
+        }
+        let top = top(of: .item(id), in: order)
+        let low = max(self.top(of: first, in: order) - top, -max(headroom, 0))
+        let high = max(low, self.top(of: last, in: order) + height(last) - top - height(.item(id)))
         return min(max(translation, low), high)
     }
 }
@@ -92,15 +115,15 @@ final class ListDrag<ID: Hashable> {
     private(set) var placement: DropPlacement<ID>?
     /// The items' heights when the item lifted.
     private(set) var layout: StackLayout<ID>
-    @ObservationIgnored private var heights: [ID: CGFloat] = [:]
+    @ObservationIgnored private var heights: [StackSlot<ID>: CGFloat] = [:]
     /// How far each item's top is below the top of the scroll view's visible part, or below a card header that sticks there.
     @ObservationIgnored private var visibleTops: [ID: CGFloat] = [:]
     /// How far the lifted item may move up before its top leaves the visible part of the scroll view.
     @ObservationIgnored private var headroom: CGFloat = .infinity
     /// Each item's list as its stack shows it now. One drag can serve several lists, such as the Pinned Topics and the others.
-    @ObservationIgnored private var lists: [ID: [ID]] = [:]
+    @ObservationIgnored private var lists: [ID: [StackSlot<ID>]] = [:]
     /// The lifted item's list when it lifted.
-    @ObservationIgnored private var order: [ID] = []
+    @ObservationIgnored private var order: [StackSlot<ID>] = []
     @ObservationIgnored private var timer: Task<Void, Never>?
 
     /// `spacing` is the room between two items in the list's stack.
@@ -116,20 +139,20 @@ final class ListDrag<ID: Hashable> {
         }
     }
 
-    /// How far `id` moves from its place in `shown`, its list as the stack shows it now, to its place in the order
+    /// How far `slot` moves from its place in `shown`, its list as the stack shows it now, to its place in the order
     /// that the dragged item's placement makes. Zero once the stack shows that order.
-    func shift(of id: ID, in shown: [ID]) -> CGFloat {
-        guard let dragged, let placement, shown.contains(dragged) else { return 0 }
-        return layout.top(of: id, in: placement.placing(dragged, in: shown)) - layout.top(of: id, in: shown)
+    func shift(of slot: StackSlot<ID>, in shown: [StackSlot<ID>]) -> CGFloat {
+        guard let dragged, let placement, shown.contains(.item(dragged)) else { return 0 }
+        return layout.top(of: slot, in: placement.placing(dragged, in: shown)) - layout.top(of: slot, in: shown)
     }
 
-    /// An item reports its height, its place in the scroll view and its list each time they change.
-    func measure(_ id: ID, height: CGFloat, visibleTop: CGFloat) {
-        heights[id] = height
-        visibleTops[id] = visibleTop
+    /// An item or a fixed view reports its height, and its place in the scroll view, each time they change.
+    func measure(_ slot: StackSlot<ID>, height: CGFloat, visibleTop: CGFloat) {
+        heights[slot] = height
+        if let id = slot.item { visibleTops[id] = visibleTop }
     }
 
-    func show(_ shown: [ID], at id: ID) {
+    func show(_ shown: [StackSlot<ID>], at id: ID) {
         lists[id] = shown
         guard phase == .settling(id), let placement, placement.placing(id, in: shown) == shown else { return }
         // The stack lays the items out where they were drawn, so the drag ends without moving anything.
@@ -149,10 +172,10 @@ final class ListDrag<ID: Hashable> {
     /// The pressed item moved far enough to be a drag.
     func lift(_ id: ID) {
         guard phase == .pressing(id) else { return }
-        order = lists[id] ?? [id]
+        order = lists[id] ?? [.item(id)]
         layout.heights = heights.filter { order.contains($0.key) }
         // Grown by the lift, its top stands a little higher than its place.
-        headroom = (visibleTops[id] ?? .infinity) - (Self.liftScale - 1) * Self.liftAnchor.y * layout.height(id)
+        headroom = (visibleTops[id] ?? .infinity) - (Self.liftScale - 1) * Self.liftAnchor.y * layout.height(.item(id))
         translation = 0
         withAnimation(.spring(duration: 0.25, bounce: 0.3)) { phase = .lifted(id) }
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
@@ -284,7 +307,7 @@ private struct ListDragHandle<ID: Hashable>: ViewModifier {
 private struct ListDragItem<ID: Hashable>: ViewModifier {
     let id: ID
     let drag: ListDrag<ID>
-    let shown: [ID]
+    let shown: [StackSlot<ID>]
     let cornerRadius: CGFloat
     @Environment(\.chromeTheme) private var chromeTheme
     @Environment(\.dragTopInset) private var topInset
@@ -294,7 +317,7 @@ private struct ListDragItem<ID: Hashable>: ViewModifier {
         let isDragged = isLifted || drag.phase == .settling(id)
         // Its own place in the new order for the dropped item, the placeholder's place for the lifted one, and for the
         // others the place they slide aside to.
-        let shift = drag.shift(of: id, in: shown)
+        let shift = drag.shift(of: .item(id), in: shown)
         content
             .transformEnvironment(\.isLiftedByDrag) { if isLifted { $0 = true } }
             .background {
@@ -311,7 +334,7 @@ private struct ListDragItem<ID: Hashable>: ViewModifier {
             }
             // Its place without its own offset, in the visible part of the list's scroll view.
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .scrollView) } action: { frame in
-                drag.measure(id, height: frame.height, visibleTop: frame.minY - topInset)
+                drag.measure(.item(id), height: frame.height, visibleTop: frame.minY - topInset)
             }
             .onChange(of: shown, initial: true) { _, shown in drag.show(shown, at: id) }
             // The Window or Session it stands for went away while it was lifted.
@@ -356,6 +379,22 @@ extension EnvironmentValues {
     }
 }
 
+/// A fixed view between a `ListDrag` list's items, such as a line: it slides as the items above it make room for the
+/// lifted one, and it is no place to land.
+private struct ListDragFixed<ID: Hashable>: ViewModifier {
+    let key: String
+    let drag: ListDrag<ID>
+    let shown: [StackSlot<ID>]
+
+    func body(content: Content) -> some View {
+        content
+            .offset(y: drag.shift(of: .fixed(key), in: shown))
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                drag.measure(.fixed(key), height: height, visibleTop: 0)
+            }
+    }
+}
+
 /// The place a lifted item would land: a slot of its size, outlined.
 private struct DropSlot: View {
     let cornerRadius: CGFloat
@@ -381,7 +420,18 @@ extension View {
     /// list as the stack shows it now, and `cornerRadius` the item's corners, for the plate it stands on while lifted
     /// and the placeholder where it would land.
     func listDragItem<ID: Hashable>(_ id: ID, drag: ListDrag<ID>, shown: [ID], cornerRadius: CGFloat) -> some View {
+        listDragItem(id, drag: drag, shown: shown.map(StackSlot.item), cornerRadius: cornerRadius)
+    }
+
+    /// `listDragItem` in a list that also has fixed views, made with `listDragFixed`, between its items.
+    func listDragItem<ID: Hashable>(_ id: ID, drag: ListDrag<ID>, shown: [StackSlot<ID>], cornerRadius: CGFloat) -> some View {
         modifier(ListDragItem(id: id, drag: drag, shown: shown, cornerRadius: cornerRadius))
+    }
+
+    /// Makes the view the fixed slot `key` of a `ListDrag` list: the items move past it, and it keeps its place among
+    /// them. `shown` is the list as the stack shows it now.
+    func listDragFixed<ID: Hashable>(_ key: String, drag: ListDrag<ID>, shown: [StackSlot<ID>]) -> some View {
+        modifier(ListDragFixed(key: key, drag: drag, shown: shown))
     }
 
     /// A press in a window that is not key reaches this view's gestures, so a click or a drag works on the first click.
