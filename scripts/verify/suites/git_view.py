@@ -2276,16 +2276,37 @@ class GitView(unittest.TestCase):
         self.assertEqual(self.stored_tabs(), [], 'o opened a page')
         self.assertTrue(self.is_open(), 'the Git View closed')
 
-    def test_o_does_nothing_in_changes_and_history(self):
+    def test_o_does_nothing_in_changes(self):
         self.addCleanup(self.close_browser_tabs)
         self.track('main', 'git@git.muxify.test:owner/repo.git')
-        for tab in ['1', '2']:
-            self.go_to(tab)
-            self.key('o')
+        self.go_to('1')
+        self.key('o')
         time.sleep(.5)
-        self.assertEqual(self.stored_tabs(), [], 'o opened a page outside Branches')
+        self.assertEqual(self.stored_tabs(), [], 'o opened a page in Changes')
         self.assertFalse(self.s.has('git-write-error'))
         self.assertTrue(self.is_open())
+
+    def test_o_on_a_commit_in_history_opens_its_page_on_origin_and_closes_the_popup(self):
+        self.addCleanup(self.close_browser_tabs)
+        self.git('remote', 'add', 'origin', 'git@git.muxify.test:owner/repo.git')
+        self.addCleanup(self.git, 'remote', 'remove', 'origin')
+        head = self.git('rev-parse', 'HEAD').strip()
+        self.go_to('2')
+        self.select_row('git-row-commit:' + head)
+        self.key('o')
+        link = 'https://git.muxify.test/owner/repo/commit/' + head
+        wait(lambda: link in self.stored_tabs(), 'o did not open %s; Tabs are %s' % (link, self.stored_tabs()), seconds=10)
+        self.assertEqual(len(self.stored_tabs()), 1)
+        wait(lambda: not self.is_open(), 'the popup Git View did not close', seconds=10)
+
+    def test_o_on_a_commit_with_no_origin_says_so_and_opens_nothing(self):
+        self.addCleanup(self.close_browser_tabs)
+        self.go_to('2')
+        self.key('o')
+        self.assertEqual(self.banner(), "There is no 'origin' remote")
+        time.sleep(.5)
+        self.assertEqual(self.stored_tabs(), [], 'o opened a page')
+        self.assertTrue(self.is_open(), 'the Git View closed')
 
 
 if __name__ == '__main__':

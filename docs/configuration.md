@@ -774,13 +774,17 @@ git_view:
   editor_in_window: false
 ```
 
-o in Branches opens the selected branch's "create pull request" page as a Tab in
+o in Branches opens the selected branch's "create pull request" page, and o in
+History or a branch's commits opens the selected commit's page, as a Tab in
 the Window's Browser, as a ⌘-click on a link does, and the page gets Focus. A
 popup Git View closes, because it floats over the Browser; a `fullscreen` one
 stays open. The link is
 `https://<web domain>/<owner>/<repo>/compare/<upstream branch>?expand=1`, with
 the repository read from the URL of the branch's upstream remote, which may
-not be `origin`. `services` maps a git host to `<provider>:<web domain>`. The
+not be `origin`. The commit's link is
+`https://<web domain>/<owner>/<repo>/commit/<full hash>`, from the URL of
+`origin`, or of the only remote when there is no `origin`; with neither, the
+banner says "There is no 'origin' remote". `services` maps a git host to `<provider>:<web domain>`. The
 provider is `github`, and github.com is built in. A git host is the host of
 the remote's URL, without user or port: `github-work` in
 `git@github-work:org/repo.git`. A host matches exactly, and your entries come

@@ -749,6 +749,22 @@ enum GitRepository {
     printf '%s\\n%s\\n' "$url" "${ref#refs/heads/}"
     """
 
+    /// Takes the folder and prints the URL of `origin`, or of the only remote when there is no `origin`, with `insteadOf`
+    /// rules applied. With neither, it prints the reason to stderr.
+    static let commitLinkScript = """
+    cd "$1" || exit 1
+    remotes=$(git remote) || exit 1
+    if printf '%s\\n' "$remotes" | grep -qx origin; then
+        remote=origin
+    elif set -f && set -- $remotes && [ $# -eq 1 ]; then
+        remote=$1
+    else
+        echo "\(GitHosting.Failure.noOrigin.message)" >&2
+        exit 1
+    fi
+    exec git ls-remote --get-url "$remote"
+    """
+
     /// Takes the folder and fetches all remotes, as lazygit's `f` does by default. It runs in a pseudo-terminal
     /// (`TerminalCommand`), so git's and ssh's questions for credentials are asked in the Git View.
     static let fetchScript = """

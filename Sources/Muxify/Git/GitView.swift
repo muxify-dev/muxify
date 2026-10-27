@@ -328,7 +328,8 @@ final class GitView {
         case pasteCommits
         /// ⌃r: clears the Copied commits.
         case clearCopied
-        /// o: opens the "create pull request" page of the branch selected in Branches.
+        /// o: opens the "create pull request" page of the branch selected in Branches, or the page of the commit selected in
+        /// History or a branch's commits.
         case openPage
     }
 
@@ -1220,7 +1221,12 @@ final class GitView {
         case .pull:
             pull()
         case .openPage:
-            if list == .branches, focus == .list, case .branch(let branch)? = selectedItem { openPullRequest(of: branch) }
+            guard focus == .list else { return }
+            switch selectedItem {
+            case .branch(let branch)? where list == .branches: openPullRequest(of: branch)
+            case .commit(let commit)? where list == .history || list == .branch: openCommitPage(commit)
+            default: break
+            }
         }
     }
 
@@ -1817,6 +1823,25 @@ final class GitView {
                     return
                 }
                 switch GitHosting.pullRequestURL(remoteURL: lines[0], upstreamBranch: lines[1], services: store.config.gitView.services) {
+                case .success(let url): self.openInBrowser(url)
+                case .failure(let failure): self.writeError = failure.message
+                }
+            case .failure(let error):
+                self.writeError = Self.message(for: error)
+            }
+        }
+    }
+
+    /// o in History and a branch's commits: opens the commit's page on `origin`, or the only remote. Nothing is checked
+    /// first: not that the commit is on the remote.
+    func openCommitPage(_ commit: GitCommit) {
+        guard let store, let root = snapshot?.root else { return }
+        writeError = nil
+        store.runGitScript(GitRepository.commitLinkScript, arguments: [root], timeout: 10) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let output):
+                switch GitHosting.commitURL(remoteURL: output, hash: commit.sha, services: store.config.gitView.services) {
                 case .success(let url): self.openInBrowser(url)
                 case .failure(let failure): self.writeError = failure.message
                 }

@@ -18,6 +18,13 @@ public enum GitHosting {
             case .github: return "?expand=1"
             }
         }
+
+        /// The full hash goes after this.
+        var commitPath: String {
+            switch self {
+            case .github: return "/commit/"
+            }
+        }
     }
 
     /// A git host and the service behind it: the web domain, which may carry a `:port`, is where the pages are.
@@ -40,11 +47,12 @@ public enum GitHosting {
 
     /// What `o` says when it opens nothing, as lazygit words it.
     public enum Failure: Error, Equatable {
-        case noUpstream, unsupportedService, unparsableURL
+        case noUpstream, noOrigin, unsupportedService, unparsableURL
 
         public var message: String {
             switch self {
             case .noUpstream: return "Cannot open a pull request for a branch with no upstream"
+            case .noOrigin: return "There is no 'origin' remote"
             case .unsupportedService: return "Unsupported git service"
             case .unparsableURL: return "Failed to parse repo information from url"
             }
@@ -85,12 +93,22 @@ public enum GitHosting {
     /// The page that creates a pull request from the upstream branch `branch` of the repository at `remoteURL`,
     /// into its default branch. `services` are tried before the built-in ones.
     public static func pullRequestURL(remoteURL: String, upstreamBranch branch: String, services: [Service]) -> Result<URL, Failure> {
+        link(remoteURL: remoteURL, services: services) { "\($0.provider.pullRequestPath)\(queryEscape(branch))\($0.provider.pullRequestSuffix)" }
+    }
+
+    /// The page of the commit `hash`, its full hash, in the repository at `remoteURL`.
+    public static func commitURL(remoteURL: String, hash: String, services: [Service]) -> Result<URL, Failure> {
+        link(remoteURL: remoteURL, services: services) { "\($0.provider.commitPath)\(hash)" }
+    }
+
+    /// `https://<web domain>/<owner>/<repo>` and what `page` makes of the service, for the remote's URL.
+    private static func link(remoteURL: String, services: [Service], page: (Service) -> String) -> Result<URL, Failure> {
         let url = remoteURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let host = host(of: url),
               let service = (services + builtIn).first(where: { $0.host == host })
         else { return .failure(.unsupportedService) }
         guard let repository = repositoryPath(of: url),
-              let link = URL(string: "https://\(service.webDomain)/\(repository)\(service.provider.pullRequestPath)\(queryEscape(branch))\(service.provider.pullRequestSuffix)")
+              let link = URL(string: "https://\(service.webDomain)/\(repository)\(page(service))")
         else { return .failure(.unparsableURL) }
         return .success(link)
     }

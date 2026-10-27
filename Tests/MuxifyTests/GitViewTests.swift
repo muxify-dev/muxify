@@ -210,7 +210,27 @@ final class GitHostingTests: XCTestCase {
         XCTAssertEqual(failure("git@github.com"), .unparsableURL)
     }
 
+    func testACommitLinkIsTheFullHashOnTheCommitPage() {
+        let hash = "0123456789abcdef0123456789abcdef01234567"
+        func commit(_ remote: String, services: [GitHosting.Service] = []) -> String? {
+            try? GitHosting.commitURL(remoteURL: remote, hash: hash, services: services).get().absoluteString
+        }
+        let expected = "https://github.com/owner/repo/commit/\(hash)"
+        XCTAssertEqual(commit("git@github.com:owner/repo.git"), expected)
+        XCTAssertEqual(commit("https://github.com/owner/repo\n"), expected)
+        XCTAssertEqual(commit("git@git.internal:team/repo.git", services: [GitHosting.Service(host: "git.internal", provider: .github, webDomain: "git.internal:8443")]),
+                       "https://git.internal:8443/team/repo/commit/\(hash)")
+        XCTAssertNil(commit("git@github.company.com:o/r.git"))
+        if case .failure(let failure) = GitHosting.commitURL(remoteURL: "git@github.company.com:o/r.git", hash: hash, services: []) {
+            XCTAssertEqual(failure, .unsupportedService)
+        } else { XCTFail("an unclaimed host opened") }
+        if case .failure(let failure) = GitHosting.commitURL(remoteURL: "git@github.com", hash: hash, services: []) {
+            XCTAssertEqual(failure, .unparsableURL)
+        } else { XCTFail("a URL that does not parse opened") }
+    }
+
     func testTheMessagesAreLazygits() {
+        XCTAssertEqual(GitHosting.Failure.noOrigin.message, "There is no 'origin' remote")
         XCTAssertEqual(GitHosting.Failure.noUpstream.message, "Cannot open a pull request for a branch with no upstream")
         XCTAssertEqual(GitHosting.Failure.unsupportedService.message, "Unsupported git service")
         XCTAssertEqual(GitHosting.Failure.unparsableURL.message, "Failed to parse repo information from url")
@@ -752,6 +772,21 @@ final class GitScriptTests: XCTestCase {
         """, repository)
         XCTAssertEqual(try run(GitRepository.pullRequestLinkScript, repository, "feature"),
                        "https://github.com/me/repo.git\ntopic/feature\n")
+    }
+
+    func testTheCommitLinkScriptReadsOriginOrTheOnlyRemote() throws {
+        // No remote.
+        XCTAssertThrowsError(try run(GitRepository.commitLinkScript, repository)) { error in
+            XCTAssertTrue(String(describing: error).contains("There is no 'origin' remote"), "\(error)")
+        }
+        try run("cd \"$1\" && git remote add fork git@github.com:me/repo.git", repository)
+        XCTAssertEqual(try run(GitRepository.commitLinkScript, repository), "git@github.com:me/repo.git\n", "the only remote")
+        try run("cd \"$1\" && git remote add upstream git@github.com:team/repo.git", repository)
+        XCTAssertThrowsError(try run(GitRepository.commitLinkScript, repository), "several remotes and none called origin") { error in
+            XCTAssertTrue(String(describing: error).contains("There is no 'origin' remote"), "\(error)")
+        }
+        try run("cd \"$1\" && git remote add origin git@github.com:owner/repo.git && git config url.https://github.com/.insteadOf git@github.com:", repository)
+        XCTAssertEqual(try run(GitRepository.commitLinkScript, repository), "https://github.com/owner/repo.git\n", "origin, with insteadOf applied")
     }
 
     func testThePullRequestLinkScriptRefusesABranchWithNoUpstreamOrOnTheRemoteDot() throws {
