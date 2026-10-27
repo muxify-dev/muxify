@@ -111,6 +111,229 @@ final class GitViewConfigTests: XCTestCase {
         XCTAssertEqual(config.gitView, GitViewConfig())
         XCTAssertEqual(config.problems, [])
     }
+
+    // MARK: services
+
+    func testServicesMapAGitHostToAProviderAndWebDomainInOrder() throws {
+        let config = try load("""
+        git_view:
+          services:
+            github.mycompany.com: github:github.mycompany.com
+            github-work: github:github.com
+            git.internal: github:git.internal:8443
+        """)
+        XCTAssertEqual(config.gitView.services, [
+            GitHosting.Service(host: "github.mycompany.com", provider: .github, webDomain: "github.mycompany.com"),
+            GitHosting.Service(host: "github-work", provider: .github, webDomain: "github.com"),
+            GitHosting.Service(host: "git.internal", provider: .github, webDomain: "git.internal:8443"),
+        ])
+        XCTAssertEqual(config.problems, [])
+        XCTAssertEqual(try load("").gitView.services, [])
+    }
+
+    func testAServiceWithNoColonOrAnUnknownProviderIsAProblemAndSkipped() throws {
+        let config = try load("""
+        git_view:
+          services:
+            a.example: github
+            b.example: svn:b.example
+            c.example: github:c.example
+            d.example: "github:"
+            e.example: "github:bad domain/x"
+        """)
+        XCTAssertEqual(config.gitView.services.map(\.host), ["c.example"])
+        XCTAssertEqual(config.problems.map(\.line), [3, 4, 6, 7])
+        XCTAssertEqual(config.problems[0].message, "git_view.services.a.example: expected <provider>:<web domain>, with a provider of github, gitlab, bitbucket, bitbucketServer, azuredevops, gitea, codeberg")
+        XCTAssertEqual(config.problems[1].message, "git_view.services.b.example: unknown provider \"svn\", expected github, gitlab, bitbucket, bitbucketServer, azuredevops, gitea, codeberg")
+        XCTAssertNotNil(try load("git_view:\n  services: github").problems.first)
+    }
+}
+
+final class GitHostingTests: XCTestCase {
+    private func link(_ remote: String, branch: String = "feature/x", services: [GitHosting.Service] = []) -> String? {
+        try? GitHosting.pullRequestURL(remoteURL: remote, upstreamBranch: branch, services: services).get().absoluteString
+    }
+
+    private func failure(_ remote: String, services: [GitHosting.Service] = []) -> GitHosting.Failure? {
+        if case .failure(let failure) = GitHosting.pullRequestURL(remoteURL: remote, upstreamBranch: "b", services: services) { return failure }
+        return nil
+    }
+
+    func testBothDefaultPatternsReadOwnerAndRepo() {
+        let expected = "https://github.com/owner/repo/compare/feature%2Fx?expand=1"
+        XCTAssertEqual(link("git@github.com:owner/repo.git"), expected)
+        XCTAssertEqual(link("git@github.com:owner/repo"), expected)
+        XCTAssertEqual(link("ssh://git@github.com/owner/repo.git"), expected)
+        XCTAssertEqual(link("ssh://git@github.com:22/owner/repo.git"), expected)
+        XCTAssertEqual(link("https://github.com/owner/repo.git"), expected)
+        XCTAssertEqual(link("https://user:token@github.com:443/owner/repo"), expected)
+        XCTAssertEqual(link("github.com:owner/repo.git"), expected)
+    }
+
+    func testOwnerIsGreedyAndARepoKeepsItsInnerDots() {
+        XCTAssertEqual(link("https://github.com/group/sub/repo.git", branch: "b"), "https://github.com/group/sub/repo/compare/b?expand=1")
+        XCTAssertEqual(link("git@github.com:o/my.repo.git", branch: "b"), "https://github.com/o/my.repo/compare/b?expand=1")
+    }
+
+    func testTheBranchIsQueryEscapedAsGoDoes() {
+        XCTAssertEqual(GitHosting.queryEscape("feature/x"), "feature%2Fx")
+        XCTAssertEqual(GitHosting.queryEscape("a b&c=d?#é"), "a+b%26c%3Dd%3F%23%C3%A9")
+        XCTAssertEqual(GitHosting.queryEscape("A-z_0.9~"), "A-z_0.9~")
+    }
+
+    func testHostsMatchExactly() {
+        XCTAssertNil(link("git@github.company.com:o/r.git"))
+        XCTAssertEqual(failure("git@github.company.com:o/r.git"), .unsupportedService)
+        XCTAssertEqual(failure("https://notgithub.com/o/r"), .unsupportedService)
+        XCTAssertEqual(failure("https://example.com/github.com/r"), .unsupportedService)
+        XCTAssertEqual(failure("https://gitlab.company.com/o/r"), .unsupportedService)
+        XCTAssertEqual(failure("https://my.dev.azure.com/o/p/_git/r"), .unsupportedService)
+        XCTAssertEqual(failure("origin"), .unsupportedService)
+    }
+
+    func testYourEntriesComeBeforeTheBuiltInHosts() {
+        let work = GitHosting.Service(host: "github.company.com", provider: .github, webDomain: "github.company.com")
+        XCTAssertEqual(link("git@github.company.com:o/r.git", branch: "b", services: [work]), "https://github.company.com/o/r/compare/b?expand=1")
+        let alias = GitHosting.Service(host: "github-work", provider: .github, webDomain: "github.com")
+        XCTAssertEqual(link("git@github-work:o/r.git", branch: "b", services: [alias]), "https://github.com/o/r/compare/b?expand=1")
+        let port = GitHosting.Service(host: "git.internal", provider: .github, webDomain: "git.internal:8443")
+        XCTAssertEqual(link("ssh://git@git.internal:2222/team/repo.git", branch: "b", services: [port]), "https://git.internal:8443/team/repo/compare/b?expand=1")
+        let override = GitHosting.Service(host: "github.com", provider: .github, webDomain: "ghe.example")
+        XCTAssertEqual(link("git@github.com:o/r.git", branch: "b", services: [override]), "https://ghe.example/o/r/compare/b?expand=1")
+        let first = GitHosting.Service(host: "h.test", provider: .github, webDomain: "one.test")
+        let second = GitHosting.Service(host: "h.test", provider: .github, webDomain: "two.test")
+        XCTAssertEqual(link("git@h.test:o/r", branch: "b", services: [first, second]), "https://one.test/o/r/compare/b?expand=1")
+    }
+
+    func testAUrlThatDoesNotParseFailsAfterItsHostIsClaimed() {
+        let service = GitHosting.Service(host: "h.test", provider: .github, webDomain: "h.test")
+        XCTAssertEqual(failure("git@h.test", services: [service]), .unparsableURL)
+        XCTAssertEqual(failure("git@github.com"), .unparsableURL)
+    }
+
+    func testACommitLinkIsTheFullHashOnTheCommitPage() {
+        let hash = "0123456789abcdef0123456789abcdef01234567"
+        func commit(_ remote: String, services: [GitHosting.Service] = []) -> String? {
+            try? GitHosting.commitURL(remoteURL: remote, hash: hash, services: services).get().absoluteString
+        }
+        let expected = "https://github.com/owner/repo/commit/\(hash)"
+        XCTAssertEqual(commit("git@github.com:owner/repo.git"), expected)
+        XCTAssertEqual(commit("https://github.com/owner/repo\n"), expected)
+        XCTAssertEqual(commit("git@git.internal:team/repo.git", services: [GitHosting.Service(host: "git.internal", provider: .github, webDomain: "git.internal:8443")]),
+                       "https://git.internal:8443/team/repo/commit/\(hash)")
+        XCTAssertNil(commit("git@github.company.com:o/r.git"))
+        if case .failure(let failure) = GitHosting.commitURL(remoteURL: "git@github.company.com:o/r.git", hash: hash, services: []) {
+            XCTAssertEqual(failure, .unsupportedService)
+        } else { XCTFail("an unclaimed host opened") }
+        if case .failure(let failure) = GitHosting.commitURL(remoteURL: "git@github.com", hash: hash, services: []) {
+            XCTAssertEqual(failure, .unparsableURL)
+        } else { XCTFail("a URL that does not parse opened") }
+    }
+
+    // MARK: the other providers, with lazygit's test cases
+
+    private func pull(_ remote: String, services: [GitHosting.Service] = []) -> String? {
+        try? GitHosting.pullRequestURL(remoteURL: remote, upstreamBranch: "feature/x", services: services).get().absoluteString
+    }
+
+    private func commit(_ remote: String, services: [GitHosting.Service] = []) -> String? {
+        try? GitHosting.commitURL(remoteURL: remote, hash: "0123abc", services: services).get().absoluteString
+    }
+
+    func testGitlabKeepsItsSubgroupsAndUsesMergeRequests() {
+        let pull = "https://gitlab.com/group/sub/repo/-/merge_requests/new?merge_request%5Bsource_branch%5D=feature%2Fx"
+        XCTAssertEqual(self.pull("git@gitlab.com:group/sub/repo.git"), pull)
+        XCTAssertEqual(self.pull("https://gitlab.com/group/sub/repo.git"), pull)
+        XCTAssertEqual(self.pull("ssh://git@gitlab.com:2222/group/sub/repo"), pull)
+        XCTAssertEqual(self.pull("git@gitlab.com:owner/repo.git"),
+                       "https://gitlab.com/owner/repo/-/merge_requests/new?merge_request%5Bsource_branch%5D=feature%2Fx")
+        XCTAssertEqual(commit("git@gitlab.com:group/sub/repo.git"), "https://gitlab.com/group/sub/repo/-/commit/0123abc")
+        let selfHosted = GitHosting.Service(host: "git.internal", provider: .gitlab, webDomain: "git.internal:8443")
+        XCTAssertEqual(commit("ssh://git@git.internal:2222/team/repo.git", services: [selfHosted]), "https://git.internal:8443/team/repo/-/commit/0123abc")
+    }
+
+    func testBitbucketReadsItsTwoPatterns() {
+        let pull = "https://bitbucket.org/owner/repo/pull-requests/new?source=feature%2Fx&t=1"
+        XCTAssertEqual(self.pull("git@bitbucket.org:owner/repo.git"), pull)
+        XCTAssertEqual(self.pull("ssh://git@bitbucket.org/owner/repo.git"), pull)
+        XCTAssertEqual(self.pull("https://bitbucket.org/owner/repo.git"), pull)
+        XCTAssertEqual(self.pull("https://user@bitbucket.org/owner/repo"), pull)
+        XCTAssertEqual(commit("git@bitbucket.org:owner/repo.git"), "https://bitbucket.org/owner/repo/commits/0123abc")
+        XCTAssertNil(commit("git@bitbucket.org"))
+        XCTAssertNil(commit("https://bitbucket.org/owner"))
+    }
+
+    func testBitbucketServerNeedsAnEntryAndReadsProjectAndRepo() {
+        let service = GitHosting.Service(host: "mycompany.bitbucket.org", provider: .bitbucketServer, webDomain: "mycompany.bitbucket.org")
+        XCTAssertNil(pull("ssh://git@mycompany.bitbucket.org/project/repo.git"))
+        let pull = "https://mycompany.bitbucket.org/projects/project/repos/repo/pull-requests?create&sourceBranch=feature%2Fx"
+        XCTAssertEqual(self.pull("ssh://git@mycompany.bitbucket.org/project/repo.git", services: [service]), pull)
+        XCTAssertEqual(self.pull("ssh://git@mycompany.bitbucket.org:7999/project/repo.git", services: [service]), pull)
+        XCTAssertEqual(self.pull("https://mycompany.bitbucket.org/scm/project/repo.git", services: [service]), pull)
+        XCTAssertEqual(self.pull("https://user@mycompany.bitbucket.org/scm/project/repo", services: [service]), pull)
+        XCTAssertEqual(commit("https://mycompany.bitbucket.org/scm/project/repo.git", services: [service]),
+                       "https://mycompany.bitbucket.org/projects/project/repos/repo/commits/0123abc")
+        // The scp-like form has no pattern, and an https URL needs its /scm/.
+        XCTAssertNil(self.pull("git@mycompany.bitbucket.org:project/repo.git", services: [service]))
+        XCTAssertNil(self.pull("https://mycompany.bitbucket.org/project/repo.git", services: [service]))
+    }
+
+    func testAzureDevOpsReadsSshHttpsAndVsSsh() {
+        let pull = "https://dev.azure.com/org/project/_git/repo/pullrequestcreate?sourceRef=feature%2Fx"
+        XCTAssertEqual(self.pull("git@ssh.dev.azure.com:v3/org/project/repo"), pull)
+        XCTAssertEqual(self.pull("https://org@dev.azure.com/org/project/_git/repo"), pull)
+        XCTAssertEqual(self.pull("https://dev.azure.com/org/project/_git/repo"), pull)
+        XCTAssertEqual(self.pull("https://org@dev.azure.com/org/project/_git/repo.git"), pull)
+        XCTAssertEqual(commit("git@ssh.dev.azure.com:v3/org/project/repo"), "https://dev.azure.com/org/project/_git/repo/commit/0123abc")
+        let vs = GitHosting.Service(host: "vs-ssh.visualstudio.com", provider: .azuredevops, webDomain: "dev.azure.com")
+        XCTAssertEqual(self.pull("org@vs-ssh.visualstudio.com:v3/org/project/repo", services: [vs]), pull)
+        XCTAssertEqual(self.pull("org@vs-ssh.visualstudio.com/org/project/repo", services: [vs]), pull)
+        XCTAssertEqual(commit("org@vs-ssh.visualstudio.com:v3/org/project/repo", services: [vs]), "https://dev.azure.com/org/project/_git/repo/commit/0123abc")
+    }
+
+    func testGiteaAndCodebergUseTheDefaultPatterns() {
+        XCTAssertEqual(pull("git@try.gitea.io:owner/repo.git"), "https://try.gitea.io/owner/repo/compare/feature%2Fx")
+        XCTAssertEqual(pull("https://try.gitea.io/owner/repo.git"), "https://try.gitea.io/owner/repo/compare/feature%2Fx")
+        XCTAssertEqual(commit("git@try.gitea.io:owner/repo.git"), "https://try.gitea.io/owner/repo/commit/0123abc")
+        XCTAssertEqual(pull("git@codeberg.org:owner/repo.git"), "https://codeberg.org/owner/repo/compare/feature%2Fx")
+        XCTAssertEqual(pull("ssh://git@codeberg.org/owner/repo"), "https://codeberg.org/owner/repo/compare/feature%2Fx")
+        XCTAssertEqual(commit("https://codeberg.org/owner/repo.git"), "https://codeberg.org/owner/repo/commit/0123abc")
+    }
+
+    func testTheBuiltInHostsMatchExactlyAndYourEntriesComeFirst() {
+        XCTAssertEqual(GitHosting.builtIn.map(\.host),
+                       ["github.com", "gitlab.com", "bitbucket.org", "dev.azure.com", "ssh.dev.azure.com", "try.gitea.io", "codeberg.org"])
+        XCTAssertEqual(GitHosting.builtIn.first { $0.host == "ssh.dev.azure.com" }?.webDomain, "dev.azure.com")
+        XCTAssertNil(pull("git@gitea.io:owner/repo.git"))
+        XCTAssertNil(pull("git@gitlab.company.com:owner/repo.git"))
+        XCTAssertNil(pull("git@mybitbucket.org:owner/repo.git"))
+        let mine = GitHosting.Service(host: "gitlab.com", provider: .gitea, webDomain: "mine.test")
+        XCTAssertEqual(pull("git@gitlab.com:owner/repo.git", services: [mine]), "https://mine.test/owner/repo/compare/feature%2Fx")
+    }
+
+    func testEveryProviderNameIsAllowed() {
+        XCTAssertEqual(GitHosting.Provider.allCases.map(\.rawValue),
+                       ["github", "gitlab", "bitbucket", "bitbucketServer", "azuredevops", "gitea", "codeberg"])
+        for provider in GitHosting.Provider.allCases {
+            XCTAssertEqual(try? GitHosting.service(host: "h.test", value: "\(provider.rawValue):w.test").get(),
+                           GitHosting.Service(host: "h.test", provider: provider, webDomain: "w.test"))
+        }
+    }
+
+    func testTheMessagesAreLazygits() {
+        XCTAssertEqual(GitHosting.Failure.noOrigin.message, "There is no 'origin' remote")
+        XCTAssertEqual(GitHosting.Failure.noUpstream.message, "Cannot open a pull request for a branch with no upstream")
+        XCTAssertEqual(GitHosting.Failure.unsupportedService.message, "Unsupported git service")
+        XCTAssertEqual(GitHosting.Failure.unparsableURL.message, "Failed to parse repo information from url")
+    }
+
+    func testTheHostIsTheRemotesWithoutUserOrPort() {
+        XCTAssertEqual(GitHosting.host(of: "git@github-work:org/repo.git"), "github-work")
+        XCTAssertEqual(GitHosting.host(of: "ssh://git@git.internal:2222/team/repo.git"), "git.internal")
+        XCTAssertEqual(GitHosting.host(of: "https://user:p@ss@host.test/o/r"), "host.test")
+        XCTAssertEqual(GitHosting.host(of: "host.test:o/r"), "host.test")
+        XCTAssertNil(GitHosting.host(of: ""))
+    }
 }
 
 final class GitRepositoryParsingTests: XCTestCase {
@@ -629,6 +852,42 @@ final class GitScriptTests: XCTestCase {
     }
 
     private var repository: String { directory.url.appendingPathComponent("repo").path }
+
+    func testThePullRequestLinkScriptPrintsTheUpstreamRemotesUrlAndTheUpstreamBranch() throws {
+        try run("""
+        cd "$1"
+        git remote add fork git@github.com:me/repo.git
+        git config branch.feature.remote fork
+        git config branch.feature.merge refs/heads/topic/feature
+        git config url.https://github.com/.insteadOf git@github.com:
+        """, repository)
+        XCTAssertEqual(try run(GitRepository.pullRequestLinkScript, repository, "feature"),
+                       "https://github.com/me/repo.git\ntopic/feature\n")
+    }
+
+    func testTheCommitLinkScriptReadsOriginOrTheOnlyRemote() throws {
+        // No remote.
+        XCTAssertThrowsError(try run(GitRepository.commitLinkScript, repository)) { error in
+            XCTAssertTrue(String(describing: error).contains("There is no 'origin' remote"), "\(error)")
+        }
+        try run("cd \"$1\" && git remote add fork git@github.com:me/repo.git", repository)
+        XCTAssertEqual(try run(GitRepository.commitLinkScript, repository), "git@github.com:me/repo.git\n", "the only remote")
+        try run("cd \"$1\" && git remote add upstream git@github.com:team/repo.git", repository)
+        XCTAssertThrowsError(try run(GitRepository.commitLinkScript, repository), "several remotes and none called origin") { error in
+            XCTAssertTrue(String(describing: error).contains("There is no 'origin' remote"), "\(error)")
+        }
+        try run("cd \"$1\" && git remote add origin git@github.com:owner/repo.git && git config url.https://github.com/.insteadOf git@github.com:", repository)
+        XCTAssertEqual(try run(GitRepository.commitLinkScript, repository), "https://github.com/owner/repo.git\n", "origin, with insteadOf applied")
+    }
+
+    func testThePullRequestLinkScriptRefusesABranchWithNoUpstreamOrOnTheRemoteDot() throws {
+        for setup in ["true", "git config branch.feature.remote . && git config branch.feature.merge refs/heads/master"] {
+            try run("cd \"$1\" && \(setup)", repository)
+            XCTAssertThrowsError(try run(GitRepository.pullRequestLinkScript, repository, "feature")) { error in
+                XCTAssertTrue(String(describing: error).contains("Cannot open a pull request for a branch with no upstream"), "\(error)")
+            }
+        }
+    }
 
     func testTheSnapshotListsEverySection() throws {
         let snapshot = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get()

@@ -808,6 +808,18 @@ private struct ConfigReader {
                     continue
                 }
                 config.gitView.editorInWindow = inWindow
+            case "services":
+                config.gitView.services = []
+                for (host, _, entry) in entries(of: value, "git_view.services") {
+                    guard let text = string(entry) else {
+                        problem(at: entry, "git_view.services.\(host): expected <provider>:<web domain>")
+                        continue
+                    }
+                    switch GitHosting.service(host: host, value: text) {
+                    case .success(let service): config.gitView.services.append(service)
+                    case .failure(let failure): problem(at: entry, failure.message)
+                    }
+                }
             default:
                 problem(at: key, "unknown key \"git_view.\(name)\"")
             }

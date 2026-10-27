@@ -749,6 +749,11 @@ git_view:
   height: 80%
   editor: nvim +{line} {file}   # without it: ${VISUAL:-${EDITOR:-vi}} +{line} {file}
   editor_in_window: true
+  services:           # a git host, mapped to <provider>:<web domain>
+    github.mycompany.com: github:github.mycompany.com
+    github-work: github:github.com                # an ssh Host alias: git@github-work:org/repo.git
+    gitlab.mycompany.com: gitlab:gitlab.mycompany.com   # a self-hosted GitLab
+    git.internal: github:git.internal:8443        # the web domain may carry a :port
 ```
 
 The sizes are the defaults. `popup` floats over the whole App Window, Sidebar and
@@ -773,8 +778,38 @@ git_view:
   editor_in_window: false
 ```
 
+o in Branches opens the selected branch's "create pull request" page, and o in
+History or a branch's commits opens the selected commit's page, as a Tab in
+the Window's Browser, as a ⌘-click on a link does, and the page gets Focus. A
+popup Git View closes, because it floats over the Browser; a `fullscreen` one
+stays open. On GitHub the link is
+`https://<web domain>/<owner>/<repo>/compare/<upstream branch>?expand=1`, with
+the repository read from the URL of the branch's upstream remote, which may
+not be `origin`. On GitHub the commit's link is
+`https://<web domain>/<owner>/<repo>/commit/<full hash>`, from the URL of
+`origin`, or of the only remote when there is no `origin`; with neither, the
+banner says "There is no 'origin' remote". `services` maps a git host to `<provider>:<web domain>`. The
+provider is one of `github`, `gitlab`, `bitbucket`, `bitbucketServer`,
+`azuredevops`, `gitea` and `codeberg`. These hosts are built in: github.com
+(`github`), gitlab.com (`gitlab`), bitbucket.org (`bitbucket`), dev.azure.com
+and ssh.dev.azure.com, whose web domain is dev.azure.com (`azuredevops`),
+try.gitea.io (`gitea`) and codeberg.org (`codeberg`). Bitbucket Server has no
+built-in host, so it needs an entry, and so does a self-hosted GitLab, Gitea or
+GitHub, or Azure's `vs-ssh.visualstudio.com`. The link's path is the service's:
+GitLab's merge request is `/-/merge_requests/new?...` and its commit
+`/-/commit/<hash>`; Bitbucket's `/pull-requests/new?...` and `/commits/<hash>`;
+Bitbucket Server's `/projects/<project>/repos/<repo>/pull-requests?create...`;
+Azure DevOps' `/<org>/<project>/_git/<repo>/pullrequestcreate?...`; Gitea and
+Codeberg's `/compare/<branch>`. A GitLab owner keeps its subgroups. A git host is the host of
+the remote's URL, without user or port: `github-work` in
+`git@github-work:org/repo.git`. A host matches exactly, and your entries come
+before the built-in ones, so `github.company.com` needs an entry of its own. A
+branch with no upstream, or a host no service claims, shows a message in the Git
+View's banner and opens nothing.
+
 Changes apply live; invalid values use the defaults and appear in the Config
-problems banner.
+problems banner, as does a `services` entry with no `:` or with an unknown
+provider, which is skipped.
 
 The Git View reads the repository when it opens, every 10 seconds, when Muxify
 comes to the front, with R, and after you stage or commit. On a Remote
