@@ -1338,7 +1338,6 @@ final class WorkspaceStore {
                 case .failure(let error):
                     self.isConnected = false
                     self.memoryServerID = nil
-                    if !self.isRemote, self.surface == nil { self.terminalMessage = String(describing: error) }
                     if error as? TmuxError != .notReady {
                         self.environmentStatus = "Waiting for \(self.environmentName): \(error)"
                     }
