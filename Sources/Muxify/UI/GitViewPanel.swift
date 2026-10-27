@@ -1499,7 +1499,7 @@ private struct GitCard: View {
         case .commit(let commit, let detail): detail?.title ?? commit.subject
         case .branch(let branch, _): branch.name
         case .stash(let stash): GitNavigatorText.stashTitle(stash.message)
-        case .folder(let path, _): path
+        case .folder(let path, _): path == GitTree.root ? "/" : path
         case .change(let change): change.path
         case .comparison(let base, let target?): "\(base.name) → \(target.name)"
         case .comparison(let base, nil): "Comparing \(base.name)"
@@ -1682,7 +1682,7 @@ private struct GitCard: View {
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "folder.fill").font(.system(size: 15)).foregroundStyle(.secondary)
-                Text(path + "/").font(.system(size: 17, weight: .semibold)).textSelection(.enabled)
+                Text(path == GitTree.root ? "/" : path + "/").font(.system(size: 17, weight: .semibold)).textSelection(.enabled)
             }
             Text(verbatim: "\(changes.count) changed file\(changes.count == 1 ? "" : "s") in this folder"
                  + (staged > 0 ? ", \(staged) of them staged" : ""))
@@ -2090,7 +2090,7 @@ private struct GitMenuView: View {
                         switch subject {
                         case .folder(let path, let files):
                             Image(systemName: "folder").font(.system(size: 11))
-                            Text(path).fontWeight(.medium).lineLimit(1).truncationMode(.head)
+                            Text(path == GitTree.root ? "/" : path).fontWeight(.medium).lineLimit(1).truncationMode(.head)
                             if let files {
                                 Text(verbatim: "·").foregroundStyle(.tertiary)
                                 Text(files == 1 ? "1 file" : "\(files) files")

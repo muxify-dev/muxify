@@ -299,6 +299,8 @@ final class GitView {
         case toggle, collapseAll, expandAll
         /// A: amends the last commit with what's staged, in Changes.
         case amend
+        /// D: lazygit's reset options for the whole working tree, in Changes.
+        case resetOptions
         /// m: continues, skips or aborts the merge, rebase, cherry-pick, revert or `git am` in progress.
         case operation
         /// M: merges the branch selected in Branches into the one you're on.
@@ -715,10 +717,10 @@ final class GitView {
                     folder = (folder as NSString).deletingLastPathComponent
                 }
             }
-            return tree(changes.map(\.path), in: .changes, folding: !isFiltered) { index in
+            return tree(changes.map(\.path), in: .changes, folding: !isFiltered, withRoot: true) { index in
                 Row(item: .change(changes[index]), isStaged: changes[index].isStaged)
             } folder: { path in
-                !unstaged.contains(path)
+                path == GitTree.root ? changes.allSatisfy(\.isStaged) : !unstaged.contains(path)
             }
         case .history, .branch:
             guard let log = log(for: level) else { return note("Reading…") }
@@ -761,9 +763,9 @@ final class GitView {
         }
     }
 
-    private func tree(_ paths: [String], in list: GitList, folding: Bool, file: (Int) -> Row,
+    private func tree(_ paths: [String], in list: GitList, folding: Bool, withRoot: Bool = false, file: (Int) -> Row,
                       folder isStaged: (String) -> Bool) -> [Row] {
-        GitTree.nodes(paths, collapsed: folding ? collapsedFolders[list] ?? [] : []).map { node in
+        GitTree.nodes(paths, collapsed: folding ? collapsedFolders[list] ?? [] : [], withRoot: withRoot).map { node in
             var row = node.file.map(file) ?? Row(item: .folder(list, node.path), text: node.name, isStaged: isStaged(node.path))
             row.depth = node.depth
             return row
@@ -943,13 +945,13 @@ final class GitView {
             return
         }
         let paths = list == .changes ? snapshot?.changes.map(\.path) ?? [] : ownerFiles?.map(\.path) ?? []
-        collapsedFolders[list] = Set(GitTree.nodes(paths).filter { $0.file == nil }.map(\.path))
-        // A file now folded away: select its top folder.
+        collapsedFolders[list] = Set(GitTree.nodes(paths, withRoot: list == .changes).filter { $0.file == nil }.map(\.path))
+        // A file now folded away: select its top folder, or the root, which holds them all.
         let items = items
         if let id = level.selection, !items.contains(where: { $0.id == id }),
            let top = items.first(where: { item in
                guard case .folder(_, let path) = item else { return false }
-               return id.hasSuffix(":" + path) || id.contains(":\(path)/")
+               return path == GitTree.root || id.hasSuffix(":" + path) || id.contains(":\(path)/")
            }) {
             choose(top)
         }
@@ -1060,7 +1062,7 @@ final class GitView {
             "alt+down": .nextHunk, "alt+up": .previousHunk, "right_bracket": .nextFile, "left_bracket": .previousFile,
             "shift+down": .extend(1), "shift+up": .extend(-1), "v": .range, "a": .hunk, "y": .copy, "cmd+c": .copy,
             "space": .toggle, "minus": .collapseAll, "equal": .expandAll, "n": .newBranch,
-            "c": .commit, "d": .discard, "g": .pop, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
+            "c": .commit, "d": .discard, "shift+d": .resetOptions, "g": .pop, "s": .stash, "shift+s": .stashOptions, "slash": .filter, "escape": .back, "q": .close, "shift+r": .refresh,
             "shift+w": .mark, "e": .edit, "f": .fetch, "shift+a": .amend, "m": .operation, "shift+m": .merge, "r": .rebase, "shift+p": .push, "p": .pull,
             "shift+c": .copyCommit, "shift+v": .pasteCommits, "ctrl+r": .clearCopied, "o": .openPage,
     ]
@@ -1175,6 +1177,8 @@ final class GitView {
             }
             guard list == .changes else { return }
             if focus == .diff { askDiscardLines() } else if let item = selectedItem { askDiscard(item) }
+        case .resetOptions:
+            openResetOptions()
         case .stash:
             askStash(.all)
         case .stashOptions:
@@ -1577,6 +1581,99 @@ final class GitView {
         }
         write(option == .all ? GitRepository.discardScript : GitRepository.discardUnstagedScript,
               arguments: [snapshot.root] + discard.paths(option))
+    }
+
+    // MARK: Resetting the working tree
+
+    /// lazygit's reset options for the working tree, for D, by the argument the reset script takes.
+    enum WorkingTreeReset: String, CaseIterable {
+        case nuke, unstaged, untracked, staged, soft, mixed, hard
+
+        var title: String {
+            switch self {
+            case .nuke: "Nuke working tree"
+            case .unstaged: "Discard unstaged changes"
+            case .untracked: "Discard untracked files"
+            case .staged: "Discard staged changes"
+            case .soft: "Soft reset"
+            case .mixed: "Mixed reset"
+            case .hard: "Hard reset"
+            }
+        }
+
+        /// lazygit's key for it in the menu.
+        var key: String {
+            switch self {
+            case .nuke: "x"
+            case .unstaged: "u"
+            case .untracked: "c"
+            case .staged: "shift+s"
+            case .soft: "s"
+            case .mixed: "m"
+            case .hard: "h"
+            }
+        }
+
+        var note: String {
+            switch self {
+            case .nuke: "Back to the last commit. New and untracked files are deleted."
+            case .unstaged: "Tracked files go back to what's staged. Untracked files stay."
+            case .untracked: "Deletes the files git doesn't track. Ignored files stay."
+            case .staged: "Takes what's staged out of the files too; the rest stays. Needs git 2.35."
+            case .soft: "Every change stays as it is, staged or not."
+            case .mixed: "Unstages everything. The files keep their changes."
+            case .hard: "Tracked files go back to the last commit. Untracked files stay."
+            }
+        }
+
+        /// Soft and mixed change no file's content.
+        var isDestructive: Bool { self != .soft && self != .mixed }
+    }
+
+    /// Why this reset of the working tree would do nothing, else nil.
+    func nothingToReset(_ reset: WorkingTreeReset) -> String? {
+        guard let changes = snapshot?.changes else { return nil }
+        if changes.isEmpty { return "Nothing to reset: the working tree is clean." }
+        switch reset {
+        case .unstaged:
+            return trackedChanges.contains { $0.groups.contains(.unstaged) } ? nil : "No tracked file has unstaged changes."
+        case .untracked:
+            return changes.contains(where: \.isUntracked) ? nil : "There are no untracked files."
+        default:
+            break
+        }
+        if snapshot?.commits.isEmpty == true { return "There is no commit yet." }
+        switch reset {
+        case .staged, .mixed:
+            return changes.contains { $0.groups.contains(.staged) } ? nil : "Nothing is staged."
+        case .hard:
+            return trackedChanges.isEmpty ? "Only untracked files, which a hard reset keeps." : nil
+        default:
+            return nil
+        }
+    }
+
+    /// D in Changes: lazygit's reset options. Each choice runs at once, as the Discard changes menu's do, so the menu
+    /// opens through the Agent guard. When the working tree is clean, it says so and opens nothing.
+    func openResetOptions() {
+        guard list == .changes, let snapshot else { return }
+        if snapshot.changes.isEmpty {
+            writeError = nothingToReset(.nuke)
+            return
+        }
+        openGuarded(GitMenu(
+            id: "reset-options", title: "Reset options", subject: .folder(GitTree.root, files: snapshot.changes.count),
+            symbol: "arrow.counterclockwise", isDestructive: true, footnote: "This can't be undone.",
+            choices: WorkingTreeReset.allCases.map { reset in
+                let reason = nothingToReset(reset)
+                return GitMenu.Choice(key: reset.key, title: reset.title, note: reason ?? reset.note, isEnabled: reason == nil,
+                                      isDestructive: reset.isDestructive) { [weak self] in self?.resetWorkingTree(reset) }
+            }))
+    }
+
+    private func resetWorkingTree(_ reset: WorkingTreeReset) {
+        guard let snapshot else { return }
+        write(GitRepository.resetWorkingTreeScript, arguments: [snapshot.root, reset.rawValue])
     }
 
     // MARK: Stashing
