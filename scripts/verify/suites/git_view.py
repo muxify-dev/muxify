@@ -119,6 +119,10 @@ class GitView(unittest.TestCase):
         cls.repo = s.root/'projects/fixture'
         cls.repo.mkdir(parents=True)
         cls.git('init', '-q', '-b', 'main')
+        cls.git('config', 'user.name', 'Verifier')
+        cls.git('config', 'user.email', 'verifier@example.invalid')
+        cls.git('config', 'rerere.enabled', 'false')
+        cls.git('config', 'commit.gpgsign', 'false')
         for name in ['README.md', 'tracked.txt', 'staged.txt', 'stashed.txt']:
             (cls.repo/name).write_text('one\n')
         (cls.repo/'tracked.txt').write_text('one\nthe quick brown fox\n')
@@ -209,15 +213,7 @@ class GitView(unittest.TestCase):
         return match.group(1) if match else None
 
     def select_change(self, name):
-        """Moves the selection to the change's row with j."""
-        key = 'git-row-change:' + name
-        self.s.wait_rows(lambda rs: self.s.has(key, rs), 'no row ' + key)
-        for _ in range(10):
-            if 'selected=1' in self.s.row(key).get('accessibilityValue', ''):
-                return
-            self.key('j')
-            self.s.wait_rows(lambda rs: len(self.rows_with_prefix('git-row-', rs)) > 0 and bool(self.selected_row(rs)), 'no row is selected')
-        self.fail('could not select ' + key)
+        self.select_row('git-row-change:' + name)
 
     def test_opening_shows_changes_with_their_letters(self):
         rs = self.s.wait_rows(lambda rs: len(self.rows_with_prefix('git-row-change:', rs)) == 3, 'Changes did not list the 3 changes')
@@ -966,6 +962,7 @@ class GitView(unittest.TestCase):
         self.assertNotIn('no upstream', self.toolbar(), 'the toolbar does not show a detached HEAD')
 
     def test_a_checkout_that_changes_would_overwrite_asks_to_autostash(self):
+        self.close_git_view()
         self.git('checkout', '-q', '-b', 'autostash-x')
         (self.repo/'stashed.txt').write_text('one\nbranch\n')
         self.git('commit', '-q', '-m', 'autostash branch', '--', 'stashed.txt')
@@ -977,8 +974,7 @@ class GitView(unittest.TestCase):
         self.addCleanup(self.git, 'add', 'staged.txt')
         (self.repo/'stashed.txt').write_text('top\none\n')
         stashes = len(self.stashes())
-        # R renames in Branches, so it reads the repository again before going there.
-        self.key('shift+r')
+        self.open_git_view()
         self.go_to('3')
         self.select_row('git-row-branch:autostash-x')
         self.key('space')

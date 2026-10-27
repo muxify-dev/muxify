@@ -11,6 +11,8 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
+import textwrap
 import time
 import unittest
 from unittest.mock import patch
@@ -29,6 +31,116 @@ s.tmux('new-session', '-d', '-s', 'orphan')
 print(json.dumps(dict(root=str(s.root), app=s.pid, server=int(s.tmux('display-message', '-p', '#{pid}')))), flush=True)
 time.sleep(600)
 ''' % NAME
+
+
+class VerifyRunner(unittest.TestCase):
+    def run_probe(self, source, *, timeout=3):
+        from scripts.verify.run import results, run_suites
+
+        root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory(prefix='muxify-runner-')))
+        module = root/'scripts/verify/suites/timeout_probe.py'
+        module.parent.mkdir(parents=True)
+        module.write_text('import os, signal, time, unittest\n' + textwrap.dedent(source))
+        out = root/'evidence'
+        environment = dict(os.environ, PYTHONPATH=str(root) + os.pathsep + os.environ.get('PYTHONPATH', ''))
+        for key in ('TMUX', 'TMUX_PANE'):
+            environment.pop(key, None)
+        with patch.dict(os.environ, environment, clear=True):
+            status = run_suites(1, [('timeout_probe', out, [], None)], time.monotonic(),
+                                timeout=timeout, stop_grace=.5)[out]
+        return status, results(out), out
+
+    def test_runner_allows_a_suite_to_outlive_the_progress_deadline(self):
+        status, records, _ = self.run_probe('''
+            class Checks(unittest.TestCase):
+                def test_a(self): time.sleep(.6)
+                def test_b(self): time.sleep(.6)
+                def test_c(self): time.sleep(.6)
+                def test_d(self): time.sleep(.6)
+                def test_e(self): time.sleep(.6)
+                def test_f(self): time.sleep(.6)
+        ''')
+        self.assertEqual(status[0], 'ok')
+        self.assertGreater(status[1], status[2])
+        self.assertEqual([record['status'] for record in records], ['pass'] * 6)
+
+    def test_runner_keeps_completed_checks_and_times_only_the_stuck_check(self):
+        status, records, out = self.run_probe('''
+            from pathlib import Path
+            class Checks(unittest.TestCase):
+                def test_a(self): time.sleep(.6)
+                def test_b(self):
+                    self.addClassCleanup(lambda: Path(os.environ['MUXIFY_VERIFY_EVIDENCE'], 'cleaned').touch())
+                    while True:
+                        print('still running', flush=True)
+                        time.sleep(.05)
+                def test_c(self): pass
+        ''')
+        self.assertEqual(status[0], 'timeout')
+        self.assertEqual([record['status'] for record in records], ['pass', 'timeout', 'not-run'])
+        self.assertLess(records[1]['seconds'], status[1] - .4)
+        self.assertIn('test_b', records[1]['error'])
+        self.assertTrue((out/'cleaned').is_file())
+
+    def test_runner_bounds_import_discovery_and_class_fixtures(self):
+        cases = {
+            'import': 'time.sleep(30)\n',
+            'discovery': 'def load_tests(*args): time.sleep(30)\n',
+            'setup': '''
+                class Checks(unittest.TestCase):
+                    @classmethod
+                    def setUpClass(cls): time.sleep(30)
+                    def test_a(self): pass
+            ''',
+            'teardown': '''
+                class Checks(unittest.TestCase):
+                    @classmethod
+                    def tearDownClass(cls): time.sleep(30)
+                    def test_a(self): pass
+            ''',
+            'cleanup': '''
+                class Checks(unittest.TestCase):
+                    @classmethod
+                    def setUpClass(cls): cls.addClassCleanup(time.sleep, 30)
+                    def test_a(self): pass
+            ''',
+        }
+        for phase, source in cases.items():
+            with self.subTest(phase=phase):
+                status, records, _ = self.run_probe(source)
+                self.assertEqual(status[0], 'timeout')
+                timeout = [record for record in records if record['status'] == 'timeout']
+                self.assertEqual([record['check'] for record in timeout], ['scripts.verify.suites.timeout_probe'])
+
+    def test_runner_keeps_results_when_a_check_cannot_handle_signals(self):
+        status, records, _ = self.run_probe('''
+            class Checks(unittest.TestCase):
+                def test_a(self): pass
+                def test_b(self): os.kill(os.getpid(), signal.SIGSTOP)
+                def test_c(self): pass
+        ''')
+        self.assertEqual(status[0], 'timeout')
+        self.assertEqual([record['status'] for record in records], ['pass', 'timeout', 'not-run'])
+
+    def test_runner_keeps_timeout_when_cleanup_blocks_or_the_check_returns_late(self):
+        for action in ('self.addClassCleanup(time.sleep, 30); raise', 'return'):
+            with self.subTest(action=action):
+                status, records, out = self.run_probe('''
+                    class Checks(unittest.TestCase):
+                        def test_a(self): pass
+                        def test_b(self):
+                            try:
+                                time.sleep(30)
+                            except KeyboardInterrupt:
+                                %s
+                        def test_c(self): pass
+                ''' % action)
+                self.assertEqual(status[0], 'timeout')
+                self.assertEqual([record['status'] for record in records], ['pass', 'timeout', 'not-run'])
+                if action == 'return':
+                    self.assertIn('OK', (out/'output.log').read_text())
+                else:
+                    self.assertIn('test_b', records[1]['error'])
 
 
 class Harness(unittest.TestCase):

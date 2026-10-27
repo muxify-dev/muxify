@@ -79,11 +79,17 @@ finally:
         output, ready = sandbox.root/(name + '.input'), sandbox.root/(name + '.ready')
         command = shlex.join([sys.executable, str(self.recorder), str(output), str(ready)])
         pane = sandbox.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-n', name, command)
-        sandbox.tmux('switch-client', '-c', self.tty, '-t', pane)
         wait(ready.exists, 'Pane recorder did not start')
         # The store must finish reading its initial remote attachment first.
         sandbox.wait_rows(lambda rows: any('Connected to Fixture' in str(r.get('accessibilityValue', ''))
                                            for r in rows), 'Remote Environment not shown')
+        window = sandbox.tmux('display-message', '-p', '-t', pane, '#{window_id}')
+        key = 'header-window-' + window
+        sandbox.wait_rows(lambda rows: sandbox.has(key, rows), 'Recorder Window did not appear')
+        sandbox.act('press', key)
+        sandbox.wait_rows(lambda rows: sandbox.row(key, rows).get('accessibilityValue') == 'selected'
+                          and sandbox.tmux('display-message', '-p', '-c', self.tty, '#{window_id}') == window,
+                          'Recorder Window was not selected by the app and Client')
         return pane, output
 
     def pasted_path(self, output):
