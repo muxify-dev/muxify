@@ -639,6 +639,21 @@ final class GitTreeAndGraphTests: XCTestCase {
         XCTAssertEqual(folded.map(\.name), ["Sources/Muxify", "Git", "UI", "Panel.swift", "docs", "a.md", "README.md"])
     }
 
+    func testTheRootHoldsTheTreeOnlyWhenMoreThanOneRowIsOnTop() {
+        let paths = ["src/deep/x.swift", "README.md"]
+        let nodes = GitTree.nodes(paths, withRoot: true)
+        XCTAssertEqual(nodes.map { "\(String(repeating: " ", count: $0.depth))\($0.name)" }, ["/", " src/deep", "  x.swift", " README.md"])
+        XCTAssertEqual(nodes[0].path, GitTree.root)
+        XCTAssertNil(nodes[0].file)
+        XCTAssertEqual(GitTree.nodes(paths, collapsed: [GitTree.root], withRoot: true).map(\.name), ["/"])
+        // As in lazygit, one file or one folder on top has no root.
+        XCTAssertEqual(GitTree.nodes(["README.md"], withRoot: true).map(\.name), ["README.md"])
+        XCTAssertEqual(GitTree.nodes(["src/deep/x.swift", "src/deep/y.swift"], withRoot: true).map(\.name), ["src/deep", "x.swift", "y.swift"])
+        XCTAssertEqual(GitTree.nodes(paths).map(\.name), ["src/deep", "x.swift", "README.md"])
+        XCTAssertTrue(GitTree.path("README.md", isIn: GitTree.root))
+        XCTAssertTrue(GitTree.path("src/deep/x.swift", isIn: GitTree.root))
+    }
+
     private func commit(_ sha: String, _ parents: [String]) -> GitCommit {
         GitCommit(sha: sha, author: "A", date: Date(), tags: [], parents: parents, subject: sha)
     }
@@ -1117,6 +1132,33 @@ final class GitScriptTests: XCTestCase {
         try run("cd \"$1\" && git reset -q --hard && printf 'let a = 5\\n' > a.swift", repository)
         try run(GitRepository.stashScript, repository, "unstaged", "")
         XCTAssertEqual(try status(), ["?? u.txt"])
+    }
+
+    func testTheResetOptionsDoWhatLazygitsDo() throws {
+        let cases: [(String, [String])] = [
+            ("nuke", []),
+            ("unstaged", ["A  s.txt", "?? u.txt"]),
+            ("untracked", [" M a.swift", "A  s.txt"]),
+            ("staged", [" M a.swift", "?? u.txt"]),
+            ("soft", [" M a.swift", "A  s.txt", "?? u.txt"]),
+            ("mixed", [" M a.swift", "?? s.txt", "?? u.txt"]),
+            ("hard", ["?? u.txt"]),
+        ]
+        for (reset, left) in cases {
+            try prepareStash()
+            try run("cd \"$1\" && git stash push -q -m kept -- a.swift && printf 'let a = 3\\n' > a.swift", repository)
+            try run(GitRepository.resetWorkingTreeScript, repository, reset)
+            XCTAssertEqual(try status(), left, reset)
+            // Discarding what's staged drops only the stash it made.
+            XCTAssertEqual(try git("stash list --format=%gs"), "On master: kept\n", reset)
+        }
+        XCTAssertEqual(try git("show HEAD:a.swift"), try run("cat \"$1/a.swift\"", repository), "a hard reset left a.swift changed")
+        // With nothing staged, git makes no stash, and the one on top stays.
+        XCTAssertThrowsError(try run(GitRepository.resetWorkingTreeScript, repository, "staged")) {
+            XCTAssertTrue(self.stderr(of: $0).contains("Nothing is staged."), self.stderr(of: $0))
+        }
+        XCTAssertEqual(try git("stash list --format=%gs"), "On master: kept\n")
+        XCTAssertThrowsError(try run(GitRepository.resetWorkingTreeScript, repository, "bogus"))
     }
 
     // MARK: Continuing, skipping and aborting
@@ -1981,6 +2023,7 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(try command(" ", keyCode: 0x31), .toggle)
         XCTAssertEqual(try command("c", keyCode: 0x08), .commit)
         XCTAssertEqual(try command("d", keyCode: 0x02), .discard)
+        XCTAssertEqual(try command("D", keyCode: 0x02, flags: .shift), .resetOptions)
         // ⌘G goes on to toggle_git_view, ⌘B to the Browser.
         XCTAssertNil(try command("g", keyCode: 0x05, flags: .command))
         XCTAssertNil(try command("b", keyCode: 0x0B, flags: .command))
@@ -2207,6 +2250,40 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertTrue(GitView.staging([unstaged, staged], path: "src") == (true, ["src"]))
         XCTAssertTrue(GitView.staging([GitChange(index: "M", worktree: "M", path: "src/a.swift")], path: "src/a.swift").stage)
         XCTAssertTrue(GitView.staging([staged, renamed], path: "src") == (false, ["src", "old.swift"]))
+    }
+
+    func testTheRootRowHoldsChangesAndSpaceAndDActOnAllOfThem() {
+        let gitView = GitView(windowID: "@1")
+        var changed = snapshot
+        changed.changes = [GitChange(index: "M", worktree: " ", path: "src/a.swift"), GitChange(index: "?", worktree: "?", path: "notes.txt")]
+        gitView.apply(changed)
+        XCTAssertEqual(gitView.rows.map(\.id), ["folder:changes:.", "folder:changes:src", "change:src/a.swift", "change:notes.txt"])
+        XCTAssertEqual(gitView.rows.map(\.text)[0], "/")
+        XCTAssertEqual(gitView.rows.map(\.depth), [0, 1, 2, 1])
+        XCTAssertEqual(gitView.rows[0].isStaged, false, "the root is green only when everything is staged")
+        XCTAssertEqual(gitView.level.selection, "change:src/a.swift", "Changes open on their first file, not on the root")
+        gitView.perform(.top)
+        XCTAssertEqual(gitView.selectedItem, .folder(.changes, GitTree.root))
+        // Space stages everything, as a does.
+        gitView.perform(.toggle)
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "."]])
+        // d discards everything, from the Discard changes menu of the root.
+        gitView.perform(.discard)
+        XCTAssertEqual(gitView.menu?.id, "discard")
+        XCTAssertEqual(gitView.menu?.subject, .folder(GitTree.root, files: 2))
+        XCTAssertTrue(gitView.chooseMenu(key: "x"))
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "."], ["/repo", "."]])
+        // - folds the root too, and the selection goes to it.
+        gitView.perform(.down)
+        gitView.perform(.collapseAll)
+        XCTAssertEqual(gitView.rows.map(\.id), ["folder:changes:."])
+        XCTAssertEqual(gitView.level.selection, "folder:changes:.")
+        gitView.perform(.expandAll)
+        XCTAssertEqual(gitView.rows.count, 4)
+        // With one file on top, there is no root.
+        changed.changes = [GitChange(index: "M", worktree: " ", path: "notes.txt")]
+        gitView.apply(changed)
+        XCTAssertEqual(gitView.rows.map(\.id), ["change:notes.txt"])
     }
 
     func testSpaceGAndDOnAStashAskBeforeApplyingPoppingAndDropping() {
@@ -3001,6 +3078,72 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(gitView.menu?.agents, ["Claude Code in work", "Claude Code in work"])
         gitView.closeMenu()
         XCTAssertNil(gitView.menu)
+    }
+
+    func testDOpensLazygitsResetOptionsAndEachRunsAtOnce() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(changedSnapshot)
+        gitView.perform(.resetOptions)
+        XCTAssertEqual(gitView.menu?.id, "reset-options")
+        XCTAssertEqual(gitView.menu?.title, "Reset options")
+        XCTAssertEqual(gitView.menu?.subject, .folder(GitTree.root, files: 3))
+        XCTAssertEqual(gitView.menu?.choices.map(\.key), ["x", "u", "c", "shift+s", "s", "m", "h"])
+        XCTAssertEqual(gitView.menu?.choices.map(\.title), ["Nuke working tree", "Discard unstaged changes", "Discard untracked files",
+                                                            "Discard staged changes", "Soft reset", "Mixed reset", "Hard reset"])
+        XCTAssertEqual(gitView.menu?.choices.map(\.isEnabled), Array(repeating: true, count: 7))
+        XCTAssertEqual(gitView.menu?.choices.map(\.isDestructive), [true, true, true, true, false, false, true])
+        XCTAssertEqual(gitView.menu?.highlightedChoice?.key, "x")
+        XCTAssertEqual(gitView.queuedWriteArguments, [], "opening the menu resets nothing")
+        for (key, reset) in [("x", "nuke"), ("u", "unstaged"), ("c", "untracked"), ("shift+s", "staged"), ("s", "soft"), ("m", "mixed"), ("h", "hard")] {
+            gitView.perform(.resetOptions)
+            XCTAssertTrue(gitView.chooseMenu(key: key), key)
+            XCTAssertNil(gitView.menu, key)
+            XCTAssertEqual(gitView.queuedWriteArguments.last, ["/repo", reset], key)
+        }
+        // Elsewhere D does nothing.
+        gitView.perform(.tab(.history))
+        gitView.perform(.resetOptions)
+        XCTAssertNil(gitView.menu)
+    }
+
+    func testAResetOptionWithNothingToDoIsDimmedAndACleanTreeOpensNothing() {
+        let gitView = GitView(windowID: "@1")
+        var changed = snapshot
+        changed.changes = [GitChange(index: "?", worktree: "?", path: "notes.txt")]
+        gitView.apply(changed)
+        gitView.perform(.resetOptions)
+        XCTAssertEqual(gitView.menu?.choices.map(\.isEnabled), [true, false, true, false, true, false, false])
+        XCTAssertEqual(gitView.menu?.choices[1].note, "No tracked file has unstaged changes.")
+        XCTAssertEqual(gitView.menu?.choices[3].note, "Nothing is staged.")
+        XCTAssertEqual(gitView.menu?.choices[6].note, "Only untracked files, which a hard reset keeps.")
+        XCTAssertFalse(gitView.chooseMenu(key: "h"))
+        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        gitView.closeMenu()
+        // Before the first commit only what needs no HEAD is offered.
+        changed.commits = []
+        changed.changes = [GitChange(index: "A", worktree: "M", path: "a.swift"), GitChange(index: "?", worktree: "?", path: "notes.txt")]
+        gitView.apply(changed)
+        gitView.perform(.resetOptions)
+        XCTAssertEqual(gitView.menu?.choices.map(\.isEnabled), [false, true, true, false, false, false, false])
+        XCTAssertEqual(gitView.menu?.choices[0].note, "There is no commit yet.")
+        gitView.closeMenu()
+        changed.changes = []
+        gitView.apply(changed)
+        gitView.perform(.resetOptions)
+        XCTAssertNil(gitView.menu)
+        XCTAssertEqual(gitView.writeError, "Nothing to reset: the working tree is clean.")
+    }
+
+    func testTheResetOptionsNameTheAgentsWorkingInTheWorktree() {
+        let gitView = GitView(windowID: "@1")
+        gitView.apply(changedSnapshot)
+        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
+                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.perform(.resetOptions)
+        XCTAssertEqual(gitView.menu?.id, "reset-options", "the guard folds into the menu instead of asking twice")
+        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
+        XCTAssertTrue(gitView.chooseMenu(key: "x"))
+        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "nuke"]])
     }
 
     func testTheAgentGuardAsksOnceForAnOperationWithNoMenuOfItsOwn() {

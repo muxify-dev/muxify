@@ -527,6 +527,10 @@ all of it is staged, and a stages or unstages everything; a click on a file's
 letters does the same. d asks, as lazygit does, whether to discard all of a
 file's or folder's changes, back to the last commit, or only the unstaged ones,
 keeping what's staged. New and untracked files are deleted; it can't be undone.
+As in lazygit's file tree, a `/` row holds the whole tree when more than one file
+or folder is on top, so space and d on it stage and discard everything; - folds
+it too. With one file on top there is no `/` row, and with one folder its row
+holds everything.
 The Git View asks in a menu, as lazygit does: each choice has its key, j and k
 (or ↓ and ↑) move the highlight, ↩ picks the highlighted choice, and ⎋ or q
 close the menu and change nothing. While it is open, no other Git View key acts.
@@ -547,6 +551,20 @@ nothing to take is dimmed, and when there is nothing to stash at all the Git
 View says so and opens nothing. Stashing changes the files of the Worktree, so it
 asks first while an Agent is working there, as below. The new stash is the first
 in Stashes, whose count goes up.
+
+D in Changes opens lazygit's reset options for the whole working tree as a menu:
+nuke the working tree (x), which puts tracked files back to the last commit and
+deletes new and untracked files, as `git reset --hard HEAD` and `git clean -fd`
+do; discard the unstaged changes (u), which puts tracked files back to what's
+staged and keeps untracked files; discard the untracked files (c); discard the
+staged changes (S), from the index and from the files, by stashing them and
+dropping that stash, as lazygit does, which needs git 2.35 or newer; or a soft
+(s), mixed (m) or hard (h) reset to the last commit. Ignored files stay. As in
+d's menu, a choice runs at once and can't be undone, and the menu names any
+Agent working in the Worktree, as below. A choice with nothing to do is dimmed,
+and so is everything but u and c before the first commit. When the working tree
+is clean, the Git View says so and opens nothing. Unlike lazygit's, the nuke
+leaves submodules alone.
 
 In Stashes, the selected stash is applied, popped or dropped as lazygit's Stash
 panel does, each after a confirmation menu: space applies it ("Are you sure you

@@ -626,6 +626,35 @@ enum GitRepository {
     LC_ALL=C git -c color.ui=never reset -q "--$2" "$3" 1>&2 || exit 1
     """
 
+    /// Takes the folder and one of lazygit's reset options for the working
+    /// tree: `nuke` puts tracked files back to HEAD and deletes untracked
+    /// ones, `unstaged` puts tracked files back to what's staged,
+    /// `untracked` deletes untracked files, `staged` stashes what's staged
+    /// and drops that stash, as lazygit does, and `soft`, `mixed` and
+    /// `hard` reset to HEAD. Ignored files stay.
+    static let resetWorkingTreeScript = """
+    cd "$1" || exit 1
+    case $2 in
+        nuke) git reset -q --hard HEAD && exec git clean -f -d -q ;;
+        unstaged) exec git checkout -q -- . ;;
+        untracked) exec git clean -f -d -q ;;
+        staged)
+            if ! git stash push -h 2>&1 | grep -q -e --staged; then
+                echo "Discarding only what's staged needs git 2.35 or newer." >&2
+                exit 1
+            fi
+            # With nothing staged git makes no stash, and the top one isn't this one's to drop.
+            before=$(git rev-parse -q --verify refs/stash)
+            git stash push -q --staged -m "Discarded staged changes" || exit 1
+            after=$(git rev-parse -q --verify refs/stash)
+            if [ -z "$after" ] || [ "$after" = "$before" ]; then echo "Nothing is staged." >&2; exit 1; fi
+            exec git stash drop -q
+            ;;
+        soft|mixed|hard) exec git reset -q "--$2" HEAD ;;
+        *) echo "Unknown reset: $2" >&2; exit 1 ;;
+    esac
+    """
+
     /// Takes the folder and the message; commits what's staged. Prints the
     /// new commit's short hash; hooks' output goes to stderr, where a
     /// failure shows it.

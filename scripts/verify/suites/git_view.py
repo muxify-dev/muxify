@@ -1,4 +1,4 @@
-"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu and its Agent guard, stashing from Changes, applying, popping and dropping a stash, checking out, fetching, pushing, pulling, and closing.
+"""The Git View: opening it, the Changes list and a file's diff, History, the Discard changes menu and its Agent guard, the reset options, stashing from Changes, applying, popping and dropping a stash, checking out, fetching, pushing, pulling, and closing.
 
 The driver cannot type keys, so a check performs each Git View key as an accessibility action of the
 `git-view` element (`GitNavigator` in UI/GitViewPanel.swift). An action is named by the key's Config
@@ -66,6 +66,11 @@ P pushes beside the writes and p pulls in the write queue, in every tab; the too
 ("Force push?", with the one choice `git-menu-choice-y`), and a detached HEAD says in `git-write-error` why it can't.
 A in Changes asks in the menu `amend` ("Amend last commit", with the one choice `git-menu-choice-y`) and amends the last
 commit with what's staged; with nothing staged or an operation in progress, `git-write-error` says why.
+With more than one row on top, Changes have the row `git-row-folder:changes:.`, labelled "/", above the rest: space and d
+on it stage and discard everything. D in Changes asks in the menu `reset-options` ("Reset options") with lazygit's choices
+`git-menu-choice-x` (Nuke working tree), `-u` (Discard unstaged changes), `-c` (Discard untracked files), `-shift+s`
+(Discard staged changes), `-s`, `-m` and `-h` (soft, mixed and hard reset to HEAD), each run at once; a choice with
+nothing to do is disabled, and with a clean tree `git-write-error` says so and nothing opens.
 m, in every tab, while a merge, rebase, cherry-pick, revert or `git am` is in progress, asks in the menu `operation`
 ("Merge options", "Rebase options" and so on) with the choices `git-menu-choice-c` (Continue), `-s` (Skip, not for a
 merge) and `-a` (Abort); with nothing in progress `git-write-error` says so. Staging the last conflicted file asks in
@@ -659,6 +664,40 @@ class GitView(unittest.TestCase):
             wait(lambda: not path.exists(), 'x did not delete the file after the guarded menu', seconds=10)
         finally:
             path.unlink(missing_ok=True)
+
+    def test_the_root_row_holds_every_change_and_space_on_it_stages_them_all(self):
+        self.addCleanup(self.restore_fixture, len(self.stashes()))
+        self.wait_change('new.txt', bool, 'Changes do not list new.txt')
+        self.assertEqual(self.s.row('git-row-folder:changes:.').get('accessibilityLabel'), '/', 'Changes have no / row above their files')
+        self.select_row('git-row-folder:changes:.')
+        self.key('space')
+        self.wait_change('new.txt', lambda row: self.status(row) == 'A ', 'space on / did not stage new.txt')
+        self.assertEqual(sorted(self.porcelain()), ['A  new.txt', 'M  staged.txt', 'M  tracked.txt'], 'space on / did not stage every change')
+
+    def open_reset_options(self):
+        self.key('shift+d')
+        return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Reset options', 'D did not open the reset options')
+
+    def test_shift_d_offers_lazygits_reset_options_and_c_deletes_only_the_untracked_files(self):
+        self.addCleanup(self.restore_fixture, len(self.stashes()))
+        self.wait_change('new.txt', bool, 'Changes do not list new.txt')
+        tree = self.porcelain()
+        rs = self.open_reset_options()
+        titles = {'x': 'Nuke working tree', 'u': 'Discard unstaged changes', 'c': 'Discard untracked files',
+                  'shift+s': 'Discard staged changes', 's': 'Soft reset', 'm': 'Mixed reset', 'h': 'Hard reset'}
+        for key, title in titles.items():
+            self.assertEqual(self.s.row('git-menu-choice-' + key, rs).get('accessibilityLabel'), title)
+            self.assertIn('enabled=1', self.s.row('git-menu-choice-' + key, rs).get('accessibilityValue', ''), title + ' is not offered')
+        self.s.act('action', 'git-menu', 'escape')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+        time.sleep(1)
+        self.assertEqual(self.porcelain(), tree, 'escape changed the tree')
+        self.open_reset_options()
+        self.s.act('action', 'git-menu', 'c')
+        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'c did not close the menu')
+        wait(lambda: not (self.repo/'new.txt').exists(), 'c did not delete the untracked file', seconds=10)
+        self.assertEqual(self.porcelain(), [line for line in tree if not line.startswith('??')], 'c changed more than the untracked files')
+        self.wait_change('new.txt', lambda row: not row, 'the deleted file stays in Changes')
 
     def stashes(self):
         return self.git('stash', 'list', '--format=%gs').splitlines()
