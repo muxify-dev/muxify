@@ -2,7 +2,9 @@ import Foundation
 
 extension TopicRecord {
     /// Save the current layout. Only a confirmed removal may replace a remembered layout with empty;
-    /// startup, server loss and reconnect do not establish that the user closed anything.
+    /// startup, server loss and reconnect do not establish that the user closed anything. A live Session's Windows
+    /// replace its remembered ones: tmux lists all of them, and a remembered Window from an earlier server is one
+    /// that Reopen already made again under a new id.
     public func remembering(_ snapshot: TmuxSnapshot, order: SessionOrder,
                             branches: TopicBranches = TopicBranches(),
                             previously: [TmuxWindow] = []) -> TopicRecord? {
@@ -49,12 +51,6 @@ extension TopicRecord {
                 fields["panes"] = panes.isEmpty ? nil : .array(panes.map { Self.remembered($0, in: window, commandLines: snapshot.commandLines) })
                 return .object(fields)
             })
-            let liveWindows = Set(members.map(\.id))
-            let observedWindows = Set(observed.map(\.id))
-            let missing = previousWindows.filter { entry in
-                entry["window_id"]?.string.map { !liveWindows.contains($0) && !observedWindows.contains($0) } ?? false
-            }
-            session["windows"] = .array((session["windows"]?.array ?? []) + missing)
             return .object(session)
         }
         let liveIDs = Set(remembered.compactMap { $0["id"]?.string })

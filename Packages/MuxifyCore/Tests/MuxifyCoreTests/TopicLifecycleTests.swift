@@ -3,8 +3,8 @@ import XCTest
 
 final class TopicLifecycleTests: XCTestCase {
     private var topic: TopicRecord { TopicRecord(id: "topic", title: "Fix", slug: "fix") }
-    private func window(_ n: Int = 1, name: String = "debug/fix") -> TmuxWindow {
-        TmuxWindow(id: "@\(n)", sessionID: "$\(n)", sessionName: name, index: 0, name: "shell", paneTitle: "",
+    private func window(_ n: Int = 1, name: String = "debug/fix", id: String? = nil) -> TmuxWindow {
+        TmuxWindow(id: id ?? "@\(n)", sessionID: "$\(n)", sessionName: name, index: 0, name: "shell", paneTitle: "",
             path: "/work/game", command: "zsh", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0,
             agent: "", storedBrowser: StoredBrowser(), openRequests: [], topicID: "topic", sessionPath: "/work/game")
     }
@@ -57,6 +57,15 @@ final class TopicLifecycleTests: XCTestCase {
         XCTAssertEqual(partial.sessions.count, 2)
         XCTAssertNil(partial.remembering(snapshot([window()]), order: .oldestFirst, previously: [window()]),
             "a later complete read must not silently erase a Session never seen on this connection")
+    }
+
+    func testReopenAfterARestartRemembersOnlyTheWindowsItMade() throws {
+        func session(_ ids: [Int]) -> [TmuxWindow] { ids.map { window(id: "@\($0)") } }
+        let beforeRestart = try XCTUnwrap(topic.remembering(snapshot(session([12, 14, 4, 5])), order: .oldestFirst))
+        let reopened = try XCTUnwrap(beforeRestart.remembering(snapshot(session([10, 11, 12, 13])), order: .oldestFirst))
+        let windows = reopened.sessions.first?["windows"]?.array?.compactMap { $0["window_id"]?.string }
+        XCTAssertEqual(windows, ["@10", "@11", "@12", "@13"], "a Window from the earlier server must not come back as a copy")
+        XCTAssertEqual(reopened.sessions.count, 1)
     }
 
     func testReopenPreservesNamesAndDisambiguatesOnlyOccupiedSessionWithoutAdoption() throws {
