@@ -2,7 +2,7 @@
 Topic, Settled, Session or Session Path row, and Move, which uses the palette's view.
 
 The driver cannot type keys, so a check opens a palette from its View menu item, closes it with the
-search field's Close accessibility action, and runs New Session, Paste Path and Snooze through the row's
+search field's Close accessibility action, uses its Back, Show Actions and Escape actions for ⌫, ⌘K and ⎋, and runs New Session, Paste Path and Snooze through the row's
 accessibility actions (UI/CommandPaletteView.swift), which call the same code as ⌘↩, ⌃Y and ⌃S.
 
 Run from the repo root after `make build`:
@@ -166,6 +166,25 @@ class CommandPalette(unittest.TestCase):
         self.s.wait_rows(lambda rs: self.s.has('reopen-choice-reopen', rs), 'the Topic did not show its Reopen choice')
         self.assertNotEqual(self.s.tmux_ok('has-session', '-t', '=' + session).returncode, 0, 'the Reopen choice created a Session')
         self.s.act('press', 'reopen-choice-reopen')
+
+    def test_backspace_in_the_empty_field_keeps_go_to_and_commands_open(self):
+        for name in ['Go to…', 'Commands']:
+            self.open_palette(name)
+            self.s.act('action', 'palette-search', 'Back')
+            time.sleep(REFRESH_LIMIT)
+            self.assertTrue(self.s.has('palette-search'), 'Backspace in the empty field closed ' + name)
+            self.close_palette()
+
+    def test_escape_hides_the_actions_menu_and_a_second_escape_closes_the_palette(self):
+        self.open_palette('Commands')
+        self.s.act('action', 'palette-search', 'Show Actions')
+        self.s.wait_rows(lambda rs: self.s.has('palette-actions-menu', rs), 'Cmd-K did not show the actions menu')
+        self.s.act('action', 'palette-search', 'Escape')
+        self.s.wait_rows(lambda rs: not self.s.has('palette-actions-menu', rs), 'Escape did not hide the actions menu')
+        time.sleep(REFRESH_LIMIT)
+        self.assertTrue(self.s.has('palette-search'), 'Escape closed the palette while the actions menu showed')
+        self.s.act('action', 'palette-search', 'Escape')
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'a second Escape did not close the palette')
 
     def test_return_on_a_dormant_topic_reopens_it_and_goes_there(self):
         self.write_topic('sw-dormant', 'Sw dormant', self.beta,

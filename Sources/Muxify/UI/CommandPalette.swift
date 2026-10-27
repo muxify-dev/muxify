@@ -289,9 +289,12 @@ final class CommandPalette {
         if showsActions { showsActions = false; return }
         if receiveChipKey(.deleteBackward(textIsEmpty: true)) { return }
         if case .search(let config, _?) = presentation { presentation = .search(config); selectedID = nil; return }
+        // At the first step ⌫ does nothing: a typo never closes the palette, only ⎋ does.
+        let earlier = flow?.earlierStep
+        guard earlier != nil || !history.isEmpty else { return }
         invocation = UUID()
-        if let earlier = flow?.earlierStep { replaceFlow(earlier); return }
-        guard let previous = history.popLast() else { close(); return }
+        if let earlier { replaceFlow(earlier); return }
+        let previous = history.removeLast()
         presentation = previous.presentation
         query = previous.query
         selectedID = previous.selectedID
@@ -427,7 +430,7 @@ final class CommandPalette {
             close(restoringFocus: false)
             return false
         }
-        if trigger == Self.escape { close(); return true }
+        if trigger == Self.escape { escape(); return true }
         if let editor = event.window?.firstResponder as? NSTextView, handleChipKey(trigger, editor: editor) { return true }
         if trigger == KeyTrigger(modifiers: [], key: .special(.backspace)), query.isEmpty {
             back()
@@ -471,6 +474,12 @@ final class CommandPalette {
             return true
         }
         return false
+    }
+
+    /// ⎋ hides the actions menu first, and closes the palette only when no menu shows.
+    func escape() {
+        if showsActions { showsActions = false; return }
+        close()
     }
 
     /// The menu opens only over a row it has actions for; a blocked row has none.
