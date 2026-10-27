@@ -149,8 +149,17 @@ public struct Config: Equatable {
     public var keybinds = Keybinds.defaults
     /// Height of the app's header in points; at least 24 to fit its buttons.
     public var headerHeight: Double = 30
-    /// `ui.status_line_header`: show the Session name and Window selector, independently of Git and panel controls.
-    public var statusLineHeader = true
+    /// `ui.status_line`: the Session name and Window selector in the header.
+    public var statusLine = StatusLine()
+
+    public struct StatusLine: Equatable {
+        /// `enabled`: show the Session name and Window selector, independently of Git and panel controls.
+        public var enabled = true
+        /// `session.wrap`: while the Sidebar shows, the Session name stays over the Sidebar, and a long one is cut
+        /// with "…" in the middle. False shows it whole and lets it push the Window list right.
+        public var wrapsSession = true
+    }
+
     /// `ui.pulse`: every Working mark moves. False keeps them still.
     public var pulse = true
     /// `ui.focus_marker`: a short line on the top edge of the side that has Focus, while the Terminal and the Browser
@@ -227,8 +236,14 @@ public struct Config: Equatable {
         # ui:
         #   # Header height in points (minimum 24). Changes apply live.
         #   header_height: 30
-        #   # Show the Session name and Window selector. Git and other controls stay visible.
-        #   status_line_header: true
+        #   status_line:
+        #     # Show the Session name and Window selector. Git and other controls stay visible.
+        #     enabled: true
+        #     session:
+        #       # A long Session name is cut with "…" in the middle to stay over
+        #       # the Sidebar. false shows it whole and lets it push the Window
+        #       # list right.
+        #       wrap: true
         #   # false keeps every Working mark still.
         #   pulse: true
         #   # A short line on the top edge of the Terminal or the Browser, whichever
@@ -1087,12 +1102,8 @@ private struct ConfigReader {
                     continue
                 }
                 config.headerHeight = height
-            case "status_line_header":
-                guard value.tag == Yams.Tag(.bool), let enabled = value.bool else {
-                    problem(at: value, "ui.status_line_header: expected a boolean")
-                    continue
-                }
-                config.statusLineHeader = enabled
+            case "status_line":
+                readUIStatusLine(value)
             case "pulse":
                 guard value.tag == Yams.Tag(.bool), let pulse = value.bool else {
                     problem(at: value, "ui.pulse: expected a boolean")
@@ -1121,6 +1132,33 @@ private struct ConfigReader {
                 readFindColors(value)
             default:
                 problem(at: key, "unknown key \"ui.\(name)\"")
+            }
+        }
+    }
+
+    mutating func readUIStatusLine(_ node: Node) {
+        for (name, key, value) in entries(of: node, "ui.status_line") {
+            switch name {
+            case "enabled":
+                guard value.tag == Yams.Tag(.bool), let enabled = value.bool else {
+                    problem(at: value, "ui.status_line.enabled: expected a boolean")
+                    continue
+                }
+                config.statusLine.enabled = enabled
+            case "session":
+                for (part, key, value) in entries(of: value, "ui.status_line.session") {
+                    guard part == "wrap" else {
+                        problem(at: key, "unknown key \"ui.status_line.session.\(part)\"")
+                        continue
+                    }
+                    guard value.tag == Yams.Tag(.bool), let wraps = value.bool else {
+                        problem(at: value, "ui.status_line.session.wrap: expected a boolean")
+                        continue
+                    }
+                    config.statusLine.wrapsSession = wraps
+                }
+            default:
+                problem(at: key, "unknown key \"ui.status_line.\(name)\"")
             }
         }
     }

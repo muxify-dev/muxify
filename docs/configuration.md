@@ -231,7 +231,10 @@ cards with their pin.
 ```yaml
 ui:
   header_height: 30
-  status_line_header: true
+  status_line:
+    enabled: true
+    session:
+      wrap: true
 ```
 
 The height is in macOS points, defaults to 30, and must be a finite number of
@@ -239,15 +242,23 @@ at least 24 so the buttons fit. Changes apply live. Removing the setting restore
 the default; invalid values use the default and appear in the Config problems
 banner. A YAML syntax error keeps the last good Config.
 
-`status_line_header` replaces tmux's status-line navigation with the current
+`status_line.enabled` replaces tmux's status-line navigation with the current
 Session name and its Window selector, inline
 when the Window list fits and as a dropdown otherwise. The Window list starts
-at the Terminal's left edge, not over the sidebar; a Session name wider than
-the room over the sidebar pushes it right. It defaults to `true`.
+at the Terminal's left edge, not over the sidebar. It defaults to `true`.
 Set it to `false` to hide only those two controls; the Git/branch button,
 Environment selector and panel controls stay visible. Changes apply live.
 Removing the setting restores the default. Invalid values use the default and
 appear in the Config problems banner.
+
+`status_line.session.wrap` keeps the Session name over the sidebar: a name
+wider than that room is cut with "…" in the middle, as the branch is, and its
+hover label shows the whole name. A wider sidebar shows more of it. It defaults
+to `true`. Set it to `false` to show the whole name and let it push the Window
+list right; the remaining header width still cuts it in the middle. While the
+sidebar is hidden, the name is not cut to fit it, and the Window list follows
+it either way. Changes apply live. Invalid values use the default and appear in
+the Config problems banner.
 
 ## Agent marks
 
