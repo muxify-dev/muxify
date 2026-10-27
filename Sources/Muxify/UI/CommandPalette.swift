@@ -430,7 +430,7 @@ final class CommandPalette {
             close(restoringFocus: false)
             return false
         }
-        if trigger == Self.escape { close(); return true }
+        if trigger == Self.escape { escape(); return true }
         if let editor = event.window?.firstResponder as? NSTextView, handleChipKey(trigger, editor: editor) { return true }
         if trigger == KeyTrigger(modifiers: [], key: .special(.backspace)), query.isEmpty {
             back()
@@ -474,6 +474,12 @@ final class CommandPalette {
             return true
         }
         return false
+    }
+
+    /// ⎋ hides the actions menu first, and closes the palette only when no menu shows.
+    func escape() {
+        if showsActions { showsActions = false; return }
+        close()
     }
 
     /// The menu opens only over a row it has actions for; a blocked row has none.

@@ -135,7 +135,9 @@ private struct SpotlightPalette: View {
                     .focused($focused)
                     .accessibilityIdentifier("palette-search")
                     .accessibilityAction(named: "Close") { palette.close() }
+                    .accessibilityAction(named: "Escape") { palette.escape() }
                     .accessibilityAction(named: "Back") { palette.back() }
+                    .accessibilityAction(named: "Show Actions") { palette.toggleActions(for: palette.selected(in: palette.results)) }
                     .accessibilityAction(named: "Accept") { palette.acceptSelected() }
                     .accessibilityAction(named: "Confirm") { palette.acceptSelected(commandReturn: true) }
                     .accessibilityAction(named: "Toggle Choice") { palette.toggleSelected() }
@@ -384,6 +386,8 @@ private struct SpotlightPalette: View {
         .frame(width: 290)
         // Nearly opaque: the rows under it would show through as blobs.
         .spotlightGlass(theme, cornerRadius: 16, tint: 0.9)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("palette-actions-menu")
     }
 }
 

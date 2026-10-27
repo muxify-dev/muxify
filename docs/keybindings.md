@@ -191,7 +191,8 @@ button includes the active Browser Tab and keeps its history. A Topic that canno
 the reason. Move does nothing while `sidebar.topics` is off.
 
 Every Action uses the palette's view, including Actions from Sidebar and menu
-bar items. ⎋ closes without a change. ⌫ in an empty field goes back one step.
+bar items. ⎋ closes without a change, after it hides the actions menu if that
+shows. ⌫ in an empty field goes back one step.
 At the first step it does nothing, so only ⎋ closes a palette.
 A step that kills a process needs ⌘↩ to confirm.
 
@@ -366,7 +367,7 @@ conflict with the actions above:
 | `new_session` | ⌘Enter | Start another Session from the highlighted Session or Session Path, keeping its Topic or No Topic scope, and switch to it |
 | `select_next` | Down, ⌃J | Highlight the next result or action |
 | `select_prev` | Up, ⌃K | Highlight the previous result or action |
-| `show_actions` | ⌘K | Show or hide the actions menu |
+| `show_actions` | ⌘K | Show or hide the actions menu. ⎋ also hides it, and keeps the palette open |
 | `copy_folder` | ⌘C | Copy the result's folder |
 | `copy_tmux_target` | ⌘⇧C | Copy the result's tmux target or Pane ID |
 | `paste_folder` | ⌃Y | Type the result's folder where the Focus was: into the text field or web page that had it, or as one shell word at the prompt of the current Pane |

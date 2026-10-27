@@ -1,7 +1,7 @@
 import XCTest
 @testable import MuxifyCore
 
-final class PaletteBackTests: XCTestCase {
+final class PaletteKeysTests: XCTestCase {
     @MainActor func testBackspaceInTheEmptyFieldOfTheFirstStepKeepsThePaletteOpen() {
         let palette = CommandPalette()
         for config in [CommandPaletteConfig.goTo, .commands] {
@@ -25,5 +25,16 @@ final class PaletteBackTests: XCTestCase {
         XCTAssertEqual(palette.current?.name, CommandPaletteConfig.commands.name)
         XCTAssertEqual(palette.query, "New Topic")
         palette.close(restoringFocus: false)
+    }
+
+    @MainActor func testEscapeHidesTheActionsMenuBeforeItClosesThePalette() {
+        let palette = CommandPalette()
+        palette.toggle(.commands)
+        palette.showsActions = true
+        palette.escape()
+        XCTAssertFalse(palette.showsActions)
+        XCTAssertTrue(palette.isOpen, "⎋ closed the palette while the actions menu showed")
+        palette.escape()
+        XCTAssertFalse(palette.isOpen, "⎋ with no menu did not close the palette")
     }
 }
