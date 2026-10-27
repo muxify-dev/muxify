@@ -29,4 +29,12 @@ public struct MuxifyPaths: Equatable, Sendable {
     public var editLock: URL { state.appendingPathComponent("topic-edits.lock") }
     /// Every new Worktree goes to `<worktrees>/<sessionPath name>/<slug>`. Settle removes only Worktrees inside it.
     public var worktrees: URL { state.appendingPathComponent("worktrees", isDirectory: true) }
+    /// The `SessionPathCache` file of this Mac for `nil`, else of the Remote Environment with this name. The name
+    /// is percent-encoded, so that each name gives a file name of its own.
+    public func sessionPathCache(remote name: String?) -> URL {
+        let file = name.map { "remote-" + ($0.addingPercentEncoding(withAllowedCharacters: Self.fileNameCharacters) ?? "") } ?? "local"
+        return state.appendingPathComponent("session-paths", isDirectory: true).appendingPathComponent(file + ".json")
+    }
+
+    private static let fileNameCharacters = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
 }

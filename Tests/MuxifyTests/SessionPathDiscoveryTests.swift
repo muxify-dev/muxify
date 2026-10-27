@@ -6,6 +6,10 @@ final class SessionPathDiscoveryTests: XCTestCase {
         try Config.load(path: path) { _ in text }.get()
     }
 
+    private func discover(_ roots: [SessionPathRoot], aliases: [String: String], within folders: [String]? = nil) -> [SessionPath] {
+        SessionPathDiscovery.output(for: roots, within: folders).map { SessionPathDiscovery.sessionPaths(in: $0, roots: roots, aliases: aliases) } ?? []
+    }
+
     func testSessionsPathsTakeAGlobADepthAndADisplayDepth() throws {
         let config = try load("""
         sessions:
@@ -58,11 +62,11 @@ final class SessionPathDiscoveryTests: XCTestCase {
         }
         try Data().write(to: root.url.appendingPathComponent("work/file"))
         let roots = [SessionPathRoot(path: root.url.path + "/work/*", displayDepth: 2), SessionPathRoot(path: root.url.path + "/work/alpha")]
-        XCTAssertEqual(SessionPathDiscovery.discover(roots, aliases: [:]).map(\.name), ["work/alpha", "work/beta"])
+        XCTAssertEqual(discover(roots, aliases: [:]).map(\.name), ["work/alpha", "work/beta"])
         for name in ["gamma.app", "my notes"] {
             try FileManager.default.createDirectory(at: root.url.appendingPathComponent("work/" + name), withIntermediateDirectories: true)
         }
-        XCTAssertEqual(SessionPathDiscovery.discover(roots, aliases: [:]).map(\.name),
+        XCTAssertEqual(discover(roots, aliases: [:]).map(\.name),
                        ["work/alpha", "work/beta", "work/gamma_app", "work/mynotes"],
                        "a folder made later is a SessionPath, named as tmux takes it")
     }
@@ -117,15 +121,15 @@ final class SessionPathDiscoveryTests: XCTestCase {
         _ = try CommandRunner().run(CommandInvocation(executable: "/usr/bin/env", arguments: ["git", "-C", "\(home)/sessionPaths/app", "init", "-q"]),
                                     environment: ["HOME": home, "PATH": "/usr/bin:/bin:/opt/homebrew/bin", "GIT_CONFIG_NOSYSTEM": "1"])
         let roots = [SessionPathRoot(path: "\(home)/sessionPaths", depth: 2), SessionPathRoot(path: "\(home)/dotfiles")]
-        let all = SessionPathDiscovery.discover(roots, aliases: [:])
+        let all = discover(roots, aliases: [:])
         let folders = ["\(home)/sessionPaths/app/src", "\(home)/sessionPaths/lib/nested/deep"]
-        let within = SessionPathDiscovery.discover(roots, aliases: [:], within: folders)
+        let within = discover(roots, aliases: [:], within: folders)
         XCTAssertEqual(within.map(\.name), ["app", "lib", "nested"])
         XCTAssertEqual(within, all.filter { sessionPath in within.contains { $0.folder.path == sessionPath.folder.path } })
         for folder in folders {
             XCTAssertEqual(SessionPath.containing(.local(folder), in: within), SessionPath.containing(.local(folder), in: all), folder)
         }
-        XCTAssertEqual(SessionPathDiscovery.discover(roots, aliases: [:], within: []), [])
+        XCTAssertEqual(discover(roots, aliases: [:], within: []), [])
     }
 
     func testALinkedWorktreeThatSortsFirstIsARowOfItsRepository() throws {
