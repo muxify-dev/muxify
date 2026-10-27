@@ -130,7 +130,7 @@ def render(summary):
 <p class="muted">A check that fails in the parallel pass runs again alone. When it passes then, it is FLAKY.</p>
 <table><tr><th>Suite</th><th>Check</th>%(rounds)s</tr>%(checks)s</table>
 <h2>Suites</h2>
-<table><tr><th>Round</th><th>Suite</th><th>Status</th><th>Time</th><th>Timeout</th><th>Evidence</th></tr>%(suites)s</table>
+<table><tr><th>Round</th><th>Suite</th><th>Status</th><th>Time</th><th>Progress timeout</th><th>Evidence</th></tr>%(suites)s</table>
 </body></html>
 ''' % dict(run=esc(summary['run']), style=STYLE, started=esc(summary['started']), seconds=summary['seconds'],
            head=esc(tree['head'][:9]), files=esc(tree.get('files', '')[:12]),

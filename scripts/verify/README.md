@@ -21,6 +21,8 @@ make verify SUITE="topics_cards_sidebar command_palette"
 
 A suite that fails runs again alone after the others. When it passes then, the last line names it as FLAKY, and its first output stays in `first-run.log`. `make verify` fails only when a suite fails again. A FLAKY suite has a check that depends on timing: find the cause, do not ignore it.
 
+The runner stops a suite after 120 seconds without a check starting or ending. Import, discovery, and class fixtures have the same limit. Output does not extend it. A suite can take longer than 120 seconds while its checks make progress. After a timeout, the suite has 60 seconds to clean up before the runner kills its process group. The last completed checks and the active timeout remain in the results even if cleanup cannot finish. Previous suite times set the run order, not the timeout.
+
 Run one check. Build the app first, because this command does not build it:
 
 ```sh

@@ -250,11 +250,10 @@ class TopicsUnread(TopicsSidebar):
     def test_empty_topic_view_stays_when_the_tmux_server_stops(self):
         topic = 'offline-stays-target'
         self.write_empty_topic(topic)
-        # The app must show a Window that goes away with the server. After an earlier check stopped the server, the
-        # app waits for a press on Reattach or Reconnect.
         for button in ['Reattach', 'Reconnect']:
             self.s.driver('press', button)
-        self.s.wait_shown('base:')
+        window = self.s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}')
+        self.s.show(window)
         self.enter_empty(topic)
         socket = self.s.tmux('display-message', '-p', '#{socket_path}')
         self.assertTrue(Path(socket).resolve().is_relative_to(self.s.root.resolve()))

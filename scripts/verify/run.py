@@ -7,7 +7,7 @@ Without a suite it runs every suite in suites/. A run of every suite is a full r
 MUXIFY_VERIFY_JOBS to change JOBS. Without the Accessibility permission it stops before any suite starts.
 
 After the parallel pass only the checks that failed run again, alone. A check that passes then is
-FLAKY. A suite that runs longer than its timeout stops, and the
+FLAKY. A suite that stops making progress reaches its timeout, and the
 check that ran gets the status timeout. --repeat N runs the selection N times, and --shuffle shuffles
 the order of the checks in each suite, with a seed that the output names.
 
@@ -25,6 +25,7 @@ import sys
 import time
 
 from scripts.verify import gate, report
+from scripts.verify.run_suite import write_json
 from scripts.verify.sandbox import AX_WAKE_NOT_TRUSTED, EVIDENCE, REPO, ax_wake, new_run_id
 
 SUITES = REPO/'scripts/verify/suites'
@@ -34,12 +35,7 @@ TIMINGS = gate.EVIDENCE/'timings.json'
 # Each suite runs its own app, and each app starts tmux every second. With all 30 suites at once on a
 # 12-core Mac, a process start took 30 times longer and checks failed by chance; 10 at once was faster.
 JOBS = 10
-# Under load a suite takes up to about twice its time alone, so three times the last time is a hang.
-# A suite with no recorded time gets UNKNOWN_TIMEOUT. After the timeout the suite gets STOP_GRACE
-# seconds to tear its Sandbox down and write its results.
-TIMEOUT_FACTOR = 3
-MIN_TIMEOUT = 120
-UNKNOWN_TIMEOUT = 600
+PROGRESS_TIMEOUT = 120
 STOP_GRACE = 60
 FAILED = ('fail', 'error', 'timeout')
 
@@ -59,12 +55,28 @@ def short(id):
     return id.split(' ')[0] + ' (%s)' % rerun_target(id).rsplit('.', 1)[-1] if id.endswith(')') else id.rsplit('.', 1)[-1]
 
 
-def timeout_for(suite, timings):
-    known = timings.get(suite)
-    return max(MIN_TIMEOUT, TIMEOUT_FACTOR*known) if known else UNKNOWN_TIMEOUT
+def finish_timeout(state, now):
+    out, frozen = state['out'], state['expired']
+    records = dict(frozen['records'])
+    phase = frozen['phase']
+    id = phase['check'] or 'scripts.verify.suites.' + state['suite']
+    try:
+        last_records = list(json.loads((out/'progress.json').read_text())['records'].values())
+    except (FileNotFoundError, ValueError):
+        last_records = []
+    detail = next((record['error'] for record in results(out) + last_records
+                   if record['check'] == id and record['status'] == 'timeout'), None)
+    records[id] = dict(check=id, status='timeout', seconds=round(state['stopped'] - phase['began'], 2),
+                       error=detail or 'run.py stopped the suite after %g seconds without progress; read %s'
+                       % (state['limit'], out/'output.log'))
+    checks = [records.get(id) or dict(check=id, status='not-run', seconds=0, error=None)
+              for id in frozen['expected']]
+    checks += [record for id, record in records.items() if id not in frozen['expected']]
+    write_json(out/'results.json', dict(suite=state['suite'], seconds=round(now - state['began'], 1),
+                                       shuffle=frozen['shuffle'], checks=checks))
 
 
-def run_suites(jobs, starts, timings, clock):
+def run_suites(jobs, starts, clock, *, timeout=PROGRESS_TIMEOUT, stop_grace=STOP_GRACE):
     """Runs each (suite, out, ids, seed), `jobs` at a time and in the given order. Returns per out:
     (status, seconds, timeout) with status ok, failed or timeout."""
     waiting, running, ended = list(starts), {}, {}
@@ -79,20 +91,30 @@ def run_suites(jobs, starts, timings, clock):
                 # A session of its own, so a suite that ignores the stop dies with all its children.
                 process = subprocess.Popen(command, cwd=REPO, stdout=handle, stderr=subprocess.STDOUT,
                                            env=dict(os.environ, **{EVIDENCE: str(out)}), start_new_session=True)
-            limit = timeout_for(suite, timings)
-            running[process] = dict(suite=suite, out=out, began=time.monotonic(), limit=limit, stopped=None)
+            began = time.monotonic()
+            checkpoint = dict(phase=dict(check=None, began=began), records={}, expected=[], shuffle=seed)
+            running[process] = dict(suite=suite, out=out, began=began, limit=timeout, stopped=None,
+                                    checkpoint=checkpoint, expired=None)
         now = time.monotonic()
         for process, state in list(running.items()):
             if process.poll() is None:
-                if state['stopped'] is None and now - state['began'] > state['limit']:
-                    state['stopped'] = now
-                    process.terminate()
-                elif state['stopped'] is not None and now - state['stopped'] > STOP_GRACE:
+                if state['stopped'] is None:
+                    try:
+                        state['checkpoint'] = json.loads((state['out']/'progress.json').read_text())
+                    except (FileNotFoundError, ValueError):
+                        pass
+                    if now - state['checkpoint']['phase']['began'] > state['limit']:
+                        state['expired'] = state['checkpoint']
+                        state['stopped'] = now
+                        process.terminate()
+                elif now - state['stopped'] > stop_grace:
                     os.killpg(process.pid, signal.SIGKILL)
                 continue
             del running[process]
             seconds = now - state['began']
-            status = 'timeout' if state['stopped'] else 'ok' if process.returncode == 0 else 'failed'
+            status = 'timeout' if state['stopped'] is not None else 'ok' if process.returncode == 0 else 'failed'
+            if state['stopped'] is not None:
+                finish_timeout(state, now)
             ended[state['out']] = (status, seconds, state['limit'])
             bad = [short(record['check']) for record in results(state['out']) if record['status'] in FAILED]
             print('%-7s %-30s %5.1f s  (at %4.0f s)%s' % (status.upper() if status != 'ok' else 'ok', state['out'].name,
@@ -136,7 +158,7 @@ def run_round(names, round_dir, jobs, seed, timings):
     clock = time.monotonic()
     # Suites with no recorded time first: they may be long, and this run learns their time.
     order = sorted(names, key=lambda name: -timings.get(name, float('inf')))
-    ended = run_suites(jobs, [(name, round_dir/name, [], seed) for name in order], timings, clock)
+    ended = run_suites(jobs, [(name, round_dir/name, [], seed) for name in order], clock)
     first = {name: results(round_dir/name) for name in names}
     redo = {name: [record['check'] for record in records if record['status'] in FAILED + ('not-run',)]
             for name, records in first.items() if ended[round_dir/name][0] != 'ok'}
@@ -145,7 +167,7 @@ def run_round(names, round_dir, jobs, seed, timings):
         print('running again alone: %s' % ', '.join('%s (%d)' % item for item in
                                                     ((name, len(ids)) for name, ids in redo.items())), flush=True)
     again_ended = run_suites(1, [(name, round_dir/(name + '.rerun'), sorted({rerun_target(id) for id in ids}), None)
-                                 for name, ids in redo.items()], timings, clock)
+                                 for name, ids in redo.items()], clock)
 
     suites = []
     for name in order:

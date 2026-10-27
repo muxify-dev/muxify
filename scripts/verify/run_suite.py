@@ -7,7 +7,7 @@ run.py starts one of these for each suite. <out-dir>/results.json lists every ch
 every check in a class or module. The Sandbox of the suite copies its app logs to <out-dir>, because
 run.py names that folder in MUXIFY_VERIFY_EVIDENCE.
 
-SIGTERM is the per-suite timeout of run.py: the check that runs gets the status timeout and the
+SIGTERM is the progress timeout of run.py: the check that runs gets the status timeout and the
 stack where it waited, the class cleanups tear the Sandbox down, and results.json is written.
 """
 
@@ -26,8 +26,10 @@ class TimedOut(KeyboardInterrupt):
     """A KeyboardInterrupt, because unittest catches every other exception and goes on to the next check."""
 
 
-def stop(_, frame):
-    raise TimedOut(''.join(traceback.format_stack(frame)))
+def write_json(path, value):
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(value, indent=2))
+    temporary.replace(path)
 
 
 def checks(suite):
@@ -56,14 +58,22 @@ def shuffled(found, seed):
 
 
 class Recorder(unittest.TextTestResult):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, state, checkpoint, progress, **kwargs):
         super().__init__(*args, **kwargs)
-        self.records = {}
+        self.records = state['records']
+        self.checkpoint = checkpoint
+        self.progress = progress
         self.current = None
 
     def startTest(self, test):
         self.current = (test, time.monotonic())
+        self.progress(test.id())
         super().startTest(test)
+
+    def stopTest(self, test):
+        super().stopTest(test)
+        self.current = None
+        self.progress()
 
     def record(self, test, status, error=None):
         began = self.current[1] if self.current and self.current[0] is test else time.monotonic()
@@ -72,6 +82,7 @@ class Recorder(unittest.TextTestResult):
         self.records[test.id()] = dict(check=test.id(), status=status, seconds=round(time.monotonic() - began, 2),
                                        error=error if isinstance(error, str) or error is None
                                        else self._exc_info_to_string(error, test))
+        self.checkpoint()
 
     def addSuccess(self, test):
         super().addSuccess(test)
@@ -104,12 +115,6 @@ class Recorder(unittest.TextTestResult):
         self.record(test, 'fail', 'unexpected success: the check passes, so remove @unittest.expectedFailure')
 
 
-class Runner(unittest.TextTestRunner):
-    def _makeResult(self):
-        self.result = super()._makeResult()
-        return self.result
-
-
 def main(argv):
     seed = None
     if '--shuffle' in argv:
@@ -118,36 +123,54 @@ def main(argv):
         argv = argv[:at] + argv[at + 2:]
     name, out, wanted = argv[0], pathlib.Path(argv[1]), argv[2:]
     out.mkdir(parents=True, exist_ok=True)
-    signal.signal(signal.SIGTERM, stop)
-
-    module = importlib.import_module('scripts.verify.suites.' + name)
-    found = [test for test in checks(unittest.defaultTestLoader.loadTestsFromModule(module)) if selected(test, wanted)]
-    if seed is not None:
-        found = shuffled(found, seed)
-
+    module_name = 'scripts.verify.suites.' + name
     started = time.monotonic()
-    runner = Runner(stream=sys.stdout, verbosity=2, resultclass=Recorder)
+    state = dict(suite=name, started=started, shuffle=seed, expected=[], records={},
+                 phase=dict(check=None, began=started))
+
+    def checkpoint():
+        write_json(out/'progress.json', state)
+
+    def progress(check=None):
+        state['phase'] = dict(check=check, began=time.monotonic())
+        checkpoint()
+
+    def stop(_, frame):
+        raise TimedOut(dict(state['phase']), ''.join(traceback.format_stack(frame)))
+
+    signal.signal(signal.SIGTERM, stop)
+    checkpoint()
+    found = []
+    runner = unittest.TextTestRunner(stream=sys.stdout, verbosity=2,
+                                    resultclass=lambda *args, **kwargs: Recorder(
+                                        *args, state=state, checkpoint=checkpoint, progress=progress, **kwargs))
     try:
+        module = importlib.import_module(module_name)
+        progress()
+        found = [test for test in checks(unittest.defaultTestLoader.loadTestsFromModule(module)) if selected(test, wanted)]
+        if seed is not None:
+            found = shuffled(found, seed)
+        state['expected'] = [test.id() for test in found]
+        progress()
         runner.run(unittest.TestSuite(found))
     except TimedOut as timeout:
-        result = runner.result
-        # Between checks the hang is in a class fixture, and the id of the module reruns the whole suite.
-        running = result.current and result.current[0].id() not in result.records
-        id = result.current[0].id() if running else module.__name__
-        result.records[id] = dict(check=id, status='timeout', seconds=round(time.monotonic() - started, 2),
-                                  error='run.py stopped the suite at its timeout; it waited here:\n' + str(timeout))
-        print('\nTIMEOUT in %s' % id, flush=True)
-        result.printErrors()
-        # The class cleanups tear the Sandbox down, and so keep the app logs of the hang.
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        for cls in {type(test) for test in found}:
-            cls.doClassCleanups()
-    result = runner.result
-    records = [result.records.get(test.id()) or dict(check=test.id(), status='not-run', seconds=0, error=None)
-               for test in found]
-    records += [record for id, record in result.records.items() if id not in {test.id() for test in found}]
-    (out/'results.json').write_text(json.dumps(dict(suite=name, seconds=round(time.monotonic() - started, 1),
-                                                    shuffle=seed, checks=records), indent=2))
+        phase, stack = timeout.args
+        id = phase['check'] or module_name
+        state['records'][id] = dict(check=id, status='timeout', seconds=round(time.monotonic() - phase['began'], 2),
+                                    error='run.py stopped the suite without progress; it waited here:\n' + stack)
+        checkpoint()
+        print('\nTIMEOUT in %s' % id, flush=True)
+        try:
+            for cls in {type(test) for test in found}:
+                cls.doClassCleanups()
+        finally:
+            checkpoint()
+    records = [state['records'].get(id) or dict(check=id, status='not-run', seconds=0, error=None)
+               for id in state['expected']]
+    records += [record for id, record in state['records'].items() if id not in state['expected']]
+    write_json(out/'results.json', dict(suite=name, seconds=round(time.monotonic() - started, 1),
+                                       shuffle=seed, checks=records))
     return 0 if all(record['status'] in ('pass', 'skip') for record in records) else 1
 
 
