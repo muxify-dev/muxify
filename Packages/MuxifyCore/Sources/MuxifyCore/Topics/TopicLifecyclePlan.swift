@@ -294,6 +294,15 @@ struct TopicReopenPlan {
             fields["id"] = .string(session.id)
             fields["name"] = .string(session.name)
             fields["base_name"] = .string(session.baseName)
+            // The remembered tmux ids name Windows that are gone. Kept, they would count as Windows the user never
+            // closed, and the next remember would keep them beside the new ones. Without them it matches by position.
+            fields["windows"] = fields["windows"]?.array.map { windows in
+                .array(windows.map { window in
+                    guard var entry = window.object else { return window }
+                    entry["window_id"] = nil
+                    return .object(entry)
+                })
+            }
             reopened.sessions[index] = .object(fields)
         }
         edit = TopicEdit(record: topic, commands: commands, selection: .sessionName(home.name), completion: .save(reopened))

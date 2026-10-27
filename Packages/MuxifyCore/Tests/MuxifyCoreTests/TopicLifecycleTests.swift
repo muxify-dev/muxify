@@ -110,6 +110,34 @@ final class TopicLifecycleTests: XCTestCase {
         XCTAssertTrue(edit.commands.contains(.tmux(["set-option", "-t", "=debug/fix:", "@muxify_session_id", try XCTUnwrap(saved["id"]?.string)])))
     }
 
+    func testEveryReopenCreatesEachRememberedWindowOnce() throws {
+        // Each Reopen's Session and Windows get new tmux ids; the Session keeps its remembered id.
+        func session(_ n: Int) -> [TmuxWindow] {
+            [2 * n, 2 * n + 1].enumerated().map { index, id in
+                var window = TmuxWindow(id: "@\(id)", sessionID: "$\(n)", sessionName: "debug/fix", index: index, name: "shell",
+                    paneTitle: "", path: "/work/game", command: "zsh", isActive: index == 0, paneCount: 1, hasBell: false,
+                    sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(), openRequests: [], topicID: "topic", sessionPath: "/work/game")
+                window.savedSessionID = "$1"
+                return window
+            }
+        }
+        var record = topic
+        for round in 1...3 {
+            let live = snapshot(session(round))
+            record = record.remembering(live, order: .oldestFirst) ?? record
+            let choices = TopicSettleSession.choices(topic: record, snapshot: live, sessionPaths: [])
+            let settled = try XCTUnwrap(TopicSettlePlan(topic: record, snapshot: live, sessionPaths: [], choices: choices, outcome: "").edit.record)
+            let edit = try TopicReopenPlan(topic: settled, records: [settled], windows: [], sessionPaths: [], existingDirectories: ["/work/game"]).edit
+            let created = edit.commands.filter { command in
+                if case .reopenSession = command { return true }
+                if case .tmux(let arguments) = command { return arguments.first == "new-window" }
+                return false
+            }
+            XCTAssertEqual(created.count, 2, "Reopen \(round)")
+            record = try XCTUnwrap(edit.savedCompletionRecord)
+        }
+    }
+
     func testSplitWindowRestoresLayoutAgentBrowserAndTypesProgramWithoutExecuting() throws {
         var source = window()
         source.activePaneID = "%3"
