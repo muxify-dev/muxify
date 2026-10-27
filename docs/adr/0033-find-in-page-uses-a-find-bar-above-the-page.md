@@ -1,5 +1,7 @@
 # Find in Page uses a find bar above the page, outside the palette's view
 
+> **Update 2026-10-27:** In the Terminal, ⌘F opens Find in Pane, which searches the active Pane's history through tmux copy mode ([ADR 0051](0051-find-in-pane-searches-tmux-copy-mode-from-a-bar-over-the-terminal.md)). Ghostty no longer keeps ⌘F there. ⌘F in the Browser is the `find_in_page` keybinding. ↩, ⇧↩ and Esc in the find field are keybindings of `keybindings.find`, and ⌘G and ⌘⇧G no longer step through the matches, so ⌘G is always the Git View.
+
 [ADR-0014](0014-every-action-runs-in-the-palettes-view.md) puts every Action that takes input in the palette's view, and says a field outside it needs its own ADR. Find in Page is that exception. The user types a query and then reads the page and steps through the matches while the field stays open. The palette covers part of the page, and Esc closes it, so the user cannot read a match and then go to the next one.
 
 Find in Page uses a find bar of our own, above the page of the active Tab. A script in each frame of the page finds the matches in its frame and highlights all of them with the CSS Custom Highlight API. This API does not change the page's DOM. The bar shows the number of the current match and the number of all matches. ⌘F, ⌘G, ⌘⇧G and Esc have their usual macOS meaning. The shortcuts work only when the Browser has Focus. In the Terminal, Ghostty keeps ⌘F.

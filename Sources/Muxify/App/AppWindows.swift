@@ -172,6 +172,7 @@ extension AppWindows: @preconcurrency GhosttyRuntimeDelegate {
     func ghosttyNewSplit(_ direction: ghostty_action_split_direction_e) { focusedStore?.ghosttyNewSplit(direction) }
     func ghosttyGotoSplit(_ direction: ghostty_action_goto_split_e) { focusedStore?.ghosttyGotoSplit(direction) }
     func ghosttyToggleSplitZoom() { focusedStore?.ghosttyToggleSplitZoom() }
+    func ghosttyStartSearch() { focusedStore?.ghosttyStartSearch() }
     func ghosttyEqualizeSplits() { focusedStore?.ghosttyEqualizeSplits() }
     func ghosttyGotoTab(_ tab: Int32) { focusedStore?.ghosttyGotoTab(tab) }
     func ghosttySurfaceClosed(_ view: TerminalSurfaceView) { view.delegate?.ghosttySurfaceClosed(view) }

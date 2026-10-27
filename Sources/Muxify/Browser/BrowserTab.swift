@@ -22,15 +22,8 @@ final class BrowserTab: NSObject, Identifiable {
         didSet { if findQuery != oldValue { find(step: 0) } }
     }
     private(set) var findStatus = FindStatus.idle
-    /// The panel moves Focus to the find field and selects its text.
     var findFieldFocusRequested = false
-
-    enum FindStatus: Equatable {
-        case idle
-        case notFound
-        /// `index` is 0-based.
-        case match(index: Int, total: Int)
-    }
+    var findFieldHasFocus = false
 
     /// Whether the Tab shows (or will show, once loaded) a page.
     var hasPage: Bool { !urlString.isEmpty }
@@ -264,6 +257,7 @@ final class BrowserTab: NSObject, Identifiable {
 
     @MainActor func closeFind() {
         isFindShown = false
+        findFieldHasFocus = false
         finder?.clear()
     }
 
@@ -281,6 +275,8 @@ final class BrowserTab: NSObject, Identifiable {
         if pasteboard.setString(urlString, forType: .string) { onCopyURL?(urlString) }
     }
 }
+
+extension BrowserTab: Finder {}
 
 extension BrowserTab: WKNavigationDelegate, WKUIDelegate {
     /// target=_blank links and window.open become a new Tab.

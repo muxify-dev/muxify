@@ -912,6 +912,7 @@ final class WorkspaceStore {
         updateTopicSelection()
         let previousID = old?.windowID?.rawValue
         guard selectedWindowID != previousID else { return }
+        paneFinder.close()
         let previous = previousID.flatMap { gitViews[$0] }
         let coveredWindow = previous?.isOpen == true
         previous?.suspend()
@@ -939,6 +940,8 @@ final class WorkspaceStore {
     var config: Config { remoteConfig?.config ?? configStore.config }
     /// From the last look at `sessions.paths` on the Environment's machine.
     let palette = CommandPalette()
+    /// Find in Pane, over the Terminal of the current Window.
+    let paneFinder = PaneFinder()
     let hintHold = HintHold()
     var isRemote: Bool { activeEnvironment != nil }
     var environmentName: String { activeEnvironment?.name ?? "Local" }
@@ -1089,6 +1092,9 @@ final class WorkspaceStore {
         }
         installKeyMonitor()
         terminalHost.onFirstResponderChange = { [weak self] in self?.readFocusedPanel() }
+        paneFinder.tmux = { [weak self] args, completion in self?.runAsync(args, completion: completion) ?? false }
+        paneFinder.windowID = { [weak self] in self?.selectedWindowID }
+        paneFinder.styles = { [weak self] in self?.findStyles ?? PaneSearch.Styles(match: "", current: "") }
         // Coming back to Muxify reads the Agents in the Window on screen.
         activationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
@@ -1788,15 +1794,18 @@ final class WorkspaceStore {
         return focusedPanel
     }
 
+    /// The Terminal or its Find in Pane field has Focus.
+    private var terminalSideHasFocus: Bool { terminalHasFocus || paneFinder.findFieldHasFocus }
+
     /// The current Window's Browser has Focus (its page or omnibox).
     var browserHasFocus: Bool {
-        !terminalHasFocus && currentGitView?.hasKeyFocus != true && panelLayout.shows(.browser)
+        !terminalSideHasFocus && currentGitView?.hasKeyFocus != true && panelLayout.shows(.browser)
     }
 
     private var focusedSide: PanelLayout.Side { browserHasFocus ? .browser : .terminal }
 
     /// The side whose keybinds act, nil while the Git View has Focus.
-    private var keyFocus: PanelLayout.Side? { terminalHasFocus ? .terminal : browserHasFocus ? .browser : nil }
+    private var keyFocus: PanelLayout.Side? { terminalSideHasFocus ? .terminal : browserHasFocus ? .browser : nil }
 
     func moveFocus(into side: PanelLayout.Side) {
         switch side {
@@ -1818,9 +1827,9 @@ final class WorkspaceStore {
     /// When a side with Focus disappears, Focus moves to the side still shown.
     private func keepFocusOnScreen() {
         let layout = panelLayout
-        if !layout.shows(.terminal), terminalHasFocus {
+        if !layout.shows(.terminal), terminalSideHasFocus {
             currentBrowser?.requestFocus()
-        } else if !layout.shows(.browser), !terminalHasFocus {
+        } else if !layout.shows(.browser), !terminalSideHasFocus {
             focusTerminal()
         }
     }
@@ -2241,7 +2250,7 @@ final class WorkspaceStore {
     /// outside the terminal, where Ghostty/tmux bindings own the keys;
     /// clicking the menu item always works.
     func browserCommand(opensBrowser: Bool = false, _ body: (Browser) -> Void) {
-        if NSApp.currentEvent?.type == .keyDown, terminalHasFocus || currentGitView?.hasKeyFocus == true { return }
+        if NSApp.currentEvent?.type == .keyDown, terminalSideHasFocus || currentGitView?.hasKeyFocus == true { return }
         if NSApp.currentEvent?.type == .keyDown, !opensBrowser, !panelLayout.shows(.browser) { return }
         guard let browser = currentBrowser else { return }
         if opensBrowser, !browser.layout.shows(.browser) { commitMaximize() }
@@ -2386,6 +2395,8 @@ final class WorkspaceStore {
         case .resizePaneRight: resizeCurrentPane("-R")
         case .resizePaneUp: resizeCurrentPane("-U")
         case .resizePaneDown: resizeCurrentPane("-D")
+        case .findInPane: showFindInPane()
+        case .findInPage: browserCommand { $0.activeTab?.showFind() }
         case .selectNextTab: browserCommand { $0.selectTab(offset: 1) }
         case .selectPrevTab: browserCommand { $0.selectTab(offset: -1) }
         case .browserBack: browserCommand { $0.activeTab?.goBack() }
@@ -2411,6 +2422,60 @@ final class WorkspaceStore {
         }
     }
 
+    /// Opens Find in Pane over the Terminal, or selects its query while it is open.
+    func showFindInPane() {
+        guard selectedWindow != nil, surface != nil, !showsEmptyPage, panelLayout.shows(.terminal) else { return }
+        paneFinder.show()
+    }
+
+    /// `ui.find_colors` as tmux styles. A system color takes its light appearance's value, so the highlight is the
+    /// same in every theme.
+    private var findStyles: PaneSearch.Styles {
+        func style(_ color: MarkColor.Single) -> String {
+            var resolved = NSColor.black
+            NSAppearance(named: .aqua)?.performAsCurrentDrawingAppearance {
+                resolved = color.nsColor.usingColorSpace(.sRGB) ?? .black
+            }
+            func channel(_ value: CGFloat) -> UInt8 { UInt8((min(max(value, 0), 1) * 255).rounded()) }
+            return PaneSearch.style(red: channel(resolved.redComponent), green: channel(resolved.greenComponent),
+                                    blue: channel(resolved.blueComponent))
+        }
+        let colors = config.findColors
+        return PaneSearch.Styles(match: style(colors.match), current: style(colors.current))
+    }
+
+    /// Closes Find in Pane, which leaves copy mode, and gives Focus back to the Terminal.
+    func closeFindInPane() {
+        paneFinder.close()
+        focusTerminal()
+    }
+
+    /// Runs a `keybindings.find` action on the find bar whose field has Focus. False passes the key on.
+    private func performFind(_ action: FindAction) -> Bool {
+        if paneFinder.isShown, paneFinder.findFieldHasFocus {
+            switch action {
+            case .next: paneFinder.findNext()
+            case .prev: paneFinder.findPrevious()
+            case .close: closeFindInPane()
+            }
+            return true
+        }
+        if paneFinder.isShown, action == .close, terminalHasFocus {
+            // tmux gives the key to the active Pane. Only the searched Pane's close ends the search (ADR 0051).
+            paneFinder.closeIfPaneIsActive()
+            return false
+        }
+        guard let browser = currentBrowser, let tab = browser.activeTab, tab.isFindShown, tab.findFieldHasFocus else { return false }
+        switch action {
+        case .next: tab.findNext()
+        case .prev: tab.findPrevious()
+        case .close:
+            tab.closeFind()
+            browser.requestFocus()
+        }
+        return true
+    }
+
     func toggleZoomOfCurrentPane() {
         runOnCurrentPane { pane, _ in ["resize-pane", "-Z", "-t", pane] }
     }
@@ -2434,14 +2499,11 @@ final class WorkspaceStore {
     @discardableResult
     func performConfiguredShortcut(_ trigger: KeyTrigger) -> Bool {
         guard !isShuttingDown, let action = config.keybinds.action(for: trigger, focus: keyFocus) else { return false }
-        // ⌘G, the Git View's, is Find Next while the Browser is finding.
-        if trigger == Self.findNext, browserHasFocus, currentBrowser?.activeTab?.isFindShown == true { return false }
         perform(action)
         return true
     }
 
     private static let closeWindow = KeyTrigger(modifiers: .command, key: .character("w"))
-    private static let findNext = KeyTrigger(modifiers: .command, key: .character("g"))
 
     #if DEBUG
     /// Delivers a key press as AppKit does, without the keyboard: the keybinds,
@@ -2473,6 +2535,9 @@ final class WorkspaceStore {
             if palette.handle(trigger, in: event) { return nil }
             if currentGitView?.handle(trigger, in: event) == true { return nil }
             let config = self.config
+            // A key that composes text in an input method stays with the field.
+            if let action = config.findKeybinds.action(for: trigger),
+               (event.window?.firstResponder as? NSTextView)?.hasMarkedText() != true, performFind(action) { return nil }
             if let target = config.commandPalettes.first(where: { $0.triggers.contains(trigger) }) {
                 palette.toggle(target)
                 return nil
@@ -2482,7 +2547,7 @@ final class WorkspaceStore {
             if keybinds.suppressesDefaultAppWindowShortcut(trigger, focus: keyFocus) { return nil }
             // ⌘W that no keybind took goes on to Ghostty from the Terminal, and
             // elsewhere does nothing, so it never closes the App Window.
-            if trigger == Self.closeWindow, keyFocus != .terminal { return nil }
+            if trigger == Self.closeWindow, !terminalHasFocus { return nil }
         }
         return event
     }
@@ -2607,6 +2672,7 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
     }
 
     func ghosttyToggleSplitZoom() { toggleZoomOfCurrentPane() }
+    func ghosttyStartSearch() { showFindInPane() }
 
     func ghosttyEqualizeSplits() {
         runOnCurrentPane { pane, _ in ["select-layout", "-E", "-t", pane] }

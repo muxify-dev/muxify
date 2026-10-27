@@ -42,6 +42,8 @@ struct ContentView: View {
                         .accessibilityHidden(!showsTerminal)
                         .quickSwitchHint(.terminal, hints: store.hintPresentation)
                         .overlay(alignment: .top) { FocusMarker(store: store, side: .terminal) }
+                        // The verify checks open Find in Pane here, because they must not type ⌘F.
+                        .accessibilityAction(named: "Find in Pane") { store.showFindInPane() }
                     if let browser {
                         HStack(spacing: 0) {
                             if showsTerminal {
@@ -367,10 +369,24 @@ private struct TerminalArea: View {
                 .background(Color(nsColor: .windowBackgroundColor))
                 .accessibilityIdentifier("empty-no-topic")
             }
+            if store.paneFinder.isShown, store.surface != nil, !store.showsEmptyPage { findBar }
             if let gitView = store.currentGitView {
                 GitViewOverlay(gitView: gitView, config: store.config.gitView, placement: .terminal)
             }
         }
+    }
+
+    /// Find in Pane floats over the Terminal's top right corner, so the Panes keep their size (ADR 0051).
+    private var findBar: some View {
+        FindBar(finder: store.paneFinder, placeholder: "Find in Pane", identifier: "terminal-find",
+                window: { store.terminalHost.window }, onClose: store.closeFindInPane) { _ in store.readFocusedPanel() }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: 420)
+        .frame(height: 34)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .shadow(color: .black.opacity(0.2), radius: 4, y: 1)
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
 
     private func emptyTopic(_ topic: TopicsModel.Row) -> some View {

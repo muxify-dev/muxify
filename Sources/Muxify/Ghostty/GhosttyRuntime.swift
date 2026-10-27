@@ -9,6 +9,8 @@ protocol GhosttyRuntimeDelegate: AnyObject {
     func ghosttyNewSplit(_ direction: ghostty_action_split_direction_e)
     func ghosttyGotoSplit(_ direction: ghostty_action_goto_split_e)
     func ghosttyToggleSplitZoom()
+    /// Ghostty's search, `start_search` on ⌘F, as Find in Pane: Ghostty sees only the screen that tmux draws.
+    func ghosttyStartSearch()
     func ghosttyEqualizeSplits()
     func ghosttyGotoTab(_ tab: Int32)
     func ghosttySurfaceClosed(_ view: TerminalSurfaceView)
@@ -234,6 +236,8 @@ final class GhosttyRuntime {
             actionDelegate?.ghosttyGotoSplit(action.action.goto_split)
         case GHOSTTY_ACTION_TOGGLE_SPLIT_ZOOM:
             actionDelegate?.ghosttyToggleSplitZoom()
+        case GHOSTTY_ACTION_START_SEARCH:
+            actionDelegate?.ghosttyStartSearch()
         case GHOSTTY_ACTION_EQUALIZE_SPLITS:
             actionDelegate?.ghosttyEqualizeSplits()
         case GHOSTTY_ACTION_GOTO_TAB:

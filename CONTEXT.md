@@ -40,6 +40,10 @@ _Avoid_: split, terminal
 A terminal attached to a tmux server, showing one of its Sessions. Each App Window's Terminal is one Client; Ghostty.app or another terminal attached to the same server is another.
 _Avoid_: attachment, connection, viewer
 
+**Find in Pane**:
+Searching the history of the current Window's active Pane, from a find bar over the Terminal, with every match highlighted. It never searches the other Panes, the Browser or a Command Palette.
+_Avoid_: terminal search, scrollback search, Find (alone)
+
 ### Topics
 
 **Topic**:
@@ -145,7 +149,7 @@ One page in a Window's Browser, with its own back/forward history. "Tab" never m
 _Avoid_: page (when you mean the Tab itself), browser window
 
 **Find in Page**:
-Searching the text of the active Tab's page, its iframes included, from a find bar in the Browser, with every match highlighted. It never searches the Terminal or a Command Palette.
+Searching the text of the active Tab's page, its iframes included, from a find bar in the Browser, with every match highlighted. It never searches the Terminal, which has Find in Pane, or a Command Palette.
 _Avoid_: search (when you mean the page text), Find (alone)
 
 **Vim Keys**:

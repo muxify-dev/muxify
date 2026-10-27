@@ -71,6 +71,8 @@ public enum ConfigAction: String, KeybindAction {
     case resizePaneRight = "resize_pane_right"
     case resizePaneUp = "resize_pane_up"
     case resizePaneDown = "resize_pane_down"
+    case findInPane = "find_in_pane"
+    case findInPage = "find_in_page"
     case selectNextTab = "select_next_tab"
     case selectPrevTab = "select_prev_tab"
     case browserBack = "browser_back"
@@ -151,6 +153,8 @@ public enum ConfigAction: String, KeybindAction {
         .resizePaneRight: [],
         .resizePaneUp: [],
         .resizePaneDown: [],
+        .findInPane: ["cmd+f"],
+        .findInPage: ["cmd+f"],
         .selectNextTab: ["cmd+shift+right_bracket", "ctrl+tab"],
         .selectPrevTab: ["cmd+shift+left_bracket", "ctrl+shift+tab"],
         .browserBack: ["cmd+left_bracket"],
@@ -201,8 +205,8 @@ public enum ConfigAction: String, KeybindAction {
     /// from the Browser, and a Tab key does not take one from the Terminal.
     public var requiredFocus: PanelLayout.Side? {
         switch self {
-        case .toggleZoomPane, .resizePaneLeft, .resizePaneRight, .resizePaneUp, .resizePaneDown: .terminal
-        case .selectNextTab, .selectPrevTab, .browserBack, .browserForward, .closeTab, .reopenClosedTab: .browser
+        case .toggleZoomPane, .resizePaneLeft, .resizePaneRight, .resizePaneUp, .resizePaneDown, .findInPane: .terminal
+        case .findInPage, .selectNextTab, .selectPrevTab, .browserBack, .browserForward, .closeTab, .reopenClosedTab: .browser
         default: nil
         }
     }
@@ -291,6 +295,23 @@ public enum PaletteAction: String, KeybindAction {
     public static let defaultTriggers = parse(defaultSpelling)
 }
 
+/// What a keybind does while the field of a find bar, Find in Pane's or Find
+/// in Page's, has Focus, from `keybindings.find`. These win over the other
+/// keybinds then.
+public enum FindAction: String, KeybindAction {
+    case next
+    case prev
+    case close
+
+    public static let defaultSpelling: KeyValuePairs<FindAction, [String]> = [
+        .next: ["enter"],
+        .prev: ["shift+enter"],
+        .close: ["escape"],
+    ]
+
+    public static let defaultTriggers = parse(defaultSpelling)
+}
+
 /// Each action's triggers, in the order they were listed. A trigger belongs to
 /// two actions only when they can share it (`canShareTrigger(with:)`), so for
 /// each Focus at most one action acts on a trigger.
@@ -322,10 +343,19 @@ public struct KeybindSet<Action: KeybindAction>: Equatable {
 public typealias Keybinds = KeybindSet<ConfigAction>
 /// The keybinds of an open Command Palette.
 public typealias PaletteKeybinds = KeybindSet<PaletteAction>
+/// The keybinds of a find bar's field.
+public typealias FindKeybinds = KeybindSet<FindAction>
 
 extension KeybindSet where Action == PaletteAction {
     /// The palette's keybinds act whatever has Focus.
     public func action(for trigger: KeyTrigger) -> PaletteAction? {
+        action(for: trigger, focus: nil)
+    }
+}
+
+extension KeybindSet where Action == FindAction {
+    /// The find bar's keybinds act whatever side has Focus.
+    public func action(for trigger: KeyTrigger) -> FindAction? {
         action(for: trigger, focus: nil)
     }
 }

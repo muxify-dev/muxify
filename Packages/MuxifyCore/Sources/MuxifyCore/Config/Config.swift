@@ -162,8 +162,12 @@ public struct Config: Equatable {
     public var focusMarkerOpacity = AppearanceOpacity(light: 0.45, dark: 0.45)
     /// `ui.agent_colors`.
     public var agentColors = AgentColors()
+    /// `ui.find_colors`.
+    public var findColors = FindColors()
     /// The keybinds of an open Command Palette (`keybindings.command_palette`).
     public var paletteKeybinds = PaletteKeybinds.defaults
+    /// The keybinds of a find bar's field (`keybindings.find`).
+    public var findKeybinds = FindKeybinds.defaults
     /// In Config order (ADR 0009).
     public var commandPalettes = CommandPaletteConfig.defaults
     /// `pick_lists`: the rules of the Action lists it names.
@@ -243,6 +247,12 @@ public struct Config: Equatable {
         #     done: blue
         #     blocked: orange
         #     failed: red
+        #   # The highlight of Find in Pane's matches and of its current match:
+        #   # one color name as in agent_colors or a quoted '#RRGGBB', the same
+        #   # in every theme.
+        #   find_colors:
+        #     match: '#FFD54F'
+        #     current: '#FF9600'
         #   sidebar:
         #     # Positive base size in points; other text scales proportionally.
         #     # Changes apply live. Invalid values use the defaults below.
@@ -435,9 +445,9 @@ public struct Config: Equatable {
         #   # Cmd+backquote stays available for macOS App Window switching.
         #   # select_card_1 through select_card_9 Jump To Topic or Session cards.
         #   # select_tab_1 through select_tab_9 select Tabs and show the Browser.
-        #   # toggle_zoom_pane and resize_pane_* act only while the Terminal
-        #   # has Focus. select_next_tab, select_prev_tab, browser_back and
-        #   # browser_forward act only while the Browser has Focus. With Focus
+        #   # toggle_zoom_pane, resize_pane_* and find_in_pane act only while
+        #   # the Terminal has Focus. find_in_page, select_next_tab, select_prev_tab,
+        #   # browser_back and browser_forward act only while the Browser has Focus. With Focus
         #   # elsewhere, their keys go on to Ghostty, the page or the menu.
         #   # resize_pane_* move the Pane's border 10 cells and are unbound.
         #   # Hold the exact modifiers alone to show Hints after hints.hold_delay.
@@ -460,6 +470,11 @@ public struct Config: Equatable {
         #   # While a Command Palette is open, these act instead:
         #   command_palette:
         \(spell(PaletteAction.defaultSpelling, indent: "     "))
+        #   # While the field of Find in Pane or Find in Page has Focus, these
+        #   # act instead. close in the Terminal goes on to the active Pane, and
+        #   # also closes Find in Pane when that Pane is the searched one.
+        #   find:
+        \(spell(FindAction.defaultSpelling, indent: "     "))
 
         """
     }
@@ -1102,6 +1117,8 @@ private struct ConfigReader {
                 readUISidebar(value)
             case "agent_colors":
                 readAgentColors(value)
+            case "find_colors":
+                readFindColors(value)
             default:
                 problem(at: key, "unknown key \"ui.\(name)\"")
             }
@@ -1116,6 +1133,16 @@ private struct ConfigReader {
             }
             guard let color = markColor(value, "ui.agent_colors.\(name)") else { continue }
             config.agentColors[mark] = color
+        }
+    }
+
+    mutating func readFindColors(_ node: Node) {
+        for (name, key, value) in entries(of: node, "ui.find_colors") {
+            switch name {
+            case "match": if let color = singleColor(value, "ui.find_colors.match") { config.findColors.match = color }
+            case "current": if let color = singleColor(value, "ui.find_colors.current") { config.findColors.current = color }
+            default: problem(at: key, "unknown key \"ui.find_colors.\(name)\"")
+            }
         }
     }
 
@@ -1186,6 +1213,10 @@ private struct ConfigReader {
                 readPaletteKeybindings(value)
                 continue
             }
+            if name == "find" {
+                readFindKeybindings(value)
+                continue
+            }
             if name == "open_switcher" {
                 problem(at: key, "open_switcher is gone: the Go to… Command Palette replaces the Switcher; bind it in command_palettes")
                 continue
@@ -1206,15 +1237,27 @@ private struct ConfigReader {
 
     /// Only while a palette is open, so they never conflict with the others.
     mutating func readPaletteKeybindings(_ node: Node) {
-        var named: [PaletteAction] = []
-        var claims: [Claim<PaletteAction>] = []
-        for (name, key, value) in entries(of: node, "keybindings.command_palette") {
-            if let renamed = Self.removedPaletteActions[name] {
+        config.paletteKeybinds = scopedKeybindings(node, "keybindings.command_palette", kind: "Command Palette",
+                                                   removed: Self.removedPaletteActions)
+    }
+
+    /// Only while a find field has Focus, so they never conflict with the others.
+    mutating func readFindKeybindings(_ node: Node) {
+        config.findKeybinds = scopedKeybindings(node, "keybindings.find", kind: "find", removed: [:])
+    }
+
+    /// The keybinds of a scope that acts on its own, with the overlay rules among themselves.
+    private mutating func scopedKeybindings<Action: KeybindAction>(_ node: Node, _ place: String, kind: String,
+                                                                   removed: [String: Action]) -> KeybindSet<Action> {
+        var named: [Action] = []
+        var claims: [Claim<Action>] = []
+        for (name, key, value) in entries(of: node, place) {
+            if let renamed = removed[name] {
                 problem(at: key, "\(name) is gone: use \(renamed.rawValue)")
                 continue
             }
-            guard let action = PaletteAction(rawValue: name) else {
-                problem(at: key, "unknown Command Palette action \"\(name)\"")
+            guard let action = Action(rawValue: name) else {
+                problem(at: key, "unknown \(kind) action \"\(name)\"")
                 continue
             }
             guard let listed = triggers(in: value, of: name) else { continue }
@@ -1223,7 +1266,7 @@ private struct ConfigReader {
         }
         let kept = resolve(claims, describe: \.rawValue) { $0.canShareTrigger(with: $1) }
         let claimed = Set(kept.values.joined())
-        config.paletteKeybinds = overlay(named: named, kept: kept) { _, trigger in claimed.contains(trigger) }
+        return overlay(named: named, kept: kept) { _, trigger in claimed.contains(trigger) }
     }
 
     mutating func readCommandPalettes(_ node: Node) {
@@ -1459,13 +1502,8 @@ private struct ConfigReader {
 
     /// One color, or a mapping with one color for `light` and one for `dark` appearance. Nil after a problem.
     private mutating func markColor(_ node: Node, _ place: String) -> MarkColor? {
-        let names = SystemColorName.allCases.map(\.rawValue).joined(separator: ", ")
-        let expected = "expected one of \(names), or a quoted '#RRGGBB'"
-        // An unquoted #RRGGBB is a YAML comment, so it arrives here as null.
-        func single(_ node: Node) -> MarkColor.Single? {
-            guard node.tag == Yams.Tag(.str), let text = string(node) else { return nil }
-            return MarkColor.Single(text)
-        }
+        let expected = Self.expectedColor
+        func single(_ node: Node) -> MarkColor.Single? { color(node) }
         guard node.mapping != nil else {
             guard let color = single(node) else {
                 problem(at: node, "\(place): \(expected), or a mapping with light and dark")
@@ -1495,6 +1533,23 @@ private struct ConfigReader {
         }
         guard valid, let light = colors["light"], let dark = colors["dark"] else { return nil }
         return .pair(light: light, dark: dark)
+    }
+
+    /// One color, the same in light and dark appearance. Nil after a problem.
+    private mutating func singleColor(_ node: Node, _ place: String) -> MarkColor.Single? {
+        guard let color = color(node) else {
+            problem(at: node, "\(place): \(Self.expectedColor)")
+            return nil
+        }
+        return color
+    }
+
+    private static let expectedColor = "expected one of \(SystemColorName.allCases.map(\.rawValue).joined(separator: ", ")), or a quoted '#RRGGBB'"
+
+    // An unquoted #RRGGBB is a YAML comment, so it arrives here as null.
+    private func color(_ node: Node) -> MarkColor.Single? {
+        guard node.tag == Yams.Tag(.str), let text = string(node) else { return nil }
+        return MarkColor.Single(text)
     }
 
     /// One opacity, or a mapping with one for `light` and one for `dark` appearance. Nil after a problem.

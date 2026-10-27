@@ -365,6 +365,29 @@ Palette's terminal theme does not change Agent marks. Leave out a key to keep
 its default. An invalid value keeps the default, and it and an unknown key
 appear in the Config problems banner. Changes apply live.
 
+### Find colors
+
+```yaml
+ui:
+  find_colors:
+    match: '#FFD54F'
+    current: '#FF9600'
+```
+
+These are the defaults. `match` is the highlight of every match of
+[Find in Pane](keybindings.md#find-in-pane), and `current` is the highlight of
+the current match. A value is one color: a color name as in
+[Agent colors](#agent-colors), or a quoted `'#RRGGBB'`. It is the same in every
+theme, so a mapping with `light` and `dark` is a Config problem. The text on a
+highlight is black or white, whichever is easier to read on it.
+
+Muxify gives the searched Pane these colors as its tmux `copy-mode-match-style`
+and `copy-mode-current-match-style` while Find in Pane is open, and removes
+them when it closes. tmux's own copy mode search keeps your tmux styles. Leave
+out a key to keep its default. An invalid value keeps the default, and it and
+an unknown key appear in the Config problems banner. A change applies at the
+next step of the search.
+
 ### Pulse
 
 ```yaml
