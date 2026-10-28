@@ -76,6 +76,28 @@ final class BrowserDeveloperToolsTests: XCTestCase {
         XCTAssertEqual(browser.tabs.count, 1)
     }
 
+    /// SwiftUI gives a new Tab host a zero size first. A docked inspector must
+    /// not push the top of the page out of view after that.
+    @MainActor func testPageKeepsItsTopInViewAfterTheHostIsResizedThroughZero() {
+        _ = NSApplication.shared
+        let tab = BrowserTab(url: nil)
+        defer { tab.close() }
+        let pageView = tab.pageView
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 600))
+        host.addSubview(pageView)
+        pageView.frame = host.bounds
+        // WebKit docks the inspector at the bottom and moves the page up above it.
+        let inspectorView = NSView(frame: NSRect(x: 0, y: 0, width: 800, height: 200))
+        inspectorView.autoresizingMask = [.width, .maxYMargin]
+        pageView.addSubview(inspectorView)
+        tab.webView.frame = NSRect(x: 0, y: 200, width: 800, height: 400)
+
+        pageView.frame = .zero
+        pageView.frame = host.bounds
+
+        XCTAssertEqual(tab.webView.frame.maxY, pageView.bounds.maxY, "page frame: \(tab.webView.frame)")
+    }
+
     /// Opt-in because opening the real inspector brings a disposable native
     /// window forward and requires a graphical macOS login.
     @MainActor func testNativeInspectorKeepsPageStateAndDockingAndClosesWithTab() async throws {
@@ -134,6 +156,11 @@ final class BrowserDeveloperToolsTests: XCTestCase {
         XCTAssertTrue(inspector.responds(to: attach))
         if inspector.responds(to: attach) { inspector.perform(attach) }
         XCTAssertTrue(inspectorView.superview === tab.pageView)
+        let size = tab.pageView.frame.size
+        tab.pageView.setFrameSize(.zero)
+        tab.pageView.setFrameSize(size)
+        XCTAssertEqual(webView.frame.maxY, tab.pageView.bounds.maxY, "The page must keep its top in view: \(webView.frame)")
+        XCTAssertEqual(webView.frame.minY, inspectorView.frame.maxY, "The page must sit above the inspector: \(webView.frame)")
 
         // Simulate SwiftUI destroying one Tab host and creating another.
         let pageView = tab.pageView

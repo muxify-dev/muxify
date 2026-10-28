@@ -114,10 +114,9 @@ final class BrowserTab: NSObject, Identifiable {
     /// alive with the Tab, so switching Tabs or Windows moves both together.
     var pageView: NSView {
         if let loadedPageView { return loadedPageView }
-        let container = NSView()
         let webView = webView
+        let container = PageView(page: webView)
         webView.frame = container.bounds
-        webView.autoresizingMask = [.width, .height]
         container.addSubview(webView)
         loadedPageView = container
         return container
@@ -370,5 +369,26 @@ enum Omnibox {
         return host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" || host == "[::1]"
             || host.hasSuffix(".localhost") || host.hasSuffix(".local") || host.hasSuffix(".test")
             || (input.first?.isNumber == true && input.contains(":"))
+    }
+}
+
+/// The parent of a Tab's page and its docked inspector. WebKit keeps the page
+/// above a bottom inspector and keeps the page's top edge where it is. When a
+/// Tab host shows it at zero size first, autoresizing loses that edge and the
+/// page grows past the top of the parent. So on each resize the page fills the
+/// parent again, and WebKit then moves it up above the inspector.
+private final class PageView: NSView {
+    private let page: NSView
+
+    init(page: NSView) {
+        self.page = page
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { fatalError("not supported") }
+
+    override func resizeSubviews(withOldSize oldSize: NSSize) {
+        super.resizeSubviews(withOldSize: oldSize)
+        page.frame = bounds
     }
 }
