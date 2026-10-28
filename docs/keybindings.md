@@ -29,6 +29,7 @@ listed below.
 | `remove_session_from_topic` | Unbound | Remove the current Session from the Active Topic. The Session stays live, and the Topic forgets it |
 | `forget_topic` | Unbound | Open Forget for the Active Topic |
 | `rename_topic` | Unbound | Open Rename for the Active Topic |
+| `set_topic_note` | Unbound | Open Set Topic Note for the Active Topic. Its field starts with the current Topic Note, and ↩ on an empty field clears it |
 | `mark_read` | ⌘⇧R | Clear Unread for the Active Topic, or the current Session when there is no Active Topic |
 | `mark_unread` | ⌘⇧U | Mark the Active Topic Unread, or eligible Agents in the current Session when there is no Active Topic |
 | `mark_all_read` | Unbound | Clear Unread in the Active Environment |
@@ -115,6 +116,12 @@ Session, and appear only when the card can move that way among the cards with
 its Pin. Unsnooze Topic appears while a Snoozed Topic exists. While the Active
 Topic is Snoozed, it Unsnoozes it at once. Else it lists the Snoozed Topics, and
 ↩ Unsnoozes the highlighted one.
+
+Commands also lists Set Topic Note, and Clear Topic Note while the Active Topic
+has a Topic Note. Set Topic Note opens one field that starts with the current
+Note. ↩ writes the Note, and ↩ on an empty field clears it. ⎋ changes nothing.
+Clear Topic Note runs at once. The actions menu of a Topic row has both, and
+the context menu of a Topic card has Set Topic Note… and Clear Topic Note.
 
 Commands also lists Snooze Topics…, which Snoozes several Topics until one time.
 Its first step is the check step. The rows are the Tags of the Topics under
@@ -239,6 +246,7 @@ keybindings:
   remove_session_from_topic: []
   forget_topic: []
   rename_topic: []
+  set_topic_note: []
   toggle_lock: []
   move_topic_up: alt+cmd+up
   move_topic_down: alt+cmd+down
@@ -380,6 +388,8 @@ conflict with the actions above:
 | `add_session_to_topic` | Unbound | Add a running Session or launch a new one in the highlighted Topic |
 | `rename` | Unbound | Rename the highlighted Topic, Session or Window |
 | `edit_tags` | Unbound | Open Edit Tags for the highlighted Topic |
+| `set_topic_note` | Unbound | Open Set Topic Note for the highlighted Topic |
+| `clear_topic_note` | Unbound | Clear the Topic Note of the highlighted Topic. The action shows only while the Topic has a Note |
 | `start_zen` | Unbound | Start Zen for the highlighted Topic. While Zen is on, end it |
 | `settle_topic` | Unbound | Settle the highlighted Topic |
 | `forget_topic` | Unbound | Forget the highlighted Topic |

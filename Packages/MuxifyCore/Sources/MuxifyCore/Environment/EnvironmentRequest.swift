@@ -305,6 +305,9 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case unsnooze(topics: [TopicRef] = [])
     /// Changes the Tags of the target's open Topic. It changes nothing in tmux.
     case tags(TopicTagChange)
+    /// Sets the Topic Note of the target's open Topic; nil clears it. The record keeps the Note as one line, and text
+    /// with no words clears it too. It changes nothing in tmux.
+    case note(String?)
     /// A tmux Window in the target's Session, in the folder of the target's Window. A `.topic` target names the
     /// Topic's only live Session; with none or more than one the request fails. It never makes a Session.
     /// `command` runs in place of the default shell.
@@ -344,7 +347,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case markAllRead
 
     private enum CodingKeys: String, CodingKey {
-        case list, show, create, settle, forget, move, rename, reopen, lock, unlock, snooze, unsnooze, tags
+        case list, show, create, settle, forget, move, rename, reopen, lock, unlock, snooze, unsnooze, tags, note
         case startFresh = "start_fresh"
         case moveSession = "move_session"
         case sortSessions = "sort_sessions"
@@ -379,6 +382,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     }
 
     private enum TagsCodingKeys: String, CodingKey { case _0 = "change" }
+    private enum NoteCodingKeys: String, CodingKey { case _0 = "text" }
     private enum MoveCardCodingKeys: String, CodingKey { case _0 = "move" }
     private enum MarkReadCodingKeys: String, CodingKey {
         case _0 = "change"

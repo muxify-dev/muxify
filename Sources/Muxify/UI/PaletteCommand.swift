@@ -17,6 +17,8 @@ enum PaletteCommand: String, CaseIterable {
     case removeSessionFromTopic = "Remove Session from Topic"
     case forgetTopic = "Forget Topic"
     case renameTopic = "Rename Topic"
+    case setTopicNote = "Set Topic Note"
+    case clearTopicNote = "Clear Topic Note"
     case renameWindow = "Rename a Window"
     case editTags = "Edit Tags…"
     case moveTopicUp = "Move Topic Up"
@@ -83,6 +85,7 @@ enum PaletteCommand: String, CaseIterable {
         case .removeSessionFromTopic: .removeSessionFromTopic
         case .forgetTopic: .forgetTopic
         case .renameTopic: .renameTopic
+        case .setTopicNote: .setTopicNote
         case .zen, .endZen: .toggleZen
         case .lockSession, .unlockSession: .toggleLock
         case .moveTopicUp: .moveTopicUp
@@ -129,6 +132,7 @@ enum PaletteCommand: String, CaseIterable {
         case .removeSessionFromTopic: .verb(.sessionRemoveFromTopic)
         case .forgetTopic: .verb(.topicForget)
         case .renameTopic: .verb(.topicRename)
+        case .setTopicNote, .clearTopicNote: .verb(.topicNote)
         case .renameWindow: .verb(.windowRename)
         case .editTags: .verb(.topicTag)
         case .moveTopicUp, .moveTopicDown: .verbs([.topicMove, .sessionMove])
@@ -187,7 +191,10 @@ extension CommandPalette {
             case .movePaneWithTab: return canChangeTopics && store.selectedWindow != nil && store.currentBrowser?.activeTab != nil
             case .addSession, .snoozeTopic, .settleTopic: return canChangeTopics && hasOpenTopic
             case .editTags: return canChangeTopics && hasOpenTopic && store.topicConfig.tags != nil
-            case .forgetTopic, .renameTopic: return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
+            case .forgetTopic, .renameTopic, .setTopicNote: return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
+            case .clearTopicNote:
+                return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
+                    && store.topicWatcher.records.contains { $0.id == store.activeTopicID && $0.note != nil }
             case .removeSessionFromTopic:
                 return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
                     && store.selectedWindow?.topicID == store.activeTopicID
@@ -257,7 +264,7 @@ extension CommandPalette {
         }
         switch command {
         case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addSession, .snoozeTopic, .snoozeTopics, .settleTopic, .zen,
-             .forgetTopic, .renameTopic, .renameWindow, .editTags, .unsnoozeTopic, .unsnoozeTopics: break
+             .forgetTopic, .renameTopic, .setTopicNote, .renameWindow, .editTags, .unsnoozeTopic, .unsnoozeTopics: break
         default: close(restoringFocus: false)
         }
         switch command {
@@ -277,6 +284,8 @@ extension CommandPalette {
         case .removeSessionFromTopic: if let window = store.selectedWindow { store.removeFromTopic(window) }
         case .forgetTopic: if let id = store.activeTopicID { store.presentForgetTopic(id, keepingHistory: true) }
         case .renameTopic: store.presentRenameTopic(keepingHistory: true)
+        case .setTopicNote: store.presentSetTopicNote(keepingHistory: true)
+        case .clearTopicNote: if let id = store.activeTopicID { store.setTopicNote(of: id, nil) }
         case .renameWindow:
             if let window = store.selectedWindow { begin(.text(.renameWindow(window)), text: window.name, keepingHistory: true) }
         case .editTags: if let id = store.activeTopicID { store.presentEditTags(of: id, keepingHistory: true) }

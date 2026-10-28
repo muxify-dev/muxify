@@ -176,8 +176,9 @@ private struct TopicsSection: View {
     }
 
     /// The cards below the bottom edge, in list order, so that a click on the line scrolls to the first one.
-    private var hiddenBelow: [TopicGroupID] {
-        model.list.compactMap(\.cardID).filter(cardsBelow.contains)
+    /// They are the ids of the `ForEach` over `model.list`, which are the ids that `scrollTo` finds.
+    private var hiddenBelow: [TopicsModel.ListItem.ID] {
+        model.list.filter { $0.cardID.map(cardsBelow.contains) ?? false }.map(\.id)
     }
 
     private func zenLine(_ zen: ZenRecord) -> some View {
@@ -506,7 +507,7 @@ struct TopicCard: View {
                    hintTarget: list == nil ? nil : namedTopicID.map { .topic($0) },
                    notes: (topic.isPinned ? ["Pinned"] : []) + (topic.usesRowMarks && topic.isUnread && topic.mark != .unread ? ["unread"] : []) + (groupDetail.map { [$0] } ?? []) + (topic.idleLabel.map { [$0] } ?? []),
                    summary: list == nil ? "" : formatted.summary, cornerWidth: list == nil ? CardCorner.groupWidth : CardCorner.width,
-                   titleNote: list == nil && !topic.isExpanded ? wake : nil, tags: tags) {
+                   titleNote: list == nil && !topic.isExpanded ? wake : nil, tags: tags, note: topic.note) {
             if list != nil || topic.isExpanded {
                 if list == nil, let detail = groupDetail {
                     Text(wake.map { $0 == SnoozeDeadline.never.wakeLabel ? "until Unsnooze" : "wakes " + $0 } ?? detail)
@@ -566,6 +567,7 @@ struct TopicCard: View {
                 DispatchQueue.main.async { list.rename(id) }
             }
             .disabled(store.changingTopic)
+            noteButtons(id)
             Button("Add a Session…") { store.presentAddSession(toTopic: id) }
                 .disabled(store.changingTopic)
             Button(store.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store.toggleZen(keeping: id) }
@@ -600,12 +602,25 @@ struct TopicCard: View {
             Button("Rename Topic…") { list.rename(id) }
                 .accessibilityIdentifier("rename-topic")
                 .disabled(store.changingTopic)
+            noteButtons(id)
             Button("Add a Session…") { store.presentAddSession(toTopic: id) }
                 .accessibilityIdentifier("add-topic-sessionPath")
                 .disabled(store.changingTopic)
             Divider()
             pinButton(id)
             CardMoveButtons(store: store, id: .topic(id), neighbors: list.neighbors)
+        }
+    }
+
+    @ViewBuilder
+    private func noteButtons(_ id: String) -> some View {
+        Button("Set Topic Note…") { DispatchQueue.main.async { store.presentSetTopicNote(of: id) } }
+            .accessibilityIdentifier("set-topic-note")
+            .disabled(store.changingTopic)
+        if topic.note != nil {
+            Button("Clear Topic Note") { store.setTopicNote(of: id, nil) }
+                .accessibilityIdentifier("clear-topic-note")
+                .disabled(store.changingTopic)
         }
     }
 

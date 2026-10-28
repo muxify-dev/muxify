@@ -20,7 +20,7 @@ final class TopicWireTests: XCTestCase {
             .settle(choices: [], outcome: "Done"), .forget(choices: [], worktrees: []),
             .removeFromTopic, .removeAndKill(worktrees: []), .rename(title: "Next"), .reopen, .startFresh,
             .lock, .unlock, .moveSession(to: .before(session)), .moveSession(to: .up), .moveSession(to: .down), .sortSessions,
-            .snooze(until: .never), .unsnooze(), .tags(.set([Tag(name: "backend")!])),
+            .snooze(until: .never), .unsnooze(), .tags(.set([Tag(name: "backend")!])), .note("Bisect"), .note(nil),
             .newWindow(command: ["make", "test"]), .newSession(sessionPath: "/work", name: "notes"), .renameSession(name: "n"),
             .renameWindow(name: "w"), .zoomPane, .killWindow, .killSession, .pin, .unpin, .moveCard(.up), .moveCard(.down),
             .moveCard(.before(.topic(.id("fix")))), .moveCard(.after(.lock(session))),
@@ -50,6 +50,8 @@ final class TopicWireTests: XCTestCase {
         XCTAssertEqual(try json(EnvironmentCommand.zoomPane), #"{"zoom_pane":{}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.markRead(.unread, scope: .session)), #"{"mark_read":{"change":"unread","scope":"session"}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.markAllRead), #"{"mark_all_read":{}}"#)
+        XCTAssertEqual(try json(EnvironmentCommand.note("Bisect")), #"{"note":{"text":"Bisect"}}"#)
+        XCTAssertEqual(try json(EnvironmentCommand.note(nil)), #"{"note":{}}"#)
         XCTAssertEqual(try json(EnvironmentResponse.readChanged(TopicReadChange(topicIDs: ["a"], paneIDs: [PaneID(rawValue: "%3")!]))),
             #"{"read_changed":{"pane_ids":["%3"],"topic_ids":["a"]}}"#)
         XCTAssertEqual(try json(TopicSummary(id: "a", label: "Fix", pinned: true)), #"{"id":"a","label":"Fix","pinned":true,"tags":[]}"#)

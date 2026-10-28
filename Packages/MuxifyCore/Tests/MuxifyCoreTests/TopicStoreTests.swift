@@ -357,6 +357,45 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(try shown(store), ["p", "t", "a"], "Reopen brings the Topic back last among the Pinned Topics")
     }
 
+    func testATopicNoteIsSavedAsOneLineAndSurvivesSnoozeSettleAndReopen() throws {
+        let old = try JSONDecoder().decode(TopicRecord.self, from: Data(#"{"id":"t","title":"T","future":{"value":7}}"#.utf8))
+        XCTAssertNil(old.note, "a record without a note key has no Note")
+        let store = TopicStore(paths: paths)
+        try store.write { try $0.create(old) }
+        func file() throws -> [String: JSONValue] {
+            try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf: paths.topics.appendingPathComponent("t.json")))
+        }
+
+        try store.write { try $0.setNote(of: "t", "  Repro with seed 4411\n\n   then bisect \r\n") }
+        XCTAssertEqual(try file()["note"], .string("Repro with seed 4411 then bisect"))
+        XCTAssertEqual(try file()["future"], old.unknownFields["future"], "a Note change keeps unknown fields")
+        let noted = try XCTUnwrap(records(store).first)
+        XCTAssertEqual(try JSONDecoder().decode(TopicRecord.self, from: TopicStore.encoded(noted)), noted)
+
+        try store.write { try $0.setSnoozes(snoozes(["t"], until: "never", in: $0)) }
+        try store.write { try $0.setSnoozes(snoozes(["t"], until: nil, in: $0)) }
+        XCTAssertEqual(try records(store).first?.note, "Repro with seed 4411 then bisect", "Snooze and Unsnooze keep the Note")
+
+        let topic = try XCTUnwrap(records(store).first)
+        let settle = TopicSettlePlan(topic: topic, snapshot: TmuxSnapshot(windows: [], clients: [], panes: [], serverRunning: true),
+                                     sessionPaths: [], choices: [], outcome: "").edit
+        try store.write { try $0.apply(TopicRecordChange(before: topic, after: XCTUnwrap(settle.record))) }
+        let settled = try XCTUnwrap(records(store).first)
+        XCTAssertEqual(settled.note, "Repro with seed 4411 then bisect", "Settle keeps the Note")
+        XCTAssertThrowsError(try store.write { try $0.setNote(of: "t", "later") }, "a Settled Topic takes no Note change")
+
+        let reopen = try TopicReopenPlan(topic: settled, records: try records(store), windows: [], sessionPaths: [],
+                                         existingDirectories: []).edit
+        try store.write { try $0.apply(TopicRecordChange(before: settled, after: XCTUnwrap(reopen.savedCompletionRecord))) }
+        XCTAssertEqual(try records(store).first?.note, "Repro with seed 4411 then bisect", "a Reopened Topic shows where the user stopped")
+
+        try store.write { try $0.setNote(of: "t", " \n\t ") }
+        XCTAssertNil(try file()["note"], "text with no words clears the Note, and the record has no note key")
+        try store.write { try $0.setNote(of: "t", "x") }
+        try store.write { try $0.setNote(of: "t", nil) }
+        XCTAssertNil(try records(store).first?.note)
+    }
+
     func testInsertionPlacesTopicsAroundLocksAndNormalizesBothExtremeEnds() throws {
         for position in TopicInsertPosition.allCases {
             let edge: Double = position == .top ? -.greatestFiniteMagnitude : .greatestFiniteMagnitude

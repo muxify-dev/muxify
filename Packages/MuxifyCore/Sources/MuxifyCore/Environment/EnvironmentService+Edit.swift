@@ -88,7 +88,7 @@ extension EnvironmentService {
             return (resolved.source, resolved.snapshot)
         }
         switch request.command {
-        case .list, .show, .lock, .unlock, .snooze, .unsnooze, .tags, .pin, .unpin, .moveCard, .startZen, .endZen, .markRead, .markAllRead:
+        case .list, .show, .lock, .unlock, .snooze, .unsnooze, .tags, .note, .pin, .unpin, .moveCard, .startZen, .endZen, .markRead, .markAllRead:
             throw TopicRequestError.noTarget
         case .create(let title, let tags):
             let tags = Set(tags ?? [])

@@ -84,6 +84,78 @@ class PaletteCurrentCommands(PaletteFixture):
         self.s.wait_rows(lambda rs: self.s.has('empty-topic-title', rs), 'the Empty Topic did not open')
         self.assertTrue(self.absent(title), 'Rename a Window shows without a Window')
 
+    def test_set_topic_note_starts_with_the_note_keeps_back_and_an_empty_field_clears_it(self):
+        note = "Waiting on Ana's review"
+        self.current_topic('note-set')
+        self.run_command('Set Topic Note')
+        self.s.wait_rows(lambda rs: 'Topic Note' in self.text('palette-breadcrumb', rs)
+                         and self.s.row('palette-search', rs).get('accessibilityValue', '') == '',
+                         'Set Topic Note did not open an empty field for a Topic with no Note')
+        self.s.act('set', 'palette-search', note)
+        self.s.act('action', 'palette-search', 'Accept')
+        wait(lambda: self.record('note-set').get('note') == note, 'Set Topic Note did not save the Note')
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Set Topic Note did not close the palette')
+
+        self.run_command('Set Topic Note')
+        self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == note,
+                         'Set Topic Note did not start with the current Note')
+        self.s.act('set', 'palette-search', '')
+        self.back('Set Topic Note')
+        self.assertEqual(self.record('note-set').get('note'), note, 'Back changed the Note')
+
+        self.run_command('Set Topic Note')
+        self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == note,
+                         'Set Topic Note did not start with the current Note')
+        self.s.act('set', 'palette-search', '')
+        self.s.act('action', 'palette-search', 'Accept')
+        wait(lambda: 'note' not in self.record('note-set'), 'Return on an empty field did not clear the Note')
+
+    def test_clear_topic_note_shows_only_while_the_active_topic_has_a_note_and_clears_it_at_once(self):
+        window = self.topic('note-clear', session=True, note='Bisect from v2')
+        self.select(window)
+        self.run_command('Clear Topic Note')
+        wait(lambda: 'note' not in self.record('note-clear'), 'Clear Topic Note did not clear the Note')
+        self.assertEqual(self.record('note-clear').get('title'), 'note-clear', 'Clear Topic Note changed the title')
+        self.assertTrue(self.absent('Clear Topic Note'), 'Clear Topic Note shows for a Topic with no Note')
+
+    def go_to(self, query):
+        def opened():
+            if not self.s.has('palette-search'):
+                self.s.driver('press', 'Go to…')
+            return self.s.has('palette-search')
+        wait(opened, 'Go to… did not open', seconds=20)
+        self.s.act('focus', 'palette-search')
+        self.s.act('set', 'palette-search', query)
+        return self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue', '') == query,
+                                'Go to… did not take the query %r' % query)
+
+    def test_a_topic_row_shows_its_note_and_its_actions_set_and_clear_it(self):
+        s = self.s
+        self.topic('note-row', note='Repro with seed 4411')
+        self.topic('note-row-snoozed', note='Wait for the release', snoozed_until='2099-01-01T00:00:00Z')
+        self.go_to('note-row')
+        key, snoozed = 'palette-row-topic-note-row', 'palette-row-topic-note-row-snoozed'
+        rs = s.wait_rows(lambda rs: s.has(key, rs) and s.has(snoozed, rs), 'Go to… did not list the Topics')
+        self.assertIn('Repro with seed 4411', self.text(key, rs), 'a Topic row does not show its Note')
+        self.assertIn('Wait for the release · until', self.text(snoozed, rs), 'a Snoozed row does not show its Note before its wake time')
+        s.act('action', 'palette-search', 'Close')
+        self.go_to('seed 4411')
+        rs = s.wait_rows(lambda rs: s.has('palette-search', rs), 'Go to… closed')
+        self.assertFalse(s.has(key, rs), 'a search matches the text of a Note')
+        s.act('action', 'palette-search', 'Close')
+
+        self.go_to('note-row')
+        s.wait_rows(lambda rs: s.has(key, rs), 'Go to… did not list the Topic')
+        s.act('action', key, 'Clear Topic Note')
+        wait(lambda: 'note' not in self.record('note-row'), 'the Clear Topic Note action did not clear the Note')
+        self.go_to('note-row')
+        s.wait_rows(lambda rs: s.has(key, rs), 'Go to… did not list the Topic')
+        s.act('action', key, 'Set Topic Note')
+        s.wait_rows(lambda rs: 'Topic Note' in self.text('palette-breadcrumb', rs), 'the Set Topic Note action did not open its step')
+        s.act('set', 'palette-search', 'Ship it\nafter review')
+        s.act('action', 'palette-search', 'Accept')
+        wait(lambda: self.record('note-row').get('note') == 'Ship it after review', 'the Set Topic Note action did not save one line')
+
     def test_the_topics_commands_come_before_the_topic_commands(self):
         self.current_topic('snooze-order')
         self.topic('snooze-order-snoozed', snoozed_until='never')
@@ -134,7 +206,7 @@ class PaletteCurrentCommands(PaletteFixture):
     def test_commands_omit_unavailable_topic_and_tab_actions(self):
         for title in ['Add a Session', 'Snooze Topic', 'Settle Topic', 'Zen', 'Move Pane with Active Tab',
                       'Remove Session from Topic', 'Forget Topic', 'Rename Topic', 'Move Topic Up', 'Move Topic Down',
-                      'Pin Topic', 'Unsnooze Topic', 'Unsnooze Topics…']:
+                      'Pin Topic', 'Unsnooze Topic', 'Unsnooze Topics…', 'Set Topic Note', 'Clear Topic Note']:
             self.search(title)
             self.assertFalse(self.s.has('palette-row-command-' + title), title + ' had no target')
             self.s.act('action', 'palette-search', 'Close')

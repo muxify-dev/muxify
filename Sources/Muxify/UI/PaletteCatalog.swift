@@ -165,7 +165,7 @@ struct PaletteCatalog {
         return PickCandidate(
             id: row.id.accessibilityID, kind: .topic, symbol: row.hasNoLiveSession ? "◇" : "◆", title: row.title,
             fields: topicFields(row, type: row.idleLabel?.lowercased() ?? "topic"),
-            trailing: trailing, mark: row.mark,
+            note: row.note, trailing: trailing, mark: row.mark,
             lastVisit: visits.last(.topic(row.id)), isCurrent: isCurrent, unopened: row.hasNoLiveSession,
             activity: row.sessions.flatMap(\.windows).map(\.sessionActivity).max() ?? 0,
             pick: .available(PaletteItem(ref: .topic(id: id, window: window))), snooze: id)
@@ -178,7 +178,8 @@ struct PaletteCatalog {
         let window = EntryWindow.of(row, lastWindowByGroup: lastWindowByGroup, visits: visits)
         return PickCandidate(
             id: row.id.accessibilityID, kind: .snoozed, symbol: "z", title: row.title, fields: topicFields(row, type: "snoozed"),
-            note: wake, trailing: window == nil ? "Reopen" : "", lastVisit: visits.last(.topic(row.id)), isPinned: row.isPinned, isSetAside: true,
+            note: [row.note, wake].compactMap { $0 }.joined(separator: " · "), trailing: window == nil ? "Reopen" : "",
+            lastVisit: visits.last(.topic(row.id)), isPinned: row.isPinned, isSetAside: true,
             pick: .available(PaletteItem(ref: .topic(id: id, window: window))), snooze: id)
     }
 
@@ -190,7 +191,8 @@ struct PaletteCatalog {
         return PickCandidate(
             id: row.id.accessibilityID, kind: .settled, symbol: "✓", title: row.title,
             fields: [.typeWord("settled")] + (outcome.isEmpty ? [] : [.detail(outcome)]) + SearchField.tags(row.tags),
-            note: settledOn, trailing: ["Reopen", age(.topic(row.id))].compactMap { $0 }.joined(separator: " · "), mark: row.mark,
+            note: [row.note, settledOn].compactMap { $0 }.joined(separator: " · "),
+            trailing: ["Reopen", age(.topic(row.id))].compactMap { $0 }.joined(separator: " · "), mark: row.mark,
             lastVisit: visits.last(.topic(row.id)), isSetAside: true,
             pick: .available(PaletteItem(ref: .topic(id: record.id, window: nil))))
     }

@@ -173,6 +173,8 @@ struct CardHeader<Details: View>: View {
     /// Small text at the right end of the title's first line, such as a Snoozed Topic's wake time.
     var titleNote: String? = nil
     var tags: CardTags? = nil
+    /// The Topic Note. An open card shows it whole on its own line; a closed card shows it only through its Summary.
+    var note: String? = nil
     @ViewBuilder var details: () -> Details
     @Environment(\.sidebarTypography) private var typography
     @Environment(\.wrapsCardTitles) private var wrapsTitle
@@ -242,6 +244,9 @@ struct CardHeader<Details: View>: View {
                 if let tags, tags.placement == .line { CardTagsSlot(tags: tags) }
                 details()
             }
+            if isOpen, let note {
+                NoteLine(note: note)
+            }
             if showsSummary {
                 Text(summary)
                     .font(.system(size: 11))
@@ -260,7 +265,30 @@ struct CardHeader<Details: View>: View {
         .accessibilityLabel(title)
         .accessibilityHint(isOpen ? "" : summary)
         .accessibilityActivationPoint(CGPoint(x: titleLine.midX, y: titleLine.midY))
-        .accessibilityValue(([isOpen ? "expanded" : "collapsed"] + notes + [mark?.rawValue].compactMap { $0 }).joined(separator: ", "))
+        .accessibilityValue(accessibilityValue)
+    }
+
+    private var accessibilityValue: String {
+        ([isOpen ? "expanded" : "collapsed"] + notes + [mark?.rawValue, note.map { "Note: " + $0 }].compactMap { $0 }).joined(separator: ", ")
+    }
+}
+
+/// The Topic Note on an open card: a pencil and the whole text, in a yellow that reads on the light and the dark Sidebar.
+private struct NoteLine: View {
+    let note: String
+
+    private static let color = Color(nsColor: NSColor(name: nil) {
+        $0.isDark ? NSColor(red: 1, green: 0.765, blue: 0.361, alpha: 1) : NSColor(red: 0.698, green: 0.42, blue: 0, alpha: 1)
+    })
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Image(systemName: "pencil")
+            Text(note).fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.system(size: 11.5))
+        .foregroundStyle(Self.color)
+        .padding(.top, 1)
     }
 }
 

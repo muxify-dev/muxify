@@ -247,6 +247,8 @@ struct TopicsModel {
         /// In Config order, then the Tags the Config no longer defines. A Locked Session has none, and with Tags
         /// off no Topic has any.
         var tags: [ShownTag] = []
+        /// The Topic Note from the record. A Locked Session has none.
+        var note: String? = nil
         /// An open Topic with no live Session. The card shows dimmed.
         var hasNoLiveSession: Bool {
             if case .settled = kind { return false }
@@ -515,7 +517,7 @@ struct TopicsModel {
             return Row(id: id, title: title, kind: kind, mark: isQuiet(id) ? nil : RowMark(unread: record.isUnread, agent: mark(agents)),
                        agentSpines: spines, usesRowMarks: id == active && openTopics.contains(id) && !isQuiet(id),
                        isUnread: record.isUnread && !isQuiet(id), isPinned: record.isPinned, sessions: sessions, isExpanded: openTopics.contains(id),
-                       remembersSessions: !record.sessions.isEmpty, tags: config.topics.tags?.shown(record.tags) ?? [])
+                       remembersSessions: !record.sessions.isEmpty, tags: config.topics.tags?.shown(record.tags) ?? [], note: record.note)
         }
         /// A Locked Session's row: one Session, quiet only as No Topic is, and titled by the Session card Formats.
         func lockedRow(_ lock: SessionLock) -> Row {
@@ -684,7 +686,7 @@ struct TopicsModel {
         }
         return Row(id: id, title: title, kind: .settled(detail: outcome.isEmpty ? settledOn ?? record.settledAt ?? "" : outcome),
                    mark: RowMark(unread: record.isUnread, agent: nil), isPinned: record.isPinned, sessions: sessions, isExpanded: expanded.contains(id),
-                   tags: tags?.shown(record.tags) ?? [])
+                   tags: tags?.shown(record.tags) ?? [], note: record.note)
     }
 
     /// A Window that left its Session's Worktree for the main working copy of the SessionPath.

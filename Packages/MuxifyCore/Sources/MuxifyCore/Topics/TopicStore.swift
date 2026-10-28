@@ -285,6 +285,15 @@ public struct TopicTransaction {
         records[index].tags = change.applied(to: records[index].tags)
     }
 
+    /// Sets the Topic Note of the open Topic `id`, and nothing else in it. Nil, or text with no words, clears it. The
+    /// Note is one line, so its lines join with a space.
+    public mutating func setNote(of id: String, _ note: String?) throws {
+        guard let index = records.firstIndex(where: { $0.id == id && $0.settledAt == nil }) else { throw Failure.topicUnavailable(id) }
+        let line = (note ?? "").split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        records[index].note = line.isEmpty ? nil : line
+    }
+
     @discardableResult
     public mutating func forget(_ id: String, insertPosition: TopicInsertPosition = .bottom, now: Date = Date()) throws -> [SessionLock] {
         guard records.contains(where: { $0.id == id }) else { throw Failure.topicUnavailable(id) }

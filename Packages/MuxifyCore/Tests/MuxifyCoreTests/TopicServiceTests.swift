@@ -387,6 +387,34 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(noTarget.kind, .noTarget)
     }
 
+    func testATopicNoteChangesOnlyTheNoteOfTheTargetsOpenTopicAndStaysThroughSnoozeAndSettle() throws {
+        let id = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Fix")))).topicID)
+        func current() throws -> TopicRecord { try XCTUnwrap(records().first { $0.id == id }) }
+        let before = try current()
+        XCTAssertEqual(try change(service().handle(EnvironmentRequest(.note("  Waiting on Ana's review\n"), target: .topic(.named("Fix"))))).topicID, id)
+        var expected = before
+        expected.note = "Waiting on Ana's review"
+        XCTAssertEqual(try current(), expected, "a Note change changes nothing else in the record")
+        _ = try change(service().handle(EnvironmentRequest(.note(nil), target: .topic(.id(id)))))
+        XCTAssertEqual(try current(), before, "nil clears the Note")
+        _ = try change(service().handle(EnvironmentRequest(.note("Bisect"), target: .topic(.id(id)))))
+        _ = try change(service().handle(EnvironmentRequest(.note("   "), target: .topic(.id(id)))))
+        XCTAssertNil(try current().note, "an empty Note clears it")
+
+        _ = try change(service().handle(EnvironmentRequest(.note("Bisect"), target: .topic(.id(id)))))
+        XCTAssertEqual(service().handle(EnvironmentRequest(.snooze(until: .never), target: .topic(.id(id)))),
+                       .snoozeChanged(TopicSnoozeChange(topicIDs: [id])))
+        _ = try change(service().handle(EnvironmentRequest(.note("Bisect from v2"), target: .topic(.id(id)))))
+        XCTAssertEqual(try current().note, "Bisect from v2", "a Snoozed Topic is open, so it takes a Note change")
+        _ = try change(service().handle(EnvironmentRequest(.settle(choices: [], outcome: ""), target: .topic(.id(id)))))
+        XCTAssertEqual(try current().note, "Bisect from v2", "Settle keeps the Note")
+        let settled = try failure(service().handle(EnvironmentRequest(.note(nil), target: .topic(.id(id)))))
+        XCTAssertEqual(settled.kind, .topicUnavailable)
+        XCTAssertEqual(settled.phase, .nothingChanged)
+        XCTAssertEqual(try current().note, "Bisect from v2")
+        XCTAssertEqual(try failure(service().handle(EnvironmentRequest(.note("x")))).kind, .noTarget)
+    }
+
     func testOnlyTheTagsTheConfigDefinesCanBeAddedAndATagItNoLongerDefinesCanStayOrGo() throws {
         let backend = Tag(name: "backend")!, release = Tag(name: "release")!, old = Tag(name: "old")!
         let id = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Fix", tags: [release])))).topicID)

@@ -55,6 +55,8 @@ struct RequestInvocation: Equatable {
         case zoomPane
         case kill(session: Bool)
         case pin(Bool)
+        /// Nil clears the Topic Note.
+        case note(String?)
         /// The Topic's card, one place up or down.
         case moveCard(CardMove)
         /// The Session one place up or down among its Topic's Sessions, or a Locked Session's card.
@@ -71,7 +73,7 @@ struct RequestInvocation: Equatable {
         var targets: [TargetOption] {
             switch self {
             case .new: return []
-            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .snooze, .unsnooze, .tag, .rename, .pin, .moveCard, .sortSessions, .zen:
+            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .snooze, .unsnooze, .tag, .note, .rename, .pin, .moveCard, .sortSessions, .zen:
                 return [.topic, .window, .pane]
             case .moveSession: return [.session, .pane]
             case .reopen, .startFresh: return [.topic]
@@ -105,7 +107,7 @@ struct RequestInvocation: Equatable {
         /// A Snooze or a Tag change needs no SessionPath, and a command that shows a Topic finds only the SessionPaths of its Sessions.
         var findsAllSessionPaths: Bool {
             switch self {
-            case .new, .snooze, .unsnooze, .tag, .lock, .pin, .moveCard, .moveSession, .sortSessions, .zen, .endZen, .markRead, .markAllRead,
+            case .new, .snooze, .unsnooze, .tag, .note, .lock, .pin, .moveCard, .moveSession, .sortSessions, .zen, .endZen, .markRead, .markAllRead,
                  .placeWindow, .zoomPane: return false
             default: return !showsTopic
             }
@@ -127,6 +129,7 @@ struct RequestInvocation: Equatable {
             case .snooze: return "topic snooze"
             case .unsnooze: return "topic unsnooze"
             case .tag: return "topic tag"
+            case .note: return "topic note"
             case .rename: return "topic rename"
             case .reopen: return "topic reopen"
             case .startFresh: return "topic start-fresh"
@@ -423,6 +426,7 @@ extension RequestInvocation {
         case .markRead(let change, let scope): return .markRead(change, scope: scope)
         case .markAllRead: return .markAllRead
         case .tag(let change): return .tags(change)
+        case .note(let note): return .note(note)
         case .list: return .list
         case .show, .open, .exec, .status, .diff: return .show
         case .rename(let title): return .rename(title: title)
