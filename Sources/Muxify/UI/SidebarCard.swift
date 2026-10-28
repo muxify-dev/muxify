@@ -173,7 +173,7 @@ struct CardHeader<Details: View>: View {
     /// Small text at the right end of the title's first line, such as a Snoozed Topic's wake time.
     var titleNote: String? = nil
     var tags: CardTags? = nil
-    /// The Topic Note. An open card shows it whole on its own line; a closed card shows it only through its Summary.
+    /// The Topic Note. Every card shows it whole on its own line, softer on a closed card.
     var note: String? = nil
     @ViewBuilder var details: () -> Details
     @Environment(\.sidebarTypography) private var typography
@@ -244,8 +244,9 @@ struct CardHeader<Details: View>: View {
                 if let tags, tags.placement == .line { CardTagsSlot(tags: tags) }
                 details()
             }
-            if isOpen, let note {
-                NoteLine(note: note)
+            if let note {
+                NoteLine(note: note, isOpen: isOpen)
+                    .padding(.trailing, !isOpen && summary.isEmpty ? cornerWidth : 0)
             }
             if showsSummary {
                 Text(summary)
@@ -273,9 +274,11 @@ struct CardHeader<Details: View>: View {
     }
 }
 
-/// The Topic Note on an open card: a pencil and the whole text, in a yellow that reads on the light and the dark Sidebar.
+/// The Topic Note on a card: a pencil and the whole text, in a yellow that reads on the light and the dark Sidebar. A
+/// closed card shows it softer, so the open card's Note stays the one that stands out.
 private struct NoteLine: View {
     let note: String
+    let isOpen: Bool
 
     private static let color = Color(nsColor: NSColor(name: nil) {
         $0.isDark ? NSColor(red: 1, green: 0.765, blue: 0.361, alpha: 1) : NSColor(red: 0.698, green: 0.42, blue: 0, alpha: 1)
@@ -287,7 +290,7 @@ private struct NoteLine: View {
             Text(note).fixedSize(horizontal: false, vertical: true)
         }
         .font(.system(size: 11.5))
-        .foregroundStyle(Self.color)
+        .foregroundStyle(Self.color.opacity(isOpen ? 1 : 0.6))
         .padding(.top, 1)
     }
 }

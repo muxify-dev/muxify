@@ -83,7 +83,7 @@ The small coloured square that shows one Tag of a Topic on its card, in the colo
 _Avoid_: dot, badge, chip (when you mean the mark on a card)
 
 **Topic Note**:
-An optional line of text on a Topic that tells the user what they were doing there, such as "Repro with seed 4411, then bisect". The user sets it, changes it or clears it. It stays through Snooze, Zen, Dormant and Settle, so a Reopened Topic still shows it. The card of the Location shows all of it; a closed card shows it only where its Summary Format puts `#{topic_note}`.
+An optional line of text on a Topic that tells the user what they were doing there, such as "Repro with seed 4411, then bisect". The user sets it, changes it or clears it. It stays through Snooze, Zen, Dormant and Settle, so a Reopened Topic still shows it. Every card shows all of it on its own line, and a closed card shows it softer than the card of the Location.
 _Avoid_: next step, comment, description, memo, Summary (when you mean the Note)
 
 **Settle**:
