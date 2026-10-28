@@ -131,6 +131,23 @@ final class CLIVerbsTests: XCTestCase {
         }
     }
 
+    func testTopicNoteSetsTheNoteOrClearsItButNeverBoth() throws {
+        let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let paths = MuxifyPaths(environment: inside, home: "/home/me")
+        let caller = try XCTUnwrap(PaneID(rawValue: "%7"))
+        func request(_ note: String?, target: EnvironmentTarget? = nil) -> CLICommand {
+            .request(RequestInvocation(command: .note(note), target: target, caller: caller, output: .text, paths: paths))
+        }
+        XCTAssertEqual(try CLICommand(arguments: ["topic", "note", "Waiting on Ana's review"], environment: inside), request("Waiting on Ana's review"))
+        XCTAssertEqual(try CLICommand(arguments: ["topic", "note", "--clear", "--topic", "Fix"], environment: inside),
+                       request(nil, target: .topic(.named("Fix"))))
+        for arguments in [["topic", "note"], ["topic", "note", " "], ["topic", "note", "a", "b"], ["topic", "note", "a", "--clear"]] {
+            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
+            }
+        }
+    }
+
     func testWindowMoveTakesAnAnchorWindowAsOneMoreDestination() throws {
         let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
         let paths = MuxifyPaths(environment: inside, home: "/home/me")

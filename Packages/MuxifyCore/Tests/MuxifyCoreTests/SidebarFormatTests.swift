@@ -51,6 +51,13 @@ final class SidebarFormatTests: XCTestCase {
         let defaults = SidebarFormats.defaults
         XCTAssertEqual(defaults.text(for: .topic, in: topic, mode: .topics).summary, "proj · proj2 · 3 Windows")
         XCTAssertEqual(defaults.text(for: .topic, in: .init(), mode: .topics).summary, "No Sessions")
+        var noted = topic
+        noted.values[.topic_note] = "Bisect, then ship"
+        XCTAssertEqual(defaults.text(for: .topic, in: noted, mode: .topics).summary, "Bisect, then ship · proj · proj2 · 3 Windows")
+        XCTAssertEqual(defaults.text(for: .topic, in: .init(values: [.topic_note: "Bisect"]), mode: .topics).summary, "Bisect · No Sessions")
+        noted.values[.topic_note] = ""
+        XCTAssertEqual(defaults.text(for: .topic, in: noted, mode: .topics).summary, "proj · proj2 · 3 Windows", "an empty Note adds nothing")
+        XCTAssertEqual(try SidebarFormat("[#{topic_note}]").expand(in: .init(values: [.topic_note: "Bisect"])), "[Bisect]")
         XCTAssertEqual(defaults.text(for: .session, in: .init(values: [.window_count: "1"]), mode: .sessions).summary, "1 Window")
         var custom = defaults
         custom.topic.title = .init(try SidebarFormat("#{pane_title}"))

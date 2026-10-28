@@ -289,7 +289,7 @@ extension EnvironmentCommand {
     var lane: Lane {
         switch self {
         case .list, .show: return .read
-        case .snooze, .unsnooze, .tags, .pin, .unpin, .moveCard, .startZen, .endZen, .markRead, .markAllRead: return .records
+        case .snooze, .unsnooze, .tags, .note, .pin, .unpin, .moveCard, .startZen, .endZen, .markRead, .markAllRead: return .records
         case .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename,
              .reopen, .startFresh, .moveSession, .sortSessions, .lock, .unlock, .newWindow, .newSession, .renameSession,
              .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession: return .edit
@@ -305,7 +305,7 @@ extension EnvironmentCommand {
         case .markRead(_, let scope): return scope == .topic
         case .markAllRead: return false
         case .list, .show, .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename, .reopen, .startFresh,
-             .moveSession, .sortSessions, .lock, .unlock, .snooze, .unsnooze, .tags, .pin, .unpin, .moveCard, .startZen, .endZen:
+             .moveSession, .sortSessions, .lock, .unlock, .snooze, .unsnooze, .tags, .note, .pin, .unpin, .moveCard, .startZen, .endZen:
             return true
         }
     }

@@ -18,6 +18,8 @@ enum PaletteText {
     /// New Topic, or Edit Tags: one field of chips that holds the Topic's Tags, and ↩ writes them.
     case tags(TagField)
     case renameTopic(TopicRecord)
+    /// Set Topic Note: the field starts with the current Note, and ↩ on an empty field clears it.
+    case topicNote(TopicRecord)
     case renameWindow(TmuxWindow)
     /// The Session of this Window.
     case renameSession(TmuxWindow)
@@ -115,6 +117,7 @@ enum PaletteFlow {
         case .snoozeUntil, .zen: "Choose a preset or type 2h, 1300, fri 10:00"
         case .text(.renameWindow): "Window name"
         case .text(.renameSession): "Session name"
+        case .text(.topicNote): "What were you doing here?"
         case .text(.tags(let field)):
             switch field.mode {
             case .newTopic: "Untitled"
@@ -166,6 +169,7 @@ extension CommandPalette {
             case .editTags(let topic): return "\(topicTitle(topic)) › Edit Tags"
             }
         case .text(.renameTopic(let topic)): return "\(topicTitle(topic)) › Rename"
+        case .text(.topicNote(let topic)): return "\(topicTitle(topic)) › Topic Note"
         case .text(.renameWindow(let window)): return "\(window.displayTitle) › Rename"
         case .text(.renameSession(let window)): return "\(window.sessionName) › Rename"
         case .confirm(let draft):
@@ -193,6 +197,7 @@ extension CommandPalette {
             }
             return tagNote(field)
         case .text(.renameTopic): return "Leave it blank for an Untitled Topic."
+        case .text(.topicNote): return "Leave it blank to clear the Note."
         case .worktreeStart(let draft):
             switch draft.starts {
             case .loading: return "Reading the branches…"
@@ -579,6 +584,7 @@ extension CommandPalette {
                 case .editTags(let topic): store.setTags(of: topic.id, typed.tags)
                 }
             case .renameTopic(let topic): store.renameTopic(topic.id, to: value)
+            case .topicNote(let topic): store.setTopicNote(of: topic.id, value)
             case .renameWindow(let window):
                 guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                 store.renameWindow(window, to: value)

@@ -23,6 +23,7 @@ extension EnvironmentCommand {
         case .snooze: .verb(.topicSnooze)
         case .unsnooze: .verb(.topicUnsnooze)
         case .tags: .verb(.topicTag)
+        case .note: .verb(.topicNote)
         case .newWindow: .verb(.windowNew)
         case .newSession: .verb(.sessionNew)
         case .renameSession: .verb(.sessionRename)

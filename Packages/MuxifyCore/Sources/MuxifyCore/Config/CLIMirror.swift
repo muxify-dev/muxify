@@ -22,6 +22,7 @@ public enum CLIVerbPath: String, CaseIterable, Sendable {
     case topicUnsnooze = "topic unsnooze"
     case topicTag = "topic tag"
     case topicRename = "topic rename"
+    case topicNote = "topic note"
     case topicReopen = "topic reopen"
     case topicStartFresh = "topic start-fresh"
     case topicPin = "topic pin"
@@ -87,6 +88,7 @@ extension PaletteAction {
         case .addSessionToTopic, .toggleNewWorktree: .verb(.topicAddSession)
         case .rename: .verbs([.topicRename, .sessionRename, .windowRename])
         case .editTags: .verb(.topicTag)
+        case .setTopicNote, .clearTopicNote: .verb(.topicNote)
         case .startZen: .verbs([.zenStart, .zenEnd])
         case .settleTopic: .verb(.topicSettle)
         case .forgetTopic: .verb(.topicForget)

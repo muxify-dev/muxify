@@ -1417,7 +1417,7 @@ A loop that the current object does not contain produces no text.
 
 | Object | Variables | Loops |
 | --- | --- | --- |
-| Topic | `topic_title`, `topic_pinned_flag`, `topic_dormant_flag`, `topic_tags`, `tag_count`, `session_count`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | S, W, P, T |
+| Topic | `topic_title`, `topic_note`, `topic_pinned_flag`, `topic_dormant_flag`, `topic_tags`, `tag_count`, `session_count`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | S, W, P, T |
 | Tag, inside `T` | Its Topic's variables, plus `tag` | None |
 | Session | `session_name`, `session_base_name`, `branch`, `topic_title`, `topic_tags`, `window_count`, `pane_count`, `agent_count`, `agents_working`, `agents_unread` | W, P |
 | Window | Its Session variables, plus `window_index`, `window_name`, `window_title`, `window_panes`, `window_zoomed_flag`, `pane_current_command`, `pane_current_path`, `tab_count`, `agent_kind`, `agent_status` | P |
@@ -1439,16 +1439,20 @@ Counts include Panes even when Pane rows are hidden. Flags use `1` and `0`.
 Muxify reads the repository files directly and caches each file read for one refresh. It does not start git.
 `branch` is empty on a Remote Environment or a detached HEAD.
 
+`topic_note` is the Topic Note, and it is empty when the Topic has none. An open
+card shows the Note on its own line, so only the Summary of a closed card needs
+the placeholder. The default Topic Summary starts with it.
+
 `tag` is the Tag's name, as the record stores it. `tag_count` is the number of the Topic's Tags.
 `topic_tags` is the Topic's Tags as plain text, such as `#work #personal`. It is also on Session, Window, Pane and Agent rows, for their Topic. The color of a
 Tag is not a Format value: the card draws it. With Tags off, these values are empty.
 
-The default Formats preserve the existing text. Window and Pane Summaries are empty.
+The default Formats preserve the existing text. A Topic with a Topic Note shows the Note first in its Summary. Window and Pane Summaries are empty.
 
 | Line | Default Format |
 | --- | --- |
 | Topic title | `#{topic_title}` |
-| Topic Summary | `#{?session_count,#{S:#{session_base_name}#{?loop_last_flag,, · }} · #{window_count} #{?#{==:#{window_count},1},Window,Windows},No Sessions}` |
+| Topic Summary | `#{?topic_note,#{topic_note} · ,}#{?session_count,#{S:#{session_base_name}#{?loop_last_flag,, · }} · #{window_count} #{?#{==:#{window_count},1},Window,Windows},No Sessions}` |
 | Session title | `#{session_name}` |
 | Session Summary | `#{window_count} #{?#{==:#{window_count},1},Window,Windows}` |
 | Window title | `#{window_title}` |

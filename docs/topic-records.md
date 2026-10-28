@@ -16,6 +16,7 @@ The filename must match the `id` field. The id must be a nonempty filename witho
   "snoozed_until": null,
   "session_order": "manual",
   "tags": ["backend", "release"],
+  "note": "Repro with seed 4411, then bisect",
   "sessions": [
     {
       "id": "78199a21-e769-41c6-97e0-70843149f16f",
@@ -69,6 +70,14 @@ Edit Tags in the app and `muxify topic tag` change the field through the Topic
 service. They change only the `tags` key, and only for an open Topic. A change
 that adds a Tag the Config does not define fails with the kind `tag_undefined`
 and writes nothing.
+
+`note` holds the Topic Note: one line of text that tells the user what they
+were doing in the Topic. A Topic without a Note has no `note` key. Set Topic
+Note and Clear Topic Note in the app, and `muxify topic note`, change the field
+through the Topic service. They change only the `note` key, and only for an
+open Topic. The service removes spaces at the two ends, joins lines with one
+space, and removes the key for text with no words. Snooze, Zen, Settle and
+Reopen keep the Note.
 
 The store retains unknown JSON fields during writes, including nested fields
 in remembered Sessions and Windows. Writes replace the file atomically. The

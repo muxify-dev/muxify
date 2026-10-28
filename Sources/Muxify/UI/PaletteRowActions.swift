@@ -49,6 +49,8 @@ extension CommandPalette {
             case .forgetTopic: begin(.confirm(PaletteConfirmation(.forget(topic))), keepingHistory: true)
             case .rename: begin(.text(.renameTopic(topic)), text: topic.title ?? "", keepingHistory: true)
             case .editTags: store.presentEditTags(of: id, keepingHistory: true)
+            case .setTopicNote: begin(.text(.topicNote(topic)), text: topic.note ?? "", keepingHistory: true)
+            case .clearTopicNote: close(); store.setTopicNote(of: id, nil)
             case .addSessionToTopic: store.refreshSessionPaths(); begin(.addSession(topic), keepingHistory: true)
             case .pinTopic: close(); store.pinTopic(id, true)
             case .unpinTopic: close(); store.pinTopic(id, false)

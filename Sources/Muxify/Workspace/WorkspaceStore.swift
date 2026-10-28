@@ -417,6 +417,20 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(.rename(title: title), target: .topic(.id(id))))
     }
 
+    /// Set Topic Note on the open Topic `id`, else on the Active Topic.
+    func presentSetTopicNote(of id: String? = nil, keepingHistory: Bool = false) {
+        topicWatcher.reload()
+        let selected = id ?? activeTopicID
+        guard !changingTopic, !isRemote,
+              let topic = topicWatcher.records.first(where: { $0.id == selected && $0.settledAt == nil }) else { return }
+        palette.begin(.text(.topicNote(topic)), text: topic.note ?? "", keepingHistory: keepingHistory)
+    }
+
+    /// Nil clears the Topic Note.
+    func setTopicNote(of id: String, _ note: String?) {
+        perform(EnvironmentRequest(.note(note), target: .topic(.id(id))))
+    }
+
     /// Puts a Session before or after another Session of its Topic, which then keeps the order the user gave.
     func moveSession(_ sessionID: String, to placement: TopicSessionPlacement) {
         guard let session = SessionID(rawValue: sessionID) else { return }
@@ -2380,6 +2394,7 @@ final class WorkspaceStore {
             if !isRemote, !changingTopic, let window = selectedWindow, window.topicID != nil, window.topicID == activeTopicID { removeFromTopic(window) }
         case .forgetTopic: if let id = activeTopicID, topicWatcher.records.contains(where: { $0.id == id && $0.settledAt == nil }) { presentForgetTopic(id) }
         case .renameTopic: presentRenameTopic()
+        case .setTopicNote: presentSetTopicNote()
         case .toggleLock: toggleLockOfCurrentSession()
         case .moveTopicUp: moveActiveCard(.previous)
         case .moveTopicDown: moveActiveCard(.next)

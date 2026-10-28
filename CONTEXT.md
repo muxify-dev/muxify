@@ -82,6 +82,10 @@ _Avoid_: label, category, folder, group
 The small coloured square that shows one Tag of a Topic on its card, in the colour of that Tag.
 _Avoid_: dot, badge, chip (when you mean the mark on a card)
 
+**Topic Note**:
+An optional line of text on a Topic that tells the user what they were doing there, such as "Repro with seed 4411, then bisect". The user sets it, changes it or clears it. It stays through Snooze, Zen, Dormant and Settle, so a Reopened Topic still shows it. The card of the Location shows all of it; a closed card shows it only where its Summary Format puts `#{topic_note}`.
+_Avoid_: next step, comment, description, memo, Summary (when you mean the Note)
+
 **Settle**:
 To mark a Topic as done. It leaves the Sidebar, its Sessions are killed or leave the Topic, and its record stays so that it can be reopened.
 _Avoid_: close, archive, resolve, complete

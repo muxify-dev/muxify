@@ -64,6 +64,8 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     public var isUnread = false
     /// The record keeps them in `tags` as an array of names, A→Z, and leaves the key out when it has nothing to keep.
     public var tags: Set<Tag> = []
+    /// The Topic Note: one line that tells the user what they were doing in the Topic. Nil is no Note.
+    public var note: String?
     /// What `tags` holds that is not a Tag: the array of those entries, or a `tags` value that is not an array. A
     /// write puts the entries back after the Tags, and the value back while the Topic has no Tags, as it keeps
     /// unknown fields.
@@ -86,7 +88,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case id, title, slug, outcome, order, sessions
         case createdAt = "created_at", settledAt = "settled_at"
-        case snoozedUntil = "snoozed_until", sessionOrder = "session_order", pinned, unread, tags
+        case snoozedUntil = "snoozed_until", sessionOrder = "session_order", pinned, unread, tags, note
     }
 
     private struct FieldKey: CodingKey {
@@ -113,6 +115,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         hasManualSessionOrder = (try? values.decodeIfPresent(String.self, forKey: .sessionOrder)) == "manual"
         isPinned = (try? values.decodeIfPresent(Bool.self, forKey: .pinned)) == true
         isUnread = (try? values.decodeIfPresent(Bool.self, forKey: .unread)) == true
+        note = try values.decodeIfPresent(String.self, forKey: .note)
         switch try values.decodeIfPresent(JSONValue.self, forKey: .tags) {
         case .array(let entries)?:
             // An entry is read as the user types a Tag, so `Backend` and `#backend` are the Tag `backend`.
@@ -145,6 +148,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         if hasManualSessionOrder { try values.encode("manual", forKey: .sessionOrder) }
         if isUnread { try values.encode(true, forKey: .unread) }
         if isPinned { try values.encode(true, forKey: .pinned) }
+        try values.encodeIfPresent(note, forKey: .note)
         let names = tags.sorted().map { JSONValue.string($0.name) }
         switch unreadableTags {
         case .array(let rest)?: try values.encode(names + rest, forKey: .tags)

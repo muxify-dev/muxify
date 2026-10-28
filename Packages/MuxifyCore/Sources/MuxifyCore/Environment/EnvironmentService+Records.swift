@@ -7,6 +7,7 @@ extension EnvironmentService {
         case .snooze(let deadline, let topics): return snooze(request, topics, until: deadline, client: client)
         case .unsnooze(let topics): return snooze(request, topics, until: nil, client: client)
         case .tags(let change): return changeTags(request, change, client: client)
+        case .note(let note): return setNote(request, note, client: client)
         case .pin: return pin(request, true, client: client)
         case .unpin: return pin(request, false, client: client)
         case .moveCard(let move): return moveCard(request, move, client: client)
@@ -227,6 +228,18 @@ extension EnvironmentService {
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: try server.snapshot(), client: client)
             try checkDefined(change, on: topic.tags)
             try store.write { try $0.changeTags(of: topic.id, change) }
+            return .changed(TopicChange(topicID: topic.id))
+        } catch {
+            return .failed(failure(error, phase: .nothingChanged))
+        }
+    }
+
+    /// The Topic Note is one key of one record, as Tags are.
+    private func setNote(_ request: EnvironmentRequest, _ note: String?, client: String?) -> EnvironmentResponse {
+        do {
+            let records = try store.read().records
+            let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: try server.snapshot(), client: client)
+            try store.write { try $0.setNote(of: topic.id, note) }
             return .changed(TopicChange(topicID: topic.id))
         } catch {
             return .failed(failure(error, phase: .nothingChanged))

@@ -3,7 +3,7 @@ import Foundation
 /// A parsed plain-text Format. Config owns parsing; rendering only evaluates the expression tree.
 public struct SidebarFormat: Equatable {
     public enum Variable: String, CaseIterable {
-        case topic_title, topic_pinned_flag, topic_dormant_flag, topic_tags, tag_count, tag
+        case topic_title, topic_note, topic_pinned_flag, topic_dormant_flag, topic_tags, tag_count, tag
         case session_count, window_count, pane_count, agent_count, agents_working, agents_unread
         case session_name, session_base_name, branch
         case window_index, window_name, window_title, window_panes, window_zoomed_flag, tab_count

@@ -47,6 +47,7 @@ public enum ConfigAction: String, KeybindAction {
     case removeSessionFromTopic = "remove_session_from_topic"
     case forgetTopic = "forget_topic"
     case renameTopic = "rename_topic"
+    case setTopicNote = "set_topic_note"
     case toggleLock = "toggle_lock"
     case moveTopicUp = "move_topic_up"
     case moveTopicDown = "move_topic_down"
@@ -127,6 +128,7 @@ public enum ConfigAction: String, KeybindAction {
         .removeSessionFromTopic: [],
         .forgetTopic: [],
         .renameTopic: [],
+        .setTopicNote: [],
         .toggleLock: [],
         .moveTopicUp: ["alt+cmd+up"],
         .moveTopicDown: ["alt+cmd+down"],
@@ -233,6 +235,8 @@ public enum PaletteAction: String, KeybindAction {
     case addSessionToTopic = "add_session_to_topic"
     case rename
     case editTags = "edit_tags"
+    case setTopicNote = "set_topic_note"
+    case clearTopicNote = "clear_topic_note"
     case startZen = "start_zen"
     case settleTopic = "settle_topic"
     case forgetTopic = "forget_topic"
@@ -271,6 +275,8 @@ public enum PaletteAction: String, KeybindAction {
         .addSessionToTopic: [],
         .rename: [],
         .editTags: [],
+        .setTopicNote: [],
+        .clearTopicNote: [],
         .startZen: [],
         .settleTopic: [],
         .forgetTopic: [],

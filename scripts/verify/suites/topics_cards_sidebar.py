@@ -334,6 +334,34 @@ class TopicsCardsSidebar(TopicsSidebar):
         wait(lambda: s.tmux('display-message', '-p', '-t', sid + ':', '#{session_name}') == 'alpha/alert-renamed',
              'Rename did not rename the Session')
 
+    def test_a_topic_note_shows_on_the_open_card_and_first_in_the_summary_of_a_closed_card(self):
+        s = self.s
+        topic, key = 'card-note', 'topic-card-note'
+        self.write_topic(topic, 'Card note', self.beta)
+        sid = self.new_session('card-note', self.beta, topic=topic)
+        window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
+        self.find(key)
+        s.act('action', key, 'Set Topic Note…')
+        s.wait_rows(lambda rs: s.has('palette-search', rs), 'Set Topic Note did not open')
+        s.act('focus', 'palette-search')
+        s.act('set', 'palette-search', 'Repro with seed 4411')
+        s.act('press', 'palette-accept')
+        wait(lambda: self.records()[topic].get('note') == 'Repro with seed 4411', 'Set Topic Note did not save the Note')
+        rs = s.wait_rows(lambda rs: 'Note: Repro with seed 4411' in s.row(key, rs).get('accessibilityValue', ''),
+                         'the card does not have the Note')
+        self.assertFalse(self.expanded(key, rs), self.describe(key, rs))
+        self.assertTrue(s.row(key, rs).get('accessibilityHelp', '').startswith('Repro with seed 4411 · '),
+                        'the Summary of the closed card does not start with the Note: %r' % s.row(key, rs).get('accessibilityHelp'))
+
+        self.select_window(window)
+        s.wait_shown(window)
+        rs = self.open_card(key)
+        self.assertIn('Note: Repro with seed 4411', s.row(key, rs).get('accessibilityValue', ''), self.describe(key, rs))
+
+        s.act('action', key, 'Clear Topic Note')
+        wait(lambda: 'note' not in self.records()[topic], 'Clear Topic Note did not clear the Note')
+        s.wait_rows(lambda rs: 'Note:' not in s.row(key, rs).get('accessibilityValue', ''), 'the card still has the Note')
+
     def test_a_card_lists_five_rows_and_n_more_lists_the_rest(self):
         s = self.s
         self.write_topic('card-more', 'Card more', self.beta)

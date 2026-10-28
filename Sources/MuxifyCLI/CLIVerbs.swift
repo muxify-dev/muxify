@@ -346,6 +346,18 @@ enum CLIVerbs {
             guard parsed.operands.count == 1, !parsed.operands[0].allSatisfy(\.isWhitespace) else { throw CLIError.usage }
             return .rename(title: parsed.operands[0])
         },
+        topicVerb(.topicNote, synopsis: "(\"text\" | --clear) \(topicTarget) [--json]", options: [.flag("--clear")],
+                  help: """
+                  Sets the Topic Note of this Pane's Topic, as Set Topic Note does: one line
+                  that tells you what you were doing there. Line breaks become spaces.
+                  --clear removes the Note, as Clear Topic Note does.
+                  """) { parsed in
+            switch (parsed.flag("--clear"), parsed.operands.count) {
+            case (true, 0): return .note(nil)
+            case (false, 1) where !parsed.operands[0].allSatisfy(\.isWhitespace): return .note(parsed.operands[0])
+            default: throw CLIError.usage
+            }
+        },
         topicVerb(.topicReopen, synopsis: "--topic <id|label> [--json]",
                   help: """
                   Makes the remembered Sessions, Windows, Tabs and Agents of a Dormant or

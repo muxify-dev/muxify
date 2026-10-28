@@ -151,7 +151,8 @@ final class CommandPalette {
                 actions += topic.snoozedUntil == nil ? [.snoozeTopic] : [.unsnoozeTopic]
                 // Zen starts only in Topics mode; while it is on, the action ends it.
                 actions += store.topics.mode == .topics || store.topicWatcher.zen != nil ? [.startZen] : []
-                actions += [.settleTopic, .addSessionToTopic, .rename] + (store.topicConfig.tags == nil ? [] : [.editTags])
+                actions += [.settleTopic, .addSessionToTopic, .rename, .setTopicNote] + (topic.note == nil ? [] : [.clearTopicNote])
+                    + (store.topicConfig.tags == nil ? [] : [.editTags])
                     + [topic.isPinned ? .unpinTopic : .pinTopic]
             }
             if topic.settledAt != nil || (!topic.sessions.isEmpty && !store.windows.contains(where: { $0.topicID == id })) {
@@ -209,6 +210,8 @@ final class CommandPalette {
         case .addSessionToTopic: return "Add a Session"
         case .rename: return "Rename"
         case .editTags: return "Edit Tags…"
+        case .setTopicNote: return "Set Topic Note"
+        case .clearTopicNote: return "Clear Topic Note"
         case .startZen: return store?.topicWatcher.zen == nil ? "Zen" : "End Zen"
         case .settleTopic: return "Settle"
         case .forgetTopic: return "Forget"
