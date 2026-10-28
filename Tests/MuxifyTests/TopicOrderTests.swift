@@ -73,6 +73,25 @@ final class TopicOrderTests: XCTestCase {
         XCTAssertEqual(DropPlacement.after("x").placing("a", in: order), order, "an anchor that left keeps the list")
     }
 
+    @MainActor func testAListWithoutTheDraggedItemMakesRoomWhenItComesIn() {
+        // a at 0–40, b at 46–86, the line at 92–112, d at 118–158.
+        let drag = ListDrag<String>(spacing: 6)
+        let all: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line"), .item("d")]
+        for slot in all { drag.measure(slot, height: slot.item == nil ? 20 : 40, visibleTop: 1000) }
+        drag.show(all, at: "d")
+        drag.press("d")
+        drag.lift("d")
+        drag.follow("d", translation: -60)
+        XCTAssertEqual(drag.placement, .before("b"), "d's top at 58 passed b's middle at 66")
+        let above: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line")]
+        XCTAssertEqual(drag.shift(of: .item("b"), in: above), 72, "b goes under the line in a list that does not hold d")
+        XCTAssertEqual(drag.shift(of: .item("a"), in: above), 0)
+        XCTAssertEqual(drag.shift(of: .fixed("line"), in: above), 0, "the line stays under the same number of items")
+        XCTAssertEqual(drag.shift(of: .fixed("line"), in: all), 0)
+        XCTAssertEqual(drag.shift(of: .item("pinned"), in: [.item("pinned")]), 0, "a list without the anchor stays")
+        drag.abandon("d")
+    }
+
     func testAPlacementMovesTheItemNextToItsAnchor() {
         XCTAssertEqual(DropPlacement.before("a").placing("c", in: ["a", "b", "c"]), ["c", "a", "b"])
         XCTAssertEqual(DropPlacement.after("c").placing("a", in: ["a", "b", "c"]), ["b", "c", "a"])

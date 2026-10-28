@@ -327,10 +327,10 @@ struct TopicsModel {
     /// The cards of `rows`, as MuxifyCore orders them for the CLI too (`TopicCards`).
     private let cards: [TopicListEntry]
 
-    /// The items of `list` that move or slide in the drag of the item `id`: the cards with its Pin and, among the cards
-    /// that are not Pinned, the Bench line and the opened No Topic Session. While the Bench is hidden, they are the
-    /// items on the side of the line that `id` is on, and none for the line: a card that crossed the line would put a
-    /// card that the Bench hides In Play.
+    /// The items of `list` that the item `id` can reach in a drag: the cards with its Pin and, among the cards that are
+    /// not Pinned, the Bench line and the opened No Topic Session. While the Bench is hidden, an In Play card gets only
+    /// the items above the line and the line: dropped below it, it would put a card that the Bench hides In Play. The
+    /// card under the line can go up past it, so it, the line and the No Topic Session get every item.
     func dragItems(around id: ListItem.ID) -> [ListItem] {
         func isPinned(_ item: ListItem) -> Bool {
             if case .card(let row) = item { return row.isPinned }
@@ -339,8 +339,7 @@ struct TopicsModel {
         guard let dragged = list.first(where: { $0.id == id }) else { return [] }
         let items = list.filter { isPinned($0) == isPinned(dragged) }
         guard isBenchShown == false, let line = items.firstIndex(where: { $0.cardID == nil }) else { return items }
-        if items[..<line].contains(where: { $0.id == id }) { return Array(items[..<line]) }
-        return items[(line + 1)...].contains { $0.id == id } ? Array(items[(line + 1)...]) : []
+        return items[..<line].contains { $0.id == id } ? Array(items[...line]) : items
     }
 
     /// The cards right above and below a card in the Topics list, among those with its Pin. None for a Topic outside it.
