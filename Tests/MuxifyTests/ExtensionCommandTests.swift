@@ -43,5 +43,9 @@ final class ExtensionCommandTests: XCTestCase {
         XCTAssertEqual(json["unrelated"] as? Bool, true)
         XCTAssertTrue(fm.fileExists(atPath: home.appendingPathComponent(".claude/settings.json.bak").path))
         XCTAssertTrue(fm.fileExists(atPath: home.appendingPathComponent(".config/opencode/plugins/muxify-status/tui.js").path))
+        for skills in [".claude/skills", ".codex/skills"] {
+            XCTAssertEqual(try Data(contentsOf: home.appendingPathComponent("\(skills)/muxify-browser/SKILL.md")),
+                           try Data(contentsOf: repository.appendingPathComponent("extensions/skills/muxify-browser/SKILL.md")), skills)
+        }
     }
 }

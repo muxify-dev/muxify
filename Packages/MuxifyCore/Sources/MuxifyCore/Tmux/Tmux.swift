@@ -187,6 +187,9 @@ public struct TmuxSnapshot {
     public var lastWindowID: String?
     public var serverRunning: Bool
     public var serverID: String?
+    /// The server's own socket, and the Browser socket that an app wrote into `BrowserAgentChannel.option`.
+    public var socketPath: String?
+    public var browserSocket: String?
     public var ownClientTTY: String?
     public var homeDirectory: String?
 
@@ -356,7 +359,7 @@ public enum Tmux {
             "list-windows", "-a", "-F", windowFormat,
             ";", "list-clients", "-F", clientFormat,
             ";", "list-panes", "-a", "-F", paneFormat,
-            ";", "display-message", "-p", "-F", "S\(s)#{pid}:#{start_time}",
+            ";", "display-message", "-p", "-F", "S\(s)#{pid}:#{start_time}\(s)#{socket_path}\(s)#{\(BrowserAgentChannel.option)}",
         ]
     }
 
@@ -368,6 +371,8 @@ public enum Tmux {
         var panes: [TmuxPane] = []
         var lastWindowID: String?
         var serverID: String?
+        var socketPath: String?
+        var browserSocket: String?
         var codexReports: [String] = []
         for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
             let f = line.components(separatedBy: s)
@@ -401,6 +406,8 @@ public enum Tmux {
                 ))
             } else if f.first == "S", f.count >= 2 {
                 serverID = f[1]
+                socketPath = field(2).isEmpty ? nil : field(2)
+                browserSocket = field(3).isEmpty ? nil : field(3)
             } else if f.first == "D", f.count == 2 {
                 codexReports.append(f[1])
             }
@@ -412,6 +419,8 @@ public enum Tmux {
             windows: windows, clients: clients, panes: panes,
             lastWindowID: lastWindowID, serverRunning: true, serverID: serverID
         )
+        snapshot.socketPath = socketPath
+        snapshot.browserSocket = browserSocket
         CodexReports.apply(codexReports, to: &snapshot)
         return snapshot
     }

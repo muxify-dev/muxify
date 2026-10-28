@@ -117,17 +117,22 @@ final class Browser {
     /// Shows `url` in a Tab and shows the Browser. Switches to a Tab that
     /// already has the URL, reuses the active Tab if it is still blank, and
     /// otherwise adds a new Tab.
-    func open(_ url: URL) {
+    @discardableResult
+    func open(_ url: URL) -> BrowserTab {
         let key = BrowserTab.matchKey(url.absoluteString)
+        let tab: BrowserTab
         if let existing = tabs.first(where: { $0.hasPage && BrowserTab.matchKey($0.urlString) == key }) {
+            tab = existing
             activeTabID = existing.id
         } else if let blank = activeTab, !blank.hasPage {
+            tab = blank
             blank.load(url)
         } else {
-            appendTab(url)
+            tab = appendTab(url)
         }
         changeLayout { $0.show(.browser) }
         changed()
+        return tab
     }
 
     func newTab() {
@@ -216,10 +221,12 @@ final class Browser {
         tabs.forEach { $0.close() }
     }
 
-    private func appendTab(_ url: URL?) {
+    @discardableResult
+    private func appendTab(_ url: URL?) -> BrowserTab {
         let tab = makeTab(url)
         tabs.append(tab)
         activeTabID = tab.id
+        return tab
     }
 
     private func makeTab(_ url: URL?, interactionState: Any? = nil) -> BrowserTab {
