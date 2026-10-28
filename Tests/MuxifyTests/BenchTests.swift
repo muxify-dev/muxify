@@ -88,11 +88,18 @@ final class BenchTests: XCTestCase {
         XCTAssertEqual(topics.dragItems(around: "topic-pinned").map(\.id), ["topic-pinned"])
     }
 
-    func testWhileTheBenchIsHiddenADragKeepsACardOnItsSideOfTheLine() {
+    func testWhileTheBenchIsHiddenTheCardUnderTheLineCanGoInPlayAndAnInPlayCardStaysAbove() {
         let topics = model(inPlay: 2, at: "d")
-        XCTAssertEqual(topics.dragItems(around: "topic-a").map(\.id), ["topic-a", "topic-b"])
-        XCTAssertEqual(topics.dragItems(around: "topic-d").map(\.id), ["topic-d"])
-        XCTAssertEqual(topics.dragItems(around: "bench-line").map(\.id), [])
+        let unpinned = ["topic-a", "topic-b", "bench-line", "topic-d"]
+        XCTAssertEqual(topics.dragItems(around: "topic-a").map(\.id), ["topic-a", "topic-b", "bench-line"],
+                       "below the line it would put a card that the Bench hides In Play")
+        XCTAssertEqual(topics.dragItems(around: "topic-d").map(\.id), unpinned)
+        XCTAssertEqual(topics.dragItems(around: "bench-line").map(\.id), unpinned, "the line slides as the card goes up")
+        let locked = model(inPlay: 2, at: "@2", windows: [window("1"), window("2", lock: 4)])
+        XCTAssertEqual(locked.dragItems(around: "locked-$2").map(\.id), unpinned.dropLast() + ["locked-$2"],
+                       "a Benched Locked Session goes In Play the same way")
+        let noTopic = model(inPlay: 2, at: "@1")
+        XCTAssertEqual(noTopic.dragItems(around: "no-topic").map(\.id), ["topic-a", "topic-b", "bench-line", "no-topic"])
     }
 
     func testHintsNumberOnlyTheCardsThatShowInTheirOrder() {

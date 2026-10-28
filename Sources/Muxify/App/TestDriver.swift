@@ -154,10 +154,11 @@ enum TestDriver {
     /// `click` presses the target at its centre and lets go there, without moving: a plain click of the mouse.
     /// The option `command_key` holds ⌘ through the click, as a ⌘-click does.
     /// `drag` presses the target, moves to the element named by `text` and lets go there: in its upper quarter,
-    /// or its lower quarter with the option `edge: "bottom"`. Each tick hands one mouse event to the window, never through
-    /// the window server, so the pointer does not move. The app stays in the background, so the window is not key:
-    /// only a gesture that takes the first click (`takesFirstClick` in SidebarView) follows, and a system drag
-    /// session would follow the real pointer instead.
+    /// or its lower quarter with the option `edge: "bottom"`. With the option `via`, it first moves to the upper quarter
+    /// of the element that `via` names, as a user who changes their mind on the way. Each tick hands one mouse event to
+    /// the window, never through the window server, so the pointer does not move. The app stays in the background, so
+    /// the window is not key: only a gesture that takes the first click (`takesFirstClick` in SidebarView) follows, and
+    /// a system drag session would follow the real pointer instead.
     private final class Drag: Steps {
         let nonce: String
         private weak var window: NSWindow?
@@ -184,12 +185,19 @@ enum TestDriver {
                 pressed = true
                 return
             }
-            guard let destination = frame(command["text"] as? String) else { return }
+            let via = frame(command["via"] as? String)
+            guard let destination = frame(command["text"] as? String), via != nil || command["via"] == nil else { return }
             self.window = window
             // Screen points grow upward, so the upper quarter is near maxY.
             let endY = command["edge"] as? String == "bottom" ? destination.minY + destination.height / 4 : destination.maxY - destination.height / 4
-            let points = [start] + (1...8).map { NSPoint(x: start.x, y: start.y + (endY - start.y) * CGFloat($0) / 8) }
-            let types = [NSEvent.EventType.leftMouseDown] + Array(repeating: .leftMouseDragged, count: 8) + [.leftMouseUp]
+            let viaY = via.map { $0.maxY - $0.height / 4 }
+            var points = [start]
+            for stopY in [viaY, endY].compactMap({ $0 }) {
+                let fromY = points.last!.y
+                points += (1...8).map { NSPoint(x: start.x, y: fromY + (stopY - fromY) * CGFloat($0) / 8) }
+            }
+            let types = [NSEvent.EventType.leftMouseDown] + Array(repeating: .leftMouseDragged, count: points.count - 1)
+                + [.leftMouseUp]
             moves = Array(zip(types, points + [points.last!]))
             pressed = true
         }

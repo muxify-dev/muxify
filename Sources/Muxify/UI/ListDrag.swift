@@ -140,10 +140,13 @@ final class ListDrag<ID: Hashable> {
     }
 
     /// How far `slot` moves from its place in `shown`, its list as the stack shows it now, to its place in the order
-    /// that the dragged item's placement makes. Zero once the stack shows that order.
+    /// that the dragged item's placement makes. Zero once the stack shows that order, and zero in a list without the
+    /// placement's anchor. A list without the dragged item takes it as an item from below its end, so the list makes
+    /// room when the item lands before one of its items.
     func shift(of slot: StackSlot<ID>, in shown: [StackSlot<ID>]) -> CGFloat {
-        guard let dragged, let placement, shown.contains(.item(dragged)) else { return 0 }
-        return layout.top(of: slot, in: placement.placing(dragged, in: shown)) - layout.top(of: slot, in: shown)
+        guard let dragged, let placement else { return 0 }
+        let full = shown.contains(.item(dragged)) ? shown : shown + [.item(dragged)]
+        return layout.top(of: slot, in: placement.placing(dragged, in: full)) - layout.top(of: slot, in: shown)
     }
 
     /// An item or a fixed view reports its height, and its place in the scroll view, each time they change.
@@ -417,8 +420,9 @@ extension View {
     }
 
     /// Makes the view an item of a `ListDrag` list, whose handle may be the view or a part of it. `shown` is its
-    /// list as the stack shows it now, and `cornerRadius` the item's corners, for the plate it stands on while lifted
-    /// and the placeholder where it would land.
+    /// list as the stack shows it now: the items it can reach in a drag. An item from below the end of that list can
+    /// come into it, and the list then makes room. `cornerRadius` is the item's corners, for the plate it stands on
+    /// while lifted and the placeholder where it would land.
     func listDragItem<ID: Hashable>(_ id: ID, drag: ListDrag<ID>, shown: [ID], cornerRadius: CGFloat) -> some View {
         listDragItem(id, drag: drag, shown: shown.map(StackSlot.item), cornerRadius: cornerRadius)
     }
