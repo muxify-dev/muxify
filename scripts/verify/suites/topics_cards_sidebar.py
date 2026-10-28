@@ -334,7 +334,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         wait(lambda: s.tmux('display-message', '-p', '-t', sid + ':', '#{session_name}') == 'alpha/alert-renamed',
              'Rename did not rename the Session')
 
-    def test_a_topic_note_shows_on_the_open_card_and_first_in_the_summary_of_a_closed_card(self):
+    def test_a_topic_note_shows_on_its_own_line_on_open_and_closed_cards_and_not_in_the_summary(self):
         s = self.s
         topic, key = 'card-note', 'topic-card-note'
         self.write_topic(topic, 'Card note', self.beta)
@@ -350,8 +350,8 @@ class TopicsCardsSidebar(TopicsSidebar):
         rs = s.wait_rows(lambda rs: 'Note: Repro with seed 4411' in s.row(key, rs).get('accessibilityValue', ''),
                          'the card does not have the Note')
         self.assertFalse(self.expanded(key, rs), self.describe(key, rs))
-        self.assertTrue(s.row(key, rs).get('accessibilityHelp', '').startswith('Repro with seed 4411 · '),
-                        'the Summary of the closed card does not start with the Note: %r' % s.row(key, rs).get('accessibilityHelp'))
+        self.assertNotIn('Repro with seed 4411', s.row(key, rs).get('accessibilityHelp', ''),
+                         'the Summary of the closed card shows the Note a second time: %r' % s.row(key, rs).get('accessibilityHelp'))
 
         self.select_window(window)
         s.wait_shown(window)

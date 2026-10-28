@@ -53,10 +53,8 @@ final class SidebarFormatTests: XCTestCase {
         XCTAssertEqual(defaults.text(for: .topic, in: .init(), mode: .topics).summary, "No Sessions")
         var noted = topic
         noted.values[.topic_note] = "Bisect, then ship"
-        XCTAssertEqual(defaults.text(for: .topic, in: noted, mode: .topics).summary, "Bisect, then ship · proj · proj2 · 3 Windows")
-        XCTAssertEqual(defaults.text(for: .topic, in: .init(values: [.topic_note: "Bisect"]), mode: .topics).summary, "Bisect · No Sessions")
-        noted.values[.topic_note] = ""
-        XCTAssertEqual(defaults.text(for: .topic, in: noted, mode: .topics).summary, "proj · proj2 · 3 Windows", "an empty Note adds nothing")
+        XCTAssertEqual(defaults.text(for: .topic, in: noted, mode: .topics).summary, "proj · proj2 · 3 Windows",
+                       "the card draws the Note on its own line, so the default Summary leaves it out")
         XCTAssertEqual(try SidebarFormat("[#{topic_note}]").expand(in: .init(values: [.topic_note: "Bisect"])), "[Bisect]")
         XCTAssertEqual(defaults.text(for: .session, in: .init(values: [.window_count: "1"]), mode: .sessions).summary, "1 Window")
         var custom = defaults

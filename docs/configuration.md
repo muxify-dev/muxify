@@ -1439,20 +1439,20 @@ Counts include Panes even when Pane rows are hidden. Flags use `1` and `0`.
 Muxify reads the repository files directly and caches each file read for one refresh. It does not start git.
 `branch` is empty on a Remote Environment or a detached HEAD.
 
-`topic_note` is the Topic Note, and it is empty when the Topic has none. An open
-card shows the Note on its own line, so only the Summary of a closed card needs
-the placeholder. The default Topic Summary starts with it.
+`topic_note` is the Topic Note, and it is empty when the Topic has none. Every
+card already shows the Note on its own line, so the default Formats do not use
+the placeholder.
 
 `tag` is the Tag's name, as the record stores it. `tag_count` is the number of the Topic's Tags.
 `topic_tags` is the Topic's Tags as plain text, such as `#work #personal`. It is also on Session, Window, Pane and Agent rows, for their Topic. The color of a
 Tag is not a Format value: the card draws it. With Tags off, these values are empty.
 
-The default Formats preserve the existing text. A Topic with a Topic Note shows the Note first in its Summary. Window and Pane Summaries are empty.
+The default Formats preserve the existing text. Window and Pane Summaries are empty.
 
 | Line | Default Format |
 | --- | --- |
 | Topic title | `#{topic_title}` |
-| Topic Summary | `#{?topic_note,#{topic_note} · ,}#{?session_count,#{S:#{session_base_name}#{?loop_last_flag,, · }} · #{window_count} #{?#{==:#{window_count},1},Window,Windows},No Sessions}` |
+| Topic Summary | `#{?session_count,#{S:#{session_base_name}#{?loop_last_flag,, · }} · #{window_count} #{?#{==:#{window_count},1},Window,Windows},No Sessions}` |
 | Session title | `#{session_name}` |
 | Session Summary | `#{window_count} #{?#{==:#{window_count},1},Window,Windows}` |
 | Window title | `#{window_title}` |
