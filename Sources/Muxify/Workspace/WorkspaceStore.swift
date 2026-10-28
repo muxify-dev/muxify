@@ -80,7 +80,7 @@ final class WorkspaceStore {
             case .success(let output):
                 DispatchQueue.global(qos: .utility).async { cache.save(output, for: arguments) }
                 found(SessionPathDiscovery.sessionPaths(in: output, roots: roots, aliases: aliases))
-            case .failure(let error): NSLog("muxify: SessionPaths: \(error)")
+            case .failure(let error): Diagnostics.report("SessionPaths: \(error)")
             }
         }
     }
@@ -1301,7 +1301,7 @@ final class WorkspaceStore {
         let current = generation
         connection.runAsync(args) { [weak self] result in
             guard let self, self.generation == current else { return }
-            if case .failure(let error) = result { NSLog("muxify: tmux command failed: \(error)") }
+            if case .failure(let error) = result { Diagnostics.report("tmux command failed: \(error)") }
             completion?(result)
         }
         return true
@@ -1997,7 +1997,7 @@ final class WorkspaceStore {
             var loaded = self.remoteConfig ?? LoadedConfig()
             loaded.update(with: Config.load(path: shown, isRemote: true) { $0 == shown ? text : nil })
             if loaded != self.remoteConfig {
-                for problem in loaded.problems { NSLog("muxify: config: \(problem)") }
+                for problem in loaded.problems { Diagnostics.report("config: \(problem)") }
                 self.remoteConfig = loaded
                 self.remoteProblemsDismissed = false
             }
@@ -2372,7 +2372,7 @@ final class WorkspaceStore {
             rememberedTopics[id] = nil
             topicSnapshots[id] = nil
             topicSnapshotBases[id] = nil
-        } catch { NSLog("muxify: remembering Topic \(id): \(error)") }
+        } catch { Diagnostics.report("remembering Topic \(id): \(error)") }
     }
 
     // MARK: - Keyboard
@@ -2604,7 +2604,7 @@ extension WorkspaceStore {
         case "toggle-browser":
             toggle(.browser)
         default:
-            NSLog("muxify: unknown URL \(url)")
+            Diagnostics.report("unknown URL \(url)")
         }
     }
 }

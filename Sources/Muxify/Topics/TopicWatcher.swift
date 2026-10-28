@@ -36,13 +36,13 @@ final class TopicWatcher {
         let contents: TopicContents
         do { contents = try store.read() }
         catch {
-            NSLog("muxify: topics: \(error)")
+            Diagnostics.report("topics: \(error)")
             return
         }
         records = contents.records
         zen = contents.zen
         problems = contents.problems
-        for problem in problems { NSLog("muxify: topics: \(problem)") }
+        for problem in problems { Diagnostics.report("topics: \(problem)") }
         self.stamp = stamp
     }
 

@@ -51,7 +51,7 @@ final class TmuxEvents {
                 self.nextStart = Date().addingTimeInterval(2)
             })
         } catch {
-            NSLog("muxify: tmux control client failed to start: \(error)")
+            Diagnostics.report("tmux control client failed to start: \(error)")
         }
     }
 
