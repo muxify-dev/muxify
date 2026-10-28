@@ -170,8 +170,6 @@ struct CardHeader<Details: View>: View {
     let summary: String
     /// The room the action in the card's bottom-right corner takes, so the last line of a closed card stops before it.
     var cornerWidth: CGFloat = 0
-    /// Small text at the right end of the title's first line, such as a Snoozed Topic's wake time.
-    var titleNote: String? = nil
     var tags: CardTags? = nil
     /// The Topic Note. Every card shows it whole on its own line, softer on a closed card.
     var note: String? = nil
@@ -226,7 +224,6 @@ struct CardHeader<Details: View>: View {
                 }
                 Spacer(minLength: 0)
                 HStack(alignment: .titleLine, spacing: 5) {
-                    if let titleNote { Text(titleNote).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1) }
                     // The Hint badge takes the mark's place while it shows.
                     let markOpacity: Double = hintTarget.map { hints[$0].isEmpty ? 1 : 0 } ?? 1
                     if isPinned { PinMark().opacity(markOpacity) } else if isLocked { LockMark().opacity(markOpacity) }
@@ -486,7 +483,7 @@ struct CardList<Heading: View, Row: View>: View {
 enum CardCorner {
     /// The room the action takes at the end of the summary line or the footer line.
     static let width: CGFloat = 44
-    /// The room of Unsnooze or Reopen… on a card in the Snoozed or Settled group.
+    /// The room of Reopen… on a card in the Settled group.
     static let groupWidth: CGFloat = 60
 }
 

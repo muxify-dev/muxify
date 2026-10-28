@@ -70,11 +70,6 @@ final class NewTopicTests: XCTestCase {
                         location: .window(WindowID(rawValue: "@1")!))
         XCTAssertNil(started.emptyTopic, "a Topic with a Window is no longer empty")
         XCTAssertEqual(started.activeTopic, .topic("empty"))
-        var snoozed = topic
-        snoozed.snoozedUntil = "never"
-        let shownSnoozed = TopicsModel(records: [snoozed], windows: [window(topic: nil)], config: config, selection: selection, location: page)
-        XCTAssertEqual(shownSnoozed.emptyTopic?.title, "Plan", "a Snoozed empty Topic the user goes to stays shown")
-        XCTAssertEqual(shownSnoozed.activeTopic, .topic("empty"))
         var settled = topic
         settled.settledAt = "2026-10-01T00:00:00Z"
         let shownSettled = TopicsModel(records: [settled], windows: [window(topic: nil)], config: config, selection: selection, location: page)

@@ -18,7 +18,7 @@ final class PickListTests: XCTestCase {
         let fields: [SearchField] = [.title("Settle GS drops"), .typeWord("settled"), .detail("game_server/main"), .hidden("reward cap")]
         let both = try XCTUnwrap(FieldsMatch.best(FuzzyQuery("sett gs"), in: fields))
         XCTAssertEqual(both.positions[0], [0, 1, 2, 3, 7, 8], "both words land on the title: a strong title hit beats the type word")
-        let typeWord = try XCTUnwrap(FieldsMatch.best(FuzzyQuery("snoo"), in: [.title("Snooze alarm"), .typeWord("snoozed")]))
+        let typeWord = try XCTUnwrap(FieldsMatch.best(FuzzyQuery("sett"), in: [.title("Settings page"), .typeWord("settled")]))
         XCTAssertEqual(typeWord.positions.keys.sorted(), [0], "an equal score goes to the field listed first")
         let hidden = try XCTUnwrap(FieldsMatch.best(FuzzyQuery("cap"), in: fields))
         XCTAssertEqual(hidden.positions, [3: [7, 8, 9]])
@@ -52,17 +52,17 @@ final class PickListTests: XCTestCase {
     }
 
     func testTiesFollowTheTiebreakRulesInTheirOrder() {
-        var snoozed = candidate("snoozed", "alpha", visit: 30)
-        snoozed.isSetAside = true
-        let candidates = [candidate("long", "alpha beta", visit: 20), candidate("short", "alpha", visit: 10), snoozed]
+        var settled = candidate("settled", "alpha", visit: 30)
+        settled.isSetAside = true
+        let candidates = [candidate("long", "alpha beta", visit: 20), candidate("short", "alpha", visit: 10), settled]
         func ids(_ tiebreak: [PaletteTiebreak]) -> [String] {
             FuzzyRanker.list([PickSectionInput(id: "s", rule: .ranked(showsWhenEmpty: true), candidates: candidates)],
                              query: FuzzyQuery("alpha"), rules: PickRules(tiebreak: tiebreak)).rows.map(\.id)
         }
-        XCTAssertEqual(ids([.open, .visit, .length]), ["long", "short", "snoozed"])
-        XCTAssertEqual(ids([.open, .length, .visit]), ["short", "long", "snoozed"])
-        XCTAssertEqual(ids([.visit]), ["snoozed", "long", "short"], "a rule not listed does not count")
-        XCTAssertEqual(ids([]), ["long", "short", "snoozed"], "with no rule, candidate order decides")
+        XCTAssertEqual(ids([.open, .visit, .length]), ["long", "short", "settled"])
+        XCTAssertEqual(ids([.open, .length, .visit]), ["short", "long", "settled"])
+        XCTAssertEqual(ids([.visit]), ["settled", "long", "short"], "a rule not listed does not count")
+        XCTAssertEqual(ids([]), ["long", "short", "settled"], "with no rule, candidate order decides")
     }
 
     func testEverySeparatorEarnsTheSameBonus() throws {
@@ -161,13 +161,13 @@ final class PickListTests: XCTestCase {
     }
 
     func testDetailShowsMatchedTypeWordThenDetailsThenMatchedHiddenThenNote() {
-        let fields: [SearchField] = [.title("Fix drops"), .typeWord("snoozed"), .detail("game_server/main"), .hidden("reward cap")]
-        XCTAssertEqual(FuzzyRanker.detail(fields, note: "until Mon 9:00", match: nil),
-                       Highlighted(text: "game_server/main · until Mon 9:00", marks: []))
-        let match = FieldsMatch.best(FuzzyQuery("snoo cap"), in: fields)
-        XCTAssertEqual(FuzzyRanker.detail(fields, note: "until Mon 9:00", match: match),
-                       Highlighted(text: "snoozed · game_server/main · reward cap · until Mon 9:00", marks: [0, 1, 2, 3, 36, 37, 38]))
-        let row = list([PickCandidate(id: "t", kind: .snoozed, title: "Fix drops", fields: Array(fields.dropFirst()), note: "until Mon 9:00", pick: .available("t"))], "snoo cap").rows[0]
+        let fields: [SearchField] = [.title("Fix drops"), .typeWord("settled"), .detail("game_server/main"), .hidden("reward cap")]
+        XCTAssertEqual(FuzzyRanker.detail(fields, note: "Oct 1, 2026", match: nil),
+                       Highlighted(text: "game_server/main · Oct 1, 2026", marks: []))
+        let match = FieldsMatch.best(FuzzyQuery("sett cap"), in: fields)
+        XCTAssertEqual(FuzzyRanker.detail(fields, note: "Oct 1, 2026", match: match),
+                       Highlighted(text: "settled · game_server/main · reward cap · Oct 1, 2026", marks: [0, 1, 2, 3, 36, 37, 38]))
+        let row = list([PickCandidate(id: "t", kind: .settled, title: "Fix drops", fields: Array(fields.dropFirst()), note: "Oct 1, 2026", pick: .available("t"))], "sett cap").rows[0]
         XCTAssertEqual(row.detail.marks, [0, 1, 2, 3, 36, 37, 38])
         XCTAssertEqual(row.title, Highlighted(text: "Fix drops", marks: []))
     }

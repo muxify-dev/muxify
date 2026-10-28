@@ -116,9 +116,7 @@ final class TopicOrderTests: XCTestCase {
         }
         var settled = record("settled", order: -100)
         settled.settledAt = "1970-01-01T00:00:00Z"
-        var snoozed = record("b", order: 0)
-        snoozed.snoozedUntil = "never"
-        let entries = [record("a", order: 0), snoozed, record("c", order: 0), settled].map(TopicListEntry.topic)
+        let entries = [record("a", order: 0), record("b", order: 0), record("c", order: 0), settled].map(TopicListEntry.topic)
         let edits = try TopicOrder.moving(.topic("c"), to: .before(.topic("b")), in: entries)
         XCTAssertEqual(shown(applying(edits, to: entries)), ["a", "c", "b"])
         XCTAssertFalse(ids(edits).contains("settled"))
@@ -133,10 +131,10 @@ final class TopicOrderTests: XCTestCase {
         let original = [record("a", order: 0), record("b", order: 1), record("c", order: 2)].map(TopicListEntry.topic)
         let moved = applying(try TopicOrder.moving(.topic("c"), to: .before(.topic("a")), in: original), to: original)
         let new = TopicRecord(newTopic: "new", title: "New", slug: "new", now: Date())
-        let placed = applying(TopicOrder.inserting(new, at: .top, in: moved), to: moved)
+        let placed = applying(TopicOrder.inserting(new, at: .end(.top), in: moved), to: moved)
         XCTAssertEqual(shown(placed), ["new", "c", "a", "b"])
         let extreme = [record("a", order: -.greatestFiniteMagnitude), record("b", order: .greatestFiniteMagnitude)].map(TopicListEntry.topic)
-        let inserted = applying(TopicOrder.inserting(record("new", order: nil), at: .top, in: extreme), to: extreme)
+        let inserted = applying(TopicOrder.inserting(record("new", order: nil), at: .end(.top), in: extreme), to: extreme)
         XCTAssertEqual(shown(inserted), ["new", "a", "b"])
         XCTAssertTrue(inserted.allSatisfy { $0.order?.isFinite == true })
         let bottom = applying(try TopicOrder.moving(.topic("a"), to: .after(.topic("b")), in: extreme), to: extreme)
@@ -154,7 +152,7 @@ final class TopicOrderTests: XCTestCase {
         XCTAssertEqual(shown(locked), ["p", "a", "lock:$1", "b", "lock:$2"])
         let moved = applying(try TopicOrder.moving(.lock(sessionID: "$2"), to: .before(.topic("p")), in: locked), to: locked)
         XCTAssertEqual(shown(moved), ["p", "lock:$2", "a", "lock:$1", "b"], "a Lock is never Pinned, so it stays below the Pinned Topics")
-        let prepended = applying(TopicOrder.inserting(record("new", order: nil), at: .top, in: moved), to: moved)
+        let prepended = applying(TopicOrder.inserting(record("new", order: nil), at: .end(.top), in: moved), to: moved)
         XCTAssertEqual(shown(prepended), ["p", "new", "lock:$2", "a", "lock:$1", "b"], "a new Topic goes before the Locks too")
     }
 

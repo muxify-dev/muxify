@@ -144,7 +144,7 @@ extension QuickSwitchTargets {
             let carded = Set(model.rows.flatMap(\.sessions).map(\.id.session))
             shown = model.noTopicSessions.filter { !carded.contains($0.id.session) }
         case let active?:
-            // A Snoozed Topic the user went to has its card in the Snoozed group, not in the rows.
+            // A Settled Topic the user went to has its card in the Settled group, not in the rows.
             shown = (model.rows + model.groups.flatMap(\.topics)).first { $0.id == active }?.sessions ?? []
         }
         return shown.filter { !$0.windows.isEmpty }

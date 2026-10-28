@@ -140,7 +140,7 @@ final class CommandPalette {
     func actions(for row: PickRow<PaletteItem>) -> [PaletteAction] {
         guard let item = row.pick.payload else { return [] }
         if flow != nil || row.kind == .command { return [.jumpTo] }
-        if case .tag = item.ref { return [.jumpTo, .snoozeTopic] }
+        if case .tag = item.ref { return [.jumpTo] }
         var actions: [PaletteAction] = [.jumpTo]
         if store?.canChangeRead(.read, in: item.readTarget) == true { actions.append(.markRead) }
         if store?.canChangeRead(.unread, in: item.readTarget) == true { actions.append(.markUnread) }
@@ -148,9 +148,6 @@ final class CommandPalette {
         case .topic(let id, _):
             guard let store, !store.isRemote, let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return actions }
             if topic.settledAt == nil {
-                actions += topic.snoozedUntil == nil ? [.snoozeTopic] : [.unsnoozeTopic]
-                // Zen starts only in Topics mode; while it is on, the action ends it.
-                actions += store.topics.mode == .topics || store.topicWatcher.zen != nil ? [.startZen] : []
                 actions += [.settleTopic, .addSessionToTopic, .rename, .setTopicNote] + (topic.note == nil ? [] : [.clearTopicNote])
                     + (store.topicConfig.tags == nil ? [] : [.editTags])
                     + [topic.isPinned ? .unpinTopic : .pinTopic]
@@ -186,7 +183,7 @@ final class CommandPalette {
         case .jumpTo:
             switch row.kind {
             case _ where moving != nil: return "Move Here"
-            case .topic, .snoozed:
+            case .topic:
                 guard case .topic(let id, nil) = item.ref,
                       store?.topicWatcher.records.first(where: { $0.id == id })?.sessions.isEmpty == false else { return "Go to Topic" }
                 return "Reopen Topic"
@@ -205,17 +202,14 @@ final class CommandPalette {
         case .copyFolder: return "Copy Path"
         case .copyTmuxTarget: return row.kind == .agent ? "Copy Pane ID" : "Copy tmux Target"
         case .pasteFolder: return "Paste Path"
-        case .snoozeTopic: return row.kind == .tag ? "Snooze its Topics…" : "Snooze Topic"
         case .move: return "Move to…"
         case .addSessionToTopic: return "Add a Session"
         case .rename: return "Rename"
         case .editTags: return "Edit Tags…"
         case .setTopicNote: return "Set Topic Note"
         case .clearTopicNote: return "Clear Topic Note"
-        case .startZen: return store?.topicWatcher.zen == nil ? "Zen" : "End Zen"
         case .settleTopic: return "Settle"
         case .forgetTopic: return "Forget"
-        case .unsnoozeTopic: return "Unsnooze"
         case .reopenTopic: return "Reopen"
         case .startTopicFresh: return "Start Fresh"
         case .pinTopic: return "Pin"
@@ -293,10 +287,8 @@ final class CommandPalette {
         if receiveChipKey(.deleteBackward(textIsEmpty: true)) { return }
         if case .search(let config, _?) = presentation { presentation = .search(config); selectedID = nil; return }
         // At the first step ⌫ does nothing: a typo never closes the palette, only ⎋ does.
-        let earlier = flow?.earlierStep
-        guard earlier != nil || !history.isEmpty else { return }
+        guard !history.isEmpty else { return }
         invocation = UUID()
-        if let earlier { replaceFlow(earlier); return }
         let previous = history.removeLast()
         presentation = previous.presentation
         query = previous.query
@@ -343,7 +335,7 @@ final class CommandPalette {
         guard let store, let item = row.pick.payload else { return }
         if case .choice(let choice) = item.ref {
             // A click on a check step's row checks it, as Space does; ↩ is what goes on.
-            if case .check(let checkRow) = choice { check(checkRow, highlighting: row.id) }
+            if case .check(let id) = choice { check(id, highlighting: row.id) }
             else if choice == .accept { acceptSelected() } else { accept(choice) }
             return
         }

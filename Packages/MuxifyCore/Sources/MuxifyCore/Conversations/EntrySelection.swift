@@ -107,7 +107,7 @@ public struct EntrySelection: Equatable, Sendable {
         return Result(entries: selected, total: entries.count, filtered: filtered, hiddenByRole: entries.count - byRole.count)
     }
 
-    /// The time that `--since` names: an ISO 8601 time, or the text as Snooze reads it but toward the past. 2h is two
+    /// The time that `--since` names: an ISO 8601 time, or a `TypedTime` toward the past. 2h is two
     /// hours ago, 17:30 the last time the clock showed 17:30, mon 9am the last Monday at 9:00.
     public static func since(_ text: String, now: Date, calendar: Calendar = .current) -> Date? {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
@@ -115,7 +115,7 @@ public struct EntrySelection: Equatable, Sendable {
             ?? (try? Date.ISO8601FormatStyle().parse(trimmed)) {
             return date
         }
-        switch SnoozeSchedule(trimmed, typed: true) {
+        switch TypedTime(trimmed) {
         case .relative(let count, let component)?:
             return calendar.date(byAdding: component, value: -count, to: now)
         case .next(let hour, let minute)?:
@@ -126,7 +126,7 @@ public struct EntrySelection: Equatable, Sendable {
                                      matchingPolicy: .nextTime, direction: .backward)
         case .day(0, let hour, let minute)?:
             return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: now).flatMap { $0 <= now ? $0 : nil }
-        case .day?, .never?, nil:
+        case .day?, nil:
             return nil
         }
     }

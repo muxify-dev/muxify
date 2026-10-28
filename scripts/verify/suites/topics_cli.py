@@ -492,50 +492,23 @@ class TopicsCli(unittest.TestCase):
         self.assertFalse(any(topic['pinned'] for topic in self.topic_list()), 'a Pin stays')
         self.assertLess(ids.index(second), ids.index(first), ids)
 
-    def test_zen_start_snoozes_the_other_topics_zen_end_restores_them_and_settle_of_the_kept_topic_ends_zen(self):
-        kept, quiet = (json.loads(self.muxify('topic', 'new', title, '--json', pane='').stdout)['changed']['topic_id']
-                       for title in ('Zen kept', 'Zen quiet'))
-        zen_file = self.s.root/'state/muxify/zen.json'
-        snoozed = lambda id: json.loads((self.s.root/'state/muxify/topics'/(id + '.json')).read_text()).get('snoozed_until')
-
-        started = self.muxify('zen', 'start', '2h', '--topic', kept, '--json', pane='')
-        self.assertEqual(started.returncode, 0, started.stderr)
-        self.assertIn(quiet, json.loads(started.stdout)['snooze_changed']['topic_ids'])
-        self.assertNotIn(kept, json.loads(started.stdout)['snooze_changed']['topic_ids'])
-        self.assertIsNotNone(snoozed(quiet), 'Zen did not Snooze the other Topic')
-        self.assertIsNone(snoozed(kept), 'Zen Snoozed the kept Topic')
-        again = self.muxify('zen', 'start', 'forever', '--topic', quiet, pane='')
-        self.assertEqual(again.returncode, 1)
-        self.assertIn('Zen is on', again.stderr)
-
-        ended = self.muxify('zen', 'end', pane='')
-        self.assertEqual(ended.returncode, 0, ended.stderr)
-        self.assertIsNone(snoozed(quiet), 'zen end did not give back the earlier Snooze')
-        self.assertFalse(zen_file.exists(), 'zen end left the Zen record')
-        self.assertEqual(self.muxify('zen', 'end', pane='').returncode, 0, 'zen end without Zen failed')
-
-        self.assertEqual(self.muxify('zen', 'start', '2h', '--topic', kept, pane='').returncode, 0)
-        settled = self.muxify('topic', 'settle', '--topic', kept, pane='')
-        self.assertEqual(settled.returncode, 0, settled.stderr)
-        self.assertFalse(zen_file.exists(), 'Settle of the kept Topic left Zen on')
-        self.assertIsNone(snoozed(quiet))
-
-    def test_topic_move_steps_over_a_snoozed_topic_and_fails_at_the_end_or_for_the_snoozed_topic(self):
-        top, snoozed, moved = (json.loads(self.muxify('topic', 'new', title, '--json', pane='').stdout)['changed']['topic_id']
-                               for title in ('Move top', 'Move snoozed', 'Move moved'))
-        self.assertEqual(self.muxify('topic', 'snooze', '1d', '--topic', snoozed, pane='').returncode, 0)
+    def test_topic_move_steps_the_card_and_fails_at_the_end_or_for_a_settled_topic(self):
+        top, settled, moved = (json.loads(self.muxify('topic', 'new', title, '--json', pane='').stdout)['changed']['topic_id']
+                               for title in ('Move top', 'Move settled', 'Move moved'))
+        settle = self.muxify('topic', 'settle', '--topic', settled, pane='')
+        self.assertEqual(settle.returncode, 0, settle.stderr)
 
         up = self.muxify('topic', 'move', 'up', '--topic', moved, pane='')
         self.assertEqual(up.returncode, 0, up.stderr)
         ids = [topic['id'] for topic in self.topic_list()]
-        self.assertEqual(ids[-3:], [moved, top, snoozed], 'the card did not step over the Snoozed Topic: %s' % ids)
+        self.assertEqual(ids[-2:], [moved, top], 'the card did not step up: %s' % ids)
 
         before = self.topic_list()
         at_end = self.muxify('topic', 'move', 'down', '--topic', top, '--json', pane='')
         self.assertEqual(at_end.returncode, 1, at_end.stderr)
         self.assertEqual(json.loads(at_end.stdout)['failed']['kind'], 'card_at_end', at_end.stdout)
-        hidden = self.muxify('topic', 'move', 'up', '--topic', snoozed, '--json', pane='')
-        self.assertEqual((hidden.returncode, json.loads(hidden.stdout)['failed']['kind']), (1, 'card_hidden'), hidden.stdout)
+        closed = self.muxify('topic', 'move', 'up', '--topic', settled, '--json', pane='')
+        self.assertEqual((closed.returncode, json.loads(closed.stdout)['failed']['kind']), (1, 'topic_unavailable'), closed.stdout)
         self.assertEqual(self.topic_list(), before, 'a failed move changed the order')
 
     def test_session_move_steps_a_session_among_its_topics_sessions_and_topic_sort_sessions_gives_back_the_creation_order(self):

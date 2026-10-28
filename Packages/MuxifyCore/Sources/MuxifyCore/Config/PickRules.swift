@@ -2,10 +2,10 @@
 /// and whether `show` lists it.
 public enum RowKind: String, CaseIterable {
     case topic
-    case snoozed, settled
+    case settled
     /// A running Session in no open Topic, such as a Settled Topic's Session.
     case session
-    /// A running Session in an open Topic, Snoozed or not.
+    /// A running Session in an open Topic.
     case topicSession = "topic-session"
     case sessionPath = "session-path"
     case worktree
@@ -22,10 +22,6 @@ public enum ActionList: String, CaseIterable {
     case move
     /// Move: the destination Session step.
     case moveSession = "move_session"
-    /// The check step of Snooze Topics… and of Unsnooze Topics….
-    case snoozeTopics = "snooze_topics", unsnoozeTopics = "unsnooze_topics"
-    /// Unsnooze Topic while the Active Topic is not Snoozed.
-    case unsnoozeTopic = "unsnooze_topic"
     /// Tag completion in New Topic and Edit Tags.
     case tags
     /// Add a Session › New Worktree from.
@@ -37,9 +33,6 @@ public enum ActionList: String, CaseIterable {
         case .addSession: [.session, .topicSession, .sessionPath, .worktree]
         case .move: [.topic]
         case .moveSession: [.session, .topicSession]
-        case .snoozeTopics: [.tag, .topic, .snoozed]
-        case .unsnoozeTopics: [.tag, .snoozed]
-        case .unsnoozeTopic: [.snoozed]
         case .tags: [.tag]
         case .worktreeStart: [.command]
         }

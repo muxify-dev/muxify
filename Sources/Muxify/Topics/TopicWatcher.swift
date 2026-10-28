@@ -9,8 +9,8 @@ final class TopicWatcher {
     let store: TopicStore
     private(set) var records: [TopicRecord] = []
     private(set) var problems: [String] = []
-    /// The Zen that is on, from `zen.json` beside the Topic records; nil when Zen is off.
-    private(set) var zen: ZenRecord?
+    /// The records hold Snoozes or a Zen from an older Muxify, which `EnvironmentService.upgradeRecords` removes.
+    private(set) var needsUpgrade = false
     @ObservationIgnored private var stamp = ""
     @ObservationIgnored private var timer: Timer?
 
@@ -40,7 +40,7 @@ final class TopicWatcher {
             return
         }
         records = contents.records
-        zen = contents.zen
+        needsUpgrade = contents.needsUpgrade
         problems = contents.problems
         for problem in problems { Diagnostics.report("topics: \(problem)") }
         self.stamp = stamp

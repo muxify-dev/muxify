@@ -63,7 +63,6 @@ struct TopicSettlePlan {
         var record = topic.remembering(snapshot, order: order) ?? topic
         record.settledAt = ISO8601DateFormatter().string(from: now)
         record.outcome = outcome.trimmingCharacters(in: .whitespacesAndNewlines)
-        record.snoozedUntil = nil
         let defaults = TopicSettleSession.choices(topic: record, snapshot: snapshot, sessionPaths: sessionPaths,
                                                  mergedWorktrees: mergedWorktrees)
         var commands: [TopicPlan.Command] = []
@@ -256,7 +255,6 @@ struct TopicReopenPlan {
             if topic.settledAt != nil {
                 var record = topic
                 record.settledAt = nil
-                record.snoozedUntil = nil
                 reopened = record
             }
             edit = TopicEdit(record: nil, commands: [], selection: .emptyTopic(topic.id), completion: reopened.map(TopicEdit.Completion.save))

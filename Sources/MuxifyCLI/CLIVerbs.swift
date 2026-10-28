@@ -3,7 +3,7 @@ import MuxifyCore
 
 /// Every verb of the command line, in the order that `muxify --help` lists them.
 enum CLIVerbs {
-    static let all: [CLIVerb] = browser + session + extensions + topic + window + zen + agent + read
+    static let all: [CLIVerb] = browser + session + extensions + topic + window + agent + read
 
     /// The verb that the words name, and the words after it. The longest match wins.
     static func verb(for arguments: ArraySlice<String>) -> (CLIVerb, ArraySlice<String>)? {
@@ -175,11 +175,11 @@ enum CLIVerbs {
 
     // MARK: - topic
 
-    private static func topicVerb(_ path: CLIVerbPath, synopsis: String, options: [CLIOption] = [], repeatsTopic: Bool = false,
+    private static func topicVerb(_ path: CLIVerbPath, synopsis: String, options: [CLIOption] = [],
                                   afterDashes: CLIVerb.AfterDashes = .refused, removed: [RemovedForm] = [], help: String,
                                   build: @escaping (ParsedArguments) throws -> RequestInvocation.Command) -> CLIVerb {
         CLIVerb(path: path, synopsis: synopsis, options: options + [.flag("--json")],
-                targets: [.topic, .window, .pane], repeatsTopic: repeatsTopic, afterDashes: afterDashes, removed: removed,
+                targets: [.topic, .window, .pane], afterDashes: afterDashes, removed: removed,
                 help: help) { parsed in
             .request(try RequestInvocation(try build(parsed), parsed: parsed))
         }
@@ -225,19 +225,6 @@ enum CLIVerbs {
             "topic new needs a title. To move this Pane into a new Topic, use: muxify \(CLIVerbPath.windowMove.rawValue) --new-topic [\"title\"]"
         },
     ]
-
-    /// The time of `topic snooze` and `zen start`. Unquoted words join, so `topic snooze mon 9am` reads as the time
-    /// step reads "mon 9am". The time step says "never", but on a command line `snooze never` reads as no Snooze, so
-    /// the CLI says "forever".
-    private static func time(_ parsed: ParsedArguments, of phrase: String) throws -> SnoozeSchedule {
-        guard !parsed.operands.isEmpty else { throw CLIError.usage }
-        let text = parsed.operands.joined(separator: " ")
-        if text.lowercased() == "forever" { return .never }
-        guard let schedule = SnoozeSchedule(text, typed: true), schedule != .never else {
-            throw CLIError("\(phrase) takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever", exitCode: 2)
-        }
-        return schedule
-    }
 
     private static func upOrDown(_ parsed: ParsedArguments) throws -> Bool {
         guard parsed.operands.count == 1, ["up", "down"].contains(parsed.operands[0]) else { throw CLIError.usage }
@@ -306,25 +293,6 @@ enum CLIVerbs {
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .settle(removeWorktrees: parsed.flag("--remove-worktrees"), killSessions: parsed.flag("--kill-sessions"))
         },
-        topicVerb(.topicSnooze, synopsis: "<time> [--topic <id|label>... | --window <id> | --pane <id>] [--json]", repeatsTopic: true,
-                  help: """
-                  Snoozes this Pane's Topic until <time>, also when it was Snoozed until
-                  later. <time> is as the time step of Snooze Topic reads it: 30m, 2h or 3d from now,
-                  17:30 or 5pm, today, tomorrow or a weekday such as mon, each with an
-                  optional time (default 9:00), or forever, until you Unsnooze it.
-                  Give --topic more than once to Snooze each of those Topics. If one
-                  is not an open Topic, nothing changes.
-                  """) { parsed in
-            .snooze(try time(parsed, of: "topic snooze"), topics: parsed.targets.topics)
-        },
-        topicVerb(.topicUnsnooze, synopsis: "[--topic <id|label>... | --window <id> | --pane <id>] [--json]", repeatsTopic: true,
-                  help: """
-                  Unsnoozes this Pane's Topic, or each --topic. A Topic that is not
-                  Snoozed does not change. It changes nothing in tmux.
-                  """) { parsed in
-            guard parsed.operands.isEmpty else { throw CLIError.usage }
-            return .unsnooze(topics: parsed.targets.topics)
-        },
         topicVerb(.topicTag, synopsis: "(add | remove | set) [<tag>...] \(topicTarget) [--json]",
                   help: """
                   Adds Tags to this Pane's Topic, removes them, or sets them, so that the
@@ -385,10 +353,47 @@ enum CLIVerbs {
         topicVerb(.topicMove, synopsis: "(up | down) \(topicTarget) [--json]",
                   help: """
                   Moves the card of this Pane's Topic one place up or down among the cards that the
-                  Topics list shows now, with the same Pin, as Move Topic Up and Down do. A Snoozed
-                  Topic has no card, so a move steps over it. At the end of the cards it fails.
+                  Topics list shows now, with the same Pin, as Move Topic Up and Down do. At the end
+                  of the cards it fails.
                   """) { parsed in
             .moveCard(try upOrDown(parsed) ? .up : .down)
+        },
+        CLIVerb(path: .topicChooseInPlay, synopsis: "(--topic <id|label> | --session <name|id>)... [--json]",
+                options: [.value("--topic"), .value("--session"), .flag("--json")],
+                help: """
+                Sets the cards In Play, as Choose In Play does. The cards that you name go
+                first after the Pinned Topics, in the order that you name them. They fill
+                the In Play places, and the ones after the last place go to the top of the
+                Bench. The other cards keep their order under them. It needs topics.in_play
+                in the Config.
+                  --topic <id|label>     an open Topic that is not Pinned; give one for each card
+                  --session <name|id>    a Locked Session
+                """) { parsed in
+            let cards = try parsed.values(of: ["--topic", "--session"]).map { option -> RequestInvocation.CardName in
+                guard !option.value.isEmpty else { throw CLIError.usage }
+                return option.name == "--topic" ? .topic(option.value) : .session(option.value)
+            }
+            guard !cards.isEmpty, parsed.operands.isEmpty else { throw CLIError.usage }
+            return .request(try RequestInvocation(.chooseInPlay(cards), parsed: parsed))
+        },
+        CLIVerb(path: .topicReplaceFromBench,
+                synopsis: "(--with <id|label> | --with-session <name|id>)\n[--topic <id|label> | --session <name|id> | --window <id> | --pane <id>] [--json]",
+                options: [.value("--with"), .value("--with-session"), .flag("--json")], targets: [.topic, .session, .window, .pane],
+                help: """
+                Puts a Benched card in the place of this Pane's card, which must be In Play,
+                as Replace from Bench does. The replaced card goes to the end of the Bench.
+                It needs topics.in_play in the Config. --session names a Locked Session.
+                  --with <id|label>          the Benched Topic that comes In Play
+                  --with-session <name|id>   the Benched Locked Session that comes In Play
+                """) { parsed in
+            let benched: RequestInvocation.CardName
+            switch (try parsed.value("--with"), try parsed.value("--with-session")) {
+            case (let topic?, nil) where !topic.isEmpty: benched = .topic(topic)
+            case (nil, let session?) where !session.isEmpty: benched = .session(session)
+            default: throw CLIError.usage
+            }
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            return .request(try RequestInvocation(.replaceFromBench(with: benched), parsed: parsed))
         },
         topicVerb(.topicSortSessions, synopsis: "\(topicTarget) [--json]",
                   help: """
@@ -617,29 +622,6 @@ enum CLIVerbs {
         }
     }
 
-    // MARK: - zen
-
-    private static let zen: [CLIVerb] = [
-        CLIVerb(path: .zenStart, synopsis: "<time> \(topicTarget) [--json]", options: [.flag("--json")],
-                targets: [.topic, .window, .pane],
-                help: """
-                Starts Zen until <time>, as Zen does: every open Topic but this Pane's Topic is
-                Snoozed until then, and the Topics list shows no Locked Session. A Topic Snoozed
-                until later keeps its Snooze. <time> is as topic snooze reads it. One Zen at a
-                time: while Zen is on, it fails. It prints the id of each Topic that Zen Snoozed.
-                """) { parsed in
-            .request(try RequestInvocation(.zen(try time(parsed, of: "zen start")), parsed: parsed))
-        },
-        CLIVerb(path: .zenEnd, synopsis: "[--json]", options: [.flag("--json")],
-                help: """
-                Ends Zen: each Topic that Zen Snoozed gets its earlier Snooze back. With no Zen
-                it changes nothing. It prints the id of each Topic whose Snooze changed.
-                """) { parsed in
-            guard parsed.operands.isEmpty else { throw CLIError.usage }
-            return .request(try RequestInvocation(.endZen, parsed: parsed))
-        },
-    ]
-
     private static let agent: [CLIVerb] = [
         CLIVerb(path: .agentList, synopsis: "[--topic <id|label>] [--status <status>] [--unread] [--json]",
                 options: [.value("--topic"), .value("--status"), .flag("--unread"), .flag("--json")],
@@ -681,8 +663,8 @@ enum CLIVerbs {
                   --range <a>..<b>     the Entries from index a to b; negative counts from
                                        the end (-20..-1) and a side can be open (40..)
                   --after <index>      only the Entries after this index, to read new ones
-                  --since <time>       only the Entries from this time: 2h, 30m, 17:30 or
-                                       ISO 8601, as topic snooze reads a time, but back
+                  --since <time>       only the Entries from this time, back from now: 2h,
+                                       30m, 17:30, today 9am, mon 9am or ISO 8601
                   --role <role>,...    user, assistant, tool_call, tool_result or all
                                        (default user,assistant)
                   --tools              all roles: also the tool calls and tool results

@@ -1,4 +1,4 @@
-"""Where the Sidebar puts its parts: the Snoozed and Settled groups at the bottom of the panel, under the Topics list,
+"""Where the Sidebar puts its parts: the Settled group at the bottom of the panel, under the Topics list,
 the Agents section, Pane rows and card title lines that the Config can decide, and the accessibility elements of the
 card lists.
 
@@ -29,7 +29,7 @@ class SidebarLayout(unittest.TestCase):
         cls.topics_dir.mkdir(parents=True)
         cls.config = s.root/'config/muxify/config.yaml'
         cls.write_config('')
-        for topic_id, fields in [('layout-open', {}), ('layout-other', {}), ('layout-snoozed', {'snoozed_until': 'never'}),
+        for topic_id, fields in [('layout-open', {}), ('layout-other', {}),
                                  ('layout-settled', {'settled_at': '2026-01-01T00:00:00Z'})]:
             (cls.topics_dir/(topic_id + '.json')).write_text(json.dumps(dict(
                 id=topic_id, title=topic_id, slug=topic_id, home_project=str(cls.project), **fields)))
@@ -46,20 +46,17 @@ class SidebarLayout(unittest.TestCase):
     def write_config(cls, sidebar):
         cls.config.write_text('sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n' + sidebar)
 
-    def test_snoozed_and_settled_groups_sit_at_the_bottom_of_the_panel(self):
-        rs = self.s.wait_rows(lambda rs: all(self.s.has(key, rs) for key in
-                                             ['topics-list', 'topic-layout-open', 'snoozed-topics', 'settled-topics']),
-                              'the Topics list does not show the open Topic and both groups')
+    def test_settled_group_sits_at_the_bottom_of_the_panel(self):
+        rs = self.s.wait_rows(lambda rs: all(self.s.has(key, rs) for key in ['topics-list', 'topic-layout-open', 'settled-topics']),
+                              'the Topics list does not show the open Topic and the Settled group')
         list_bottom, list_top = frame(self.s.row('topics-list', rs))
         topic_bottom, topic_top = frame(self.s.row('topic-layout-open', rs))
-        _, snoozed_top = frame(self.s.row('snoozed-topics', rs))
-        settled_bottom, settled_top = frame(self.s.row('settled-topics', rs))
+        _, settled_top = frame(self.s.row('settled-topics', rs))
         self.assertLess(list_top - topic_top, 40, 'the open Topic is not at the top of the list')
-        self.assertLess(abs(list_bottom - snoozed_top), 12,
-                        'Snoozed starts %.0f points away from the end of the Topics list' % (list_bottom - snoozed_top))
-        self.assertLess(settled_top, snoozed_top, 'Settled is not below Snoozed')
-        self.assertGreater(topic_bottom - snoozed_top, 100,
-                           'the groups follow the Topics instead of the bottom of the panel')
+        self.assertLess(abs(list_bottom - settled_top), 12,
+                        'Settled starts %.0f points away from the end of the Topics list' % (list_bottom - settled_top))
+        self.assertGreater(topic_bottom - settled_top, 100,
+                           'the group follows the Topics instead of the bottom of the panel')
 
     def test_custom_topic_summary_changes_the_closed_card(self):
         self.addCleanup(self.write_config, '')

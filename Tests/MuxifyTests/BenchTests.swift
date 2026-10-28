@@ -103,7 +103,7 @@ final class BenchTests: XCTestCase {
         XCTAssertNil(targets.target(for: .card(5)), "past the cards that show, a card key does nothing")
         XCTAssertEqual(targets.step(.topic, .next, from: .topic("b")), .topic("d"), "a Topic step skips the hidden Bench")
         XCTAssertEqual(targets.step(.topic, .next, from: .topic("d")), .topic("pinned"), "and wraps after the cards that show")
-        XCTAssertEqual(hidden.nextTopic(after: "b"), .topic("c"), "the Next Topic after Snooze or Settle still uses every card")
+        XCTAssertEqual(hidden.nextTopic(after: "b"), .topic("c"), "the Next Topic after Settle still uses every card")
         XCTAssertEqual(cards(model(inPlay: 2, benchShown: true, at: "@1")),
                        [.topic("pinned"), .topic("a"), .topic("b"), .topic("c"), .topic("d")])
     }

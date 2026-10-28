@@ -4,56 +4,33 @@ import Foundation
 extension EnvironmentService {
     func changeRecords(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
         switch request.command {
-        case .snooze(let deadline, let topics): return snooze(request, topics, until: deadline, client: client)
-        case .unsnooze(let topics): return snooze(request, topics, until: nil, client: client)
         case .tags(let change): return changeTags(request, change, client: client)
         case .note(let note): return setNote(request, note, client: client)
         case .pin: return pin(request, true, client: client)
         case .unpin: return pin(request, false, client: client)
         case .moveCard(let move): return moveCard(request, move, client: client)
-        case .startZen(let deadline): return startZen(request, until: deadline, client: client)
-        case .endZen: return endZen(client: client)
+        case .chooseInPlay(let cards): return chooseInPlay(cards, client: client)
+        case .replaceFromBench(let benched): return replaceFromBench(request, with: benched, client: client)
         case .markRead(let change, let scope): return markRead(request, change, scope: scope, client: client)
         case .markAllRead: return markRead(request, .read, scope: nil, client: client)
         default: preconditionFailure("\(request.command) is not in the records lane")
         }
     }
 
-    /// A nil `deadline` is an Unsnooze. Every Topic resolves before the one write, so a bad ref changes nothing.
-    private func snooze(_ request: EnvironmentRequest, _ topics: [TopicRef], until deadline: SnoozeDeadline?, client: String?) -> EnvironmentResponse {
+    /// Upgrades the records that a Muxify with Snooze and Zen wrote, with this service's place for a returning Topic,
+    /// and sets the Locks it moved in tmux. Nil when it succeeded or had nothing to upgrade.
+    public func upgradeRecords(client: String? = nil) -> TopicFailure? {
         var phase = TopicFailure.Phase.nothingChanged
         do {
-            if !topics.isEmpty, request.target != nil { throw TopicRequestError.targetAndTopics }
-            let records = try store.read().records
-            let resolved = topics.isEmpty
-                ? [try openTopic(request.target, caller: request.caller, records: records, snapshot: try server.snapshot(), client: client)]
-                : try topics.map { try $0.resolve(in: records) }
-            var ids: [String] = []
-            for topic in resolved where !ids.contains(topic.id) { ids.append(topic.id) }
-            let locks = SessionLock.locks(in: try server.snapshot().windows, records: records)
-            let (shortened, moved) = try store.write(locks: locks) { transaction -> ([String], [SessionLock]) in
-                guard let deadline else {
-                    let saves = try ids.map { id in
-                        guard var record = transaction.records.first(where: { $0.id == id && $0.settledAt == nil }) else {
-                            throw TopicRequestError.topicUnavailable(id)
-                        }
-                        record.snoozedUntil = nil
-                        return record
-                    }
-                    return ([], try transaction.setSnoozes(saves, insertPosition: self.topics.insertPosition))
-                }
-                let set = SnoozeSet(ids, until: deadline, records: transaction.records)
-                // A Topic that was Settled after the read has no save.
-                if let settled = ids.first(where: { id in !set.saves.contains { $0.id == id } }) {
-                    throw TopicRequestError.topicUnavailable(settled)
-                }
-                return (set.shortened, try transaction.setSnoozes(set.saves, insertPosition: self.topics.insertPosition))
-            }
-            phase = .changesStarted
+            let contents = try store.read()
+            guard contents.needsUpgrade else { return nil }
+            let locks = SessionLock.locks(in: try server.snapshot().windows, records: contents.records)
+            let moved = try store.upgrade(locks: locks, arrival: topics.arrival)
+            phase = .recordSaved
             try executor.run(moved.map { .tmux($0.setOption) }, client: client)
-            return .snoozeChanged(TopicSnoozeChange(topicIDs: ids, shortened: shortened))
+            return nil
         } catch {
-            return .failed(failure(error, phase: phase))
+            return failure(error, phase: phase)
         }
     }
 
@@ -85,13 +62,11 @@ extension EnvironmentService {
             let placement: TopicPlacement
             switch move {
             case .up, .down:
-                let cards = TopicCards.order(records: contents.records, windows: snapshot.windows, zen: contents.zen, now: Date())
+                let cards = TopicCards.order(records: contents.records, windows: snapshot.windows)
                 switch TopicCards.step(card.id, move == .up ? .up : .down, in: cards) {
                 case .to(let found): placement = found
                 case .atEnd: throw TopicRequestError.cardAtEnd(card: card.label, up: move == .up, pinned: card.pinned)
-                case .hidden:
-                    if case .lock = card.id { throw TopicRequestError.cardHidden("Zen is on, so the Topics list shows no card for \(card.label).") }
-                    throw TopicRequestError.cardHidden("\(card.label) is Snoozed, so the Topics list shows no card for it.")
+                case .hidden: throw TopicRequestError.cardHidden("\(card.label) has no card in the Topics list.")
                 }
             case .before(let ref): placement = .before(try listID(ref, records: contents.records))
             case .after(let ref): placement = .after(try listID(ref, records: contents.records))
@@ -108,38 +83,41 @@ extension EnvironmentService {
         }
     }
 
-    /// One write: the Zen record goes down before the Snoozes, so a Topic that Zen Snoozed is always in it. Snoozing
-    /// moves no card back, so no Lock changes.
-    private func startZen(_ request: EnvironmentRequest, until deadline: SnoozeDeadline, client: String?) -> EnvironmentResponse {
+    /// Choose In Play writes the order of the Topics list, as a card move does.
+    private func chooseInPlay(_ cards: [TopicListRef], client: String?) -> EnvironmentResponse {
+        var phase = TopicFailure.Phase.nothingChanged
         do {
-            let records = try store.read().records
-            let kept = try openTopic(request.target, caller: request.caller, records: records, snapshot: try server.snapshot(), client: client)
-            let ids = try store.write { transaction -> [String] in
-                guard transaction.zen == nil else { throw TopicRequestError.zenOn }
-                guard transaction.records.contains(where: { $0.id == kept.id && $0.settledAt == nil }) else {
-                    throw TopicRequestError.topicUnavailable(kept.id)
-                }
-                let (zen, saves) = ZenRecord.start(keeping: kept.id, until: deadline, records: transaction.records)
-                transaction.zen = zen
-                try transaction.setSnoozes(saves)
-                return saves.map(\.id)
-            }
-            return .snoozeChanged(TopicSnoozeChange(topicIDs: ids))
+            guard topics.inPlay != nil else { throw TopicRequestError.inPlayOff }
+            let contents = try store.read()
+            let snapshot = try server.snapshot()
+            let chosen = try cards.map { try listID($0, records: contents.records) }
+            let moved = try store.write(locks: SessionLock.locks(in: snapshot.windows, records: contents.records)) { try $0.chooseInPlay(chosen) }
+            phase = .changesStarted
+            try executor.run(moved.map { .tmux($0.setOption) }, client: client)
+            return .changed(TopicChange(topicID: nil))
         } catch {
-            return .failed(failure(error, phase: .nothingChanged))
+            return .failed(failure(error, phase: phase))
         }
     }
 
-    /// The Topics that Zen Snoozed come back to the list and may renumber the Locks, which tmux keeps.
-    private func endZen(client: String?) -> EnvironmentResponse {
+    /// Replace from Bench writes the order of the Topics list, as a card move does.
+    private func replaceFromBench(_ request: EnvironmentRequest, with ref: TopicListRef, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
-            let records = try store.read().records
-            let locks = SessionLock.locks(in: try server.snapshot().windows, records: records)
-            let (ids, moved) = try store.write(locks: locks) { try $0.endZen(insertPosition: self.topics.insertPosition) }
+            guard let inPlay = topics.inPlay else { throw TopicRequestError.inPlayOff }
+            let contents = try store.read()
+            let snapshot = try server.snapshot()
+            let card = try self.card(request.target, caller: request.caller, records: contents.records, snapshot: snapshot, client: client)
+            let benched = try listID(ref, records: contents.records)
+            let moved = try store.write(locks: SessionLock.locks(in: snapshot.windows, records: contents.records)) {
+                try $0.replaceFromBench(card.id, with: benched, inPlay: inPlay)
+            }
             phase = .changesStarted
             try executor.run(moved.map { .tmux($0.setOption) }, client: client)
-            return .snoozeChanged(TopicSnoozeChange(topicIDs: ids))
+            switch benched {
+            case .topic(let id): return .changed(TopicChange(topicID: id))
+            case .lock(let sessionID): return .changed(TopicChange(topicID: nil, session: SessionID(rawValue: sessionID)))
+            }
         } catch {
             return .failed(failure(error, phase: phase))
         }

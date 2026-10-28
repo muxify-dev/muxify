@@ -1,6 +1,6 @@
 /// One kind of thing a Command Palette searches (CONTEXT.md).
 public enum PaletteSource: String, CaseIterable {
-    /// Open Topics, then Snoozed and Settled ones. Only a Local App Window with Topics on has them.
+    /// Open Topics, then Settled ones. Only a Local App Window with Topics on has them.
     case topics
     /// Every running Session, in either Sidebar mode, and the SessionPaths whose launch name has no running Session.
     case sessions
@@ -22,7 +22,7 @@ public enum PaletteOrder: String, CaseIterable {
 /// A rule that orders two rows with an equal match, in the order a palette lists them. Candidate order, which is
 /// Source order, decides when every listed rule ties.
 public enum PaletteTiebreak: String, CaseIterable {
-    /// A row that is not a Snoozed or Settled Topic first.
+    /// A row that is not a Settled Topic first.
     case open
     /// A row with something running first: not a Dormant or Empty Topic, nor a Session Path with no Session.
     case running

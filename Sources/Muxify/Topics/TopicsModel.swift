@@ -20,9 +20,9 @@ extension TopicGroupID {
     }
 }
 
-/// The two group rows after the open Topics and the No Topic card in Topics mode.
+/// The group row after the open Topics and the No Topic card in Topics mode.
 enum TopicGroup: String, CaseIterable {
-    case snoozed, settled
+    case settled
 
     var title: String { rawValue.capitalized }
     var accessibilityID: String { rawValue + "-topics" }
@@ -224,8 +224,6 @@ struct TopicsModel {
     struct Row: Identifiable {
         enum Kind: Equatable {
             case open
-            /// `wake` is the wake time the row shows: "Mon 9:00", or "never".
-            case snoozed(wake: String)
             /// `detail` is the outcome, or the settle date when there is none.
             case settled(detail: String)
         }
@@ -233,7 +231,7 @@ struct TopicsModel {
         let id: TopicGroupID
         let title: String
         let kind: Kind
-        /// The Topic Unread mark or its strongest Agent mark; nil while the Topic is quiet.
+        /// The Topic Unread mark or its strongest Agent mark.
         let mark: RowMark?
         /// Agent marks beside the rows of an expanded Active Topic, keyed by Window or replacing Pane ID.
         var agentSpines: [String: AgentMark] = [:]
@@ -292,15 +290,7 @@ struct TopicsModel {
         }
     }
 
-    struct Wake {
-        let id: String
-        let title: String
-        let count: Int
-        var message: String { "\(title) woke. \(count) Agent\(count == 1 ? "" : "s") need\(count == 1 ? "s" : "") you." }
-    }
-
-    /// The open Topics that are not Snoozed and the Locked Sessions, in one order; `groups` lists the others.
-    /// No Topic has no row. While Zen is on, the Locked Sessions have no row either.
+    /// The open Topics and the Locked Sessions, in one order; `groups` lists the others. No Topic has no row.
     let rows: [Row]
     /// The Next Topic after `id` leaves the list together with `others`: the nearest row below that stays, else above.
     func nextTopic(after id: String, skipping others: Set<String> = []) -> TopicGroupID {
@@ -312,10 +302,10 @@ struct TopicsModel {
         return rows[(index + 1)...].first(where: stays)?.id ?? rows[..<index].last(where: stays)?.id ?? .noTopic
     }
 
-    /// The title of the Topic whose Session this is, among the open, Snoozed and shown Settled Topics. Nil for a
+    /// The title of the Topic whose Session this is, among the open and shown Settled Topics. Nil for a
     /// Session in no Topic, and for a Locked Session, which is its own row.
     func topicTitle(ofSession sessionID: String) -> String? {
-        let all = rows + snoozedRows + groups.flatMap(\.topics)
+        let all = rows + groups.flatMap(\.topics)
         let row = all.first { row in
             if case .topic = row.id { return row.sessions.contains { $0.id.session == sessionID } }
             return false
@@ -364,28 +354,23 @@ struct TopicsModel {
 
     /// Every live No Topic Session, Locked or not. The Command Palette reaches each of them.
     let noTopicSessions: [Session]
-    /// The Locked Sessions, by Session ID, also while Zen hides their cards.
+    /// The Locked Sessions, by Session ID.
     let lockedSessionIDs: Set<String>
     /// The No Topic Session of the selected Window. The Topic list shows it as one card after the open Topics, or under
     /// the Bench line.
     /// Nil while the Active Topic is a Topic.
     let openedNoTopicSession: Session?
-    /// Snoozed, then Settled, after the Topics rows in Topics mode. Empty in Sessions mode.
+    /// Settled, after the Topics rows in Topics mode. Empty in Sessions mode.
     let groups: [Group]
-    /// The Snoozed Topics by wake time, soonest first, in both Sidebar modes. A Topic Snoozed until the user Unsnoozes
-    /// it comes last; equal times keep the list order.
-    let snoozedRows: [Row]
     /// Every Settled Topic, newest first.
     let settledTopicIDs: [String]
     /// The group that lists the Active Topic. Nil for a Topic in the Topics list, a Locked Session and No Topic.
     var activeTopicGroup: TopicGroup? {
         guard case .topic(let id)? = activeTopic else { return nil }
-        if snoozedTopicIDs.contains(id) { return .snoozed }
         return settledTopicIDs.contains(id) ? .settled : nil
     }
-    /// The title each row shows, by Topic id: open, Snoozed and the Settled Topics on the shown pages.
+    /// The title each row shows, by Topic id: open and the Settled Topics on the shown pages.
     let titles: [String: String]
-    let snoozedTopicIDs: Set<String>
     let visibleAgents: [Agent]
     let agentsScope: AgentsScopeTarget
     /// The line under each listed Agent, by Pane ID: its Topic's title in Topics mode, its Session's name in
@@ -399,9 +384,6 @@ struct TopicsModel {
     let sessionChildren: [String: SessionChildren]
     /// Each live Session as a Topic lists it, by Session ID, for its SessionPath name in the sidebar Formats.
     let topicSessions: [String: Session]
-    let dueWakes: [Wake]
-    /// The next Snooze deadline after `now`. From then on, a model built from the same inputs is different.
-    let changesAt: Date?
     let activeTopic: TopicGroupID?
     /// The Active Topic when it has no live Session, which the terminal area shows in place of a Window: an empty
     /// Topic, or a Dormant or Settled one with its Reopen choice.
@@ -415,49 +397,31 @@ struct TopicsModel {
 
     init(records: [TopicRecord], windows: [TmuxWindow], config: Config, selection: TopicSelection, location: Location? = nil,
          mode: SidebarMode = .topics, groups groupsState: TopicGroupsState = TopicGroupsState(), benchShown: Bool = false,
-         agents: [Agent] = [], panes: [TmuxPane]? = nil, zen: ZenRecord? = nil,
-         now: Date = Date()) {
+         agents: [Agent] = [], panes: [TmuxPane]? = nil) {
         topicsEnabled = config.sidebar.topics
         sessionsEnabled = config.sidebar.sessions
         tags = config.topics.tags
         self.mode = config.sidebar.shownMode(chosen: mode)
-        let locks = SessionLock.locks(in: windows, records: records)
-        lockedSessionIDs = Set(locks.map(\.sessionID))
-        // Zen keeps only Topics: it hides the Locked Sessions, and then each is one more No Topic Session.
-        let shownLocks = zen == nil ? lockedSessionIDs : []
-        let entries = TopicOrder.sorted(records.map(TopicListEntry.topic) + (zen == nil ? locks : []).map(TopicListEntry.lock))
-        let open = entries.records
-        let cards = TopicCards.order(records: records, windows: windows, zen: zen, now: now)
+        let lockedIDs = Set(SessionLock.locks(in: windows, records: records).map(\.sessionID))
+        lockedSessionIDs = lockedIDs
+        let cards = TopicCards.order(records: records, windows: windows)
         self.cards = cards
+        let open = cards.records
         let ids = Set(open.map(\.id))
-        let snoozedIDs = Set(open.filter { $0.isSnoozed(at: now) }.map(\.id))
-        snoozedTopicIDs = snoozedIDs
         func groupID(_ window: TmuxWindow) -> TopicGroupID {
             if let id = window.topicID, ids.contains(id) { return .topic(id) }
-            if shownLocks.contains(window.sessionID) { return .locked(window.sessionID) }
+            if lockedIDs.contains(window.sessionID) { return .locked(window.sessionID) }
             return .noTopic
         }
         let windowsByID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let agentsByGroup = Dictionary(grouping: agents, by: { windowsByID[$0.windowID].map(groupID) ?? .noTopic })
-        /// A group that shows no Notification: a Snoozed Topic, and No Topic while Zen is on. Its card has no mark at
-        /// all; an Agent's own row keeps the Working mark. Unread does not change, so the Notifications come back when
-        /// the Snooze or Zen ends.
-        func isQuiet(_ group: TopicGroupID) -> Bool {
-            switch group {
-            case .topic(let id): return snoozedIDs.contains(id)
-            case .locked: return false
-            case .noTopic: return zen != nil
-            }
-        }
-        func isQuiet(_ agent: Agent) -> Bool { isQuiet(windowsByID[agent.windowID].map(groupID) ?? .noTopic) }
         let agentMarks = Dictionary(agents.compactMap { agent in
-            AgentMark(agent, notifications: config.notifications, quiet: isQuiet(agent)).map { (agent.paneID, $0) }
+            AgentMark(agent, notifications: config.notifications).map { (agent.paneID, $0) }
         }, uniquingKeysWith: { first, _ in first })
         self.agentMarks = agentMarks
         func mark(_ agents: [Agent]) -> AgentMark? { agents.compactMap { agentMarks[$0.paneID] }.max() }
-        let shown = agents.filter { !isQuiet($0) }
-        sessionMarks = Dictionary(grouping: shown, by: \.sessionID).compactMapValues(mark)
-        let windowMarks = Dictionary(grouping: shown, by: \.windowID).compactMapValues(mark)
+        sessionMarks = Dictionary(grouping: agents, by: \.sessionID).compactMapValues(mark)
+        let windowMarks = Dictionary(grouping: agents, by: \.windowID).compactMapValues(mark)
         let panesByWindow = panes.map { Dictionary(grouping: $0, by: \.windowID) }
         let agentsByPane = Dictionary(agents.map { ($0.paneID, $0) }, uniquingKeysWith: { first, _ in first })
         func children(_ windows: [TmuxWindow]) -> SessionChildren {
@@ -497,11 +461,10 @@ struct TopicsModel {
         }
         func row(_ record: TopicRecord, title: String) -> Row {
             let id = TopicGroupID.topic(record.id)
-            let kind: Row.Kind = (record.isSnoozed(at: now) ? record.snoozeDeadline : nil).map { .snoozed(wake: $0.wakeLabel) } ?? .open
-            let agents = isQuiet(id) ? [] : agentsByGroup[id] ?? []
+            let agents = agentsByGroup[id] ?? []
             let sessions = sessions(of: id, members: grouped[id] ?? [], record: record)
             var spines: [String: AgentMark] = [:]
-            if id == active, openTopics.contains(id), !isQuiet(id) {
+            if id == active, openTopics.contains(id) {
                 for session in sessions {
                     guard case .live(let children) = session.contents else { continue }
                     for item in children.items {
@@ -514,12 +477,12 @@ struct TopicsModel {
                     }
                 }
             }
-            return Row(id: id, title: title, kind: kind, mark: isQuiet(id) ? nil : RowMark(unread: record.isUnread, agent: mark(agents)),
-                       agentSpines: spines, usesRowMarks: id == active && openTopics.contains(id) && !isQuiet(id),
-                       isUnread: record.isUnread && !isQuiet(id), isPinned: record.isPinned, sessions: sessions, isExpanded: openTopics.contains(id),
+            return Row(id: id, title: title, kind: .open, mark: RowMark(unread: record.isUnread, agent: mark(agents)),
+                       agentSpines: spines, usesRowMarks: id == active && openTopics.contains(id),
+                       isUnread: record.isUnread, isPinned: record.isPinned, sessions: sessions, isExpanded: openTopics.contains(id),
                        remembersSessions: !record.sessions.isEmpty, tags: config.topics.tags?.shown(record.tags) ?? [], note: record.note)
         }
-        /// A Locked Session's row: one Session, quiet only as No Topic is, and titled by the Session card Formats.
+        /// A Locked Session's row: one Session, titled by the Session card Formats.
         func lockedRow(_ lock: SessionLock) -> Row {
             let id = TopicGroupID.locked(lock.sessionID)
             let agents = agentsByGroup[id] ?? []
@@ -542,7 +505,7 @@ struct TopicsModel {
             numbers[record.id] = number
             usedNumbers.insert(number)
         }
-        let rows = entries.map { entry -> Row in
+        let rows = cards.map { entry -> Row in
             switch entry {
             case .lock(let lock): return lockedRow(lock)
             case .topic(let record):
@@ -563,20 +526,9 @@ struct TopicsModel {
         openedNoTopicSession = active == .noTopic ? noTopicSessions.first { $0.id.session == selectedWindow?.sessionID } : nil
         topicSessions = Dictionary((rows.flatMap(\.sessions) + noTopicSessions).map { ($0.id.session, $0) },
                                    uniquingKeysWith: { first, _ in first })
-        let wakes = Dictionary(open.compactMap { record in record.snoozeDeadline.map { (record.id, $0) } },
-                               uniquingKeysWith: { first, _ in first })
-        func wake(_ row: Row) -> Date {
-            guard case .topic(let id) = row.id, case .at(let date)? = wakes[id] else { return .distantFuture }
-            return date
-        }
-        let snoozedRows = rows.filter { if case .topic(let id) = $0.id { return snoozedIDs.contains(id) }; return false }
-            .enumerated().sorted { (wake($0.element), $0.offset) < (wake($1.element), $1.offset) }.map(\.element)
-        let rowsByCard = Dictionary(rows.compactMap { row in row.id.listID.map { ($0, row) } }, uniquingKeysWith: { first, _ in first })
-        let openRows = cards.compactMap { rowsByCard[$0.id] }
-        self.rows = openRows
-        list = Self.list(openRows, inPlay: self.mode == .topics ? config.topics.inPlay : nil, benchShown: benchShown,
+        self.rows = rows
+        list = Self.list(rows, inPlay: self.mode == .topics ? config.topics.inPlay : nil, benchShown: benchShown,
                          location: active, noTopic: openedNoTopicSession)
-        self.snoozedRows = snoozedRows
         let settled = records.filter { $0.settledAt != nil }
             .sorted { ($0.settledAt ?? "", $0.id) > ($1.settledAt ?? "", $1.id) }
         settledTopicIDs = settled.map(\.id)
@@ -590,7 +542,6 @@ struct TopicsModel {
         let settledRows = settled.prefix(groupsState.settledPages * TopicGroupsState.pageSize)
             .map { Self.settledRow($0, sessionPaths: config.sessionPaths, tags: config.topics.tags, expanded: openTopics) }
         groups = self.mode == .topics ? [
-            Group(kind: .snoozed, topics: snoozedRows, hiddenCount: 0, isExpanded: groupsState.open == .snoozed),
             Group(kind: .settled, topics: settledRows,
                   hiddenCount: settled.count - settledRows.count, isExpanded: groupsState.open == .settled),
         ].filter { $0.count > 0 } : []
@@ -598,17 +549,6 @@ struct TopicsModel {
             if case .topic(let id) = row.id { return (id, row.title) }
             return nil
         }, uniquingKeysWith: { first, _ in first })
-        changesAt = open.compactMap { record -> Date? in
-            guard case .at(let date)? = record.snoozeDeadline, date > now else { return nil }
-            return date
-        }.min()
-        dueWakes = open.filter { $0.snoozeDeadline?.isDue(at: now) == true }.map { record in
-            Wake(id: record.id, title: rows.first { $0.id == .topic(record.id) }?.title ?? "Untitled Topic",
-                 count: (agentsByGroup[.topic(record.id)] ?? []).filter {
-                     AgentMark($0, notifications: config.notifications)?.isNotification == true
-                 }.count)
-        }
-
         let scope: AgentsScopeTarget
         if config.sidebar.agentsScope[self.mode] == .active, self.mode == .topics, let activeTopic {
             let title = rows.first { $0.id == activeTopic }?.title ?? emptyTopic?.title ?? "No Topic"
@@ -621,7 +561,7 @@ struct TopicsModel {
             }
         }
         agentsScope = scope
-        let scoped = shown.filter { agent in
+        let scoped = agents.filter { agent in
             switch scope {
             case .everyAgent: return true
             case .topic(let id, _): return windowsByID[agent.windowID].map(groupID) == id
@@ -670,10 +610,7 @@ struct TopicsModel {
         let title = [record.title, record.slug].compactMap { $0 }
             .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "Untitled Topic"
         let outcome = record.outcome?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let settledOn = record.settledAt.flatMap { SnoozeDeadline(stored: $0) }.flatMap { deadline -> String? in
-            if case .at(let date) = deadline { return date.formatted(date: .abbreviated, time: .omitted) }
-            return nil
-        }
+        let settledOn = record.settledAt.flatMap { try? Date.ISO8601FormatStyle().parse($0) }?.formatted(date: .abbreviated, time: .omitted)
         let sessions = record.sessions.enumerated().compactMap { index, session -> Session? in
             guard let path = session["directory"]?.string, let savedID = session["id"]?.string else { return nil }
             let identity = TopicSessionID(topic: id, session: savedID)

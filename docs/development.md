@@ -19,13 +19,11 @@ both link it, so both read and change Topics with the same code.
 ### Agent marks
 
 `AgentMark` in `MuxifyCore` decides the one Agent mark an Agent shows, from its
-Status, its Unread flag, the `notifications` switches and whether its group is
-quiet (a Snoozed Topic, or No Topic while Zen is on). `TopicsModel` computes
+Status, its Unread flag and the `notifications` switches. `TopicsModel` computes
 every mark once: `agentMarks` for each Agent by Pane ID, `Row.mark` for each
 Topic or Locked Session card, and `sessionMarks` for each Session card in
-Sessions mode. A group's mark is its strongest member's. A quiet group has no
-mark on its card; an Agent's own row there keeps only the Working mark. Do not
-decide a mark anywhere else.
+Sessions mode. A group's mark is its strongest member's. Do not decide a mark
+anywhere else.
 
 The app draws a mark in two views in `UI/AgentMarks.swift`, and each takes its
 color from `ui.agent_colors` through the `agentColors` environment value:

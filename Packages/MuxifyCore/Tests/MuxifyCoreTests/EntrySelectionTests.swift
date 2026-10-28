@@ -83,7 +83,7 @@ final class EntrySelectionTests: XCTestCase {
         XCTAssertEqual(EntrySelection(maxChars: nil).apply(to: entries).entries.map(\.text), ["short", "abcdefgh"])
     }
 
-    func testSinceReadsISOTimesAndTheSnoozeTimesTowardThePast() throws {
+    func testSinceReadsISOTimesAndTypedTimesTowardThePast() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "UTC")!
         let now = try Date.ISO8601FormatStyle().parse("2026-10-18T12:00:00Z") // a Sunday
@@ -100,5 +100,22 @@ final class EntrySelectionTests: XCTestCase {
         XCTAssertNil(since("tomorrow"))
         XCTAssertNil(since("never"))
         XCTAssertNil(since("soon"))
+    }
+
+    func testTypedTimeReadsEachFormAndRefusesTheRest() {
+        let forms: [String: TypedTime] = [
+            "+5m": .relative(5, .minute), "2h": .relative(2, .hour), "+2d": .relative(2, .day),
+            "today": .day(0, hour: 9, minute: 0), "today 10:30": .day(0, hour: 10, minute: 30), "today 1:00": .day(0, hour: 1, minute: 0),
+            "tomorrow 12:15": .day(1, hour: 12, minute: 15), "tomorrow 1 pm": .day(1, hour: 13, minute: 0),
+            "mon": .weekday(2, hour: 9, minute: 0), "sun": .weekday(1, hour: 9, minute: 0), "fri 9": .weekday(6, hour: 9, minute: 0),
+            "1300": .next(hour: 13, minute: 0), "9": .next(hour: 9, minute: 0), "930": .next(hour: 9, minute: 30),
+            "13:00": .next(hour: 13, minute: 0), "1:30 pm": .next(hour: 13, minute: 30), "130pm": .next(hour: 13, minute: 30),
+            "12am": .next(hour: 0, minute: 0), "12pm": .next(hour: 12, minute: 0), "0700": .next(hour: 7, minute: 0),
+        ]
+        for (form, expected) in forms { XCTAssertEqual(TypedTime(form), expected, form) }
+        for form in ["+0m", "+-1h", "+999999999999999999d", "+1w", "friday", "tomorrow 24:00", "today 09:60", "never",
+                     "2400", "1360", "13pm", "0am", "12345", "1:3", "123:00", "today pm", "today 09:00 extra", ""] {
+            XCTAssertNil(TypedTime(form), form)
+        }
     }
 }

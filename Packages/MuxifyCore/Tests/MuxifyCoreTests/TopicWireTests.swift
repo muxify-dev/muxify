@@ -20,10 +20,11 @@ final class TopicWireTests: XCTestCase {
             .settle(choices: [], outcome: "Done"), .forget(choices: [], worktrees: []),
             .removeFromTopic, .removeAndKill(worktrees: []), .rename(title: "Next"), .reopen, .startFresh,
             .lock, .unlock, .moveSession(to: .before(session)), .moveSession(to: .up), .moveSession(to: .down), .sortSessions,
-            .snooze(until: .never), .unsnooze(), .tags(.set([Tag(name: "backend")!])), .note("Bisect"), .note(nil),
+            .tags(.set([Tag(name: "backend")!])), .note("Bisect"), .note(nil),
             .newWindow(command: ["make", "test"]), .newSession(sessionPath: "/work", name: "notes"), .renameSession(name: "n"),
             .renameWindow(name: "w"), .zoomPane, .killWindow, .killSession, .pin, .unpin, .moveCard(.up), .moveCard(.down),
-            .moveCard(.before(.topic(.id("fix")))), .moveCard(.after(.lock(session))),
+            .moveCard(.before(.topic(.id("fix")))), .moveCard(.after(.lock(session))), .replaceFromBench(with: .lock(session)),
+            .chooseInPlay([.lock(session), .topic(.named("Fix"))]),
             .moveWindow(to: .before(WindowID(rawValue: "@3")!)), .moveWindow(to: .after(WindowID(rawValue: "@3")!))]
         for command in commands {
             let request = EnvironmentRequest(command, target: .session(session))
@@ -43,10 +44,10 @@ final class TopicWireTests: XCTestCase {
             #"{"add_session":{"directory":"/work","working_copy":{"directory":{}}}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.moveCard(.up)), #"{"move_card":{"move":{"up":{}}}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.moveCard(.after(.lock(session)))), #"{"move_card":{"move":{"after":{"card":{"lock":{"session":"$1"}}}}}}"#)
+        XCTAssertEqual(try json(EnvironmentCommand.chooseInPlay([.lock(session)])), #"{"choose_in_play":{"cards":[{"lock":{"session":"$1"}}]}}"#)
+        XCTAssertEqual(try json(EnvironmentCommand.replaceFromBench(with: .topic(.id("fix")))), #"{"replace_from_bench":{"with":{"topic":{"ref":{"id":"fix"}}}}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.moveWindow(to: .before(WindowID(rawValue: "@3")!))), #"{"move_window":{"to":{"before":{"window":"@3"}}}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.moveWindow(to: .after(WindowID(rawValue: "@5")!))), #"{"move_window":{"to":{"after":{"window":"@5"}}}}"#)
-        XCTAssertEqual(try json(EnvironmentCommand.startZen(until: .never)), #"{"start_zen":{"until":"never"}}"#)
-        XCTAssertEqual(try json(EnvironmentCommand.endZen), #"{"end_zen":{}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.zoomPane), #"{"zoom_pane":{}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.markRead(.unread, scope: .session)), #"{"mark_read":{"change":"unread","scope":"session"}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.markAllRead), #"{"mark_all_read":{}}"#)
@@ -59,7 +60,7 @@ final class TopicWireTests: XCTestCase {
 
     func testSessionDetailUsesNameBaseAndDirectoryRatherThanRepositoryIdentity() throws {
         let detail = TopicDetail(id: "a", label: "Fix", title: "Fix", slug: "fix", createdAt: nil,
-            snoozedUntil: nil, tags: [], sessions: [.init(id: "$2", name: "debug/fix", baseName: "debug", directory: "/work", worktree: nil, windows: [])])
+            tags: [], sessions: [.init(id: "$2", name: "debug/fix", baseName: "debug", directory: "/work", worktree: nil, windows: [])])
         let response = EnvironmentResponse.topic(detail)
         let text = try json(response)
         XCTAssertFalse(text.contains("project"))

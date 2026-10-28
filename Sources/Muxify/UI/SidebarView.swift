@@ -94,7 +94,6 @@ private struct TopicsSection: View {
     var body: some View {
         GeometryReader { proxy in
             VStack(spacing: 0) {
-                if let zen = store.topicWatcher.zen { zenLine(zen) }
                 topicsList
                 if !model.groups.isEmpty {
                     VStack(spacing: 4) {
@@ -181,24 +180,6 @@ private struct TopicsSection: View {
         model.list.filter { $0.cardID.map(cardsBelow.contains) ?? false }.map(\.id)
     }
 
-    private func zenLine(_ zen: ZenRecord) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "moon.stars").font(.system(size: 11))
-            Group {
-                if let deadline = zen.deadline, deadline != .never { Text("Zen until " + deadline.wakeLabel) } else { Text("Zen") }
-            }
-            .font(.system(size: 13, weight: .semibold)).lineLimit(1)
-            .accessibilityIdentifier("zen-status")
-            Spacer(minLength: 4)
-            Button("End Zen") { store.endZen() }
-                .topicLink()
-                .disabled(store.changingTopic)
-                .accessibilityIdentifier("end-zen")
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 14).frame(height: 26)
-    }
-
     /// The No Topic Session the user opened, as the card Sessions mode shows. No Topic has no group row.
     @ViewBuilder
     private func noTopicCard(_ opened: TopicsModel.Session) -> some View {
@@ -232,7 +213,7 @@ private extension View {
 }
 
 private extension View {
-    /// The look of a Topic's own action (Settle, Unsnooze, Reopen): a link, so the row stays quiet.
+    /// The look of a Topic's own action (Settle, Reopen): a link, so the row stays quiet.
     func topicLink() -> some View {
         buttonStyle(.link).font(.system(size: 11))
     }
@@ -375,7 +356,7 @@ private struct TopicItemRow: View {
 }
 
 /// Where a Topic card sits. In the Topics list the card has a Hint, moves by a drag and by Move Up and Move Down, and
-/// offers Settle. In the Snoozed or Settled group it has none of these, and closed it shows only its title and wake time.
+/// offers Settle. In the Settled group it has none of these.
 enum TopicCardPlace {
     case list(TopicListPlace)
     case group
@@ -402,7 +383,7 @@ struct TopicCard: View {
 
     /// The Topic list's scroll view, in which an open card's header sticks to the top.
     static let viewport = "topics-viewport"
-    /// The scroll view of the Snoozed and Settled groups.
+    /// The scroll view of the Settled group.
     static let groupsViewport = "topic-groups-viewport"
 
     private var list: TopicListPlace? {
@@ -448,7 +429,7 @@ struct TopicCard: View {
             }
     }
 
-    /// The Topic's own action: Settle in the Topics list, Unsnooze or Reopen… in a group.
+    /// The Topic's own action: Settle in the Topics list, Reopen… in a group.
     @ViewBuilder
     private var corner: some View {
         if case .topic(let id) = topic.id {
@@ -458,11 +439,6 @@ struct TopicCard: View {
                     .topicLink()
                     .disabled(store.changingTopic)
                     .accessibilityIdentifier("settle-topic-" + id)
-            case (nil, .snoozed):
-                Button("Unsnooze") { store.unsnoozeTopic(id) }
-                    .topicLink()
-                    .disabled(store.changingTopic)
-                    .accessibilityIdentifier("unsnooze-topic-" + id)
             case (nil, .settled):
                 Button("Reopen…") { store.showEmptyTopic(id) }
                     .topicLink()
@@ -474,7 +450,7 @@ struct TopicCard: View {
         }
     }
 
-    /// How a Session line moves within this Topic. A Snoozed or Settled Topic's lines do not move.
+    /// How a Session line moves within this Topic. A Settled Topic's lines do not move.
     private func ordering(of sessionID: String) -> SessionOrdering? {
         guard topic.kind == .open, case .topic(let id) = topic.id else { return nil }
         let order = topic.sessions.map(\.id.session)
@@ -488,18 +464,12 @@ struct TopicCard: View {
         store.sidebarText(.topic, context: store.sidebarFormatContexts.topics[topic.id])
     }
 
-    /// The wake time of a Snoozed Topic, or the outcome or settle date of a Settled one.
+    /// The outcome or settle date of a Settled Topic.
     private var groupDetail: String? {
         switch topic.kind {
         case .open: return nil
-        case .snoozed(let wake): return wake
         case .settled(let detail): return detail.isEmpty ? nil : detail
         }
-    }
-
-    private var wake: String? {
-        if case .snoozed(let wake) = topic.kind { return wake }
-        return nil
     }
 
     private var header: some View {
@@ -507,10 +477,10 @@ struct TopicCard: View {
                    hintTarget: list == nil ? nil : namedTopicID.map { .topic($0) },
                    notes: (topic.isPinned ? ["Pinned"] : []) + (topic.usesRowMarks && topic.isUnread && topic.mark != .unread ? ["unread"] : []) + (groupDetail.map { [$0] } ?? []) + (topic.idleLabel.map { [$0] } ?? []),
                    summary: list == nil ? "" : formatted.summary, cornerWidth: list == nil ? CardCorner.groupWidth : CardCorner.width,
-                   titleNote: list == nil && !topic.isExpanded ? wake : nil, tags: tags, note: topic.note) {
+                   tags: tags, note: topic.note) {
             if list != nil || topic.isExpanded {
                 if list == nil, let detail = groupDetail {
-                    Text(wake.map { $0 == SnoozeDeadline.never.wakeLabel ? "until Unsnooze" : "wakes " + $0 } ?? detail)
+                    Text(detail)
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 if let label = topic.idleLabel { Text(label).font(.system(size: 10)).foregroundStyle(.secondary) }
@@ -543,16 +513,11 @@ struct TopicCard: View {
     /// A closed card in a group shows no Tags.
     private var tags: CardTags? { list != nil || topic.isExpanded ? store.cardTags(topic) : nil }
 
-    /// The actions of a card in a group: those of the Snoozed or Settled Topic, and Pin.
+    /// The actions of a card in a group: those of the Settled Topic.
     @ViewBuilder
     private var groupActions: some View {
         if case .topic(let id) = topic.id {
             Button("Forget Topic…") { store.presentForgetTopic(id) }.disabled(store.changingTopic)
-            if case .snoozed = topic.kind {
-                Button("Settle…") { store.presentSettleTopic(id) }.disabled(store.changingTopic)
-                Button("Snooze again…") { store.presentSnooze(id) }.disabled(store.changingTopic)
-            }
-            pinButton(id)
         }
     }
 
@@ -569,8 +534,6 @@ struct TopicCard: View {
             .disabled(store.changingTopic)
             noteButtons(id)
             Button("Add a Session…") { store.presentAddSession(toTopic: id) }
-                .disabled(store.changingTopic)
-            Button(store.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store.toggleZen(keeping: id) }
                 .disabled(store.changingTopic)
         }
     }
@@ -589,10 +552,6 @@ struct TopicCard: View {
                     .accessibilityIdentifier("start-fresh-topic-" + id)
                     .disabled(store.changingTopic)
             }
-            Button("Snooze…") { store.presentSnooze(id) }
-                .accessibilityIdentifier("snooze-topic").disabled(store.changingTopic)
-            Button(store.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store.toggleZen(keeping: id) }
-                .accessibilityIdentifier("zen-topic").disabled(store.changingTopic)
             Button("Forget Topic…") { store.presentForgetTopic(id) }
                 .accessibilityIdentifier("forget-topic").disabled(store.changingTopic)
             Button("Settle Topic…") { store.presentSettleTopic(id) }
@@ -631,7 +590,7 @@ struct TopicCard: View {
     }
 
     /// A press on the Active Topic's header opens or closes the card; on another Topic's header it goes to that Topic,
-    /// whose card then opens as the Active Topic's. A Snoozed Topic stays Snoozed, and a Settled one shows its Reopen choice.
+    /// whose card then opens as the Active Topic's. A Settled one shows its Reopen choice.
     private func press() {
         guard !holdsSelection else { return toggle() }
         store.updateTopicSelection()
@@ -760,7 +719,7 @@ private struct LockedCard: View {
         }
     }
 
-    /// The Actions of a Locked Session. It is not a Topic, so it has no Settle, Snooze, Pin, Forget or Zen.
+    /// The Actions of a Locked Session. It is not a Topic, so it has no Settle, Pin or Forget.
     @ViewBuilder
     private var actions: some View {
         Button("Unlock Session") { store.setLock(ofSession: sessionID, false) }
@@ -945,15 +904,13 @@ private struct SessionCard<Row: View>: View {
 
     var body: some View {
         let isOpen = store.openSessionCards.contains(session.name)
-        let isSnoozed = session.windows.first?.topicID.map { model.snoozedTopicIDs.contains($0) } ?? false
         let mark = model.sessionMarks[session.id].map(RowMark.agent)
         let isLocked = model.lockedSessionIDs.contains(session.id)
         SidebarCard(isOpen: isOpen, holdsSelection: holdsSelection, mark: mark,
                     viewport: viewport) {
             CardHeader(title: formatted.title, isOpen: isOpen, mark: mark, isLocked: isLocked, hintTarget: .session(session.id),
-                       notes: (isSnoozed ? ["snoozed"] : []) + (isLocked ? ["Locked"] : []),
+                       notes: isLocked ? ["Locked"] : [],
                        summary: formatted.summary) {
-                if isSnoozed { Text("snoozed").font(.system(size: 10)).foregroundStyle(.secondary) }
                 if !isOpen, session.windows.contains(where: \.hasBell) {
                     BellMark()
                 }

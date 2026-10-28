@@ -22,9 +22,6 @@ listed below.
 | `move_window` | Unbound | Open Move for the selected Window |
 | `move_session` | ⌘⇧M | Open Move for the selected Window's Session, in the Command Palette's view |
 | `add_session_to_topic` | ⌘⇧A | Open Add a Session for the Active Topic in the palette |
-| `snooze_topic` | ⌥⌘S | Snooze the Active Topic, then open the Next Topic |
-| `snooze_topics` | Unbound | Open Snooze Topics, with no Topic checked |
-| `toggle_zen` | ⇧⌥⌘S | Start Zen, which Snoozes every open Topic except the Active Topic; while Zen is on, end it. While the Active Topic is No Topic or a Locked Session, or in Sessions mode, it only ends Zen |
 | `settle_topic` | Unbound | Settle the Active Topic, then open the Next Topic |
 | `remove_session_from_topic` | Unbound | Remove the current Session from the Active Topic. The Session stays live, and the Topic forgets it |
 | `forget_topic` | Unbound | Open Forget for the Active Topic |
@@ -34,13 +31,13 @@ listed below.
 | `mark_unread` | ⌘⇧U | Mark the Active Topic Unread, or eligible Agents in the current Session when there is no Active Topic |
 | `mark_all_read` | Unbound | Clear Unread in the Active Environment |
 | `toggle_lock` | Unbound | Lock the current Session, which must be in No Topic, or Unlock it while it is Locked |
-| `move_topic_up` | ⌥⌘↑ | Move the card of the Active Topic, or of the current Locked Session, one card up among the cards with its Pin. It does nothing at the top, for No Topic, for a Snoozed or Settled Topic, and in Sessions mode |
-| `move_topic_down` | ⌥⌘↓ | Move the card of the Active Topic, or of the current Locked Session, one card down among the cards with its Pin. It does nothing at the bottom, for No Topic, for a Snoozed or Settled Topic, and in Sessions mode |
+| `move_topic_up` | ⌥⌘↑ | Move the card of the Active Topic, or of the current Locked Session, one card up among the cards with its Pin. It does nothing at the top, for No Topic, for a Settled Topic, and in Sessions mode |
+| `move_topic_down` | ⌥⌘↓ | Move the card of the Active Topic, or of the current Locked Session, one card down among the cards with its Pin. It does nothing at the bottom, for No Topic, for a Settled Topic, and in Sessions mode |
 | `toggle_pin_topic` | Unbound | Pin the Active Topic, or Unpin it while it is Pinned. It does nothing for a Settled Topic |
-| `unsnooze_topic` | Unbound | Unsnooze the Active Topic while it is Snoozed. Else, while a Snoozed Topic exists, choose one Snoozed Topic to Unsnooze |
-| `unsnooze_topics` | Unbound | Open Unsnooze Topics, with no Topic checked |
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
 | `toggle_bench` | ⇧⌘S | Show or hide the Bench, the Topics after the ones [In Play](configuration.md#topics-in-play). It does nothing while the Topics list has no Bench line |
+| `choose_in_play` | ⇧⌥⌘S | Open Choose In Play: check the cards to put [In Play](configuration.md#topics-in-play), then choose the card for each place. It does nothing without `topics.in_play` |
+| `replace_from_bench` | ⌥⌘S | Open Replace from Bench for the card you are on while it is [In Play](configuration.md#topics-in-play). Choose a Benched card. It takes the place, and your card goes to the end of the Bench. It does nothing without `topics.in_play` |
 | `toggle_terminal` | ⌘J | Show or hide the current Window's Terminal. It does nothing while the Terminal is the only side shown |
 | `toggle_browser` | ⌘B | Show or hide the current Window's Browser. It does nothing while the Browser is the only side shown |
 | `toggle_git_view` | ⌘G | Show or hide the [Git View](configuration.md#git-view) of the current Window's repository |
@@ -87,7 +84,7 @@ select the next or previous Tab, so Windows and Tabs share their step keys.
 | --- | --- | --- |
 | `select_next_session` | Unbound | Go to the next Session the Sidebar shows, wrapping to the first. In Topics mode, only the Active Topic's Sessions take part; for No Topic, the No Topic Sessions |
 | `select_prev_session` | Unbound | Go to the previous Session the Sidebar shows, wrapping to the last. In Topics mode, only the Active Topic's Sessions take part |
-| `select_next_topic` | Unbound | Go to the Topic below in the Topics list, wrapping to the first. Locked Sessions take part in their place; No Topic, Snoozed Topics and Benched cards that do not show do not. A Dormant Topic is Reopened. Works in both Sidebar modes |
+| `select_next_topic` | Unbound | Go to the Topic below in the Topics list, wrapping to the first. Locked Sessions take part in their place; No Topic and Benched cards that do not show do not. A Dormant Topic is Reopened. Works in both Sidebar modes |
 | `select_prev_topic` | Unbound | Go to the Topic above in the Topics list, wrapping to the last |
 
 The default [Command Palettes](configuration.md#command-palettes) are
@@ -104,55 +101,21 @@ Mark All as Read clears all Topic and Agent Unread marks in the Active Environme
 and appears when either kind of mark is set.
 
 Commands also lists Move Pane, Move Window, Move Session, Move Pane with Active
-Tab, Add a Session, Snooze Topic, Settle Topic, Lock Session or Unlock Session, and Zen
-or End Zen. These use the
-current item and appear when that item is available. Back returns from an input
+Tab, Add a Session, Settle Topic, and Lock Session or Unlock Session. These use
+the current item and appear when that item is available. Back returns from an input
 step to the Commands search.
 
-Commands also lists Move Topic Up and Move Topic Down, Pin Topic or Unpin Topic,
-and Unsnooze Topic. They run at once on the Active Topic, as their keybindings
+Commands also lists Move Topic Up and Move Topic Down, and Pin Topic or Unpin
+Topic. They run at once on the Active Topic, as their keybindings
 do. Move Topic Up and Move Topic Down also move the card of the current Locked
 Session, and appear only when the card can move that way among the cards with
-its Pin. Unsnooze Topic appears while a Snoozed Topic exists. While the Active
-Topic is Snoozed, it Unsnoozes it at once. Else it lists the Snoozed Topics, and
-↩ Unsnoozes the highlighted one.
+its Pin.
 
 Commands also lists Set Topic Note, and Clear Topic Note while the Active Topic
 has a Topic Note. Set Topic Note opens one field that starts with the current
 Note. ↩ writes the Note, and ↩ on an empty field clears it. ⎋ changes nothing.
 Clear Topic Note runs at once. The actions menu of a Topic row has both, and
 the context menu of a Topic card has Set Topic Note… and Clear Topic Note.
-
-Commands also lists Snooze Topics…, which Snoozes several Topics until one time.
-Its first step is the check step. The rows are the Tags of the Topics under
-Tags, in Config order, the Topics in the Topics list under Topics, and the
-Snoozed Topics under Already Snoozed. Each row has a box. No Topic starts
-checked, also not the Active Topic. The search field holds only the query.
-
-- Space or ⇥ checks or unchecks the highlighted row, also with a query. So the
-  query of this step cannot hold a space. A click on a row does the same.
-- ⌘A checks every Topic row that the filter shows, or unchecks them when all of
-  them are already checked.
-- A Tag row checks or unchecks the Topics that have the Tag in this list: with
-  none or some checked, Space checks all of them, and with all checked, Space
-  unchecks all of them. Its box shows none, some or all, in the colour of the
-  Tag, and the row shows "2/3" while some are checked. Only Topics are in the
-  set: a Topic that gets the Tag later is not Snoozed.
-- With one or more Topics checked, ↩ on any row opens the time step with the
-  checked Topics. With none checked, ↩ on a Topic row opens it with that Topic,
-  and ↩ on a Tag row checks its Topics and stays in the check step.
-- The note under the list names the checked Topics, counts the checked Topics
-  that the filter hides, and says what ↩ does now.
-
-The time that you choose replaces the time of each Topic of the set, also a
-later time, and the step note names each Snooze that becomes shorter. ⌫ in the
-empty time field goes back to the check step with the checks kept. Snooze Topic
-is the same flow with its Topic checked, and it starts at the time step.
-
-Commands also lists Unsnooze Topics… while a Snoozed Topic exists. It opens the
-same check step with only the Snoozed Topics, and each row shows its wake time.
-A Tag row counts only the Snoozed Topics. ↩ works as in Snooze Topics…, but it
-Unsnoozes the Topics at once, with no time step.
 
 In a field with chips (New Topic and Edit Tags), ← at the start
 of the text selects the last chip, and ← and → move the selection. → after the
@@ -161,14 +124,12 @@ selects the chip to its left, and ⌦ removes it and selects the chip to its
 right. A letter puts the caret back and types. ⌫ in an empty field removes the
 last chip.
 
-A word that starts with `#` in the query of Snooze Topics or of a palette with
-the topics Source, such as Go to…, matches the Tags of the Topics, not the words
-in their titles. Each Topic row shows its Tags, also with no query. With a
+A word that starts with `#` in the query of a palette with the topics Source,
+such as Go to…, matches the Tags of the Topics, not the words in their titles. Each Topic row shows its Tags, also with no query. With a
 query, Go to… also lists the Tags after the Topics. ↩ on
 a Tag row makes it a filter chip, "Go to… › #backend", and the list then shows
-only the Topics with the Tag: open, Snoozed and Settled. ⌫ in the empty field
-removes the chip. ⌘K on a Tag row offers Snooze its Topics…, which opens the
-check step with the Topics of the Tag checked.
+only the Topics with the Tag: open and Settled. ⌫ in the empty field removes
+the chip.
 
 Only the Tags that the Config lists in `topics.tags` exist (see
 [Tags](configuration.md#tags)). In New Topic, a word that starts with `#` is a
@@ -239,9 +200,6 @@ keybindings:
   move_window: []
   move_session: cmd+shift+m
   add_session_to_topic: cmd+shift+a
-  snooze_topic: alt+cmd+s
-  snooze_topics: []
-  toggle_zen: shift+alt+cmd+s
   settle_topic: []
   remove_session_from_topic: []
   forget_topic: []
@@ -251,10 +209,10 @@ keybindings:
   move_topic_up: alt+cmd+up
   move_topic_down: alt+cmd+down
   toggle_pin_topic: []
-  unsnooze_topic: []
-  unsnooze_topics: []
   toggle_sidebar: [cmd+s, ctrl+cmd+s]
   toggle_bench: shift+cmd+s
+  choose_in_play: shift+alt+cmd+s
+  replace_from_bench: alt+cmd+s
   toggle_terminal: cmd+j
   toggle_browser: cmd+b
   toggle_git_view: cmd+g
@@ -328,8 +286,8 @@ and Option + 0. This leaves Command + backquote for macOS App Window switching.
 Use `focus_terminal: []` to disable it, or `focus_terminal: cmd+backquote` to
 use that key instead. Then macOS App Window switching does not work.
 
-The old names `move_keyboard_to_terminal`, `new_topic_from_pane`,
-`move_session_to_topic` and `zen_mode` are gone. A Config that names one shows a
+The old names `move_keyboard_to_terminal`, `new_topic_from_pane` and
+`move_session_to_topic` are gone. A Config that names one shows a
 problem that names the new action. `focus_terminal`, `focus_browser` and
 `toggle_focus` keep their names with a new meaning. A Config that binds them
 changes behavior and shows no problem. `toggle_focus` was the old name of
@@ -383,17 +341,14 @@ conflict with the actions above:
 | `copy_folder` | ⌘C | Copy the result's folder |
 | `copy_tmux_target` | ⌘⇧C | Copy the result's tmux target or Pane ID |
 | `paste_folder` | ⌃Y | Type the result's folder where the Focus was: into the text field or web page that had it, or as one shell word at the prompt of the current Pane |
-| `snooze_topic` | ⌃S | Open Snooze for the highlighted open, Dormant or Snoozed Topic |
 | `move` | Unbound | Open Move for the highlighted result |
 | `add_session_to_topic` | Unbound | Add a running Session or launch a new one in the highlighted Topic |
 | `rename` | Unbound | Rename the highlighted Topic, Session or Window |
 | `edit_tags` | Unbound | Open Edit Tags for the highlighted Topic |
 | `set_topic_note` | Unbound | Open Set Topic Note for the highlighted Topic |
 | `clear_topic_note` | Unbound | Clear the Topic Note of the highlighted Topic. The action shows only while the Topic has a Note |
-| `start_zen` | Unbound | Start Zen for the highlighted Topic. While Zen is on, end it |
 | `settle_topic` | Unbound | Settle the highlighted Topic |
 | `forget_topic` | Unbound | Forget the highlighted Topic |
-| `unsnooze_topic` | Unbound | Unsnooze the highlighted Topic |
 | `reopen_topic` | Unbound | Reopen the highlighted Topic |
 | `start_topic_fresh` | Unbound | Start Fresh for the highlighted Topic |
 | `pin_topic` | Unbound | Pin the highlighted Topic |

@@ -46,7 +46,7 @@ extension EnvironmentService {
                     if let left = edit.leftTopic {
                         _ = try transaction.apply(TopicRecordChange(before: records.first { $0.id == left.id }, after: left))
                     }
-                    return try transaction.apply(TopicRecordChange(before: read, after: record), insertPosition: topics.insertPosition,
+                    return try transaction.apply(TopicRecordChange(before: read, after: record), arrival: topics.arrival,
                                                  replacingLockOf: planned.replacedLockOf)
                 }
                 commands += moved.map { .tmux($0.setOption) }
@@ -60,13 +60,11 @@ extension EnvironmentService {
                 let before = edit.record ?? records.first { $0.id == record.id }
                 let locks = SessionLock.locks(in: try server.snapshot().windows, records: try store.read().records)
                 let moved = try store.write(locks: locks) {
-                    try $0.apply(TopicRecordChange(before: before, after: record), insertPosition: topics.insertPosition)
+                    try $0.apply(TopicRecordChange(before: before, after: record), arrival: topics.arrival)
                 }
                 try executor.run(moved.map { .tmux($0.setOption) }, client: client)
             case .forget(let id):
-                let locks = SessionLock.locks(in: try server.snapshot().windows, records: try store.read().records)
-                let moved = try store.write(locks: locks) { try $0.forget(id, insertPosition: topics.insertPosition) }
-                try executor.run(moved.map { .tmux($0.setOption) }, client: client)
+                try store.write { try $0.forget(id) }
             case nil: break
             }
             phase = .selectionFailed
@@ -88,7 +86,7 @@ extension EnvironmentService {
             return (resolved.source, resolved.snapshot)
         }
         switch request.command {
-        case .list, .show, .lock, .unlock, .snooze, .unsnooze, .tags, .note, .pin, .unpin, .moveCard, .startZen, .endZen, .markRead, .markAllRead:
+        case .list, .show, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .markRead, .markAllRead:
             throw TopicRequestError.noTarget
         case .create(let title, let tags):
             let tags = Set(tags ?? [])

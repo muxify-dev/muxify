@@ -1,6 +1,6 @@
-"""Topics in the Sidebar: moving a Window to a Topic, Topic and Session cards, the Snoozed and Settled groups, and Zen.
+"""Topics in the Sidebar: moving a Window to a Topic, Topic and Session cards, and the Settled group.
 
-The Topic and Session card headers in UI/SidebarView.swift give "Zen…", "Pin Topic", "Go to Topic" and "Go to Session"
+The Topic and Session card headers in UI/SidebarView.swift give "Pin Topic", "Go to Topic" and "Go to Session"
 as accessibility actions, so the checks reach them without the header's context menu.
 
 The fixture and the helpers that several suites use are in scripts/verify/topics_sidebar.py.
@@ -210,11 +210,11 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.s.wait_rows(lambda rs: 'Keep' in self.s.row(key, rs).get('accessibilityLabel', ''),
                          'the Session row did not turn to Keep: ' + self.describe(key, self.s.rows()))
 
-    def test_forget_dormant_snoozed_and_settled_topics_confirms_before_removal(self):
+    def test_forget_dormant_and_settled_topics_confirms_before_removal(self):
         s = self.s
-        for state in ['dormant', 'snoozed', 'settled']:
+        for state in ['dormant', 'settled']:
             topic = 'forget-' + state
-            fields = {'snoozed_until': 'never'} if state == 'snoozed' else {'settled_at': '2031-01-01T00:00:00Z'} if state == 'settled' else {}
+            fields = {'settled_at': '2031-01-01T00:00:00Z'} if state == 'settled' else {}
             self.write_topic(topic, 'Forget ' + state, self.alpha, **fields)
             if state != 'dormant':
                 self.find(state + '-topics')
@@ -459,83 +459,6 @@ class TopicsCardsSidebar(TopicsSidebar):
                          'the new Topic is not below the Pinned Topic and the other Topic')
         self.assertEqual(self.topic_rows(rs)[0], 'topic-pin-lower', 'Topic rows %s' % self.topic_rows(rs))
 
-    def test_zen_from_a_topic_row_snoozes_the_other_topics_and_end_zen_puts_back_their_snoozes(self):
-        s = self.s
-        zen_file = self.topics_dir.parent/'zen.json'
-        self.addCleanup(zen_file.unlink, missing_ok=True)
-        earlier = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + 600))
-        self.write_topic('zen-kept', 'Zen kept', self.beta)
-        self.write_topic('zen-other', 'Zen other', self.beta)
-        self.write_topic('zen-earlier', 'Zen earlier', self.beta, snoozed_until=earlier)
-        self.find('topic-zen-kept')
-        s.act('action', 'topic-zen-kept', 'Zen…')
-        rs = s.wait_rows(lambda rs: s.has('palette-breadcrumb', rs), 'Zen… did not open the Zen palette')
-        names = self.describe('palette-note', rs)
-        self.assertTrue('Zen other' in names and 'Zen earlier' in names and 'Zen kept' not in names,
-                        'the Zen palette lists the wrong Topics: ' + names)
-        # A preset row accepts on a press: In one hour, after the Snooze of zen-earlier.
-        s.act('press', 'palette-row-0')
-        s.wait_rows(lambda rs: not s.has('palette-breadcrumb', rs), 'the Zen palette did not close')
-
-        zen = wait(lambda: zen_file.exists() and json.loads(zen_file.read_text()), 'Zen wrote no zen.json')
-        records = self.records()
-        changes = {c['topic_id']: c.get('previous_snoozed_until') for c in zen['changes']}
-        self.assertEqual(zen['kept_topic_id'], 'zen-kept', json.dumps(zen))
-        self.assertEqual({key: changes.get(key, 'absent') for key in ['zen-kept', 'zen-other', 'zen-earlier']},
-                         {'zen-kept': 'absent', 'zen-other': None, 'zen-earlier': earlier}, json.dumps(zen))
-        self.assertNotIn('snoozed_until', records['zen-kept'], 'Zen Snoozed the Topic it keeps')
-        self.assertEqual([records[key].get('snoozed_until') for key in ['zen-other', 'zen-earlier']], [zen['until']] * 2,
-                         'Zen did not Snooze the other Topics until its time')
-
-        s.wait_rows(lambda rs: s.has('end-zen', rs), 'the Sidebar does not show End Zen')
-        s.act('press', 'end-zen')
-        wait(lambda: not zen_file.exists(), 'End Zen kept zen.json')
-        records = self.records()
-        self.assertNotIn('snoozed_until', records['zen-other'], 'End Zen did not unsnooze a Topic that was not Snoozed')
-        self.assertEqual(records['zen-earlier'].get('snoozed_until'), earlier, 'End Zen did not put back the earlier Snooze')
-        s.wait_rows(lambda rs: not s.has('end-zen', rs), 'the Sidebar still shows End Zen')
-
-    def test_zen_keeps_the_no_topic_card_and_hides_the_notification_marks_of_no_topic_until_it_ends(self):
-        s = self.s
-        zen_file = self.topics_dir.parent/'zen.json'
-        self.addCleanup(zen_file.unlink, missing_ok=True)
-        self.addCleanup(self.show_view, 'topics')
-        self.write_topic('zen-hide-kept', 'Zen hide kept', self.beta)
-        kept = self.new_session('zen-hide-kept', self.beta, topic='zen-hide-kept')
-        sid_one, window_one, _ = self.agent_session('zen-hide-one')
-        sid_two, window_two, _ = self.agent_session('zen-hide-two')
-        # Never selected, so its done Agent stays Unread through the check.
-        sid_unread, _, _ = self.agent_session('zen-hide-unread', status='done', unread=True)
-        unread_mark = lambda rs: 'done' in self.describe('session-' + sid_unread, rs)
-        self.select_window(kept + ':')
-        self.find('topic-zen-hide-kept')
-        self.show_view('sessions')
-        s.wait_rows(unread_mark, 'Sessions mode shows no done mark on a No Topic Session before Zen')
-        self.show_view('topics')
-
-        s.act('action', 'topic-zen-hide-kept', 'Zen…')
-        s.wait_rows(lambda rs: s.has('palette-breadcrumb', rs), 'Zen… did not open the Zen palette')
-        s.act('press', 'palette-row-0')
-        rs = s.wait_rows(lambda rs: s.has('end-zen', rs), 'the Sidebar does not show End Zen')
-        self.assertEqual(self.no_topic_cards(rs), [], 'Zen shows a No Topic card while the kept Topic is active')
-
-        self.select_window(window_one)
-        rs = s.wait_rows(lambda rs: self.no_topic_cards(rs) == [sid_one], 'opening a No Topic Session during Zen did not show its card')
-        self.select_window(window_two)
-        s.wait_rows(lambda rs: self.no_topic_cards(rs) == [sid_two], 'opening another No Topic Session did not replace the card')
-        self.select_window(kept + ':')
-        s.wait_rows(lambda rs: self.no_topic_cards(rs) == [], 'going back to the kept Topic did not remove the No Topic card')
-
-        self.show_view('sessions')
-        rs = s.wait_rows(lambda rs: s.has('session-' + sid_unread, rs), 'Sessions mode does not list a No Topic Session during Zen')
-        self.assertFalse(unread_mark(rs), 'Sessions mode shows a No Topic mark during Zen: ' + self.describe('session-' + sid_unread, rs))
-        self.show_view('topics')
-
-        s.act('press', 'end-zen')
-        s.wait_rows(lambda rs: not s.has('end-zen', rs), 'the Sidebar still shows End Zen')
-        self.show_view('sessions')
-        s.wait_rows(unread_mark, 'the No Topic mark did not come back after Zen')
-
     def test_pressing_a_dormant_topic_card_reopens_it_without_the_reopen_choice(self):
         s = self.s
         self.write_topic('dormant-first', 'First', self.beta, order=0)
@@ -649,14 +572,12 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.find('topic-choice-dormant')
         self.select_window(sid + ':')
         s.wait_shown(sid + ':')
-        self.press_menu_item('Go to…')
-        key = 'palette-row-topic-choice-active'
-        s.wait_rows(lambda rs: s.has(key, rs), 'the Active Topic did not show in Go to')
-        s.act('action', key, 'Snooze Topic')
-        rs = s.wait_rows(lambda rs: s.has('palette-note', rs), 'Snooze did not show the Next Topic')
+        self.press_menu_item('Settle Topic…')
+        s.wait_rows(lambda rs: any(key.startswith('palette-row-session-') for key in s.ids(rs)), 'Settle choices did not load')
+        rs = s.wait_rows(lambda rs: s.has('palette-note', rs), 'Settle did not show the Next Topic')
         note = s.row('palette-note', rs)
         self.assertIn('Then opens: Choice dormant', note.get('accessibilityLabel', '') + note.get('accessibilityValue', ''))
-        s.act('press', 'palette-row-never')
+        s.act('press', 'palette-accept')
         rs = s.wait_rows(lambda rs: s.has('reopen-choice-start-fresh', rs), 'Next Topic did not show the Reopen choice')
         reopen = self.describe('reopen-session-alpha', rs)
         for text in ['edit', 'agent', '1 Tab', 'resumes Claude Code']:

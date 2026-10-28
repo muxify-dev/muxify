@@ -114,32 +114,18 @@ final class AgentsScopeTests: XCTestCase {
         XCTAssertEqual(scoped.visibleAgents.map(\.paneID), ["%1"])
     }
 
-    func testAllListsEveryAgentInBothModesExceptSnoozedTopics() {
-        var snoozed = beta
-        snoozed.snoozedUntil = "never"
+    func testAllListsEveryAgentInBothModes() {
         let inAlpha = window("@1", session: "$1", topic: "a")
         let inBeta = window("@2", session: "$2", topic: "b")
         let loose = window("@3", session: "$3", topic: nil)
         let agents = [agent("%1", in: inAlpha), agent("%2", in: inBeta), agent("%3", in: loose)]
         for mode in [SidebarMode.topics, .sessions] {
-            let every = model([alpha, snoozed], [inAlpha, inBeta, loose], agents, selected: "@1", mode: mode, scope: .all)
+            let every = model([alpha, beta], [inAlpha, inBeta, loose], agents, selected: "@1", mode: mode, scope: .all)
             XCTAssertEqual(every.agentsScope, .everyAgent, "\(mode)")
             XCTAssertNil(every.agentsScope.name, "\(mode)")
-            XCTAssertEqual(every.visibleAgents.map(\.paneID), ["%1", "%3"], "\(mode)")
-            let groups = mode == .topics ? ["%1": "Alpha", "%3": "No Topic"] : ["%1": "name-$1", "%3": "name-$3"]
+            XCTAssertEqual(every.visibleAgents.map(\.paneID), ["%1", "%2", "%3"], "\(mode)")
+            let groups = mode == .topics ? ["%1": "Alpha", "%2": "Beta", "%3": "No Topic"] : ["%1": "name-$1", "%2": "name-$2", "%3": "name-$3"]
             XCTAssertEqual(every.agentGroups, groups, "\(mode)")
-        }
-    }
-
-    func testSnoozedTopicAgentsStayHiddenInTheirOwnScope() {
-        var snoozed = alpha
-        snoozed.snoozedUntil = "never"
-        let inAlpha = window("@1", session: "$1", topic: "a")
-        let blocked = agent("%1", in: inAlpha, .blocked, unread: true)
-        for mode in [SidebarMode.topics, .sessions] {
-            let scoped = model([snoozed], [inAlpha], [blocked], selected: "@1", mode: mode)
-            XCTAssertEqual(scoped.visibleAgents, [], "\(mode)")
-            XCTAssertEqual(scoped.sessionMarks, [:], "\(mode)")
         }
     }
 }

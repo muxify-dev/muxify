@@ -66,7 +66,6 @@ public struct Config: Equatable {
     }
 
     public struct Topics: Equatable, Sendable {
-        public var snoozePresets = SnoozePreset.defaults
         public var sessionOrder = SessionOrder.oldestFirst
         public var insertPosition = TopicInsertPosition.bottom
         /// Nil: Tags are off, and `#` in New Topic is plain title text.
@@ -337,17 +336,16 @@ public struct Config: Equatable {
         #     # open, running, visit, activity or length.
         #     tiebreak: [open, length, running, visit, activity]
         #     # The kinds of rows it lists; without show, every kind:
-        #     # topic, snoozed, settled, session, topic-session,
+        #     # topic, settled, session, topic-session,
         #     # session-path, worktree, window, agent, command or tag.
-        #     show: [topic, snoozed, settled, session, session-path, worktree]
+        #     show: [topic, settled, session, session-path, worktree]
         #   - name: Agents
         #     keybinding: cmd+shift+o
         #     sources: [agents]
         #
         # pick_lists:
         #   # An Action's list takes show and tiebreak as a palette does:
-        #   # add_session, move, move_session, snooze_topics,
-        #   # unsnooze_topics, unsnooze_topic, tags or worktree_start.
+        #   # add_session, move, move_session, tags or worktree_start.
         #   add_session:
         #     show: [session-path]
         #
@@ -436,22 +434,13 @@ public struct Config: Equatable {
         #   blocked_enabled: true
         #
         # topics:
-        #   # A list replaces all presets. Omitted times mean 09:00.
-        #   # at: +Nm/+Nh/+Nd, a time such as 1300, 13:00 or 1pm (the next one to come),
-        #   # today|tomorrow|mon…sun [time], or never.
-        #   snooze_presets:
-        #     - label: In one hour
-        #       at: +1h
-        #     - label: Tomorrow
-        #       at: tomorrow
-        #     - label: Next Monday
-        #       at: mon
         #   # The order of a Topic's Sessions, by when tmux created them:
         #   # oldest_first or newest_first. Once you move a Session, the Topic
         #   # keeps your order, and a new Session goes to this order's end.
         #   session_order: oldest_first
         #   # New and returning Settled Topics go at the bottom or top of their
-        #   # part of the list. Dormant Topics keep their place.
+        #   # part of the list. Dormant Topics keep their place. With in_play,
+        #   # they go to the top of the Bench instead.
         #   insert_position: bottom
         #   # The Sidebar shows the Pinned Topics and this many other Topics and
         #   # Locked Sessions In Play. The rest wait on the Bench, behind one line
@@ -727,7 +716,6 @@ private struct ConfigReader {
     public mutating func readTopics(_ node: Node) {
         for (name, key, value) in entries(of: node, "topics") {
             switch name {
-            case "snooze_presets": readSnoozePresets(value)
             case "insert_position":
                 guard value.tag == Yams.Tag(.str), let position = value.string.flatMap(TopicInsertPosition.init(rawValue:)) else {
                     problem(at: value, "topics.insert_position: expected bottom or top")
@@ -899,30 +887,6 @@ private struct ConfigReader {
                 continue
             }
             config.diagnostics = enabled
-        }
-    }
-
-    public mutating func readSnoozePresets(_ node: Node) {
-        guard let sequence = node.sequence else {
-            problem(at: node, "topics.snooze_presets: expected a list")
-            return
-        }
-        config.topics.snoozePresets = []
-        for entry in sequence {
-            var label: String?
-            var schedule: SnoozeSchedule?
-            for (name, key, value) in entries(of: entry, "topics.snooze_presets entry") {
-                switch name {
-                case "label": label = string(value)?.trimmingCharacters(in: .whitespacesAndNewlines)
-                case "at": schedule = string(value).flatMap { SnoozeSchedule($0) }
-                default: problem(at: key, "unknown key \"topics.snooze_presets.\(name)\"")
-                }
-            }
-            guard let label, !label.isEmpty, let schedule else {
-                problem(at: entry, "topics.snooze_presets: expected a label and a valid at value")
-                continue
-            }
-            config.topics.snoozePresets.append(SnoozePreset(label: label, schedule: schedule))
         }
     }
 
@@ -1250,18 +1214,14 @@ private struct ConfigReader {
         "move_keyboard_to_terminal": .focusTerminal,
         "new_topic_from_pane": .movePane,
         "move_session_to_topic": .moveSession,
-        "zen_mode": .toggleZen,
     ]
 
     /// The same for `keybindings.command_palette`. Its old move_* names are
     /// valid `keybindings` actions, so each scope keeps its own table.
     static let removedPaletteActions: [String: PaletteAction] = [
-        "snooze": .snoozeTopic,
         "add_session": .addSessionToTopic,
-        "zen": .startZen,
         "settle": .settleTopic,
         "forget": .forgetTopic,
-        "unsnooze": .unsnoozeTopic,
         "reopen": .reopenTopic,
         "start_fresh": .startTopicFresh,
         "pin": .pinTopic,

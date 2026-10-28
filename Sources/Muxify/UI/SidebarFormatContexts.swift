@@ -72,7 +72,7 @@ struct SidebarFormatContexts {
             }
             sessions[sessionID] = Context(values: sessionValues, loops: [.windows: windowContexts, .panes: paneContexts])
         }
-        for topic in model.rows + model.snoozedRows + model.groups.filter({ $0.kind == .settled }).flatMap(\.topics) {
+        for topic in model.rows + model.groups.flatMap(\.topics) {
             // A Locked card shows its Session's Formats.
             guard case .topic = topic.id else { continue }
             let children = topic.sessions.compactMap { sessions[$0.id.session] }

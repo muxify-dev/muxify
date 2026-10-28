@@ -24,7 +24,7 @@ final class PaletteCatalogTests: XCTestCase {
     }
 
     private func catalog(records: [TopicRecord], windows: [TmuxWindow], selected: String? = nil, visits: VisitLog = VisitLog(),
-                         lastWindow: [TopicGroupID: String] = [:], agents: [Agent] = [], zen: ZenRecord? = nil,
+                         lastWindow: [TopicGroupID: String] = [:], agents: [Agent] = [],
                          mode: SidebarMode = .topics, sessionPaths: [SessionPath]? = nil) -> PaletteCatalog {
         var config = Config()
         config.sessionPaths = sessionPaths ?? [game, notes]
@@ -32,7 +32,7 @@ final class PaletteCatalogTests: XCTestCase {
         selection.windowID = selected
         let model = TopicsModel(records: records, windows: windows, config: config, selection: selection,
                         location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), mode: mode,
-                                agents: agents, zen: zen, now: now)
+                                agents: agents)
         return PaletteCatalog(windows: windows, agents: agents, sessionPaths: config.sessionPaths, selectedWindowID: selected,
                               homeDirectory: "/home", topics: model, records: records, lastWindowByGroup: lastWindow,
                               visits: visits, now: now, agentMarks: model.agentMarks)
@@ -123,18 +123,16 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(matched.rows.first?.detail, Highlighted(text: "/work/game", marks: [1, 2, 3, 4]))
     }
 
-    func testGoToListsOtherLiveTopicsThenCurrentThenDormantBeforeSessionsSnoozedAndSettled() {
-        var snoozed = topic("z", "Zzz")
-        snoozed.snoozedUntil = "never"
+    func testGoToListsOtherLiveTopicsThenCurrentThenDormantBeforeSessionsAndSettled() {
         var settled = topic("s", "Settled")
         settled.settledAt = "2026-01-01T00:00:00Z"
-        let records = [topic("a", "Alpha"), topic("b", "Beta"), topic("c", "Charlie"), snoozed, settled]
+        let records = [topic("a", "Alpha"), topic("b", "Beta"), topic("c", "Charlie"), settled]
         let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
                        window("@2", session: "game/beta", directory: "/work/game/release", topic: "b"),
                        window("@3", session: "scratch", directory: "/work/notes")]
         let visits = visits([(.topic(.topic("b")), 100), (.topic(.topic("a")), 300), (.topic(.noTopic), 200)])
         let list = catalog(records: records, windows: windows, selected: "@1", visits: visits).list(goTo, query: "", rules: .standard)
-        XCTAssertEqual(list.sections.map(\.id), ["topics", "sessions", "snoozed", "settled"])
+        XCTAssertEqual(list.sections.map(\.id), ["topics", "sessions", "settled"])
         XCTAssertEqual(CommandPaletteConfig.goTo.sources, goTo)
         let topics = list.sections[0].rows
         XCTAssertEqual(topics.map(\.id), ["topic-b", "topic-a", "topic-c"], "other live Topics, then the Active Topic, then Dormant; no No Topic row")
@@ -145,25 +143,23 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(topics[0].trailing, "2h")
     }
 
-    func testSnoozedAndSettledTopicsRankByScoreForAQueryAndComeLastWithout() {
-        var snoozed = topic("z", "What are Claude Code mods?")
-        snoozed.snoozedUntil = "never"
+    func testSettledTopicsRankByScoreForAQueryAndComeLastWithout() {
         var settled = topic("s", "Claude mods notes")
         settled.settledAt = "2026-01-01T00:00:00Z"
         let windows = [window("@1", session: "chezmoi/what-are-claude-code-mods", directory: "/tmp/chezmoi"),
                        window("@2", session: "muxify/claude-mods-later", directory: "/tmp/muxify")]
-        let catalog = catalog(records: [topic("a", "Clean up old modules"), snoozed, settled], windows: windows)
+        let catalog = catalog(records: [topic("a", "Clean up old modules"), settled], windows: windows)
         let grouped = catalog.list(goTo, query: "claude mods", rules: .standard)
         XCTAssertEqual(grouped.sections.map(\.title), ["Topics", "Sessions"], "under headers, a query puts them among the open Topics")
-        XCTAssertEqual(grouped.sections[0].rows.map(\.id), ["topic-s", "topic-z", "topic-a"],
-                       "the Settled and Snoozed Topics match better than the open one")
+        XCTAssertEqual(grouped.sections[0].rows.map(\.id), ["topic-s", "topic-a"],
+                       "the Settled Topic matches better than the open one")
         let oneList = catalog.list(goTo, query: "claude mods", rules: .standard, order: .ranked)
         XCTAssertEqual(oneList.sections.map(\.title), [nil])
-        XCTAssertEqual(ids(oneList), ["session:$muxify/claude-mods-later", "session:$chezmoi/what-are-claude-code-mods", "topic-s", "topic-z", "topic-a"],
+        XCTAssertEqual(ids(oneList), ["session:$muxify/claude-mods-later", "session:$chezmoi/what-are-claude-code-mods", "topic-s", "topic-a"],
                        "in one list, a separator earns no more than another, so the Sessions tie the set-aside Topics and go first, and the weak open Topic is last")
-        XCTAssertEqual(ids(catalog.list(goTo, query: "", rules: .standard, order: .ranked)).suffix(2), ["topic-z", "topic-s"],
-                       "with nothing typed, Snoozed and Settled Topics stay last")
-        XCTAssertEqual(catalog.list(goTo, query: "", rules: .standard).sections.map(\.title), ["Topics", "Sessions", "Snoozed", "Settled"])
+        XCTAssertEqual(ids(catalog.list(goTo, query: "", rules: .standard, order: .ranked)).suffix(1), ["topic-s"],
+                       "with nothing typed, Settled Topics stay last")
+        XCTAssertEqual(catalog.list(goTo, query: "", rules: .standard).sections.map(\.title), ["Topics", "Sessions", "Settled"])
     }
 
     func testEveryRunningSessionHasItsOwnRowInBothModesAndDifferentNamesDoNotOccupyPaths() {
@@ -226,29 +222,13 @@ final class PaletteCatalogTests: XCTestCase {
         XCTAssertEqual(row("session:$scratch")?.mark, .agent(.blocked))
     }
 
-    func testDuringZenANoTopicSessionShowsNoNotificationMark() {
-        let records = [topic("a", "Alpha")]
-        let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
-                       window("@3", session: "scratch", directory: "/tmp/scratch")]
-        let agents = [Agent(paneID: "%3", kind: .codex, status: .blocked, unread: true, windowID: "@3", sessionID: "$scratch",
-                            sessionName: "scratch", windowIndex: 1, windowTitle: "Agent", label: "Agent")]
-        let zen = ZenRecord(keptTopicID: "a", until: SnoozeDeadline.never.stored, changes: [])
-        let list = catalog(records: records, windows: windows, selected: "@1", agents: agents, zen: zen).list(goTo, query: "scratch", rules: .standard)
-        XCTAssertEqual(ids(list), ["session:$scratch"])
-        XCTAssertNil(list.rows[0].mark)
-    }
-
-    func testRowsWithAFolderPasteItAndOnlyOpenOrSnoozedTopicsSnooze() {
-        var snoozed = topic("z", "Zzz")
-        snoozed.snoozedUntil = "never"
+    func testRowsWithAFolderPasteIt() {
         var settled = topic("s", "Settled")
         settled.settledAt = "2026-01-01T00:00:00Z"
-        let records = [topic("a", "Alpha"), topic("d", "Dormant"), snoozed, settled]
+        let records = [topic("a", "Alpha"), topic("d", "Dormant"), settled]
         let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
                        window("@2", session: "scratch", directory: "/elsewhere/my notes")]
         let rows = catalog(records: records, windows: windows).sections(goTo + [.windows]).flatMap(\.candidates)
-        XCTAssertEqual(Dictionary(uniqueKeysWithValues: rows.compactMap { row in row.snooze.map { (row.id, $0) } }),
-                       ["topic-a": "a", "topic-d": "d", "topic-z": "z"], "the Settled Topic, Session and SessionPath rows Snooze nothing")
         let pastes = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.paste) })
         XCTAssertEqual(pastes["topic-a"], .some(nil), "a Topic pastes nothing")
         XCTAssertEqual(pastes["session:$scratch"], "/elsewhere/my notes", "the path stays raw until a terminal gets it")
@@ -267,25 +247,18 @@ final class PaletteCatalogTests: XCTestCase {
         var settled = topic("s", "Game settled")
         settled.settledAt = "2026-01-01T00:00:00Z"
         settled.outcome = "Shipped the GS reward cap"
-        var snoozed = topic("z", "Game paused")
-        snoozed.snoozedUntil = "never"
-        let records = [topic("a", "Fix game drops"), snoozed, settled]
+        let records = [topic("a", "Fix game drops"), settled]
         let windows = [window("@1", session: "game/fix", directory: "/work/game/main", topic: "a"),
                        window("@2", session: "game-scratch", directory: "/tmp/scratch")]
         let catalog = catalog(records: records, windows: windows)
         let list = catalog.list(goTo, query: "game", rules: .standard)
         XCTAssertEqual(list.sections.map(\.title), ["Topics", "Sessions"])
-        XCTAssertEqual(list.sections[0].rows.map(\.id), ["topic-a", "topic-z", "topic-s"], "on an equal score, the open Topic goes first")
-        XCTAssertEqual(list.sections[0].rows[1].pick.payload?.ref, .topic(id: "z", window: nil), "a Dormant Snoozed Topic Reopens")
-        XCTAssertEqual(list.sections[0].rows[1].trailing, "Reopen")
-        XCTAssertEqual(list.sections[0].rows[1].detail.text, "until never")
-        XCTAssertEqual(list.sections[0].rows[2].detail.text, "Shipped the GS reward cap")
+        XCTAssertEqual(list.sections[0].rows.map(\.id), ["topic-a", "topic-s"], "on an equal score, the open Topic goes first")
+        XCTAssertEqual(list.sections[0].rows[1].detail.text, "Shipped the GS reward cap")
         XCTAssertEqual(list.sections[1].rows.first?.id, "session:$game/fix", "all running Sessions, including Topic members, are searchable")
         let byOutcome = catalog.list(goTo, query: "sett gs", rules: .standard)
         XCTAssertEqual(ids(byOutcome), ["topic-s"], "one word on the type word, one on the outcome")
         XCTAssertEqual(byOutcome.rows[0].title.marks, [5, 6, 7, 8])
-        XCTAssertEqual(catalog.list(goTo, query: "snoo", rules: .standard).rows.first?.detail.text, "snoozed · until never",
-                       "a type word shows when it is what matched")
     }
 
     func testATopicRowShowsButNeverMatchesTheBaseNamesOfItsSessions() {
@@ -294,17 +267,6 @@ final class PaletteCatalogTests: XCTestCase {
         let catalog = catalog(records: records, windows: windows)
         XCTAssertFalse(ids(catalog.list([.topics], query: "game", rules: .standard)).contains("topic-a"))
         XCTAssertTrue(catalog.list([.topics], query: "", rules: .standard).rows.first?.detail.text.contains("game") ?? false)
-    }
-
-    func testASnoozedTopicWithAWindowGoesToItsEntryWindowAndKeepsTheSnooze() {
-        var snoozed = topic("z", "Paused")
-        snoozed.snoozedUntil = "never"
-        let windows = [window("@1", session: "game/paused", directory: "/work/game/main", topic: "z", active: false),
-                       window("@2", session: "game/paused", directory: "/work/game/main", topic: "z")]
-        let row = catalog(records: [snoozed], windows: windows).list([.topics], query: "paused", rules: .standard).rows[0]
-        XCTAssertEqual(row.pick.payload?.ref, .topic(id: "z", window: windows[1]))
-        XCTAssertEqual(row.kind, .snoozed)
-        XCTAssertEqual(row.snooze, "z")
     }
 
     func testAPlainRepositoryIsNamedAfterTheSessionPathAndItsOutsideWorktreeAfterTheFolder() {
@@ -326,7 +288,7 @@ final class PaletteCatalogTests: XCTestCase {
         let everything = ids(catalog.list([.sessions], query: "", rules: .standard))
         XCTAssertTrue(everything.contains("session:$notes"), "\(everything)")
         XCTAssertFalse(everything.contains("session-path:/work/notes"), "a running launch name hides its path: \(everything)")
-        let rules = PickRules(show: [.topic, .snoozed, .settled, .session, .sessionPath, .worktree])
+        let rules = PickRules(show: [.topic, .settled, .session, .sessionPath, .worktree])
         for query in ["", "notes"] {
             let shown = ids(catalog.list([.topics, .sessions], query: query, rules: rules))
             XCTAssertFalse(shown.contains("session:$notes"), "a Topic's Session is left out for \(query.debugDescription): \(shown)")
@@ -387,7 +349,7 @@ final class PaletteCatalogTests: XCTestCase {
                 assertShowsOnlyItsKinds(list) { catalog.destinationList(windows[2], topic: "a", query: "", rules: $0) }
                 assertShowsOnlyItsKinds(list) { catalog.destinationList(windows[0], topic: nil, query: "", rules: $0) }
             // CommandPalette builds these from the WorkspaceStore: testEachPaletteActionList… checks them.
-            case .snoozeTopics, .unsnoozeTopics, .unsnoozeTopic, .tags, .worktreeStart: break
+            case .tags, .worktreeStart: break
             }
         }
     }
@@ -426,9 +388,7 @@ final class PaletteCatalogTests: XCTestCase {
     }
 
     func testMoveOffersOtherOpenTopicsBlocksAnOccupiedOneAndEndsWithNewTopicTitledByTheQuery() {
-        var snoozed = topic("z", "Zzz")
-        snoozed.snoozedUntil = "never"
-        let records = [topic("a", "Alpha"), topic("b", "Beta"), topic("c", "Charlie"), snoozed]
+        let records = [topic("a", "Alpha"), topic("b", "Beta"), topic("c", "Charlie")]
         let windows = [window("@1", session: "game/alpha", directory: "/work/game/main", topic: "a"),
                        window("@2", session: "game/beta", directory: "/work/game/release", topic: "b"),
                        window("@3", session: "notes/charlie", directory: "/work/notes", topic: "c"),

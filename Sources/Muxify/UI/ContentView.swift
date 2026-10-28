@@ -104,9 +104,6 @@ struct ContentView: View {
             if let message = store.attachmentStatus {
                 Text(message).padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
                     .padding(16).accessibilityIdentifier("attachment-status")
-            } else if let message = store.wakeToast {
-                Text(message).padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-                    .padding(16).accessibilityIdentifier("wake-toast")
             }
         }
         .environment(\.quickSwitchHints, store.hintPresentation)

@@ -1,4 +1,4 @@
-"""Tags in Go to…: each Topic row shows its Tags, a Tags section after Topics for a query, a Tag filter chip, and Snooze its Topics.
+"""Tags in Go to…: each Topic row shows its Tags, a Tags section after Topics for a query, and a Tag filter chip.
 
 The driver cannot type keys. A check opens Go to… from its View menu item and sets the query. A press on a row is
 what Return on it does, Back is what Backspace in the empty field calls, and a row's accessibility actions are its
@@ -13,11 +13,9 @@ import unittest
 from scripts.verify.palette_fixture import PaletteFixture
 from scripts.verify.sandbox import wait
 
-LATER = '2099-01-01T00:00:00Z'
-
 
 class PaletteGoToTags(PaletteFixture):
-    TAGS = {'gssect': '{}', 'gfilter': '{}', 'gzsnooze': '{}', 'gplain': '{color: green}', 'gempty': '{}'}
+    TAGS = {'gssect': '{}', 'gfilter': '{}', 'gplain': '{color: green}', 'gempty': '{}'}
 
     def go_to(self, query):
         def opened():
@@ -71,7 +69,6 @@ class PaletteGoToTags(PaletteFixture):
     def test_return_on_a_tag_row_filters_by_the_tag_and_back_removes_the_filter(self):
         s = self.s
         self.topic('gf-open', 11, tags=['gfilter'])
-        self.topic('gf-snoozed', 12, tags=['gfilter'], snoozed_until=LATER)
         self.topic('gf-settled', 13, tags=['gfilter'], settled_at='2026-01-01T00:00:00Z')
         self.topic('gf-other', 14)
         self.go_to('#gfilter')
@@ -82,30 +79,12 @@ class PaletteGoToTags(PaletteFixture):
         self.assertIn('Go to… › #gfilter', self.text('palette-breadcrumb', rs))
         self.assertEqual(s.row('palette-search', rs).get('accessibilityValue', ''), '', 'the filter did not clear the query')
         shown = [key for key in s.ids(rs) if key.startswith('palette-row-')]
-        self.assertEqual(sorted(shown), ['palette-row-topic-gf-open', 'palette-row-topic-gf-settled', 'palette-row-topic-gf-snoozed'],
-                         'the filter does not show exactly the Topics with the Tag, Snoozed and Settled too')
+        self.assertEqual(sorted(shown), ['palette-row-topic-gf-open', 'palette-row-topic-gf-settled'],
+                         'the filter does not show exactly the Topics with the Tag, Settled too')
         s.act('action', 'palette-search', 'Back')
         rs = s.wait_rows(lambda rs: not self.chips(rs) and s.has('palette-search', rs), 'Back did not remove the filter chip')
         self.assertFalse(s.has('palette-breadcrumb', rs), 'the breadcrumb stayed after the filter went')
 
-    def test_snooze_its_topics_on_a_tag_row_opens_check_with_the_topics_of_the_tag_that_are_not_snoozed_checked(self):
-        s = self.s
-        self.topic('gz-one', 21, tags=['gzsnooze'])
-        self.topic('gz-two', 22, tags=['gzsnooze'])
-        self.topic('gz-none', 23)
-        self.topic('gz-snoozed', 24, tags=['gzsnooze'], snoozed_until=LATER)
-        self.go_to('#gzsnooze')
-        s.wait_rows(lambda rs: s.has('palette-row-tag-gzsnooze', rs), 'the Tag row did not show')
-        s.act('action', 'palette-row-tag-gzsnooze', 'Snooze its Topics…')
-        checked = lambda rs, name: 'checked' in s.row('palette-row-topic-' + name, rs).get('accessibilityValue', '')
-        rs = s.wait_rows(lambda rs: 'Snooze Topics › check' in self.text('palette-breadcrumb', rs) and checked(rs, 'gz-one') and checked(rs, 'gz-two'),
-                         'Snooze its Topics… did not open the check step with the Topics of the Tag checked')
-        self.assertFalse(checked(rs, 'gz-none'), 'a Topic without the Tag is checked')
-        self.assertTrue(s.has('palette-row-topic-gz-snoozed', rs), 'the Already Snoozed Topic of the Tag is not listed')
-        self.assertFalse(checked(rs, 'gz-snoozed'), 'an Already Snoozed Topic of the Tag is checked')
-        self.assertEqual(self.chips(rs), [], 'the check step shows a chip')
-        self.assertIn('↩ Snoozes 2 Topics…', self.text('palette-note', rs))
-        s.act('action', 'palette-search', 'Close')
 
 if __name__ == '__main__':
     unittest.main()

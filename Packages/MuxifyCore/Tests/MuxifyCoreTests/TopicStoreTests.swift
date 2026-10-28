@@ -35,24 +35,18 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(cleared.title, "Renamed")
     }
 
-    func testForgetEndsZenAndStaleEditsCannotCreateTheTopicAgain() throws {
+    func testStaleEditsCannotCreateAForgottenTopicAgain() throws {
         let store = TopicStore(paths: paths)
         let kept = TopicRecord(id: "kept", title: "Kept")
         let other = TopicRecord(id: "other", title: "Other")
         try store.write { transaction in
             try transaction.create(kept)
             try transaction.create(other)
-            let started = ZenRecord.start(keeping: kept.id, until: .never, records: transaction.records)
-            transaction.zen = started.zen
-            for record in started.saves { try transaction.update(record.id) { $0 = record } }
         }
         var remembered = kept
         remembered.sessions = [.object(["repository_path": .string("/sessionPath")])]
         try store.write { try $0.forget(kept.id) }
-        let contents = try store.read()
-        XCTAssertNil(contents.zen)
-        XCTAssertEqual(contents.records.map(\.id), [other.id])
-        XCTAssertNil(contents.records.first?.snoozedUntil)
+        XCTAssertEqual(try store.read().records.map(\.id), [other.id])
         XCTAssertFalse(FileManager.default.fileExists(atPath: paths.topics.appendingPathComponent("kept.json").path))
         XCTAssertThrowsError(try store.write { try $0.apply(TopicRecordChange(before: kept, after: remembered)) })
         XCTAssertThrowsError(try store.write { try $0.update(kept.id) { $0.title = "Stale" } })
@@ -73,16 +67,16 @@ final class TopicStoreTests: XCTestCase {
         for record in records { try TopicStore.encoded(record).write(to: paths.topics.appendingPathComponent(record.id + ".json")) }
     }
 
-    func testAnOldPlanKeepsTheSnoozeThatAnotherWriterSet() throws {
+    func testAnOldPlanKeepsTheNoteThatAnotherWriterSet() throws {
         let a = TopicStore(paths: paths), b = TopicStore(paths: paths)
         try a.write { try $0.create(TopicRecord(id: "t", title: "Old")) }
         let read = try XCTUnwrap(a.read().records.first)
-        try b.write { try $0.update("t") { $0.snoozedUntil = "never" } }
+        try b.write { try $0.setNote(of: "t", "Bisect") }
         var renamed = read
         renamed.title = "New"
         try a.write { try $0.apply(TopicRecordChange(before: read, after: renamed)) }
         XCTAssertEqual(try records(a).map(\.title), ["New"])
-        XCTAssertEqual(try records(a).map(\.snoozedUntil), ["never"])
+        XCTAssertEqual(try records(a).map(\.note), ["Bisect"])
     }
 
     func testTheMergeTakesEachChangedKeyAndKeepsNumbersAndUnknownFieldsExact() throws {
@@ -156,7 +150,7 @@ final class TopicStoreTests: XCTestCase {
     }
 
     func testAReadWithoutAStateFolderCreatesNothing() throws {
-        XCTAssertEqual(try TopicStore(paths: paths).read(), TopicContents(records: [], zen: nil, problems: []))
+        XCTAssertEqual(try TopicStore(paths: paths).read(), TopicContents(records: [], problems: []))
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
     }
 
@@ -169,7 +163,7 @@ final class TopicStoreTests: XCTestCase {
     }
 
     func testRecordRoundTripPreservesUnknownNestedValuesAndLargeIntegers() throws {
-        let data = Data(#"{"id":"test","title":"Before","slug":"test","home_project":"/work/app","created_at":"2026-10-06T20:00:00Z","settled_at":null,"outcome":null,"order":2,"snoozed_until":"never","future":{"large":18446744073709551615,"items":[true,null,0.125]},"sessions":[{"repository_path":"/work/app","future_session":42,"windows":[{"future_window":{"key":"kept"}}]}]}"#.utf8)
+        let data = Data(#"{"id":"test","title":"Before","slug":"test","home_project":"/work/app","created_at":"2026-10-06T20:00:00Z","settled_at":null,"outcome":null,"order":2,"future":{"large":18446744073709551615,"items":[true,null,0.125]},"sessions":[{"repository_path":"/work/app","future_session":42,"windows":[{"future_window":{"key":"kept"}}]}]}"#.utf8)
         let record = try JSONDecoder().decode(TopicRecord.self, from: data)
         let store = TopicStore(paths: paths)
         try seed(record)
@@ -201,14 +195,14 @@ final class TopicStoreTests: XCTestCase {
         try seed(originals[0], originals[1], originals[2])
         try TopicStore(paths: paths).write {
             try $0.update("b") { record in
-                record.snoozedUntil = "never"
+                record.note = "Bisect"
                 record.unknownFields["external"] = .bool(true)
             }
         }
         try store.write { try $0.move(.topic("c"), to: .before(.topic("b"))) }
         let moved = try records(TopicStore(paths: paths))
         XCTAssertEqual(TopicOrder.sorted(moved.map(TopicListEntry.topic)).records.map(\.id), ["a", "c", "b"])
-        XCTAssertEqual(moved.first { $0.id == "b" }?.snoozedUntil, "never")
+        XCTAssertEqual(moved.first { $0.id == "b" }?.note, "Bisect")
         XCTAssertEqual(moved.first { $0.id == "b" }?.unknownFields["external"], .bool(true))
         try store.write { try $0.create(record("new", order: nil)) }
         XCTAssertEqual(TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id), ["a", "c", "b", "new"])
@@ -224,7 +218,7 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: file), before)
         XCTAssertThrowsError(try store.write { try $0.move(.topic("a"), to: .after(.topic("missing"))) })
         XCTAssertEqual(try Data(contentsOf: file), before)
-        try store.write { try $0.create(record("new", order: nil), insertPosition: .top) }
+        try store.write { try $0.create(record("new", order: nil), arrival: .end(.top)) }
         XCTAssertEqual(TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id), ["new", "a"])
         XCTAssertTrue(try records(store).allSatisfy { $0.order?.isFinite == true })
     }
@@ -357,7 +351,7 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(try shown(store), ["p", "t", "a"], "Reopen brings the Topic back last among the Pinned Topics")
     }
 
-    func testATopicNoteIsSavedAsOneLineAndSurvivesSnoozeSettleAndReopen() throws {
+    func testATopicNoteIsSavedAsOneLineAndSurvivesSettleAndReopen() throws {
         let old = try JSONDecoder().decode(TopicRecord.self, from: Data(#"{"id":"t","title":"T","future":{"value":7}}"#.utf8))
         XCTAssertNil(old.note, "a record without a note key has no Note")
         let store = TopicStore(paths: paths)
@@ -371,10 +365,6 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(try file()["future"], old.unknownFields["future"], "a Note change keeps unknown fields")
         let noted = try XCTUnwrap(records(store).first)
         XCTAssertEqual(try JSONDecoder().decode(TopicRecord.self, from: TopicStore.encoded(noted)), noted)
-
-        try store.write { try $0.setSnoozes(snoozes(["t"], until: "never", in: $0)) }
-        try store.write { try $0.setSnoozes(snoozes(["t"], until: nil, in: $0)) }
-        XCTAssertEqual(try records(store).first?.note, "Repro with seed 4411 then bisect", "Snooze and Unsnooze keep the Note")
 
         let topic = try XCTUnwrap(records(store).first)
         let settle = TopicSettlePlan(topic: topic, snapshot: TmuxSnapshot(windows: [], clients: [], panes: [], serverRunning: true),
@@ -401,9 +391,9 @@ final class TopicStoreTests: XCTestCase {
             let edge: Double = position == .top ? -.greatestFiniteMagnitude : .greatestFiniteMagnitude
             var pinned = record("p", order: 0)
             pinned.isPinned = true
-            var transaction = TopicTransaction(records: [pinned, record("a", order: edge)], zen: nil, topics: paths.topics)
+            var transaction = TopicTransaction(records: [pinned, record("a", order: edge)], topics: paths.topics)
             transaction.locks = [SessionLock(sessionID: "$1", order: edge)]
-            let moved = try transaction.create(record("new", order: nil), insertPosition: position)
+            let moved = try transaction.create(record("new", order: nil), arrival: .end(position))
             let shown = TopicOrder.sorted(transaction.records.map(TopicListEntry.topic) + transaction.locks.map(TopicListEntry.lock))
             let expected: [TopicListID] = position == .top
                 ? [.topic("p"), .topic("new"), .lock(sessionID: "$1"), .topic("a")]
@@ -430,9 +420,9 @@ final class TopicStoreTests: XCTestCase {
                             let initial = [first, topic, last]
                             let plan = try TopicReopenPlan(topic: topic, records: initial, windows: [], sessionPaths: [],
                                                           existingDirectories: [], choice: choice).edit
-                            var transaction = TopicTransaction(records: initial, zen: nil, topics: paths.topics)
+                            var transaction = TopicTransaction(records: initial, topics: paths.topics)
                             if let saved = plan.savedCompletionRecord {
-                                try transaction.apply(TopicRecordChange(before: topic, after: saved), insertPosition: position)
+                                try transaction.apply(TopicRecordChange(before: topic, after: saved), arrival: .end(position))
                             }
                             let expected = !settled ? ["first", "returning", "last"]
                                 : position == .top ? ["returning", "first", "last"] : ["first", "last", "returning"]
@@ -453,11 +443,11 @@ final class TopicStoreTests: XCTestCase {
         current.isPinned = true
         var pinned = record("p", order: 0)
         pinned.isPinned = true
-        var transaction = TopicTransaction(records: [pinned, current, record("a", order: 0)], zen: nil, topics: paths.topics)
+        var transaction = TopicTransaction(records: [pinned, current, record("a", order: 0)], topics: paths.topics)
         let change = TopicRecordChange(before: settled, after: reopened)
-        try transaction.apply(change, insertPosition: .bottom)
+        try transaction.apply(change, arrival: .end(.bottom))
         XCTAssertEqual(TopicOrder.sorted(transaction.records.map(TopicListEntry.topic)).records.map(\.id), ["p", "returning", "a"])
-        try transaction.apply(change, insertPosition: .top)
+        try transaction.apply(change, arrival: .end(.top))
         XCTAssertEqual(TopicOrder.sorted(transaction.records.map(TopicListEntry.topic)).records.map(\.id), ["p", "returning", "a"])
     }
 
@@ -472,115 +462,57 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(writes.count, 1)
     }
 
-    func testZenIsKeptBesideTheTopicRecordsAndRemoved() throws {
-        let store = TopicStore(paths: paths)
-        try store.write { try $0.create(TopicRecord(id: "a")) }
-        let zen = ZenRecord(keptTopicID: "a", until: "2026-10-08T17:00:00Z", changes: [.init(topicID: "b", previous: nil)])
-        try store.write { $0.zen = zen }
-        let other = try TopicStore(paths: paths).read()
-        XCTAssertEqual(other.zen, zen)
-        XCTAssertEqual(other.records.map(\.id), ["a"])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: paths.zenFile.path))
-        try store.write { $0.zen = nil }
-        XCTAssertNil(try TopicStore(paths: paths).read().zen)
-        try store.write { $0.zen = nil }
-    }
-
-    private func snoozes(_ ids: [String], until: String?, in transaction: TopicTransaction) -> [TopicRecord] {
-        ids.map { id in
-            var record = transaction.records.first { $0.id == id }!
-            record.snoozedUntil = until
-            return record
-        }
-    }
-
-    func testTopicsWhoseSnoozeEndsGoToTheEndAndKeepTheirOrderAmongThemselves() throws {
-        let store = TopicStore(paths: paths)
-        try seed(record("a", order: 0), record("b", order: 1), record("c", order: 2), record("d", order: 3), record("e", order: 4))
-        try store.write { try $0.setSnoozes(snoozes(["d", "b"], until: "never", in: $0)) }
-        XCTAssertEqual(try records(store).map(\.order), [0, 1, 2, 3, 4], "a Snooze keeps the stored order")
-        try store.write { try $0.create(record("new", order: nil)) }
-        try store.write { try $0.setSnoozes(snoozes(["d", "b"], until: nil, in: $0)) }
-        XCTAssertEqual(try shown(store), ["a", "c", "e", "new", "b", "d"])
-        try store.write { try $0.setSnoozes(snoozes(["a"], until: "never", in: $0)) }
-        try store.write { try $0.setSnoozes(snoozes(["a"], until: nil, in: $0)) }
-        XCTAssertEqual(try shown(store), ["c", "e", "new", "b", "d", "a"])
-        try store.write { try $0.setSnoozes(snoozes(["c"], until: nil, in: $0)) }
-        XCTAssertEqual(try shown(store), ["c", "e", "new", "b", "d", "a"], "a Topic that was not Snoozed keeps its place")
-    }
-
-    func testTopicsWhoseSnoozeEndsGoToTheTopWithTheirPin() throws {
-        let store = TopicStore(paths: paths)
-        var first = record("p1", order: 0), second = record("p2", order: 1)
-        first.isPinned = true
-        second.isPinned = true
-        try seed(first, second, record("a", order: 0), record("b", order: 1), record("c", order: 2))
-        try store.write { try $0.setSnoozes(snoozes(["p2", "b", "c"], until: "never", in: $0)) }
-        try store.write { try $0.setSnoozes(snoozes(["c", "p2", "b"], until: nil, in: $0), insertPosition: .top) }
-        XCTAssertEqual(try shown(store), ["p2", "p1", "b", "c", "a"])
-        try store.write { try $0.setSnoozes(snoozes(["p2"], until: "never", in: $0)) }
-        try store.write { try $0.setSnoozes(snoozes(["p2"], until: nil, in: $0)) }
-        XCTAssertEqual(try shown(store), ["p1", "p2", "b", "c", "a"], "a Pinned Topic goes to the end of the Pinned Topics")
-    }
-
-    func testTheTopicsThatZenSnoozedKeepTheirPlacesWhenZenEnds() throws {
-        let past = SnoozeDeadline.at(Date(timeIntervalSince1970: 0)).stored
-        for endsAtItsTime in [false, true] {
+    func testTheUpgradeEndsZenThenPutsEachSnoozedTopicAtTheTopOfTheBenchInWakeOrder() throws {
+        let lock = SessionLock(sessionID: "$1", order: 1.5)
+        let cases: [(inPlay: Int?, position: TopicInsertPosition, expected: [String])] = [
+            (2, .bottom, ["p", "kept", "zenA", "early", "zenB", "never", "$1", "c", "d"]),
+            (nil, .top, ["p", "early", "zenB", "never", "kept", "zenA", "$1", "c", "d"]),
+            (nil, .bottom, ["p", "kept", "zenA", "$1", "c", "d", "early", "zenB", "never"]),
+        ]
+        for (inPlay, position, expected) in cases {
             try? FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: paths.topics, withIntermediateDirectories: true)
+            let zenUntil = "2026-11-03T17:00:00Z"
+            let files = [
+                "p": #"{"id":"p","order":0,"pinned":true,"snoozed_until":"never"}"#,
+                "kept": #"{"id":"kept","order":0}"#,
+                "zenA": #"{"id":"zenA","order":1,"snoozed_until":"\#(zenUntil)"}"#,
+                "zenB": #"{"id":"zenB","order":2,"snoozed_until":"\#(zenUntil)"}"#,
+                "early": #"{"id":"early","order":3,"snoozed_until":"2026-11-01T09:00:00Z"}"#,
+                "never": #"{"id":"never","order":4,"snoozed_until":"never"}"#,
+                "c": #"{"id":"c","order":5}"#,
+                "d": #"{"id":"d","order":6}"#,
+                "s": #"{"id":"s","order":7,"settled_at":"2026-10-01T00:00:00Z","snoozed_until":"never"}"#,
+            ]
+            for (id, json) in files { try Data(json.utf8).write(to: paths.topics.appendingPathComponent(id + ".json")) }
+            try Data(#"""
+            {"kept_topic_id":"kept","until":"\#(zenUntil)","changes":[
+              {"topic_id":"zenA","previous_snoozed_until":null},
+              {"topic_id":"zenB","previous_snoozed_until":"2026-11-02T09:00:00Z"}]}
+            """#.utf8).write(to: paths.legacyZenFile)
             let store = TopicStore(paths: paths)
-            var earlier = record("earlier", order: 2)
-            earlier.snoozedUntil = past
-            try seed(record("kept", order: 0), record("a", order: 1), earlier, record("b", order: 3))
-            try store.write { transaction in
-                let started = ZenRecord.start(keeping: "kept", until: .never, records: transaction.records)
-                transaction.zen = started.zen
-                try transaction.setSnoozes(started.saves)
-            }
-            try store.write { try $0.create(record("new", order: nil)) }
-            try store.write { transaction in
-                let zen = try XCTUnwrap(transaction.zen)
-                let ends = endsAtItsTime
-                    ? snoozes(zen.changes.map(\.topicID), until: nil, in: transaction)
-                    : zen.end(records: transaction.records, now: Date())
-                try transaction.setSnoozes(ends)
-                transaction.zen = nil
-            }
-            XCTAssertEqual(try shown(store), ["kept", "a", "b", "new", "earlier"],
-                           "a Topic whose earlier Snooze ended during Zen goes to the end (Zen ends at its time: \(endsAtItsTime))")
-            XCTAssertTrue(try records(store).allSatisfy { $0.snoozedUntil == nil })
-        }
-    }
+            XCTAssertTrue(try store.read().needsUpgrade)
 
-    func testAZenSnoozedTopicGoesBackToItsPlaceWhenTheKeptTopicIsForgotten() throws {
-        let store = TopicStore(paths: paths)
-        try seed(record("kept", order: 0), record("a", order: 1), record("b", order: 2))
-        try store.write { transaction in
-            let started = ZenRecord.start(keeping: "kept", until: .never, records: transaction.records)
-            transaction.zen = started.zen
-            try transaction.setSnoozes(started.saves)
-        }
-        try store.write { try $0.create(record("new", order: nil)) }
-        try store.write { try $0.forget("kept") }
-        XCTAssertEqual(try shown(store), ["a", "b", "new"])
-    }
-
-    func testZenIsWrittenBeforeTheSnoozesItMakes() throws {
-        let store = TopicStore(paths: paths)
-        try seed(TopicRecord(id: "a"), TopicRecord(id: "b"), TopicRecord(id: "c"))
-        let failing = TopicStore(paths: paths) { data, url in
-            guard url.lastPathComponent == "zen.json" || url.deletingLastPathComponent().lastPathComponent == "topics" else {
-                throw CocoaError(.fileWriteUnknown)
+            try store.upgrade(locks: [lock], arrival: TopicArrival(inPlay: inPlay, insertPosition: position))
+            let upgraded = try store.read()
+            let shown = TopicOrder.sorted(upgraded.records.map(TopicListEntry.topic) + [.lock(lock)]).map { entry in
+                switch entry.id {
+                case .topic(let id): return id
+                case .lock(let sessionID): return sessionID
+                }
             }
-            try data.write(to: url, options: .atomic)
+            XCTAssertEqual(shown, expected, "in_play \(String(describing: inPlay)), insert_position \(position)")
+            XCTAssertFalse(upgraded.needsUpgrade)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: paths.legacyZenFile.path), "the upgrade removes zen.json")
+            for id in files.keys {
+                let saved = try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf: paths.topics.appendingPathComponent(id + ".json")))
+                XCTAssertNil(saved["snoozed_until"], "\(id) is written without its Snooze")
+            }
+
+            let stamp = store.stamp()
+            XCTAssertEqual(try store.upgrade(locks: [lock], arrival: TopicArrival(inPlay: inPlay, insertPosition: position)), [])
+            XCTAssertEqual(store.stamp(), stamp, "a second upgrade writes nothing")
         }
-        XCTAssertThrowsError(try failing.write { transaction in
-            transaction.zen = ZenRecord(keptTopicID: "a", until: "never", changes: [.init(topicID: "b", previous: nil), .init(topicID: "c", previous: nil)])
-            try transaction.update("b") { $0.snoozedUntil = "never" }
-            try transaction.update("c") { $0.snoozedUntil = "never" }
-        })
-        let contents = try store.read()
-        XCTAssertNotNil(contents.zen, "Zen lists the Topics before any of them is Snoozed")
-        XCTAssertEqual(contents.records.map(\.snoozedUntil), [nil, nil, nil], "the Snoozes go in one swap or not at all")
     }
 }
 

@@ -31,7 +31,7 @@ final class CommandPaletteConfigTests: XCTestCase {
         XCTAssertEqual(keys.action(for: trigger("cmd+c")), .copyFolder)
         XCTAssertEqual(keys.action(for: trigger("cmd+shift+c")), .copyTmuxTarget)
         XCTAssertEqual(keys.action(for: trigger("ctrl+y")), .pasteFolder)
-        XCTAssertEqual(keys.action(for: trigger("ctrl+s")), .snoozeTopic)
+        XCTAssertNil(keys.action(for: trigger("ctrl+s")))
         XCTAssertEqual(keys.action(for: trigger("alt+1")), .choosePane)
         XCTAssertEqual(keys.action(for: trigger("alt+2")), .chooseWindow)
         XCTAssertEqual(keys.action(for: trigger("alt+3")), .chooseSession)
@@ -130,7 +130,7 @@ final class CommandPaletteConfigTests: XCTestCase {
         """)
         XCTAssertEqual(config.commandPalettes.map(\.name), ["Go to…", "Everything", "One kind"])
         XCTAssertEqual(config.commandPalettes.map(\.rules.show), [[.topic, .session, .sessionPath, .worktree], RowKind.all, [.agent]])
-        let every = "topic, snoozed, settled, session, topic-session, session-path, worktree, window, agent, command or tag"
+        let every = "topic, settled, session, topic-session, session-path, worktree, window, agent, command or tag"
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 12, message: "Command Palette show: expected " + every),
             ConfigProblem(path: root, line: 15, message: "Command Palette show: expected a list of " + every),
@@ -165,23 +165,23 @@ final class CommandPaletteConfigTests: XCTestCase {
             order: ranked
           tags:
             show: []
-          unsnooze_topic:
+          move_session:
             tiebreak: [frecency]
-          snooze_topics:
-            show: [tag, topic]
+          worktree_start:
+            show: [command]
         """)
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 2, message: "unknown pick list \"add_sesion\": expected add_session, move, move_session, "
-                          + "snooze_topics, unsnooze_topics, unsnooze_topic, tags or worktree_start"),
+                          + "tags or worktree_start"),
             ConfigProblem(path: root, line: 5, message: "pick_lists.add_session.show: expected session, topic-session, session-path or worktree"),
             ConfigProblem(path: root, line: 8, message: "unknown key \"pick_lists.move.order\""),
             ConfigProblem(path: root, line: 10, message: "pick_lists.tags.show: expected a list of tag"),
-            ConfigProblem(path: root, line: 12, message: "pick_lists.unsnooze_topic.tiebreak: expected open, running, visit, activity or length"),
+            ConfigProblem(path: root, line: 12, message: "pick_lists.move_session.tiebreak: expected open, running, visit, activity or length"),
         ])
-        for list in [ActionList.addSession, .move, .tags, .unsnoozeTopic] {
+        for list in [ActionList.addSession, .move, .tags, .moveSession] {
             XCTAssertEqual(config.rules(for: list), .standard, "\(list)")
         }
-        XCTAssertEqual(config.rules(for: .snoozeTopics), PickRules(show: [.tag, .topic]), "a good entry applies beside bad ones")
+        XCTAssertEqual(config.rules(for: .worktreeStart), PickRules(show: [.command]), "a good entry applies beside bad ones")
     }
 
     func testTheConfigurationGuideNamesEveryPickListAndRowKind() throws {

@@ -1,212 +1,98 @@
 import MuxifyCore
 
-/// What a check step does with the Topics that go on from it.
+/// What a check step does with the cards that go on from it. Each Action that starts with a check step is a case, and
+/// the compiler finds every place that must answer for it.
 enum CheckAction: Equatable {
-    /// Goes on to the "until" step.
-    case snooze
-    /// Runs at once: one Unsnooze write for the set.
-    case unsnooze
+    /// Choose In Play: the cards that are not Pinned, with the In Play ones checked first. Going on orders every checked
+    /// card: the first `places` fill the In Play places, and the others go to the top of the Bench.
+    case chooseInPlay(places: Int)
 
-    var verb: String {
+    var title: String {
         switch self {
-        case .snooze: "Snooze"
-        case .unsnooze: "Unsnooze"
+        case .chooseInPlay: "Choose In Play"
         }
     }
 
-    /// The Topics that the step lists, in list order. Snooze: the Topics list, then the Snoozed Topics. Unsnooze: the
-    /// Snoozed Topics. Settled Topics are in neither.
+    /// The cards that the step lists, in list order.
     func listed(_ topics: TopicsModel) -> [TopicsModel.Row] {
         switch self {
-        case .snooze: topics.rows + topics.snoozedRows
-        case .unsnooze: topics.snoozedRows
+        case .chooseInPlay: topics.rows.filter { !$0.isPinned }
         }
     }
 
-    /// The Topics that a Tag row reaches. Snooze: only the Topics list, so a Tag cannot change the time of an Already
-    /// Snoozed Topic, and the user checks that Topic by its own row (ADR 0036). Unsnooze: the Snoozed Topics.
-    func tagReach(_ topics: TopicsModel) -> [TopicsModel.Row] {
+    /// What going on with `count` cards does, for the note line.
+    func outcome(_ count: Int) -> String {
         switch self {
-        case .snooze: topics.rows
-        case .unsnooze: topics.snoozedRows
+        case .chooseInPlay(let places):
+            return "\(count) checked for \(places) In Play \(places == 1 ? "place" : "places")."
+                + (count > places ? " The last \(count - places) go to the top of the Bench." : "")
+        }
+    }
+
+    /// Runs the Action on the cards that go on, in list order.
+    @MainActor func goOn(with ids: [TopicGroupID], in palette: CommandPalette) {
+        switch self {
+        case .chooseInPlay(let places): palette.order(OrderDraft(cards: ids, places: places))
         }
     }
 }
 
-/// A check step (ADR 0035): the Topics that the user checked. The step lists the order, so the set keeps none.
+/// A check step (ADR 0035): the cards that the user checked. The step lists the order, so the set keeps none.
 struct CheckDraft: Equatable {
     let action: CheckAction
-    var checked: Set<String> = []
+    var checked: Set<TopicGroupID> = []
 
-    /// Checks every Topic of `ids`, or unchecks them when all are already checked: Space on a Tag row, and ⌘A.
-    mutating func flip(_ ids: Set<String>) {
+    /// Checks every card of `ids`, or unchecks them when all are already checked: ⌘A.
+    mutating func flip(_ ids: Set<TopicGroupID>) {
         if ids.isSubset(of: checked) { checked.subtract(ids) } else { checked.formUnion(ids) }
     }
-}
 
-/// A row of a check step. A Tag row is a shortcut to the Topics with the Tag that it reaches (`CheckAction.tagReach`), not a
-/// member of the set.
-enum CheckRow: Equatable {
-    case tag(Tag, topics: Set<String>)
-    case topic(String)
-
-    var topics: Set<String> {
-        switch self {
-        case .tag(_, let topics): topics
-        case .topic(let id): [id]
-        }
-    }
-
-    func box(checked: Set<String>) -> CheckBox { CheckBox(topics, checked: checked) }
-
-    /// What ↩ on this row does. With Topics checked, it goes on with them, on any row. With none, a Topic row goes on
-    /// with its Topic, and a Tag row checks its Topics and stays: one ↩ by reflex never acts on all Topics of a Tag.
-    func returnOutcome(checked: Set<String>) -> CheckOutcome {
-        if !checked.isEmpty { return .goOn(checked) }
-        switch self {
-        case .topic(let id): return .goOn([id])
-        case .tag(_, let topics): return .check(topics)
-        }
-    }
-}
-
-enum CheckOutcome: Equatable {
-    case goOn(Set<String>)
-    case check(Set<String>)
-}
-
-/// The box of a row: how many of its Topics are checked.
-enum CheckBox: Equatable {
-    case none, some, all
-
-    init(_ topics: Set<String>, checked: Set<String>) {
-        let count = topics.intersection(checked).count
-        self = count == 0 ? .none : count == topics.count ? .all : .some
-    }
-}
-
-/// The box that a row of a check step draws, in the colour of its Tag for a Tag row.
-struct RowCheck {
-    let box: CheckBox
-    var color: MarkColor? = nil
+    /// What ↩ on the row of `id` goes on with: the checked cards on any row, else this row's card.
+    func goingOn(from id: TopicGroupID) -> Set<TopicGroupID> { checked.isEmpty ? [id] : checked }
 }
 
 extension CommandPalette {
-    /// The Topics a check step lists (`CheckAction.listed`).
-    func checkable(_ action: CheckAction) -> [(id: String, row: TopicsModel.Row)] {
+    /// `ids` in list order, without the cards that the step no longer lists.
+    func listOrder(_ ids: Set<TopicGroupID>, _ action: CheckAction) -> [TopicGroupID] {
         guard let topics = store?.topics else { return [] }
-        return action.listed(topics).compactMap { row in
-            guard case .topic(let id) = row.id else { return nil }
-            return (id, row)
-        }
+        return action.listed(topics).map(\.id).filter(ids.contains)
     }
 
-    /// `ids` in list order, without the Topics that the step no longer lists.
-    func listOrder(_ ids: Set<String>, _ action: CheckAction) -> [String] {
-        checkable(action).map(\.id).filter(ids.contains)
-    }
+    func checkedIDs(_ draft: CheckDraft) -> [TopicGroupID] { listOrder(draft.checked, draft.action) }
 
-    func checkedIDs(_ draft: CheckDraft) -> [String] { listOrder(draft.checked, draft.action) }
-
-    /// The Topics of `rows` that have each Tag.
-    private func tagged(_ rows: [TopicsModel.Row]) -> [Tag: Set<String>] {
-        var tagged: [Tag: Set<String>] = [:]
-        for row in rows {
-            guard case .topic(let id) = row.id else { continue }
-            for tag in row.tags.compactMap(\.definition).map(\.tag) { tagged[tag, default: []].insert(id) }
-        }
-        return tagged
-    }
-
-    /// The Topics with `tag` that its Tag row reaches.
-    func topics(with tag: Tag, _ action: CheckAction) -> Set<String> {
-        guard let topics = store?.topics else { return [] }
-        return tagged(action.tagReach(topics))[tag] ?? []
-    }
-
-    /// Tags in Config order, then Topics, then Already Snoozed for Snooze, or Snoozed for Unsnooze. A Tag that reaches no
-    /// Topic has no row. A row stays in its place when it is checked.
-    func checkRows(_ draft: CheckDraft, rules: PickRules) -> PickList<PaletteItem> {
+    /// One row for each card that the step lists. A row stays in its place when it is checked.
+    func checkRows(_ draft: CheckDraft) -> PickList<PaletteItem> {
         guard let topics = store?.topics else { return .empty }
-        let checked = Set(checkedIDs(draft))
-        func plural(_ count: Int) -> String { count == 1 ? "1 Topic" : "\(count) Topics" }
-        func candidate(_ row: TopicsModel.Row) -> PickCandidate<PaletteItem>? {
-            guard case .topic(let id) = row.id else { return nil }
-            var trailing = topics.activeTopic == row.id ? "Active" : ""
-            var kind = RowKind.topic
-            if case .snoozed(let wake) = row.kind { trailing = "until " + wake; kind = .snoozed }
-            return PickCandidate(id: row.id.accessibilityID, kind: kind, title: row.title,
-                                 fields: (row.idleLabel.map { [.detail($0)] } ?? []) + row.sessions.map { .label($0.baseName) }
-                                    + SearchField.tags(row.tags),
-                                 trailing: trailing, mark: row.mark,
-                                 pick: .available(PaletteItem(ref: .choice(.check(.topic(id))))))
-        }
-        let reached = tagged(draft.action.tagReach(topics))
-        let listed = tagged(draft.action.listed(topics))
-        let tags = (topics.tags?.definitions ?? []).compactMap { definition -> PickCandidate<PaletteItem>? in
-            guard let ids = reached[definition.tag] else { return nil }
-            let row = CheckRow.tag(definition.tag, topics: ids)
-            let snoozed = (listed[definition.tag]?.count ?? 0) - ids.count
-            let count = row.box(checked: checked) == .some ? "\(ids.intersection(checked).count)/\(ids.count)" : plural(ids.count)
-            return PickCandidate(id: "tag-" + definition.tag.name, kind: .tag, title: definition.tag.description, fields: [.hidden(definition.tag.name)],
-                                 trailing: count + (snoozed > 0 ? " · \(snoozed) Snoozed" : ""),
-                                 pick: .available(PaletteItem(ref: .choice(.check(row)), color: definition.color)), titlePlace: .tag)
-        }
-        var sections: [PickSectionInput<PaletteItem>] = [.tags(tags, showsWhenEmpty: true)]
-        switch draft.action {
-        case .snooze:
-            sections += [
-                PickSectionInput(id: "topics", title: "Topics", rule: .ranked(showsWhenEmpty: true),
-                                 candidates: topics.rows.compactMap(candidate)),
-                PickSectionInput(id: "snoozed", title: "Already Snoozed", rule: .ranked(showsWhenEmpty: true),
-                                 candidates: topics.snoozedRows.compactMap(candidate)),
-            ]
-        case .unsnooze:
-            sections.append(PickSectionInput(id: "snoozed", title: "Snoozed", rule: .ranked(showsWhenEmpty: true),
-                                             candidates: topics.snoozedRows.compactMap(candidate)))
-        }
-        return FuzzyRanker.list(sections, query: FuzzyQuery(query), rules: rules)
+        let candidates = draft.action.listed(topics).map { cardCandidate($0, choice: .check($0.id)) }
+        return FuzzyRanker.list([PickSectionInput(id: "topics", title: "Topics", rule: .ranked(showsWhenEmpty: true),
+                                                  candidates: candidates)], query: FuzzyQuery(query), rules: PickRules())
     }
 
-    private func checkRow(of row: PickRow<PaletteItem>?) -> CheckRow? {
-        guard case .choice(.check(let checkRow))? = row?.pick.payload?.ref else { return nil }
-        return checkRow
+    private func checkRow(of row: PickRow<PaletteItem>?) -> TopicGroupID? {
+        guard case .choice(.check(let id))? = row?.pick.payload?.ref else { return nil }
+        return id
     }
 
-    /// The box a row draws; nil outside a check step.
-    func rowCheck(_ row: PickRow<PaletteItem>) -> RowCheck? {
-        guard case .check(let draft)? = flow, let checkRow = checkRow(of: row) else { return nil }
-        let box = checkRow.box(checked: Set(checkedIDs(draft)))
-        return RowCheck(box: box, color: row.pick.payload?.color)
+    /// Whether the row's box is checked; nil outside a check step.
+    func rowCheck(_ row: PickRow<PaletteItem>) -> Bool? {
+        guard case .check(let draft)? = flow, let id = checkRow(of: row) else { return nil }
+        return checkedIDs(draft).contains(id)
     }
 
-    /// The checked Topics by name, the checked Topics that the filter hides, and what ↩ does now.
+    /// How many cards are checked and what going on does with them, the checked cards that the filter hides, and what
+    /// ↩ does now.
     func checkNote(_ draft: CheckDraft) -> String? {
         let ids = checkedIDs(draft)
         let list = results
-        var parts: [String] = []
-        if !ids.isEmpty {
-            let named = ids.prefix(4).map(topicTitle(id:)).joined(separator: ", ")
-            parts.append("\(draft.action.verb)s: " + named + (ids.count > 4 ? " +\(ids.count - 4) more" : ""))
-            let shown = Set(list.rows.compactMap { row -> String? in
-                guard case .topic(let id)? = checkRow(of: row) else { return nil }
-                return id
-            })
-            let hidden = ids.filter { !shown.contains($0) }.count
-            if hidden > 0 { parts.append("\(hidden) checked \(hidden == 1 ? "is" : "are") not shown") }
-            if draft.action == .snooze, let next = nextTopicNote(ids) { parts.append(next) }
+        var parts = [draft.action.outcome(ids.count)]
+        let shown = Set(list.rows.compactMap(checkRow(of:)))
+        let hidden = ids.filter { !shown.contains($0) }.count
+        if hidden > 0 { parts.append("\(hidden) checked \(hidden == 1 ? "is" : "are") not shown") }
+        if let id = checkRow(of: selected(in: list)) {
+            let ordered = listOrder(draft.goingOn(from: id), draft.action)
+            parts.append("↩ goes on with " + (ordered.count == 1 ? cardTitle(ordered[0]) : "\(ordered.count) cards"))
         }
-        if let row = checkRow(of: selected(in: list)) {
-            switch row.returnOutcome(checked: Set(ids)) {
-            case .goOn(let going):
-                let ordered = listOrder(going, draft.action)
-                let what = ordered.count == 1 ? topicTitle(id: ordered[0]) : "\(ordered.count) Topics"
-                parts.append("↩ \(draft.action.verb)s \(what)" + (draft.action == .snooze ? "…" : ""))
-            case .check:
-                if case .tag(let tag, _) = row { parts.append("↩ checks " + tag.description) }
-            }
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        return parts.joined(separator: " · ")
     }
 
     /// Changes the checks and keeps the highlighted row.
@@ -215,62 +101,31 @@ extension CommandPalette {
         selectedID = id
     }
 
-    /// Space, ⇥ or a click on a row: a Topic row checks or unchecks its Topic, and a Tag row checks all its Topics,
-    /// or unchecks them when all are checked.
-    func check(_ row: CheckRow, highlighting id: String?) {
+    /// Space, ⇥ or a click on a row checks or unchecks its card.
+    func check(_ id: TopicGroupID, highlighting rowID: String?) {
         guard case .check(var draft) = flow else { return }
         draft.checked = Set(checkedIDs(draft))
-        draft.flip(row.topics)
-        updateCheck(draft, highlighting: id)
+        draft.flip([id])
+        updateCheck(draft, highlighting: rowID)
     }
 
     func checkSelected() {
         let row = selected(in: results)
-        guard let checkRow = checkRow(of: row) else { return }
-        check(checkRow, highlighting: row?.id)
+        guard let id = checkRow(of: row) else { return }
+        check(id, highlighting: row?.id)
     }
 
-    /// ⌘A: checks every Topic row that the filter shows, or unchecks them when all are checked.
+    /// ⌘A: checks every row that the filter shows, or unchecks them when all are checked.
     func checkShown() {
         guard case .check(var draft) = flow else { return }
-        let shown = Set(results.rows.compactMap { row -> String? in
-            guard case .topic(let id)? = checkRow(of: row) else { return nil }
-            return id
-        })
         draft.checked = Set(checkedIDs(draft))
-        draft.flip(shown)
+        draft.flip(Set(results.rows.compactMap(checkRow(of:))))
         updateCheck(draft, highlighting: selectedID)
     }
 
     /// ↩ on a row of a check step.
-    func returnOnCheck(_ row: CheckRow) {
-        guard let store, case .check(var draft) = flow else { return }
-        switch row.returnOutcome(checked: Set(checkedIDs(draft))) {
-        case .check(let ids):
-            draft.checked.formUnion(ids)
-            updateCheck(draft, highlighting: selectedID)
-        case .goOn(let ids):
-            switch draft.action {
-            case .snooze:
-                query = ""
-                replaceFlow(.snoozeUntil(ids))
-            case .unsnooze:
-                store.unsnoozeTopics(listOrder(ids, .unsnooze))
-            }
-        }
-    }
-
-    /// Unsnooze Topic while the Active Topic is not Snoozed: one row for each Snoozed Topic.
-    func unsnoozeRows(rules: PickRules) -> PickList<PaletteItem> {
-        let candidates = checkable(.unsnooze).map { id, row in
-            var trailing = ""
-            if case .snoozed(let wake) = row.kind { trailing = "until " + wake }
-            return PickCandidate(id: row.id.accessibilityID, kind: .snoozed, title: row.title,
-                                 fields: row.sessions.map { .label($0.baseName) } + SearchField.tags(row.tags),
-                                 trailing: trailing, mark: row.mark,
-                                 pick: .available(PaletteItem(ref: .choice(.unsnooze(id)))))
-        }
-        return FuzzyRanker.list([PickSectionInput(id: "snoozed", title: "Snoozed", rule: .ranked(showsWhenEmpty: true),
-                                                  candidates: candidates)], query: FuzzyQuery(query), rules: rules)
+    func returnOnCheck(_ id: TopicGroupID) {
+        guard case .check(let draft) = flow else { return }
+        draft.action.goOn(with: listOrder(draft.goingOn(from: id), draft.action), in: self)
     }
 }

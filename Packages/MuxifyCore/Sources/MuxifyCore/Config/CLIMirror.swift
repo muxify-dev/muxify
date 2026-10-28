@@ -1,4 +1,4 @@
-/// The path of each verb of the command line, such as "topic snooze". The CLI has one verb for each case, so a
+/// The path of each verb of the command line, such as "topic settle". The CLI has one verb for each case, so a
 /// mirror that names a case names a verb that exists.
 public enum CLIVerbPath: String, CaseIterable, Sendable {
     case browserOpen = "browser open"
@@ -18,8 +18,6 @@ public enum CLIVerbPath: String, CaseIterable, Sendable {
     case topicAddSession = "topic add-session"
     case topicForget = "topic forget"
     case topicSettle = "topic settle"
-    case topicSnooze = "topic snooze"
-    case topicUnsnooze = "topic unsnooze"
     case topicTag = "topic tag"
     case topicRename = "topic rename"
     case topicNote = "topic note"
@@ -28,6 +26,8 @@ public enum CLIVerbPath: String, CaseIterable, Sendable {
     case topicPin = "topic pin"
     case topicUnpin = "topic unpin"
     case topicMove = "topic move"
+    case topicChooseInPlay = "topic choose-in-play"
+    case topicReplaceFromBench = "topic replace-from-bench"
     case topicSortSessions = "topic sort-sessions"
     case topicList = "topic list"
     case topicShow = "topic show"
@@ -41,8 +41,6 @@ public enum CLIVerbPath: String, CaseIterable, Sendable {
     case windowRename = "window rename"
     case windowZoom = "window zoom"
     case windowKill = "window kill"
-    case zenStart = "zen start"
-    case zenEnd = "zen end"
     case agentList = "agent list"
     case agentConversation = "agent conversation"
     case topicMarkRead = "topic mark-read"
@@ -83,16 +81,13 @@ extension PaletteAction {
         case .selectNext, .selectPrev, .showActions: .noMirror("It moves the selection of the palette.")
         case .copyFolder, .copyTmuxTarget, .pasteFolder: .noMirror("It uses the macOS pasteboard.")
         case .revealFolder: .noMirror("It shows the folder in Finder.")
-        case .snoozeTopic: .verb(.topicSnooze)
         case .move: .verb(.windowMove)
         case .addSessionToTopic, .toggleNewWorktree: .verb(.topicAddSession)
         case .rename: .verbs([.topicRename, .sessionRename, .windowRename])
         case .editTags: .verb(.topicTag)
         case .setTopicNote, .clearTopicNote: .verb(.topicNote)
-        case .startZen: .verbs([.zenStart, .zenEnd])
         case .settleTopic: .verb(.topicSettle)
         case .forgetTopic: .verb(.topicForget)
-        case .unsnoozeTopic: .verb(.topicUnsnooze)
         case .reopenTopic: .verb(.topicReopen)
         case .startTopicFresh: .verb(.topicStartFresh)
         case .pinTopic: .verb(.topicPin)

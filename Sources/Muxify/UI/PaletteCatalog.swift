@@ -41,7 +41,7 @@ enum MoveDestination: Hashable {
 }
 
 /// What the Command Palettes of an App Window search, as sections for the ranker: one for each Source, with
-/// the topics Source's Snoozed and Settled sections after all of them.
+/// the topics Source's Settled section after all of them.
 struct PaletteCatalog {
     var windows: [TmuxWindow]
     var agents: [Agent]
@@ -65,23 +65,23 @@ struct PaletteCatalog {
     /// Whether the topics Source has rows: Topics are on, in a Local App Window.
     var offersTopics: Bool { topics?.topicsEnabled == true }
 
-    /// With `tagFilter`, only the Topics that have the Tag: open, Snoozed and Settled.
+    /// With `tagFilter`, only the Topics that have the Tag: open and Settled.
     func list(_ sources: [PaletteSource], query: String, tagFilter: Tag? = nil, rules: PickRules,
               order: PaletteOrder = .grouped) -> PickList<PaletteItem> {
         let query = FuzzyQuery(query)
-        // Under headers, a query ranks Snoozed and Settled Topics by score beside the open ones; in one list they already are.
+        // Under headers, a query ranks Settled Topics by score beside the open ones; in one list they already are.
         let ranksSetAside = order == .grouped && !query.isEmpty
         let sections = tagFilter.map { topicSections(only: $0, ranksSetAside: ranksSetAside) } ?? sections(sources, ranksSetAside: ranksSetAside)
         return FuzzyRanker.list(sections, query: query, rules: rules, order: order)
     }
 
-    /// The rows before any query, in the order of `sources`, then the Snoozed and Settled Topics, which are set aside:
+    /// The rows before any query, in the order of `sources`, then the Settled Topics, which are set aside:
     /// last with an empty query, and after an equal match for a query. With `ranksSetAside`, they join the open Topics'
     /// section. Windows show on an empty query only when theirs is the only Source, and a Window with an Agent is left
     /// out beside the agents Source. The Tags follow the Topics, for a query only: a Tag is not a place, but a filter
     /// that leads to places.
     func sections(_ sources: [PaletteSource], ranksSetAside: Bool = false) -> [PickSectionInput<PaletteItem>] {
-        let laterTopics = sources.contains(.topics) && !ranksSetAside ? snoozedAndSettledSections(only: nil) : []
+        let laterTopics = sources.contains(.topics) && !ranksSetAside ? settledSections(only: nil) : []
         return sources.flatMap { source -> [PickSectionInput<PaletteItem>] in
             switch source {
             case .commands:
@@ -108,10 +108,10 @@ struct PaletteCatalog {
 
     // MARK: Topics
 
-    /// The open Topics, then the Snoozed and Settled ones: in their own sections, or with `ranksSetAside` in one.
+    /// The open Topics, then the Settled ones: in their own section, or with `ranksSetAside` in one.
     private func topicSections(only tag: Tag?, ranksSetAside: Bool) -> [PickSectionInput<PaletteItem>] {
         let open = openTopicSection(only: tag)
-        let later = snoozedAndSettledSections(only: tag)
+        let later = settledSections(only: tag)
         guard ranksSetAside, var open else { return (open.map { [$0] } ?? []) + later }
         open.candidates += later.flatMap(\.candidates)
         return [open]
@@ -135,17 +135,12 @@ struct PaletteCatalog {
         }, showsWhenEmpty: false)
     }
 
-    private func snoozedAndSettledSections(only tag: Tag?) -> [PickSectionInput<PaletteItem>] {
-        guard offersTopics, let topics else { return [] }
-        let snoozed = (topics.groups.first { $0.kind == .snoozed }?.topics ?? [])
-            .filter { $0.has(tag) }.compactMap(snoozedCandidate)
+    private func settledSections(only tag: Tag?) -> [PickSectionInput<PaletteItem>] {
+        guard offersTopics else { return [] }
         let settled = records.filter { $0.settledAt != nil && (tag.map($0.tags.contains) ?? true) }
             .sorted { ($0.settledAt ?? "", $0.id) > ($1.settledAt ?? "", $1.id) }
             .map(settledCandidate)
-        return [
-            PickSectionInput(id: "snoozed", title: "Snoozed", rule: .ranked(showsWhenEmpty: true), candidates: snoozed),
-            PickSectionInput(id: "settled", title: "Settled", rule: .ranked(showsWhenEmpty: true), candidates: settled),
-        ]
+        return [PickSectionInput(id: "settled", title: "Settled", rule: .ranked(showsWhenEmpty: true), candidates: settled)]
     }
 
     private func age(_ key: VisitKey) -> String? {
@@ -168,19 +163,7 @@ struct PaletteCatalog {
             note: row.note, trailing: trailing, mark: row.mark,
             lastVisit: visits.last(.topic(row.id)), isCurrent: isCurrent, unopened: row.hasNoLiveSession,
             activity: row.sessions.flatMap(\.windows).map(\.sessionActivity).max() ?? 0,
-            pick: .available(PaletteItem(ref: .topic(id: id, window: window))), snooze: id)
-    }
-
-    private func snoozedCandidate(_ row: TopicsModel.Row) -> PickCandidate<PaletteItem>? {
-        guard case .topic(let id) = row.id else { return nil }
-        var wake: String?
-        if case .snoozed(let label) = row.kind { wake = "until " + label }
-        let window = EntryWindow.of(row, lastWindowByGroup: lastWindowByGroup, visits: visits)
-        return PickCandidate(
-            id: row.id.accessibilityID, kind: .snoozed, symbol: "z", title: row.title, fields: topicFields(row, type: "snoozed"),
-            note: [row.note, wake].compactMap { $0 }.joined(separator: " · "), trailing: window == nil ? "Reopen" : "",
-            lastVisit: visits.last(.topic(row.id)), isPinned: row.isPinned, isSetAside: true,
-            pick: .available(PaletteItem(ref: .topic(id: id, window: window))), snooze: id)
+            pick: .available(PaletteItem(ref: .topic(id: id, window: window))))
     }
 
     private func settledCandidate(_ record: TopicRecord) -> PickCandidate<PaletteItem> {
@@ -327,7 +310,7 @@ struct PaletteCatalog {
 
     // MARK: Move
 
-    /// The open, not Snoozed Topics minus the source's own, ranked for `query`, then the New Topic row titled
+    /// The open Topics minus the source's own, ranked for `query`, then the New Topic row titled
     /// by it. A Topic with a Session in the source's folder is offered too: Topics group Sessions, not folders.
     func moveList(_ source: TmuxWindow, query: String, scope: MoveDraft.Scope = .session, rules: PickRules) -> PickList<PaletteItem> {
         guard let topics else { return .empty }

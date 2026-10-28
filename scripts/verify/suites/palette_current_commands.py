@@ -39,24 +39,18 @@ class PaletteCurrentCommands(PaletteFixture):
     def test_topic_steps_keep_back_and_cancel_without_writes(self):
         path = self.current_topic('current-commands')
         before = path.read_text()
-        for title, step in [('Add a Session', 'Add a Session'), ('Snooze Topic', 'Snooze'),
-                            ('Settle Topic', 'Settle'), ('Zen', 'Zen'), ('Forget Topic', 'Forget'), ('Rename Topic', 'Rename')]:
+        for title, step in [('Add a Session', 'Add a Session'), ('Settle Topic', 'Settle'), ('Forget Topic', 'Forget'),
+                            ('Rename Topic', 'Rename')]:
             self.run_command(title)
             self.s.wait_rows(lambda rs: step in self.text('palette-breadcrumb', rs), title + ' did not open its step')
             if title == 'Rename Topic':
                 # Rename starts with the title in the field, and Back works only in an empty field.
                 self.s.act('set', 'palette-search', '')
-            if title == 'Snooze Topic':
-                self.s.act('action', 'palette-search', 'Back')
-                self.s.wait_rows(lambda rs: 'Snooze Topics › check' in self.text('palette-breadcrumb', rs)
-                                 and 'checked' in self.s.row('palette-row-topic-current-commands', rs).get('accessibilityValue', ''),
-                                 'Back did not go to the check step with the Topic checked')
             self.back(title)
         after = json.loads(path.read_text())
         original = json.loads(before)
-        for key in ['title', 'snoozed_until', 'settled_at']:
+        for key in ['title', 'settled_at']:
             self.assertEqual(after.get(key), original.get(key), key + ' changed on Cancel')
-        self.assertFalse((self.s.root/'state/muxify/zen.json').exists())
 
     def test_rename_window_prefills_name_keeps_back_and_saves_current_window(self):
         window = self.topic('rename-window-command', session=True)
@@ -132,12 +126,12 @@ class PaletteCurrentCommands(PaletteFixture):
     def test_a_topic_row_shows_its_note_and_its_actions_set_and_clear_it(self):
         s = self.s
         self.topic('note-row', note='Repro with seed 4411')
-        self.topic('note-row-snoozed', note='Wait for the release', snoozed_until='2099-01-01T00:00:00Z')
+        self.topic('note-row-settled', note='Wait for the release', settled_at='2026-01-01T00:00:00Z')
         self.go_to('note-row')
-        key, snoozed = 'palette-row-topic-note-row', 'palette-row-topic-note-row-snoozed'
-        rs = s.wait_rows(lambda rs: s.has(key, rs) and s.has(snoozed, rs), 'Go to… did not list the Topics')
+        key, settled = 'palette-row-topic-note-row', 'palette-row-topic-note-row-settled'
+        rs = s.wait_rows(lambda rs: s.has(key, rs) and s.has(settled, rs), 'Go to… did not list the Topics')
         self.assertIn('Repro with seed 4411', self.text(key, rs), 'a Topic row does not show its Note')
-        self.assertIn('Wait for the release · until', self.text(snoozed, rs), 'a Snoozed row does not show its Note before its wake time')
+        self.assertIn('Wait for the release · ', self.text(settled, rs), 'a Settled row does not show its Note before its Settle date')
         s.act('action', 'palette-search', 'Close')
         self.go_to('seed 4411')
         rs = s.wait_rows(lambda rs: s.has('palette-search', rs), 'Go to… closed')
@@ -155,17 +149,6 @@ class PaletteCurrentCommands(PaletteFixture):
         s.act('set', 'palette-search', 'Ship it\nafter review')
         s.act('action', 'palette-search', 'Accept')
         wait(lambda: self.record('note-row').get('note') == 'Ship it after review', 'the Set Topic Note action did not save one line')
-
-    def test_the_topics_commands_come_before_the_topic_commands(self):
-        self.current_topic('snooze-order')
-        self.topic('snooze-order-snoozed', snoozed_until='never')
-        for verb in ['Snooze', 'Unsnooze']:
-            self.search(verb.lower() + ' topic')
-            many, one = 'palette-row-command-%s Topics…' % verb, 'palette-row-command-%s Topic' % verb
-            rs = self.s.wait_rows(lambda rs: self.s.has(many, rs) and self.s.has(one, rs), 'both %s Commands did not show' % verb)
-            ids = self.s.ids(rs)
-            self.assertLess(ids.index(many), ids.index(one), '%s Topic came before %s Topics…' % (verb, verb))
-            self.s.act('action', 'palette-search', 'Close')
 
     def remembered(self, path):
         """Waits until the app records the Topic's live Session, so that a removal has something to forget."""
@@ -204,9 +187,9 @@ class PaletteCurrentCommands(PaletteFixture):
         self.assert_empty_topic('remove-kill', path, self.s.tmux('list-sessions', '-F', '#{session_name}').split())
 
     def test_commands_omit_unavailable_topic_and_tab_actions(self):
-        for title in ['Add a Session', 'Snooze Topic', 'Settle Topic', 'Zen', 'Move Pane with Active Tab',
+        for title in ['Add a Session', 'Settle Topic', 'Move Pane with Active Tab',
                       'Remove Session from Topic', 'Forget Topic', 'Rename Topic', 'Move Topic Up', 'Move Topic Down',
-                      'Pin Topic', 'Unsnooze Topic', 'Unsnooze Topics…', 'Set Topic Note', 'Clear Topic Note']:
+                      'Pin Topic', 'Set Topic Note', 'Clear Topic Note']:
             self.search(title)
             self.assertFalse(self.s.has('palette-row-command-' + title), title + ' had no target')
             self.s.act('action', 'palette-search', 'Close')
@@ -234,66 +217,13 @@ class PaletteCurrentCommands(PaletteFixture):
         self.run_command('Move Topic Down')
         wait(lambda: order('move-current') > order('move-upper'), 'Move Topic Down did not move the Active Topic back')
 
-    def test_pin_topic_flips_to_unpin_topic_and_unsnooze_topic_unsnoozes_a_snoozed_active_topic_at_once(self):
+    def test_pin_topic_flips_to_unpin_topic(self):
         self.current_topic('pin-current')
-        self.assertTrue(self.absent('Unsnooze Topic'), 'Unsnooze Topic shows with no Snoozed Topic')
         self.run_command('Pin Topic')
         wait(lambda: self.record('pin-current').get('pinned') is True, 'Pin Topic did not Pin the Active Topic')
         self.assertTrue(self.absent('Pin Topic'), 'Pin Topic shows for a Pinned Topic')
         self.run_command('Unpin Topic')
         wait(lambda: not self.record('pin-current').get('pinned'), 'Unpin Topic did not Unpin the Active Topic')
-
-        window = self.topic('unsnooze-current', session=True, snoozed_until='never')
-        self.select(window)
-        self.run_command('Unsnooze Topic')
-        wait(lambda: 'snoozed_until' not in self.record('unsnooze-current'), 'Unsnooze Topic did not Unsnooze the Active Topic')
-
-    def test_unsnooze_topics_lists_only_snoozed_topics_and_unsnoozes_the_checked_set_at_once(self):
-        s = self.s
-        self.current_topic('us-current')
-        for name in ['us-a', 'us-b', 'us-c']:
-            self.topic(name, snoozed_until='2099-01-01T00:00:00Z')
-        self.run_command('Unsnooze Topics…')
-        rs = s.wait_rows(lambda rs: 'Unsnooze Topics › check' in self.text('palette-breadcrumb', rs) and s.has('palette-row-topic-us-c', rs),
-                         'Unsnooze Topics… did not open the check step of the Snoozed Topics')
-        self.assertFalse(s.has('palette-row-topic-us-current', rs), 'the check step lists a Topic that is not Snoozed')
-        self.assertIn('until', self.text('palette-row-topic-us-a', rs), 'a Snoozed row does not show its wake time')
-        for name in ['us-a', 'us-b']:
-            s.act('press', 'palette-row-topic-' + name)
-        rs = s.wait_rows(lambda rs: '↩ Unsnoozes 2 Topics' in self.text('palette-note', rs), 'the note does not say what Return does')
-        self.assertIn('Unsnoozes: us-a, us-b', self.text('palette-note', rs), 'the note does not name the checked Topics')
-        s.act('action', 'palette-search', 'Accept')
-        s.wait_rows(lambda rs: not s.has('palette-search', rs), 'Unsnooze Topics… did not close the palette')
-        wait(lambda: all('snoozed_until' not in self.record(name) for name in ['us-a', 'us-b']), 'the checked Topics are still Snoozed')
-        self.assertEqual(self.record('us-c').get('snoozed_until'), '2099-01-01T00:00:00Z', 'a Topic that was not checked was Unsnoozed')
-
-    def test_unsnooze_topic_with_an_active_topic_that_is_not_snoozed_opens_the_choose_step(self):
-        s = self.s
-        self.current_topic('uc-current')
-        self.topic('uc-one', snoozed_until='2099-01-01T00:00:00Z')
-        self.topic('uc-two', snoozed_until='2099-01-01T00:00:00Z')
-        self.run_command('Unsnooze Topic')
-        rs = s.wait_rows(lambda rs: self.text('palette-breadcrumb', rs).startswith('Unsnooze Topic') and s.has('palette-row-topic-uc-one', rs),
-                         'Unsnooze Topic did not open the choice of the Snoozed Topics')
-        self.assertFalse(s.has('palette-row-topic-uc-current', rs), 'the choice lists a Topic that is not Snoozed')
-        self.assertIn('snoozed_until', self.record('uc-one'), 'opening the choice Unsnoozed a Topic')
-        s.act('press', 'palette-row-topic-uc-one')
-        s.wait_rows(lambda rs: not s.has('palette-search', rs), 'choosing a row did not close the palette')
-        wait(lambda: 'snoozed_until' not in self.record('uc-one'), 'Unsnooze Topic did not Unsnooze the chosen Topic')
-        self.assertIn('snoozed_until', self.record('uc-two'), 'Unsnooze Topic Unsnoozed a Topic that was not chosen')
-
-    def test_end_zen_is_available_in_no_topic_and_closes_commands(self):
-        self.current_topic('zen-current-command')
-        self.run_command('Zen')
-        self.s.wait_rows(lambda rs: self.s.has('palette-row-never', rs), 'Zen presets did not show')
-        self.s.act('press', 'palette-row-never')
-        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Zen did not close')
-        self.select(self.base)
-        self.run_command('End Zen')
-        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'End Zen did not close Commands')
-        self.search('End Zen')
-        self.assertFalse(self.s.has('palette-row-command-End Zen'), 'Zen remained active')
-        self.s.act('action', 'palette-search', 'Close')
 
     def test_layout_commands_show_their_shortcut_and_change_the_window(self):
         self.search('Maximize Terminal')

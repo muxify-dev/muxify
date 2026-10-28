@@ -16,7 +16,6 @@ import unittest
 from scripts.verify.sandbox import Sandbox, remove_topic, wait
 
 SHELL = '/bin/zsh -f'
-LATER = '2099-01-01T00:00:00Z'
 TAGS = '  tags:\n    work: {color: blue}\n    personal: {}\n'
 CORNER = '  tag_placement: corner\n'
 
@@ -148,18 +147,18 @@ class TopicsTagsSidebar(unittest.TestCase):
         self.s.wait_rows(lambda rs: self.s.has('topic-tg-off', rs) and not self.s.has('tags-topic-tg-off', rs),
                          'a card shows Tags with no topics.tags')
 
-    def test_a_closed_snoozed_card_shows_no_tags_and_the_opened_one_shows_them_in_the_title_line(self):
-        self.topic('tg-snoozed', ['work'], session=False, snoozed_until=LATER)
-        rs = self.s.wait_rows(lambda rs: self.s.has('snoozed-topics', rs), 'the Snoozed group did not show')
-        if self.s.row('snoozed-topics', rs).get('accessibilityValue') != 'expanded':
-            self.s.act('press', 'snoozed-topics')
-        self.addCleanup(lambda: self.s.has('snoozed-topics') and self.s.row('snoozed-topics').get('accessibilityValue') == 'expanded'
-                        and self.s.act('press', 'snoozed-topics'))
-        self.s.wait_rows(lambda rs: self.s.has('topic-tg-snoozed', rs), 'the Snoozed card did not show')
+    def test_a_closed_settled_card_shows_no_tags_and_the_opened_one_shows_them_in_the_title_line(self):
+        self.topic('tg-settled', ['work'], session=False, settled_at='2026-01-01T00:00:00Z')
+        rs = self.s.wait_rows(lambda rs: self.s.has('settled-topics', rs), 'the Settled group did not show')
+        if self.s.row('settled-topics', rs).get('accessibilityValue') != 'expanded':
+            self.s.act('press', 'settled-topics')
+        self.addCleanup(lambda: self.s.has('settled-topics') and self.s.row('settled-topics').get('accessibilityValue') == 'expanded'
+                        and self.s.act('press', 'settled-topics'))
+        self.s.wait_rows(lambda rs: self.s.has('topic-tg-settled', rs), 'the Settled card did not show')
         time.sleep(1)
-        self.assertFalse(self.s.has('tags-topic-tg-snoozed'), 'a closed Snoozed card shows Tags')
-        self.s.act('press', 'topic-tg-snoozed')
-        self.tags('tg-snoozed', 'work', 'the opened Snoozed card does not show its Tag Mark in its title line',
+        self.assertFalse(self.s.has('tags-topic-tg-settled'), 'a closed Settled card shows Tags')
+        self.s.act('press', 'topic-tg-settled')
+        self.tags('tg-settled', 'work', 'the opened Settled card does not show its Tag Mark in its title line',
                   lambda tags, header: header[1] - tags[1] < 14)
 
     def test_topic_tags_names_the_tags_of_an_agents_topic(self):

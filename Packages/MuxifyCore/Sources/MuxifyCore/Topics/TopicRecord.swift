@@ -55,7 +55,6 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     public var settledAt: String?
     public var outcome: String?
     public var order: Double?
-    public var snoozedUntil: String?
     public var sessions: [JSONValue] = []
     /// The user ordered the Sessions by hand, so `sessions` gives their order (`session_order: manual`).
     public var hasManualSessionOrder = false
@@ -72,13 +71,6 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     var unreadableTags: JSONValue?
     public var unknownFields: [String: JSONValue] = [:]
 
-    public func isSnoozed(at now: Date) -> Bool {
-        guard let deadline = snoozeDeadline else { return false }
-        return !deadline.isDue(at: now)
-    }
-
-    public var snoozeDeadline: SnoozeDeadline? { snoozedUntil.flatMap(SnoozeDeadline.init(stored:)) }
-
     public init(id: String, title: String? = nil, slug: String? = nil) {
         self.id = id
         self.title = title
@@ -88,7 +80,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case id, title, slug, outcome, order, sessions
         case createdAt = "created_at", settledAt = "settled_at"
-        case snoozedUntil = "snoozed_until", sessionOrder = "session_order", pinned, unread, tags, note
+        case sessionOrder = "session_order", pinned, unread, tags, note
     }
 
     private struct FieldKey: CodingKey {
@@ -110,7 +102,6 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         settledAt = try values.decodeIfPresent(String.self, forKey: .settledAt)
         outcome = try values.decodeIfPresent(String.self, forKey: .outcome)
         order = try values.decodeIfPresent(Double.self, forKey: .order)
-        snoozedUntil = try values.decodeIfPresent(String.self, forKey: .snoozedUntil)
         sessions = try values.decodeIfPresent([JSONValue].self, forKey: .sessions) ?? []
         hasManualSessionOrder = (try? values.decodeIfPresent(String.self, forKey: .sessionOrder)) == "manual"
         isPinned = (try? values.decodeIfPresent(Bool.self, forKey: .pinned)) == true
@@ -143,7 +134,6 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         try values.encodeIfPresent(settledAt, forKey: .settledAt)
         try values.encodeIfPresent(outcome, forKey: .outcome)
         try values.encodeIfPresent(order, forKey: .order)
-        try values.encodeIfPresent(snoozedUntil, forKey: .snoozedUntil)
         try values.encode(sessions, forKey: .sessions)
         if hasManualSessionOrder { try values.encode("manual", forKey: .sessionOrder) }
         if isUnread { try values.encode(true, forKey: .unread) }

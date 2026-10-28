@@ -1,5 +1,7 @@
 # A check step checks Topics for Snooze and Unsnooze, and Tags are shortcuts
 
+> **Update 2026-10-28:** Choose In Play now starts with the check step, and it lists Locked Sessions too ([ADR 0054](0054-choose-in-play-and-replace-from-bench-replace-snooze-and-zen.md)). Space checks only in an empty field, so a query can hold a space. ⇥ and a click still check in any field.
+
 > **Update 2026-10-21:** [ADR 0036](0036-a-tag-row-in-snooze-topics-checks-only-topics-that-are-not-snoozed.md) changes the Tag row of Snooze Topics…. It reaches only the Topics of the Tag that are not Snoozed, and it shows " · N Snoozed" when the Tag has Already Snoozed Topics.
 
 This replaces [ADR 0025](0025-a-pick-step-collects-topics-and-tags-as-chips.md) for Snooze Topics…. The pick step held the picked Topics and Tags as chips in the search field. To change a set, the user removed a chip and picked again, and one search was necessary for each Topic. Also, a Tag chip held all its Topics, so the user could not take out one Topic of a Tag.

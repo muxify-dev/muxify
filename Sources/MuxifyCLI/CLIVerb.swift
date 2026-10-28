@@ -20,8 +20,6 @@ struct CLIVerb {
     let options: [CLIOption]
     /// The target options that the reader takes, before `build` checks which of them the command accepts.
     var targets: [RequestInvocation.TargetOption] = []
-    /// Snooze and Unsnooze act on each Topic of a repeated `--topic`.
-    var repeatsTopic = false
     var afterDashes = AfterDashes.refused
     /// Old forms of this verb. Each fails with a message that names the new form, before `build` runs.
     var removed: [RemovedForm] = []
@@ -66,7 +64,7 @@ struct ParsedArguments {
     init(_ arguments: ArraySlice<String>, for verb: CLIVerb, environment: [String: String], now: Date) throws {
         self.environment = environment
         self.now = now
-        targets = RequestInvocation.TargetOptions(accepting: verb.targets, repeatsTopic: verb.repeatsTopic)
+        targets = RequestInvocation.TargetOptions(accepting: verb.targets)
         var args = arguments
         while let word = args.popFirst() {
             if word == "--" {
@@ -106,6 +104,11 @@ struct ParsedArguments {
     }
 
     func values(_ name: String) -> [String] { given.filter { $0.name == name }.compactMap(\.value) }
+
+    /// The values of the options `names`, in the order of the command line, for options whose order matters together.
+    func values(of names: [String]) -> [(name: String, value: String)] {
+        given.compactMap { option in option.value.flatMap { names.contains(option.name) ? (option.name, $0) : nil } }
+    }
 
     /// How many of these options the command line gives, each time counted.
     func count(of names: [String]) -> Int { given.filter { names.contains($0.name) }.count }

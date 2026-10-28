@@ -5,17 +5,16 @@ public enum AgentMark: String, CaseIterable, Comparable, Sendable {
     case working, done, failed, blocked
 
     /// The mark of one Agent. A blocked Agent shows its Notification while it stays blocked, read or Unread; done and
-    /// failed show theirs only while Unread. Each type shows only while its `notifications.*_enabled` is on. A quiet
-    /// Agent, in a Snoozed Topic or in No Topic while Zen is on, shows no Notification, only the Working mark.
-    public init?(_ agent: Agent, notifications: Config.Notifications, quiet: Bool = false) {
+    /// failed show theirs only while Unread. Each type shows only while its `notifications.*_enabled` is on.
+    public init?(_ agent: Agent, notifications: Config.Notifications) {
         switch agent.status {
         case .working?:
             self = .working
-        case .blocked? where notifications.blockedEnabled && !quiet:
+        case .blocked? where notifications.blockedEnabled:
             self = .blocked
-        case .failed? where agent.unread && notifications.failedEnabled && !quiet:
+        case .failed? where agent.unread && notifications.failedEnabled:
             self = .failed
-        case .done? where agent.unread && notifications.doneEnabled && !quiet:
+        case .done? where agent.unread && notifications.doneEnabled:
             self = .done
         default:
             return nil

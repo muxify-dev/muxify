@@ -34,17 +34,9 @@ extension CommandPalette {
             store.changeRead(action == .markRead ? .read : .unread, in: item.readTarget)
             return
         }
-        if case .tag(let tag) = item.ref, action == .snoozeTopic {
-            store.presentCheck(CheckDraft(action: .snooze, checked: topics(with: tag, .snooze)), keepingHistory: true)
-            return
-        }
         if case .topic(let id, _) = item.ref,
            let topic = store.topicWatcher.records.first(where: { $0.id == id }) {
             switch action {
-            case .snoozeTopic: store.presentSnooze(id, keepingHistory: true)
-            case .startZen:
-                if store.topicWatcher.zen == nil { begin(.zen(id), keepingHistory: true) }
-                else { close(); store.endZen() }
             case .settleTopic: begin(.confirm(PaletteConfirmation(.settle(topic))), keepingHistory: true)
             case .forgetTopic: begin(.confirm(PaletteConfirmation(.forget(topic))), keepingHistory: true)
             case .rename: begin(.text(.renameTopic(topic)), text: topic.title ?? "", keepingHistory: true)
@@ -54,7 +46,6 @@ extension CommandPalette {
             case .addSessionToTopic: store.refreshSessionPaths(); begin(.addSession(topic), keepingHistory: true)
             case .pinTopic: close(); store.pinTopic(id, true)
             case .unpinTopic: close(); store.pinTopic(id, false)
-            case .unsnoozeTopic: close(); store.unsnoozeTopic(id)
             case .reopenTopic: close(); store.reopenTopic(id, .reopen)
             case .startTopicFresh: close(); store.reopenTopic(id, .startFresh)
             default: break

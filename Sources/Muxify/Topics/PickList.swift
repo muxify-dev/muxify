@@ -5,7 +5,7 @@ import MuxifyCore
 struct SearchField: Equatable {
     enum Place: Equatable {
         case title
-        /// "topic", "snoozed", ...; shown in the detail line only when it matched.
+        /// "topic", "settled", ...; shown in the detail line only when it matched.
         case typeWord
         /// Always in the detail line: a Settled Topic's outcome, a directory in New Topic.
         case detail
@@ -122,13 +122,11 @@ struct PickCandidate<Payload: Equatable> {
     var unopened = false
     /// The Session's last activity in tmux, which breaks a tie after the last visit.
     var activity = 0
-    /// A Snoozed or Settled Topic: seldom the place to go, so it goes after an equal match.
+    /// A Settled Topic: seldom the place to go, so it goes after an equal match.
     var isSetAside = false
     let pick: Pick<Payload>
     /// The text ⌃Y types where the Focus was before the picker opened, as pop's Yank does. A terminal gets it as one shell word.
     var paste: String? = nil
-    /// The id of the Topic that ⌃S Snoozes.
-    var snooze: String? = nil
     /// `.tag` when the title is a Tag, such as "#backend", so only a `#` word matches it.
     var titlePlace: SearchField.Place = .title
 
@@ -148,7 +146,6 @@ struct PickRow<Payload: Equatable>: Identifiable, Equatable {
     let mark: RowMark?
     let pick: Pick<Payload>
     let paste: String?
-    let snooze: String?
 }
 
 /// A Tag chip after a row's title.
@@ -311,7 +308,7 @@ enum FuzzyRanker {
                 detail: detail(candidate.searchFields, note: candidate.note, match: match),
                 tags: tags(candidate.searchFields, match: match),
                 trailing: candidate.trailing, mark: candidate.mark,
-                pick: candidate.pick, paste: candidate.paste, snooze: candidate.snooze)
+                pick: candidate.pick, paste: candidate.paste)
     }
 
     /// The Tag fields after the title, and their marks.

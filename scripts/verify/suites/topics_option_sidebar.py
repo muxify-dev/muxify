@@ -96,7 +96,7 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.show_view('sessions')
         live = dict(line.split('|', 1) for line in self.s.tmux('list-sessions', '-F', '#{session_id}|#{session_name}').splitlines())
         complete = lambda rs: (all(self.s.has('session-' + sid, rs) for sid in live) and not self.topic_rows(rs)
-                               and not self.s.has('snoozed-topics', rs) and not self.s.has('settled-topics', rs))
+                               and not self.s.has('settled-topics', rs))
         latency, rs = self.rows_until(complete, seconds=5)
         self.assertIsNotNone(latency, 'Sessions view: missing %s; Topic rows %s'
                              % ([name for sid, name in live.items() if not self.s.has('session-' + sid, rs)], self.topic_rows(rs)))

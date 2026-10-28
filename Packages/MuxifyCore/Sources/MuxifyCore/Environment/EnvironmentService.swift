@@ -255,8 +255,8 @@ public struct EnvironmentService: Sendable {
             case .cardAtEnd: return .cardAtEnd
             case .sessionAtEnd: return .sessionAtEnd
             case .cardHidden: return .cardHidden
-            case .zenOn: return .zenOn
             case .windowNotInSession: return .windowNotInSession
+            case .inPlayOff: return .inPlayOff
             }
         case let error as TopicEditFailure:
             switch error {
@@ -270,6 +270,14 @@ public struct EnvironmentService: Sendable {
             case .sourceUnavailable: return .sourceUnavailable
             case .destinationUnavailable: return .topicUnavailable
             case .chooseSession: return .unsupported
+            }
+        case let error as TopicOrder.Failure:
+            switch error {
+            case .sourceUnavailable, .anchorUnavailable: return .topicUnavailable
+            case .notInPlay: return .cardNotInPlay
+            case .notBenched: return .cardNotBenched
+            case .pinned: return .cardPinned
+            case .chosenTwice: return .unsupported
             }
         case is TopicTransaction.Failure: return .topicUnavailable
         case is FileLock.Busy: return .storeBusy
@@ -289,7 +297,7 @@ extension EnvironmentCommand {
     var lane: Lane {
         switch self {
         case .list, .show: return .read
-        case .snooze, .unsnooze, .tags, .note, .pin, .unpin, .moveCard, .startZen, .endZen, .markRead, .markAllRead: return .records
+        case .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .markRead, .markAllRead: return .records
         case .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename,
              .reopen, .startFresh, .moveSession, .sortSessions, .lock, .unlock, .newWindow, .newSession, .renameSession,
              .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession: return .edit
@@ -305,7 +313,7 @@ extension EnvironmentCommand {
         case .markRead(_, let scope): return scope == .topic
         case .markAllRead: return false
         case .list, .show, .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename, .reopen, .startFresh,
-             .moveSession, .sortSessions, .lock, .unlock, .snooze, .unsnooze, .tags, .note, .pin, .unpin, .moveCard, .startZen, .endZen:
+             .moveSession, .sortSessions, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench:
             return true
         }
     }
@@ -364,8 +372,9 @@ public enum TopicRequestError: Error, CustomStringConvertible {
     case cardAtEnd(card: String, up: Bool, pinned: Bool)
     case sessionAtEnd(session: String, topic: String, up: Bool)
     case cardHidden(String)
-    case zenOn
     case windowNotInSession(window: String, anchor: String)
+    /// Choose In Play and Replace from Bench need `topics.in_play`.
+    case inPlayOff
     /// An old form of a request that now fails, with the message that names the new form.
     case removedForm(String)
 
@@ -401,8 +410,8 @@ public enum TopicRequestError: Error, CustomStringConvertible {
         case .sessionAtEnd(let session, let topic, let up):
             return "The Session \(session) is the \(up ? "first" : "last") Session of the Topic \(topic)."
         case .cardHidden(let message): return message
-        case .zenOn: return "Zen is on. One Zen at a time: end it first with muxify zen end."
         case .windowNotInSession(let window, let anchor): return "The Window \(anchor) is not in the Session of the Window \(window)."
+        case .inPlayOff: return "The Config does not set topics.in_play, so no card is In Play."
         case .sessionNameInvalid(let name): return "\(name) cannot name a tmux Session: it is empty, or it has a period, a colon or a control character."
         case .branchUnavailable(let branch, let worktree): return "No local branch \(branch) is in the repository of \(worktree)."
         case .branchCheckedOut(let branch, let worktree):

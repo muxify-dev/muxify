@@ -110,14 +110,14 @@ final class ConfigTests: XCTestCase {
     }
 
     func testARemovedKeybindingNameIsAProblemThatNamesItsReplacement() throws {
-        let config = try load("keybindings:\n  zen_mode: cmd+e\n  move_pane: cmd+shift+t")
-        XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 2, message: "zen_mode is gone: use toggle_zen")])
+        let config = try load("keybindings:\n  move_session_to_topic: cmd+e\n  move_pane: cmd+shift+t")
+        XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 2, message: "move_session_to_topic is gone: use move_session")])
         XCTAssertNil(config.keybinds.action(for: trigger("cmd+e"), focus: nil), "a removed name still binds its trigger")
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleZen), trigger("shift+alt+cmd+s"))
+        XCTAssertEqual(config.keybinds.firstTrigger(for: .moveSession), trigger("cmd+shift+m"))
         XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+t"), focus: .terminal), .movePane)
         XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+t"), focus: .browser), .reopenClosedTab,
                        "restating Move Pane's default took the key from Reopen Closed Tab")
-        XCTAssertFalse(Config.template.contains("zen_mode"))
+        XCTAssertFalse(Config.template.contains("move_session_to_topic"))
     }
 
     func testARemovedPaletteNameIsAProblemEvenWhereTheGlobalScopeUsesIt() throws {
@@ -148,7 +148,6 @@ final class ConfigTests: XCTestCase {
             (.reopenClosedTab, ["cmd+shift+t"]),
             (.moveWindow, []),
             (.moveSession, ["cmd+shift+m"]),
-            (.toggleZen, ["shift+alt+cmd+s"]),
             (.toggleTerminal, ["cmd+j"]),
             (.toggleBrowser, ["cmd+b"]),
         ]

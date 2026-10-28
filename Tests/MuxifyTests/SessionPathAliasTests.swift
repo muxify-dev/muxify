@@ -15,7 +15,7 @@ final class SessionPathAliasTests: XCTestCase {
     private func catalog(records: [TopicRecord] = [], windows: [TmuxWindow] = [], mode: SidebarMode = .topics) -> PaletteCatalog {
         var config = Config()
         config.sessionPaths = [vault, game]
-        let model = TopicsModel(records: records, windows: windows, config: config, selection: TopicSelection(), mode: mode, agents: [], now: Date())
+        let model = TopicsModel(records: records, windows: windows, config: config, selection: TopicSelection(), mode: mode, agents: [])
         return PaletteCatalog(windows: windows, agents: [], sessionPaths: [vault, game], topics: model, records: records)
     }
 

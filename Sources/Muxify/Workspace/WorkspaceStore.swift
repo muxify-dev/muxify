@@ -20,8 +20,6 @@ struct SessionGroup: Identifiable, Equatable {
 final class WorkspaceStore {
     private(set) var attachmentStatus: String?
     @ObservationIgnored private var attachmentStatusID = UUID()
-    private(set) var wakeToast: String?
-    @ObservationIgnored private var wakeToastDismiss: DispatchWorkItem?
     @ObservationIgnored private var readVisits = AgentReadVisits()
     @ObservationIgnored private var readWindowID: String?
     @ObservationIgnored private var readGeneration = 0
@@ -278,7 +276,7 @@ final class WorkspaceStore {
             if let last = members.first(where: { $0.id == topicSelection.lastWindowByGroup[.noTopic] }) { return last }
             return EntryWindow.ofSession(members)
         }
-        guard let row = (topics.rows + topics.snoozedRows).first(where: { $0.id == id }) else { return nil }
+        guard let row = topics.rows.first(where: { $0.id == id }) else { return nil }
         return EntryWindow.of(row, lastWindowByGroup: topicSelection.lastWindowByGroup, visits: visits)
     }
 
@@ -340,8 +338,8 @@ final class WorkspaceStore {
     }
 
     /// Whether Move Topic Up (`previous`) or Down (`next`) can move the card of the Active Topic or Locked Session, as
-    /// the card's own Move Up and Move Down do. Not at that end of the cards with its Pin, for No Topic, for a Snoozed or
-    /// Settled Topic, and outside Topics mode, where the cards do not show.
+    /// the card's own Move Up and Move Down do. Not at that end of the cards with its Pin, for No Topic, for a Settled
+    /// Topic, and outside Topics mode, where the cards do not show.
     func canMoveActiveCard(_ direction: StepDirection) -> Bool {
         guard !isRemote, !changingTopic, topics.mode == .topics, let active = topics.activeTopic else { return false }
         return topics.neighbors(of: active).placement(direction) != nil
@@ -352,7 +350,7 @@ final class WorkspaceStore {
         moveCard(id, direction == .previous ? .up : .down)
     }
 
-    /// The Active Topic when it is open or Snoozed, which Pin Topic and Unpin Topic act on.
+    /// The Active Topic when it is open, which Pin Topic and Unpin Topic act on.
     var pinnableActiveTopic: TopicRecord? {
         guard !isRemote, let id = activeTopicID else { return nil }
         return topicWatcher.records.first { $0.id == id && $0.settledAt == nil }
@@ -360,12 +358,6 @@ final class WorkspaceStore {
 
     func togglePinOfActiveTopic() {
         if let topic = pinnableActiveTopic { pinTopic(topic.id, !topic.isPinned) }
-    }
-
-    /// The Active Topic when it is Snoozed, which Unsnooze Topic acts on.
-    var snoozedActiveTopicID: String? {
-        guard !isRemote, let id = activeTopicID, topics.snoozedTopicIDs.contains(id) else { return nil }
-        return id
     }
 
     func changeTopic(_ source: TopicMembershipPlan.Source, destination: TopicRecord? = nil, title: String = "") {
@@ -480,122 +472,25 @@ final class WorkspaceStore {
         }
     }
 
-    /// Snooze Topics… and Unsnooze Topics… start at the check step: with nothing checked, or with the Topics of a
-    /// Tag for "Snooze its Topics…".
-    func presentCheck(_ draft: CheckDraft, keepingHistory: Bool = false) {
-        topicWatcher.reload()
-        palette.begin(.check(draft), keepingHistory: keepingHistory)
-    }
-
-    /// Snooze Topic: the "until" step of the same flow, so ⌫ goes back to the check step with the Topic checked.
-    func presentSnooze(_ id: String, keepingHistory: Bool = false) {
-        topicWatcher.reload()
-        guard topicWatcher.records.contains(where: { $0.id == id && $0.settledAt == nil }) else { return }
-        palette.begin(.snoozeUntil([id]), keepingHistory: keepingHistory)
-    }
-
-    /// Unsnooze Topic: the Active Topic at once while it is Snoozed, else a choice of one Snoozed Topic.
-    func presentUnsnoozeTopic(keepingHistory: Bool = false) {
-        if let id = snoozedActiveTopicID {
-            palette.close(restoringFocus: false)
-            unsnoozeTopic(id)
-            return
-        }
-        guard !isRemote, !topics.snoozedRows.isEmpty else { return }
-        topicWatcher.reload()
-        palette.begin(.unsnoozeTopic, keepingHistory: keepingHistory)
-    }
-
-    /// One request for the whole set. When the Active Topic is in the set, the Next Topic outside the set opens.
-    func snoozeTopics(_ ids: [String], until deadline: SnoozeDeadline) {
-        guard !changingTopic, !ids.isEmpty else { return }
-        let next = activeTopicID.flatMap { ids.contains($0) ? nextTopic(after: $0, skipping: Set(ids)) : nil }
-        perform(EnvironmentRequest(.snooze(until: deadline, topics: ids.map(TopicRef.id))), presenting: .snooze(next: next))
-    }
-
-    /// Unsnooze Topics…: one request for the whole set, so Topics whose Snooze ends together keep their order.
-    func unsnoozeTopics(_ ids: [String]) {
-        guard !ids.isEmpty else { return }
-        perform(EnvironmentRequest(.unsnooze(topics: ids.map(TopicRef.id))), presenting: .unsnooze(showing: nil))
-    }
-
-    /// The Sidebar's Unsnooze: back to the Topics list, and to its Window when it has one. A Dormant
-    /// Topic stays Dormant, because Unsnooze changes nothing in tmux.
-    func unsnoozeTopic(_ id: String) {
-        perform(EnvironmentRequest(.unsnooze(topics: [.id(id)])), presenting: .unsnooze(showing: id))
-    }
-
     /// The open Topic of the Window the user looks at, or of the empty-Topic view; nil for No Topic.
     var activeTopicID: String? {
         if case .topic(let id) = topics.activeTopic { return id }
         return nil
     }
 
-    /// One Zen at a time: while Zen is on, the Zen action ends it.
-    func toggleZen(keeping id: String, keepingHistory: Bool = false) {
-        topicWatcher.reload()
-        if topicWatcher.zen != nil { endZen() } else { palette.begin(.zen(id), keepingHistory: keepingHistory) }
-    }
-
-    /// The Zen menu item and the `toggle_zen` key keep the Active Topic. No Topic and a Locked Session are not Topics,
-    /// and Zen starts only in Topics mode, so otherwise they can only end Zen.
-    func toggleZenOfActiveTopic(keepingHistory: Bool = false) {
-        if let id = activeTopicID, topics.mode == .topics { toggleZen(keeping: id, keepingHistory: keepingHistory) } else { endZen() }
-    }
-
-    var canToggleZenOfActiveTopic: Bool { topicWatcher.zen != nil || (activeTopicID != nil && topics.mode == .topics) }
-
-    /// Zen is in the Topic records on this Mac, so it starts and ends there also from a Remote App Window.
-    func startZen(keeping id: String, until deadline: SnoozeDeadline) {
-        perform(EnvironmentRequest(.startZen(until: deadline), target: .topic(.id(id))), presenting: .zen, onLocalServer: true)
-    }
-
-    /// Ending twice is safe: with no Zen the request changes nothing.
-    func endZen() {
-        perform(EnvironmentRequest(.endZen), presenting: .zen, onLocalServer: true)
-    }
-
-    /// Wakes the due Topics with one toast line each. When Zen's time comes, its Topics wake with them and
-    /// share one line. Settling the kept Topic ends Zen in the same write; a Zen whose kept Topic an older Muxify
-    /// Settled ends here.
-    private func wakeTopics() {
-        guard !changingTopic else { return }
-        if let zen = topicWatcher.zen, !topicWatcher.records.contains(where: { $0.id == zen.keptTopicID && $0.settledAt == nil }) {
-            endZen()
-            return
+    /// Records that a Muxify with Snooze and Zen wrote are upgraded on this Mac as soon as the app reads them, with
+    /// this App Window's Config. The records are local, so a Remote App Window upgrades them too.
+    private func upgradeTopicRecords() {
+        guard topicWatcher.needsUpgrade, !changingTopic else { return }
+        changingTopic = true
+        let service = topicService()
+        Task { [weak self] in
+            let failure = await Task.detached(priority: .userInitiated) { service.upgradeRecords() }.value
+            guard let self else { return }
+            self.changingTopic = false
+            self.topicWatcher.reload()
+            if let failure { NSLog("muxify: topics: upgrade: \(failure.message)") }
         }
-        let endingZen = topicWatcher.zen.flatMap { $0.deadline?.isDue(at: Date()) == true ? $0 : nil }
-        guard !topics.dueWakes.isEmpty || endingZen != nil else { return }
-        // Another process can Settle or Unsnooze a due Topic; the request names only the Topics that are still due.
-        topicWatcher.reload()
-        let wakes = topics.dueWakes
-        guard !wakes.isEmpty else {
-            showWake([], of: [], endingZen: endingZen)
-            endZen()
-            return
-        }
-        // The Topic records are on this Mac, so a Remote App Window wakes them too.
-        perform(EnvironmentRequest(.unsnooze(topics: wakes.map { .id($0.id) })), presenting: .wake(wakes, endingZen: endingZen),
-                onLocalServer: true)
-    }
-
-    /// The wake toast: one line for each woken Topic, and one shared line for the Topics that Zen kept quiet.
-    private func showWake(_ woken: Set<String>, of wakes: [TopicsModel.Wake], endingZen: ZenRecord?) {
-        let zenTopicIDs = Set(endingZen?.changes.map(\.topicID) ?? [])
-        var messages: [String] = []
-        var zenWoken = 0
-        for wake in wakes where woken.contains(wake.id) {
-            if zenTopicIDs.contains(wake.id) { zenWoken += 1 } else { messages.append(wake.message) }
-        }
-        if endingZen != nil {
-            messages.insert(zenWoken == 0 ? "Zen ended" : "Zen ended: \(zenWoken) Topic\(zenWoken == 1 ? " is" : "s are") back", at: 0)
-        }
-        guard !messages.isEmpty else { return }
-        wakeToastDismiss?.cancel()
-        wakeToast = messages.joined(separator: "\n")
-        let dismiss = DispatchWorkItem { [weak self] in self?.wakeToast = nil }
-        wakeToastDismiss = dismiss
-        DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: dismiss)
     }
 
     func presentSettleTopic(_ id: String? = nil, keepingHistory: Bool = false) {
@@ -662,18 +557,12 @@ final class WorkspaceStore {
         case newTopic
         /// As `edit`; a failure lets the user press again at once for this folder.
         case newSession(Folder)
-        /// The Next Topic opens when the Active Topic is in the Snoozed set.
-        case snooze(next: TopicGroupID?)
-        /// The Unsnoozed Topic shows its Window when it has one.
-        case unsnooze(showing: String?)
-        /// Due Topics woke; the toast names them. A due Zen then ends.
-        case wake([TopicsModel.Wake], endingZen: ZenRecord?)
-        /// Zen started or ended.
-        case zen
         /// A Session or Window that moved shows where it is now; nothing else changes.
         case membership(selecting: String?)
         case settle(TopicGroupID?)
         case move(source: String, tab: BrowserTab?)
+        /// The Location goes to this card, as Go to Topic does.
+        case goTo(TopicGroupID)
     }
 
     /// The one path for every Topic edit that the user asks for in the app. The app's unsaved memory goes to disk and to tmux first,
@@ -737,23 +626,6 @@ final class WorkspaceStore {
             // A Read change is not shown until a snapshot after it, so the next change waits for that snapshot.
             readGeneration += 1
             readSnapshotPending = true
-        case .snoozeChanged(let change):
-            switch presentation {
-            case .snooze(let next):
-                if ownsPalette { palette.close() }
-                if let next { showTopic(next) }
-            case .unsnooze(let id):
-                if ownsPalette { palette.close() }
-                if let id, let window = entryWindow(of: .topic(id)) { select(window) }
-            case .wake(let wakes, let endingZen):
-                showWake(Set(change.topicIDs), of: wakes, endingZen: endingZen)
-                // The woken Topics no longer have Zen's Snooze, so End Zen now only removes the Zen record.
-                if endingZen != nil { endZen() }
-            case .zen:
-                if ownsPalette { palette.close() }
-            case .edit, .newTopic, .newSession, .membership, .settle, .move:
-                break
-            }
         case .failed(let failure):
             if case .newSession(let directory) = presentation { pendingOpenings[directory] = nil }
             if case .newTopic = presentation, failure.phase == .nothingChanged, ownsPalette {
@@ -779,8 +651,9 @@ final class WorkspaceStore {
                     }
                     route(.result(.window(destination), lastStartedRead: lastStartedRead))
                 }
-            case .snooze, .unsnooze, .wake, .zen:
-                break
+            case .goTo(let card):
+                if ownsPalette { palette.close(restoringFocus: false) }
+                goToTopic(card)
             case .edit, .newTopic, .newSession:
                 if ownsPalette { palette.close(restoringFocus: false) }
                 switch change.shown {
@@ -802,7 +675,7 @@ final class WorkspaceStore {
                 }
             }
         }
-        // Only an edit can make a tmux Window to attach to. A Read or Snooze change on a stopped server leaves it
+        // Only an edit can make a tmux Window to attach to. A Read change on a stopped server leaves it
         // stopped: an attach there would start the server with a new Session.
         var changed = false
         if case .changed = response { changed = true }
@@ -853,15 +726,15 @@ final class WorkspaceStore {
     /// The last read, so a refresh runs `ps` only when a Topic Pane starts another program.
     @ObservationIgnored private var paneCommandLines = PaneCommandLines()
 
-    /// The open Snoozed or Settled group, and the Settled pages shown.
+    /// Whether the Settled group is open, and the Settled pages shown.
     var topicGroups = TopicGroupsState()
     /// Whether the Bench shows. Only the user shows or hides it. Each App Window has its own, and no restart keeps it.
     var benchShown = false
 
-    /// Built again only after a change to what it reads, or when a Snooze deadline passes. The Sidebar, the menus
+    /// Built again only after a change to what it reads. The Sidebar, the menus
     /// and the terminal area read it many times in each update, and each build is expensive.
     var topics: TopicsModel { topicsCache.value }
-    @ObservationIgnored private lazy var topicsCache = ObservedCache(expiry: \.changesAt) { [unowned self] in buildTopics() }
+    @ObservationIgnored private lazy var topicsCache = ObservedCache { [unowned self] in buildTopics() }
 
     private func buildTopics() -> TopicsModel {
         var config = self.config
@@ -869,7 +742,7 @@ final class WorkspaceStore {
         if isRemote { config.sidebar.topics = false }
         return TopicsModel(records: topicWatcher.records, windows: windows, config: config,
                            selection: topicSelection, location: location, mode: sidebarMode, groups: topicGroups, benchShown: benchShown, agents: agents,
-                           panes: panesVisible ? panes : nil, zen: isRemote ? nil : topicWatcher.zen)
+                           panes: panesVisible ? panes : nil)
     }
 
     var sidebarFormatContexts: SidebarFormatContexts { sidebarFormatsCache.value }
@@ -903,7 +776,47 @@ final class WorkspaceStore {
         benchShown.toggle()
     }
 
-    /// Going to a Snoozed or Settled Topic opens its group, so the Sidebar shows it; leaving the group closes it.
+    /// Choose In Play needs `topics.in_play` and a card that is not Pinned. In Sessions mode too: In Play is a place in
+    /// the Topics list, which both modes share.
+    var canChooseInPlay: Bool {
+        !isRemote && !changingTopic && topics.topicsEnabled && topicConfig.inPlay != nil && topics.rows.contains { !$0.isPinned }
+    }
+
+    /// The check step of Choose In Play, with the In Play cards checked.
+    func presentChooseInPlay(keepingHistory: Bool = false) {
+        guard canChooseInPlay, let inPlay = topicConfig.inPlay else { return }
+        let draft = CheckDraft(action: .chooseInPlay(places: inPlay), checked: Set(topics.split(inPlay: inPlay).inPlay.map(\.id)))
+        palette.begin(.check(draft), keepingHistory: keepingHistory)
+    }
+
+    /// Choose In Play goes through the Topic service, as `muxify topic choose-in-play` does.
+    func chooseInPlay(_ cards: [TopicGroupID]) {
+        perform(EnvironmentRequest(.chooseInPlay(cards.compactMap { $0.listID.flatMap(Self.ref(of:)) })))
+    }
+
+    /// The card of the Location while it is In Play and the Bench has a card for Replace from Bench to put in its place.
+    /// In Sessions mode too: In Play is a place in the Topics list, which both modes share.
+    private var replaceableCard: TopicGroupID? {
+        guard !isRemote, !changingTopic, topics.topicsEnabled, let inPlay = topicConfig.inPlay, let active = topics.activeTopic else { return nil }
+        let cards = topics.split(inPlay: inPlay)
+        return !cards.bench.isEmpty && cards.inPlay.contains { $0.id == active } ? active : nil
+    }
+
+    var canReplaceFromBench: Bool { replaceableCard != nil }
+
+    func presentReplaceFromBench(keepingHistory: Bool = false) {
+        guard let card = replaceableCard else { return }
+        palette.begin(.replaceFromBench(card), keepingHistory: keepingHistory)
+    }
+
+    /// Replace from Bench goes through the Topic service, as `muxify topic replace-from-bench` does. Then the Location
+    /// goes to the card that came In Play; the command line leaves the Location, as its other order verbs do.
+    func replaceFromBench(_ card: TopicGroupID, with benched: TopicGroupID) {
+        guard let target = card.listID.flatMap(Self.target(of:)), let ref = benched.listID.flatMap(Self.ref(of:)) else { return }
+        perform(EnvironmentRequest(.replaceFromBench(with: ref), target: target), presenting: .goTo(benched))
+    }
+
+    /// Going to a Settled Topic opens its group, so the Sidebar shows it; leaving the group closes it.
     func updateTopicSelection() {
         let model = topics
         var groups = topicGroups
@@ -1431,7 +1344,7 @@ final class WorkspaceStore {
         }
         recordVisit()
         consumeOpenRequests()
-        if !updateUnread(snapshot.panes) { wakeTopics() }
+        if !updateUnread(snapshot.panes) { upgradeTopicRecords() }
 
         // (Re)start listening once there is a Session to attach to.
         if snapshot.serverRunning, isConnected, !events.isRunning,
@@ -1681,7 +1594,6 @@ final class WorkspaceStore {
         return commands
     }
 
-    /// Persist Unread before the next snapshot counts wake Notifications.
     private func updateUnread(_ panes: [TmuxPane]) -> Bool {
         let commands = unreadChanges(panes)
         guard !commands.isEmpty else { return false }
@@ -1690,7 +1602,7 @@ final class WorkspaceStore {
     }
 
     private func routingFacts(snapshot: TmuxSnapshot? = nil, allowAttach: Bool = false) -> Router.Facts {
-        let groups = Set((topics.rows + topics.snoozedRows).map(\.id)).union([.noTopic])
+        let groups = Set(topics.rows.map(\.id)).union([.noTopic])
         let entries = Dictionary(uniqueKeysWithValues: groups.compactMap { group -> (TopicGroupID, WindowID)? in
             guard let window = entryWindow(of: group), let id = WindowID(rawValue: window.id) else { return nil }
             return (group, id)
@@ -2385,10 +2297,6 @@ final class WorkspaceStore {
         case .moveWindow: presentMoveWindow()
         case .moveSession: if !isRemote { presentMoveSession() }
         case .addSessionToTopic: if !isRemote { presentAddSession() }
-        case .snoozeTopic: if !isRemote, let id = activeTopicID { presentSnooze(id) }
-        case .snoozeTopics: if !isRemote { presentCheck(CheckDraft(action: .snooze)) }
-        case .unsnoozeTopics: if !isRemote { presentCheck(CheckDraft(action: .unsnooze)) }
-        case .toggleZen: if !isRemote { toggleZenOfActiveTopic() }
         case .settleTopic: if !isRemote { presentSettleTopic() }
         case .removeSessionFromTopic:
             if !isRemote, !changingTopic, let window = selectedWindow, window.topicID != nil, window.topicID == activeTopicID { removeFromTopic(window) }
@@ -2399,12 +2307,13 @@ final class WorkspaceStore {
         case .moveTopicUp: moveActiveCard(.previous)
         case .moveTopicDown: moveActiveCard(.next)
         case .togglePinTopic: togglePinOfActiveTopic()
-        case .unsnoozeTopic: presentUnsnoozeTopic()
         case .markRead: changeRead(.read, in: currentReadTarget)
         case .markUnread: changeRead(.unread, in: currentReadTarget)
         case .markAllRead: changeRead(.read, in: .environment)
         case .toggleSidebar: toggleSidebar()
         case .toggleBench: toggleBench()
+        case .chooseInPlay: presentChooseInPlay()
+        case .replaceFromBench: presentReplaceFromBench()
         case .toggleTerminal: toggle(.terminal)
         case .toggleBrowser: toggle(.browser)
         case .toggleGitView: toggleGitView()

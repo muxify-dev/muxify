@@ -25,10 +25,6 @@ struct RequestInvocation: Equatable {
         case status(sessionPath: String?)
         /// One changeset across the live Sessions since each one's base. `stat` prints a summary, not the patch.
         case diff(sessionPath: String?, stat: Bool)
-        /// The time as the time step of Snooze Topic reads typed text. It becomes a time when the command runs.
-        /// `topics` are the `--topic` options; empty is the target or the caller Pane's Topic.
-        case snooze(SnoozeSchedule, topics: [TopicRef])
-        case unsnooze(topics: [TopicRef])
         case tag(TopicTagChange)
         case rename(title: String)
         /// A Dormant or Settled Topic has no Pane, so these take only `--topic`.
@@ -59,12 +55,13 @@ struct RequestInvocation: Equatable {
         case note(String?)
         /// The Topic's card, one place up or down.
         case moveCard(CardMove)
+        /// The cards In Play, in their order, and then the top of the Bench.
+        case chooseInPlay([CardName])
+        /// The Benched card that takes the place of the target's card In Play.
+        case replaceFromBench(with: CardName)
         /// The Session one place up or down among its Topic's Sessions, or a Locked Session's card.
         case moveSession(TopicSessionPlacement)
         case sortSessions
-        /// Zen keeps the target's Topic until the time, which becomes a time when the command runs.
-        case zen(SnoozeSchedule)
-        case endZen
         /// Read or Unread for the `scope` of the target or of the caller's Pane.
         case markRead(ReadChange, scope: ReadScope)
         case markAllRead
@@ -73,9 +70,10 @@ struct RequestInvocation: Equatable {
         var targets: [TargetOption] {
             switch self {
             case .new: return []
-            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .snooze, .unsnooze, .tag, .note, .rename, .pin, .moveCard, .sortSessions, .zen:
+            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .moveCard, .sortSessions:
                 return [.topic, .window, .pane]
             case .moveSession: return [.session, .pane]
+            case .replaceFromBench: return [.topic, .session, .window, .pane]
             case .reopen, .startFresh: return [.topic]
             case .lock: return [.session]
             case .moveWindow, .moveToNewTopic, .removeWindowFromTopic: return [.window, .pane]
@@ -90,7 +88,7 @@ struct RequestInvocation: Equatable {
             case .markRead(_, .session): return [.session, .window, .pane]
             case .markRead(_, .window): return [.window, .pane]
             case .markRead(_, .pane): return [.pane]
-            case .list, .endZen, .markAllRead: return []
+            case .list, .markAllRead, .chooseInPlay: return []
             }
         }
 
@@ -104,10 +102,10 @@ struct RequestInvocation: Equatable {
             }
         }
 
-        /// A Snooze or a Tag change needs no SessionPath, and a command that shows a Topic finds only the SessionPaths of its Sessions.
+        /// A Tag change needs no SessionPath, and a command that shows a Topic finds only the SessionPaths of its Sessions.
         var findsAllSessionPaths: Bool {
             switch self {
-            case .new, .snooze, .unsnooze, .tag, .note, .lock, .pin, .moveCard, .moveSession, .sortSessions, .zen, .endZen, .markRead, .markAllRead,
+            case .new, .tag, .note, .lock, .pin, .moveCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
                  .placeWindow, .zoomPane: return false
             default: return !showsTopic
             }
@@ -126,8 +124,6 @@ struct RequestInvocation: Equatable {
             case .exec: return "topic exec"
             case .status: return "topic status"
             case .diff: return "topic diff"
-            case .snooze: return "topic snooze"
-            case .unsnooze: return "topic unsnooze"
             case .tag: return "topic tag"
             case .note: return "topic note"
             case .rename: return "topic rename"
@@ -148,12 +144,34 @@ struct RequestInvocation: Equatable {
             case .kill(let session): return session ? "session kill" : "window kill"
             case .pin(let pinned): return pinned ? "topic pin" : "topic unpin"
             case .moveCard: return "topic move"
+            case .chooseInPlay: return "topic choose-in-play"
+            case .replaceFromBench: return "topic replace-from-bench"
             case .moveSession: return "session move"
             case .sortSessions: return "topic sort-sessions"
-            case .zen: return "zen start"
-            case .endZen: return "zen end"
             case .markRead(let change, let scope): return CLIVerbPath.markRead(change, scope: scope).rawValue
             case .markAllRead: return "mark-all-read"
+            }
+        }
+    }
+
+    /// A card of the Topics list as a command line names it: an open Topic by id or label, or a Locked Session by name
+    /// or id.
+    enum CardName: Equatable {
+        case topic(String)
+        case session(String)
+
+        /// A Session name becomes its id here, because a card on the wire names a Locked Session by its id.
+        var ref: TopicListRef {
+            get throws {
+                switch self {
+                case .topic(let name): return .topic(.named(name))
+                case .session(let value):
+                    guard let window = TmuxServer.local.snapshot().windows.first(where: { $0.sessionID == value || $0.sessionName == value }),
+                          let id = SessionID(rawValue: window.sessionID) else {
+                        throw CLIError(TopicRequestError.sessionUnavailable(value).description)
+                    }
+                    return .lock(id)
+                }
             }
         }
     }
@@ -200,31 +218,21 @@ struct RequestInvocation: Equatable {
     /// target, else on the caller Pane's Window or Topic.
     struct TargetOptions {
         let accepted: [TargetOption]
-        /// Snooze and Unsnooze act on each Topic of a repeated `--topic` in one write.
-        let repeatsTopic: Bool
         private(set) var chosen: (option: TargetOption, target: EnvironmentTarget)?
-        /// Each `--topic`, in order.
-        private(set) var topics: [TopicRef] = []
 
-        init(accepting accepted: [TargetOption], repeatsTopic: Bool = false) {
+        init(accepting accepted: [TargetOption]) {
             self.accepted = accepted
-            self.repeatsTopic = repeatsTopic
         }
 
         /// Takes `argument` and its value from `args` when it is an accepted target option. False for any other word.
         mutating func take(_ argument: String, from args: inout ArraySlice<String>) throws -> Bool {
             guard let option = TargetOption(rawValue: argument), accepted.contains(option) else { return false }
-            if let first = chosen?.option, !(repeatsTopic && first == .topic && option == .topic) {
+            if chosen != nil {
                 let names = accepted.map(\.rawValue)
-                if repeatsTopic {
-                    throw CLIError("give --topic one or more times, or only one of " + names.dropFirst().joined(separator: " and "), exitCode: 2)
-                }
                 throw CLIError("give only one of " + names.dropLast().joined(separator: ", ") + " and " + names.last!, exitCode: 2)
             }
             guard let value = args.popFirst() else { throw CLIError.usage }
-            let target = try option.target(value)
-            if case .topic(let ref) = target { topics.append(ref) }
-            if chosen == nil { chosen = (option, target) }
+            chosen = (option, try option.target(value))
             return true
         }
 
@@ -265,11 +273,7 @@ extension RequestInvocation {
             throw CLIError("\(command.phrase) does not take \(chosen.option.rawValue)" + Self.choice(of: takes), exitCode: 2)
         }
         caller = try parsed.targets.caller(environment: parsed.environment, needed: command.needsTarget, offered: takes)
-        // Snooze and Unsnooze send their `--topic` options in the command, as a list.
-        switch command {
-        case .snooze(_, let topics), .unsnooze(let topics): target = topics.isEmpty ? parsed.targets.chosen?.target : nil
-        default: target = parsed.targets.chosen?.target
-        }
+        target = parsed.targets.chosen?.target
         output = parsed.output
         paths = parsed.paths
     }
@@ -348,7 +352,6 @@ extension RequestInvocation {
                 }
             // A Topic change prints the Topic's id, a change of a Window the Window's id, and a Session rename the full name.
             case .changed(let change): if let id = change.topicID ?? change.window?.rawValue ?? change.sessionName { print(id) }
-            case .snoozeChanged(let change): for id in change.topicIDs { print(id) }
             case .readChanged(let change): for id in change.topicIDs + change.paneIDs.map(\.rawValue) { print(id) }
             case .failed: break
             }
@@ -414,15 +417,6 @@ extension RequestInvocation {
                 choices[index].removeWorktree = remove && choices[index].worktree != nil
             }
             return .settle(choices: choices, outcome: "")
-        case .snooze(let schedule, let topics):
-            // Only a time later today can be past, e.g. today 8:00 at 9:00.
-            guard let deadline = schedule.deadline(from: Date()) else { throw CLIError("that time has already passed", exitCode: 2) }
-            return .snooze(until: deadline, topics: topics)
-        case .unsnooze(let topics): return .unsnooze(topics: topics)
-        case .zen(let schedule):
-            guard let deadline = schedule.deadline(from: Date()) else { throw CLIError("that time has already passed", exitCode: 2) }
-            return .startZen(until: deadline)
-        case .endZen: return .endZen
         case .markRead(let change, let scope): return .markRead(change, scope: scope)
         case .markAllRead: return .markAllRead
         case .tag(let change): return .tags(change)
@@ -467,6 +461,8 @@ extension RequestInvocation {
         case .kill(let session): return session ? .killSession : .killWindow
         case .pin(let pinned): return pinned ? .pin : .unpin
         case .moveCard(let move): return .moveCard(move)
+        case .chooseInPlay(let cards): return .chooseInPlay(try cards.map { try $0.ref })
+        case .replaceFromBench(let benched): return .replaceFromBench(with: try benched.ref)
         case .moveSession(let placement): return .moveSession(to: placement)
         case .sortSessions: return .sortSessions
         case .removeWindowFromTopic(nil): return .move(to: .newSession(topic: nil))

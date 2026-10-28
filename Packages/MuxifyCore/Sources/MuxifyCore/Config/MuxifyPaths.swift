@@ -3,7 +3,7 @@ import Foundation
 /// Where Muxify keeps its files, by one rule for the app and the command line tool:
 /// an XDG variable that is set but empty counts as unset.
 public struct MuxifyPaths: Equatable, Sendable {
-    /// `$XDG_STATE_HOME/muxify`: the Topic records, the Zen record and the Worktrees Muxify made.
+    /// `$XDG_STATE_HOME/muxify`: the Topic records and the Worktrees Muxify made.
     public let state: URL
     /// MUXIFY_CONFIG when it is set and not empty, so each launch can choose its Config; else the XDG path.
     public let configFile: URL
@@ -20,9 +20,9 @@ public struct MuxifyPaths: Equatable, Sendable {
     }
 
     public var topics: URL { state.appendingPathComponent("topics", isDirectory: true) }
-    /// Beside `topics/`, not in it, because every JSON file in `topics/` is a Topic record.
-    public var zenFile: URL { state.appendingPathComponent("zen.json") }
-    /// Empty, and never removed: only its lock matters. Every write of the record files and the Zen record holds it.
+    /// The Zen record of an older Muxify. Only the upgrade of the records reads it, then removes it.
+    public var legacyZenFile: URL { state.appendingPathComponent("zen.json") }
+    /// Empty, and never removed: only its lock matters. Every write of the record files holds it.
     public var recordLock: URL { state.appendingPathComponent("topics.lock") }
     /// Empty, like the record lock. One Topic edit at a time holds it, from its read to its last tmux command,
     /// so a second edit sees the first one's Topic and Session names before it chooses its own.

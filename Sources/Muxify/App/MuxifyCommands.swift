@@ -71,9 +71,6 @@ import MuxifyCore
             Button("Settle Topic…") { store?.presentSettleTopic() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .settleTopic)?.shortcut)
                 .disabled(!topicsAvailable || store?.activeTopicID == nil)
-            Button(store?.topicWatcher.zen == nil ? "Zen…" : "End Zen") { store?.toggleZenOfActiveTopic() }
-                .keyboardShortcut(keybinds.firstTrigger(for: .toggleZen)?.shortcut)
-                .disabled(!topicsAvailable || store?.topics.topicsEnabled != true || store?.canToggleZenOfActiveTopic != true)
             Divider()
             Button("Mark Read") { store?.changeRead(.read, in: store?.currentReadTarget) }
                 .keyboardShortcut(keybinds.firstTrigger(for: .markRead)?.shortcut)

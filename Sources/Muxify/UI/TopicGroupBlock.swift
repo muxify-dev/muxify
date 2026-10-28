@@ -1,8 +1,8 @@
 import MuxifyCore
 import SwiftUI
 
-/// The Snoozed or Settled group at the bottom of the Topics panel, as a block of its own. Its row stays in view and
-/// only its cards scroll, so the user can always close the open group or reach the other one.
+/// The Settled group at the bottom of the Topics panel, as a block of its own. Its row stays in view and
+/// only its cards scroll, so the user can always close the open group.
 struct TopicGroupBlock: View {
     let store: WorkspaceStore
     let model: TopicsModel
@@ -14,7 +14,7 @@ struct TopicGroupBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            GroupHeader(icon: group.kind == .snoozed ? "moon" : "checkmark.circle", title: group.kind.title,
+            GroupHeader(icon: "checkmark.circle", title: group.kind.title,
                         count: group.count, isExpanded: group.isExpanded) {
                 store.topicGroups.toggle(group.kind)
             }
@@ -52,7 +52,7 @@ struct TopicGroupBlock: View {
     }
 }
 
-/// A group row: Snoozed or Settled.
+/// A group row: Settled.
 private struct GroupHeader: View {
     let icon: String
     let title: String

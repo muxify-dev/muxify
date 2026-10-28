@@ -167,29 +167,6 @@ final class CLICommandTests: XCTestCase {
         }
     }
 
-    func testZenStartKeepsTheTargetsTopicAndZenEndTakesNoTarget() throws {
-        let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
-        let paths = MuxifyPaths(environment: inside, home: "/home/me")
-        let caller = try XCTUnwrap(PaneID(rawValue: "%7"))
-        func zen(_ command: RequestInvocation.Command, target: EnvironmentTarget? = nil, caller: PaneID? = caller,
-                 output: RequestInvocation.Output = .text) -> CLICommand {
-            .request(RequestInvocation(command: command, target: target, caller: caller, output: output, paths: paths))
-        }
-        XCTAssertEqual(try CLICommand(arguments: ["zen", "start", "2h"], environment: inside), zen(.zen(try XCTUnwrap(SnoozeSchedule("2h", typed: true)))))
-        XCTAssertEqual(try CLICommand(arguments: ["zen", "start", "forever", "--topic", "Fix", "--json"], environment: inside),
-                       zen(.zen(.never), target: .topic(.named("Fix")), output: .json))
-        XCTAssertEqual(try CLICommand(arguments: ["zen", "end"], environment: [:]),
-                       .request(RequestInvocation(command: .endZen, target: nil, caller: nil, output: .text,
-                                                  paths: MuxifyPaths(environment: [:], home: NSHomeDirectory()))))
-        for (arguments, message) in [(["zen", "start"], nil), (["zen", "start", "soon"], "zen start takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever"),
-                                     (["zen", "end", "now"], nil), (["zen", "end", "--topic", "Fix"], nil)] {
-            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
-                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
-                if let message { XCTAssertEqual(error.localizedDescription, message, "\(arguments)") }
-            }
-        }
-    }
-
     func testMarkReadVerbsSendTheirScopeWithTheTargetOrTheCallingPane() throws {
         let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
         let paths = MuxifyPaths(environment: inside, home: "/home/me")
@@ -241,20 +218,10 @@ final class CLICommandTests: XCTestCase {
             (["settle", "--window", "@12"], inside, topic(.settle(removeWorktrees: false), target: window)),
             (["settle", "--json", "--pane", "%3"], inside, topic(.settle(removeWorktrees: false), target: pane, output: .json)),
             (["settle", "--remove-worktrees"], inside, topic(.settle(removeWorktrees: true))),
-            (["snooze", "2h"], inside, topic(.snooze(.relative(2, .hour), topics: []))),
-            (["snooze", "mon", "9:30", "--topic", "Fix reward", "--json"], outside,
-             topic(.snooze(.weekday(2, hour: 9, minute: 30), topics: [.named("Fix reward")]), caller: nil, output: .json)),
-            (["snooze", "--topic", "a", "2h", "--topic", "b", "--topic", "a"], inside,
-             topic(.snooze(.relative(2, .hour), topics: [.named("a"), .named("b"), .named("a")]))),
-            (["snooze", "forever", "--pane", "%3"], inside, topic(.snooze(.never, topics: []), target: pane)),
-            (["unsnooze"], inside, topic(.unsnooze(topics: []))),
             (["tag", "add", "backend", "#Release"], inside, topic(.tag(.add([Tag(name: "backend")!, Tag(name: "release")!])))),
             (["tag", "remove", "backend", "--topic", "Fix"], outside,
              topic(.tag(.remove([Tag(name: "backend")!])), target: .topic(.named("Fix")), caller: nil)),
             (["tag", "set", "--pane", "%3", "--json"], inside, topic(.tag(.set([])), target: pane, output: .json)),
-            (["unsnooze", "--window", "@12"], inside, topic(.unsnooze(topics: []), target: window)),
-            (["unsnooze", "--topic", "a", "--topic", "b", "--json"], outside,
-             topic(.unsnooze(topics: [.named("a"), .named("b")]), caller: nil, output: .json)),
             (["list"], outside, topic(.list, caller: nil)),
             (["list", "--json"], inside, topic(.list, output: .json)),
             (["show"], inside, topic(.show(conversations: false))),
@@ -487,10 +454,8 @@ final class CLICommandTests: XCTestCase {
                           ["topic", "exec", "--timeout", "-1", "--", "pwd"], ["topic", "show", "--", "pwd"],
                           ["topic", "show", "--timeout", "5"], ["topic", "status", "--stat"], ["topic", "status", "x"],
                           ["topic", "diff", "x"], ["topic", "diff", "--", "pwd"], ["topic", "show", "--stat"],
-                          ["topic", "snooze"], ["topic", "snooze", "2h", "--directory", "tools"], ["topic", "snooze", "2h", "--stat"],
                           ["topic", "tag"], ["topic", "tag", "add"], ["topic", "tag", "remove"], ["topic", "tag", "rename", "a"],
-                          ["topic", "tag", "add", "a", "--directory", "tools"],
-                          ["topic", "unsnooze", "2h"], ["topic", "unsnooze", "--remove-worktrees"], ["topic", "snooze", "2h", "--topic"]] {
+                          ["topic", "tag", "add", "a", "--directory", "tools"]] {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
                 XCTAssertEqual((error as? CLIError)?.exitCode, 2)
                 XCTAssertEqual(error.localizedDescription, CLICommand.usage, "\(arguments)")
@@ -505,10 +470,6 @@ final class CLICommandTests: XCTestCase {
             (["new", "--pane", "%1", "--pane", "%2"], inside, "give only one of --topic, --window and --pane"),
             (["settle", "--topic", "Fix", "--window", "@1"], inside, "give only one of --topic, --window and --pane"),
             (["settle", "--topic", "a", "--topic", "b"], inside, "give only one of --topic, --window and --pane"),
-            (["snooze", "2h", "--topic", "a", "--pane", "%1"], inside, "give --topic one or more times, or only one of --window and --pane"),
-            (["unsnooze", "--window", "@1", "--topic", "a"], inside, "give --topic one or more times, or only one of --window and --pane"),
-            (["unsnooze", "--pane", "%1", "--pane", "%2"], inside, "give --topic one or more times, or only one of --window and --pane"),
-            (["unsnooze", "--topic", "a", "--topic", ""], inside, "--topic takes the id or label of an open Topic"),
             (["settle", "--window", "%3"], inside, "--window takes a tmux Window id, e.g. @12"),
             (["settle", "--pane", "@3"], inside, "--pane takes a tmux Pane id, e.g. %3"),
             (["new", "--pane", "7"], inside, "--pane takes a tmux Pane id, e.g. %3"),
@@ -532,11 +493,6 @@ final class CLICommandTests: XCTestCase {
             (["add-session", "tools"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
             (["settle"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
             (["show"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
-            (["snooze", "2h"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
-            (["unsnooze"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),
-            (["snooze", "soon"], inside, "topic snooze takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever"),
-            (["snooze", "25:00"], inside, "topic snooze takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever"),
-            (["snooze", "never"], inside, "topic snooze takes a time, e.g. 2h, 17:30, tomorrow, mon 9am or forever"),
             (["tag", "add", "back end"], inside, "back end is not a Tag: use lower case letters, digits and -, e.g. backend"),
             (["tag", "set", "café"], inside, "café is not a Tag: use lower case letters, digits and -, e.g. backend"),
             (["tag", "add", "a"], [:], "not inside tmux; name the target with --topic <id|label>, --window <id> or --pane <id>"),

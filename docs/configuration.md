@@ -150,11 +150,9 @@ topics:
 `bottom` (the default) puts a new Topic below all Topics and Locked Sessions
 that are not Pinned. `top` puts it first below the Pinned Topics.
 Reopen and Start Fresh use this position when a Settled Topic returns.
-Unsnooze and a Snooze that ends at its time also use it. Topics whose Snooze
-ends at the same time go there together, in their earlier order.
-The Topics that Zen Snoozed go back to their earlier places when Zen ends.
-A Topic whose own earlier Snooze ended during Zen uses this position.
 A Pinned Topic returns at the chosen end of the Pinned Topics.
+With `topics.in_play`, this option does nothing: a new or returning Topic goes
+to the top of the Bench (see [Topics In Play](#topics-in-play)).
 A Dormant Topic keeps its place, including when it is Pinned.
 A Topic made from a Locked Session takes that Lock's place.
 An unknown value uses `bottom` and appears in the Config problems banner.
@@ -177,6 +175,34 @@ Sidebar then shows every card.
 
 - Pinned Topics always show, and they do not count toward `in_play`. A Locked
   Session counts.
+- A new Topic goes to the top of the Bench, right after the In Play cards. A
+  Settled Topic that Reopen or Start Fresh brings back goes there too. When the
+  list has fewer cards than `in_play`, it goes last. A Pinned Topic that
+  returns goes last among the Pinned Topics. `topics.insert_position` does not
+  apply.
+- When you Settle a card In Play, the first card of the Bench moves up into its
+  place.
+- Choose In Play… (`choose_in_play`, ⇧⌥⌘S) sets which cards are In Play, and
+  in what order. It opens in the palette with a box on each open Topic and
+  Locked Session that is not Pinned, and the In Play cards start checked. A
+  query such as `#work` narrows the rows. Space in an empty field, ⇥ or a
+  click checks or unchecks a row, and ⌘A checks every row that shows. ↩ goes
+  on with the checked cards, or with the highlighted card when none is
+  checked. The note tells how many checked cards go to the top of the Bench
+  when you check more cards than `in_play`. Then you choose the card for each
+  place in turn, one place for each checked card. The places after the In Play
+  places are the top of the Bench, and the note tells when a place is on the
+  Bench. The rows keep the list order, so ↩ on each place keeps it. ⌫ in the
+  empty field goes back one place. The last card needs no choice. The cards
+  that you did not check keep their order under the checked cards. `muxify
+  topic choose-in-play` does the same.
+- Replace from Bench… (`replace_from_bench`, ⌥⌘S) works on the card that you
+  are on while it is In Play, a Topic or a Locked Session. Choose a Benched card
+  in the palette; a query such as `#work` narrows the rows. The card that you
+  choose takes the place, your card goes to the end of the Bench, and you go to
+  the card that you chose. Both Actions show in Topics mode and in Sessions
+  mode. `muxify topic replace-from-bench` makes the same change, but it does not
+  change the Location, as `muxify topic move` does not.
 - The line reads "Bench" while the Bench is hidden and "Hide Bench" while it
   shows. A click on it, `toggle_bench` (⇧⌘S), View > Show Bench and the Toggle
   Bench Command show or hide the Bench. The line shows only while the Bench has
@@ -199,7 +225,7 @@ Sidebar then shows every card.
 - The "N more below" line counts only the cards that show.
 
 Each App Window shows or hides its own Bench, and a restart hides it. The
-Sessions mode and the Snoozed and Settled groups have no Bench.
+Sessions mode and the Settled group have no Bench.
 
 ## Tags
 
@@ -234,7 +260,7 @@ and ↩ does nothing while it is in the field.
 A Topic record can hold a Tag that the Config does not define, such as a Tag
 that you removed or renamed here. Muxify does not change the record. The card
 shows that Tag dimmed and with no color. Edit Tags can remove it, but nothing
-can add it again, and Go to… and Snooze Topics do not list it.
+can add it again, and Go to… does not list it.
 
 Without `topics.tags`, or with an empty one, Tags are off: `#` in New Topic is
 plain title text, Edit Tags is not offered, and no card, palette row or Format
@@ -317,9 +343,7 @@ result:
 | Done or failed and read, or no Status yet | none | — |
 
 A card shows the strongest mark of its Agents: blocked, then failed, then
-done, then working. A Snoozed Topic, and No Topic while Zen is on, show no
-Notification on any surface, and their cards show no mark. An Agent's own Pane
-row and Command Palette result there still show its Working mark.
+done, then working.
 
 A terminal bell is not an Agent mark. It shows as a gray bell symbol, and no
 Config changes its color.
@@ -358,7 +382,6 @@ A Topic's Mark Unread Action also saves a separate Topic mark, with or without
 Agents. Window visits and Window or Pane Actions preserve this mark. Use the
 Topic's Mark Read Action to clear it. On an Empty Topic page, the Commands act
 on the Topic mark. A new visit to that page also clears it when Manual Read is off.
-A Snoozed Topic keeps its mark but hides it until Snooze ends.
 
 The expanded Active Topic shows Agent lines beside Window rows, or beside Pane
 rows when they replace a Window. Working has a moving line. A title line shows
@@ -366,14 +389,14 @@ explicit Topic Unread separately. The more row shows the strongest hidden Agent
 mark. Other cards keep their aggregate line.
 
 **Mark All as Read** clears Unread in the Active Environment, including all Topic marks and Unread
-working Agents. This includes hidden, Snoozed and Settled Topics. It has no default shortcut. Set `keybindings.mark_all_read` to
+working Agents. This includes hidden, Benched and Settled Topics. It has no default shortcut. Set `keybindings.mark_all_read` to
 assign one. Use `keybindings.mark_unread` to change the Mark Unread shortcut.
 The palette row Action has no default shortcut. Set
 `keybindings.command_palette.mark_unread` to assign one.
 
 Set a `*_enabled` key to `false` to turn off that type of Notification on every surface:
 cards, Pane rows, the Agents section, and the Command Palette's marks and
-status text. A wake message after a Snooze then does not count those Agents.
+status text.
 Each key is `true` by default. A value that is not a boolean, or an unknown
 key, appears in the Config problems banner.
 
@@ -940,7 +963,7 @@ Without `command_palettes`, Muxify has two palettes. **Commands** opens on
 - `topics`: with no query, other live Topics by most recent visit, then the current
   Topic, then Dormant and Empty Topics. Pins do not override this order; they
   still determine Sidebar order. Activity breaks visit ties using the most active
-  member Session. With no query, its Snoozed and Settled Topics come after the
+  member Session. With no query, its Settled Topics come after the
   rows of every other Source. With a query, they rank by their match among the
   open Topics. Only a Local App Window with Topics on has them.
 - `sessions`: one row per running Session, including Topic members in either
@@ -966,7 +989,7 @@ typed.
 
 Results stay in sections, one or more for each source. With `order: ranked` on
 a palette, they show in one list without headers, and a query ranks the rows of
-every source together. Words match in any order, fzf style, on the name, a type word (`topic`, `dormant`, `snoozed`,
+every source together. Words match in any order, fzf style, on the name, a type word (`topic`, `dormant`,
 `settled`, `session`, `worktree`, `window`), the details under the
 name, or a Settled Topic's outcome, and the matched letters are marked. A word
 must match at least 55% as well as it matches itself, so its letters spread
@@ -979,7 +1002,7 @@ Typed queries use fuzzy match quality, without pushing the current row down.
 An equal match follows the palette's `tiebreak` rules, in order. The first
 rule that differs decides:
 
-- `open`: a row that is not a Snoozed or Settled Topic first.
+- `open`: a row that is not a Settled Topic first.
 - `running`: a row with something running first, not a Dormant or Empty Topic or
   a Session Path with no Session.
 - `visit`: the most recently visited first.
@@ -1013,7 +1036,7 @@ command_palettes:
   - name: Go to…
     keybinding: cmd+p
     sources: [topics, sessions]
-    show: [topic, snoozed, settled, session, session-path, worktree]
+    show: [topic, settled, session, session-path, worktree]
 ```
 
 When a Session runs with the launch name of a Session Path, the palette lists
@@ -1025,10 +1048,9 @@ the palette lists the path again.
 | Kind | Row |
 | --- | --- |
 | `topic` | An open Topic |
-| `snoozed` | A Snoozed Topic |
 | `settled` | A Settled Topic |
 | `session` | A running Session in no open Topic: a No Topic Session, or a Session of a Settled Topic |
-| `topic-session` | A running Session in an open Topic, Snoozed or not |
+| `topic-session` | A running Session in an open Topic |
 | `session-path` | A Session Path, or a checkout inside the folder of a bare repository, with no running Session |
 | `worktree` | A Worktree outside the folder of its Session Path, with no running Session |
 | `window` | A Window |
@@ -1048,7 +1070,6 @@ A step that kills a process needs ⌘↩ to confirm. The keys inside a palette a
 | Copy Path (⌘C) | — | Its start folder | The active Pane's folder | The Pane's folder | The folder |
 | Copy tmux Target (⌘⇧C) | — | Session name | `session:index` | Pane ID | — |
 | Paste Path (⌃Y) | — | Its start folder | The Pane's folder | The Pane's folder | The folder |
-| Snooze (⌃S) | Open the Snooze sheet, except when Settled | — | — | — | — |
 
 ⌘K opens these actions in a menu by the highlighted row.
 
@@ -1070,9 +1091,6 @@ pick_lists:
 | `add_session` | Add a Session, also after New Topic | `session`, `topic-session`, `session-path`, `worktree` |
 | `move` | Move to…, the Topic step | `topic` |
 | `move_session` | Move to…, the step that chooses a Session | `session`, `topic-session` |
-| `snooze_topics` | Snooze Topics…, the step that checks Topics | `tag`, `topic`, `snoozed` |
-| `unsnooze_topics` | Unsnooze Topics…, the step that checks Topics | `tag`, `snoozed` |
-| `unsnooze_topic` | Unsnooze Topic, when the Active Topic is not Snoozed | `snoozed` |
 | `tags` | The Tags of New Topic and Edit Tags… | `tag` |
 | `worktree_start` | Add a Session › New Worktree from | `command` |
 
@@ -1254,7 +1272,7 @@ A configured value disables the corresponding View menu choice.
 | `all` | Every Agent. |
 
 Without a selected Window, `active` and `window` show every Agent.
-The existing Snooze and Zen rules still hide quiet Agents.
+With `all`, the Agents of Benched Topics show their marks too.
 `agents` and `agents_scope` accept one value for both modes, or a mapping with `topics` and `sessions` values.
 
 ```yaml
@@ -1324,12 +1342,12 @@ sidebar:
 | `line` | Chips on their own line under the title, before Dormant or Empty. When they do not all fit, the line ends with `+N`. |
 
 In `corner` and `title`, the title line is, from left to right: the title, the
-Hint, a Snoozed Topic's wake time, the Pin or Lock, and the Tags. Tag editing
+Hint, the Pin or Lock, and the Tags. Tag editing
 does not depend on this setting: Edit Tags… and `#` in New Topic work whenever
 `topics.tags` exists.
 
 The hover label and the accessibility value of the Tags name every Tag. A
-closed card in the Snoozed or Settled group shows no Tags; an opened one shows
+closed card in the Settled group shows no Tags; an opened one shows
 them as an open card does. Locked Sessions and Session cards show no Tags.
 
 ```yaml
@@ -1354,7 +1372,7 @@ mode. `null` keeps the default. To show Tags as plain text instead, set
 Each `title` or `summary` accepts a string, or a mapping with `topics` and `sessions` values.
 An empty Summary hides its line. An empty title uses the default title.
 Card Summaries appear only when the card is closed.
-Session headings within Topics, Snoozed and Settled Topic rows, and Command Palette rows keep their existing text.
+Session headings within Topics, Settled Topic rows, and Command Palette rows keep their existing text.
 A Window, Pane or Agent row's hover label shows the formatted title, in the row's font, when the row cuts it off.
 The line under it keeps its existing text.
 With `agents_scope: window`, the Agents section header uses the formatted Window title.

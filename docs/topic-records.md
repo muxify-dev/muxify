@@ -13,7 +13,6 @@ The filename must match the `id` field. The id must be a nonempty filename witho
   "settled_at": null,
   "outcome": null,
   "order": 0,
-  "snoozed_until": null,
   "session_order": "manual",
   "tags": ["backend", "release"],
   "note": "Repro with seed 4411, then bisect",
@@ -48,7 +47,7 @@ The filename must match the `id` field. The id must be a nonempty filename witho
 }
 ```
 
-Only `id` is required. Dates use strings. `snoozed_until` can also be `"never"`.
+Only `id` is required. Dates use strings.
 An absent or null `title` gives an Untitled Topic. A slug such as `untitled-3`
 gives the label `Untitled 3`. Without that slug, the view assigns a free number
 in Topic id order. Manual display order does not change those numbers.
@@ -76,8 +75,8 @@ were doing in the Topic. A Topic without a Note has no `note` key. Set Topic
 Note and Clear Topic Note in the app, and `muxify topic note`, change the field
 through the Topic service. They change only the `note` key, and only for an
 open Topic. The service removes spaces at the two ends, joins lines with one
-space, and removes the key for text with no words. Snooze, Zen, Settle and
-Reopen keep the Note.
+space, and removes the key for text with no words. Settle and Reopen keep the
+Note.
 
 The store retains unknown JSON fields during writes, including nested fields
 in remembered Sessions and Windows. Writes replace the file atomically. The
@@ -88,7 +87,7 @@ The app and `muxify` both write these files. Each write holds an exclusive
 one. The file stays empty, and Muxify never removes it. A program that writes
 the record files must hold the exclusive lock while it reads, changes and
 writes them. A write rereads the files under the lock. A Topic edit changes
-only the JSON keys that it changed itself, so it keeps a Snooze that another
+only the JSON keys that it changed itself, so it keeps a key that another
 writer set while the edit ran.
 
 Live membership comes only from the tmux Session option. For example:
@@ -211,41 +210,38 @@ Locked Session takes the Lock's value as its `order`.
 `muxify://topic/lock?session=<name>` and `muxify://topic/unlock?session=<name>`,
 change a Lock through the Topic service.
 
-## Zen record
+## Upgrade from Snooze and Zen
 
-While Zen is on, Muxify keeps one record in `$XDG_STATE_HOME/muxify/zen.json`,
-beside the `topics/` folder. It is not in that folder, because each JSON file
-there is a Topic record.
+An older Muxify kept a Snooze in each record's `snoozed_until`: an ISO 8601
+time or `never`. It kept a running Zen in `$XDG_STATE_HOME/muxify/zen.json`,
+with `until`, and `changes` with `topic_id` and `previous_snoozed_until`.
 
-```json
-{
-  "kept_topic_id": "reward-drop",
-  "until": "2026-10-08T17:00:00Z",
-  "changes": [
-    { "topic_id": "docs-pass", "previous_snoozed_until": null },
-    { "topic_id": "flaky-ci", "previous_snoozed_until": "2026-10-08T15:00:00Z" }
-  ]
-}
-```
+The app upgrades the records on this Mac when it reads them. The CLI does not
+upgrade them. It keeps the old keys as unknown fields until the app runs. The
+upgrade is one write, under the record lock:
 
-`kept_topic_id` is the Topic that Zen keeps. It is required: Zen always keeps
-a Topic, because No Topic is not a Topic. A record without it does not load.
-`until` is the
-`snoozed_until` value that Zen wrote on each Topic in `changes`. Each change
-also keeps the Topic's `snoozed_until` value from before Zen. Zen does not
-change a Topic that is Snoozed until `never` or past `until`, so that Topic is
-not in `changes`.
+1. The Zen ends as it did before. Each Topic in `changes` whose
+   `snoozed_until` is still Zen's `until` gets its `previous_snoozed_until`
+   back, or no Snooze when that is null. So a Topic that only Zen Snoozed
+   keeps its place.
+2. Each open Topic that is not Pinned and still has a Snooze goes to the top
+   of the Bench, in the order it would wake. The soonest time is first and
+   `never` is last. Equal times keep their list order. The top of the Bench is
+   the place after the first `topics.in_play` cards that are not Pinned, and
+   Locked Sessions count. Without `topics.in_play`, the Topics go as one block
+   in wake order where `topics.insert_position` puts them: at the top or the
+   bottom of the cards that are not Pinned. A Pinned Topic keeps its place. A
+   value that is not a time or `never` is no Snooze.
+3. No record keeps `snoozed_until`, and Muxify removes `zen.json`. A
+   `zen.json` that does not read counts as no Zen.
 
-End Zen puts back each earlier value that is still in the future, and removes
-the Snooze when that value is past. It skips a Topic that was Settled, or whose
-`snoozed_until` is no longer `until`. Then it deletes the file. When `until`
-comes, the Topics wake as for any Snooze, and Muxify deletes the file. Settling
-the kept Topic also ends Zen.
+A second run changes nothing. When the move renumbers Locked Sessions, Muxify
+writes their new `@muxify_lock` values to tmux.
 
 ## Forget
 
 Forget removes `topics/<id>.json` after it kills or detaches the Topic's live Sessions.
-The Topic cannot be Reopened. Forget applies to open, Dormant, Snoozed, and Settled Topics.
+The Topic cannot be Reopened. Forget applies to open, Dormant and Settled Topics.
 Each live Session uses the same Kill or Keep with no Topic choice as Settle.
 The palette presets every Session to Kill. A request that names no choice for a Session, such as a URL or the CLI without `--kill-sessions`, keeps it. Keeping restores its base name, with `+x` on collision.
 Every Worktree defaults to Keep. Missing `worktree_created` is not permission to delete.
@@ -261,7 +257,6 @@ Add `--remove-worktrees` to remove eligible Worktrees. The URL forms are
 `muxify://topic/forget?topic=<id>` and `muxify://topic/forget?pane=<pane-id>`.
 Both use the Topic service. They keep Worktrees unless the request selects them.
 
-Forget ends Zen if Zen keeps that Topic. The record transaction restores the other Topics' Snoozes.
 A stale record update or remembered-Session write cannot create the removed Topic again.
 Only an explicit creation with no previous record can create a Topic file.
 

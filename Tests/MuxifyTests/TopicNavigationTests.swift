@@ -9,10 +9,9 @@ final class TopicNavigationTests: XCTestCase {
                    storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, sessionPath: "/work/app")
     }
 
-    private func model(_ records: [TopicRecord], _ windows: [TmuxWindow], _ selection: TopicSelection,
-                       now: Date = Date()) -> TopicsModel {
+    private func model(_ records: [TopicRecord], _ windows: [TmuxWindow], _ selection: TopicSelection) -> TopicsModel {
         TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
-                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), now: now)
+                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window))
     }
 
     private func visit(_ id: String, topic: String, selection: inout TopicSelection) {
@@ -53,39 +52,17 @@ final class TopicNavigationTests: XCTestCase {
         XCTAssertEqual(result.rows.map(\.id), [.topic("a"), .topic("b"), .topic("d"), .topic("c")])
     }
 
-    func testSnoozeTimesHideTopicsWithoutChangingWindowMembership() {
-        let now = Date(timeIntervalSince1970: 1_000)
-        let cases: [(String?, Bool)] = [(nil, false), ("never", true), ("1970-01-01T00:16:41Z", true),
-                                      ("1970-01-01T00:16:39Z", false), ("1970-01-01T00:16:40Z", false),
-                                      ("1970-01-01T00:16:40.001Z", true), ("bad-date", false)]
-        let records = cases.enumerated().map { index, item -> TopicRecord in
-            var record = TopicRecord(id: String(index))
-            record.snoozedUntil = item.0
-            XCTAssertEqual(record.isSnoozed(at: now), item.1)
-            return record
-        }
-        var settled = TopicRecord(id: "settled")
-        settled.settledAt = "1970-01-01T00:16:39Z"
-        let result = model(records + [settled], [window("@1", topic: "1")], TopicSelection(), now: now)
-        XCTAssertEqual(result.rows.map(\.id), [.topic("0"), .topic("3"), .topic("4"), .topic("6")])
-        XCTAssertFalse(result.rows.contains { $0.id == .topic("1") })
-        XCTAssertTrue(result.groups.first { $0.kind == .snoozed }!.topics.contains { $0.id == .topic("1") })
-        XCTAssertFalse(result.rows.contains { $0.id == .noTopic })
-        XCTAssertFalse(result.rows.contains { $0.id == .topic("settled") })
-    }
     func testNextTopicUsesVisibleOrderThenFallsBackToNoTopic() {
         var a = TopicRecord(id: "a")
         a.order = 2
         var b = TopicRecord(id: "b")
         b.order = 1
-        var hidden = TopicRecord(id: "hidden")
-        hidden.snoozedUntil = "never"
         var settled = TopicRecord(id: "settled")
         settled.settledAt = "2026-01-01T00:00:00Z"
-        let result = model([a, hidden, settled, b], [], TopicSelection())
+        let result = model([a, settled, b], [], TopicSelection())
         XCTAssertEqual(result.nextTopic(after: "b"), .topic("a"))
         XCTAssertEqual(result.nextTopic(after: "a"), .topic("b"))
-        XCTAssertEqual(model([a, hidden, settled], [], TopicSelection()).nextTopic(after: "a"), .noTopic)
+        XCTAssertEqual(model([a, settled], [], TopicSelection()).nextTopic(after: "a"), .noTopic)
     }
 
     func testNextTopicSkipsTheOtherTopicsThatLeaveTheList() {

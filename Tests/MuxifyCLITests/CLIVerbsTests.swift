@@ -119,12 +119,22 @@ final class CLIVerbsTests: XCTestCase {
             (["session", "move", "up", "--session", "notes"], request(.moveSession(.up), target: .sessionName("notes"))),
             (["session", "move", "down"], request(.moveSession(.down))),
             (["topic", "sort-sessions", "--topic", "Fix"], request(.sortSessions, target: .topic(.named("Fix")))),
+            (["topic", "replace-from-bench", "--with", "Next"], request(.replaceFromBench(with: .topic("Next")))),
+            (["topic", "choose-in-play", "--topic", "B", "--session", "notes", "--topic", "A"],
+             request(.chooseInPlay([.topic("B"), .session("notes"), .topic("A")]))),
+            (["topic", "replace-from-bench", "--with-session", "notes", "--session", "chores"],
+             request(.replaceFromBench(with: .session("notes")), target: .sessionName("chores"))),
         ]
         for (arguments, expected) in cases {
             XCTAssertEqual(try CLICommand(arguments: arguments, environment: inside), expected, "\(arguments)")
         }
         for arguments in [["topic", "pin", "now"], ["topic", "move"], ["topic", "move", "left"], ["topic", "move", "up", "down"],
-                          ["session", "move", "up", "--window", "@1"], ["session", "move", "up", "--topic", "Fix"]] {
+                          ["session", "move", "up", "--window", "@1"], ["session", "move", "up", "--topic", "Fix"],
+                          ["topic", "replace-from-bench"], ["topic", "replace-from-bench", "Next"],
+                          ["topic", "replace-from-bench", "--with", "Next", "--with-session", "notes"],
+                          ["topic", "replace-from-bench", "--with", "A", "--with", "B"], ["topic", "replace-from-bench", "--with", ""],
+                          ["topic", "choose-in-play"], ["topic", "choose-in-play", "A"], ["topic", "choose-in-play", "--topic", ""],
+                          ["topic", "choose-in-play", "--window", "@1"]] {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
                 XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
             }

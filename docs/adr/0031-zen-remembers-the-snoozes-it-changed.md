@@ -1,4 +1,10 @@
+---
+status: superseded by ADR-0054
+---
+
 # Zen remembers the Snoozes it changed
+
+> **Superseded by [ADR-0054](0054-choose-in-play-and-replace-from-bench-replace-snooze-and-zen.md):** Zen is removed. Choose In Play and the Bench now keep the other Topics out of view, so no record of changed Snoozes is needed.
 
 Zen Snoozes every open Topic except the one it keeps, until one time. It does this with ordinary Snoozes on the Topic records. It also writes one record, `$XDG_STATE_HOME/muxify/zen.json`, beside the Topic records (ADR 0028). That record holds the kept Topic, the end time, and each Topic that Zen changed with the Snooze time that Topic had before. Zen never makes a Snooze shorter. A Topic that was already Snoozed past the end time, or until the user unsnoozes it, is not changed and is not in the record. When the user ends Zen early, Muxify puts back the earlier Snooze time on each Topic in the record, or unsnoozes it when that time is past. It skips a Topic whose Snooze the user changed during Zen. When Zen reaches its end time, the usual wake unsnoozes the Topics, and Muxify removes the record.
 

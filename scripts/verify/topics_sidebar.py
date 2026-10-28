@@ -92,12 +92,10 @@ class TopicsSidebar(unittest.TestCase):
         self.show_view('topics')
         # An open group takes up to a third of the Sidebar, and the Topic list then builds fewer rows.
         rs = self.s.rows()
-        for key in ['snoozed-topics', 'settled-topics']:
-            if self.expanded(key, rs):
-                # The previous check's cleanup can remove the group's last Topic, and the row with it, before the press.
-                self.s.driver('press', key)
-        self.s.wait_rows(lambda rs: not any(self.expanded(key, rs) for key in ['snoozed-topics', 'settled-topics']),
-                         'a Topic group did not close')
+        if self.expanded('settled-topics', rs):
+            # The previous check's cleanup can remove the group's last Topic, and the row with it, before the press.
+            self.s.driver('press', 'settled-topics')
+        self.s.wait_rows(lambda rs: not self.expanded('settled-topics', rs), 'the Settled group did not close')
 
     def new_session(self, name, project, command=SHELL, topic=None):
         sid = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, '-c', str(project), command)

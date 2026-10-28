@@ -315,7 +315,7 @@ private struct SpotlightPalette: View {
         let item = row.pick.payload
         let check = palette.rowCheck(row)
         return HStack(spacing: 12) {
-            if let check { CheckBoxView(check: check) }
+            if let check { CheckBoxView(isChecked: check) }
             if let item { PaletteIcon(source: .item(item, row.kind), theme: theme) } else { Color.clear.frame(width: 32, height: 32) }
             VStack(alignment: .leading, spacing: 1) {
                 titleLine(row, theme: theme)
@@ -343,7 +343,7 @@ private struct SpotlightPalette: View {
         .accessibilityElement(children: .ignore)
         .accessibilityIdentifier("palette-row-" + row.id)
         .accessibilityLabel(accessibilityLabel(row))
-        .accessibilityValue(row.pick.reason ?? [check?.box.accessibilityValue, isSelected ? "selected" : nil]
+        .accessibilityValue(row.pick.reason ?? [check == true ? "checked" : nil, isSelected ? "selected" : nil]
                                 .compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(.isButton)
         .accessibilityAction(.default) { palette.perform(.jumpTo, on: row) }
@@ -432,7 +432,7 @@ struct PaletteIcon: View {
                 .font(.system(size: size * 0.5, weight: .semibold))
                 .foregroundStyle(item.color?.color ?? theme.magenta)
                 .frame(width: size, height: size)
-        case .item(let item, let kind) where [.topic, .snoozed, .settled].contains(kind):
+        case .item(let item, let kind) where [.topic, .settled].contains(kind):
             Image(systemName: topicSymbol(item, kind))
                 .font(.system(size: size * 0.6))
                 .foregroundStyle(kind == .topic ? theme.magenta : Color.secondary)
@@ -474,7 +474,6 @@ struct PaletteIcon: View {
         case .copyFolder: theme.cyan
         case .copyTmuxTarget: theme.magenta
         case .pasteFolder: theme.green
-        case .snoozeTopic: theme.yellow
         default: theme.blue
         }
     }
@@ -485,15 +484,13 @@ struct PaletteIcon: View {
         case .copyFolder: "doc.on.doc.fill"
         case .copyTmuxTarget: "number"
         case .pasteFolder: "text.cursor"
-        case .snoozeTopic: "moon.zzz.fill"
         default: "arrow.up.forward"
         }
     }
 
-    /// Open, Dormant (no live Session), Snoozed or Settled.
+    /// Open, Dormant (no live Session) or Settled.
     private func topicSymbol(_ item: PaletteItem, _ kind: RowKind) -> String {
         switch kind {
-        case .snoozed: return "moon.zzz"
         case .settled: return "checkmark.circle"
         default:
             if case .topic(_, nil) = item.ref { return "diamond" }
@@ -574,35 +571,23 @@ private struct FieldChipView: View {
     }
 }
 
-/// The box of a check step's row: empty, a dash when some of a Tag's Topics are checked, a check mark when all are.
-/// A Tag row's box has the Tag's colour, as its Tag Mark on a card has.
+/// The box of a check step's row: empty, or a check mark.
 private struct CheckBoxView: View {
-    let check: RowCheck
+    let isChecked: Bool
 
     var body: some View {
-        let color = check.color?.color ?? Color.accentColor
         let shape = RoundedRectangle(cornerRadius: 4, style: .continuous)
         ZStack {
-            if check.box == .none {
-                shape.strokeBorder(Color.secondary.opacity(0.7), lineWidth: 1.5)
-            } else {
-                shape.fill(color)
-                Image(systemName: check.box == .all ? "checkmark" : "minus")
+            if isChecked {
+                shape.fill(Color.accentColor)
+                Image(systemName: "checkmark")
                     .font(.system(size: 10, weight: .bold))
                     .foregroundStyle(.white)
+            } else {
+                shape.strokeBorder(Color.secondary.opacity(0.7), lineWidth: 1.5)
             }
         }
         .frame(width: 16, height: 16)
-    }
-}
-
-extension CheckBox {
-    var accessibilityValue: String? {
-        switch self {
-        case .none: nil
-        case .some: "partly checked"
-        case .all: "checked"
-        }
     }
 }
 

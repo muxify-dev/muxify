@@ -42,6 +42,47 @@ class TopicsBenchSidebar(TopicsSidebar):
             self.s.act('press', LINE)
         self.s.wait_rows(lambda rs: self.line(rs) == 'Bench', 'the Bench did not hide')
 
+    def show_bench(self):
+        if self.line(self.s.rows()) == 'Bench':
+            self.s.act('press', LINE)
+        self.s.wait_rows(lambda rs: self.line(rs) == 'Hide Bench', 'the Bench did not show')
+
+    def test_a_new_topic_goes_to_the_top_of_the_bench(self):
+        s = self.s
+        self.bench_topics('bench-new')
+        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        self.show_bench()
+        key = 'topic-' + self.create_topic('Bench new')['id']
+        expected = ['topic-bench-new-a', LINE, key, 'topic-bench-new-b', 'topic-bench-new-c']
+        shown = lambda rs: [k for k in s.ids(rs) if k in expected]
+        s.wait_rows(lambda rs: shown(rs) == expected, 'the new Topic is not first on the Bench: %s' % shown(s.rows()))
+
+    def test_settling_a_card_in_play_moves_the_top_of_the_bench_into_its_place(self):
+        s = self.s
+        windows = self.bench_topics('bench-settle')
+        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        self.hide_bench()
+        s.show(windows['topic-bench-settle-a'])
+
+        def settle_opened():
+            # The menu item follows the Location about a second after the Sidebar, so it can still settle the last Topic.
+            if s.has('palette-search'):
+                s.act('action', 'palette-search', 'Close')
+            s.driver('press', 'Settle Topic…')
+            found, rs = self.rows_until(lambda rs: any(key.startswith('palette-row-session-') for key in s.ids(rs)), seconds=3)
+            return found is not None and 'Bench-settle-a' in self.describe('palette-breadcrumb', rs)
+        wait(settle_opened, 'Settle did not open for the card In Play', seconds=20)
+
+        def settled():
+            # The step takes no ↩ while another change of the Topics runs, as after the last check's clean-up.
+            if not s.has('palette-search'):
+                return True
+            s.act('press', 'palette-accept')
+            return False
+        wait(settled, 'Settle did not close the palette')
+        s.wait_rows(lambda rs: self.cards('bench-settle', rs) == ['topic-bench-settle-b', LINE],
+                    'the first Benched card did not come In Play: %s' % self.cards('bench-settle', s.rows()))
+
     def test_the_bench_line_shows_the_bench_and_going_to_a_topic_leaves_it_shown(self):
         s = self.s
         windows = self.bench_topics('bench-toggle')
@@ -80,7 +121,7 @@ class TopicsBenchSidebar(TopicsSidebar):
 
     def cards(self, prefix, rs):
         """The cards of the check's Topics and the Bench line, in Sidebar order."""
-        return [key for key in self.s.ids(rs) if key.startswith('topic-' + prefix) or key == LINE]
+        return [key for key in self.s.ids(rs) if key.startswith('topic-' + prefix) and '-session-' not in key or key == LINE]
 
     def test_a_card_dragged_across_the_shown_bench_line_changes_places_with_the_cards_it_passes(self):
         s = self.s

@@ -298,11 +298,6 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case lock
     /// Ends the Lock of the target Session. A Session that is not Locked does not change.
     case unlock
-    /// Snoozes each open Topic in `topics` until this time, also one that was Snoozed until later. Empty `topics`
-    /// is the target's open Topic. One write: when one Topic is not open, nothing changes. It changes nothing in tmux.
-    case snooze(until: SnoozeDeadline, topics: [TopicRef] = [])
-    /// Ends the Snooze of each open Topic in `topics`, as `snooze` names them. A Topic that is not Snoozed does not change.
-    case unsnooze(topics: [TopicRef] = [])
     /// Changes the Tags of the target's open Topic. It changes nothing in tmux.
     case tags(TopicTagChange)
     /// Sets the Topic Note of the target's open Topic; nil clears it. The record keeps the Note as one line, and text
@@ -329,17 +324,18 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case killWindow
     /// Kills the target's whole Session, with the same rules as `killWindow`.
     case killSession
-    /// Pins or unpins the target's open or Snoozed Topic. A Topic that already has that Pin does not change.
+    /// Pins or unpins the target's open Topic. A Topic that already has that Pin does not change.
     case pin
     case unpin
     /// Moves the card of the target's Topic, or of the target's Locked Session, among the cards with its Pin.
     case moveCard(CardMove)
-    /// Snoozes every open Topic but the target's Topic until this time, in one write with the Zen record. It fails
-    /// while Zen is on.
-    case startZen(until: SnoozeDeadline)
-    /// Gives each Topic that Zen Snoozed its earlier Snooze back, and removes the Zen record. With no Zen it changes
-    /// nothing and succeeds.
-    case endZen
+    /// Puts `cards` first among the cards of the Topics list that are not Pinned, in this order: they fill the In Play
+    /// places, and the ones after the last place go to the top of the Bench. The other cards keep their order under
+    /// them. It takes no target, and it needs `topics.in_play`.
+    case chooseInPlay([TopicListRef])
+    /// The Benched card `with` takes the place of the target's card, which must be In Play. The target's card goes to
+    /// the end of the Bench. It needs `topics.in_play`.
+    case replaceFromBench(with: TopicListRef)
     /// Marks the `scope` of the target Read or Unread: the Topic Unread of a Topic, and each Agent there that
     /// `change` applies to.
     case markRead(ReadChange, scope: ReadScope)
@@ -347,7 +343,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case markAllRead
 
     private enum CodingKeys: String, CodingKey {
-        case list, show, create, settle, forget, move, rename, reopen, lock, unlock, snooze, unsnooze, tags, note
+        case list, show, create, settle, forget, move, rename, reopen, lock, unlock, tags, note
         case startFresh = "start_fresh"
         case moveSession = "move_session"
         case sortSessions = "sort_sessions"
@@ -364,8 +360,8 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
         case killSession = "kill_session"
         case pin, unpin
         case moveCard = "move_card"
-        case startZen = "start_zen"
-        case endZen = "end_zen"
+        case chooseInPlay = "choose_in_play"
+        case replaceFromBench = "replace_from_bench"
         case markRead = "mark_read"
         case markAllRead = "mark_all_read"
     }
@@ -384,6 +380,8 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     private enum TagsCodingKeys: String, CodingKey { case _0 = "change" }
     private enum NoteCodingKeys: String, CodingKey { case _0 = "text" }
     private enum MoveCardCodingKeys: String, CodingKey { case _0 = "move" }
+    private enum ChooseInPlayCodingKeys: String, CodingKey { case _0 = "cards" }
+    private enum ReplaceFromBenchCodingKeys: String, CodingKey { case with }
     private enum MarkReadCodingKeys: String, CodingKey {
         case _0 = "change"
         case scope
@@ -480,24 +478,6 @@ public struct TopicChange: Codable, Hashable, Sendable {
     }
 }
 
-/// What a Snooze or an Unsnooze changed.
-public struct TopicSnoozeChange: Codable, Hashable, Sendable {
-    /// Each Topic that the request named, once, in the order it named them.
-    public var topicIDs: [String]
-    /// The Topics of `topicIDs` that were Snoozed until later. An Unsnooze shortens none.
-    public var shortened: [String]
-
-    public init(topicIDs: [String], shortened: [String] = []) {
-        self.topicIDs = topicIDs
-        self.shortened = shortened
-    }
-
-    private enum CodingKeys: String, CodingKey {
-        case shortened
-        case topicIDs = "topic_ids"
-    }
-}
-
 /// A failure is data, not a thrown error, so every transport can send it.
 public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConvertible {
     /// An open set: a newer writer may send a kind that an older reader does not know.
@@ -535,8 +515,11 @@ public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConv
         public static let cardAtEnd = Kind(rawValue: "card_at_end")
         public static let sessionAtEnd = Kind(rawValue: "session_at_end")
         public static let cardHidden = Kind(rawValue: "card_hidden")
-        public static let zenOn = Kind(rawValue: "zen_on")
         public static let windowNotInSession = Kind(rawValue: "window_not_in_session")
+        public static let inPlayOff = Kind(rawValue: "in_play_off")
+        public static let cardNotInPlay = Kind(rawValue: "card_not_in_play")
+        public static let cardNotBenched = Kind(rawValue: "card_not_benched")
+        public static let cardPinned = Kind(rawValue: "card_pinned")
     }
 
     /// How far the request got before it failed.
@@ -595,13 +578,11 @@ public enum EnvironmentResponse: Codable, Hashable, Sendable {
     case topics([TopicSummary])
     case topic(TopicDetail)
     case changed(TopicChange)
-    case snoozeChanged(TopicSnoozeChange)
     case readChanged(TopicReadChange)
     case failed(TopicFailure)
 
     private enum CodingKeys: String, CodingKey {
         case topics, topic, changed, failed
-        case snoozeChanged = "snooze_changed"
         case readChanged = "read_changed"
     }
 
@@ -610,7 +591,6 @@ public enum EnvironmentResponse: Codable, Hashable, Sendable {
         if let topics = try values.decodeIfPresent([TopicSummary].self, forKey: .topics) { self = .topics(topics) }
         else if let topic = try values.decodeIfPresent(TopicDetail.self, forKey: .topic) { self = .topic(topic) }
         else if let change = try values.decodeIfPresent(TopicChange.self, forKey: .changed) { self = .changed(change) }
-        else if let change = try values.decodeIfPresent(TopicSnoozeChange.self, forKey: .snoozeChanged) { self = .snoozeChanged(change) }
         else if let change = try values.decodeIfPresent(TopicReadChange.self, forKey: .readChanged) { self = .readChanged(change) }
         else { self = .failed(try values.decode(TopicFailure.self, forKey: .failed)) }
     }
@@ -621,7 +601,6 @@ public enum EnvironmentResponse: Codable, Hashable, Sendable {
         case .topics(let topics): try values.encode(topics, forKey: .topics)
         case .topic(let topic): try values.encode(topic, forKey: .topic)
         case .changed(let change): try values.encode(change, forKey: .changed)
-        case .snoozeChanged(let change): try values.encode(change, forKey: .snoozeChanged)
         case .readChanged(let change): try values.encode(change, forKey: .readChanged)
         case .failed(let failure): try values.encode(failure, forKey: .failed)
         }

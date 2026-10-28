@@ -1,4 +1,4 @@
-"""Locked Sessions in the Topics list (ADR 0018): Lock, Unlock, New Topic from a Locked Session, Zen and Kill.
+"""Locked Sessions in the Topics list (ADR 0018): Lock, Unlock, New Topic from a Locked Session and Kill.
 
 The Session card header in UI/SidebarView.swift gives "Lock Session" as an accessibility action, and the Locked card
 header gives "Unlock Session" and "New Topic from this Session", so the checks reach them without a context menu.
@@ -89,24 +89,6 @@ class TopicsLocksSidebar(TopicsSidebar):
         topic = 'topic-' + record['id']
         s.wait_rows(lambda rs: self.above('topic-take-upper', topic, rs) and self.above(topic, 'topic-take-lower', rs)
                     and key not in s.ids(rs), 'the new Topic did not take the place of the Locked card')
-
-    def test_zen_hides_a_locked_card_until_zen_ends(self):
-        s = self.s
-        zen_file = self.topics_dir.parent/'zen.json'
-        self.addCleanup(zen_file.unlink, missing_ok=True)
-        self.write_topic('zen-lock-kept', 'Zen lock kept', self.beta)
-        sid, key = self.locked_session('zen-lock-notes', 3)
-        self.find('topic-zen-lock-kept')
-        s.act('action', 'topic-zen-lock-kept', 'Zen…')
-        s.wait_rows(lambda rs: s.has('palette-breadcrumb', rs), 'Zen… did not open the Zen palette')
-        s.act('press', 'palette-row-0')
-        wait(lambda: zen_file.exists(), 'Zen wrote no zen.json')
-        s.wait_rows(lambda rs: not s.has(key, rs), 'Zen did not hide the Locked card')
-        self.assertNotEqual(self.lock_option(sid), '', 'Zen ended the Lock')
-        s.wait_rows(lambda rs: s.has('end-zen', rs), 'the Sidebar does not show End Zen')
-        s.act('press', 'end-zen')
-        wait(lambda: not zen_file.exists(), 'End Zen kept zen.json')
-        self.find(key, 'the Locked card did not come back when Zen ended')
 
     def test_killing_a_locked_session_removes_its_card(self):
         s = self.s

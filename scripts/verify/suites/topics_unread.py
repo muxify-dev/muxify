@@ -177,9 +177,8 @@ class TopicsUnread(TopicsSidebar):
             self.mark_row(topic, 'Mark Read')
             self.assert_unread(topic, False)
 
-    def test_dormant_snoozed_and_settled_records_and_all_read(self):
+    def test_dormant_and_settled_records_and_all_read(self):
         for topic, fields in [('dormant-read-target', {'sessions': [dict(id='saved', name='debug/dormant-read-target', base_name='debug', directory=str(self.beta))]}),
-                              ('snoozed-read-target', {'snoozed_until': 'never'}),
                               ('settled-read-target', {'settled_at': '2026-10-01T10:00:00Z'})]:
             self.write_topic(topic, topic, self.beta, **fields)
             self.mark_row(topic, 'Mark Unread')
@@ -191,7 +190,7 @@ class TopicsUnread(TopicsSidebar):
                          settled_at='2020-01-01T00:00:00Z', unread=True)
         self.command('Mark All as Read')
         self.assert_unread('hidden-read-target', False)
-        for topic in ['dormant-read-target', 'snoozed-read-target', 'settled-read-target']:
+        for topic in ['dormant-read-target', 'settled-read-target']:
             self.assert_unread(topic, False)
 
     def test_topic_mark_remains_after_its_agent_exits(self):

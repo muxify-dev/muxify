@@ -115,6 +115,33 @@ public enum TopicInsertPosition: String, CaseIterable, Sendable {
     case top, bottom
 }
 
+/// Where a new Topic goes in the Topics list, and a Topic that Reopen or Start Fresh brings back. The Config gives it
+/// once, so no caller asks two settings.
+public enum TopicArrival: Equatable, Sendable {
+    /// Without `topics.in_play`: the `topics.insert_position` end of the cards with the Topic's Pin.
+    case end(TopicInsertPosition)
+    /// With `topics.in_play`: right after the first `inPlay` cards that are not Pinned, or last when there are fewer.
+    /// A Pinned Topic has no Bench, so it goes last among the Pinned Topics, as Pin puts it.
+    case topOfBench(inPlay: Int)
+
+    public init(inPlay: Int?, insertPosition: TopicInsertPosition) {
+        self = inPlay.map { .topOfBench(inPlay: $0) } ?? .end(insertPosition)
+    }
+
+    /// The index in `zone`, the cards with the Topic's Pin without the Topic, where it goes.
+    func index(in zone: [TopicListEntry], pinned: Bool) -> Int {
+        switch self {
+        case .end(.top): return 0
+        case .end(.bottom): return zone.count
+        case .topOfBench(let inPlay): return pinned ? zone.count : min(inPlay, zone.count)
+        }
+    }
+}
+
+extension Config.Topics {
+    public var arrival: TopicArrival { TopicArrival(inPlay: inPlay, insertPosition: insertPosition) }
+}
+
 public enum TopicPlacement: Equatable, Sendable {
     case before(TopicListID)
     case after(TopicListID)
@@ -131,11 +158,19 @@ public enum TopicPlacement: Equatable, Sendable {
 public enum TopicOrder {
     public enum Failure: Error, CustomStringConvertible {
         case sourceUnavailable, anchorUnavailable
+        /// Replace from Bench: the card to replace is not In Play, or the card to take its place is not Benched.
+        case notInPlay, notBenched
+        /// Choose In Play: a Pinned Topic is neither In Play nor Benched, and each place takes one card.
+        case pinned, chosenTwice
 
         public var description: String {
             switch self {
             case .sourceUnavailable: return "The Topic is no longer open."
             case .anchorUnavailable: return "The Topic at the drop position is no longer open."
+            case .notInPlay: return "The card to replace is not In Play."
+            case .notBenched: return "The card to put In Play is not on the Bench."
+            case .pinned: return "A Pinned Topic is neither In Play nor on the Bench."
+            case .chosenTwice: return "A card is chosen twice."
             }
         }
     }
@@ -184,14 +219,41 @@ public enum TopicOrder {
         return placing(source, at: index, in: zone, others: original.filter { $0.isPinned != pinned && $0.id != source.id })
     }
 
-    /// Places a new or returning Topic at the chosen end of the entries with its pin.
-    public static func inserting(_ record: TopicRecord, at position: TopicInsertPosition, in entries: [TopicListEntry]) -> [TopicListEntry] {
+    /// Places a new or returning Topic where `arrival` puts it among the entries with its pin.
+    public static func inserting(_ record: TopicRecord, at arrival: TopicArrival, in entries: [TopicListEntry]) -> [TopicListEntry] {
         let original = sorted(entries).filter { $0.id != .topic(record.id) }
         let source = TopicListEntry.topic(record)
         var zone = original.filter { $0.isPinned == record.isPinned }
-        let index = position == .top ? 0 : zone.count
+        let index = arrival.index(in: zone, pinned: record.isPinned)
         zone.insert(source, at: index)
         return placing(source, at: index, in: zone, others: original.filter { $0.isPinned != record.isPinned })
+    }
+
+    /// Choose In Play: `chosen` go first among the entries that are not Pinned, in this order. So they fill the In Play
+    /// places, and the ones after the last place lead the Bench. The other entries keep their order under them.
+    public static func choosingInPlay(_ chosen: [TopicListID], in entries: [TopicListEntry]) throws -> [TopicListEntry] {
+        let original = sorted(entries)
+        guard Set(chosen).count == chosen.count else { throw Failure.chosenTwice }
+        let first = try chosen.map { id in
+            guard let entry = original.first(where: { $0.id == id }) else { throw Failure.sourceUnavailable }
+            guard !entry.isPinned else { throw Failure.pinned }
+            return entry
+        }
+        return normalized(first + original.filter { !$0.isPinned && !chosen.contains($0.id) })
+    }
+
+    /// Replace from Bench: `benched` takes the place of `card`, and `card` goes to the end of the Bench. The first
+    /// `inPlay` entries that are not Pinned are In Play; the others are Benched.
+    public static func replacingFromBench(_ card: TopicListID, with benched: TopicListID, inPlay: Int,
+                                          in entries: [TopicListEntry]) throws -> [TopicListEntry] {
+        var zone = sorted(entries).filter { !$0.isPinned }
+        guard let place = zone.firstIndex(where: { $0.id == card }), place < inPlay else { throw Failure.notInPlay }
+        guard let index = zone.firstIndex(where: { $0.id == benched }), index >= inPlay else { throw Failure.notBenched }
+        let replaced = zone[place]
+        let incoming = zone.remove(at: index)
+        zone[place] = incoming
+        zone.append(replaced)
+        return normalized(zone)
     }
 
     /// Locks the Session last among the entries that are not Pinned.

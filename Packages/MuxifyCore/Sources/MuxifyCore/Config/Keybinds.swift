@@ -40,9 +40,6 @@ public enum ConfigAction: String, KeybindAction {
     case moveWindow = "move_window"
     case moveSession = "move_session"
     case addSessionToTopic = "add_session_to_topic"
-    case snoozeTopic = "snooze_topic"
-    case snoozeTopics = "snooze_topics"
-    case toggleZen = "toggle_zen"
     case settleTopic = "settle_topic"
     case removeSessionFromTopic = "remove_session_from_topic"
     case forgetTopic = "forget_topic"
@@ -52,13 +49,13 @@ public enum ConfigAction: String, KeybindAction {
     case moveTopicUp = "move_topic_up"
     case moveTopicDown = "move_topic_down"
     case togglePinTopic = "toggle_pin_topic"
-    case unsnoozeTopic = "unsnooze_topic"
-    case unsnoozeTopics = "unsnooze_topics"
     case markRead = "mark_read"
     case markUnread = "mark_unread"
     case markAllRead = "mark_all_read"
     case toggleSidebar = "toggle_sidebar"
     case toggleBench = "toggle_bench"
+    case chooseInPlay = "choose_in_play"
+    case replaceFromBench = "replace_from_bench"
     case toggleTerminal = "toggle_terminal"
     case toggleBrowser = "toggle_browser"
     case toggleGitView = "toggle_git_view"
@@ -133,16 +130,13 @@ public enum ConfigAction: String, KeybindAction {
         .moveTopicUp: ["alt+cmd+up"],
         .moveTopicDown: ["alt+cmd+down"],
         .togglePinTopic: [],
-        .unsnoozeTopic: [],
-        .unsnoozeTopics: [],
         .markRead: ["cmd+shift+r"],
         .markUnread: ["cmd+shift+u"],
         .markAllRead: [],
-        .snoozeTopic: ["alt+cmd+s"],
-        .snoozeTopics: [],
-        .toggleZen: ["shift+alt+cmd+s"],
         .toggleSidebar: ["cmd+s", "ctrl+cmd+s"],
         .toggleBench: ["shift+cmd+s"],
+        .chooseInPlay: ["shift+alt+cmd+s"],
+        .replaceFromBench: ["alt+cmd+s"],
         .toggleTerminal: ["cmd+j"],
         .toggleBrowser: ["cmd+b"],
         .toggleGitView: ["cmd+g"],
@@ -229,7 +223,6 @@ public enum PaletteAction: String, KeybindAction {
     case copyFolder = "copy_folder"
     case copyTmuxTarget = "copy_tmux_target"
     case pasteFolder = "paste_folder"
-    case snoozeTopic = "snooze_topic"
 
     case move
     case addSessionToTopic = "add_session_to_topic"
@@ -237,10 +230,8 @@ public enum PaletteAction: String, KeybindAction {
     case editTags = "edit_tags"
     case setTopicNote = "set_topic_note"
     case clearTopicNote = "clear_topic_note"
-    case startZen = "start_zen"
     case settleTopic = "settle_topic"
     case forgetTopic = "forget_topic"
-    case unsnoozeTopic = "unsnooze_topic"
     case reopenTopic = "reopen_topic"
     case startTopicFresh = "start_topic_fresh"
     case pinTopic = "pin_topic"
@@ -270,17 +261,14 @@ public enum PaletteAction: String, KeybindAction {
         .copyFolder: ["cmd+c"],
         .copyTmuxTarget: ["cmd+shift+c"],
         .pasteFolder: ["ctrl+y"],
-        .snoozeTopic: ["ctrl+s"],
         .move: [],
         .addSessionToTopic: [],
         .rename: [],
         .editTags: [],
         .setTopicNote: [],
         .clearTopicNote: [],
-        .startZen: [],
         .settleTopic: [],
         .forgetTopic: [],
-        .unsnoozeTopic: [],
         .reopenTopic: [],
         .startTopicFresh: [],
         .pinTopic: [],

@@ -1,4 +1,4 @@
-"""Topics in the Sidebar: the Snoozed and Settled groups, their order, and which group is open.
+"""Topics in the Sidebar: the Settled group, its pages, and when it is open.
 
 A card in a group (TopicCard in UI/SidebarView.swift) gives its context menu's items as accessibility actions.
 
@@ -9,7 +9,6 @@ Run from the repo root after `make build`:
 """
 
 import json
-import time
 import unittest
 
 from scripts.verify.sandbox import frame, wait
@@ -28,48 +27,44 @@ class TopicsGroupsSidebar(TopicsSidebar):
         return self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue', '') == query,
                                 'Go to… did not take the query %r' % query)
 
-    def assert_group_rows_in_view(self, rs, when):
+    def assert_group_row_in_view(self, rs, when):
         floor = frame(self.s.row('agents-header', rs))[1]
         ceiling = frame(self.s.row('topics-list', rs))[0]
-        for key in ['snoozed-topics', 'settled-topics']:
-            bottom, top = frame(self.s.row(key, rs))
-            self.assertTrue(floor <= bottom and top <= ceiling,
-                            '%s: the %s row %s is not between the Topics list and the Agents section (%s..%s)'
-                            % (when, key, (bottom, top), floor, ceiling))
+        bottom, top = frame(self.s.row('settled-topics', rs))
+        self.assertTrue(floor <= bottom and top <= ceiling,
+                        '%s: the Settled row %s is not between the Topics list and the Agents section (%s..%s)'
+                        % (when, (bottom, top), floor, ceiling))
 
-    def test_an_open_group_keeps_both_group_rows_in_view(self):
+    def test_an_open_group_keeps_its_row_in_view(self):
         s = self.s
-        snoozed = ['rows-in-view-snoozed-%02d' % i for i in range(12)]
-        for topic_id in snoozed:
-            self.write_topic(topic_id, 'Rows in view ' + topic_id[-2:], self.beta, snoozed_until='never')
-        self.write_topic('rows-in-view-settled', 'Rows in view settled', self.beta, settled_at='2031-01-01T10:00:00Z')
+        settled = ['rows-in-view-settled-%02d' % i for i in range(12)]
+        for number, topic_id in enumerate(settled):
+            self.write_topic(topic_id, 'Rows in view ' + topic_id[-2:], self.beta, settled_at='2030-02-%02dT10:00:00Z' % (28 - number))
         self.collapse('settled-topics')
-        self.collapse('snoozed-topics')
-        s.act('press', 'snoozed-topics')
-        last = 'topic-' + snoozed[-1]
-        rs = s.wait_rows(lambda rs: self.expanded('snoozed-topics', rs) and s.has(last, rs),
-                         'the Snoozed header did not open its group')
-        self.assertLess(frame(s.row(last, rs))[1], frame(s.row('settled-topics', rs))[1],
-                        'the 12 Snoozed cards fit in their block, so the check proves nothing')
-        self.assert_group_rows_in_view(rs, 'Snoozed open')
+        s.act('press', 'settled-topics')
+        last = 'topic-' + settled[-1]
+        rs = s.wait_rows(lambda rs: self.expanded('settled-topics', rs) and s.has(last, rs),
+                         'the Settled header did not open its group')
+        self.assertLess(frame(s.row(last, rs))[1], frame(s.row('agents-header', rs))[1],
+                        'the 12 Settled cards fit in their block, so the check proves nothing')
+        self.assert_group_row_in_view(rs, 'Settled open')
         s.reveal(last)
         rs = s.rows()
-        self.assertGreater(frame(s.row(last, rs))[0], frame(s.row('settled-topics', rs))[1],
-                           'revealing the last Snoozed card did not scroll it into its block above the Settled row')
-        self.assert_group_rows_in_view(rs, 'Snoozed scrolled to its last card')
+        self.assertGreaterEqual(frame(s.row(last, rs))[0], frame(s.row('agents-header', rs))[1],
+                                'revealing the last Settled card did not scroll it into its block above the Agents section')
+        self.assert_group_row_in_view(rs, 'Settled scrolled to its last card')
 
-    def test_opening_one_group_closes_the_other_and_a_header_press_goes_to_no_topic(self):
+    def test_a_group_header_press_opens_the_group_and_does_not_go_to_a_topic(self):
         s = self.s
-        self.write_topic('one-open-snoozed', 'One open snoozed', self.beta, snoozed_until='never')
         self.write_topic('one-open-settled', 'One open settled', self.beta, settled_at='2031-01-01T10:00:00Z')
+        # A move of the shown Window closes the group, so the check starts on base, not on a Reopen choice that an
+        # earlier check left.
+        self.select_window('base:')
+        s.wait_shown('base:')
         self.collapse('settled-topics')
-        self.collapse('snoozed-topics')
         clients = s.tmux('list-clients', '-F', '#{window_id}')
-        s.act('press', 'snoozed-topics')
-        s.wait_rows(lambda rs: self.expanded('snoozed-topics', rs), 'the Snoozed header did not open its group')
         s.act('press', 'settled-topics')
-        rs = s.wait_rows(lambda rs: self.expanded('settled-topics', rs), 'the Settled header did not open its group')
-        self.assertFalse(self.expanded('snoozed-topics', rs), 'opening Settled did not close Snoozed')
+        s.wait_rows(lambda rs: self.expanded('settled-topics', rs), 'the Settled header did not open its group')
         self.assertEqual(s.tmux('list-clients', '-F', '#{window_id}'), clients, 'a header press went to a Topic')
 
     def test_go_to_a_settled_topic_opens_its_group_and_going_to_a_topic_in_the_list_closes_it(self):
@@ -88,93 +83,6 @@ class TopicsGroupsSidebar(TopicsSidebar):
         self.select_window(sid + ':')
         s.wait_rows(lambda rs: not self.expanded('settled-topics', rs),
                     'going to a Topic in the Topics list did not close the Settled group')
-
-    def test_snoozed_group_lists_snoozed_topic_with_its_live_windows_and_unsnooze_returns_it(self):
-        self.write_topic('group-snoozed', 'Group snoozed', self.beta, snoozed_until='never')
-        sid = self.new_session('group-snoozed', self.beta, topic='group-snoozed')
-        window = self.s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
-        self.expand('snoozed-topics')
-        latency, rs = self.rows_until(lambda rs: self.grouped('topic-group-snoozed', 'snoozed-topics', rs))
-        self.assertIsNotNone(latency, 'Topic is not in the Snoozed group; Topic rows %s' % self.topic_rows(rs))
-        self.assertIn('never', self.describe('topic-group-snoozed', rs), 'row does not show its wake time')
-        # The app reads the Topic file within a quarter second and tmux once per second, so the row can say Empty
-        # before the app has seen the Session. A press on an Empty card shows the empty-Topic view in place of the
-        # Window; the Session that then shows ends that view, and the Snoozed group closes with it.
-        latency, rs = self.rows_until(lambda rs: 'Empty' not in self.describe('topic-group-snoozed', rs), seconds=5)
-        self.assertIsNotNone(latency, 'a Topic with a live Session says Empty: ' + self.describe('topic-group-snoozed', rs))
-
-        self.expand('topic-group-snoozed')
-        self.s.wait_rows(lambda rs: self.s.has('topic-window-' + window, rs), 'snoozed Topic does not list its live Window')
-        self.s.act('press', 'topic-window-' + window)
-        wait(lambda: window in self.s.tmux('list-clients', '-F', '#{window_id}').split(),
-             'click on the snoozed Window did not show it', seconds=10)
-
-        self.s.act('press', 'unsnooze-topic-group-snoozed')
-        latency, rs = self.rows_until(lambda rs: self.s.has('topic-group-snoozed', rs)
-                                      and not self.grouped('topic-group-snoozed', 'snoozed-topics', rs))
-        self.assertIsNotNone(latency, 'Unsnooze did not return the Topic to the Topics list; Topic rows %s' % self.topic_rows(rs))
-        self.assertNotIn('snoozed_until', self.records()['group-snoozed'], 'Unsnooze kept the snooze in the record')
-
-    def test_snoozed_group_lists_topics_by_wake_time_soonest_first_and_until_unsnooze_last(self):
-        at = lambda seconds: time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + seconds))
-        self.write_topic('wake-order-never', 'Wake never', self.beta, snoozed_until='never', order=-3000)
-        self.write_topic('wake-order-late', 'Wake late', self.beta, snoozed_until=at(7200), order=-2999, pinned=True)
-        self.write_topic('wake-order-soon', 'Wake soon', self.beta, snoozed_until=at(3600), order=-2998)
-        expected = ['topic-wake-order-soon', 'topic-wake-order-late', 'topic-wake-order-never']
-        mine = lambda rs: [key for key in self.topic_rows(rs) if key.startswith('topic-wake-order-')
-                           and self.grouped(key, 'snoozed-topics', rs)]
-        self.expand('snoozed-topics')
-        latency, rs = self.rows_until(lambda rs: len(mine(rs)) == 3)
-        self.assertIsNotNone(latency, 'the Snoozed group does not list the three Topics; Topic rows %s' % self.topic_rows(rs))
-        self.assertEqual(mine(rs), expected, 'the Snoozed group is not in wake time order, with the Pin ignored')
-
-    def test_a_press_on_a_closed_snoozed_card_goes_to_the_topic_and_keeps_it_snoozed_with_pin(self):
-        s = self.s
-        self.write_topic('card-snoozed', 'Card snoozed', self.beta, snoozed_until='never')
-        sid = self.new_session('card-snoozed', self.beta, topic='card-snoozed')
-        window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
-        self.expand('snoozed-topics')
-        rs = s.wait_rows(lambda rs: self.grouped('topic-card-snoozed', 'snoozed-topics', rs)
-                         and 'Empty' not in s.row('topic-card-snoozed', rs).get('accessibilityValue', ''),
-                         'the Topic is not in the Snoozed group with its live Session')
-        self.assertFalse(self.expanded('topic-card-snoozed', rs), 'a Snoozed card starts open')
-        self.assertFalse(s.has('topic-window-' + window, rs), 'a closed Snoozed card lists its Windows')
-        s.act('press', 'topic-card-snoozed')
-        s.wait_shown(window)
-        rs = s.wait_rows(lambda rs: self.expanded('topic-card-snoozed', rs) and s.has('topic-window-' + window, rs),
-                         'going to the Snoozed Topic did not open its card to its Windows')
-        self.assertTrue(self.grouped('topic-card-snoozed', 'snoozed-topics', rs), 'a press on a Snoozed card Unsnoozed it')
-        self.assertEqual(self.records()['card-snoozed'].get('snoozed_until'), 'never', 'a press on a Snoozed card changed its Snooze')
-        s.act('action', 'topic-card-snoozed', 'Pin Topic')
-        wait(lambda: self.records()['card-snoozed'].get('pinned') is True, 'Pin on a Snoozed card did not Pin the Topic')
-
-    def test_snoozed_topic_wakes_at_its_deadline_while_the_app_runs(self):
-        deadline = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(time.time() + 6))
-        self.write_topic('group-wakes', 'Group wakes', self.beta, snoozed_until=deadline)
-        self.new_session('group-wakes', self.beta, topic='group-wakes')
-        self.expand('snoozed-topics')
-        self.s.wait_rows(lambda rs: self.grouped('topic-group-wakes', 'snoozed-topics', rs),
-                         'Topic is not in the Snoozed group before its deadline')
-        # Nothing changes in tmux or in the Topic files at the deadline; only the time tells the app to wake the Topic.
-        latency, rs = self.rows_until(lambda rs: self.s.has('topic-group-wakes', rs)
-                                      and not self.grouped('topic-group-wakes', 'snoozed-topics', rs), seconds=20)
-        self.assertIsNotNone(latency, 'Topic did not wake at its deadline; Topic rows %s' % self.topic_rows(rs))
-        # The Sidebar wakes the card at the deadline, a moment before the app writes the record.
-        wait(lambda: 'snoozed_until' not in self.records()['group-wakes'], 'the woken Topic kept its snooze in the record')
-
-    def test_snoozed_topic_row_offers_settle_and_snooze_again(self):
-        self.write_topic('group-again', 'Group again', self.beta, snoozed_until='never')
-        self.expand('snoozed-topics')
-        rs = self.s.wait_rows(lambda rs: self.grouped('topic-group-again', 'snoozed-topics', rs), 'Topic is not in the Snoozed group')
-        self.assertIn('Empty', self.describe('topic-group-again', rs), 'a snoozed Topic that remembers no Session does not say Empty')
-        self.s.act('action', 'topic-group-again', 'Snooze again…')
-        self.s.wait_rows(lambda rs: self.s.has('palette-accept', rs), 'Snooze again did not open the Snooze palette')
-        self.s.act('press', 'palette-cancel')
-        self.s.wait_rows(lambda rs: not self.s.has('palette-accept', rs), 'Snooze palette did not close')
-        self.s.act('action', 'topic-group-again', 'Settle…')
-        self.s.wait_rows(lambda rs: self.s.has('palette-cancel', rs), 'Settle did not open the Settle palette')
-        self.s.act('press', 'palette-cancel')
-        self.s.wait_rows(lambda rs: not self.s.has('palette-cancel', rs), 'Settle palette did not close')
 
     def test_settled_group_lists_settled_topic_with_remembered_windows_and_its_reopen_choice_rebuilds_it(self):
         self.write_topic('group-settled', 'Group settled', self.alpha, settled_at='2031-01-01T10:00:00Z', outcome='Shipped proof',

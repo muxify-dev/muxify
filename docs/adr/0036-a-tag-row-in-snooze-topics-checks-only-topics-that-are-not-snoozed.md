@@ -1,4 +1,10 @@
+---
+status: superseded by ADR-0054
+---
+
 # A Tag row in Snooze Topics… checks only the Topics that are not Snoozed
+
+> **Superseded by [ADR-0054](0054-choose-in-play-and-replace-from-bench-replace-snooze-and-zen.md):** Snooze Topics… is removed. The Check step now serves Choose In Play, and it has no Tag rows.
 
 This changes the Tag row rule of [ADR 0035](0035-a-check-step-checks-topics-for-snooze-and-unsnooze.md) for Snooze Topics….
 

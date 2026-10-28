@@ -21,7 +21,6 @@ final class WorktreeTests: XCTestCase {
         func paths(_ environment: [String: String]) -> MuxifyPaths { MuxifyPaths(environment: environment, home: "/Users/me") }
         XCTAssertEqual(paths(["XDG_STATE_HOME": "/xdg state"]).worktrees.path, "/xdg state/muxify/worktrees")
         XCTAssertEqual(paths(["XDG_STATE_HOME": "/xdg state"]).topics.path, "/xdg state/muxify/topics")
-        XCTAssertEqual(paths(["XDG_STATE_HOME": "/xdg state"]).zenFile.path, "/xdg state/muxify/zen.json")
         XCTAssertEqual(paths([:]).worktrees.path, "/Users/me/.local/state/muxify/worktrees")
         XCTAssertEqual(paths(["XDG_STATE_HOME": ""]).worktrees.path, "/Users/me/.local/state/muxify/worktrees", "an empty value is unset")
     }

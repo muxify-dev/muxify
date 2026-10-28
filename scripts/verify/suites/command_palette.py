@@ -2,14 +2,13 @@
 Topic, Settled, Session or Session Path row, and Move, which uses the palette's view.
 
 The driver cannot type keys, so a check opens a palette from its View menu item, closes it with the
-search field's Close accessibility action, uses its Back, Show Actions and Escape actions for ⌫, ⌘K and ⎋, and runs New Session, Paste Path and Snooze through the row's
-accessibility actions (UI/CommandPaletteView.swift), which call the same code as ⌘↩, ⌃Y and ⌃S.
+search field's Close accessibility action, uses its Back, Show Actions and Escape actions for ⌫, ⌘K and ⎋, and runs New Session and Paste Path through the row's
+accessibility actions (UI/CommandPaletteView.swift), which call the same code as ⌘↩ and ⌃Y.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.command_palette
 """
 
-import datetime
 import json
 import os
 import subprocess
@@ -60,7 +59,7 @@ class CommandPalette(unittest.TestCase):
                                                        '  - {name: Go to…, keybinding: cmd+p, sources: [topics, sessions]}\n'
                                                        '  - {name: One list, sources: [topics, sessions], order: ranked, tiebreak: [open, visit, length]}\n'
                                                        '  - {name: No Topic Sessions, sources: [topics, sessions],'
-                                                       ' show: [topic, snoozed, settled, session, session-path, worktree]}\n')
+                                                       ' show: [topic, settled, session, session-path, worktree]}\n')
         cls.base = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'base', '-c', str(cls.beta), SHELL)
         cls.base_window = s.tmux('display-message', '-p', '-t', cls.base + ':', '#{window_id}')
         s.launch(LAUNCH_ARGS)
@@ -199,35 +198,6 @@ class CommandPalette(unittest.TestCase):
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close after ↩')
         self.assertFalse(self.s.has('reopen-choice-reopen'), '↩ on a Dormant row showed the Reopen choice')
 
-    def test_return_on_a_snoozed_topic_with_a_window_goes_there_and_keeps_the_snooze(self):
-        self.write_topic('sw-snoozed-go', 'Sw snoozed go', self.beta, snoozed_until='never')
-        window = self.window_of(self.new_session('beta/sw-snoozed-go', self.beta, topic='sw-snoozed-go'))
-        self.select_window(self.base_window)
-        if self.s.row('snoozed-topics').get('accessibilityValue') == 'expanded':
-            self.s.act('press', 'snoozed-topics')
-        key = 'palette-row-topic-sw-snoozed-go'
-        self.open_palette()
-        self.search('snoozed go', key)
-        self.s.act('press', key)
-        wait(lambda: window in self.client_windows(), 'the client did not go to the Snoozed Topic\'s Window', seconds=10)
-        rs = self.s.wait_rows(lambda rs: self.s.row('topic-window-' + window, rs).get('accessibilityValue') == 'selected',
-                              'the Sidebar does not show the Window selected: %s, %s' % (
-                                  self.describe('snoozed-topics', self.s.rows()), self.s.ids()))
-        self.assertEqual(self.records()['sw-snoozed-go'].get('snoozed_until'), 'never', 'going to the Topic changed its Snooze')
-        self.assertIn(window, self.client_windows(), 'the selection moved away from the Snoozed Topic')
-
-    def test_return_on_a_dormant_snoozed_topic_reopens_it_and_keeps_the_snooze(self):
-        self.write_topic('sw-snoozed-dormant', 'Sw snoozed dormant', self.beta, snoozed_until='never',
-                         sessions=[remembered_session(self.beta, 'sw-snoozed-dormant', windows=[dict(directory=str(self.beta), name='shell')])])
-        key = 'palette-row-topic-sw-snoozed-dormant'
-        self.open_palette()
-        rs = self.search('snoozed dormant', key)
-        self.assertIn('Reopen', self.describe(key, rs), 'a Dormant Snoozed row does not say Reopen')
-        self.s.act('press', key)
-        wait(lambda: 'beta/sw-snoozed-dormant' in self.client_sessions(), 'the client did not go to the reopened Session', seconds=15)
-        self.s.wait_shown('=beta/sw-snoozed-dormant:')
-        self.assertEqual(self.records()['sw-snoozed-dormant'].get('snoozed_until'), 'never', 'Reopen changed the Snooze')
-
     def test_typing_sett_finds_a_settled_topic_by_its_outcome_and_return_shows_its_reopen_choice(self):
         self.write_topic('sw-settled', 'Sw settled', self.alpha, settled_at='2031-01-01T10:00:00Z', outcome='Shipped proof',
                          sessions=[remembered_session(self.alpha, 'sw-settled', windows=[dict(directory=str(self.alpha), name='shell')])])
@@ -244,16 +214,17 @@ class CommandPalette(unittest.TestCase):
         wait(lambda: 'settled_at' not in self.records().get('sw-settled', {'settled_at': 1}), 'Reopen did not clear settled_at', seconds=15)
         wait(lambda: 'alpha/sw-settled' in self.client_sessions(), 'the client did not go to the reopened Session', seconds=10)
 
-    def test_a_snoozed_topic_that_matches_better_ranks_above_an_open_topic(self):
-        for topic_id, title, fields in [('sw-rank-open', 'Sw quokkas frank', {}), ('sw-rank-snoozed', 'Sw quokka rank', dict(snoozed_until='never'))]:
+    def test_a_settled_topic_that_matches_better_ranks_above_an_open_topic(self):
+        for topic_id, title, fields in [('sw-rank-open', 'Sw quokkas frank', {}),
+                                        ('sw-rank-settled', 'Sw quokka rank', dict(settled_at='2031-01-01T10:00:00Z'))]:
             self.write_topic(topic_id, title, self.beta, **fields)
             self.addCleanup(remove_topic, self.topics_dir/(topic_id + '.json'))
         self.open_palette()
         rs = self.search('quokka rank', 'palette-row-topic-sw-rank-open')
         ids = self.s.ids(rs)
-        self.assertNotIn('palette-section-snoozed', ids, 'a query still lists Snoozed Topics under their own header')
-        self.assertEqual(self.topic_row_ids(rs), ['palette-row-topic-sw-rank-snoozed', 'palette-row-topic-sw-rank-open'],
-                         'the Snoozed Topic does not rank by its score')
+        self.assertNotIn('palette-section-settled', ids, 'a query still lists Settled Topics under their own header')
+        self.assertEqual(self.topic_row_ids(rs), ['palette-row-topic-sw-rank-settled', 'palette-row-topic-sw-rank-open'],
+                         'the Settled Topic does not rank by its score')
 
     def test_one_list_ranks_sessions_and_topics_together_without_headers(self):
         self.write_topic('sw-one-weak', 'Sw wom-bat later', self.beta)
@@ -365,37 +336,6 @@ class CommandPalette(unittest.TestCase):
         last = [line for line in screen.splitlines() if line.strip()][-1]
         self.assertTrue(last.rstrip().endswith(path), 'the path is not waiting at the prompt: %r' % screen)
         self.assertEqual(set(self.client_windows()), {window}, 'Paste Path moved the client')
-
-    def test_snooze_on_a_topic_row_uses_the_palette_and_a_bare_1300_snoozes_until_the_next_1300(self):
-        self.write_topic('sw-snooze', 'Sw snooze', self.beta)
-        key = 'palette-row-topic-sw-snooze'
-        self.open_palette()
-        self.s.wait_rows(lambda rs: self.s.has(key, rs), 'the Topic row did not show')
-        self.s.act('action', key, 'Snooze Topic')
-        rs = self.s.wait_rows(lambda rs: self.s.has('palette-accept', rs), 'Snooze did not open the Snooze palette')
-        self.assertTrue(self.s.has('palette-search', rs), 'Snooze did not retain the palette input')
-        self.assertTrue(any('Sw snooze › Snooze' in r.get('accessibilityLabel', '') + r.get('accessibilityValue', '') for r in rs),
-                        'the Snooze palette is not for the Topic: %s' % [r.get('accessibilityLabel') for r in rs])
-
-        def next_1300():
-            # Count days in naive local wall-clock time, so the UTC offset comes from the day of the 13:00 and not
-            # from now: on the day before a daylight-saving change the two differ.
-            now = datetime.datetime.now()
-            today = now.replace(hour=13, minute=0, second=0, microsecond=0)
-            return (today if today > now else today + datetime.timedelta(days=1)).astimezone()
-        expected = {next_1300()}
-
-        def typed():
-            self.s.act('focus', 'palette-search')
-            self.s.act('set', 'palette-search', '1300')
-            return self.rows_until(lambda rs: self.s.has('palette-row-typed', rs), seconds=3)[0] is not None
-        wait(typed, 'the typed 1300 did not show as a choice', seconds=20)
-        self.s.act('press', 'palette-accept')
-        expected.add(next_1300())
-        self.s.wait_rows(lambda rs: not self.s.has('palette-accept', rs), 'the Snooze palette did not close')
-        stored = wait(lambda: self.records().get('sw-snooze', {}).get('snoozed_until'), 'the Topic was not Snoozed', seconds=10)
-        until = datetime.datetime.strptime(stored, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc)
-        self.assertIn(until, expected, 'snoozed_until %s is not the next 13:00 local time %s' % (stored, sorted(expected)))
 
     def test_sessions_mode_finds_a_topic_session_by_name_on_its_own_row_and_goes_into_it(self):
         """ADR 0037: every running Session has its own row, in Sessions mode too, and a Topic Session in a Session
@@ -521,28 +461,26 @@ class CommandPalette(unittest.TestCase):
             order += [key for key in more if key not in order]
         self.fail('the palette list did not end: %s' % order)
 
-    def test_an_empty_query_lists_topics_sessions_snoozed_and_settled_in_that_order(self):
+    def test_an_empty_query_lists_topics_sessions_and_settled_in_that_order(self):
         empty = self.s.root/'projects/sw-order-empty'
         outside = self.s.root/'outside-order'
         for directory in [empty, outside]:
             directory.mkdir(exist_ok=True)
         self.write_topic('sw-order-open', 'Sw order open', self.beta)
-        self.write_topic('sw-order-snoozed', 'Sw order snoozed', self.beta, snoozed_until='never')
         self.write_topic('sw-order-settled', 'Sw order settled', self.beta, settled_at='2031-01-01T10:00:00Z')
-        for topic_id in ['sw-order-open', 'sw-order-snoozed', 'sw-order-settled']:
+        for topic_id in ['sw-order-open', 'sw-order-settled']:
             self.addCleanup(remove_topic, self.topics_dir/(topic_id + '.json'))
         outside_sid = self.new_session('sw-order-outside', outside)
         for sid in [self.new_session('beta/sw-order-open', self.beta, topic='sw-order-open'), outside_sid]:
             self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', sid)
         placed = [('palette-row-topic-sw-order-open', 'topics'), (self.session_row(outside_sid), 'sessions'),
-                  (self.session_path_row(empty), 'sessions'), ('palette-row-topic-sw-order-snoozed', 'snoozed'),
-                  ('palette-row-topic-sw-order-settled', 'settled')]
+                  (self.session_path_row(empty), 'sessions'), ('palette-row-topic-sw-order-settled', 'settled')]
         rows = [row for row, _ in placed]
         self.open_palette()
         # The app sees the new Sessions at its next read of tmux, and the open palette follows.
         order = wait(lambda: (lambda order: order if set(rows) <= set(order) else None)(self.palette_order()),
                      'an empty query does not list every section\'s row: %s' % rows, seconds=10)
-        names = ['topics', 'sessions', 'snoozed', 'settled']
+        names = ['topics', 'sessions', 'settled']
         headers = ['palette-section-' + name for name in names]
         self.assertEqual([key for key in order if key.startswith('palette-section-')], headers, order)
         bounds = [order.index(header) for header in headers] + [len(order)]
@@ -559,7 +497,7 @@ class CommandPalette(unittest.TestCase):
         outside = s.root/'outside-slot'
         outside.mkdir(exist_ok=True)
         cards = lambda rs: [key for key in s.ids(rs) if key.startswith('no-topic') and not key.endswith('-more')]
-        for topic_id, title, fields in [('sw-slot-open', 'Sw slot open', {}), ('sw-slot-snoozed', 'Sw slot snoozed', dict(snoozed_until='never'))]:
+        for topic_id, title, fields in [('sw-slot-open', 'Sw slot open', {}), ('sw-slot-settled', 'Sw slot settled', dict(settled_at='2031-01-01T10:00:00Z'))]:
             self.write_topic(topic_id, title, self.beta, **fields)
             self.addCleanup(remove_topic, self.topics_dir/(topic_id + '.json'))
         topic_sid = self.new_session('beta/sw-slot-open', self.beta, topic='sw-slot-open')
@@ -572,7 +510,7 @@ class CommandPalette(unittest.TestCase):
         self.addCleanup(self.select_window, self.base_window)
         self.select_window(topic_window)
         rs = s.wait_rows(lambda rs: s.row('topic-window-' + topic_window, rs).get('accessibilityValue') == 'selected'
-                         and s.has('snoozed-topics', rs), 'the Sidebar does not show the Topic Window selected and the Snoozed group')
+                         and s.has('settled-topics', rs), 'the Sidebar does not show the Topic Window selected and the Settled group')
         self.assertEqual(cards(rs), [], 'the No Topic slot is not empty while a Topic is active')
 
         self.open_palette()
@@ -584,9 +522,9 @@ class CommandPalette(unittest.TestCase):
         self.assertEqual(cards(rs), [card], 'the Topic list shows more than the opened No Topic Session')
         topic_bottom, _ = frame(s.row('topic-sw-slot-open', rs))
         card_bottom, card_top = frame(s.row(card, rs))
-        _, snoozed_top = frame(s.row('snoozed-topics', rs))
+        _, settled_top = frame(s.row('settled-topics', rs))
         self.assertLessEqual(card_top, topic_bottom, 'the No Topic card is not below the open Topic')
-        self.assertGreaterEqual(card_bottom, snoozed_top, 'the No Topic card is not above the Snoozed group')
+        self.assertGreaterEqual(card_bottom, settled_top, 'the No Topic card is not above the Settled group')
 
         self.select_window(topic_window)
         s.wait_rows(lambda rs: cards(rs) == [], 'selecting a Topic Window did not remove the No Topic card')
