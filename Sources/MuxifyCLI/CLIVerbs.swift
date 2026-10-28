@@ -40,34 +40,117 @@ enum CLIVerbs {
     Optional tmux binding: bind T run-shell 'muxify window move --new-topic --pane #{pane_id} >/dev/null'
     """
 
+    /// The options of every Browser command that acts on a Tab.
+    private static let agentOptions: [CLIOption] = [.value("--window", aliases: ["-w"]), .value("--tab")]
+
     private static let topicTarget = "[--topic <id|label> | --window <id> | --pane <id>]"
 
     // MARK: - browser
 
     private static let browser: [CLIVerb] = [
-        CLIVerb(path: .browserOpen, synopsis: "[--window <id>] <url>...",
-                options: [.value("--window", aliases: ["-w"])], afterDashes: .operands,
+        CLIVerb(path: .browserOpen, synopsis: "[--window <id>] [--json] <url>...",
+                options: [.value("--window", aliases: ["-w"]), .flag("--json")], afterDashes: .operands,
                 help: """
-                Opens each URL as a Tab in this tmux Window's Browser.
+                Opens each URL as a Tab in this tmux Window's Browser. The last Tab
+                that a Pane opens is its Agent Tab, which the Browser commands act on.
                   --window <id>   open in another Window instead, e.g. --window @12
+                  --json          print each Tab's id, URL and title as one line of JSON
                 """) { parsed in
             guard !parsed.operands.isEmpty else { throw CLIError.usage }
-            var target = try parsed.value("--window") ?? ""
-            if target.isEmpty {
-                guard let pane = parsed.environment["TMUX_PANE"], !pane.isEmpty else {
-                    throw CLIError("not inside tmux; specify the Window with --window <id> (e.g. --window @12)")
-                }
-                target = pane
+            let pane = parsed.environment["TMUX_PANE"].flatMap { $0.isEmpty ? nil : $0 }
+            guard let target = try parsed.value("--window") ?? pane else {
+                throw CLIError("not inside tmux; specify the Window with --window <id> (e.g. --window @12)")
             }
             for url in parsed.operands where url.contains(where: { $0.isWhitespace }) {
                 throw CLIError("'\(url)' contains spaces; pass one URL per argument")
             }
-            return .browserOpen(window: target, urls: parsed.operands)
+            return .browserOpen(window: target, pane: pane, urls: parsed.operands, json: parsed.flag("--json"))
+        },
+        CLIVerb(path: .browserTabs, synopsis: "[--window <id>] [--json]",
+                options: [.value("--window", aliases: ["-w"]), .flag("--json")],
+                help: """
+                Lists the Tabs of this Window's Browser: id, URL, title, and active
+                or agent for the shown Tab and this Pane's Agent Tab.
+                """) { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            return .browser(try BrowserAgentInvocation(.tabs, parsed: parsed))
+        },
+        CLIVerb(path: .browserSnapshot, synopsis: "[--window <id>] [--tab <id>]", options: agentOptions,
+                help: """
+                Prints the page of the Agent Tab, or of --tab, as an accessibility tree.
+                Each element has a Ref, such as e3, for click, fill and press. A Ref
+                stays valid until the Tab loads a new document.
+                """) { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            return .browser(try BrowserAgentInvocation(.snapshot, parsed: parsed))
+        },
+        CLIVerb(path: .browserClick, synopsis: "[--window <id>] [--tab <id>] <ref>", options: agentOptions,
+                help: "Clicks the element of the Ref, with DOM events.") { parsed in
+            guard parsed.operands.count == 1 else { throw CLIError.usage }
+            return .browser(try BrowserAgentInvocation(.click(ref: try BrowserAgentInvocation.ref(parsed.operands[0])), parsed: parsed))
+        },
+        CLIVerb(path: .browserFill, synopsis: "[--window <id>] [--tab <id>] <ref> <text>", options: agentOptions,
+                afterDashes: .operands,
+                help: """
+                Replaces the value of the field of the Ref with <text>, and sends input
+                and change, as typing does. For a select, <text> is an option's value
+                or label.
+                """) { parsed in
+            guard parsed.operands.count >= 2 else { throw CLIError.usage }
+            let ref = try BrowserAgentInvocation.ref(parsed.operands[0])
+            return .browser(try BrowserAgentInvocation(.fill(ref: ref, text: parsed.operands.dropFirst().joined(separator: " ")), parsed: parsed))
+        },
+        CLIVerb(path: .browserPress, synopsis: "[--window <id>] [--tab <id>] <key> [<ref>]", options: agentOptions,
+                help: """
+                Presses a key, such as Enter, Escape, ArrowDown or a, on the element of
+                the Ref, or on the element that has the page's focus.
+                """) { parsed in
+            guard (1...2).contains(parsed.operands.count), !parsed.operands[0].isEmpty else { throw CLIError.usage }
+            let ref = try parsed.operands.dropFirst().first.map(BrowserAgentInvocation.ref)
+            return .browser(try BrowserAgentInvocation(.press(key: parsed.operands[0], ref: ref), parsed: parsed))
+        },
+        CLIVerb(path: .browserWait, synopsis: "[--window <id>] [--tab <id>] (--load | --text <text> | --selector <css>)\n[--timeout <seconds>]",
+                options: agentOptions + [.flag("--load"), .value("--text"), .value("--selector"), .value("--timeout")],
+                help: """
+                Waits until the page has loaded, shows the text, or shows an element that
+                matches the CSS selector. Fails after 10 seconds, or after --timeout.
+                """) { parsed in
+            guard parsed.operands.isEmpty, parsed.count(of: ["--load", "--text", "--selector"]) == 1 else { throw CLIError.usage }
+            let condition: BrowserAgentWait = try parsed.value("--text").map { .text($0) }
+                ?? parsed.value("--selector").map { .selector($0) } ?? .load
+            let timeout = try parsed.value("--timeout").map { value in
+                guard let seconds = TimeInterval(value), seconds > 0, seconds <= 600 else {
+                    throw CLIError("--timeout takes seconds from 0 to 600, such as --timeout 30", exitCode: 2)
+                }
+                return seconds
+            } ?? 10
+            return .browser(try BrowserAgentInvocation(.wait(condition, timeout: timeout), parsed: parsed))
+        },
+        CLIVerb(path: .browserEval, synopsis: "[--window <id>] [--tab <id>] <js>", options: agentOptions, afterDashes: .operands,
+                help: """
+                Runs JavaScript in the page of the Agent Tab, or of --tab, and prints
+                the result as JSON. Give an expression, or statements with return.
+                await works.
+                """) { parsed in
+            guard !parsed.operands.isEmpty else { throw CLIError.usage }
+            return .browser(try BrowserAgentInvocation(.eval(script: parsed.operands.joined(separator: " ")), parsed: parsed))
+        },
+        CLIVerb(path: .browserScreenshot, synopsis: "[--window <id>] [--tab <id>] [--out <file.png>]",
+                options: agentOptions + [.value("--out")],
+                help: """
+                Writes a PNG of the Agent Tab's page, or of --tab, and prints its path.
+                  --out <file.png>  write it there, not in the temporary directory
+                """) { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            let name = "muxify-screenshot-\(Int(parsed.now.timeIntervalSince1970 * 1000)).png"
+            let path = try parsed.value("--out").map { URL(fileURLWithPath: $0).absoluteURL.path }
+                ?? URL(fileURLWithPath: parsed.environment["TMPDIR"] ?? "/tmp").appendingPathComponent(name).path
+            return .browser(try BrowserAgentInvocation(.screenshot, parsed: parsed, screenshotPath: path))
         },
         CLIVerb(path: .browserAvailable, synopsis: "", options: [],
                 help: """
-                Prints local, remote or no for this Pane's newest Client.
-                Exits 0 for local or remote, and 1 for no.
+                Prints local or remote when Muxify shows this Pane's tmux server, else no.
+                Exits 0 for local or remote, 1 for no, and 2 when it cannot read tmux.
                 """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError("browser available takes no arguments", exitCode: 2) }
             return .browserAvailable(pane: parsed.environment["TMUX_PANE"])

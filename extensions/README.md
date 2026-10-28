@@ -11,6 +11,11 @@ doing. There is one folder per Agent:
 | `opencode/` | OpenCode 2  | `muxify-status/`, a TUI plugin directory    |
 | `pi/`       | Pi          | `muxify-status.ts`, an extension file       |
 
+`skills/muxify-browser/` is not an Extension. It is a skill that tells an Agent
+to drive Muxify's Browser with `muxify browser` commands when `muxify browser
+available` exits 0. The installer puts it in the skills folder of Claude Code
+and of Codex.
+
 ## What an Extension does
 
 Claude Code, OpenCode and Pi write three tmux pane options on the Agent's own Pane
@@ -79,7 +84,9 @@ For Claude Code (detected by `~/.claude`), the installer:
   touches or reorders other entries (Raycast, herdr, lavish …) or other keys,
   and leaves both files alone when nothing is missing;
 - needs `jq`; without it, it prints `claude: failed (jq not found)` and changes
-  nothing.
+  nothing;
+- replaces `~/.claude/skills/muxify-browser/` with a copy of
+  `skills/muxify-browser/`.
 
 For Codex, the installer uses `$CODEX_HOME` when set, else `~/.codex`:
 
@@ -98,7 +105,9 @@ For Codex, the installer uses `$CODEX_HOME` when set, else `~/.codex`:
   line that fish, zsh and bash all read the same way;
 - follows the same rules as for Claude Code: `hooks.json.bak` before changing
   it, an entry only when that event has no hook with the identical command yet,
-  other entries and keys left alone, and nothing written when nothing is missing.
+  other entries and keys left alone, and nothing written when nothing is missing;
+- replaces `skills/muxify-browser/` in the Codex home with a copy of
+  `skills/muxify-browser/`.
 
 For OpenCode 2 (detected by `~/.config/opencode`), the installer replaces
 `~/.config/opencode/plugins/muxify-status/` with a copy of

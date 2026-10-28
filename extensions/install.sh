@@ -45,7 +45,19 @@ add_hook_entries() {
 	printf '%s\n' "$merged" >"$hooks_file"
 }
 
-# Claude Code: one hook script for every event, registered in settings.json.
+# install_skill <skills directory>
+#
+# Replaces the browser skill there with the bundled copy, so files dropped from
+# the skill don't linger. The skill tells the Agent to drive Muxify's Browser
+# with `muxify browser` commands.
+install_skill() {
+	mkdir -p "$1" &&
+		rm -rf "$1/muxify-browser" &&
+		cp -R "$here/skills/muxify-browser" "$1/muxify-browser"
+}
+
+# Claude Code: one hook script for every event, registered in settings.json,
+# and the browser skill.
 install_claude() {
 	claude_dir=$HOME/.claude
 	if [ ! -d "$claude_dir" ]; then
@@ -80,10 +92,15 @@ install_claude() {
 		echo "claude: failed (could not update settings.json)"
 		return 1
 	fi
+	if ! install_skill "$claude_dir/skills"; then
+		echo "claude: failed (could not copy the browser skill)"
+		return 1
+	fi
 	echo "claude: $result"
 }
 
-# Codex CLI: one hook script for every event, registered in hooks.json.
+# Codex CLI: one hook script for every event, registered in hooks.json, and the
+# browser skill.
 install_codex() {
 	codex_dir=${CODEX_HOME:-$HOME/.codex}
 	if [ ! -d "$codex_dir" ]; then
@@ -131,6 +148,10 @@ PY
 	fi
 	if ! add_hook_entries "$codex_dir/hooks.json" "$codex_entries"; then
 		echo "codex: failed (could not update hooks.json)"
+		return 1
+	fi
+	if ! install_skill "$codex_dir/skills"; then
+		echo "codex: failed (could not copy the browser skill)"
 		return 1
 	fi
 	echo "codex: $result"

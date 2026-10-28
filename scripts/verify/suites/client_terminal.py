@@ -148,35 +148,41 @@ class ClientTerminal(unittest.TestCase):
         wait(plain_active, 'plain Client did not receive input')
         return plain
 
-    def type_in_muxify(self, after):
-        def muxify_active():
-            # ClientVerification sends one space through Ghostty without taking the keyboard.
-            self.sandbox.act('action', 'client-input', 'Client input')
-            return self.clients()[self.muxify_pid]['activity'] > after
-        wait(muxify_active, 'Muxify Client did not receive input')
-
-    def test_check_follows_the_client_that_received_input(self):
+    def test_newer_input_in_a_plain_client_on_the_same_session_keeps_the_answer_local(self):
         sandbox, fields = self.sandbox, self.fields
         pane = sandbox.tmux('display-message', '-p', '-c', fields[1], '#{pane_id}')
         session = sandbox.tmux('display-message', '-p', '-t', pane, '#{session_id}')
         self.assertEqual(self.answer(pane), 'local')
-        plain = self.type_in_plain_client(session)
-        self.assertEqual(self.answer(pane), 'no')
-        self.type_in_muxify(after=self.clients()[plain.pid]['activity'])
+        self.type_in_plain_client(session)
         self.assertEqual(self.answer(pane), 'local')
 
-    def test_pane_in_a_session_that_no_client_shows_follows_the_newest_client_on_the_server(self):
+    def test_pane_in_a_session_that_no_client_shows_answers_local_while_muxify_shows_the_server(self):
         sandbox, fields = self.sandbox, self.fields
         shown = sandbox.tmux('display-message', '-p', '-c', fields[1], '#{session_id}')
         sandbox.tmux('new-session', '-d', '-s', 'unshown', '-c', str(sandbox.root), '/bin/sh')
         self.addCleanup(sandbox.tmux, 'kill-session', '-t', '=unshown')
         pane = sandbox.tmux('display-message', '-p', '-t', '=unshown:', '#{pane_id}')
         self.assertEqual(sandbox.tmux('display-message', '-p', '-t', pane, '#{session_attached}'), '0')
+        self.type_in_plain_client(shown)
         self.assertEqual(self.answer(pane), 'local')
-        plain = self.type_in_plain_client(shown)
+
+    def test_marker_whose_client_is_not_attached_answers_no(self):
+        pane = self.sandbox.tmux('display-message', '-p', '-c', self.fields[1], '#{pane_id}')
+        gone = max(self.clients()) + 100000
+        self.sandbox.tmux('set-option', '-s', self.option, '␟'.join([str(gone)] + self.fields[1:]))
         self.assertEqual(self.answer(pane), 'no')
-        self.type_in_muxify(after=self.clients()[plain.pid]['activity'])
-        self.assertEqual(self.answer(pane), 'local')
+
+    def test_unreadable_tmux_fails_with_status_two_and_a_reason(self):
+        pane = self.sandbox.tmux('display-message', '-p', '-c', self.fields[1], '#{pane_id}')
+        missing = str(self.sandbox.root/'no-such-socket')
+        env = dict(self.sandbox.env, TMUX_PANE=pane, TMUX=missing + ',1,0')
+        cli = self.sandbox.app/'Contents/Resources/bin/muxify'
+        answer = subprocess.run([str(cli), 'browser', 'available'], env=env, capture_output=True, text=True)
+        self.assertEqual((answer.returncode, answer.stdout), (2, ''), answer.stderr)
+        self.assertIn('cannot read tmux', answer.stderr)
+        self.assertIn('no-such-socket', answer.stderr, 'tmux\'s own reason reaches stderr')
+        script = subprocess.run(['/bin/sh', str(self.check)], env=env, capture_output=True, text=True)
+        self.assertEqual((script.returncode, script.stdout), (2, ''), script.stderr)
 
     def test_remote_marker_matches_script_and_command(self):
         pane = self.sandbox.tmux('display-message', '-p', '-c', self.fields[1], '#{pane_id}')

@@ -993,6 +993,10 @@ final class WorkspaceStore {
     @ObservationIgnored var onSelectEnvironment: ((String?) -> Void)?
     @ObservationIgnored var onNewAppWindow: (() -> Void)?
     @ObservationIgnored var shouldConsumeOpenRequests: (() -> Bool)?
+    /// Starts serving Browser commands for the server whose socket it gets, and returns the path to publish.
+    @ObservationIgnored var serveBrowserAgent: ((_ tmuxSocket: String, _ serverID: String?) -> String?)?
+    /// Whether this store wrote `BrowserAgentChannel.option`, so its connection removes it when it retires.
+    @ObservationIgnored private var publishedBrowserSocket = false
     #if DEBUG
     @ObservationIgnored private var gitDemoObserver: NSObjectProtocol?
     #endif
@@ -1344,6 +1348,7 @@ final class WorkspaceStore {
         }
         recordVisit()
         consumeOpenRequests()
+        publishBrowserSocket(snapshot)
         if !updateUnread(snapshot.panes) { upgradeTopicRecords() }
 
         // (Re)start listening once there is a Session to attach to.
@@ -2106,6 +2111,9 @@ final class WorkspaceStore {
         return browser
     }
 
+    /// The Window's Browser if something has shown or used it, without restoring it from tmux.
+    func loadedBrowser(for windowID: String) -> Browser? { browsers[windowID] }
+
     var currentBrowser: Browser? {
         selectedWindow.map { browser(for: $0.id) }
     }
@@ -2219,6 +2227,16 @@ final class WorkspaceStore {
         }
     }
 
+    /// The App Window that consumes `@muxify_open` also serves Browser commands, so a Tab that an Agent opens
+    /// is in the Browser that its next command reaches. Written again whenever the option differs, for
+    /// example after another App Window's connection removed it.
+    private func publishBrowserSocket(_ snapshot: TmuxSnapshot) {
+        guard !isRemote, snapshot.serverRunning, shouldConsumeOpenRequests?() ?? true, let socket = snapshot.socketPath,
+              let path = serveBrowserAgent?(socket, snapshot.serverID), snapshot.browserSocket != path else { return }
+        publishedBrowserSocket = true
+        runAsync(["set-option", "-sq", BrowserAgentChannel.option, path])
+    }
+
     /// Writes Browser state onto its tmux Window, coalescing bursts of
     /// changes (redirects, quick Tab switching) into one tmux call.
     private func persistWindow(_ id: String) {
@@ -2241,6 +2259,7 @@ final class WorkspaceStore {
 
     var pendingBrowserCommands: [[String]] {
         dirtyBrowsers.keys.sorted().compactMap { id in browsers[id]?.stored.setOptionArgs(windowID: id) }
+            + (publishedBrowserSocket ? [["set-option", "-squ", BrowserAgentChannel.option]] : [])
     }
 
     private func rememberTopics(in snapshot: TmuxSnapshot) {

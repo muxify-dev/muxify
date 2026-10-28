@@ -5,38 +5,29 @@ enum BrowserAvailability: String {
 
     var exitCode: Int32 { self == .no ? 1 : 0 }
 
-    static func check(pane: String?, using runner: any CLICommandRunning) -> Self {
+    /// Muxify shows every Window of a tmux server that one of its Clients is attached to, and it opens
+    /// `@muxify_open` on any of them. So the answer is about the server: a `@muxify_client_*` marker whose
+    /// Client is attached now. A marker left by a crash names a Client that is gone, so it never matches.
+    static func check(pane: String?, using runner: any CLICommandRunning) throws -> Self {
         guard let pane, !pane.isEmpty else { return .no }
-        func output(_ arguments: [String]) -> String? {
-            guard let result = try? runner.run("tmux", arguments: arguments, quiet: true), result.status == 0 else { return nil }
+        // tmux writes its own reason to stderr, so a sandbox or a missing tmux is not a silent "no".
+        func tmux(_ arguments: [String]) throws -> String {
+            let result = try runner.run("tmux", arguments: arguments, quiet: false)
+            guard result.status == 0 else {
+                throw CLIError("cannot read tmux: tmux \(arguments[0]) exited with status \(result.status)", exitCode: 2)
+            }
             return result.output
         }
-        func clients(_ scope: [String]) -> String? {
-            output(["list-clients"] + scope + ["-F", "#{client_activity} #{client_control_mode} #{client_pid}"])
+        let attached = Set(try tmux(["list-clients", "-F", "#{client_control_mode} #{client_pid} #{client_tty}"])
+            .split(separator: "\n").filter { $0.hasPrefix("0 ") }.map { String($0.dropFirst(2)) })
+        let options = try tmux(["show-options", "-s"]).split(separator: "\n")
+            .compactMap { $0.split(separator: " ").first }.filter { $0.hasPrefix("@muxify_client_") }
+        let kinds = try options.compactMap { option -> Self? in
+            let fields = try tmux(["show-options", "-sqv", String(option)])
+                .trimmingCharacters(in: .newlines).components(separatedBy: "␟")
+            guard fields.count >= 3, attached.contains("\(fields[0]) \(fields[1])") else { return nil }
+            return Self(rawValue: fields[fields.count - 1]).flatMap { $0 == .no ? nil : $0 }
         }
-        func newest(_ clients: String) -> String? {
-            var newest: Int64 = -1
-            var client: String?
-            for line in clients.split(separator: "\n") {
-                let fields = line.split(whereSeparator: \.isWhitespace)
-                guard fields.count >= 3, fields[1] == "0", let activity = Int64(fields[0]), activity > newest else { continue }
-                newest = activity
-                client = fields.dropFirst(2).joined(separator: " ")
-            }
-            return client
-        }
-        guard let sessionClients = clients(["-t", pane]) else { return .no }
-        // Muxify moves its one Client between Sessions, so the Pane's Session often has no Client while you
-        // look at another Session in Muxify. Then the Client you typed into is the newest on the server.
-        let client = newest(sessionClients) ?? clients([]).flatMap(newest)
-        guard let client, let options = output(["show-options", "-s"]) else { return .no }
-        for line in options.split(separator: "\n") {
-            guard let option = line.split(whereSeparator: \.isWhitespace).first, option.hasPrefix("@muxify_client_"),
-                  let marker = output(["show-options", "-sqv", String(option)]) else { continue }
-            let fields = marker.trimmingCharacters(in: .newlines).components(separatedBy: "␟")
-            guard fields.first == client, let kind = fields.last, let result = Self(rawValue: kind), result != .no else { continue }
-            return result
-        }
-        return .no
+        return kinds.contains(.local) ? .local : kinds.contains(.remote) ? .remote : .no
     }
 }

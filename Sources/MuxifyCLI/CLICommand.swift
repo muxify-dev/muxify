@@ -4,7 +4,9 @@ import MuxifyCore
 enum CLICommand: Equatable {
     case help
     case browserAvailable(pane: String?)
-    case browserOpen(window: String, urls: [String])
+    /// `window` is a Window or a Pane id. `pane` is the caller's Pane, whose Agent Tab the opened Tab becomes.
+    case browserOpen(window: String, pane: String?, urls: [String], json: Bool)
+    case browser(BrowserAgentInvocation)
     case sessionOpen(name: String)
     /// `target` is a Window or a Pane id.
     case windowOpen(target: String)
@@ -39,7 +41,7 @@ enum CLICommand: Equatable {
                  executableURL: URL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])) async throws -> Int32 {
         switch self {
         case .browserAvailable(let pane):
-            let result = BrowserAvailability.check(pane: pane, using: runner)
+            let result = try BrowserAvailability.check(pane: pane, using: runner)
             print(result.rawValue)
             return result.exitCode
         case .help: print(Self.usage)
@@ -54,13 +56,23 @@ enum CLICommand: Equatable {
             let result = try runner.run("/bin/sh", arguments: [installer.path], quiet: false)
             print(result.output, terminator: "")
             try Self.check(result, command: "Extension installer")
-        case .browserOpen(let target, let urls):
-            // list-panes validates the target; display-message succeeds even for missing Windows.
-            let result = try runner.run("tmux", arguments: ["list-panes", "-t", target, "-F", "#{window_id}"], quiet: true)
-            let window = result.output.components(separatedBy: "\n").first ?? ""
-            guard result.status == 0, !window.isEmpty else { throw CLIError("no tmux Window '\(target)'") }
-            // Append so requests made before Muxify's next poll aren't overwritten.
-            try Self.check(runner.run("tmux", arguments: ["set-option", "-wa", "-t", window, "@muxify_open", " " + urls.joined(separator: " ")], quiet: false), command: "tmux")
+        case .browserOpen(let target, let pane, let urls, let json):
+            do {
+                for url in urls {
+                    switch try BrowserAgentInvocation.send(.open(url: url), target: target, pane: pane, tab: nil, using: runner) {
+                    case .opened(let tab): if json { print(try BrowserAgentInvocation.json(tab)) }
+                    case .failure(let message, let exitCode): throw CLIError(message, exitCode: exitCode)
+                    default: throw CLIError("Muxify sent an unexpected reply to browser open")
+                    }
+                }
+            } catch let failure as BrowserAgentChannel.Failure {
+                // Without the app, nothing can name the new Tab; without --json, Muxify opens the URLs on its next read.
+                guard !json, case .unreachable = failure else { throw failure.cliError }
+                try Self.appendOpenRequest(target: target, urls: urls, using: runner)
+            }
+        case .browser(let invocation):
+            do { try invocation.run(using: runner) }
+            catch let failure as BrowserAgentChannel.Failure { throw failure.cliError }
         case .sessionOpen(let name):
             let result = try runner.run("tmux", arguments: ["has-session", "-t", "=\(name)"], quiet: true)
             guard result.status == 0 else { throw CLIError("no tmux session '\(name)'") }
@@ -76,6 +88,15 @@ enum CLICommand: Equatable {
         case .agentConversation(let invocation): try invocation.run(using: runner)
         }
         return 0
+    }
+
+    private static func appendOpenRequest(target: String, urls: [String], using runner: any CLICommandRunning) throws {
+        // list-panes validates the target; display-message succeeds even for missing Windows.
+        let result = try runner.run("tmux", arguments: ["list-panes", "-t", target, "-F", "#{window_id}"], quiet: true)
+        let window = result.output.components(separatedBy: "\n").first ?? ""
+        guard result.status == 0, !window.isEmpty else { throw CLIError("no tmux Window '\(target)'") }
+        // Append so requests made before Muxify's next poll aren't overwritten.
+        try check(runner.run("tmux", arguments: ["set-option", "-wa", "-t", window, Tmux.openOption, " " + urls.joined(separator: " ")], quiet: false), command: "tmux")
     }
 
     /// Hands a `muxify://` URL to the app. A view verb asks the app to show something; it changes no state.

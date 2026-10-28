@@ -25,16 +25,16 @@ final class CLICommandTests: XCTestCase {
     func testBrowserTargetsCallingPaneAndKeepsURLsSeparate() throws {
         XCTAssertEqual(try CLICommand(arguments: ["browser", "open", "localhost:3000", "https://example.com/#token=secret"],
                                       environment: ["TMUX_PANE": "%7"]),
-                       .browserOpen(window: "%7", urls: ["localhost:3000", "https://example.com/#token=secret"]))
+                       .browserOpen(window: "%7", pane: "%7", urls: ["localhost:3000", "https://example.com/#token=secret"], json: false))
     }
 
     func testBrowserExplicitWindowWorksOutsideTmux() throws {
         for options in [["--window", "@12"], ["-w", "@12"], ["--window=@12"]] {
             XCTAssertEqual(try CLICommand(arguments: ["browser", "open"] + options + ["https://example.com"], environment: [:]),
-                           .browserOpen(window: "@12", urls: ["https://example.com"]))
+                           .browserOpen(window: "@12", pane: nil, urls: ["https://example.com"], json: false))
         }
         XCTAssertEqual(try CLICommand(arguments: ["browser", "open", "--window", "@12", "--", "-url"], environment: [:]),
-                       .browserOpen(window: "@12", urls: ["-url"]))
+                       .browserOpen(window: "@12", pane: nil, urls: ["-url"], json: false))
     }
 
     func testBrowserRejectsMissingTargetUnknownOptionsAndWhitespace() {
@@ -86,10 +86,13 @@ final class CLICommandTests: XCTestCase {
         XCTAssertTrue(runner.calls.isEmpty)
     }
 
-    func testBrowserAppendsRequestToResolvedWindow() async throws {
-        let runner = RecordingRunner(results: [.init(status: 0, output: "@12\n@12\n"), .init(status: 0, output: "")])
-        try await CLICommand.browserOpen(window: "%7", urls: ["localhost:3000", "https://example.com"]).execute(using: runner)
+    func testBrowserAppendsRequestToResolvedWindowWhenMuxifyServesNoBrowserSocket() async throws {
+        let runner = RecordingRunner(results: [.init(status: 0, output: "@12\n@12\n"), .init(status: 0, output: ""),
+                                               .init(status: 0, output: "@12\n@12\n"), .init(status: 0, output: "")])
+        try await CLICommand.browserOpen(window: "%7", pane: "%7", urls: ["localhost:3000", "https://example.com"], json: false).execute(using: runner)
         XCTAssertEqual(runner.calls, [
+            .init(command: "tmux", arguments: ["list-panes", "-t", "%7", "-F", "#{window_id}"], quiet: true),
+            .init(command: "tmux", arguments: ["show-options", "-sqv", "@muxify_browser_socket"], quiet: false),
             .init(command: "tmux", arguments: ["list-panes", "-t", "%7", "-F", "#{window_id}"], quiet: true),
             .init(command: "tmux", arguments: ["set-option", "-wa", "-t", "@12", "@muxify_open", " localhost:3000 https://example.com"], quiet: false),
         ])
@@ -99,10 +102,10 @@ final class CLICommandTests: XCTestCase {
         for result in [CLICommandResult(status: 1, output: ""), .init(status: 0, output: "")] {
             let runner = RecordingRunner(results: [result])
             do {
-                try await CLICommand.browserOpen(window: "@404", urls: ["localhost:3000"]).execute(using: runner)
+                try await CLICommand.browserOpen(window: "@404", pane: nil, urls: ["localhost:3000"], json: false).execute(using: runner)
                 XCTFail("Expected missing Window error")
             } catch {
-                XCTAssertEqual(error.localizedDescription, "no tmux Window '@404'")
+                XCTAssertEqual(error.localizedDescription, "no tmux Window or Pane '@404'")
             }
             XCTAssertEqual(runner.calls.count, 1)
         }
@@ -158,9 +161,10 @@ final class CLICommandTests: XCTestCase {
     }
 
     func testSubcommandFailurePreservesExitCode() async {
-        let runner = RecordingRunner(results: [.init(status: 0, output: "@12\n"), .init(status: 7, output: "")])
+        let runner = RecordingRunner(results: [.init(status: 0, output: "@12\n"), .init(status: 0, output: ""),
+                                               .init(status: 0, output: "@12\n"), .init(status: 7, output: "")])
         do {
-            try await CLICommand.browserOpen(window: "%7", urls: ["localhost:3000"]).execute(using: runner)
+            try await CLICommand.browserOpen(window: "%7", pane: "%7", urls: ["localhost:3000"], json: false).execute(using: runner)
             XCTFail("Expected tmux failure")
         } catch {
             XCTAssertEqual((error as? CLIError)?.exitCode, 7)
@@ -509,49 +513,59 @@ final class CLICommandTests: XCTestCase {
         XCTAssertEqual(try CLICommand(arguments: ["browser", "available"], environment: [:]), .browserAvailable(pane: nil))
         XCTAssertEqual(try CLICommand(arguments: ["browser", "available", "--help"]), .help)
         XCTAssertThrowsError(try CLICommand(arguments: ["browser", "available", "extra"]))
-        let status = try await CLICommand.browserAvailable(pane: nil).execute(using: RecordingRunner(results: []))
+        let outside = RecordingRunner(results: [])
+        let status = try await CLICommand.browserAvailable(pane: nil).execute(using: outside)
         XCTAssertEqual(status, 1)
-        for kind in ["local", "remote"] {
-            let runner = RecordingRunner(results: [
-                .init(status: 0, output: "90 1 999\n12 0 100\n12 0 200\n11 0 300\n"),
-                .init(status: 0, output: "ordinary value\n@muxify_client_stale value\n@muxify_client_live value\n"),
-                .init(status: 0, output: "200␟tty␟home␟host␟local\n"),
-                .init(status: 0, output: "100␟extra␟fields␟are␟allowed␟\(kind)\n"),
-            ])
-            let command = try CLICommand(arguments: ["browser", "available"], environment: ["TMUX_PANE": "%7"])
-            let status = try await command.execute(using: runner)
-            XCTAssertEqual(status, 0)
-            XCTAssertTrue(runner.calls.allSatisfy { $0.quiet && $0.command == "tmux" })
+        XCTAssertEqual(outside.calls, [], "outside tmux the answer is no without asking tmux")
+        let runner = availabilityRunner(clients: "0 100 /dev/ttys001\n", markers: ["100␟/dev/ttys001␟home␟host␟local"])
+        let command = try CLICommand(arguments: ["browser", "available"], environment: ["TMUX_PANE": "%7"])
+        let attached = try await command.execute(using: runner)
+        XCTAssertEqual(attached, 0)
+    }
+
+    func testBrowserAvailabilityAnswersForTheServerThatAMuxifyClientIsAttachedTo() throws {
+        // A plain Client with newer activity on the Pane's own Session no longer decides the answer.
+        let clients = "1 999 /dev/ttys009\n0 300 /dev/ttys003\n0 100 /dev/ttys001\n"
+        XCTAssertEqual(try BrowserAvailability.check(pane: "%7", using: availabilityRunner(
+            clients: clients, markers: ["100␟/dev/ttys001␟home␟host␟remote"])), .remote)
+        XCTAssertEqual(try BrowserAvailability.check(pane: "%7", using: availabilityRunner(
+            clients: clients, markers: ["100␟/dev/ttys001␟home␟host␟remote", "300␟/dev/ttys003␟home␟host␟local"])), .local,
+                       "a local Client wins, because the Mac reaches the server's pages directly")
+    }
+
+    func testBrowserAvailabilityIgnoresMarkersOfClientsThatAreNotAttached() throws {
+        let clients = "1 999 /dev/ttys009\n0 100 /dev/ttys001\n"
+        for marker in ["200␟/dev/ttys002␟home␟host␟local",
+                       "100␟/dev/ttys005␟home␟host␟local",
+                       "999␟/dev/ttys009␟home␟host␟local",
+                       "100␟/dev/ttys001␟home␟host␟unknown",
+                       "100"] {
+            XCTAssertEqual(try BrowserAvailability.check(pane: "%7", using: availabilityRunner(clients: clients, markers: [marker])),
+                           .no, marker)
         }
     }
 
-    func testBrowserAvailabilityUsesTheNewestClientOnTheServerWhenNoClientShowsThePanesSession() {
-        let runner = RecordingRunner(results: [
-            .init(status: 0, output: "90 1 999\n"),
-            .init(status: 0, output: "90 1 999\n40 0 200\n50 0 100\n"),
-            .init(status: 0, output: "@muxify_client_live value\n"),
-            .init(status: 0, output: "100␟tty␟home␟host␟local\n"),
-        ])
-        XCTAssertEqual(BrowserAvailability.check(pane: "%7", using: runner), .local)
-        XCTAssertEqual(runner.calls.prefix(2).map(\.arguments), [
-            ["list-clients", "-t", "%7", "-F", "#{client_activity} #{client_control_mode} #{client_pid}"],
-            ["list-clients", "-F", "#{client_activity} #{client_control_mode} #{client_pid}"],
-        ])
-    }
-
-    func testBrowserAvailabilityQuietFailuresAndUnmarkedClients() {
-        let cases: [[CLICommandResult]] = [
+    func testBrowserAvailabilityFailsWithStatusTwoWhenTmuxCannotBeRead() async throws {
+        for results: [CLICommandResult] in [
             [.init(status: 1, output: "")],
-            [.init(status: 0, output: "10 1 123\n"), .init(status: 1, output: "")],
-            [.init(status: 0, output: ""), .init(status: 0, output: "10 1 123\n")],
-            [.init(status: 0, output: "10 0 123\n"), .init(status: 1, output: "")],
-            [.init(status: 0, output: "10 0 123\n"), .init(status: 0, output: "")],
-            [.init(status: 0, output: "10 0 123\n"), .init(status: 0, output: "@muxify_client_bad x"), .init(status: 1, output: "")],
-            [.init(status: 0, output: "10 0 123\n"), .init(status: 0, output: "@muxify_client_bad x"), .init(status: 0, output: "123␟unknown")],
-        ]
-        for results in cases {
-            XCTAssertEqual(BrowserAvailability.check(pane: "%7", using: RecordingRunner(results: results)), .no)
+            [.init(status: 0, output: "0 100 /dev/ttys001\n"), .init(status: 127, output: "")],
+        ] {
+            let runner = RecordingRunner(results: results)
+            do {
+                _ = try await CLICommand.browserAvailable(pane: "%7").execute(using: runner)
+                XCTFail("an unreadable tmux must not answer no")
+            } catch let error as CLIError {
+                XCTAssertEqual(error.exitCode, 2)
+            }
+            XCTAssertTrue(runner.calls.allSatisfy { !$0.quiet }, "tmux's own reason reaches stderr")
         }
+    }
+
+    private func availabilityRunner(clients: String, markers: [String]) -> RecordingRunner {
+        let names = markers.indices.map { "@muxify_client_\($0) value" }
+        return RecordingRunner(results: [.init(status: 0, output: clients),
+                                         .init(status: 0, output: (["ordinary value"] + names).joined(separator: "\n") + "\n")]
+                               + markers.map { .init(status: 0, output: $0 + "\n") })
     }
 
     func testProcessRunnerPreservesArgumentBoundaries() throws {

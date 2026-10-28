@@ -164,6 +164,18 @@ _Avoid_: search (when you mean the page text), Find (alone)
 The letter keys h, j, k, l, d, u, gg and G, which scroll the active Tab's page as the arrow keys, Page Down, Page Up, Home and End do, and H and L, which go back and forward as the Back and Forward buttons do, when the Browser has Focus and the page does not use the key itself. They are on by default and the Config can turn them off.
 _Avoid_: vim mode, keyboard navigation
 
+**Agent Tab**:
+The last Tab that a Pane opened with `muxify browser open`. A Browser command from that Pane acts on it when the command does not name a Tab with `--tab`.
+_Avoid_: agent browser, automation tab, controlled tab
+
+**Browser command**:
+A `muxify browser` command that an Agent uses to drive a Tab of its own Window, one step for each command: `tabs`, `open`, `snapshot`, `click`, `fill`, `press`, `wait`, `eval` and `screenshot`. Muxify does each command in its own Browser, not in another browser.
+_Avoid_: automation, Playwright (when you mean Muxify's commands), browser tool
+
+**Ref**:
+The short name, such as `e3`, that `muxify browser snapshot` gives to an element of the page. `click`, `fill` and `press` take it. A Ref stays valid until the Tab loads a new document.
+_Avoid_: handle, selector (when you mean the Ref), node id
+
 ### Agents
 
 **Agent**:

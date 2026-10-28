@@ -18,6 +18,13 @@ final class AppWindows {
     @ObservationIgnored private var closedIDs = Set<UUID>()
 
     var focusedStore: WorkspaceStore? { focusedID.flatMap { stores[$0] } }
+    @ObservationIgnored private(set) lazy var browserAgent = BrowserAgentService { [weak self] in self?.localStores ?? [] }
+
+    /// The stores that show the Local Environment, the one that consumes `@muxify_open` first.
+    private var localStores: [WorkspaceStore] {
+        let first = catalog.window(forEnvironment: nil).flatMap { stores[$0.id] }
+        return (first.map { [$0] } ?? []) + stores.values.filter { $0 !== first && $0.activeEnvironment == nil }
+    }
 
     init(configStore: ConfigStore) {
         self.configStore = configStore
@@ -54,6 +61,9 @@ final class AppWindows {
         store.shouldConsumeOpenRequests = { [weak self, weak store] in
             guard let self, let store else { return false }
             return self.catalog.window(forEnvironment: store.activeEnvironment?.name)?.id == request.id
+        }
+        store.serveBrowserAgent = { [weak self] socket, serverID in
+            self?.browserAgent.serve(tmuxSocket: socket, serverID: serverID)
         }
         return store
     }
@@ -161,7 +171,10 @@ final class AppWindows {
             pending.enter()
             store.shutdown { pending.leave() }
         }
-        pending.notify(queue: .main, execute: completion)
+        pending.notify(queue: .main) { [weak self] in
+            self?.browserAgent.stop()
+            completion()
+        }
     }
 }
 

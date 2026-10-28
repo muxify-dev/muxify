@@ -1150,56 +1150,50 @@ Hints use the resolved keybindings of the Active Environment's Config, including
 ### Check whether a program runs from Muxify
 
 When the Muxify CLI is installed, run `muxify browser available` when the program starts.
-It prints `local`, `remote` or `no`. It exits 0 for `local` or `remote`, and 1 for `no`.
-The command uses the same Client check as the script below and does not start Muxify.
+It prints `local` or `remote` when Muxify shows the Pane's tmux server, and `no` when it does not.
+It exits 0 for `local` or `remote`, and 1 for `no`. When it cannot read tmux, for
+example because a sandbox blocks the tmux socket, it prints tmux's reason on stderr
+and exits 2. The command uses the same check as the script below and does not start Muxify.
 
-On a machine without the CLI, run this `/bin/sh` check when the program starts. It prints `local`, `remote`,
-or `no`. It needs only `tmux` and shell builtins. It checks the most recently
-active non-control Client of the Pane's own Session. When no such Client shows
-that Session, for example because Muxify shows another Session, it checks the
-most recently active non-control Client on the server.
+On a machine without the CLI, run this `/bin/sh` check when the program starts. It
+needs only `tmux` and shell builtins. It looks for a Muxify Client that is attached to
+the server now. It does not matter which Session that Client shows, because Muxify
+shows every Window of the server and opens `@muxify_open` on any of them.
 
 ```sh
 muxify_environment() (
-    [ -n "${TMUX_PANE:-}" ] || { printf '%s\n' no; return; }
-    newest_client() {
-        newest=-1
-        client=
-        while read -r activity control pid; do
-            [ "$control" = 0 ] || continue
-            if [ "$activity" -gt "$newest" ]; then
-                newest=$activity
-                client=$pid
-            fi
+    [ -n "${TMUX_PANE:-}" ] || { printf '%s\n' no; return 1; }
+    clients=$(tmux list-clients -F '#{client_control_mode} #{client_pid} #{client_tty}') || return 2
+    options=$(tmux show-options -s) || return 2
+    attached() {
+        while read -r control pid tty; do
+            [ "$control" = 0 ] && [ "$pid" = "$1" ] && [ "$tty" = "$2" ] && return 0
         done <<EOF
-$1
+$clients
 EOF
+        return 1
     }
-    format='#{client_activity} #{client_control_mode} #{client_pid}'
-    clients=$(tmux list-clients -t "$TMUX_PANE" -F "$format" 2>/dev/null) || { printf '%s\n' no; return; }
-    newest_client "$clients"
-    if [ -z "$client" ]; then
-        clients=$(tmux list-clients -F "$format" 2>/dev/null) || { printf '%s\n' no; return; }
-        newest_client "$clients"
-    fi
-    [ -n "$client" ] || { printf '%s\n' no; return; }
-    options=$(tmux show-options -s 2>/dev/null) || { printf '%s\n' no; return; }
     separator='␟'
+    answer=no
     while read -r option rest; do
         case "$option" in
-            @muxify_client_*)
-                marker=$(tmux show-options -sqv "$option" 2>/dev/null) || continue
-                [ "${marker%%"$separator"*}" = "$client" ] || continue
-                kind=${marker##*"$separator"}
-                case "$kind" in
-                    local|remote) printf '%s\n' "$kind"; return ;;
-                esac
-                ;;
+            @muxify_client_*) ;;
+            *) continue ;;
+        esac
+        marker=$(tmux show-options -sqv "$option") || return 2
+        pid=${marker%%"$separator"*}
+        tty=${marker#*"$separator"}
+        tty=${tty%%"$separator"*}
+        attached "$pid" "$tty" || continue
+        case "${marker##*"$separator"}" in
+            local) answer=local ;;
+            remote) [ "$answer" = local ] || answer=remote ;;
         esac
     done <<EOF
 $options
 EOF
-    printf '%s\n' no
+    printf '%s\n' "$answer"
+    [ "$answer" != no ]
 )
 muxify_environment
 ```
@@ -1207,16 +1201,55 @@ muxify_environment
 Each Muxify Client has a server option named `@muxify_client_<nonce>`. Its value
 has five `␟`-separated fields: Client PID, TTY, home directory, host name, and
 `local` or `remote`. Muxify removes its option when the Client detaches. A stale
-option from a crash cannot match a Client that is no longer connected.
+option from a crash cannot match a Client that is no longer attached.
 
-The result describes the time of the check. Input through another Client can
-change it. tmux records Client activity in whole seconds. If Clients have the
-same activity time, the check uses the first one in `list-clients`.
+When a local and a remote Muxify both show the server, the answer is `local`. The
+answer is true at the time of the check. Muxify can quit or attach later.
 
 For `local`, a program can use `muxify browser open <url>`. For `remote`, it can
 set `tmux set-option -w -t "$TMUX_PANE" @muxify_open <url>`. A page served on a
 remote machine needs an address that the Mac can reach, such as its Tailscale
 address. For `no`, use the program's normal browser behavior.
+
+### Drive the Browser from an Agent
+
+When `muxify browser available` prints `local`, an Agent in a Pane can drive the
+Browser of its own tmux Window with Browser commands, one step for each command:
+
+```sh
+muxify browser open --json http://localhost:3000   # {"id":"…","url":"…","title":"…"}
+muxify browser snapshot                            # the page as a tree, with a Ref such as e3 on each element
+muxify browser fill e3 'ada@example.com'
+muxify browser click e4
+muxify browser wait --text 'Welcome'
+muxify browser eval 'document.title'               # prints the result as JSON
+muxify browser screenshot --out page.png           # prints the path of the PNG
+```
+
+The Tab that a Pane opened last is its Agent Tab. A command without `--tab <id>`
+acts on it. `muxify browser tabs` lists the Tabs of the Window and their ids. When
+the Agent Tab is closed, a command fails and asks you to run `muxify browser open`
+or to give `--tab`. A Ref stays valid until the Tab loads a new document. Run
+`snapshot` again after a navigation.
+
+`wait` waits for one of `--load`, `--text <text>` or `--selector <css>`, for 10
+seconds or for `--timeout <seconds>`. `press <key> [<ref>]` sends a key, such as
+`Enter` or `a`, to the Ref or to the element that has the page's focus. `eval`
+runs in the page, so it sees the page's own variables, and it can use `await`.
+Write an expression, or statements with `return`.
+
+The commands do not take the focus. A Tab that opens in a Window that you do not
+see stays there until you go to that Window. `click`, `fill` and `press` send DOM
+events, so a page that accepts only trusted input ignores them. They see only the
+main frame of the page, not its iframes.
+
+Muxify serves the commands on a Unix socket next to the tmux server's socket, and
+writes its path into the server option `@muxify_browser_socket`. Only the Local
+Environment has the socket.
+
+`muxify extensions install` also installs the skill `muxify-browser` for Claude
+Code and Codex. It tells the Agent to use these commands for browser work when
+`muxify browser available` exits 0.
 
 ## Diagnostics
 
