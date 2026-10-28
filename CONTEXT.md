@@ -71,7 +71,7 @@ The Topic of the App Window's Location: the Topic of its Window or of its Empty 
 _Avoid_: current Topic, selected Topic, focused Topic
 
 **Next Topic**:
-The Topic or Locked Session that Muxify opens after the user Snoozes or Settles the Active Topic: the nearest row below it in the Topics list that stays in the list, else the nearest such row above it, else No Topic.
+The Topic or Locked Session that Muxify opens after the user Settles the Active Topic: the nearest row below it in the Topics list that stays in the list, else the nearest such row above it, else No Topic.
 _Avoid_: following Topic, previous Topic, last Topic
 
 **Tag**:
@@ -83,7 +83,7 @@ The small coloured square that shows one Tag of a Topic on its card, in the colo
 _Avoid_: dot, badge, chip (when you mean the mark on a card)
 
 **Topic Note**:
-An optional line of text on a Topic that tells the user what they were doing there, such as "Repro with seed 4411, then bisect". The user sets it, changes it or clears it. It stays through Snooze, Zen, Dormant and Settle, so a Reopened Topic still shows it. Every card shows all of it on its own line, and a closed card shows it softer than the card of the Location.
+An optional line of text on a Topic that tells the user what they were doing there, such as "Repro with seed 4411, then bisect". The user sets it, changes it or clears it. It stays through Dormant and Settle, so a Reopened Topic still shows it. Every card shows all of it on its own line, and a closed card shows it softer than the card of the Location.
 _Avoid_: next step, comment, description, memo, Summary (when you mean the Note)
 
 **Settle**:
@@ -114,20 +114,24 @@ _Avoid_: inactive, sleeping, suspended
 An open Topic that has no live Session and remembers no Session: the user stopped, removed or moved away its last Session or Window. Going to it offers Add a Session; nothing is Reopened.
 _Avoid_: Dormant (when it remembers no Session), blank, cleared
 
-**Snooze**:
-To hide one or more open Topics until a time, or until the user Unsnoozes them. Their Sessions and Agents keep running, but their Agents show no Notification until they come back. A Snooze on a Topic that is already Snoozed replaces its time. The Snoozed Topics are listed by the time they wake, soonest first, and the Topics Snoozed until the user Unsnoozes them come last. A Snoozed Topic loses its place in the Topics list, unless Zen Snoozed it: it comes back at the end that the Config gives to new Topics, among the Topics with its Pin, and the Topics that come back together keep their earlier order among themselves.
-_Avoid_: hide, park, defer, archive, mass snooze
+**In Play**:
+The first open Topics and Locked Sessions in the Topics list that are not Pinned, up to the number that the Config gives. Their cards always show in the Sidebar, under the Pinned Topics and above the Bench line.
+_Avoid_: active Topics, focus Topics, front Topics, WIP limit
 
-**Unsnooze**:
-To end a Snooze before its time, so the Topic goes back to the Topics list. Nothing changes in tmux.
-_Avoid_: restore, wake, resume
+**Bench**:
+The open Topics and Locked Sessions in the Topics list after the In Play ones. The Sidebar hides them behind the Bench line until the user shows the Bench. A Benched Topic or Locked Session keeps its place in the list, its Sessions and its Agents.
+_Avoid_: backlog, queue, hidden Topics, overflow, Snooze (when you mean the Bench)
 
-**Zen**:
-A time when every open Topic except one is Snoozed, so the user can work on that one Topic. Locked Sessions are hidden too, and the Agents of No Topic show no Notification mark. It ends at its time or when the user ends it, and then each Topic it Snoozed comes back as it was before, in its earlier place in the Topics list.
-_Avoid_: focus, focus mode, do not disturb, mass snooze
+**Choose In Play**:
+A Command that sets which open Topics and Locked Sessions are In Play, and in what order. The user checks them, then chooses the one for each place in turn. The checked ones after the last place go to the top of the Bench.
+_Avoid_: In Play Prioritisation Session, prioritise, reorder, Zen
+
+**Replace from Bench**:
+An Action on an In Play Topic or Locked Session. A Benched Topic or Locked Session that the user chooses takes its place, and the replaced card goes to the end of the Bench.
+_Avoid_: Done, Switch Topic Places, swap, Snooze
 
 **Pin**:
-To keep a Topic above every Topic that is not Pinned, in each list of Topics except the Snoozed Topics, until you unpin it. A Pinned Topic can be Snoozed as usual, and it is still Pinned when it comes back.
+To keep a Topic above every Topic that is not Pinned, in each list of Topics, until you unpin it. A Pinned Topic is neither In Play nor Benched.
 _Avoid_: favorite, star, sticky, keep on top
 
 **Lock**:
@@ -135,7 +139,7 @@ To keep a No Topic Session in the Topics list as a card with a number, in the or
 _Avoid_: pin, keep, dock, sticky
 
 **Locked Session**:
-A No Topic Session that the user Locked. It has a card among the Topics, but it is not a Topic: it cannot be Settled, Snoozed, Pinned or Forgotten.
+A No Topic Session that the user Locked. It has a card among the Topics, but it is not a Topic: it cannot be Settled, Pinned or Forgotten.
 _Avoid_: kept Session, pinned Session, Topic (when you mean the Session)
 
 **Unlock**:
@@ -185,7 +189,7 @@ _Avoid_: dismiss Status
 An Action that marks a Topic or eligible Agents in its named target Unread. Its Command and shortcut target the current Window or its Zoomed Pane, or the Topic mark on an Empty Topic page.
 
 **Mark All as Read**:
-A Command that clears Unread for all Topics and Agents in the Active Environment, including hidden, Snoozed and Settled Topics.
+A Command that clears Unread for all Topics and Agents in the Active Environment, including hidden, Benched and Settled Topics.
 
 **Notification**:
 A mark that Muxify shows because an Agent is Unread, or is blocked, such as the mark on its Topic. Its type is the Status: done, failed or blocked.
@@ -262,7 +266,7 @@ The typography of text in the Sidebar's Sessions and Agents sections, independen
 _Avoid_: UI font, terminal font (when you mean Sidebar text)
 
 **Action**:
-Something the user does to one Topic, Session, Window, Pane, Agent or Tab, such as Jump To, Snooze, Rename or Settle. Every Action runs in the palette's view, whichever way the user starts it.
+Something the user does to one Topic, Session, Window, Pane, Agent or Tab, such as Jump To, Rename, Replace from Bench or Settle. Every Action runs in the palette's view, whichever way the user starts it.
 _Avoid_: command (when you mean an Action on a thing), operation, menu item
 
 **Command**:
@@ -280,7 +284,7 @@ One kind of thing a Command Palette searches: Topics, Sessions, Windows, Agents 
 _Avoid_: provider, category, section
 
 **Row kind**:
-What one row of a Command Palette or of an Action's list is: `topic`, `snoozed`, `settled`, `session`, `topic-session`, `session-path`, `worktree`, `window`, `agent`, `command` or `tag`. A list's `show` names the Row kinds that it lists. A running Session is a `topic-session` when its Topic is not Settled, and a `session` in all other cases. A checkout is a `worktree` when its folder is outside the folder of its Session Path, and a `session-path` in all other cases, so the checkouts inside a bare repository's folder are `session-path` rows.
+What one row of a Command Palette or of an Action's list is: `topic`, `settled`, `session`, `topic-session`, `session-path`, `worktree`, `window`, `agent`, `command` or `tag`. A list's `show` names the Row kinds that it lists. A running Session is a `topic-session` when its Topic is not Settled, and a `session` in all other cases. A checkout is a `worktree` when its folder is outside the folder of its Session Path, and a `session-path` in all other cases, so the checkouts inside a bare repository's folder are `session-path` rows.
 _Avoid_: type, category, Source (when you mean one kind of row)
 
 **Pick list**:
@@ -288,7 +292,7 @@ The ranked list of an Action's step, such as Add a Session or Move. Each has a n
 _Avoid_: picker, dropdown, menu
 
 **Check step**:
-A palette step that lists Topics with a box on each, and Tag rows that check or uncheck all their Topics in the list, before an Action on the checked Topics. In Snooze Topics, a Tag row does not check its Already Snoozed Topics. The user checks each of them by its own row. A Tag row is not a member of the set. Snooze Topics and Unsnooze Topics start with it.
+A palette step that lists Topics and Locked Sessions with a box on each, before an Action on the checked ones. Choose In Play starts with it.
 _Avoid_: pick step, chips, mark, multi-select, selection
 
 ### Git
