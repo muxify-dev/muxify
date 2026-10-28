@@ -1247,9 +1247,9 @@ Muxify serves the commands on a Unix socket next to the tmux server's socket, an
 writes its path into the server option `@muxify_browser_socket`. Only the Local
 Environment has the socket.
 
-`muxify extensions install` also installs the skill `muxify-browser` for Claude
-Code and Codex. It tells the Agent to use these commands for browser work when
-`muxify browser available` exits 0.
+`muxify extensions install` also installs the skill `muxify` for Claude Code and
+Codex. When `muxify browser available` exits 0, it tells the Agent to use these
+commands for browser work, and teaches the Topic, Window and Agent commands.
 
 ## Diagnostics
 

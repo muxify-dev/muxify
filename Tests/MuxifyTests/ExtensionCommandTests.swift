@@ -30,6 +30,8 @@ final class ExtensionCommandTests: XCTestCase {
         guard (try? CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", "command -v jq && command -v python3 && codex app-server --help </dev/null | grep -q 'codex app-server'"]), environment: environment)) != nil else {
             throw XCTSkip("The Extension installer requires jq, python3 and a codex with app-server")
         }
+        let oldSkill = home.appendingPathComponent(".claude/skills/muxify-browser")
+        try fm.createDirectory(at: oldSkill, withIntermediateDirectories: true)
         let invocation = CommandInvocation(executable: command.path, arguments: ["extensions", "install"])
         let first = try CommandRunner().run(invocation, environment: environment)
         let installed = try Data(contentsOf: config)
@@ -43,9 +45,12 @@ final class ExtensionCommandTests: XCTestCase {
         XCTAssertEqual(json["unrelated"] as? Bool, true)
         XCTAssertTrue(fm.fileExists(atPath: home.appendingPathComponent(".claude/settings.json.bak").path))
         XCTAssertTrue(fm.fileExists(atPath: home.appendingPathComponent(".config/opencode/plugins/muxify-status/tui.js").path))
+        XCTAssertFalse(fm.fileExists(atPath: oldSkill.path))
         for skills in [".claude/skills", ".codex/skills"] {
-            XCTAssertEqual(try Data(contentsOf: home.appendingPathComponent("\(skills)/muxify-browser/SKILL.md")),
-                           try Data(contentsOf: repository.appendingPathComponent("extensions/skills/muxify-browser/SKILL.md")), skills)
+            for file in ["SKILL.md", "references/browser.md", "references/topics-and-sessions.md", "references/agents.md"] {
+                XCTAssertEqual(try Data(contentsOf: home.appendingPathComponent("\(skills)/muxify/\(file)")),
+                               try Data(contentsOf: repository.appendingPathComponent("extensions/skills/muxify/\(file)")), "\(skills)/\(file)")
+            }
         }
     }
 }
