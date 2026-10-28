@@ -48,6 +48,21 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(remote.problems.isEmpty)
     }
 
+    func testDiagnosticsAreOffByDefaultAndOnlyTheLocalConfigTurnsThemOn() throws {
+        XCTAssertFalse(try load("").diagnostics)
+        XCTAssertTrue(Config.template.contains("# diagnostics:\n"))
+        XCTAssertTrue(Config.template.contains("#   enabled: false"))
+        let on = try load("diagnostics:\n  enabled: true")
+        XCTAssertTrue(on.diagnostics)
+        XCTAssertTrue(on.problems.isEmpty)
+        let invalid = try load("diagnostics:\n  enabled: yes please\n  folder: /tmp")
+        XCTAssertFalse(invalid.diagnostics)
+        XCTAssertEqual(invalid.problems.map(\.message), ["diagnostics.enabled: expected a boolean", "unknown key \"diagnostics.folder\""])
+        let remote = try Config.load(path: root, isRemote: true) { _ in "diagnostics:\n  enabled: true" }.get()
+        XCTAssertFalse(remote.diagnostics)
+        XCTAssertTrue(remote.problems.isEmpty)
+    }
+
     func testUnreadAndAllReadBindingsCanBeRemappedOrDisabled() throws {
         let defaults = try load("")
         XCTAssertEqual(defaults.keybinds.action(for: trigger("cmd+shift+u"), focus: nil), .markUnread)

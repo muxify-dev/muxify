@@ -96,7 +96,7 @@ final class AppWindows {
     func register(_ window: NSWindow, for id: UUID) {
         guard !isQuitting, !closedIDs.contains(id) else { return }
         if let existing = nativeWindows[id] {
-            if existing !== window { NSLog("muxify: refusing duplicate App Window identity \(id)") }
+            if existing !== window { Diagnostics.report("refusing duplicate App Window identity \(id)") }
             return
         }
         nativeWindows[id] = window

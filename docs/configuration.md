@@ -1088,8 +1088,8 @@ default `tiebreak`.
 A Remote Environment's App Window uses the Config on that machine
 (`~/.config/muxify/config.yaml`, or under its `$XDG_CONFIG_HOME`) when there is
 one, as if Muxify ran there: its Session Paths, palettes, keybindings and `ui`.
-Its `ghostty`, `browser` and `remote_environments` sections are ignored, because
-they describe this Mac's app. Without a remote Config, the local Config applies, and
+Its `ghostty`, `browser`, `diagnostics` and `remote_environments` sections are
+ignored, because they describe this Mac's app. Without a remote Config, the local Config applies, and
 its Session Paths are looked for on the remote. Topics stay on this Mac. The menu shows the focused App
 Window's keybindings.
 
@@ -1199,6 +1199,20 @@ For `local`, a program can use `muxify browser open <url>`. For `remote`, it can
 set `tmux set-option -w -t "$TMUX_PANE" @muxify_open <url>`. A page served on a
 remote machine needs an address that the Mac can reach, such as its Tailscale
 address. For `no`, use the program's normal browser behavior.
+
+## Diagnostics
+
+When the app freezes, crashes or uses too much CPU, turn on Diagnostics to log
+what happened to `~/Library/Logs/Muxify/`. It is off by default:
+
+```yaml
+diagnostics:
+  enabled: true
+```
+
+It applies when you save the Config, with no restart.
+[Diagnostics](development.md#diagnostics) lists what the log holds and how to
+read it.
 
 ## Hints
 

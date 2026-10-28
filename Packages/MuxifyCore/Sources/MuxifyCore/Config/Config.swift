@@ -42,6 +42,10 @@ public struct Config: Equatable {
         public var vimKeys = true
     }
 
+    /// `diagnostics.enabled`: the app logs freezes, CPU and errors to a file (docs/development.md). It is about the
+    /// app on this Mac, so only the Local Config sets it.
+    public var diagnostics = false
+
     public struct Hints: Equatable {
         public var holdDelay: TimeInterval? = 0.35
         public var cards = Surface(always: true)
@@ -420,6 +424,11 @@ public struct Config: Equatable {
         #   # not use the key itself and no text field has Focus.
         #   vim_keys: true
         #
+        # diagnostics:
+        #   # Logs each freeze, with a sample of the app taken during it, CPU
+        #   # and memory each minute, and errors to ~/Library/Logs/Muxify.
+        #   enabled: false
+        #
         # notifications:
         #   manual_read: false
         #   done_enabled: true
@@ -598,6 +607,7 @@ private struct ConfigReader {
         "notifications": { $0.readNotifications($1) },
         "hints": { $0.readHints($1) },
         "browser": { $0.readBrowser($1) },
+        "diagnostics": { $0.readDiagnostics($1) },
         "sidebar": { $0.readSidebar($1) },
         "ghostty": { $0.readGhostty($1) },
         "ui": { $0.readUI($1) },
@@ -610,7 +620,7 @@ private struct ConfigReader {
     ]
 
     /// About the app on this Mac, not the machine the Config is on.
-    static let appSections: Set<String> = ["ghostty", "browser", "remote_environments"]
+    static let appSections: Set<String> = ["ghostty", "browser", "diagnostics", "remote_environments"]
 
     mutating func readSections(_ root: Node) {
         for (name, key, value) in entries(of: root, "the Config") {
@@ -875,6 +885,20 @@ private struct ConfigReader {
                 continue
             }
             config.browser.vimKeys = enabled
+        }
+    }
+
+    mutating func readDiagnostics(_ node: Node) {
+        for (name, key, value) in entries(of: node, "diagnostics") {
+            guard name == "enabled" else {
+                problem(at: key, "unknown key \"diagnostics.\(name)\"")
+                continue
+            }
+            guard value.tag == Yams.Tag(.bool), let enabled = value.bool else {
+                problem(at: value, "diagnostics.enabled: expected a boolean")
+                continue
+            }
+            config.diagnostics = enabled
         }
     }
 

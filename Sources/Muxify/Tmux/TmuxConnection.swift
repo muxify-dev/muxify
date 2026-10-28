@@ -150,7 +150,7 @@ final class TmuxConnection: @unchecked Sendable {
                     _ = try self.run(["set-option", "-su", marker.option])
                     self.localMarker = nil
                 } catch {
-                    NSLog("muxify: could not remove Client marker: \(error)")
+                    Diagnostics.report("could not remove Client marker: \(error)")
                     return
                 }
             }
@@ -162,7 +162,7 @@ final class TmuxConnection: @unchecked Sendable {
             do {
                 _ = try self.run(["set-option", "-sq", option, value])
                 self.localMarker = (option, client.pid, true)
-            } catch { NSLog("muxify: could not register Client marker: \(error)") }
+            } catch { Diagnostics.report("could not register Client marker: \(error)") }
         }
     }
 

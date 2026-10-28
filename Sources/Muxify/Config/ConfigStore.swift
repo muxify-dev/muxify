@@ -4,8 +4,8 @@ import UniformTypeIdentifiers
 import MuxifyCore
 
 /// The live Config. It loads the Ghostty config the Config names into
-/// libghostty, applies the Browser section to every Tab, and when the Config or any Ghostty config file changes it
-/// reads the Config again and reloads the Ghostty config.
+/// libghostty, applies the Browser section to every Tab, turns Diagnostics on or off, and when the Config or any
+/// Ghostty config file changes it reads the Config again and reloads the Ghostty config.
 @Observable
 final class ConfigStore {
     let path: String
@@ -58,7 +58,7 @@ final class ConfigStore {
                 try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try Config.template.write(to: url, atomically: true, encoding: .utf8)
             } catch {
-                NSLog("muxify: cannot create the Config at \(path): \(error)")
+                Diagnostics.report("cannot create the Config at \(path): \(error)")
                 return
             }
         }
@@ -69,7 +69,9 @@ final class ConfigStore {
 
     private func load() {
         loaded.update(with: Config.load(path: path, read: Self.readFile))
-        for problem in loaded.problems { NSLog("muxify: config: \(problem)") }
+        // Before the problems, so they reach the diagnostics log too.
+        Diagnostics.setEnabled(config.diagnostics)
+        for problem in loaded.problems { Diagnostics.report("config: \(problem)") }
         BrowserPageScripts.setVimKeys(config.browser.vimKeys)
     }
 

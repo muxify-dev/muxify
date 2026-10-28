@@ -94,7 +94,7 @@ final class GhosttyRuntime {
     func start(ghosttyConfigFile: String?) {
         guard app == nil else { return }
         if ghostty_init(UInt(CommandLine.argc), CommandLine.unsafeArgv) != GHOSTTY_SUCCESS {
-            NSLog("muxify: ghostty_init failed")
+            Diagnostics.report("ghostty_init failed")
             return
         }
         config = Self.loadConfig(ghosttyConfigFile: ghosttyConfigFile)
@@ -123,7 +123,7 @@ final class GhosttyRuntime {
             }
         )
         app = ghostty_app_new(&runtime, config)
-        if app == nil { NSLog("muxify: ghostty_app_new failed") }
+        if app == nil { Diagnostics.report("ghostty_app_new failed") }
         // Resolve a light:/dark: theme pair right away so the chrome has the
         // right colors before the first terminal exists. libghostty only
         // re-applies the config when the scheme *changes* (it starts as
@@ -195,7 +195,7 @@ final class GhosttyRuntime {
         ghostty_config_finalize(config)
         for i in 0..<ghostty_config_diagnostics_count(config) {
             let diagnostic = ghostty_config_get_diagnostic(config, i)
-            if let message = diagnostic.message { NSLog("muxify: ghostty config: \(String(cString: message))") }
+            if let message = diagnostic.message { Diagnostics.report("ghostty config: \(String(cString: message))") }
         }
         return config
     }

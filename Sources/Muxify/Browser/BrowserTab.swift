@@ -304,11 +304,11 @@ extension BrowserTab: WKNavigationDelegate, WKUIDelegate {
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        NSLog("muxify: browser failed \(webView.url?.absoluteString ?? "-"): \(error.localizedDescription)")
+        Diagnostics.report("browser failed \(webView.url?.absoluteString ?? "-"): \(error.localizedDescription)")
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        NSLog("muxify: browser failed to start \(webView.url?.absoluteString ?? "-"): \(error.localizedDescription)")
+        Diagnostics.report("browser failed to start \(webView.url?.absoluteString ?? "-"): \(error.localizedDescription)")
     }
 
     func webView(

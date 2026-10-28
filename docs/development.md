@@ -117,6 +117,37 @@ matters only in shells outside that server. See
 [Extensions](../extensions/README.md#install) for Agent setup and
 [Testing](testing.md) for unit and live tests.
 
+## Diagnostics
+
+To find out why the app froze, crashed or used too much CPU, turn on
+Diagnostics in the Config. It works in Release builds too, and costs nothing
+while it is off. Like the rest of the Config, it applies when you save the
+file, with no restart.
+
+```yaml
+diagnostics:
+  enabled: true
+```
+
+The app then writes to `~/Library/Logs/Muxify/`:
+
+- `muxify.log`: the launch, or `on` and `off` when the Config turns it on or
+  off, with the crash, hang and CPU reports macOS wrote for the app since the
+  log was last written; each freeze of the main thread over a
+  second; CPU, memory, threads and open files each minute; Muxify's own
+  messages and the errors the system logged for the app; and the app, window,
+  Space, screen and sleep changes. Its `animation` and `display link` lines
+  follow each AppKit animation and the display links it leaves running:
+  thousands of those links freeze the app on a Space switch. It keeps one
+  older file, `muxify.1.log`, of up to 20 MB.
+- `freeze-<time>.txt`: a `sample` of every thread, started a second into a
+  freeze, and `cpu-<time>.txt`, started after a minute over half a core. The
+  folder keeps the newest 20.
+
+To find the trouble, start with
+`grep -E "freeze|LEAK|stuck|report|system log" ~/Library/Logs/Muxify/muxify.log`.
+A verify run writes these files into its sandbox's `logs/`, never into yours.
+
 ## Beta releases
 
 ### Verify a download
