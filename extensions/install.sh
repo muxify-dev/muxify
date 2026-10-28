@@ -47,17 +47,18 @@ add_hook_entries() {
 
 # install_skill <skills directory>
 #
-# Replaces the browser skill there with the bundled copy, so files dropped from
-# the skill don't linger. The skill tells the Agent to drive Muxify's Browser
-# with `muxify browser` commands.
+# Replaces the muxify skill there with the bundled copy, so files dropped from
+# the skill don't linger. The skill teaches the Agent the `muxify` commands.
+# muxify-browser is its old name; removing it keeps two skills from answering
+# the same task.
 install_skill() {
 	mkdir -p "$1" &&
-		rm -rf "$1/muxify-browser" &&
-		cp -R "$here/skills/muxify-browser" "$1/muxify-browser"
+		rm -rf "$1/muxify-browser" "$1/muxify" &&
+		cp -R "$here/skills/muxify" "$1/muxify"
 }
 
 # Claude Code: one hook script for every event, registered in settings.json,
-# and the browser skill.
+# and the muxify skill.
 install_claude() {
 	claude_dir=$HOME/.claude
 	if [ ! -d "$claude_dir" ]; then
@@ -93,14 +94,14 @@ install_claude() {
 		return 1
 	fi
 	if ! install_skill "$claude_dir/skills"; then
-		echo "claude: failed (could not copy the browser skill)"
+		echo "claude: failed (could not copy the muxify skill)"
 		return 1
 	fi
 	echo "claude: $result"
 }
 
 # Codex CLI: one hook script for every event, registered in hooks.json, and the
-# browser skill.
+# muxify skill.
 install_codex() {
 	codex_dir=${CODEX_HOME:-$HOME/.codex}
 	if [ ! -d "$codex_dir" ]; then
@@ -151,7 +152,7 @@ PY
 		return 1
 	fi
 	if ! install_skill "$codex_dir/skills"; then
-		echo "codex: failed (could not copy the browser skill)"
+		echo "codex: failed (could not copy the muxify skill)"
 		return 1
 	fi
 	echo "codex: $result"
