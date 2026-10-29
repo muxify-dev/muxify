@@ -106,6 +106,8 @@ struct PickCandidate<Payload: Equatable> {
     var shadowedBy: String? = nil
     var symbol: String? = nil
     let title: String
+    /// A choice that removes what it cannot bring back, such as All time in Clear Browser History: its title is red.
+    var isDestructive = false
     var fields: [SearchField] = []
     /// Plain detail text, never matched: "until Mon 9:00", "4 Windows".
     var note: String? = nil
@@ -139,6 +141,7 @@ struct PickRow<Payload: Equatable>: Identifiable, Equatable {
     let kind: RowKind
     let symbol: String?
     let title: Highlighted
+    var isDestructive = false
     let detail: Highlighted
     /// The Tags of the row's Topic, each with the marks of the query.
     var tags: [RowTag] = []
@@ -304,7 +307,7 @@ enum FuzzyRanker {
 
     private static func row<Payload>(_ candidate: PickCandidate<Payload>, match: FieldsMatch?) -> PickRow<Payload> {
         PickRow(id: candidate.id, kind: candidate.kind, symbol: candidate.symbol,
-                title: Highlighted(text: candidate.title, marks: match?.positions[0] ?? []),
+                title: Highlighted(text: candidate.title, marks: match?.positions[0] ?? []), isDestructive: candidate.isDestructive,
                 detail: detail(candidate.searchFields, note: candidate.note, match: match),
                 tags: tags(candidate.searchFields, match: match),
                 trailing: candidate.trailing, mark: candidate.mark,

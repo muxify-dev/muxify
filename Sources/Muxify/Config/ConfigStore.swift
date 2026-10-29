@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 import MuxifyCore
 
 /// The live Config. It loads the Ghostty config the Config names into
-/// libghostty, applies the Browser section to every Tab, turns Diagnostics on or off, and when the Config or any
+/// libghostty, applies the Browser section to every Tab and to Browser History, turns Diagnostics on or off, and when the Config or any
 /// Ghostty config file changes it reads the Config again and reloads the Ghostty config.
 @Observable
 final class ConfigStore {
@@ -73,6 +73,7 @@ final class ConfigStore {
         Diagnostics.setEnabled(config.diagnostics)
         for problem in loaded.problems { Diagnostics.report("config: \(problem)") }
         BrowserPageScripts.setVimKeys(config.browser.vimKeys)
+        BrowserHistory.shared.setEnabled(config.browser.history)
     }
 
     /// Modification times of every file the Config or the Ghostty config can

@@ -27,6 +27,8 @@ public struct MuxifyPaths: Equatable, Sendable {
     /// Empty, like the record lock. One Topic edit at a time holds it, from its read to its last tmux command,
     /// so a second edit sees the first one's Topic and Session names before it chooses its own.
     public var editLock: URL { state.appendingPathComponent("topic-edits.lock") }
+    /// Browser History, for every Window of every Environment: the Browser runs on this Mac.
+    public var browserHistory: URL { state.appendingPathComponent("browser-history.json") }
     /// Every new Worktree goes to `<worktrees>/<sessionPath name>/<slug>`. Settle removes only Worktrees inside it.
     public var worktrees: URL { state.appendingPathComponent("worktrees", isDirectory: true) }
     /// The `SessionPathCache` file of this Mac for `nil`, else of the Remote Environment with this name. The name

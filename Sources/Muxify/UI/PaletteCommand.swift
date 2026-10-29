@@ -63,6 +63,7 @@ enum PaletteCommand: String, CaseIterable {
     case reloadPage = "Reload Page"
     case copyURL = "Copy URL"
     case developerTools = "Show Developer Tools"
+    case clearBrowserHistory = "Clear Browser History"
 
     /// The keybinding that does what this Command does, so the row shows its shortcut.
     var keybinding: ConfigAction? {
@@ -143,6 +144,8 @@ enum PaletteCommand: String, CaseIterable {
             .noMirror("It changes only the view of one App Window.")
         case .newTab, .closeTab, .reopenClosedTab, .openLocation, .nextTab, .previousTab, .back, .forward, .reloadPage, .copyURL, .developerTools:
             .noMirror("It changes only the Browser of one App Window.")
+        case .clearBrowserHistory:
+            .noMirror("It removes a file of this Mac's app, which no Agent reads.")
         case .openConfig, .reloadConfig, .installExtensions, .installCLI:
             .noMirror("It sets up the app. An Agent edits the Config file directly.")
         }
@@ -206,6 +209,7 @@ extension CommandPalette {
             case .back: return store.currentBrowser?.activeTab?.canGoBack == true
             case .forward: return store.currentBrowser?.activeTab?.canGoForward == true
             case .reloadPage, .copyURL, .developerTools: return store.currentBrowser?.activeTab?.hasPage == true
+            case .clearBrowserHistory: return store.browserHistory.canClear
             case .maximize: return store.panelLayout.maximized == nil && store.canToggleMaximize
             case .restore: return store.currentBrowser != nil && store.panelLayout.maximized != nil
             case .maximizeTerminal: return store.panelLayout.maximized != .terminal && store.canMaximize(.terminal)
@@ -253,7 +257,7 @@ extension CommandPalette {
         }
         switch command {
         case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addSession, .settleTopic,
-             .forgetTopic, .renameTopic, .setTopicNote, .renameWindow, .editTags, .chooseInPlay, .replaceFromBench: break
+             .forgetTopic, .renameTopic, .setTopicNote, .renameWindow, .editTags, .chooseInPlay, .replaceFromBench, .clearBrowserHistory: break
         default: close(restoringFocus: false)
         }
         switch command {
@@ -303,6 +307,7 @@ extension CommandPalette {
         case .reloadPage: store.currentBrowser?.activeTab?.reloadOrStop()
         case .copyURL: store.currentBrowser?.activeTab?.copyURL()
         case .developerTools: store.currentBrowser?.activeTab?.showDeveloperTools()
+        case .clearBrowserHistory: begin(.clearHistory, keepingHistory: true)
         case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser,
              .showSidebar, .hideSidebar, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser: break
         }

@@ -40,6 +40,10 @@ final class BrowserTab: NSObject, Identifiable {
     @ObservationIgnored var onURLChange: (() -> Void)?
     /// The current URL was copied, for the App Window's confirmation pill.
     @ObservationIgnored var onCopyURL: ((String) -> Void)?
+    /// A main-frame load that Browser History records finished, with its URL and title.
+    @ObservationIgnored var onVisit: ((URL, String, HistoryVisit) -> Void)?
+    /// The page of the last recorded visit changed its title, with that page's URL.
+    @ObservationIgnored var onTitleChange: ((String, String) -> Void)?
     /// The Browser commands that run on this Tab now (ADR 0058). While one runs, a popup loads in this Tab.
     @ObservationIgnored var agentCommands = 0
     /// When a main-frame navigation last started, committed, finished or failed. A Browser command waits for a
@@ -53,6 +57,9 @@ final class BrowserTab: NSObject, Identifiable {
     @ObservationIgnored private var pendingInteractionState: Any?
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
     @ObservationIgnored private var finder: PageFinder?
+    @ObservationIgnored private var historyLoads = HistoryLoads()
+    /// The URL of the document whose load was last recorded, until another document commits.
+    @ObservationIgnored private var visitedURL: String?
 
     private static let configuration: WKWebViewConfiguration = {
         // Pages here take code and formulas, which curly quotes and long dashes break. Without its own key, WebKit
@@ -78,11 +85,13 @@ final class BrowserTab: NSObject, Identifiable {
         return config
     }()
 
-    init(url: URL?, interactionState: Any? = nil) {
+    /// A `restored` Tab shows a page that the user loaded before, so its first load is not a new visit.
+    init(url: URL?, interactionState: Any? = nil, restored: Bool = false) {
         pendingURL = url
         pendingInteractionState = interactionState
         urlString = url?.absoluteString ?? ""
         super.init()
+        if restored { historyLoads.next = .skipped }
     }
 
     var webView: WKWebView {
@@ -105,7 +114,8 @@ final class BrowserTab: NSObject, Identifiable {
             webView.interactionState = pendingInteractionState
         } else if let pendingURL {
             self.pendingURL = nil
-            load(pendingURL)
+            navigationActivity = Date()
+            Self.start(pendingURL, in: webView)
         }
         return webView
     }
@@ -161,7 +171,10 @@ final class BrowserTab: NSObject, Identifiable {
                 }
             },
             webView.observe(\.title, options: [.new]) { [weak self] webView, _ in
-                self?.update { $0.title = webView.title ?? "" }
+                self?.update { tab in
+                    tab.title = webView.title ?? ""
+                    if let visitedURL = tab.visitedURL { tab.onTitleChange?(visitedURL, tab.title) }
+                }
             },
             webView.observe(\.canGoBack, options: [.new]) { [weak self] webView, _ in
                 self?.update { $0.canGoBack = webView.canGoBack }
@@ -191,24 +204,30 @@ final class BrowserTab: NSObject, Identifiable {
     /// Loads whatever the user typed: a URL, a bare host, or a search query.
     func open(_ input: String) {
         guard let url = Omnibox.url(for: input) else { return }
-        load(url)
+        load(url, typed: true)
     }
 
-    func load(_ url: URL) {
+    /// `typed` for a load from the address field or a Suggestion, which Browser History weighs more than a link.
+    func load(_ url: URL, typed: Bool = false) {
+        historyLoads.next = typed ? .typed : nil
         let changed = url.absoluteString != urlString
         urlString = url.absoluteString
         navigationActivity = Date()
         if let loadedWebView {
-            if url.isFileURL {
-                loadedWebView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
-            } else {
-                loadedWebView.load(URLRequest(url: url))
-            }
+            Self.start(url, in: loadedWebView)
         } else {
             pendingURL = url
             pendingInteractionState = nil
         }
         if changed { onURLChange?() }
+    }
+
+    private static func start(_ url: URL, in webView: WKWebView) {
+        if url.isFileURL {
+            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
+        } else {
+            webView.load(URLRequest(url: url))
+        }
     }
 
     func goBack() { loadedWebView?.goBack() }
@@ -311,25 +330,32 @@ extension BrowserTab: WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         navigationActivity = Date()
+        historyLoads.start(navigation.map(ObjectIdentifier.init))
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         navigationActivity = Date()
+        visitedURL = nil
         finder?.reset()
         findStatus = .idle
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         navigationActivity = Date()
+        guard let visit = historyLoads.finish(navigation.map(ObjectIdentifier.init), byAgent: agentCommands > 0), let url = webView.url else { return }
+        visitedURL = url.absoluteString
+        onVisit?(url, webView.title ?? "", visit)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         navigationActivity = Date()
+        historyLoads.fail(navigation.map(ObjectIdentifier.init))
         Diagnostics.report("browser failed \(webView.url?.absoluteString ?? "-"): \(error.localizedDescription)")
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         navigationActivity = Date()
+        historyLoads.fail(navigation.map(ObjectIdentifier.init))
         Diagnostics.report("browser failed to start \(webView.url?.absoluteString ?? "-"): \(error.localizedDescription)")
     }
 
@@ -338,7 +364,8 @@ extension BrowserTab: WKNavigationDelegate, WKUIDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
-        if navigationAction.targetFrame?.isMainFrame == true { navigationActivity = Date() }
+        let isMainFrame = navigationAction.targetFrame?.isMainFrame == true
+        if isMainFrame { navigationActivity = Date() }
         guard let url = navigationAction.request.url, let scheme = url.scheme?.lowercased() else {
             decisionHandler(.allow)
             return
@@ -355,6 +382,7 @@ extension BrowserTab: WKNavigationDelegate, WKUIDelegate {
             decisionHandler(.cancel)
             return
         }
+        if isMainFrame { historyLoads.decide(navigationAction.navigationType, byAgent: agentCommands > 0) }
         decisionHandler(.allow)
     }
 }
@@ -375,8 +403,12 @@ enum Omnibox {
             let local = isLocal(input)
             return URL(string: (local ? "http://" : "https://") + input)
         }
+        return searchURL(for: input)
+    }
+
+    static func searchURL(for query: String) -> URL? {
         var components = URLComponents(string: "https://www.google.com/search")!
-        components.queryItems = [URLQueryItem(name: "q", value: input)]
+        components.queryItems = [URLQueryItem(name: "q", value: query.trimmingCharacters(in: .whitespacesAndNewlines))]
         return components.url
     }
 

@@ -37,13 +37,17 @@ final class Browser {
     @ObservationIgnored var onCopyURL: ((String) -> Void)?
     /// Called when something asks for Focus in this Browser, before the page or the address field takes it.
     @ObservationIgnored var onFocusRequest: ((Browser) -> Void)?
+    /// The Topic of the Window, for the History entries of its pages.
+    @ObservationIgnored var topicID: () -> String? = { nil }
+    let history: BrowserHistory
 
-    init(windowID: String, stored: StoredBrowser, discoversLocalServers: Bool = true) {
+    init(windowID: String, stored: StoredBrowser, discoversLocalServers: Bool = true, history: BrowserHistory = .shared) {
         self.windowID = windowID
         self.discoversLocalServers = discoversLocalServers
+        self.history = history
         layout = stored.layout
         tabs = stored.tabURLs.map { url in
-            makeTab(url == "about:blank" ? nil : URL(string: url))
+            makeTab(url == "about:blank" ? nil : URL(string: url), restored: true)
         }
         if tabs.isEmpty {
             layout.closeBrowser()
@@ -170,7 +174,7 @@ final class Browser {
     /// and forward history, and gives it Focus.
     func reopenClosedTab() {
         guard let closed = closedTabs.popLast() else { return }
-        let tab = makeTab(closed.url, interactionState: closed.interactionState)
+        let tab = makeTab(closed.url, interactionState: closed.interactionState, restored: true)
         tabs.insert(tab, at: min(closed.index, tabs.count))
         activeTabID = tab.id
         changeLayout { $0.reveal(.browser) }
@@ -229,8 +233,8 @@ final class Browser {
         return tab
     }
 
-    private func makeTab(_ url: URL?, interactionState: Any? = nil) -> BrowserTab {
-        let tab = BrowserTab(url: url, interactionState: interactionState)
+    private func makeTab(_ url: URL?, interactionState: Any? = nil, restored: Bool = false) -> BrowserTab {
+        let tab = BrowserTab(url: url, interactionState: interactionState, restored: restored)
         bind(tab)
         return tab
     }
@@ -243,6 +247,11 @@ final class Browser {
         }
         tab.onURLChange = { [weak self] in self?.changed() }
         tab.onCopyURL = { [weak self] in self?.onCopyURL?($0) }
+        tab.onVisit = { [weak self] url, title, visit in
+            guard let self else { return }
+            history.record(url: url, title: title, visit: visit, topic: topicID())
+        }
+        tab.onTitleChange = { [weak self] url, title in self?.history.updateTitle(of: url, to: title) }
     }
 
     private func changed() {

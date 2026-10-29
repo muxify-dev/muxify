@@ -99,12 +99,15 @@ enum PaletteFlow {
     case confirm(PaletteConfirmation)
     /// Replace from Bench: a Benched card takes the place of this card In Play.
     case replaceFromBench(TopicGroupID)
+    /// Clear Browser History: a row for each `ClearRange`, and the chosen row clears.
+    case clearHistory
 
     @MainActor var placeholder: String {
         switch self {
         case .check: "Topics and Locked Sessions, or #tag"
         case .order(let draft): "What goes at place \(draft.place)?"
         case .replaceFromBench: "What comes In Play?"
+        case .clearHistory: "Which visits?"
         case .move(let draft): draft.destination == .topics ? "Topic or new title" : "Destination Session"
         case .addSession: "Search Sessions and Session Paths"
         case .worktreeStart: "Branch, or a ref to start at"
@@ -138,6 +141,7 @@ enum PaletteChoice: Equatable {
     case worktreeStart(WorktreeStart)
     /// A card of the Topics list, in a step that chooses one.
     case card(TopicGroupID)
+    case clearHistory(ClearRange)
     case accept
 }
 
@@ -152,6 +156,7 @@ extension CommandPalette {
         case .check(let draft): return "\(draft.action.title) › Check"
         case .order(let draft): return "Choose In Play › Place \(draft.place)"
         case .replaceFromBench(let card): return "\(cardTitle(card)) › Replace from Bench"
+        case .clearHistory: return "Clear Browser History"
         case .text(.tags(let field)):
             switch field.mode {
             case .newTopic: return "New Topic"
@@ -196,6 +201,7 @@ extension CommandPalette {
         case .check(let draft): return checkNote(draft)
         case .order(let draft): return orderNote(draft)
         case .replaceFromBench(let card): return "\(cardTitle(card)) goes to the end of the Bench."
+        case .clearHistory: return "Browser History forgets the pages you visited in this time. ↩ clears at once."
         case .confirm(let draft):
             if case .loading = draft.choices { return "Checking Sessions and Worktrees…" }
             if case .failed(let message) = draft.choices { return message }
@@ -268,6 +274,13 @@ extension CommandPalette {
         case .check(let draft): return checkRows(draft)
         case .order(let draft): return orderRows(draft)
         case .replaceFromBench: return benchRows()
+        case .clearHistory:
+            let rows = ClearRange.allCases.map { range in
+                PickCandidate(id: "clear-" + range.title, kind: .command, title: range.title, isDestructive: range == .allTime,
+                              pick: .available(PaletteItem(ref: .choice(.clearHistory(range)))))
+            }
+            return FuzzyRanker.list([PickSectionInput(id: "ranges", rule: .ranked(showsWhenEmpty: true), candidates: rows, shorterTitleFirst: false)],
+                                    query: FuzzyQuery(query), rules: PickRules())
         case .addSession(let topic):
             return catalog?.addSessionList(topic: topic.id, query: query, rows: store.sessionPathRows, rules: store.config.rules(for: .addSession)) ?? .empty
         case .worktreeStart(let draft): return worktreeStartRows(draft, rules: store.config.rules(for: .worktreeStart))
@@ -524,6 +537,9 @@ extension CommandPalette {
         case (.check, .check(let id)): returnOnCheck(id)
         case (.order(let draft), .card(let id)): order(draft.placing(id))
         case (.replaceFromBench(let card), .card(let benched)): store.replaceFromBench(card, with: benched)
+        case (.clearHistory, .clearHistory(let range)):
+            close()
+            store.browserHistory.clear(range)
         case (_, .tag(let tag)): addTagChip(tag)
         case (.text(let text), .accept):
             let value = query

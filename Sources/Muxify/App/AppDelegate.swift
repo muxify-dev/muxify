@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         // The GUI is exiting; surviving tmux jobs must not keep its Dock item alive.
         NSApplication.shared.setActivationPolicy(.prohibited)
+        BrowserHistory.shared.flush()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
