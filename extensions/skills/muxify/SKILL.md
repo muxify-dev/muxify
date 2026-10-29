@@ -26,7 +26,7 @@ The Topic's title, Note, Tags, Pin, In Play order, and Read or Unread marks are 
 
 Read the reference for the task before you run its commands:
 
-- A web page: open, read, click, fill, press, wait, run JavaScript, screenshot. Read [references/browser.md](references/browser.md).
+- A web page: open, read, click, fill, press, wait, run JavaScript, screenshot, close. Read [references/browser.md](references/browser.md).
 - The other Sessions of this Topic: their git status, one diff, a command in each folder, a new Session or Worktree, moving a Window. Read [references/topics-and-sessions.md](references/topics-and-sessions.md).
 - Other Agents: start a helper in a new Window, list Agents and their Status, read a conversation. Read [references/agents.md](references/agents.md).
 

@@ -154,6 +154,14 @@ enum CLIVerbs {
                 ?? URL(fileURLWithPath: parsed.environment["TMPDIR"] ?? "/tmp").appendingPathComponent(name).path
             return .browser(try BrowserAgentInvocation(.screenshot, parsed: parsed, screenshotPath: path))
         },
+        CLIVerb(path: .browserClose, synopsis: "[--window <id>] [--tab <id>]", options: agentOptions,
+                help: """
+                Closes the active Tab, or --tab. Reopen Closed Tab brings it back.
+                Closing the last Tab closes the Browser.
+                """) { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            return .browser(try BrowserAgentInvocation(.close, parsed: parsed))
+        },
         CLIVerb(path: .browserAvailable, synopsis: "", options: [],
                 help: """
                 Prints local or remote when Muxify shows this Pane's tmux server, else no.

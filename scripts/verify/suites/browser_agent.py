@@ -208,6 +208,22 @@ class BrowserAgent(unittest.TestCase):
         self.assertEqual([(t['id'], t['url'], t['active']) for t in tabs],
                          [(first['id'], self.url('into-again'), False), (second['id'], self.url('into-second'), True)])
 
+    def test_close_with_tab_closes_that_tab_and_the_window_forgets_its_url(self):
+        window, pane = self.window()
+        first = self.open(pane, 'close-first')
+        second = self.open(pane, 'close-second')
+        self.assertEqual(self.ok(pane, 'close', '--tab', first['id']), '')
+        self.assertEqual([t['id'] for t in self.tabs(pane)], [second['id']])
+        wait(lambda: self.stored_tabs(window) == [self.url('close-second')],
+             'the Window still keeps the closed Tab: %s' % self.stored_tabs(window))
+
+    def test_close_without_tab_closes_the_active_tab(self):
+        _, pane = self.window()
+        first = self.open(pane, 'close-active-first')
+        self.open(pane, 'close-active-second')
+        self.ok(pane, 'close')
+        self.assertEqual([(t['id'], t['active']) for t in self.tabs(pane)], [(first['id'], True)])
+
     def test_click_on_a_new_window_link_loads_in_the_same_tab_and_keeps_the_focus(self):
         window, pane = self.window()
         tab = self.open(pane, 'new-window-link')

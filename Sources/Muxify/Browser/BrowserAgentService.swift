@@ -92,6 +92,11 @@ final class BrowserAgentService {
             }
         case .wait(let condition, let timeout):
             return await withTab(request, in: stores) { tab, _ in await tab.agentWait(for: condition, timeout: timeout) }
+        case .close:
+            return await withTab(request, in: stores) { tab, browser in
+                browser.close(tab)
+                return .done
+            }
         }
     }
 
