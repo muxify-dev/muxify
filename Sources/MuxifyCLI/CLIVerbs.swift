@@ -48,44 +48,48 @@ enum CLIVerbs {
     // MARK: - browser
 
     private static let browser: [CLIVerb] = [
-        CLIVerb(path: .browserOpen, synopsis: "[--window <id>] [--json] <url>...",
-                options: [.value("--window", aliases: ["-w"]), .flag("--json")], afterDashes: .operands,
+        CLIVerb(path: .browserOpen, synopsis: "[--window <id>] [--json] <url>...\n[--window <id>] [--json] --tab <id> <url>",
+                options: agentOptions + [.flag("--json")], afterDashes: .operands,
                 help: """
-                Opens each URL as a Tab in this tmux Window's Browser. The last Tab
-                that a Pane opens is its Agent Tab, which the Browser commands act on.
+                Opens each URL in a new Tab of this tmux Window's Browser, or goes to
+                the Tab that shows it already. It returns when the page has loaded.
                   --window <id>   open in another Window instead, e.g. --window @12
+                  --tab <id>      load the URL in this Tab, in place of its page
                   --json          print each Tab's id, URL and title as one line of JSON
                 """) { parsed in
             guard !parsed.operands.isEmpty else { throw CLIError.usage }
-            let pane = parsed.environment["TMUX_PANE"].flatMap { $0.isEmpty ? nil : $0 }
-            guard let target = try parsed.value("--window") ?? pane else {
-                throw CLIError("not inside tmux; specify the Window with --window <id> (e.g. --window @12)")
-            }
+            let target = try BrowserAgentInvocation.target(parsed)
+            let tab = try BrowserAgentInvocation.tab(parsed)
+            if tab != nil, parsed.operands.count > 1 { throw CLIError("--tab takes one URL", exitCode: 2) }
             for url in parsed.operands where url.contains(where: { $0.isWhitespace }) {
                 throw CLIError("'\(url)' contains spaces; pass one URL per argument")
             }
-            return .browserOpen(window: target, pane: pane, urls: parsed.operands, json: parsed.flag("--json"))
+            return .browserOpen(window: target, tab: tab, urls: parsed.operands, json: parsed.flag("--json"))
         },
         CLIVerb(path: .browserTabs, synopsis: "[--window <id>] [--json]",
                 options: [.value("--window", aliases: ["-w"]), .flag("--json")],
                 help: """
                 Lists the Tabs of this Window's Browser: id, URL, title, and active
-                or agent for the shown Tab and this Pane's Agent Tab.
+                for the Tab that the Browser shows.
                 """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .browser(try BrowserAgentInvocation(.tabs, parsed: parsed))
         },
         CLIVerb(path: .browserSnapshot, synopsis: "[--window <id>] [--tab <id>]", options: agentOptions,
                 help: """
-                Prints the page of the Agent Tab, or of --tab, as an accessibility tree.
+                Prints the page of the active Tab, or of --tab, as an accessibility tree.
                 Each element has a Ref, such as e3, for click, fill and press. A Ref
-                stays valid until the Tab loads a new document.
+                stays valid until the Tab loads a new document. Without --tab, every
+                Browser command acts on the Tab that the Browser shows.
                 """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .browser(try BrowserAgentInvocation(.snapshot, parsed: parsed))
         },
         CLIVerb(path: .browserClick, synopsis: "[--window <id>] [--tab <id>] <ref>", options: agentOptions,
-                help: "Clicks the element of the Ref, with DOM events.") { parsed in
+                help: """
+                Clicks the element of the Ref, with DOM events. It returns when the page
+                that the click opens has loaded. A link to a new window loads in this Tab.
+                """) { parsed in
             guard parsed.operands.count == 1 else { throw CLIError.usage }
             return .browser(try BrowserAgentInvocation(.click(ref: try BrowserAgentInvocation.ref(parsed.operands[0])), parsed: parsed))
         },
@@ -103,7 +107,8 @@ enum CLIVerbs {
         CLIVerb(path: .browserPress, synopsis: "[--window <id>] [--tab <id>] <key> [<ref>]", options: agentOptions,
                 help: """
                 Presses a key, such as Enter, Escape, ArrowDown or a, on the element of
-                the Ref, or on the element that has the page's focus.
+                the Ref, or on the element that has the page's focus. It returns when
+                the page that the key opens has loaded.
                 """) { parsed in
             guard (1...2).contains(parsed.operands.count), !parsed.operands[0].isEmpty else { throw CLIError.usage }
             let ref = try parsed.operands.dropFirst().first.map(BrowserAgentInvocation.ref)
@@ -114,6 +119,8 @@ enum CLIVerbs {
                 help: """
                 Waits until the page has loaded, shows the text, or shows an element that
                 matches the CSS selector. Fails after 10 seconds, or after --timeout.
+                The page has loaded when it is complete and has not gone to another page
+                for 400 ms.
                 """) { parsed in
             guard parsed.operands.isEmpty, parsed.count(of: ["--load", "--text", "--selector"]) == 1 else { throw CLIError.usage }
             let condition: BrowserAgentWait = try parsed.value("--text").map { .text($0) }
@@ -128,7 +135,7 @@ enum CLIVerbs {
         },
         CLIVerb(path: .browserEval, synopsis: "[--window <id>] [--tab <id>] <js>", options: agentOptions, afterDashes: .operands,
                 help: """
-                Runs JavaScript in the page of the Agent Tab, or of --tab, and prints
+                Runs JavaScript in the page of the active Tab, or of --tab, and prints
                 the result as JSON. Give an expression, or statements with return.
                 await works.
                 """) { parsed in
@@ -138,7 +145,7 @@ enum CLIVerbs {
         CLIVerb(path: .browserScreenshot, synopsis: "[--window <id>] [--tab <id>] [--out <file.png>]",
                 options: agentOptions + [.value("--out")],
                 help: """
-                Writes a PNG of the Agent Tab's page, or of --tab, and prints its path.
+                Writes a PNG of the active Tab's page, or of --tab, and prints its path.
                   --out <file.png>  write it there, not in the temporary directory
                 """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }

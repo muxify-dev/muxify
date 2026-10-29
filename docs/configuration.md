@@ -1217,23 +1217,32 @@ When `muxify browser available` prints `local`, an Agent in a Pane can drive the
 Browser of its own tmux Window with Browser commands, one step for each command:
 
 ```sh
-muxify browser open --json http://localhost:3000   # {"id":"…","url":"…","title":"…"}
-muxify browser snapshot                            # the page as a tree, with a Ref such as e3 on each element
-muxify browser fill e3 'ada@example.com'
-muxify browser click e4
-muxify browser wait --text 'Welcome'
-muxify browser eval 'document.title'               # prints the result as JSON
-muxify browser screenshot --out page.png           # prints the path of the PNG
+muxify browser open --json http://localhost:3000   # {"id":"T","url":"…","title":"…"}
+muxify browser snapshot --tab T                    # the page as a tree, with a Ref such as e3 on each element
+muxify browser fill --tab T e3 'ada@example.com'
+muxify browser click --tab T e4
+muxify browser wait --tab T --text 'Welcome'
+muxify browser eval --tab T 'document.title'       # prints the result as JSON
+muxify browser screenshot --tab T --out page.png   # prints the path of the PNG
+muxify browser open --tab T http://localhost:3000/settings
 ```
 
-The Tab that a Pane opened last is its Agent Tab. A command without `--tab <id>`
-acts on it. `muxify browser tabs` lists the Tabs of the Window and their ids. When
-the Agent Tab is closed, a command fails and asks you to run `muxify browser open`
-or to give `--tab`. A Ref stays valid until the Tab loads a new document. Run
-`snapshot` again after a navigation.
+`--tab <id>` names a Tab of the Window. A command without `--tab` acts on the
+Window's active Tab, the one that the Browser shows, so it follows the Tab that
+you select. `muxify browser tabs` lists the Tabs of the Window, their ids, and
+which one is active. `open <url>` opens a new Tab, or goes to a Tab that shows
+the URL already. `open --tab <id> <url>` loads the URL in that Tab. A Ref stays
+valid until the Tab loads a new document. Run `snapshot` again after a
+navigation. When the page shows nothing yet, `snapshot` fails and tells you to run
+`wait --load`.
 
-`wait` waits for one of `--load`, `--text <text>` or `--selector <css>`, for 10
-seconds or for `--timeout <seconds>`. `press <key> [<ref>]` sends a key, such as
+A page has loaded when it is complete and has not gone to another page for 400
+ms, so a page that goes on to another page with JavaScript after its load counts
+as the next page. `open`, `click` and `press` return when the page has loaded, or
+after 10 seconds. While a command runs on a Tab, a `target=_blank` link or
+`window.open` of that Tab loads in the same Tab. `wait` waits for one of
+`--load`, `--text <text>` or `--selector <css>`, for 10 seconds or for
+`--timeout <seconds>`. `press <key> [<ref>]` sends a key, such as
 `Enter` or `a`, to the Ref or to the element that has the page's focus. `eval`
 runs in the page, so it sees the page's own variables, and it can use `await`.
 Write an expression, or statements with `return`.

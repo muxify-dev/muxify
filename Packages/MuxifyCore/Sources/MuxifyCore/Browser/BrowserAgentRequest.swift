@@ -1,16 +1,15 @@
 import Foundation
 
-/// One Browser command from a Pane, as the CLI sends it to the app (ADR 0057). `window` and `pane` are the
-/// caller's tmux ids. `tab` names a Tab; without it, the command acts on the Pane's Agent Tab.
+/// One Browser command from a Pane, as the CLI sends it to the app (ADR 0057, ADR 0058). `window` is the
+/// caller's tmux Window. `tab` names a Tab of it; without it, the command acts on the Window's active Tab, and
+/// `open` opens a new Tab.
 public struct BrowserAgentRequest: Codable, Equatable, Sendable {
     public var window: String
-    public var pane: String?
     public var tab: UUID?
     public var command: BrowserAgentCommand
 
-    public init(window: String, pane: String?, tab: UUID? = nil, command: BrowserAgentCommand) {
+    public init(window: String, tab: UUID? = nil, command: BrowserAgentCommand) {
         self.window = window
-        self.pane = pane
         self.tab = tab
         self.command = command
     }
@@ -46,15 +45,12 @@ public struct BrowserAgentTab: Codable, Equatable, Sendable {
     public var url: String
     public var title: String
     public var active: Bool
-    /// The caller's Agent Tab.
-    public var agent: Bool
 
-    public init(id: UUID, url: String, title: String, active: Bool, agent: Bool) {
+    public init(id: UUID, url: String, title: String, active: Bool) {
         self.id = id
         self.url = url
         self.title = title
         self.active = active
-        self.agent = agent
     }
 }
 

@@ -1,12 +1,11 @@
 import Foundation
 import MuxifyCore
 
-/// One Browser command (ADR 0057): it finds the app that serves this tmux server's Browsers, sends one request
+/// One Browser command (ADR 0057, ADR 0058): it finds the app that serves this tmux server's Browsers, sends one request
 /// for the caller's Window, and prints the reply.
 struct BrowserAgentInvocation: Equatable {
     /// A Window or a Pane id: `--window`, else `$TMUX_PANE`.
     let target: String
-    let pane: String?
     let tab: UUID?
     let command: BrowserAgentCommand
     let json: Bool
@@ -14,24 +13,15 @@ struct BrowserAgentInvocation: Equatable {
     var screenshotPath: String?
 
     init(_ command: BrowserAgentCommand, parsed: ParsedArguments, screenshotPath: String? = nil) throws {
-        let pane = parsed.environment["TMUX_PANE"].flatMap { $0.isEmpty ? nil : $0 }
-        guard let target = try parsed.value("--window") ?? pane else {
-            throw CLIError("not inside tmux; specify the Window with --window <id> (e.g. --window @12)")
-        }
-        let tab = try parsed.value("--tab")
-        if let tab, UUID(uuidString: tab) == nil {
-            throw CLIError("'\(tab)' is not a Tab id; muxify browser tabs lists them", exitCode: 2)
-        }
-        self.target = target
-        self.pane = pane
-        self.tab = tab.flatMap(UUID.init(uuidString:))
+        target = try Self.target(parsed)
+        tab = try Self.tab(parsed)
         self.command = command
         json = parsed.flag("--json")
         self.screenshotPath = screenshotPath
     }
 
     func run(using runner: any CLICommandRunning) throws {
-        let reply = try Self.send(command, target: target, pane: pane, tab: tab, using: runner)
+        let reply = try Self.send(command, target: target, tab: tab, using: runner)
         switch reply {
         case .tabs(let tabs):
             if json { print(try Self.json(tabs)) }
@@ -48,6 +38,22 @@ struct BrowserAgentInvocation: Equatable {
         }
     }
 
+    /// A Window or a Pane id: `--window`, else `$TMUX_PANE`.
+    static func target(_ parsed: ParsedArguments) throws -> String {
+        guard let target = try parsed.value("--window") ?? parsed.environment["TMUX_PANE"].flatMap({ $0.isEmpty ? nil : $0 }) else {
+            throw CLIError("not inside tmux; specify the Window with --window <id> (e.g. --window @12)")
+        }
+        return target
+    }
+
+    static func tab(_ parsed: ParsedArguments) throws -> UUID? {
+        guard let tab = try parsed.value("--tab") else { return nil }
+        guard let id = UUID(uuidString: tab) else {
+            throw CLIError("'\(tab)' is not a Tab id; muxify browser tabs lists them", exitCode: 2)
+        }
+        return id
+    }
+
     /// A Ref names an element of the last `snapshot`.
     static func ref(_ word: String) throws -> String {
         guard word.first == "e", let number = Int(word.dropFirst()), number > 0, word == "e\(number)" else {
@@ -58,7 +64,7 @@ struct BrowserAgentInvocation: Equatable {
 
     /// The app's reply for the caller's Window. A failure to reach the app is a `BrowserAgentChannel.Failure`, so
     /// `browser open` can fall back to `@muxify_open`; every other failure is a `CLIError`.
-    static func send(_ command: BrowserAgentCommand, target: String, pane: String?, tab: UUID?,
+    static func send(_ command: BrowserAgentCommand, target: String, tab: UUID?,
                      using runner: any CLICommandRunning) throws -> BrowserAgentReply {
         let panes = try runner.run("tmux", arguments: ["list-panes", "-t", target, "-F", "#{window_id}"], quiet: true)
         guard panes.status == 0, let window = panes.output.split(separator: "\n").first.map(String.init) else {
@@ -72,7 +78,7 @@ struct BrowserAgentInvocation: Equatable {
         guard !path.isEmpty else {
             throw BrowserAgentChannel.Failure.unreachable("Muxify does not serve the Browser of this tmux server")
         }
-        return try BrowserAgentChannel.send(BrowserAgentRequest(window: window, pane: pane, tab: tab, command: command), to: path)
+        return try BrowserAgentChannel.send(BrowserAgentRequest(window: window, tab: tab, command: command), to: path)
     }
 
     static func json(_ value: some Encodable) throws -> String {
@@ -82,8 +88,8 @@ struct BrowserAgentInvocation: Equatable {
     }
 
     private static func line(_ tab: BrowserAgentTab) -> String {
-        let marks = [tab.active ? "active" : nil, tab.agent ? "agent" : nil].compactMap { $0 }
-        return ([tab.id.uuidString, tab.url.isEmpty ? "about:blank" : tab.url, tab.title] + marks).joined(separator: "\t")
+        ([tab.id.uuidString, tab.url.isEmpty ? "about:blank" : tab.url, tab.title] + (tab.active ? ["active"] : []))
+            .joined(separator: "\t")
     }
 }
 

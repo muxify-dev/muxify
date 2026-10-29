@@ -994,7 +994,7 @@ final class WorkspaceStore {
     @ObservationIgnored var onNewAppWindow: (() -> Void)?
     @ObservationIgnored var shouldConsumeOpenRequests: (() -> Bool)?
     /// Starts serving Browser commands for the server whose socket it gets, and returns the path to publish.
-    @ObservationIgnored var serveBrowserAgent: ((_ tmuxSocket: String, _ serverID: String?) -> String?)?
+    @ObservationIgnored var serveBrowserAgent: ((_ tmuxSocket: String) -> String?)?
     /// Whether this store wrote `BrowserAgentChannel.option`, so its connection removes it when it retires.
     @ObservationIgnored private var publishedBrowserSocket = false
     #if DEBUG
@@ -2232,7 +2232,7 @@ final class WorkspaceStore {
     /// example after another App Window's connection removed it.
     private func publishBrowserSocket(_ snapshot: TmuxSnapshot) {
         guard !isRemote, snapshot.serverRunning, shouldConsumeOpenRequests?() ?? true, let socket = snapshot.socketPath,
-              let path = serveBrowserAgent?(socket, snapshot.serverID), snapshot.browserSocket != path else { return }
+              let path = serveBrowserAgent?(socket), snapshot.browserSocket != path else { return }
         publishedBrowserSocket = true
         runAsync(["set-option", "-sq", BrowserAgentChannel.option, path])
     }

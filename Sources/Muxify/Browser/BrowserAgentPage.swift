@@ -2,7 +2,7 @@ import AppKit
 import MuxifyCore
 import WebKit
 
-/// The Browser commands on one Tab's page (ADR 0057). `eval` runs in the page's own world, so it sees the page's
+/// The Browser commands on one Tab's page (ADR 0057, ADR 0058). `eval` runs in the page's own world, so it sees the page's
 /// variables. The other commands run `agentLibrary` in a world of their own, so the page cannot see or change it,
 /// and its map from Ref to element lasts as long as the document.
 @MainActor
@@ -17,13 +17,20 @@ extension BrowserTab {
         return webView
     }
 
-    /// Waits until the page that `open` started has loaded, so the next command sees it.
-    func agentWaitForLoad(timeout: TimeInterval = 10) async {
+    /// Waits until the page has loaded: no load runs, the document is complete, and no navigation has started,
+    /// committed or finished for 400 ms, counted from the call at the earliest. The quiet time catches a page that
+    /// goes on to another page with JavaScript after its load, and a click whose navigation starts a moment later.
+    /// False when `timeout` ends first.
+    func agentWaitForLoad(timeout: TimeInterval) async -> Bool {
         let webView = agentWebView
-        let deadline = Date().addingTimeInterval(timeout)
-        while webView.isLoading, Date() < deadline {
+        let start = Date()
+        let deadline = start.addingTimeInterval(timeout)
+        while Date() < deadline {
+            let quiet = Date().timeIntervalSince(max(start, navigationActivity)) >= 0.4
+            if quiet, !webView.isLoading, (try? await callAgent("loaded()")) as? Bool == true { return true }
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
+        return false
     }
 
     func agentEval(_ script: String) async -> BrowserAgentReply {
@@ -61,35 +68,43 @@ extension BrowserTab {
         }
     }
 
+    /// An empty tree is a failure, because it is almost always a page that is not there yet, and an Agent that
+    /// reads nothing has no next step.
     func agentSnapshot() async -> BrowserAgentReply {
-        do { return .snapshot(try await callAgent("snapshot()") as? String ?? "") }
+        let tree: String
+        do { tree = try await callAgent("snapshot()") as? String ?? "" }
         catch { return .failure(error.agentMessage) }
+        guard tree.isEmpty else { return .snapshot(tree) }
+        let page = urlString.isEmpty ? "about:blank" : urlString
+        return .failure("the page \(page) shows nothing yet. Run muxify browser wait --load, then snapshot again.")
     }
 
-    /// `click`, `fill` and `press`: a call of the library that returns nothing.
-    func agentAct(_ call: String, _ arguments: [String: Any]) async -> BrowserAgentReply {
+    /// `click`, `fill` and `press`: a call of the library that returns nothing. With `waitForLoad`, it replies when
+    /// the page that the call starts has loaded, or after 10 s, as a click on a link needs.
+    func agentAct(_ call: String, _ arguments: [String: Any], waitForLoad: Bool) async -> BrowserAgentReply {
         do {
             _ = try await callAgent(call, arguments)
-            return .done
         } catch {
             return .failure(error.agentMessage)
         }
+        if waitForLoad { _ = await agentWaitForLoad(timeout: 10) }
+        return .done
     }
 
     /// Asks the page ten times a second, from here, because a click that navigates ends the document that a wait
     /// inside the page would run in.
     func agentWait(for condition: BrowserAgentWait, timeout: TimeInterval) async -> BrowserAgentReply {
-        let webView = agentWebView
         let deadline = Date().addingTimeInterval(timeout)
-        let (call, arguments, goal): (String, [String: Any], String) = switch condition {
-        case .load: ("loaded()", [:], "the page to load")
-        case .text(let text): ("hasText(text)", ["text": text], "the text \"\(text)\"")
-        case .selector(let selector): ("hasElement(selector)", ["selector": selector], "an element that matches \(selector)")
+        let (call, arguments, goal): (String, [String: Any], String)
+        switch condition {
+        case .load:
+            return await agentWaitForLoad(timeout: timeout) ? .done : .failure("waited \(Int(timeout)) s for the page to load")
+        case .text(let text): (call, arguments, goal) = ("hasText(text)", ["text": text], "the text \"\(text)\"")
+        case .selector(let selector): (call, arguments, goal) = ("hasElement(selector)", ["selector": selector], "an element that matches \(selector)")
         }
         while true {
             do {
-                let met = try await callAgent(call, arguments) as? Bool == true
-                if met, condition != .load || !webView.isLoading { return .done }
+                if try await callAgent(call, arguments) as? Bool == true { return .done }
             } catch where error.agentMessage.contains("SyntaxError") {
                 return .failure(message: "'\(arguments["selector"] ?? "")' is not a CSS selector", exitCode: 2)
             } catch {
