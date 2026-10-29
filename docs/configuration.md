@@ -1139,6 +1139,26 @@ browser:
 
 The change applies to the pages that are open and to the pages that load later.
 
+Browser History records the pages that you load in the Tabs of every Window, so
+that the address field suggests them as you type. It is on by default. To turn
+it off:
+
+```yaml
+browser:
+  history: false
+```
+
+Muxify keeps Browser History in one file on this Mac,
+`$XDG_STATE_HOME/muxify/browser-history.json`. It does not record a page that a
+Browser command loads, a reload, or a URL whose query or fragment has a key such
+as `token`, `code` or `password`. While it is off, Muxify does not record pages,
+does not read the file, and the address field shows no Suggestions.
+
+The Command **Clear Browser History** asks for a time: Last hour, Last 6 hours,
+Last day, Last 3 days, Last 7 days, or All time. The row that you choose clears
+at once. Browser History then forgets each visit in that time, and a page with
+no visit left. All time removes the file. Esc changes nothing.
+
 Configurable [Keybindings](keybindings.md) work throughout the app, including in
 Browser pages. The guide lists all actions, defaults, built-in shortcuts and a
 complete Config example.

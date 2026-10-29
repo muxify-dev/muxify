@@ -156,6 +156,22 @@ _Avoid_: webview, inspector, sidebar browser
 One page in a Window's Browser, with its own back/forward history. "Tab" never means a tmux Window or a Git View tab.
 _Avoid_: page (when you mean the Tab itself), browser window
 
+**Browser History**:
+The pages that the user loaded in the Tabs of every Window, one History entry for each, kept in one file on the Mac. It is on by default; the Config key `browser.history: false` turns it off. It never records a page that a Browser command loads.
+_Avoid_: history (alone, which is also a Tab's back/forward history and Find in Pane's), visits
+
+**History entry**:
+One page in Browser History: its URL, title, its visits of the last 7 days, one score for its older visits, and the Topics where the user visited it. The score grows with each visit and halves each 14 days.
+_Avoid_: page (when you mean the entry), visit, bookmark
+
+**Suggestion**:
+One row in the list under the address field: a History entry, a host or path of Browser History, an open Tab, a dev server port of the Window, or the search row. The list shows only while Browser History is on.
+_Avoid_: autocomplete, result, completion (when you mean the row)
+
+**Inline completion**:
+The text that the address field adds after the typed text, selected, when the first Suggestion is a host or path that starts with it.
+_Avoid_: autofill, autocomplete
+
 **Find in Page**:
 Searching the text of the active Tab's page, its iframes included, from a find bar in the Browser, with every match highlighted. It never searches the Terminal, which has Find in Pane, or a Command Palette.
 _Avoid_: search (when you mean the page text), Find (alone)

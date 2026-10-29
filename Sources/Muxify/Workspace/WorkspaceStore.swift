@@ -1001,8 +1001,12 @@ final class WorkspaceStore {
     @ObservationIgnored private var gitDemoObserver: NSObjectProtocol?
     #endif
 
-    init(configStore: ConfigStore, environment: RemoteEnvironment? = nil) {
+    /// Browser History of this Mac, for the Browsers of this App Window.
+    let browserHistory: BrowserHistory
+
+    init(configStore: ConfigStore, environment: RemoteEnvironment? = nil, browserHistory: BrowserHistory = .shared) {
         self.configStore = configStore
+        self.browserHistory = browserHistory
         activeEnvironment = environment
         palette.store = self
         #if DEBUG
@@ -2088,8 +2092,9 @@ final class WorkspaceStore {
     func browser(for windowID: String) -> Browser {
         if let browser = browsers[windowID] { return browser }
         let stored = windows.first { $0.id == windowID }?.storedBrowser ?? StoredBrowser()
-        let browser = Browser(windowID: windowID, stored: stored, discoversLocalServers: !isRemote)
+        let browser = Browser(windowID: windowID, stored: stored, discoversLocalServers: !isRemote, history: browserHistory)
         let current = generation
+        browser.topicID = { [weak self] in self?.windows.first { $0.id == windowID }?.topicID }
         browser.onChange = { [weak self] browser in
             guard let self, self.generation == current else { return }
             persistWindow(browser.windowID)

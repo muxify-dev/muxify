@@ -302,6 +302,7 @@ private struct SpotlightPalette: View {
     private func titleLine(_ row: PickRow<PaletteItem>, theme: PaletteTheme) -> some View {
         HStack(spacing: 6) {
             Text(row.title.attributed).font(.system(size: 15)).lineLimit(1)
+                .foregroundStyle(row.isDestructive ? AnyShapeStyle(theme.red) : AnyShapeStyle(.primary))
             ForEach(row.tags, id: \.text.text) { tag in
                 Text(tag.text.attributed)
                     .lineLimit(1)

@@ -138,6 +138,8 @@ private struct TabContent: View {
     let tab: BrowserTab
 
     @State private var address = ""
+    /// While the address field has Focus: the typed text and its Suggestions.
+    @State private var edit: AddressEdit?
     @State private var ports: [Int] = []
     @FocusState private var addressFocused: Bool
 
@@ -160,6 +162,16 @@ private struct TabContent: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .overlayPreferenceValue(AddressFieldBounds.self) { anchor in
+            if let anchor, addressFocused, let edit, edit.showsList {
+                GeometryReader { proxy in
+                    let field = proxy[anchor]
+                    SuggestionList(suggestions: edit.suggestions, selection: edit.selection, open: open)
+                        .frame(width: field.width)
+                        .offset(x: field.minX, y: field.maxY + 4)
+                }
+            }
+        }
         .onAppear {
             address = tab.urlString
             scanPorts()
@@ -167,6 +179,16 @@ private struct TabContent: View {
         }
         .onChange(of: tab.urlString) { _, newValue in
             if !addressFocused { address = newValue }
+        }
+        .onChange(of: addressFocused) { _, focused in
+            edit = focused ? AddressEdit(url: tab.urlString) : nil
+        }
+        .onChange(of: address) { _, newValue in
+            guard addressFocused else { return }
+            var next = edit ?? AddressEdit(url: tab.urlString)
+            next.textChanged(to: newValue, suggest: suggestions)
+            edit = next
+            if next.text != newValue { showEdit() }
         }
         .onChange(of: browser.focusRequest) { _, _ in consumeFocusRequest() }
     }
@@ -225,12 +247,11 @@ private struct TabContent: View {
                 .font(.system(size: 13))
                 .focused($addressFocused)
                 .onSubmit(submit)
+                .onKeyPress(phases: [.down, .repeat], action: listKey)
                 .accessibilityIdentifier("browser-address")
                 .accessibilityAction(named: "Submit", submit)
-                .onExitCommand {
-                    address = tab.urlString
-                    focusPage()
-                }
+                .onExitCommand(perform: escape)
+                .anchorPreference(key: AddressFieldBounds.self, value: .bounds) { $0 }
         }
         .padding(.horizontal, 10)
         .frame(height: 30)
@@ -304,8 +325,71 @@ private struct TabContent: View {
     // MARK: - Actions
 
     private func submit() {
-        tab.open(address)
+        switch edit?.target ?? .text(address) {
+        case .suggestion(let suggestion): open(suggestion)
+        case .text(let text):
+            edit = nil
+            tab.open(text)
+            focusPage()
+        }
+    }
+
+    /// An open Tab is shown, not loaded again. Every other Suggestion loads in this Tab as a typed visit.
+    private func open(_ suggestion: Suggestion) {
+        edit = nil
+        if case .tab(let id, _, _) = suggestion, let other = browser.tabs.first(where: { $0.id == id }) {
+            address = tab.urlString
+            browser.jumpTo(other)
+            return
+        }
+        guard let url = URL(string: suggestion.url) else { return }
+        tab.load(url, typed: true)
         focusPage()
+    }
+
+    /// ↓ and ↑, or ⌃N and ⌃P, select a Suggestion while the list shows.
+    private func listKey(_ press: KeyPress) -> KeyPress.Result {
+        let step: Int
+        if press.modifiers.isDisjoint(with: [.command, .option, .control, .shift]), press.key == .downArrow || press.key == .upArrow {
+            step = press.key == .downArrow ? 1 : -1
+        } else if press.modifiers.intersection([.command, .option, .control, .shift]) == .control,
+                  ["n", "p", "\u{0e}", "\u{10}"].contains(press.key.character) {
+            step = press.key.character == "n" || press.key.character == "\u{0e}" ? 1 : -1
+        } else {
+            return .ignored
+        }
+        guard var next = edit, next.move(step) else { return .ignored }
+        edit = next
+        showEdit()
+        return .handled
+    }
+
+    /// ⎋ closes the list first, then gives back the Tab's URL.
+    private func escape() {
+        if var next = edit, next.escape() {
+            edit = next
+            return
+        }
+        address = tab.urlString
+        focusPage()
+    }
+
+    /// Shows the edit's text in the field, with the Inline completion selected, so that typing goes on over it.
+    private func showEdit() {
+        guard let edit else { return }
+        address = edit.text
+        let selection = edit.completion ?? NSRange(location: edit.text.utf16.count, length: 0)
+        DispatchQueue.main.async {
+            guard addressFocused, let editor = tab.webView.window?.firstResponder as? NSTextView else { return }
+            if editor.string != edit.text { editor.string = edit.text }
+            editor.setSelectedRange(selection)
+        }
+    }
+
+    private func suggestions(for query: String) -> [Suggestion] {
+        let tabs = browser.tabs.filter { $0.id != tab.id && $0.hasPage }
+            .map { LiveRows.OpenTab(id: $0.id, url: $0.urlString, title: $0.title) }
+        return browser.history.suggestions(for: query, live: LiveRows(tabs: tabs, ports: ports), activeTopic: browser.topicID())
     }
 
     /// Only explicit requests (opening the panel, ⌘L, Maximize, Focus Browser)
@@ -335,6 +419,93 @@ private struct TabContent: View {
     private func scanPorts() {
         guard browser.discoversLocalServers else { return }
         DevServerScanner.scan(windowID: browser.windowID) { ports = $0 }
+    }
+}
+
+private struct AddressFieldBounds: PreferenceKey {
+    static var defaultValue: Anchor<CGRect>?
+    static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) { value = value ?? nextValue() }
+}
+
+/// The Suggestions under the address field. A click opens one; the list never takes Focus from the field.
+private struct SuggestionList: View {
+    let suggestions: [Suggestion]
+    let selection: Int?
+    let open: (Suggestion) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(suggestions.enumerated()), id: \.offset) { index, suggestion in
+                Button { open(suggestion) } label: {
+                    SuggestionRow(suggestion: suggestion, isSelected: index == selection)
+                }
+                .buttonStyle(.plain)
+                .focusable(false)
+                .accessibilityIdentifier("browser-suggestion-\(index)")
+                .accessibilityLabel(suggestion.display)
+                .accessibilityValue(suggestion.url)
+            }
+        }
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .shadow(color: .black.opacity(0.18), radius: 8, y: 3)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.14), lineWidth: 1)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("browser-suggestions")
+    }
+}
+
+private struct SuggestionRow: View {
+    let suggestion: Suggestion
+    let isSelected: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(isSelected ? .white : .secondary)
+                .frame(width: 16)
+            Text(suggestion.title.isEmpty ? suggestion.display : suggestion.title)
+                .font(.system(size: 13))
+                .foregroundStyle(isSelected ? .white : .primary)
+                .lineLimit(1)
+            if !suggestion.title.isEmpty, !isSearch {
+                Text(suggestion.display)
+                    .font(.system(size: 12))
+                    .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 26)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(isSelected ? Color.accentColor : .clear)
+        )
+        .contentShape(Rectangle())
+    }
+
+    private var isSearch: Bool {
+        if case .search = suggestion { return true }
+        return false
+    }
+
+    private var icon: String {
+        switch suggestion {
+        case .page: "clock"
+        case .prefix: "globe"
+        case .tab: "square.on.square"
+        case .devServer: "server.rack"
+        case .search: "magnifyingglass"
+        }
     }
 }
 

@@ -48,6 +48,17 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(remote.problems.isEmpty)
     }
 
+    func testBrowserHistoryIsOnByDefaultAndOnlyTheLocalConfigTurnsItOff() throws {
+        XCTAssertTrue(try load("").browser.history)
+        XCTAssertTrue(Config.template.contains("#   history: true"))
+        let off = try load("browser:\n  history: false")
+        XCTAssertFalse(off.browser.history)
+        XCTAssertTrue(off.problems.isEmpty)
+        XCTAssertEqual(try load("browser:\n  history: yes please").problems.map(\.message), ["browser.history: expected a boolean"])
+        let remote = try Config.load(path: root, isRemote: true) { _ in "browser:\n  history: false" }.get()
+        XCTAssertTrue(remote.browser.history)
+    }
+
     func testDiagnosticsAreOffByDefaultAndOnlyTheLocalConfigTurnsThemOn() throws {
         XCTAssertFalse(try load("").diagnostics)
         XCTAssertTrue(Config.template.contains("# diagnostics:\n"))

@@ -40,6 +40,8 @@ public struct Config: Equatable {
     /// The Browser renders on this Mac, so only the Local Config sets it.
     public struct Browser: Equatable {
         public var vimKeys = true
+        /// `browser.history`: Browser History records the pages that the user loads. On by default.
+        public var history = true
     }
 
     /// `diagnostics.enabled`: the app logs freezes, CPU and errors to a file (docs/development.md). It is about the
@@ -421,6 +423,9 @@ public struct Config: Equatable {
         #   # h, j, k, l, d, u, gg and G scroll the page when the page does
         #   # not use the key itself and no text field has Focus.
         #   vim_keys: true
+        #   # Records the pages that you load, so that the address field
+        #   # suggests them. On by default.
+        #   history: true
         #
         # diagnostics:
         #   # Logs each freeze, with a sample of the app taken during it, CPU
@@ -864,7 +869,7 @@ private struct ConfigReader {
 
     mutating func readBrowser(_ node: Node) {
         for (name, key, value) in entries(of: node, "browser") {
-            guard name == "vim_keys" else {
+            guard name == "vim_keys" || name == "history" else {
                 problem(at: key, "unknown key \"browser.\(name)\"")
                 continue
             }
@@ -872,7 +877,7 @@ private struct ConfigReader {
                 problem(at: value, "browser.\(name): expected a boolean")
                 continue
             }
-            config.browser.vimKeys = enabled
+            if name == "vim_keys" { config.browser.vimKeys = enabled } else { config.browser.history = enabled }
         }
     }
 
