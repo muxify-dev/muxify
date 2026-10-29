@@ -28,6 +28,7 @@ PAGE = '''<!doctype html>
 <p hidden>secret hidden text</p>
 <form id="search"><input name="q" aria-label="Query"></form>
 <a href="#details">Read the <b>details</b></a>
+<a href="page.html?new-window" target="_blank">Open in a new window</a>
 <script>
   window.fixtureMark = 'page-world';
   document.getElementById('save').addEventListener('click', () => setTimeout(() => {
@@ -42,6 +43,18 @@ PAGE = '''<!doctype html>
 '''
 
 
+# The empty first page of a sign-in flow, which goes on to the real page with JavaScript after its own load.
+MOVES_ON = '''<!doctype html>
+<html><head><meta charset="utf-8"><title>Moving on</title></head><body>
+<script>
+  addEventListener('load', () => setTimeout(() => location.replace('page.html?moved-on'), 150));
+</script>
+</body></html>
+'''
+
+EMPTY = '<!doctype html><html><head><meta charset="utf-8"><title>Empty</title></head><body></body></html>\n'
+
+
 class BrowserAgent(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -49,6 +62,8 @@ class BrowserAgent(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         cls.page = s.root/'page.html'
         cls.page.write_text(PAGE)
+        (s.root/'moves-on.html').write_text(MOVES_ON)
+        (s.root/'empty.html').write_text(EMPTY)
         (s.root/'config/muxify/config.yaml').write_text('')
         cls.session = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'agent', '-x', '200', '-y', '50', SHELL)
         s.launch()
@@ -86,14 +101,16 @@ class BrowserAgent(unittest.TestCase):
         tmux_socket = self.s.tmux('display-message', '-p', '#{socket_path}')
         self.assertEqual(self.socket, tmux_socket + '.muxify-browser')
 
-    def test_open_json_prints_the_tab_that_tabs_lists_as_the_agent_tab(self):
+    def tabs(self, pane):
+        return json.loads(self.ok(pane, 'tabs', '--json'))
+
+    def test_open_json_prints_the_tab_that_tabs_lists_as_the_active_tab(self):
         window, pane = self.window()
         tab = self.open(pane, 'open-json')
         self.assertEqual(str(uuid.UUID(tab['id'])).upper(), tab['id'].upper())
         self.assertEqual(tab['url'], self.url('open-json'))
         self.assertEqual(tab['title'], 'Agent fixture', 'open returns after the page loaded')
-        tabs = json.loads(self.ok(pane, 'tabs', '--json'))
-        self.assertEqual([(t['id'], t['agent']) for t in tabs], [(tab['id'], True)])
+        self.assertEqual([(t['id'], t['active']) for t in self.tabs(pane)], [(tab['id'], True)])
         wait(lambda: self.stored_tabs(window) == [self.url('open-json')],
              'the Window does not keep the Tab: %s' % self.stored_tabs(window))
 
@@ -128,7 +145,7 @@ class BrowserAgent(unittest.TestCase):
         _, _, dark = png_pixels(self.screenshot(pane, 'unshown.png'))
         self.assertGreater(dark, 100, 'the PNG shows no text of the page')
 
-    def test_each_pane_reaches_the_agent_tab_of_its_own_window(self):
+    def test_each_pane_reaches_the_active_tab_of_its_own_window(self):
         first_window, first = self.window('own-first')
         second_window, second = self.window('own-second')
         first_tab = self.open(first, 'own-first')
@@ -144,16 +161,63 @@ class BrowserAgent(unittest.TestCase):
              and self.stored_tabs(second_window) == [self.url('own-second')],
              'each Window keeps only its own Tab: %s %s' % (self.stored_tabs(first_window), self.stored_tabs(second_window)))
 
-    def test_a_pane_without_an_agent_tab_is_told_to_open_one(self):
+    def test_a_window_without_a_tab_tells_the_agent_to_open_one(self):
         _, pane = self.window()
         result = self.muxify(pane, 'eval', 'document.title')
         self.assertEqual(result.returncode, 1)
         self.assertIn('muxify browser open', result.stderr)
 
-    def test_open_without_json_also_makes_the_agent_tab(self):
+    def test_open_without_json_opens_the_tab_that_the_next_command_reads(self):
         _, pane = self.window()
         self.assertEqual(self.ok(pane, 'open', self.url('plain-open')), '')
         self.assertEqual(self.ok(pane, 'eval', 'location.search'), '"?plain-open"\n')
+
+    def test_open_returns_after_a_page_that_moves_on_with_javascript(self):
+        _, pane = self.window()
+        tab = json.loads(self.ok(pane, 'open', '--json', (self.s.root/'moves-on.html').as_uri()))
+        self.assertEqual(tab['url'], self.url('moved-on'), 'open returned before the page moved on')
+        snapshot = self.ok(pane, 'snapshot', '--tab', tab['id'])
+        self.assertIn('- heading "Sign up" [level=1] [ref=', snapshot)
+
+    def test_snapshot_of_an_empty_page_tells_the_agent_to_wait(self):
+        _, pane = self.window()
+        tab = json.loads(self.ok(pane, 'open', '--json', (self.s.root/'empty.html').as_uri()))
+        result = self.muxify(pane, 'snapshot', '--tab', tab['id'])
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('muxify browser wait --load', result.stderr)
+
+    def test_without_tab_a_command_acts_on_the_tab_that_the_user_selected(self):
+        window, pane = self.window()
+        first = self.open(pane, 'selected-first')
+        self.open(pane, 'selected-second')
+        self.assertEqual(self.ok(pane, 'eval', 'location.search'), '"?selected-second"\n')
+        self.s.show(window)
+        self.s.act('click', 'browser-tab-title-' + first['id'])
+        wait(lambda: [t['active'] for t in self.tabs(pane) if t['id'] == first['id']] == [True],
+             'the click did not select the first Tab: %s' % self.tabs(pane))
+        self.assertIn('/url: %s#details' % self.url('selected-first'), self.ok(pane, 'snapshot'))
+        self.assertEqual(self.ok(pane, 'eval', 'location.search'), '"?selected-first"\n')
+
+    def test_open_with_tab_loads_the_url_in_that_tab(self):
+        _, pane = self.window()
+        first = self.open(pane, 'into-first')
+        second = self.open(pane, 'into-second')
+        loaded = json.loads(self.ok(pane, 'open', '--json', '--tab', first['id'], self.url('into-again')))
+        self.assertEqual((loaded['id'], loaded['url']), (first['id'], self.url('into-again')))
+        tabs = self.tabs(pane)
+        self.assertEqual([(t['id'], t['url'], t['active']) for t in tabs],
+                         [(first['id'], self.url('into-again'), False), (second['id'], self.url('into-second'), True)])
+
+    def test_click_on_a_new_window_link_loads_in_the_same_tab_and_keeps_the_focus(self):
+        window, pane = self.window()
+        tab = self.open(pane, 'new-window-link')
+        self.s.show(window)
+        before = self.s.driver('responder')['responders']
+        _, refs = self.refs(pane)
+        self.assertEqual(self.ok(pane, 'click', refs['link "Open in a new window"']), '')
+        self.assertEqual([(t['id'], t['url']) for t in self.tabs(pane)], [(tab['id'], self.url('new-window'))],
+                         'the link opened another Tab, or click returned before the page loaded')
+        self.assertEqual(self.s.driver('responder')['responders'], before)
 
     def refs(self, pane):
         """The snapshot, and the Ref of each line by its role and name, such as 'button "Save"'."""

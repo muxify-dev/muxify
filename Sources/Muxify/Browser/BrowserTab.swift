@@ -40,6 +40,11 @@ final class BrowserTab: NSObject, Identifiable {
     @ObservationIgnored var onURLChange: (() -> Void)?
     /// The current URL was copied, for the App Window's confirmation pill.
     @ObservationIgnored var onCopyURL: ((String) -> Void)?
+    /// The Browser commands that run on this Tab now (ADR 0058). While one runs, a popup loads in this Tab.
+    @ObservationIgnored var agentCommands = 0
+    /// When a main-frame navigation last started, committed, finished or failed. A Browser command waits for a
+    /// time without one, because a page can go on to another page with JavaScript after its load.
+    @ObservationIgnored private(set) var navigationActivity = Date.distantPast
 
     @ObservationIgnored private var loadedWebView: WKWebView?
     @ObservationIgnored private var loadedPageView: NSView?
@@ -96,6 +101,7 @@ final class BrowserTab: NSObject, Identifiable {
         if let pendingInteractionState {
             self.pendingInteractionState = nil
             pendingURL = nil
+            navigationActivity = Date()
             webView.interactionState = pendingInteractionState
         } else if let pendingURL {
             self.pendingURL = nil
@@ -191,6 +197,7 @@ final class BrowserTab: NSObject, Identifiable {
     func load(_ url: URL) {
         let changed = url.absoluteString != urlString
         urlString = url.absoluteString
+        navigationActivity = Date()
         if let loadedWebView {
             if url.isFileURL {
                 loadedWebView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
@@ -285,29 +292,44 @@ final class BrowserTab: NSObject, Identifiable {
 extension BrowserTab: Finder {}
 
 extension BrowserTab: WKNavigationDelegate, WKUIDelegate {
-    /// target=_blank links and window.open become a new Tab.
+    /// target=_blank links and window.open become a new Tab. During a Browser command they load in this Tab, so
+    /// the Agent's next command finds the page and the user's focus stays where it is.
     func webView(
         _ webView: WKWebView,
         createWebViewWith configuration: WKWebViewConfiguration,
         for navigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        if navigationAction.targetFrame == nil, let url = navigationAction.request.url {
+        guard navigationAction.targetFrame == nil, let url = navigationAction.request.url else { return nil }
+        if agentCommands > 0 {
+            webView.load(navigationAction.request)
+        } else {
             onOpenInNewTab?(url)
         }
         return nil
     }
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        navigationActivity = Date()
+    }
+
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        navigationActivity = Date()
         finder?.reset()
         findStatus = .idle
     }
 
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        navigationActivity = Date()
+    }
+
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        navigationActivity = Date()
         Diagnostics.report("browser failed \(webView.url?.absoluteString ?? "-"): \(error.localizedDescription)")
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        navigationActivity = Date()
         Diagnostics.report("browser failed to start \(webView.url?.absoluteString ?? "-"): \(error.localizedDescription)")
     }
 
@@ -316,6 +338,7 @@ extension BrowserTab: WKNavigationDelegate, WKUIDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
+        if navigationAction.targetFrame?.isMainFrame == true { navigationActivity = Date() }
         guard let url = navigationAction.request.url, let scheme = url.scheme?.lowercased() else {
             decisionHandler(.allow)
             return

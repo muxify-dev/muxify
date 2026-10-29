@@ -62,8 +62,8 @@ final class AppWindows {
             guard let self, let store else { return false }
             return self.catalog.window(forEnvironment: store.activeEnvironment?.name)?.id == request.id
         }
-        store.serveBrowserAgent = { [weak self] socket, serverID in
-            self?.browserAgent.serve(tmuxSocket: socket, serverID: serverID)
+        store.serveBrowserAgent = { [weak self] socket in
+            self?.browserAgent.serve(tmuxSocket: socket)
         }
         return store
     }

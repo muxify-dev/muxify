@@ -60,7 +60,9 @@ final class BrowserAgentCommandTests: XCTestCase {
         XCTAssertEqual(try invocation(["wait", "--text", "Saved", "--timeout", "2.5"]).command, .wait(.text("Saved"), timeout: 2.5))
         XCTAssertEqual(try invocation(["wait", "--selector", "#out"]).command, .wait(.selector("#out"), timeout: 10))
         XCTAssertEqual(try command(["open", "--json", "localhost:3000"]),
-                       .browserOpen(window: "%7", pane: "%7", urls: ["localhost:3000"], json: true))
+                       .browserOpen(window: "%7", tab: nil, urls: ["localhost:3000"], json: true))
+        XCTAssertEqual(try command(["open", "--tab", tab.uuidString, "localhost:3000"]),
+                       .browserOpen(window: "%7", tab: tab, urls: ["localhost:3000"], json: false))
     }
 
     func testBrowserCommandsRefuseWhatTheyCannotSend() {
@@ -85,6 +87,9 @@ final class BrowserAgentCommandTests: XCTestCase {
                 XCTAssertEqual(error.localizedDescription, "--timeout takes seconds from 0 to 600, such as --timeout 30")
             }
         }
+        XCTAssertThrowsError(try command(["open", "--tab", UUID().uuidString, "localhost:3000", "localhost:4000"])) { error in
+            XCTAssertEqual(error.localizedDescription, "--tab takes one URL")
+        }
         XCTAssertThrowsError(try command(["eval", "--tab", "e3", "1"])) { error in
             XCTAssertEqual(error.localizedDescription, "'e3' is not a Tab id; muxify browser tabs lists them")
         }
@@ -93,16 +98,16 @@ final class BrowserAgentCommandTests: XCTestCase {
         }
     }
 
-    func testEvalSendsTheCallersWindowAndPaneAndFailsWithTheAppsMessage() async throws {
-        try serve(.failure(message: "the Agent Tab of this Pane is closed", exitCode: 1))
+    func testEvalSendsTheCallersWindowAndFailsWithTheAppsMessage() async throws {
+        try serve(.failure(message: "tmux Window @12 has no Tab", exitCode: 1))
         do {
             try await command(["eval", "document.title"]).execute(using: tmux(socket: socketPath))
             XCTFail("the app's failure must fail the command")
         } catch let error as CLIError {
-            XCTAssertEqual(error.message, "the Agent Tab of this Pane is closed")
+            XCTAssertEqual(error.message, "tmux Window @12 has no Tab")
             XCTAssertEqual(error.exitCode, 1)
         }
-        XCTAssertEqual(requests.all, [BrowserAgentRequest(window: "@12", pane: "%7", command: .eval(script: "document.title"))])
+        XCTAssertEqual(requests.all, [BrowserAgentRequest(window: "@12", command: .eval(script: "document.title"))])
     }
 
     func testWaitGivesTheAppLongerThanItsOwnTimeout() async throws {
@@ -131,15 +136,25 @@ final class BrowserAgentCommandTests: XCTestCase {
             XCTAssertTrue(error.message.hasPrefix("cannot reach Muxify"), error.message)
         }
         XCTAssertFalse(stale.ran("set-option"))
+        do {
+            try await command(["open", "--tab", UUID().uuidString, "localhost:3000"]).execute(using: stale)
+            XCTFail("without the app nothing can load the URL into the Tab")
+        } catch let error as CLIError {
+            XCTAssertTrue(error.message.hasPrefix("cannot reach Muxify"), error.message)
+        }
+        XCTAssertFalse(stale.ran("set-option"), "@muxify_open would open a new Tab, not load into the Tab")
         try await command(["open", "localhost:3000"]).execute(using: stale)
         XCTAssertEqual(stale.arguments(of: "set-option"), ["set-option", "-wa", "-t", "@12", "@muxify_open", " localhost:3000"])
     }
 
     func testOpenGoesThroughTheAppWhenItServes() async throws {
-        try serve(.opened(BrowserAgentTab(id: UUID(), url: "http://localhost:3000/", title: "", active: true, agent: true)))
+        let tab = UUID()
+        try serve(.opened(BrowserAgentTab(id: tab, url: "http://localhost:3000/", title: "", active: true)))
         let answers = tmux(socket: socketPath)
         try await command(["open", "localhost:3000"]).execute(using: answers)
-        XCTAssertEqual(requests.all, [BrowserAgentRequest(window: "@12", pane: "%7", command: .open(url: "localhost:3000"))])
+        try await command(["open", "--tab", tab.uuidString, "localhost:4000"]).execute(using: answers)
+        XCTAssertEqual(requests.all, [BrowserAgentRequest(window: "@12", command: .open(url: "localhost:3000")),
+                                      BrowserAgentRequest(window: "@12", tab: tab, command: .open(url: "localhost:4000"))])
         XCTAssertFalse(answers.ran("set-option"), "the app opened the Tab, so @muxify_open stays empty")
     }
 
@@ -147,7 +162,7 @@ final class BrowserAgentCommandTests: XCTestCase {
         try serve(.value("1"))
         let newer = try BrowserAgentListener(path: socketPath) { _, respond in respond(.value("2")) }
         listener?.stop()
-        XCTAssertEqual(try BrowserAgentChannel.send(BrowserAgentRequest(window: "@1", pane: nil, command: .tabs), to: socketPath), .value("2"))
+        XCTAssertEqual(try BrowserAgentChannel.send(BrowserAgentRequest(window: "@1", command: .tabs), to: socketPath), .value("2"))
         newer.stop()
         XCTAssertFalse(FileManager.default.fileExists(atPath: socketPath))
     }

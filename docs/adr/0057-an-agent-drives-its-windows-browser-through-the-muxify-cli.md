@@ -1,5 +1,7 @@
 # An Agent drives its Window's Browser through the Muxify CLI
 
+> **Partly superseded by [ADR-0058](0058-a-browser-command-acts-on-the-tab-that-the-user-sees.md):** there is no Agent Tab. A command without `--tab` acts on the Window's active Tab, `open --tab` loads a URL in a Tab, a command waits until the page has loaded with no navigation for 400 ms, and a popup during a command loads in the same Tab. The other rules below still apply.
+
 An Agent in a Pane can open a page in its Window's Browser with `muxify browser open`, but it cannot read the page, click on it or see it. For that work, Agents start Playwright or another browser. That browser is not the user's: it has no logins, the user does not see what the Agent does, and it is one more large program to install. The user wants an Agent in Muxify to use the Browser of its own tmux Window, as Playwright drives a page.
 
 The Agent drives the Browser with `muxify browser` commands, one step for each command, in the style of `playwright-cli`:

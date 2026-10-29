@@ -4,8 +4,8 @@ import MuxifyCore
 enum CLICommand: Equatable {
     case help
     case browserAvailable(pane: String?)
-    /// `window` is a Window or a Pane id. `pane` is the caller's Pane, whose Agent Tab the opened Tab becomes.
-    case browserOpen(window: String, pane: String?, urls: [String], json: Bool)
+    /// `window` is a Window or a Pane id. With `tab`, the one URL loads in that Tab; without it, each URL opens a Tab.
+    case browserOpen(window: String, tab: UUID?, urls: [String], json: Bool)
     case browser(BrowserAgentInvocation)
     case sessionOpen(name: String)
     /// `target` is a Window or a Pane id.
@@ -56,18 +56,18 @@ enum CLICommand: Equatable {
             let result = try runner.run("/bin/sh", arguments: [installer.path], quiet: false)
             print(result.output, terminator: "")
             try Self.check(result, command: "Extension installer")
-        case .browserOpen(let target, let pane, let urls, let json):
+        case .browserOpen(let target, let tab, let urls, let json):
             do {
                 for url in urls {
-                    switch try BrowserAgentInvocation.send(.open(url: url), target: target, pane: pane, tab: nil, using: runner) {
+                    switch try BrowserAgentInvocation.send(.open(url: url), target: target, tab: tab, using: runner) {
                     case .opened(let tab): if json { print(try BrowserAgentInvocation.json(tab)) }
                     case .failure(let message, let exitCode): throw CLIError(message, exitCode: exitCode)
                     default: throw CLIError("Muxify sent an unexpected reply to browser open")
                     }
                 }
             } catch let failure as BrowserAgentChannel.Failure {
-                // Without the app, nothing can name the new Tab; without --json, Muxify opens the URLs on its next read.
-                guard !json, case .unreachable = failure else { throw failure.cliError }
+                // Without the app, nothing can name the new Tab or load into one; a plain open waits for Muxify's next read.
+                guard !json, tab == nil, case .unreachable = failure else { throw failure.cliError }
                 try Self.appendOpenRequest(target: target, urls: urls, using: runner)
             }
         case .browser(let invocation):

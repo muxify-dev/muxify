@@ -25,16 +25,16 @@ final class CLICommandTests: XCTestCase {
     func testBrowserTargetsCallingPaneAndKeepsURLsSeparate() throws {
         XCTAssertEqual(try CLICommand(arguments: ["browser", "open", "localhost:3000", "https://example.com/#token=secret"],
                                       environment: ["TMUX_PANE": "%7"]),
-                       .browserOpen(window: "%7", pane: "%7", urls: ["localhost:3000", "https://example.com/#token=secret"], json: false))
+                       .browserOpen(window: "%7", tab: nil, urls: ["localhost:3000", "https://example.com/#token=secret"], json: false))
     }
 
     func testBrowserExplicitWindowWorksOutsideTmux() throws {
         for options in [["--window", "@12"], ["-w", "@12"], ["--window=@12"]] {
             XCTAssertEqual(try CLICommand(arguments: ["browser", "open"] + options + ["https://example.com"], environment: [:]),
-                           .browserOpen(window: "@12", pane: nil, urls: ["https://example.com"], json: false))
+                           .browserOpen(window: "@12", tab: nil, urls: ["https://example.com"], json: false))
         }
         XCTAssertEqual(try CLICommand(arguments: ["browser", "open", "--window", "@12", "--", "-url"], environment: [:]),
-                       .browserOpen(window: "@12", pane: nil, urls: ["-url"], json: false))
+                       .browserOpen(window: "@12", tab: nil, urls: ["-url"], json: false))
     }
 
     func testBrowserRejectsMissingTargetUnknownOptionsAndWhitespace() {
@@ -89,7 +89,7 @@ final class CLICommandTests: XCTestCase {
     func testBrowserAppendsRequestToResolvedWindowWhenMuxifyServesNoBrowserSocket() async throws {
         let runner = RecordingRunner(results: [.init(status: 0, output: "@12\n@12\n"), .init(status: 0, output: ""),
                                                .init(status: 0, output: "@12\n@12\n"), .init(status: 0, output: "")])
-        try await CLICommand.browserOpen(window: "%7", pane: "%7", urls: ["localhost:3000", "https://example.com"], json: false).execute(using: runner)
+        try await CLICommand.browserOpen(window: "%7", tab: nil, urls: ["localhost:3000", "https://example.com"], json: false).execute(using: runner)
         XCTAssertEqual(runner.calls, [
             .init(command: "tmux", arguments: ["list-panes", "-t", "%7", "-F", "#{window_id}"], quiet: true),
             .init(command: "tmux", arguments: ["show-options", "-sqv", "@muxify_browser_socket"], quiet: false),
@@ -102,7 +102,7 @@ final class CLICommandTests: XCTestCase {
         for result in [CLICommandResult(status: 1, output: ""), .init(status: 0, output: "")] {
             let runner = RecordingRunner(results: [result])
             do {
-                try await CLICommand.browserOpen(window: "@404", pane: nil, urls: ["localhost:3000"], json: false).execute(using: runner)
+                try await CLICommand.browserOpen(window: "@404", tab: nil, urls: ["localhost:3000"], json: false).execute(using: runner)
                 XCTFail("Expected missing Window error")
             } catch {
                 XCTAssertEqual(error.localizedDescription, "no tmux Window or Pane '@404'")
@@ -164,7 +164,7 @@ final class CLICommandTests: XCTestCase {
         let runner = RecordingRunner(results: [.init(status: 0, output: "@12\n"), .init(status: 0, output: ""),
                                                .init(status: 0, output: "@12\n"), .init(status: 7, output: "")])
         do {
-            try await CLICommand.browserOpen(window: "%7", pane: "%7", urls: ["localhost:3000"], json: false).execute(using: runner)
+            try await CLICommand.browserOpen(window: "%7", tab: nil, urls: ["localhost:3000"], json: false).execute(using: runner)
             XCTFail("Expected tmux failure")
         } catch {
             XCTAssertEqual((error as? CLIError)?.exitCode, 7)
