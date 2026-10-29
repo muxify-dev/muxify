@@ -165,7 +165,7 @@ The letter keys h, j, k, l, d, u, gg and G, which scroll the active Tab's page a
 _Avoid_: vim mode, keyboard navigation
 
 **Browser command**:
-A `muxify browser` command that an Agent uses to drive a Tab of its own Window, one step for each command: `tabs`, `open`, `snapshot`, `click`, `fill`, `press`, `wait`, `eval` and `screenshot`. It acts on the Tab that `--tab` names, else on the Window's active Tab. Muxify does each command in its own Browser, not in another browser.
+A `muxify browser` command that an Agent uses to drive a Tab of its own Window, one step for each command: `tabs`, `open`, `snapshot`, `click`, `fill`, `press`, `wait`, `eval`, `screenshot` and `close`. It acts on the Tab that `--tab` names, else on the Window's active Tab. Muxify does each command in its own Browser, not in another browser.
 _Avoid_: automation, Playwright (when you mean Muxify's commands), browser tool, Agent Tab
 
 **Ref**:

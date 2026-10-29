@@ -59,6 +59,10 @@ final class BrowserAgentCommandTests: XCTestCase {
         XCTAssertEqual(try invocation(["wait", "--load"]).command, .wait(.load, timeout: 10))
         XCTAssertEqual(try invocation(["wait", "--text", "Saved", "--timeout", "2.5"]).command, .wait(.text("Saved"), timeout: 2.5))
         XCTAssertEqual(try invocation(["wait", "--selector", "#out"]).command, .wait(.selector("#out"), timeout: 10))
+        XCTAssertEqual(try invocation(["close"]).command, .close)
+        XCTAssertNil(try invocation(["close"]).tab)
+        XCTAssertEqual(try invocation(["close", "--tab", tab.uuidString]).tab, tab)
+        XCTAssertEqual(try invocation(["close", "--tab", tab.uuidString]).command, .close)
         XCTAssertEqual(try command(["open", "--json", "localhost:3000"]),
                        .browserOpen(window: "%7", tab: nil, urls: ["localhost:3000"], json: true))
         XCTAssertEqual(try command(["open", "--tab", tab.uuidString, "localhost:3000"]),
@@ -72,7 +76,7 @@ final class BrowserAgentCommandTests: XCTestCase {
             }
         }
         for arguments in [["click"], ["click", "e1", "e2"], ["fill", "e1"], ["press"], ["wait"], ["wait", "--load", "--text", "x"],
-                          ["snapshot", "extra"]] {
+                          ["snapshot", "extra"], ["close", "extra"]] {
             XCTAssertThrowsError(try command(arguments), "\(arguments)") { error in
                 XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
             }

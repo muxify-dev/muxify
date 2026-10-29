@@ -12,7 +12,7 @@ final class CLICommandTests: XCTestCase {
     }
 
     func testIncompleteAndUnknownCommandsReturnUsage() {
-        for arguments in [[], ["unknown"], ["browser"], ["browser", "close"], ["browser", "open"],
+        for arguments in [[], ["unknown"], ["browser"], ["browser", "unknown"], ["browser", "open"],
                           ["browser", "open", "--window"], ["session"], ["session", "close"], ["session", "open"],
                           ["extensions"], ["extensions", "unknown"]] {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: [:])) { error in

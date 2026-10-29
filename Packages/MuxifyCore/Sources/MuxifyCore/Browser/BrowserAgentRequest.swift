@@ -26,6 +26,7 @@ public enum BrowserAgentCommand: Codable, Equatable, Sendable {
     /// Without `ref`, the key goes to the element that has the page's focus.
     case press(key: String, ref: String?)
     case wait(BrowserAgentWait, timeout: TimeInterval)
+    case close
 
     /// The longest time the app can take to reply, so the CLI does not give up first.
     public var replyTimeout: TimeInterval {

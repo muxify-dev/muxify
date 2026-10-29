@@ -11,6 +11,7 @@ public enum CLIVerbPath: String, CaseIterable, Sendable {
     case browserWait = "browser wait"
     case browserEval = "browser eval"
     case browserScreenshot = "browser screenshot"
+    case browserClose = "browser close"
     case sessionOpen = "session open"
     case sessionLock = "session lock"
     case sessionUnlock = "session unlock"

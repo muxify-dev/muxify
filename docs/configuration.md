@@ -1225,6 +1225,7 @@ muxify browser wait --tab T --text 'Welcome'
 muxify browser eval --tab T 'document.title'       # prints the result as JSON
 muxify browser screenshot --tab T --out page.png   # prints the path of the PNG
 muxify browser open --tab T http://localhost:3000/settings
+muxify browser close --tab T                       # Reopen Closed Tab brings it back
 ```
 
 `--tab <id>` names a Tab of the Window. A command without `--tab` acts on the

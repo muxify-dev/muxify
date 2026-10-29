@@ -14,6 +14,8 @@ Muxify shows a Browser beside each tmux Window. Drive the Browser of your own Wi
 
 To go to another page in your Tab, run `muxify browser open --tab <id> <url>`. `open` without `--tab` opens a new Tab.
 
+When you are done, close each Tab that you opened: `muxify browser close --tab <id>`. The user can bring it back with Reopen Closed Tab.
+
 `open`, `click` and `press` return when the page has loaded, also when it goes on to another page with JavaScript. A link that opens a new window loads in your Tab. When `snapshot` says that the page shows nothing yet, run `muxify browser wait --tab <id> --load`, then `snapshot` again.
 
 A Ref is valid until the Tab loads a new document. After a navigation or a reload, run `snapshot` again. `muxify browser tabs --json` lists the Window's Tabs, with `active` on the Tab that the user sees.
