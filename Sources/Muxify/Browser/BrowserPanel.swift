@@ -38,7 +38,7 @@ private struct TabStrip: View {
                                 browser.select(tab)
                                 browser.requestFocus()
                             },
-                            onClose: { browser.close(tab) }
+                            onClose: { browser.closeAndFocus(tab) }
                         )
                     }
                     ToolbarIconButton(systemName: "plus", help: "New Tab (⌘T)", action: browser.newTab)
@@ -102,6 +102,7 @@ private struct TabItem: View {
             .foregroundStyle(.secondary)
             .opacity(isActive || hovering ? 1 : 0)
             .help("Close Tab (⌘W)")
+            .accessibilityIdentifier("browser-tab-close-" + tab.id.uuidString)
         }
         .padding(.leading, 8)
         .padding(.trailing, 4)
@@ -218,7 +219,7 @@ private struct TabContent: View {
                 Button("Copy URL", action: tab.copyURL).disabled(!tab.hasPage)
                 Button("Show Developer Tools", action: tab.showDeveloperTools).disabled(!tab.hasPage)
                 Divider()
-                Button("Close Tab") { browser.close(tab) }
+                Button("Close Tab") { browser.closeAndFocus(tab) }
                 Button("Hide Browser") { browser.toggle(.browser) }
                     .disabled(!browser.layout.canToggle(.browser))
             } label: {
