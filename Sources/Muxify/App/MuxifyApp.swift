@@ -12,6 +12,7 @@ struct MuxifyApp: App {
         TestDriver.startIfRequested()
         #endif
         AppEnvironment.prepare()
+        PTYWatch.start()
         let configStore = ConfigStore()
         configStore.start()
         let windows = AppWindows(configStore: configStore)

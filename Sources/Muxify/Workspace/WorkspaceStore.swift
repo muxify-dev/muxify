@@ -1422,6 +1422,23 @@ final class WorkspaceStore {
         var tmuxTarget: String { "\(sessionID):\(windowID)" }
     }
 
+    private static let terminalStartFailure = "Could not start the terminal."
+
+    /// A Mac out of pseudo-terminals is a common reason a Terminal can't start, and nothing else says so: the message
+    /// names who holds them when use is high, and the log gets the whole census either way.
+    private func explainTerminalStartFailure() {
+        let current = generation
+        DispatchQueue.global(qos: .utility).async {
+            let census = PTYCensus.take()
+            Diagnostics.report("terminal did not start. \(census.summary)")
+            guard census.isHigh else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.generation == current, self.terminalMessage == Self.terminalStartFailure else { return }
+                self.terminalMessage = "\(Self.terminalStartFailure) \(census.explanation)"
+            }
+        }
+    }
+
     /// Starts our tmux client on `target`, or a fresh session if there is none.
     private func attach(to target: Target?, intent: Router.IntentID, createSessionIfNeeded: Bool = true) {
         let args = target.map { ["-u", "attach-session", "-t", $0.tmuxTarget] }
@@ -1429,7 +1446,8 @@ final class WorkspaceStore {
         guard let connection, let command = try? connection.terminalCommand(args, target: target?.tmuxTarget, createSessionIfNeeded: createSessionIfNeeded),
               let view = TerminalSurfaceView(command: command, workingDirectory: isRemote ? nil : target?.path, delegate: self)
         else {
-            terminalMessage = "Could not start the terminal."
+            terminalMessage = Self.terminalStartFailure
+            explainTerminalStartFailure()
             route(.commandFinished(intent, .failure, lastStartedRead: lastStartedRead))
             return
         }
