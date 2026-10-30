@@ -59,19 +59,26 @@ extension EnvironmentService {
             let contents = try store.read()
             let snapshot = try server.snapshot()
             let card = try self.card(request.target, caller: request.caller, records: contents.records, snapshot: snapshot, client: client)
-            let placement: TopicPlacement
+            let change: (inout TopicTransaction) throws -> [SessionLock]
             switch move {
             case .up, .down:
                 let cards = TopicCards.order(records: contents.records, windows: snapshot.windows)
                 switch TopicCards.step(card.id, move == .up ? .up : .down, in: cards) {
-                case .to(let found): placement = found
+                case .to(let found): change = { try $0.move(card.id, to: found) }
                 case .atEnd: throw TopicRequestError.cardAtEnd(card: card.label, up: move == .up, pinned: card.pinned)
                 case .hidden: throw TopicRequestError.cardHidden("\(card.label) has no card in the Topics list.")
                 }
-            case .before(let ref): placement = .before(try listID(ref, records: contents.records))
-            case .after(let ref): placement = .after(try listID(ref, records: contents.records))
+            case .before(let ref):
+                let anchor = try listID(ref, records: contents.records)
+                change = { try $0.move(card.id, to: .before(anchor)) }
+            case .after(let ref):
+                let anchor = try listID(ref, records: contents.records)
+                change = { try $0.move(card.id, to: .after(anchor)) }
+            case .trade(let ref):
+                let other = try listID(ref, records: contents.records)
+                change = { try $0.trade(card.id, with: other) }
             }
-            let moved = try store.write(locks: SessionLock.locks(in: snapshot.windows, records: contents.records)) { try $0.move(card.id, to: placement) }
+            let moved = try store.write(locks: SessionLock.locks(in: snapshot.windows, records: contents.records), change)
             phase = .changesStarted
             try executor.run(moved.map { .tmux($0.setOption) }, client: client)
             switch card.id {

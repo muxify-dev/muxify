@@ -23,7 +23,7 @@ final class TopicWireTests: XCTestCase {
             .tags(.set([Tag(name: "backend")!])), .note("Bisect"), .note(nil),
             .newWindow(command: ["make", "test"]), .newSession(sessionPath: "/work", name: "notes"), .renameSession(name: "n"),
             .renameWindow(name: "w"), .zoomPane, .killWindow, .killSession, .pin, .unpin, .moveCard(.up), .moveCard(.down),
-            .moveCard(.before(.topic(.id("fix")))), .moveCard(.after(.lock(session))), .replaceFromBench(with: .lock(session)),
+            .moveCard(.before(.topic(.id("fix")))), .moveCard(.after(.lock(session))), .moveCard(.trade(.topic(.id("fix")))), .replaceFromBench(with: .lock(session)),
             .chooseInPlay([.lock(session), .topic(.named("Fix"))]),
             .moveWindow(to: .before(WindowID(rawValue: "@3")!)), .moveWindow(to: .after(WindowID(rawValue: "@3")!))]
         for command in commands {
@@ -44,6 +44,7 @@ final class TopicWireTests: XCTestCase {
             #"{"add_session":{"directory":"/work","working_copy":{"directory":{}}}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.moveCard(.up)), #"{"move_card":{"move":{"up":{}}}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.moveCard(.after(.lock(session)))), #"{"move_card":{"move":{"after":{"card":{"lock":{"session":"$1"}}}}}}"#)
+        XCTAssertEqual(try json(EnvironmentCommand.moveCard(.trade(.lock(session)))), #"{"move_card":{"move":{"trade":{"card":{"lock":{"session":"$1"}}}}}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.chooseInPlay([.lock(session)])), #"{"choose_in_play":{"cards":[{"lock":{"session":"$1"}}]}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.replaceFromBench(with: .topic(.id("fix")))), #"{"replace_from_bench":{"with":{"topic":{"ref":{"id":"fix"}}}}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.moveWindow(to: .before(WindowID(rawValue: "@3")!))), #"{"move_window":{"to":{"before":{"window":"@3"}}}}"#)

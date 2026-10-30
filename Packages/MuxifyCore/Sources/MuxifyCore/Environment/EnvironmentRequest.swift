@@ -207,9 +207,12 @@ public enum CardMove: Codable, Hashable, Sendable {
     /// Next to another card, shown or not, as the Sidebar drag puts it.
     case before(TopicListRef)
     case after(TopicListRef)
+    /// A trade, as the Sidebar drag across the Bench line makes it: the two cards exchange their places.
+    case trade(TopicListRef)
 
     private enum BeforeCodingKeys: String, CodingKey { case _0 = "card" }
     private enum AfterCodingKeys: String, CodingKey { case _0 = "card" }
+    private enum TradeCodingKeys: String, CodingKey { case _0 = "card" }
 }
 
 /// A card on the wire: a Topic, or a Locked Session by its tmux id.

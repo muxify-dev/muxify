@@ -81,7 +81,7 @@ private struct TopicsSection: View {
     @Environment(\.sidebarTypography) private var typography
     let store: WorkspaceStore
     let model: TopicsModel
-    @State private var drag = ListDrag<TopicListID>(spacing: 6)
+    @State private var drag = ListDrag<TopicListID>(spacing: 6, tradesAcross: TopicsModel.ListItem.benchLine(isBenchShown: false).id)
     /// The cards whose "N more…" the user pressed.
     @State private var showingAllRows: Set<TopicGroupID> = []
     /// The No Topic Session cards whose "N more…" the user pressed, by Session ID.
@@ -117,16 +117,31 @@ private struct TopicsSection: View {
                     ForEach(model.list) { item in
                         switch item {
                         case .card(let topic):
-                            listCard(topic, order: dragSlots(around: item.id)).tracksBottomEdge(topic.id, in: $cardsBelow)
+                            listCard(topic, order: model.dragSlots(around: item.id)).tracksBottomEdge(topic.id, in: $cardsBelow)
                         case .benchLine(let isBenchShown):
                             BenchLine(isBenchShown: isBenchShown) { withAnimation(.easeOut(duration: 0.15)) { store.toggleBench() } }
-                                .listDragFixed(item.id, drag: drag, shown: dragSlots(around: item.id))
+                                .listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
                         case .noTopicSession(let opened):
-                            noTopicCard(opened).listDragFixed(item.id, drag: drag, shown: dragSlots(around: item.id))
+                            noTopicCard(opened).listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
                         }
                     }
                 }
                 .onOverhangingBottomEdge(of: TopicCard.viewport, upTo: MoreBelowLine.height) { listEnd = $0 }
+                // An In Play card that crosses the hidden line opens the Bench, so the user sees what it can trade with.
+                .onChange(of: drag.isAcross) { _, across in
+                    guard across, !store.benchShown, store.benchPeek != .all, let dragged = drag.dragged,
+                          model.split(inPlay: store.topicConfig.inPlay ?? 0).inPlay.contains(where: { $0.id.listID == dragged })
+                    else { return }
+                    withAnimation(.easeOut(duration: 0.2)) { store.benchPeek = .all }
+                }
+                // What a drag showed of the hidden Bench folds into the line as soon as the cards no longer need it: at
+                // the drop, while a card glides back, or once two traded cards are in their new places.
+                .onChange(of: drag.phase) { _, phase in
+                    switch phase {
+                    case .lifted, .trading: return
+                    default: if store.benchPeek != nil { withAnimation(.easeOut(duration: 0.2)) { store.benchPeek = nil } }
+                    }
+                }
                 .padding(.horizontal, 6).padding(.vertical, 4)
             }
             .coordinateSpace(.named(TopicCard.viewport))
@@ -163,14 +178,6 @@ private struct TopicsSection: View {
                       onShowAllRows: { showingAllRows.insert(topic.id) },
                       place: .list(TopicListPlace(drag: drag, order: order, neighbors: model.neighbors(of: topic.id),
                                                   rename: renameTopic)))
-        }
-    }
-
-    /// The Topic and Locked cards that move in the drag of the item `id`, and the views between them that slide.
-    private func dragSlots(around id: TopicsModel.ListItem.ID) -> [StackSlot<TopicListID>] {
-        model.dragItems(around: id).map { item in
-            if case .card(let row) = item, let listID = row.id.listID { return .item(listID) }
-            return .fixed(item.id)
         }
     }
 
@@ -498,6 +505,8 @@ struct TopicCard: View {
         }
         .modifier(CardHandle(list: list, listID: listID, isEnabled: !store.changingTopic, onTap: press, onDrop: { drop in
             if let listID { store.moveTopic(listID, to: drop.topicPlacement) }
+        }, onTrade: { other in
+            if let listID { store.tradeCard(listID, with: other) }
         }))
         .accessibilityAction(.default, press)
         .accessibilityIdentifier(topic.id.accessibilityID)
@@ -618,10 +627,11 @@ private struct CardHandle: ViewModifier {
     let isEnabled: Bool
     let onTap: () -> Void
     let onDrop: (DropPlacement<TopicListID>) -> Void
+    let onTrade: (TopicListID) -> Void
 
     func body(content: Content) -> some View {
         if let list, let listID {
-            content.listDrag(listID, drag: list.drag, isEnabled: isEnabled, onTap: onTap, onDrop: onDrop)
+            content.listDrag(listID, drag: list.drag, isEnabled: isEnabled, onTap: onTap, onDrop: onDrop, onTrade: onTrade)
         } else {
             content.onTapGesture(perform: onTap).takesFirstClick()
         }
@@ -705,6 +715,8 @@ private struct LockedCard: View {
         }
         .listDrag(id, drag: drag, isEnabled: !store.changingTopic, onTap: press) { drop in
             store.moveTopic(id, to: drop.topicPlacement)
+        } onTrade: { other in
+            store.tradeCard(id, with: other)
         }
         .accessibilityAction(.default, press)
         .accessibilityIdentifier(row.id.accessibilityID)

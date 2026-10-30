@@ -448,13 +448,23 @@ enum CLIVerbs {
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .pin(false)
         },
-        topicVerb(.topicMove, synopsis: "(up | down) \(topicTarget) [--json]",
+        topicVerb(.topicMove, synopsis: "(up | down | --trade-with <id|label> | --trade-with-session <name|id>) \(topicTarget) [--json]",
+                  options: [.value("--trade-with"), .value("--trade-with-session")],
                   help: """
                   Moves the card of this Pane's Topic one place up or down among the cards that the
                   Topics list shows now, with the same Pin, as Move Topic Up and Down do. At the end
                   of the cards it fails.
+                  With --trade-with, the two cards change places, as a drag across the Bench line
+                  does, and no other card moves. Neither card can be Pinned.
+                    --trade-with <id|label>            the open Topic to trade places with
+                    --trade-with-session <name|id>     the Locked Session to trade places with
                   """) { parsed in
-            .moveCard(try upOrDown(parsed) ? .up : .down)
+            switch (try parsed.value("--trade-with"), try parsed.value("--trade-with-session")) {
+            case (nil, nil): return .moveCard(try upOrDown(parsed) ? .up : .down)
+            case (let topic?, nil) where !topic.isEmpty && parsed.operands.isEmpty: return .tradeCard(with: .topic(topic))
+            case (nil, let session?) where !session.isEmpty && parsed.operands.isEmpty: return .tradeCard(with: .session(session))
+            default: throw CLIError.usage
+            }
         },
         CLIVerb(path: .topicChooseInPlay, synopsis: "(--topic <id|label> | --session <name|id>)... [--json]",
                 options: [.value("--topic"), .value("--session"), .flag("--json")],

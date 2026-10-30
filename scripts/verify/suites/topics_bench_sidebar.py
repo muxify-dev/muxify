@@ -123,24 +123,26 @@ class TopicsBenchSidebar(TopicsSidebar):
         """The cards of the check's Topics and the Bench line, in Sidebar order."""
         return [key for key in self.s.ids(rs) if key.startswith('topic-' + prefix) and '-session-' not in key or key == LINE]
 
-    def test_a_card_dragged_across_the_shown_bench_line_changes_places_with_the_cards_it_passes(self):
+    def orders(self, prefix):
+        return {i: r.get('order') for i, r in self.records().items() if i.startswith(prefix + '-')}
+
+    def test_a_card_dragged_across_the_shown_bench_line_trades_with_the_card_it_is_let_go_on(self):
         s = self.s
         self.bench_topics('bench-drag')
         s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
-        if self.line(s.rows()) == 'Bench':
-            s.act('press', LINE)
+        self.show_bench()
         s.wait_rows(lambda rs: self.cards('bench-drag', rs)
                     == ['topic-bench-drag-a', LINE, 'topic-bench-drag-b', 'topic-bench-drag-c'],
                     'the Bench did not show: %s' % self.cards('bench-drag', s.rows()))
         s.act('drag', 'topic-bench-drag-c', 'topic-bench-drag-a')
         # The Sidebar shows the new order before the app saves it. Wait for the save, so that the cleanup removes the
         # records after it and the save does not bring a Topic back for the next check.
-        orders = lambda: {i: r.get('order') for i, r in self.records().items() if i.startswith('bench-drag-')}
-        wait(lambda: orders()['bench-drag-c'] < orders()['bench-drag-a'],
-             'the drag did not save bench-drag-c above bench-drag-a', seconds=5)
+        orders = lambda: self.orders('bench-drag')
+        wait(lambda: orders()['bench-drag-c'] < orders()['bench-drag-b'] < orders()['bench-drag-a'],
+             'the drag did not save c, b, a: %s' % orders(), seconds=5)
         s.wait_rows(lambda rs: self.cards('bench-drag', rs)
-                    == ['topic-bench-drag-c', LINE, 'topic-bench-drag-a', 'topic-bench-drag-b'],
-                    'the Benched card dragged onto the card In Play did not go In Play: %s' % self.cards('bench-drag', s.rows()))
+                    == ['topic-bench-drag-c', LINE, 'topic-bench-drag-b', 'topic-bench-drag-a'],
+                    'the Benched card and the card In Play did not trade places: %s' % self.cards('bench-drag', s.rows()))
 
     def test_a_card_let_go_on_the_shown_bench_line_stays_in_its_place(self):
         # The line is between the cards, so a card that reaches only the line has not passed the card under it.
@@ -157,8 +159,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         time.sleep(2)
         self.assertEqual(self.cards('bench-line-drop', s.rows()), before, 'a card let go on the line moved')
 
-    def test_a_card_in_play_does_not_go_to_the_hidden_bench(self):
-        # The hidden Bench shows no place to drop a card, and the cards it hides would come In Play in its place.
+    def test_a_card_in_play_let_go_across_the_hidden_line_on_no_card_goes_back_and_the_bench_hides_again(self):
         s = self.s
         self.bench_topics('bench-hidden-drop')
         s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
@@ -166,28 +167,66 @@ class TopicsBenchSidebar(TopicsSidebar):
         before = ['topic-bench-hidden-drop-a', LINE]
         s.wait_rows(lambda rs: self.cards('bench-hidden-drop', rs) == before,
                     'the hidden Bench shows cards: %s' % self.cards('bench-hidden-drop', s.rows()))
+        saved = self.orders('bench-hidden-drop')
         s.act('drag', 'topic-bench-hidden-drop-a', LINE, edge='bottom')
-        time.sleep(2)
-        self.assertEqual(self.cards('bench-hidden-drop', s.rows()), before, 'the card In Play went to the hidden Bench')
+        s.wait_rows(lambda rs: self.cards('bench-hidden-drop', rs) == before and self.line(rs) == 'Bench',
+                    'the Bench that the drag opened did not hide again: %s' % self.cards('bench-hidden-drop', s.rows()))
+        time.sleep(1)
+        self.assertEqual(self.orders('bench-hidden-drop'), saved, 'a card let go on no card changed the order')
 
-    def test_the_benched_card_of_the_location_dragged_past_the_hidden_line_goes_in_play(self):
+    def test_a_card_in_play_dragged_past_the_hidden_line_opens_the_bench_and_trades_with_a_benched_card(self):
+        # The Benched card shows only once the drag opened the Bench, so the drag finds it after it waits on the line.
+        s = self.s
+        self.bench_topics('bench-hidden-trade')
+        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        self.hide_bench()
+        s.wait_rows(lambda rs: self.cards('bench-hidden-trade', rs) == ['topic-bench-hidden-trade-a', LINE],
+                    'the hidden Bench shows cards: %s' % self.cards('bench-hidden-trade', s.rows()))
+        s.act('drag', 'topic-bench-hidden-trade-a', 'topic-bench-hidden-trade-b', via=LINE, edge='bottom')
+        orders = lambda: self.orders('bench-hidden-trade')
+        wait(lambda: orders()['bench-hidden-trade-b'] < orders()['bench-hidden-trade-a'] < orders()['bench-hidden-trade-c'],
+             'the drag did not save b, a, c: %s' % orders(), seconds=5)
+        s.wait_rows(lambda rs: self.cards('bench-hidden-trade', rs) == ['topic-bench-hidden-trade-b', LINE]
+                    and self.line(rs) == 'Bench',
+                    'the Bench that the drag opened did not hide again: %s' % self.cards('bench-hidden-trade', s.rows()))
+        self.show_bench()
+        s.wait_rows(lambda rs: self.cards('bench-hidden-trade', rs)
+                    == ['topic-bench-hidden-trade-b', LINE, 'topic-bench-hidden-trade-a', 'topic-bench-hidden-trade-c'],
+                    'the card that left In Play did not take the place of the card that came: %s'
+                    % self.cards('bench-hidden-trade', s.rows()))
+
+    def test_the_benched_card_of_the_location_dragged_onto_a_card_in_play_trades_with_it(self):
         s = self.s
         windows = self.bench_topics('bench-visit-drag')
         s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
         self.hide_bench()
-        s.show(windows['topic-bench-visit-drag-c'])
-        s.wait_rows(lambda rs: self.cards('bench-visit-drag', rs) == ['topic-bench-visit-drag-a', LINE, 'topic-bench-visit-drag-c'],
+        s.show(windows['topic-bench-visit-drag-b'])
+        s.wait_rows(lambda rs: self.cards('bench-visit-drag', rs) == ['topic-bench-visit-drag-a', LINE, 'topic-bench-visit-drag-b'],
                     'the Benched card of the Location does not show under the line: %s' % self.cards('bench-visit-drag', s.rows()))
-        s.act('drag', 'topic-bench-visit-drag-c', 'topic-bench-visit-drag-a')
-        orders = lambda: {i: r.get('order') for i, r in self.records().items() if i.startswith('bench-visit-drag-')}
-        wait(lambda: orders()['bench-visit-drag-c'] < orders()['bench-visit-drag-a'] < orders()['bench-visit-drag-b'],
-             'the drag did not save bench-visit-drag-c above a, and a above b: %s' % orders(), seconds=5)
-        s.wait_rows(lambda rs: self.cards('bench-visit-drag', rs) == ['topic-bench-visit-drag-c', LINE],
-                    'the dragged card did not go In Play: %s' % self.cards('bench-visit-drag', s.rows()))
+        s.act('drag', 'topic-bench-visit-drag-b', 'topic-bench-visit-drag-a')
+        orders = lambda: self.orders('bench-visit-drag')
+        wait(lambda: orders()['bench-visit-drag-b'] < orders()['bench-visit-drag-a'] < orders()['bench-visit-drag-c'],
+             'the drag did not save b, a, c: %s' % orders(), seconds=5)
+        s.wait_rows(lambda rs: self.cards('bench-visit-drag', rs) == ['topic-bench-visit-drag-b', LINE],
+                    'the card it replaced did not fold into the hidden Bench: %s' % self.cards('bench-visit-drag', s.rows()))
         self.show_bench()
         s.wait_rows(lambda rs: self.cards('bench-visit-drag', rs)
-                    == ['topic-bench-visit-drag-c', LINE, 'topic-bench-visit-drag-a', 'topic-bench-visit-drag-b'],
-                    'the last card In Play did not go to the top of the Bench: %s' % self.cards('bench-visit-drag', s.rows()))
+                    == ['topic-bench-visit-drag-b', LINE, 'topic-bench-visit-drag-a', 'topic-bench-visit-drag-c'],
+                    'the card it replaced did not take its place on the Bench: %s' % self.cards('bench-visit-drag', s.rows()))
+
+    def test_the_benched_card_of_the_location_stays_right_under_the_line_when_the_bench_shows(self):
+        s = self.s
+        windows = self.bench_topics('bench-visit-open')
+        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        self.hide_bench()
+        s.show(windows['topic-bench-visit-open-c'])
+        s.wait_rows(lambda rs: self.shown_after_line(rs) == ['topic-bench-visit-open-c'],
+                    'the Benched card of the Location does not show under the line: %s' % s.ids())
+        saved = self.orders('bench-visit-open')
+        self.show_bench()
+        s.wait_rows(lambda rs: self.shown_after_line(rs) == ['topic-bench-visit-open-c', 'topic-bench-visit-open-b'],
+                    'the card of the Location moved when the Bench showed: %s' % self.shown_after_line(s.rows()))
+        self.assertEqual(self.orders('bench-visit-open'), saved, 'showing the Bench changed the order')
 
     def test_the_benched_card_of_the_location_dragged_up_and_back_below_the_hidden_line_keeps_its_place(self):
         s = self.s
@@ -198,7 +237,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         before = ['topic-bench-visit-back-a', LINE, 'topic-bench-visit-back-c']
         s.wait_rows(lambda rs: self.cards('bench-visit-back', rs) == before,
                     'the Benched card of the Location does not show under the line: %s' % self.cards('bench-visit-back', s.rows()))
-        orders = lambda: {i: r.get('order') for i, r in self.records().items() if i.startswith('bench-visit-back-')}
+        orders = lambda: self.orders('bench-visit-back')
         saved = orders()
         s.act('drag', 'topic-bench-visit-back-c', 'topic-bench-visit-back-c', via='topic-bench-visit-back-a')
         time.sleep(2)

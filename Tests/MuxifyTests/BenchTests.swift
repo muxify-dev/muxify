@@ -25,14 +25,15 @@ final class BenchTests: XCTestCase {
 
     /// The Topics model as the Sidebar builds it, at the Location of a Topic id, a Window id ("@…") or nowhere.
     private func model(inPlay: Int?, benchShown: Bool = false, at place: String? = nil,
-                       records: [TopicRecord]? = nil, windows: [TmuxWindow]? = nil) -> TopicsModel {
+                       records: [TopicRecord]? = nil, windows: [TmuxWindow]? = nil,
+                       benchPeek: TopicsModel.BenchPeek? = nil) -> TopicsModel {
         var config = Config()
         config.topics.inPlay = inPlay
         let location: Location? = place.map { place in
             place.hasPrefix("@") ? .window(WindowID(rawValue: place)!) : .emptyTopic(.topic(place))
         }
         return TopicsModel(records: records ?? self.records, windows: windows ?? self.windows, config: config,
-                           selection: TopicSelection(), location: location, benchShown: benchShown)
+                           selection: TopicSelection(), location: location, benchShown: benchShown, benchPeek: benchPeek)
     }
 
     private func shown(_ model: TopicsModel) -> [String] { model.list.map(\.id) }
@@ -79,27 +80,55 @@ final class BenchTests: XCTestCase {
                        ["topic-pinned", "topic-a", "topic-b", "bench-line", "no-topic", "topic-c", "topic-d"])
     }
 
-    func testADragMovesACardAmongTheCardsWithItsPinAndPastTheShownBenchLine() {
-        let topics = model(inPlay: 2, benchShown: true, at: "@1")
-        let unpinned = ["topic-a", "topic-b", "bench-line", "no-topic", "topic-c", "topic-d"]
-        XCTAssertEqual(topics.dragItems(around: "topic-a").map(\.id), unpinned)
-        XCTAssertEqual(topics.dragItems(around: "topic-d").map(\.id), unpinned)
-        XCTAssertEqual(topics.dragItems(around: "bench-line").map(\.id), unpinned, "the line slides with the cards it is between")
-        XCTAssertEqual(topics.dragItems(around: "topic-pinned").map(\.id), ["topic-pinned"])
+    func testTheLocationsBenchedCardStaysRightUnderTheLineWhenTheBenchShows() {
+        let topics = model(inPlay: 2, benchShown: true, at: "d")
+        XCTAssertEqual(shown(topics), ["topic-pinned", "topic-a", "topic-b", "bench-line", "topic-d", "topic-c"],
+                       "it does not jump to its place in the Bench when the Bench shows")
+        XCTAssertEqual(topics.rows.map(\.id), [.topic("pinned"), .topic("a"), .topic("b"), .topic("c"), .topic("d")],
+                       "its place in the list does not change")
     }
 
-    func testWhileTheBenchIsHiddenTheCardUnderTheLineCanGoInPlayAndAnInPlayCardStaysAbove() {
+    func testADragShowsBenchedCardsOnlyForAMoment() {
+        XCTAssertEqual(shown(model(inPlay: 2, benchPeek: .all)),
+                       ["topic-pinned", "topic-a", "topic-b", "bench-line", "topic-c", "topic-d"],
+                       "an In Play card that crosses the hidden line opens the Bench")
+        XCTAssertEqual(shown(model(inPlay: 2, at: "b", benchPeek: .card(.topic("c")))),
+                       ["topic-pinned", "topic-a", "topic-b", "bench-line", "topic-c"],
+                       "the card that a trade sent to the hidden Bench shows under the line until it folds in")
+        XCTAssertEqual(model(inPlay: 2, benchPeek: .all).isBenchShown, true)
+    }
+
+    func testADragReachesTheCardsWithItsPinAndTheLineAndTheNoTopicSessionStayAmongThem() {
+        let topics = model(inPlay: 2, benchShown: true, at: "@1")
+        let unpinned: [StackSlot<TopicListID>] = [.item(.topic("a")), .item(.topic("b")), .fixed("bench-line"), .fixed("no-topic"),
+                                                  .item(.topic("c")), .item(.topic("d"))]
+        XCTAssertEqual(topics.dragSlots(around: "topic-a"), unpinned)
+        XCTAssertEqual(topics.dragSlots(around: "topic-d"), unpinned)
+        XCTAssertEqual(topics.dragSlots(around: "bench-line"), unpinned, "the line slides with the cards it is between")
+        XCTAssertEqual(topics.dragSlots(around: "topic-pinned"), [.item(.topic("pinned"))], "a Pinned card trades with none")
+    }
+
+    func testWhileTheBenchIsHiddenEveryCardCanReachTheOtherSideOfTheLine() {
         let topics = model(inPlay: 2, at: "d")
-        let unpinned = ["topic-a", "topic-b", "bench-line", "topic-d"]
-        XCTAssertEqual(topics.dragItems(around: "topic-a").map(\.id), ["topic-a", "topic-b", "bench-line"],
-                       "below the line it would put a card that the Bench hides In Play")
-        XCTAssertEqual(topics.dragItems(around: "topic-d").map(\.id), unpinned)
-        XCTAssertEqual(topics.dragItems(around: "bench-line").map(\.id), unpinned, "the line slides as the card goes up")
+        let unpinned: [StackSlot<TopicListID>] = [.item(.topic("a")), .item(.topic("b")), .fixed("bench-line"), .item(.topic("d"))]
+        XCTAssertEqual(topics.dragSlots(around: "topic-a"), unpinned, "an In Play card can cross the hidden line")
+        XCTAssertEqual(topics.dragSlots(around: "topic-d"), unpinned)
         let locked = model(inPlay: 2, at: "@2", windows: [window("1"), window("2", lock: 4)])
-        XCTAssertEqual(locked.dragItems(around: "locked-$2").map(\.id), unpinned.dropLast() + ["locked-$2"],
-                       "a Benched Locked Session goes In Play the same way")
-        let noTopic = model(inPlay: 2, at: "@1")
-        XCTAssertEqual(noTopic.dragItems(around: "no-topic").map(\.id), ["topic-a", "topic-b", "bench-line", "no-topic"])
+        XCTAssertEqual(locked.dragSlots(around: "locked-$2"), unpinned.dropLast() + [.item(.lock(sessionID: "$2"))],
+                       "a Benched Locked Session trades the same way")
+    }
+
+    func testUnderTheShownLineTheLocationsCardAndTheOtherBenchedCardsKeepTheirPlacesForEachOther() {
+        let records = records + [topic("e", order: 4)]
+        let topics = model(inPlay: 2, benchShown: true, at: "d", records: records)
+        XCTAssertEqual(shown(topics), ["topic-pinned", "topic-a", "topic-b", "bench-line", "topic-d", "topic-c", "topic-e"])
+        let inPlay: [StackSlot<TopicListID>] = [.item(.topic("a")), .item(.topic("b")), .fixed("bench-line")]
+        XCTAssertEqual(topics.dragSlots(around: "topic-c"), inPlay + [.held(.topic("d")), .item(.topic("c")), .item(.topic("e"))],
+                       "a Benched card reorders around the Location's card, which stays under the line")
+        XCTAssertEqual(topics.dragSlots(around: "topic-d"), inPlay + [.item(.topic("d")), .held(.topic("c")), .held(.topic("e"))],
+                       "the Location's card only trades")
+        XCTAssertEqual(topics.dragSlots(around: "topic-a"), inPlay + [.item(.topic("d")), .item(.topic("c")), .item(.topic("e"))],
+                       "an In Play card can trade with each of them")
     }
 
     func testHintsNumberOnlyTheCardsThatShowInTheirOrder() {
