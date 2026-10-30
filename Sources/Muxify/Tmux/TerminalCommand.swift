@@ -4,7 +4,9 @@ import MuxifyCore
 
 /// A command run in a pseudo-terminal, as in lazygit, so that git and ssh ask their questions, such as a password,
 /// there. Its output is watched for them (`GitCredentialPrompt`); each goes to `onPrompt`, and `answer` writes the
-/// reply and a newline into the terminal. The timeout doesn't run while a question waits. `cancel` stops it.
+/// reply and a newline into the terminal. The timeout doesn't run while a question waits, but a question that waits
+/// `answerTimeout` times the command out, so a question nobody answers can't keep it, its terminal and ssh forever.
+/// `cancel` stops it.
 /// Callbacks come on the main queue; the completion once, with what it wrote, or `TmuxError.failed` with git's
 /// message and no progress, `TmuxError.timedOut` or `TmuxError.cancelled`.
 final class TerminalCommand: @unchecked Sendable {
@@ -28,6 +30,7 @@ final class TerminalCommand: @unchecked Sendable {
     private var recentLines: [String] = []
     private var isWaiting = false
     private var remaining: TimeInterval
+    private let answerTimeout: TimeInterval
     private var runningSince = Date()
     private var deadline: DispatchWorkItem?
     private var status: Int32?
@@ -40,10 +43,12 @@ final class TerminalCommand: @unchecked Sendable {
 
     /// Starts `invocation` in its own terminal, with `environment` added to Muxify's.
     init(_ invocation: CommandInvocation, environment: [String: String] = [:], timeout: TimeInterval,
-         onPrompt: @escaping (GitCredentialPrompt) -> Void, completion: @escaping (Result<String, Error>) -> Void) throws {
+         answerTimeout: TimeInterval = 600, onPrompt: @escaping (GitCredentialPrompt) -> Void,
+         completion: @escaping (Result<String, Error>) -> Void) throws {
         self.onPrompt = onPrompt
         self.completion = completion
         remaining = timeout
+        self.answerTimeout = answerTimeout
         let variables = ProcessInfo.processInfo.environment.merging(Self.locale) { $1 }.merging(environment) { $1 }
         let argv = ([invocation.executable] + invocation.arguments).map { strdup($0) } + [nil]
         let envp = variables.map { strdup("\($0)=\($1)") } + [nil]
@@ -166,21 +171,25 @@ final class TerminalCommand: @unchecked Sendable {
     }
 
     private func startDeadline() {
-        deadline?.cancel()
         runningSince = Date()
+        timeOut(after: remaining, waiting: false)
+    }
+
+    private func pauseDeadline() {
+        remaining -= Date().timeIntervalSince(runningSince)
+        timeOut(after: answerTimeout, waiting: true)
+    }
+
+    /// Times the command out after `interval`, unless by then it has finished, or started or stopped waiting for an answer.
+    private func timeOut(after interval: TimeInterval, waiting: Bool) {
+        deadline?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self, !self.isFinished, !self.isWaiting else { return }
+            guard let self, !self.isFinished, self.isWaiting == waiting else { return }
             self.isTimedOut = true
             self.terminate()
         }
         deadline = work
-        queue.asyncAfter(deadline: .now() + max(remaining, 0), execute: work)
-    }
-
-    private func pauseDeadline() {
-        deadline?.cancel()
-        deadline = nil
-        remaining -= Date().timeIntervalSince(runningSince)
+        queue.asyncAfter(deadline: .now() + max(interval, 0), execute: work)
     }
 
     /// The command leads its own session, so its group is it and what it started, such as ssh.
