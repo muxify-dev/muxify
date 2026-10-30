@@ -6,7 +6,7 @@ import MuxifyCore
 /// The script writes `command.json` (with a fresh nonce) into the folder
 /// named by MUXIFY_TEST_DRIVER; a timer on the main run loop answers each new
 /// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, hover, snapshot, responder, scroll, stall,
-/// each with the option `reveal` that scrolls the target into view first. None of
+/// binding, each with the option `reveal` that scrolls the target into view first. None of
 /// them activates the app, opens a menu or moves the pointer, so a run never takes focus.
 enum TestDriver {
     private static var activity: NSObjectProtocol?
@@ -110,6 +110,11 @@ enum TestDriver {
         if took > 1 {
             NSLog("muxify test driver: %@ %@ took %.1f s", command["command"] as? String ?? "", command["target"] as? String ?? "", took)
         }
+    }
+
+    private static func terminal(in view: NSView?) -> TerminalSurfaceView? {
+        guard let view else { return nil }
+        return view as? TerminalSurfaceView ?? view.subviews.lazy.compactMap(terminal).first
     }
 
     private static func answer(_ result: [String: Any], nonce: String, in folder: URL) {
@@ -325,6 +330,12 @@ enum TestDriver {
         if name == "stall" {
             Thread.sleep(forTimeInterval: command["seconds"] as? Double ?? 1)
             return ["rows": [], "pressed": true]
+        }
+        // Performs a Ghostty keybind action, such as `quit`, on the first Terminal, as its key does.
+        if name == "binding" {
+            let surface = NSApp.windows.lazy.compactMap { terminal(in: $0.contentView) }.first
+            surface?.performBinding(text)
+            return ["rows": [], "pressed": surface != nil]
         }
         if name == "responder" {
             let classes = NSApp.windows.filter(\.isVisible).compactMap { $0.firstResponder.map { String(describing: type(of: $0)) } }
