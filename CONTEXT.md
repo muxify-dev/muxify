@@ -62,6 +62,14 @@ _Avoid_: Session Path, workspace, Session (when you mean the folder)
 One checkout of a repository at its own path, such as a folder inside a bare repository's folder. Several Sessions, in the same Topic or different Topics, can use the same Worktree.
 _Avoid_: checkout, clone, Session Path (when you mean one checkout)
 
+**Muxify Worktree**:
+A Worktree that Muxify made and remembers, so it can list and remove it. A Topic may own it, or none.
+_Avoid_: managed worktree, created worktree
+
+**Worktree setup**:
+A project's `.worktree.json`: the files Muxify copies or links into a new Muxify Worktree, the hooks it runs after making it, and the hooks it runs before removing it.
+_Avoid_: worktree config, sync config
+
 **Untitled Topic**:
 A Topic that has no title yet. A rename gives it one.
 _Avoid_: draft, scratch, temp Topic
@@ -324,7 +332,7 @@ One kind of thing a Command Palette searches: Topics, Sessions, Windows, Agents 
 _Avoid_: provider, category, section
 
 **Row kind**:
-What one row of a Command Palette or of an Action's list is: `topic`, `settled`, `session`, `topic-session`, `session-path`, `worktree`, `window`, `agent`, `command` or `tag`. A list's `show` names the Row kinds that it lists. A running Session is a `topic-session` when its Topic is not Settled, and a `session` in all other cases. A checkout is a `worktree` when its folder is outside the folder of its Session Path, and a `session-path` in all other cases, so the checkouts inside a bare repository's folder are `session-path` rows.
+What one row of a Command Palette or of an Action's list is: `topic`, `settled`, `session`, `topic-session`, `session-path`, `worktree`, `muxify-worktree`, `window`, `agent`, `command` or `tag`. A list's `show` names the Row kinds that it lists. A running Session is a `topic-session` when its Topic is not Settled, and a `session` in all other cases. A checkout is a `worktree` when its folder is outside the folder of its Session Path, and a `session-path` in all other cases, so the checkouts inside a bare repository's folder are `session-path` rows. A `muxify-worktree` row is a Muxify Worktree, wherever its folder is.
 _Avoid_: type, category, Source (when you mean one kind of row)
 
 **Pick list**:

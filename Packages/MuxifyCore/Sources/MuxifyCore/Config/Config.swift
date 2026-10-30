@@ -193,6 +193,9 @@ public struct Config: Equatable {
     public var sidebarTypography = SidebarTypography()
     /// How the Git View opens.
     public var gitView = GitViewConfig()
+    /// `worktrees.root_path`: the folder new Muxify Worktrees go in, as `<root>/<repository>/<name>`, on the
+    /// Environment's machine. `~/` is that machine's home. Nil: `$XDG_STATE_HOME/muxify/worktrees` there.
+    public var worktreesRoot: String?
 
     /// An Action list's rules: its `pick_lists` entry, else every kind and the standard tiebreak.
     public func rules(for list: ActionList) -> PickRules { pickLists[list] ?? .standard }
@@ -319,6 +322,12 @@ public struct Config: Equatable {
         #   # the SessionPath.
         #   aliases:
         #     - ~/Dev/obsidian_vaults/notes: My Notes
+        #
+        # worktrees:
+        #   # The folder new Muxify Worktrees go in, as <root_path>/<repository>/<name>.
+        #   # A project's .worktree.json worktreePath replaces it. The default is
+        #   # $XDG_STATE_HOME/muxify/worktrees.
+        #   root_path: ~/worktrees
         #
         # command_palettes:
         #   # A palette opens with its sources selected: topics, sessions (with
@@ -610,6 +619,7 @@ private struct ConfigReader {
         "pick_lists": { $0.readPickLists($1) },
         "git_view": { $0.readGitView($1) },
         "sessions": { $0.readSessions($1) },
+        "worktrees": { $0.readWorktrees($1) },
         "remote_environments": { $0.readRemoteEnvironments($1) },
     ]
 
@@ -818,6 +828,20 @@ private struct ConfigReader {
             case "done_enabled": config.notifications.doneEnabled = enabled
             case "failed_enabled": config.notifications.failedEnabled = enabled
             default: config.notifications.blockedEnabled = enabled
+            }
+        }
+    }
+
+    mutating func readWorktrees(_ node: Node) {
+        for (name, key, value) in entries(of: node, "worktrees") {
+            switch name {
+            case "root_path":
+                guard let path = string(value)?.trimmingCharacters(in: .whitespacesAndNewlines), path.hasPrefix("/") || path.hasPrefix("~/") else {
+                    problem(at: value, "worktrees.root_path: expected an absolute path or one that starts with ~/")
+                    continue
+                }
+                config.worktreesRoot = path
+            default: problem(at: key, "unknown key \"worktrees.\(name)\"")
             }
         }
     }

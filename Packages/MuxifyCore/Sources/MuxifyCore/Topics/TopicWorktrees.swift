@@ -4,15 +4,21 @@ enum TopicWorktrees {
     /// Missing provenance is never permission to remove a Worktree.
     public static let createdKey = "worktree_created"
 
+    /// The remembered-Session field that names the Muxify Worktree's record (ADR 0062).
+    public static let idKey = "worktree_id"
+
     /// The remembered-Session field that holds the full id of the commit a created Worktree started at.
     public static let baseKey = "base"
 
     public static func isCreated(_ session: JSONValue) -> Bool { session[createdKey] == .bool(true) }
 
-    /// Whether `worktree` sits inside Muxify's worktrees folder `root`. Settle never removes a Worktree outside it, so the
+    /// Whether Muxify made `worktree`: it sits inside Muxify's worktrees folder `root`, or a Muxify Worktree record in that
+    /// folder names it (ADR 0062), wherever `worktrees.root_path` put it. Settle never removes another Worktree, so the
     /// user's own Worktrees, and those Muxify made before the folder existed, stay wherever they are.
     public static func isInside(_ worktree: Folder, root: Folder) -> Bool {
-        worktree != root && root.contains(worktree)
+        if worktree != root && root.contains(worktree) { return true }
+        let records = (try? MuxifyWorktreeStore(folder: URL(fileURLWithPath: root.path)).all()) ?? []
+        return records.contains { $0.environment == nil && Folder.local($0.path) == worktree }
     }
 
     /// The Worktrees Settle may remove: those inside `root` that the Topic created, with their branch merged.

@@ -38,11 +38,11 @@ enum TopicWorkingCopy: Equatable {
     case directory
     /// A Worktree the user picked in the SessionPath list.
     case worktree(Worktree)
-    /// A Worktree the Topic creates on the branch `<slug>` at `commit`, in `root/<sessionPath name>/<slug>` for a bare
-    /// and a plain repository alike.
-    case newWorktree(at: String, root: String)
-    /// A Worktree the Topic creates on the local branch `branch`, now at `commit`, in `root/<sessionPath name>/<branch>`.
-    case branchWorktree(branch: String, commit: String, root: String)
+    /// A Worktree the Topic creates on the branch `<slug>` at `commit`, in `<parent>/<slug>` for a bare and a plain
+    /// repository alike. `setup` is the Worktree setup it gets.
+    case newWorktree(at: String, parent: String, setup: TopicPlan.Setup = .none)
+    /// A Worktree the Topic creates on the local branch `branch`, now at `commit`, in `<parent>/<branch>`.
+    case branchWorktree(branch: String, commit: String, parent: String, setup: TopicPlan.Setup = .none)
 }
 
 extension TopicWorkingCopy {
@@ -62,8 +62,7 @@ extension TopicWorkingCopy {
             var fields: [String: JSONValue] = ["repository_path": .string(sessionPath.folder.path), "worktree_path": .string(worktree.folder.path), TopicWorktrees.createdKey: .bool(false)]
             fields["branch"] = worktree.branch.map(JSONValue.string)
             return SessionStart(directory: worktree.folder.path, worktreeFields: fields, newWorktree: nil)
-        case .newWorktree(let commit, let root):
-            let parent = (root as NSString).appendingPathComponent(sessionPath.name)
+        case .newWorktree(let commit, let parent, let setup):
             let branches = Set((try? Shell.run("/usr/bin/git", ["for-each-ref", "--format=%(refname:short)", "refs/heads"], directory: sessionPath.folder.path))?.split(separator: "\n").map(String.init) ?? [])
             var branch = slug
             var number = 2
@@ -72,9 +71,8 @@ extension TopicWorkingCopy {
             }
             let path = Folder.lexical((parent as NSString).appendingPathComponent(branch))
             return Self.made(TopicPlan.WorktreeSpec(repositoryPath: sessionPath.folder.path, path: path, branch: branch), commit: commit,
-                             checkout: .newBranch)
-        case .branchWorktree(let branch, let commit, let root):
-            let parent = (root as NSString).appendingPathComponent(sessionPath.name)
+                             checkout: .newBranch, setup: setup)
+        case .branchWorktree(let branch, let commit, let parent, let setup):
             // A branch such as feature/x makes one folder, not two.
             let name = branch.replacingOccurrences(of: "/", with: "-")
             var folder = name
@@ -84,17 +82,20 @@ extension TopicWorkingCopy {
             }
             let path = Folder.lexical((parent as NSString).appendingPathComponent(folder))
             return Self.made(TopicPlan.WorktreeSpec(repositoryPath: sessionPath.folder.path, path: path, branch: branch), commit: commit,
-                             checkout: .existingBranch)
+                             checkout: .existingBranch, setup: setup)
         }
     }
 
-    /// A Worktree that Muxify makes: the record says so and keeps the commit it started at, so Settle may remove it.
-    private static func made(_ worktree: TopicPlan.WorktreeSpec, commit: String, checkout: TopicPlan.NewWorktree.Checkout) -> SessionStart {
-        SessionStart(directory: worktree.path,
-                     worktreeFields: ["repository_path": .string(worktree.repositoryPath), "worktree_path": .string(worktree.path),
-                                      "branch": .string(worktree.branch), TopicWorktrees.createdKey: .bool(true),
-                                      TopicWorktrees.baseKey: .string(commit)],
-                     newWorktree: TopicPlan.NewWorktree(worktree: worktree, commit: commit, checkout: checkout))
+    /// A Worktree that Muxify makes: the record says so and keeps the commit it started at, so Settle may remove it, and
+    /// names its Muxify Worktree record.
+    private static func made(_ worktree: TopicPlan.WorktreeSpec, commit: String, checkout: TopicPlan.NewWorktree.Checkout,
+                             setup: TopicPlan.Setup) -> SessionStart {
+        let id = UUID().uuidString.lowercased()
+        return SessionStart(directory: worktree.path,
+                            worktreeFields: ["repository_path": .string(worktree.repositoryPath), "worktree_path": .string(worktree.path),
+                                             "branch": .string(worktree.branch), TopicWorktrees.createdKey: .bool(true),
+                                             TopicWorktrees.baseKey: .string(commit), TopicWorktrees.idKey: .string(id)],
+                            newWorktree: TopicPlan.NewWorktree(worktree: worktree, commit: commit, checkout: checkout, id: id, setup: setup))
     }
 }
 
@@ -126,6 +127,20 @@ public enum TopicPlan {
         /// The full id of the commit the Worktree starts at.
         public let commit: String
         public var checkout = Checkout.newBranch
+        /// Its Muxify Worktree record's id.
+        public var id = UUID().uuidString.lowercased()
+        public var setup = Setup.none
+    }
+
+    /// The Worktree setup a new Worktree gets, and the repository it belongs to.
+    public struct Setup: Equatable, Sendable {
+        /// The repository's main working tree, or its bare folder.
+        public var repository: String?
+        /// The checkout the setup came from, the source of its copies and links.
+        public var folder: String?
+        public var setup = WorktreeSetup()
+
+        public static let none = Setup()
     }
 
     public enum Command: Equatable, Sendable {

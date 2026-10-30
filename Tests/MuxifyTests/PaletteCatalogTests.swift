@@ -349,7 +349,7 @@ final class PaletteCatalogTests: XCTestCase {
                 assertShowsOnlyItsKinds(list) { catalog.destinationList(windows[2], topic: "a", query: "", rules: $0) }
                 assertShowsOnlyItsKinds(list) { catalog.destinationList(windows[0], topic: nil, query: "", rules: $0) }
             // CommandPalette builds these from the WorkspaceStore: testEachPaletteActionList… checks them.
-            case .tags, .worktreeStart: break
+            case .tags, .worktreeStart, .newWorktree, .removeWorktree: break
             }
         }
     }
@@ -370,8 +370,13 @@ final class PaletteCatalogTests: XCTestCase {
         let draft = WorktreeStartDraft(topic: TopicRecord(id: "t", title: "T"), choice: SessionChoice(sessionPath: game, worktree: nil))
         draft.starts = .ready([WorktreeStartChoice(branch: "main", checkedOutAt: "/work/game/main"),
                                WorktreeStartChoice(branch: "feature", checkedOutAt: nil)])
+        let removing = RemoveWorktreeDraft()
+        removing.rows = .ready([MuxifyWorktreeSummary(record: MuxifyWorktreeRecord(environment: nil, repository: "/work/game", name: "fix",
+                                                                                   path: "/trees/game/fix", branch: "fix", base: "abc"),
+                                                      state: .clean, sessions: [], topic: nil)])
+        // New Worktree lists the WorkspaceStore's SessionPaths, which only discovery fills: none here to check.
         for (list, flow, query) in [(ActionList.tags, PaletteFlow.text(.tags(TagField(mode: .newTopic, defined: defined))), "#"),
-                                    (.worktreeStart, .worktreeStart(draft), "")] {
+                                    (.worktreeStart, .worktreeStart(draft), ""), (.removeWorktree, .removeWorktree(removing), "")] {
             narrowed.palette.query = query
             standard.palette.query = query
             let built = standard.palette.flowResults(flow)

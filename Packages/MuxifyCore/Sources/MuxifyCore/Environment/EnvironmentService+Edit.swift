@@ -36,7 +36,11 @@ extension EnvironmentService {
             let planned = try plan(request, records: records, snapshot: snapshot, client: client)
             let edit = planned.edit
             try TopicWorktrees.check(edit.commands)
-            if let new = edit.newWorktree { try TopicWorktrees.add(new) }
+            var postCreate: String?
+            if let new = edit.newWorktree {
+                try TopicWorktrees.add(new)
+                postCreate = try setUpWorktree(new)
+            }
             let read = edit.record.flatMap { record in records.first { $0.id == record.id } }
             // A new Topic takes its place among the Locks too, and may renumber them.
             var commands = edit.commands
@@ -55,6 +59,10 @@ extension EnvironmentService {
                 phase = .changesStarted
             }
             let made = try executor.run(commands, client: client)
+            if let postCreate, let pane = made?.pane {
+                try server.run(["send-keys", "-t", pane.rawValue, "-l", postCreate])
+                try server.run(["send-keys", "-t", pane.rawValue, "Enter"])
+            }
             switch edit.completion {
             case .save(let record):
                 let before = edit.record ?? records.first { $0.id == record.id }
@@ -89,7 +97,7 @@ extension EnvironmentService {
         }
         switch request.command {
         case .list, .show, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .endGuest,
-             .markRead, .markAllRead:
+             .markRead, .markAllRead, .createWorktree, .removeWorktree, .listWorktrees:
             throw TopicRequestError.noTarget
         case .create(let title, let tags):
             let tags = Set(tags ?? [])
@@ -334,16 +342,24 @@ extension EnvironmentService {
             }
             return match
         }
+        /// The folder that holds the new Worktree, and the setup it gets, from the Worktree it starts from (ADR 0062).
+        func place(from base: Worktree) throws -> (parent: String, setup: TopicPlan.Setup) {
+            let repository = try worktrees.repository(at: base.folder.path)
+            return (repository.parent(root: worktreesRoot, defaultRoot: paths.worktrees.path, repositoryFolder: sessionPath.name), repository.topicSetup)
+        }
         switch choice {
         case .directory: return .directory
         case .worktree(let path): return .worktree(try worktree(at: path))
         case .newWorktree(let path, .head):
-            return .newWorktree(at: try TopicWorktrees.commit(nil, in: try worktree(at: path)), root: paths.worktrees.path)
+            let base = try worktree(at: path), place = try place(from: base)
+            return .newWorktree(at: try TopicWorktrees.commit(nil, in: base), parent: place.parent, setup: place.setup)
         case .newWorktree(let path, .ref(let ref)):
-            return .newWorktree(at: try TopicWorktrees.commit(ref, in: try worktree(at: path)), root: paths.worktrees.path)
+            let base = try worktree(at: path), place = try place(from: base)
+            return .newWorktree(at: try TopicWorktrees.commit(ref, in: base), parent: place.parent, setup: place.setup)
         case .newWorktree(let path, .branch(let branch)):
-            let commit = try TopicWorktrees.branchStart(branch, in: try worktree(at: path))
-            return .branchWorktree(branch: branch, commit: commit, root: paths.worktrees.path)
+            let base = try worktree(at: path), place = try place(from: base)
+            let commit = try TopicWorktrees.branchStart(branch, in: base)
+            return .branchWorktree(branch: branch, commit: commit, parent: place.parent, setup: place.setup)
         }
     }
 

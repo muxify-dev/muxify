@@ -12,21 +12,33 @@ public struct EnvironmentService: Sendable {
     public let topics: Config.Topics
     /// False on a Remote Environment: Topic records are local, so a command that reads or writes one fails there.
     public let topicsAvailable: Bool
+    /// Runs the Muxify Worktree scripts on the Environment's machine.
+    public let scripts: any ScriptRunning
+    /// Nil on this Mac, else the Remote Environment's name, which the Muxify Worktree records keep.
+    public let environmentName: String?
+    /// The Config's `worktrees.root_path`.
+    public let worktreesRoot: String?
     let store: TopicStore
     let editLockTimeout: TimeInterval
 
     public init(paths: MuxifyPaths, server: any TmuxRunning = TmuxServer.local, sessionPaths: [SessionPath] = [],
-                topics: Config.Topics = Config.Topics(), topicsAvailable: Bool = true) {
-        self.init(paths: paths, server: server, sessionPaths: sessionPaths, topics: topics, topicsAvailable: topicsAvailable, editLockTimeout: 10)
+                topics: Config.Topics = Config.Topics(), topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(),
+                environmentName: String? = nil, worktreesRoot: String? = nil) {
+        self.init(paths: paths, server: server, sessionPaths: sessionPaths, topics: topics, topicsAvailable: topicsAvailable, scripts: scripts,
+                  environmentName: environmentName, worktreesRoot: worktreesRoot, editLockTimeout: 10)
     }
 
     init(paths: MuxifyPaths, server: any TmuxRunning, sessionPaths: [SessionPath], topics: Config.Topics = Config.Topics(),
-         topicsAvailable: Bool = true, editLockTimeout: TimeInterval) {
+         topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(), environmentName: String? = nil, worktreesRoot: String? = nil,
+         editLockTimeout: TimeInterval) {
         self.paths = paths
         self.server = server
         self.sessionPaths = sessionPaths
         self.topics = topics
         self.topicsAvailable = topicsAvailable
+        self.scripts = scripts
+        self.environmentName = environmentName
+        self.worktreesRoot = worktreesRoot
         self.editLockTimeout = editLockTimeout
         store = TopicStore(paths: paths, inPlay: topics.inPlay)
     }
@@ -45,6 +57,7 @@ public struct EnvironmentService: Sendable {
         switch request.command.lane {
         case .read:
             if case .list = request.command { return list() }
+            if case .listWorktrees(let all, let from) = request.command { return listWorktrees(request, all: all, from: from, client: client) }
             return show(request, client: client)
         case .records:
             return changeRecords(request, client: client)
@@ -56,6 +69,10 @@ public struct EnvironmentService: Sendable {
                     case .unlock: return changeLock(request, locked: false, client: client)
                     case .moveSession(.up): return stepSession(request, .up, client: client)
                     case .moveSession(.down): return stepSession(request, .down, client: client)
+                    case .createWorktree(let name, let from, let start, let open):
+                        return createWorktree(request, name: name, from: from, start: start, open: open, client: client)
+                    case .removeWorktree(let worktree, let kill, let force):
+                        return removeWorktree(request, worktree, kill: kill, force: force, client: client)
                     default: return edit(request, client: client)
                     }
                 }
@@ -280,6 +297,18 @@ public struct EnvironmentService: Sendable {
             case .chosenTwice: return .unsupported
             case .guest: return .cardGuest
             }
+        case let error as MuxifyWorktreeError:
+            switch error {
+            case .script: return .gitFailed
+            case .setupInvalid: return .worktreeSetupInvalid
+            case .hookFailed: return .hookFailed
+            case .exists: return .worktreeExists
+            case .unavailable: return .worktreeUnavailable
+            case .ambiguous: return .worktreeAmbiguous
+            case .inUse: return .worktreeInUse
+            case .hasChanges: return .worktreeHasChanges
+            case .nameInvalid: return .worktreeNameInvalid
+            }
         case is TopicTransaction.Failure: return .topicUnavailable
         case is FileLock.Busy: return .storeBusy
         case is TmuxError: return .tmuxFailed
@@ -297,12 +326,12 @@ extension EnvironmentCommand {
     /// chooses its lane.
     var lane: Lane {
         switch self {
-        case .list, .show: return .read
+        case .list, .show, .listWorktrees: return .read
         case .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .endGuest, .markRead, .markAllRead:
             return .records
         case .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename,
              .reopen, .startFresh, .moveSession, .sortSessions, .lock, .unlock, .newWindow, .newSession, .renameSession,
-             .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession: return .edit
+             .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession, .createWorktree, .removeWorktree: return .edit
         }
     }
 
@@ -310,6 +339,8 @@ extension EnvironmentCommand {
     var needsRecords: Bool {
         switch self {
         case .newWindow, .newSession, .renameSession, .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession: return false
+        // A Remote Environment's Muxify Worktrees have no Topic; on this Mac the request also updates the Topics.
+        case .createWorktree, .removeWorktree, .listWorktrees: return false
         // Agent Unread is in tmux. Only a Topic's Read state is in its record; Mark All as Read leaves the records
         // out where there are none.
         case .markRead(_, let scope): return scope == .topic

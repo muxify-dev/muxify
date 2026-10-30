@@ -30,10 +30,11 @@ final class WorktreeTests: XCTestCase {
         sessionPath.alias = "My Game"
         sessionPath.layout = .plainRepository([Worktree(path: "/work/game source", branch: "main")])
         let plan = try TopicSessionPlan(topic: TopicRecord(id: "topic", title: "Fix links", slug: "fix-links"), sessionPath: sessionPath,
-                                        workingCopy: .newWorktree(at: "c0ffee", root: "/work trees"), windows: [], sessionPaths: [sessionPath]).edit
+                                        workingCopy: .newWorktree(at: "c0ffee", parent: "/work trees/team/game"), windows: [], sessionPaths: [sessionPath]).edit
         let worktree = TopicPlan.WorktreeSpec(repositoryPath: sessionPath.folder.path, path: "/work trees/team/game/fix-links", branch: "fix-links")
         XCTAssertEqual(worktree.arguments, ["worktree", "add", "-b", "fix-links", "/work trees/team/game/fix-links"])
-        XCTAssertEqual(plan.newWorktree, TopicPlan.NewWorktree(worktree: worktree, commit: "c0ffee"))
+        XCTAssertEqual(plan.newWorktree?.worktree, worktree)
+        XCTAssertEqual(plan.newWorktree?.commit, "c0ffee")
         XCTAssertEqual(Array(plan.commands.prefix(2)), [
             .tmuxMaking(["new-session", "-d", "-s", "team/game/fix-links", "-c", worktree.path]),
             .tmux(["set-option", "-t", "=team/game/fix-links:", "@muxify_topic", "topic"]),
@@ -52,6 +53,7 @@ final class WorktreeTests: XCTestCase {
             "branch": .string("fix-links"),
             "worktree_created": .bool(true),
             "base": .string("c0ffee"),
+            "worktree_id": .string(try XCTUnwrap(plan.newWorktree?.id)),
         ])])
     }
 
@@ -60,9 +62,9 @@ final class WorktreeTests: XCTestCase {
         let release = Worktree(path: "/work/game_server/release", branch: "release-line")
         sessionPath.layout = .bareRepository([release])
         let plan = try TopicSessionPlan(topic: TopicRecord(id: "topic", title: "Fix links", slug: "fix-links"), sessionPath: sessionPath,
-                                        workingCopy: .newWorktree(at: "c0ffee", root: "/state/muxify/worktrees"), windows: [], sessionPaths: [sessionPath]).edit
+                                        workingCopy: .newWorktree(at: "c0ffee", parent: "/state/muxify/worktrees/game_server"), windows: [], sessionPaths: [sessionPath]).edit
         let path = "/state/muxify/worktrees/game_server/fix-links"
-        XCTAssertEqual(plan.newWorktree, TopicPlan.NewWorktree(worktree: .init(repositoryPath: sessionPath.folder.path, path: path, branch: "fix-links"), commit: "c0ffee"))
+        XCTAssertEqual(plan.newWorktree?.worktree, .init(repositoryPath: sessionPath.folder.path, path: path, branch: "fix-links"))
         XCTAssertEqual(plan.commands.first, .tmuxMaking(["new-session", "-d", "-s", "game_server/fix-links", "-c", path]))
     }
 

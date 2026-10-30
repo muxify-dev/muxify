@@ -64,6 +64,11 @@ final class TmuxConnection: @unchecked Sendable {
         }
     }
 
+    /// `ScriptRunning`, for the Muxify Worktree scripts of a Remote Environment.
+    func runScript(_ script: String, arguments: [String], timeout: TimeInterval) throws -> String {
+        try runScript(script, arguments: arguments, timeout: timeout, inputFile: nil)
+    }
+
     /// `runScriptAsync` for a caller that is already off the main thread.
     func runScript(_ script: String, arguments: [String] = [], timeout: TimeInterval = 20, inputFile: URL? = nil) throws -> String {
         lock.lock()
@@ -231,3 +236,5 @@ final class TmuxConnection: @unchecked Sendable {
 
     func cleanup() { remote?.cleanup() }
 }
+
+extension TmuxConnection: ScriptRunning {}

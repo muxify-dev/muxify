@@ -39,6 +39,9 @@ extension EnvironmentCommand {
         case .endGuest: .verb(.topicEndGuest)
         case .markRead(let change, let scope): .verb(.markRead(change, scope: scope))
         case .markAllRead: .verb(.markAllRead)
+        case .createWorktree: .verb(.worktreeCreate)
+        case .removeWorktree: .verb(.worktreeRemove)
+        case .listWorktrees: .verb(.worktreeList)
         }
     }
 }

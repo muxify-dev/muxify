@@ -178,7 +178,7 @@ public enum TopicWorkingCopyChoice: Codable, Hashable, Sendable {
 }
 
 /// Where a new Worktree starts.
-public enum WorktreeStart: Hashable, Sendable {
+public enum WorktreeStart: Codable, Hashable, Sendable {
     /// A new branch named from the Topic slug, at the HEAD of the Worktree it starts from.
     case head
     /// A new branch named from the Topic slug, at the commit that the ref names.
@@ -351,6 +351,16 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case markRead(ReadChange, scope: ReadScope)
     /// Marks every Topic and every Agent Read.
     case markAllRead
+    /// Makes a Muxify Worktree called `name` from the checkout at `from`, else the folder of the caller's Pane, with
+    /// its Worktree setup, and a No Topic Session `<repository>/<name>` in it whose first Window runs postCreate
+    /// (ADR 0062). `.head` checks out the local branch `name` when it exists, else makes it at HEAD. `open` switches
+    /// the host's client to the Session.
+    case createWorktree(name: String, from: String?, start: WorktreeStart, open: Bool)
+    /// Removes the Muxify Worktree that `worktree` names by its id, path or name, after its preDelete hooks. `kill`
+    /// stops the Sessions that use it; `force` removes it with changes or after a failed hook. The branch stays.
+    case removeWorktree(String, kill: Bool, force: Bool)
+    /// The Muxify Worktrees of the repository of `from`, else of the caller's Pane; `all`, or no folder, lists every one.
+    case listWorktrees(all: Bool, from: String?)
 
     private enum CodingKeys: String, CodingKey {
         case list, show, create, settle, forget, move, rename, reopen, lock, unlock, tags, note
@@ -376,6 +386,14 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
         case endGuest = "end_guest"
         case markRead = "mark_read"
         case markAllRead = "mark_all_read"
+        case createWorktree = "create_worktree"
+        case removeWorktree = "remove_worktree"
+        case listWorktrees = "list_worktrees"
+    }
+
+    private enum RemoveWorktreeCodingKeys: String, CodingKey {
+        case _0 = "worktree"
+        case kill, force
     }
 
     private enum NewSessionCodingKeys: String, CodingKey {
@@ -470,9 +488,13 @@ public struct TopicChange: Codable, Hashable, Sendable {
     public var pane: PaneID?
     /// The Agent Panes that a Kill stopped.
     public var stopped: [PaneID]?
+    /// The Muxify Worktree that the request made or removed.
+    public var worktreeID: String?
+    /// What the Worktree's sync or preDelete hooks printed.
+    public var output: String?
 
     public init(topicID: String?, created: Bool = false, shown: Location? = nil, session: SessionID? = nil, sessionName: String? = nil,
-                window: WindowID? = nil, pane: PaneID? = nil, stopped: [PaneID]? = nil) {
+                window: WindowID? = nil, pane: PaneID? = nil, stopped: [PaneID]? = nil, worktreeID: String? = nil, output: String? = nil) {
         self.topicID = topicID
         self.created = created
         self.shown = shown
@@ -481,12 +503,15 @@ public struct TopicChange: Codable, Hashable, Sendable {
         self.window = window
         self.pane = pane
         self.stopped = stopped
+        self.worktreeID = worktreeID
+        self.output = output
     }
 
     private enum CodingKeys: String, CodingKey {
-        case created, shown, session, window, pane, stopped
+        case created, shown, session, window, pane, stopped, output
         case topicID = "topic_id"
         case sessionName = "session_name"
+        case worktreeID = "worktree_id"
     }
 }
 
@@ -533,6 +558,14 @@ public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConv
         public static let cardNotBenched = Kind(rawValue: "card_not_benched")
         public static let cardPinned = Kind(rawValue: "card_pinned")
         public static let cardGuest = Kind(rawValue: "card_guest")
+        public static let worktreeExists = Kind(rawValue: "worktree_exists")
+        public static let worktreeUnavailable = Kind(rawValue: "worktree_unavailable")
+        public static let worktreeAmbiguous = Kind(rawValue: "worktree_ambiguous")
+        public static let worktreeInUse = Kind(rawValue: "worktree_in_use")
+        public static let worktreeHasChanges = Kind(rawValue: "worktree_has_changes")
+        public static let worktreeSetupInvalid = Kind(rawValue: "worktree_setup_invalid")
+        public static let worktreeNameInvalid = Kind(rawValue: "worktree_name_invalid")
+        public static let hookFailed = Kind(rawValue: "hook_failed")
     }
 
     /// How far the request got before it failed.
@@ -569,6 +602,36 @@ public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConv
     public var description: String { message }
 }
 
+/// A Muxify Worktree in a list, with what uses it now.
+public struct MuxifyWorktreeSummary: Codable, Hashable, Sendable {
+    public var id: String
+    public var name: String
+    public var branch: String
+    public var path: String
+    public var repository: String
+    public var base: String
+    /// Nil on this Mac, else the Remote Environment's name.
+    public var environment: String?
+    public var state: MuxifyWorktrees.State
+    /// The live Sessions that have a Window or Pane in it.
+    public var sessions: [String]
+    /// The label of the open Topic that remembers a Session in it.
+    public var topic: String?
+
+    public init(record: MuxifyWorktreeRecord, state: MuxifyWorktrees.State, sessions: [String], topic: String?) {
+        id = record.id
+        name = record.name
+        branch = record.branch
+        path = record.path
+        repository = record.repository
+        base = record.base
+        environment = record.environment
+        self.state = state
+        self.sessions = sessions
+        self.topic = topic
+    }
+}
+
 /// What a Mark Read or Mark Unread changed.
 public struct TopicReadChange: Codable, Hashable, Sendable {
     /// The Topics whose Topic Unread changed.
@@ -592,10 +655,11 @@ public enum EnvironmentResponse: Codable, Hashable, Sendable {
     case topic(TopicDetail)
     case changed(TopicChange)
     case readChanged(TopicReadChange)
+    case worktrees([MuxifyWorktreeSummary])
     case failed(TopicFailure)
 
     private enum CodingKeys: String, CodingKey {
-        case topics, topic, changed, failed
+        case topics, topic, changed, failed, worktrees
         case readChanged = "read_changed"
     }
 
@@ -605,6 +669,7 @@ public enum EnvironmentResponse: Codable, Hashable, Sendable {
         else if let topic = try values.decodeIfPresent(TopicDetail.self, forKey: .topic) { self = .topic(topic) }
         else if let change = try values.decodeIfPresent(TopicChange.self, forKey: .changed) { self = .changed(change) }
         else if let change = try values.decodeIfPresent(TopicReadChange.self, forKey: .readChanged) { self = .readChanged(change) }
+        else if let worktrees = try values.decodeIfPresent([MuxifyWorktreeSummary].self, forKey: .worktrees) { self = .worktrees(worktrees) }
         else { self = .failed(try values.decode(TopicFailure.self, forKey: .failed)) }
     }
 
@@ -615,6 +680,7 @@ public enum EnvironmentResponse: Codable, Hashable, Sendable {
         case .topic(let topic): try values.encode(topic, forKey: .topic)
         case .changed(let change): try values.encode(change, forKey: .changed)
         case .readChanged(let change): try values.encode(change, forKey: .readChanged)
+        case .worktrees(let worktrees): try values.encode(worktrees, forKey: .worktrees)
         case .failed(let failure): try values.encode(failure, forKey: .failed)
         }
     }

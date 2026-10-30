@@ -130,7 +130,7 @@ final class CommandPaletteConfigTests: XCTestCase {
         """)
         XCTAssertEqual(config.commandPalettes.map(\.name), ["Go to…", "Everything", "One kind"])
         XCTAssertEqual(config.commandPalettes.map(\.rules.show), [[.topic, .session, .sessionPath, .worktree], RowKind.all, [.agent]])
-        let every = "topic, settled, session, topic-session, session-path, worktree, window, agent, command or tag"
+        let every = "topic, settled, session, topic-session, session-path, worktree, muxify-worktree, window, agent, command or tag"
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 12, message: "Command Palette show: expected " + every),
             ConfigProblem(path: root, line: 15, message: "Command Palette show: expected a list of " + every),
@@ -172,7 +172,7 @@ final class CommandPaletteConfigTests: XCTestCase {
         """)
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 2, message: "unknown pick list \"add_sesion\": expected add_session, move, move_session, "
-                          + "tags or worktree_start"),
+                          + "tags, worktree_start, new_worktree or remove_worktree"),
             ConfigProblem(path: root, line: 5, message: "pick_lists.add_session.show: expected session, topic-session, session-path or worktree"),
             ConfigProblem(path: root, line: 8, message: "unknown key \"pick_lists.move.order\""),
             ConfigProblem(path: root, line: 10, message: "pick_lists.tags.show: expected a list of tag"),

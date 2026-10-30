@@ -3,7 +3,7 @@ import MuxifyCore
 
 /// Every verb of the command line, in the order that `muxify --help` lists them.
 enum CLIVerbs {
-    static let all: [CLIVerb] = browser + session + extensions + topic + window + agent + read
+    static let all: [CLIVerb] = browser + session + extensions + topic + window + worktree + agent + read
 
     /// The verb that the words name, and the words after it. The longest match wins.
     static func verb(for arguments: ArraySlice<String>) -> (CLIVerb, ArraySlice<String>)? {
@@ -265,6 +265,53 @@ enum CLIVerbs {
             return .request(try RequestInvocation(.lock(locked), parsed: parsed))
         }
     }
+
+    // MARK: - worktree
+
+    private static let worktree: [CLIVerb] = [
+        CLIVerb(path: .worktreeCreate, synopsis: "<name> [--base <ref> | --branch <name>] [--no-open] [--json]",
+                options: [.value("--base"), .value("--branch"), .flag("--no-open"), .flag("--json")],
+                help: """
+                Makes a Muxify Worktree <name> of the repository you are in, at
+                <worktrees.root_path>/<repository>/<name>, with a No Topic Session
+                <repository>/<name> in it, and shows that Session. The project's
+                .worktree.json copies and links files into it, and its postCreate
+                hooks run in the Session's first Window. The branch <name> is checked
+                out when it exists, else made at HEAD.
+                  --base <ref>     make the branch <name> at <ref>
+                  --branch <name>  check out this local branch instead
+                  --no-open        keep this terminal where it is
+                """) { parsed in
+            let base = try parsed.value("--base"), branch = try parsed.value("--branch")
+            guard parsed.operands.count == 1, base == nil || branch == nil else { throw CLIError.usage }
+            let start: WorktreeStart = branch.map(WorktreeStart.branch) ?? base.map(WorktreeStart.ref) ?? .head
+            return .request(try RequestInvocation(.createWorktree(name: parsed.operands[0], from: FileManager.default.currentDirectoryPath,
+                                                                  start: start, open: !parsed.flag("--no-open")), parsed: parsed))
+        },
+        CLIVerb(path: .worktreeRemove, synopsis: "<name|path|id> [--kill] [--force] [--json]",
+                options: [.flag("--kill"), .flag("--force"), .flag("--json")],
+                help: """
+                Removes a Muxify Worktree after its preDelete hooks, and the Topic's
+                memory of its Sessions. The branch stays. It fails when a live Session
+                uses the Worktree, when it has changes, or when a hook fails.
+                  --kill   stop the Sessions that use it; this terminal moves first
+                  --force  remove it with changes, or after a failed hook
+                """) { parsed in
+            guard parsed.operands.count == 1, !parsed.operands[0].isEmpty else { throw CLIError.usage }
+            return .request(try RequestInvocation(.removeWorktree(parsed.operands[0], kill: parsed.flag("--kill"), force: parsed.flag("--force")),
+                                                  parsed: parsed))
+        },
+        CLIVerb(path: .worktreeList, synopsis: "[--all] [--json]", options: [.flag("--all"), .flag("--json")],
+                help: """
+                Lists the Muxify Worktrees of the repository you are in: name, branch,
+                clean, dirty or missing, path, the Sessions that use it and its Topic.
+                  --all    list those of every repository
+                """) { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            return .request(try RequestInvocation(.listWorktrees(from: parsed.flag("--all") ? nil : FileManager.default.currentDirectoryPath),
+                                                  parsed: parsed))
+        },
+    ]
 
     // MARK: - extensions
 

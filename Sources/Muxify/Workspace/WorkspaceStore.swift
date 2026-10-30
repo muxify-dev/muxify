@@ -674,14 +674,21 @@ final class WorkspaceStore {
 
     /// The service on the Local server, with the SessionPaths as git reported them last.
     func topicService() -> EnvironmentService {
-        EnvironmentService(paths: topicWatcher.store.paths, server: TmuxServer.app, sessionPaths: sessionPaths, topics: topicConfig)
+        EnvironmentService(paths: topicWatcher.store.paths, server: TmuxServer.app, sessionPaths: sessionPaths, topics: topicConfig,
+                           worktreesRoot: config.worktreesRoot)
     }
 
     /// The service on the Remote Environment that the App Window shows. It has no Topics, so it runs only the requests
-    /// that need no Topic record.
+    /// that need no Topic record. Its Muxify Worktree scripts run over the connection, on that machine (ADR 0062).
     private func remoteService() -> EnvironmentService? {
         guard let connection else { return nil }
-        return EnvironmentService(paths: topicWatcher.store.paths, server: connection, topics: topicConfig, topicsAvailable: false)
+        return EnvironmentService(paths: topicWatcher.store.paths, server: connection, topics: topicConfig, topicsAvailable: false,
+                                  scripts: connection, environmentName: activeEnvironment?.name, worktreesRoot: config.worktreesRoot)
+    }
+
+    /// The service of the Environment that the App Window shows: Local's, or the Remote Environment's.
+    func environmentService() -> EnvironmentService? {
+        isRemote ? remoteService() : topicService()
     }
 
     private func present(_ response: EnvironmentResponse, as presentation: TopicPresentation, invocation: UUID) {
@@ -689,7 +696,7 @@ final class WorkspaceStore {
         changingTopic = false
         let ownsPalette = palette.invocation == invocation
         switch response {
-        case .topics, .topic:
+        case .topics, .topic, .worktrees:
             break
         case .readChanged:
             // A Read change is not shown until a snapshot after it, so the next change waits for that snapshot.

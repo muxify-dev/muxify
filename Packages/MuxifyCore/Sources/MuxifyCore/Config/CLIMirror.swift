@@ -63,6 +63,9 @@ public enum CLIVerbPath: String, CaseIterable, Sendable {
     case agentMarkRead = "agent mark-read"
     case agentMarkUnread = "agent mark-unread"
     case markAllRead = "mark-all-read"
+    case worktreeCreate = "worktree create"
+    case worktreeRemove = "worktree remove"
+    case worktreeList = "worktree list"
 
     public var words: [String] { rawValue.split(separator: " ").map(String.init) }
 }

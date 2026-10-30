@@ -218,18 +218,19 @@ final class RepositorySessionPathTests: XCTestCase {
 
     func testAddSessionWithANewWorktreeCreatesItFromThePickedBaseAndRemembersItAsCreated() throws {
         let topic = TopicRecord(id: "t", title: "T", slug: "t")
-        let added = try TopicSessionPlan(topic: topic, sessionPath: gameServer, workingCopy: .newWorktree(at: "c0ffee", root: "/trees"),
+        let added = try TopicSessionPlan(topic: topic, sessionPath: gameServer, workingCopy: .newWorktree(at: "c0ffee", parent: "/trees/game_server"),
                                          windows: [], sessionPaths: [gameServer, notes]).edit
         let tree = TopicPlan.WorktreeSpec(repositoryPath: gameServer.folder.path, path: "/trees/game_server/t", branch: "t")
-        XCTAssertEqual(added.newWorktree, TopicPlan.NewWorktree(worktree: tree, commit: "c0ffee"))
+        XCTAssertEqual(added.newWorktree?.worktree, tree)
+        XCTAssertEqual(added.newWorktree?.commit, "c0ffee")
+        XCTAssertEqual(added.record?.sessions.last?["worktree_id"]?.string, added.newWorktree?.id, "the Session names the Worktree's record")
         XCTAssertEqual(Array(added.commands.prefix(2)), [.tmuxMaking(["new-session", "-d", "-s", "game_server/t", "-c", "/trees/game_server/t"]),
                                         .tmux(["set-option", "-t", "=game_server/t:", "@muxify_topic", "t"])])
         XCTAssertEqual(added.record?.sessions.last?["base"], .string("c0ffee"))
         XCTAssertEqual(added.record?.sessions.last?["worktree_created"], .bool(true))
-        let plain = try TopicSessionPlan(topic: topic, sessionPath: app, workingCopy: .newWorktree(at: "c0ffee", root: "/trees"),
+        let plain = try TopicSessionPlan(topic: topic, sessionPath: app, workingCopy: .newWorktree(at: "c0ffee", parent: "/trees/app"),
                                          windows: [], sessionPaths: [app, notes]).edit
-        XCTAssertEqual(plain.newWorktree, TopicPlan.NewWorktree(worktree: .init(repositoryPath: app.folder.path, path: "/trees/app/t", branch: "t"),
-                                                                commit: "c0ffee"))
+        XCTAssertEqual(plain.newWorktree?.worktree, .init(repositoryPath: app.folder.path, path: "/trees/app/t", branch: "t"))
         XCTAssertEqual(plain.record?.sessions.last?["worktree_path"]?.string, "/trees/app/t")
     }
 
