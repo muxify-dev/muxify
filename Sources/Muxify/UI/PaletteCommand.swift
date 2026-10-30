@@ -50,6 +50,8 @@ enum PaletteCommand: String, CaseIterable {
     case newAppWindow = "New Muxify Window"
     case newWindow = "New tmux Window"
     case newSession = "New tmux Session"
+    case newWorktree = "New Worktree"
+    case removeWorktree = "Remove Worktree"
     case openConfig = "Open Config"
     case reloadConfig = "Reload Config"
     case installExtensions = "Install Extensions"
@@ -141,6 +143,8 @@ enum PaletteCommand: String, CaseIterable {
         case .endGuest: .verbs([.topicEndGuest, .sessionUnlock])
         case .newWindow: .verb(.windowNew)
         case .newSession: .verb(.sessionNew)
+        case .newWorktree: .verb(.worktreeCreate)
+        case .removeWorktree: .verb(.worktreeRemove)
         case .zoomPane: .verb(.windowZoom)
         case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser, .showSidebar, .hideSidebar,
              .showTerminal, .hideTerminal, .showBrowser, .hideBrowser, .nextSession, .previousSession, .nextTopic, .previousTopic,
@@ -209,6 +213,8 @@ extension CommandPalette {
                 guard canChangeTopics, let card = store.currentGuestCard, let guest = store.guestState(of: card) else { return false }
                 return guest == (command == .endGuest)
             case .installExtensions: return !store.isRemote
+            case .newWorktree: return !store.changingTopic && store.sessionPaths.contains { !$0.layout.worktrees.isEmpty }
+            case .removeWorktree: return !store.changingTopic
             case .nextSession, .previousSession, .nextTopic, .previousTopic:
                 guard let step = command.keybinding?.step else { return false }
                 return store.stepTarget(step.level, step.direction) != nil
@@ -265,7 +271,8 @@ extension CommandPalette {
         }
         switch command {
         case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addSession, .settleTopic,
-             .forgetTopic, .renameTopic, .setTopicNote, .renameWindow, .editTags, .chooseInPlay, .replaceFromBench, .clearBrowserHistory: break
+             .forgetTopic, .renameTopic, .setTopicNote, .renameWindow, .editTags, .chooseInPlay, .replaceFromBench, .clearBrowserHistory,
+             .newWorktree, .removeWorktree: break
         default: close(restoringFocus: false)
         }
         switch command {
@@ -301,6 +308,8 @@ extension CommandPalette {
         case .newAppWindow: store.onNewAppWindow?()
         case .newWindow: store.newWindow()
         case .newSession: store.newSession()
+        case .newWorktree: store.presentNewWorktree(keepingHistory: true)
+        case .removeWorktree: store.presentRemoveWorktree(keepingHistory: true)
         case .openConfig: store.openConfig()
         case .reloadConfig: store.reloadConfig()
         case .installExtensions: ExtensionInstaller.run()

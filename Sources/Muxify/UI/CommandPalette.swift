@@ -194,6 +194,7 @@ final class CommandPalette {
             case .session, .topicSession: return "Switch to Session"
             // A SessionPath row's target is the Session ↩ goes to; without one, ↩ starts it.
             case .sessionPath, .worktree: return item.target == nil ? "Open as Session" : "Switch to Session"
+            case .muxifyWorktree: return "Remove"
             case .window: return "Open Window"
             case .agent: return "Jump to Agent"
             case .command: return "Run"

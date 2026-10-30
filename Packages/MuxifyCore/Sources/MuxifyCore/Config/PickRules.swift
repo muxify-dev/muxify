@@ -9,6 +9,8 @@ public enum RowKind: String, CaseIterable {
     case topicSession = "topic-session"
     case sessionPath = "session-path"
     case worktree
+    /// A Worktree that Muxify made and remembers (ADR 0062), wherever its folder is.
+    case muxifyWorktree = "muxify-worktree"
     case window, agent, command, tag
 
     public static let all = Set(allCases)
@@ -24,8 +26,12 @@ public enum ActionList: String, CaseIterable {
     case moveSession = "move_session"
     /// Tag completion in New Topic and Edit Tags.
     case tags
-    /// Add a Session › New Worktree from.
+    /// Add a Session › New Worktree from, and New Worktree's start step.
     case worktreeStart = "worktree_start"
+    /// New Worktree: the checkout it starts from.
+    case newWorktree = "new_worktree"
+    /// Remove Worktree: the Muxify Worktree it removes.
+    case removeWorktree = "remove_worktree"
 
     /// The kinds its ranked rows can be: `show` may name only these.
     public var kinds: Set<RowKind> {
@@ -35,6 +41,8 @@ public enum ActionList: String, CaseIterable {
         case .moveSession: [.session, .topicSession]
         case .tags: [.tag]
         case .worktreeStart: [.command]
+        case .newWorktree: [.sessionPath, .worktree]
+        case .removeWorktree: [.muxifyWorktree]
         }
     }
 }

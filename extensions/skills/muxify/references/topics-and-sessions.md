@@ -15,6 +15,12 @@ A Topic is one thing the user wants to get done. It groups Sessions, and its Ses
 - `muxify topic add-session <dir>` makes a Session in another folder for this Topic. `--worktree` makes a new Worktree on a new branch named from the Topic, so your work does not change the user's checkout.
 - `muxify window move` moves a Window to another Session or Topic.
 
+## Worktrees outside a Topic
+
+- `muxify worktree create <name> --no-open` makes a Muxify Worktree of the repository you are in, on the branch `<name>`, with a No Topic Session `<repository>/<name>` in it. The project's `.worktree.json` copies files into it and runs its postCreate hooks in that Session's first Window. Leave out `--no-open` only when the user wants to see the new Session now.
+- `muxify worktree list` prints the Muxify Worktrees of this repository: name, branch, `clean`, `dirty` or `missing`, path, the Sessions in it and its Topic. `--all` lists every repository's.
+- `muxify worktree remove <name>` runs the preDelete hooks and removes the Worktree. The branch stays. Ask the user first, most of all for `--kill` or `--force`.
+
 ## Change the Topic
 
 `topic rename`, `topic note`, `topic tag`, `topic pin`, `topic move`, `topic choose-in-play` and the `mark-read` and `mark-unread` verbs change how the user sees their Topics. Run them when the user asks.

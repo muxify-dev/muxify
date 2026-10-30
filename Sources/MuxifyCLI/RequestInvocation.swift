@@ -69,6 +69,12 @@ struct RequestInvocation: Equatable {
         /// Read or Unread for the `scope` of the target or of the caller's Pane.
         case markRead(ReadChange, scope: ReadScope)
         case markAllRead
+        /// A Muxify Worktree from the checkout at `from`, the folder the command runs in. `open` switches the caller
+        /// Pane's terminal to its Session.
+        case createWorktree(name: String, from: String, start: WorktreeStart, open: Bool)
+        case removeWorktree(String, kill: Bool, force: Bool)
+        /// Nil `from` lists every Muxify Worktree.
+        case listWorktrees(from: String?)
 
         /// The target options this command takes. `topic new` makes an Empty Topic, so it takes none.
         var targets: [TargetOption] {
@@ -93,7 +99,7 @@ struct RequestInvocation: Equatable {
             case .markRead(_, .session): return [.session, .window, .pane]
             case .markRead(_, .window): return [.window, .pane]
             case .markRead(_, .pane): return [.pane]
-            case .list, .markAllRead, .chooseInPlay: return []
+            case .list, .markAllRead, .chooseInPlay, .createWorktree, .removeWorktree, .listWorktrees: return []
             }
         }
 
@@ -111,7 +117,7 @@ struct RequestInvocation: Equatable {
         var findsAllSessionPaths: Bool {
             switch self {
             case .new, .tag, .note, .lock, .pin, .guest, .moveCard, .tradeCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
-                 .placeWindow, .zoomPane: return false
+                 .placeWindow, .zoomPane, .createWorktree, .removeWorktree, .listWorktrees: return false
             default: return !showsTopic
             }
         }
@@ -156,6 +162,9 @@ struct RequestInvocation: Equatable {
             case .sortSessions: return "topic sort-sessions"
             case .markRead(let change, let scope): return CLIVerbPath.markRead(change, scope: scope).rawValue
             case .markAllRead: return "mark-all-read"
+            case .createWorktree: return "worktree create"
+            case .removeWorktree: return "worktree remove"
+            case .listWorktrees: return "worktree list"
             }
         }
     }
@@ -299,11 +308,13 @@ extension RequestInvocation {
         default:
             let config = try await ConfigSessions.load(paths.configFile, within: command.findsAllSessionPaths ? nil : [])
             func handle() throws -> EnvironmentResponse {
-                let service = EnvironmentService(paths: paths, server: TmuxServer.local, sessionPaths: config.sessionPaths, topics: config.topics)
+                let service = EnvironmentService(paths: paths, server: TmuxServer.local, sessionPaths: config.sessionPaths, topics: config.topics,
+                                                 worktreesRoot: config.worktreesRoot)
                 // No client: no terminal switches to the result, because a command changes what the user sees only
-                // when they ask for it.
+                // when they ask for it. A new Worktree's Session is shown unless --no-open says not to, and a Remove
+                // that kills the caller's Session moves its terminal first.
                 return service.handle(EnvironmentRequest(try request(sessionPaths: config.sessionPaths, service: service), target: target,
-                                                         caller: caller.map(TopicCaller.pane)))
+                                                         caller: caller.map(TopicCaller.pane)), client: callerClient)
             }
             do {
                 response = try handle()
@@ -353,8 +364,18 @@ extension RequestInvocation {
                     print([session.name, session.baseName, session.directory,
                            session.worktree?.branch ?? ""].map(\.oneLineField).joined(separator: "\t"))
                 }
-            // A Topic change prints the Topic's id, a change of a Window the Window's id, and a Session rename the full name.
+            // A Worktree change prints what its sync or hooks printed, then the Session it made. A Topic change prints the
+            // Topic's id, a change of a Window the Window's id, and a Session rename the full name.
+            case .changed(let change) where change.worktreeID != nil:
+                if let output = change.output { print(output.trimmingCharacters(in: .newlines)) }
+                if let name = change.sessionName { print(name) }
             case .changed(let change): if let id = change.topicID ?? change.window?.rawValue ?? change.sessionName { print(id) }
+            case .worktrees(let worktrees):
+                // One line each: name, branch, state, path, the Sessions that use it, and its Topic.
+                for worktree in worktrees {
+                    print([worktree.name, worktree.branch, worktree.state.rawValue, worktree.path, worktree.sessions.joined(separator: ","),
+                           worktree.topic ?? ""].map(\.oneLineField).joined(separator: "\t"))
+                }
             case .readChanged(let change): for id in change.topicIDs + change.paneIDs.map(\.rawValue) { print(id) }
             case .failed: break
             }
@@ -422,6 +443,9 @@ extension RequestInvocation {
             return .settle(choices: choices, outcome: "")
         case .markRead(let change, let scope): return .markRead(change, scope: scope)
         case .markAllRead: return .markAllRead
+        case .createWorktree(let name, let from, let start, let open): return .createWorktree(name: name, from: from, start: start, open: open)
+        case .removeWorktree(let worktree, let kill, let force): return .removeWorktree(worktree, kill: kill, force: force)
+        case .listWorktrees(let from): return .listWorktrees(all: from == nil, from: from)
         case .tag(let change): return .tags(change)
         case .note(let note): return .note(note)
         case .list: return .list
@@ -481,6 +505,18 @@ extension RequestInvocation {
             }
             return .move(to: .session(id))
         }
+    }
+
+    /// The terminal of the caller's Pane, for the two commands that may switch it: a Worktree's Session shown, or a
+    /// Remove that kills the Session it shows. Nil for every other command, and outside tmux.
+    private var callerClient: String? {
+        switch command {
+        case .createWorktree(_, _, _, true), .removeWorktree(_, kill: true, _): break
+        default: return nil
+        }
+        guard let caller, let tty = try? TmuxServer.local.run(["display-message", "-p", "-t", caller.rawValue, "#{client_tty}"])
+            .trimmingCharacters(in: .whitespacesAndNewlines), !tty.isEmpty else { return nil }
+        return tty
     }
 
     /// A response that ends the command before its request, such as the failure of a read that the request needs.

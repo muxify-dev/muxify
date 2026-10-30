@@ -19,6 +19,7 @@ The other Sessions, Windows and Agents belong to the user or to other Agents tha
 
 - `session kill`, `window kill`, and `session remove-from-topic --kill` stop every process in them, Agents too. Your own Pane is one of them when you leave out the target.
 - `topic settle` and `topic forget`, most of all with `--kill-sessions` or `--remove-worktrees`.
+- `worktree remove`, most of all with `--kill` or `--force`.
 
 The Topic's title, Note, Tags, Pin, In Play order, and Read or Unread marks are how the user arranges their day. Change them when the user asks.
 

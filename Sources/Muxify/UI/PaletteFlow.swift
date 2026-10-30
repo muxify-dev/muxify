@@ -23,6 +23,8 @@ enum PaletteText {
     case renameWindow(TmuxWindow)
     /// The Session of this Window.
     case renameSession(TmuxWindow)
+    /// New Worktree: the name of the Worktree from this checkout.
+    case worktreeName(SessionChoice)
 }
 
 @MainActor @Observable
@@ -35,6 +37,8 @@ final class PaletteConfirmation {
         case killSession(TmuxWindow)
         /// The Session of this Window leaves its Topic and stops.
         case removeAndKill(TmuxWindow)
+        /// Remove Worktree: ⌘↩ also stops the Sessions that use it.
+        case removeWorktree(MuxifyWorktreeSummary)
     }
     enum Choices {
         case loading
@@ -46,12 +50,16 @@ final class PaletteConfirmation {
     var removedWorktrees: Set<String> = []
     var reviewedPaneIDs: Set<String>?
     var impactChanged = false
+    /// Remove Worktree's Force row: remove the Worktree with changes, or after a failed preDelete hook.
+    var force = false
 
     init(_ target: Target) { self.target = target }
 
     var requiresCommandReturn: Bool {
         switch target {
         case .forget, .killWindow, .killSession, .removeAndKill: return true
+        // ↩ removes a Worktree that no Session uses; one that a Session uses goes only with its Sessions, on ⌘↩.
+        case .removeWorktree(let worktree): return !worktree.sessions.isEmpty
         case .settle:
             guard case .ready(let sessions, _) = choices else { return true }
             return sessions.contains { $0.disposition == .kill }
@@ -68,7 +76,8 @@ final class PaletteConfirmation {
     }
 }
 
-/// Add a Session with the new Worktree toggle on: where the new Worktree from `choice` starts (ADR 0039).
+/// Add a Session with the new Worktree toggle on, or New Worktree: where the new Worktree from `choice` starts
+/// (ADR 0039, ADR 0062).
 @MainActor @Observable
 final class WorktreeStartDraft {
     enum Starts {
@@ -76,12 +85,23 @@ final class WorktreeStartDraft {
         case failed(String)
         case ready([WorktreeStartChoice])
     }
-    let topic: TopicRecord
+    enum Purpose {
+        /// A Session of this Topic, in a Worktree named from its slug.
+        case addSession(TopicRecord)
+        /// A Muxify Worktree with this name, and a No Topic Session in it.
+        case newWorktree(name: String)
+    }
+    let purpose: Purpose
     let choice: SessionChoice
     var starts: Starts = .loading
 
     init(topic: TopicRecord, choice: SessionChoice) {
-        self.topic = topic
+        purpose = .addSession(topic)
+        self.choice = choice
+    }
+
+    init(newWorktree name: String, choice: SessionChoice) {
+        purpose = .newWorktree(name: name)
         self.choice = choice
     }
 }
@@ -91,6 +111,10 @@ enum PaletteFlow {
     case addSession(TopicRecord)
     /// A row for each start of the new Worktree, and a typed ref.
     case worktreeStart(WorktreeStartDraft)
+    /// New Worktree: the checkout it starts from. Its name and start come next.
+    case newWorktree
+    /// Remove Worktree: the Muxify Worktree it removes. A confirm step comes next.
+    case removeWorktree(RemoveWorktreeDraft)
     /// Check cards of the Topics list, then go on with them.
     case check(CheckDraft)
     /// Choose In Play: the card for one In Play place.
@@ -111,6 +135,9 @@ enum PaletteFlow {
         case .move(let draft): draft.destination == .topics ? "Topic or new title" : "Destination Session"
         case .addSession: "Search Sessions and Session Paths"
         case .worktreeStart: "Branch, or a ref to start at"
+        case .newWorktree: "Repository or Worktree to start from"
+        case .removeWorktree: "Muxify Worktree"
+        case .text(.worktreeName): "Worktree name"
         case .text(.renameWindow): "Window name"
         case .text(.renameSession): "Session name"
         case .text(.topicNote): "What were you doing here?"
@@ -123,7 +150,7 @@ enum PaletteFlow {
         case .confirm(let draft):
             switch draft.target {
             case .settle: "Outcome note (optional)"
-            case .forget, .killWindow, .killSession, .removeAndKill: "Review and confirm"
+            case .forget, .killWindow, .killSession, .removeAndKill, .removeWorktree: "Review and confirm"
             }
         }
     }
@@ -139,6 +166,10 @@ enum PaletteChoice: Equatable {
     case session(String)
     case worktree(String)
     case worktreeStart(WorktreeStart)
+    /// A Muxify Worktree by its record's id, in Remove Worktree.
+    case muxifyWorktree(String)
+    /// Remove Worktree's Force row.
+    case force
     /// A card of the Topics list, in a step that chooses one.
     case card(TopicGroupID)
     case clearHistory(ClearRange)
@@ -152,7 +183,14 @@ extension CommandPalette {
         switch flow {
         case .move(let draft): return "\(draft.scope.rawValue) \(draft.window.displayTitle) › Move to"
         case .addSession(let topic): return "\(topicTitle(topic)) › Add a Session"
-        case .worktreeStart(let draft): return "\(topicTitle(draft.topic)) › Add a Session › \(draft.choice.displayName) › New Worktree from"
+        case .worktreeStart(let draft):
+            switch draft.purpose {
+            case .addSession(let topic): return "\(topicTitle(topic)) › Add a Session › \(draft.choice.displayName) › New Worktree from"
+            case .newWorktree(let name): return "New Worktree › \(draft.choice.displayName) › \(name) from"
+            }
+        case .newWorktree: return "New Worktree"
+        case .removeWorktree: return "Remove Worktree"
+        case .text(.worktreeName(let choice)): return "New Worktree › \(choice.displayName)"
         case .check(let draft): return "\(draft.action.title) › Check"
         case .order(let draft): return "Choose In Play › Place \(draft.place)"
         case .replaceFromBench(let card): return "\(cardTitle(card)) › Replace from Bench"
@@ -173,6 +211,7 @@ extension CommandPalette {
             case .killWindow(let window): return "\(window.displayTitle) › Kill Window"
             case .killSession(let window): return "\(window.sessionName) › Kill Session"
             case .removeAndKill(let window): return "\(window.sessionName) › Remove from Topic and Kill"
+            case .removeWorktree(let worktree): return "\(worktree.name) › Remove Worktree"
             }
         }
     }
@@ -196,7 +235,19 @@ extension CommandPalette {
             switch draft.starts {
             case .loading: return "Reading the branches…"
             case .failed(let message): return message
-            case .ready: return "HEAD or a ref starts a new branch. Check out uses the branch, and Settle never deletes it."
+            case .ready:
+                if case .newWorktree(let name) = draft.purpose {
+                    return "HEAD or a ref starts the branch \(name), or checks it out when it exists. Removing the Worktree keeps the branch."
+                }
+                return "HEAD or a ref starts a new branch. Check out uses the branch, and Settle never deletes it."
+            }
+        case .newWorktree: return "Its project's .worktree.json copies files in, and postCreate runs in its new Session."
+        case .text(.worktreeName): return "It names the branch, the folder and the Session."
+        case .removeWorktree(let draft):
+            switch draft.rows {
+            case .loading: return "Reading the Muxify Worktrees…"
+            case .failed(let message): return message
+            case .ready(let worktrees): return worktrees.isEmpty ? "Muxify made no Worktree here yet." : nil
             }
         case .check(let draft): return checkNote(draft)
         case .order(let draft): return orderNote(draft)
@@ -215,6 +266,8 @@ extension CommandPalette {
                 let topic = topicTitle(id: window.topicID ?? "")
                 let others = store.windows.contains { $0.topicID == window.topicID && $0.sessionID != window.sessionID }
                 return "This stops every process in the Session. \(topic) stays open" + (others ? "." : ", Empty.")
+            case .removeWorktree(let worktree):
+                return worktree.sessions.isEmpty ? "↩ removes the Worktree." : "⌘↩ stops every process in its Sessions and removes it."
             }
         default: return nil
         }
@@ -233,7 +286,7 @@ extension CommandPalette {
             return false
         }
         switch flow {
-        case .text(.renameWindow), .text(.renameSession): return !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .text(.renameWindow), .text(.renameSession), .text(.worktreeName): return !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .text(.tags(let field)): return field.text(query).refusedWords.isEmpty
         default: break
         }
@@ -284,6 +337,8 @@ extension CommandPalette {
         case .addSession(let topic):
             return catalog?.addSessionList(topic: topic.id, query: query, rows: store.sessionPathRows, rules: store.config.rules(for: .addSession)) ?? .empty
         case .worktreeStart(let draft): return worktreeStartRows(draft, rules: store.config.rules(for: .worktreeStart))
+        case .newWorktree: return newWorktreeRows(query: query, rules: store.config.rules(for: .newWorktree))
+        case .removeWorktree(let draft): return removeWorktreeRows(draft, query: query, rules: store.config.rules(for: .removeWorktree))
         case .text(.tags(let field)): return tagRows(field, rules: store.config.rules(for: .tags))
         case .text: return .empty
         case .confirm(let draft): return confirmationRows(draft)
@@ -316,6 +371,7 @@ extension CommandPalette {
 
     private func confirmationRows(_ draft: PaletteConfirmation) -> PickList<PaletteItem> {
         guard case .ready(let sessions, let worktrees) = draft.choices else { return .empty }
+        if case .removeWorktree(let worktree) = draft.target { return FuzzyRanker.fixed(removeWorktreeConfirmationRows(worktree, draft: draft)) }
         var rows = sessions.flatMap { session in
             let windows = store?.windows.filter { $0.sessionID == session.id } ?? []
             let working = store?.agents.filter { $0.sessionID == session.id && $0.status == .working } ?? []
@@ -370,7 +426,11 @@ extension CommandPalette {
     }
 
     func loadFlow() {
-        if case .worktreeStart(let draft) = flow { loadWorktreeStarts(draft); return }
+        if case .worktreeStart(let draft) = flow {
+            if case .newWorktree = draft.purpose { loadNewWorktreeStarts(draft) } else { loadWorktreeStarts(draft) }
+            return
+        }
+        if case .removeWorktree(let draft) = flow { loadRemoveWorktrees(draft); return }
         guard let store, case .confirm(let draft) = flow else { return }
         let target: EnvironmentTarget
         let forget: Bool
@@ -383,6 +443,10 @@ extension CommandPalette {
             return
         case .removeAndKill(let window):
             loadRemoveAndKill(window, draft: draft)
+            return
+        case .removeWorktree:
+            // The row of the first step is the review: the confirm step reads nothing more.
+            draft.choices = .ready([], [])
             return
         case .settle(let topic): target = .topic(.id(topic.id)); forget = false
         case .forget(let topic): target = .topic(.id(topic.id)); forget = true
@@ -491,7 +555,7 @@ extension CommandPalette {
     func toggleSelected() {
         guard case .choice(let choice) = selected(in: results)?.pick.payload?.ref else { return }
         switch choice {
-        case .session, .worktree, .tag: accept(choice)
+        case .session, .worktree, .tag, .force: accept(choice)
         default: break
         }
     }
@@ -530,7 +594,17 @@ extension CommandPalette {
                 store.addSession(sessionPath, toTopic: topic.id, newWorktree: nil)
             }
         case (.worktreeStart(let draft), .worktreeStart(let start)):
-            store.addSession(draft.choice, toTopic: draft.topic.id, newWorktree: start)
+            switch draft.purpose {
+            case .addSession(let topic): store.addSession(draft.choice, toTopic: topic.id, newWorktree: start)
+            case .newWorktree(let name): store.createWorktree(from: draft.choice, name: name, start: start)
+            }
+        case (.newWorktree, .sessionPath(let choice)):
+            begin(.text(.worktreeName(choice)), keepingHistory: true)
+        case (.removeWorktree(let list), .muxifyWorktree(let id)):
+            guard case .ready(let worktrees) = list.rows, let worktree = worktrees.first(where: { $0.id == id }) else { return }
+            begin(.confirm(PaletteConfirmation(.removeWorktree(worktree))), keepingHistory: true)
+        case (.confirm(let draft), .force):
+            draft.force.toggle()
         case (.addSession(let topic), .session(let id)):
             guard let window = store.windows.first(where: { $0.sessionID == id }) else { return }
             store.changeTopic(.session(window), destination: topic)
@@ -561,6 +635,10 @@ extension CommandPalette {
                 guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                 store.renameSession(window, to: value)
                 close()
+            case .worktreeName(let choice):
+                let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { return }
+                begin(.worktreeStart(WorktreeStartDraft(newWorktree: name, choice: choice)), keepingHistory: true)
             }
         case (.confirm(let draft), .session(let id)):
             guard case .ready(var sessions, let worktrees) = draft.choices,
@@ -587,6 +665,8 @@ extension CommandPalette {
             case .killSession(let window): store.kill(window, session: true, reviewed: draft.reviewedPaneIDs ?? [])
             case .removeAndKill(let window):
                 store.removeAndKill(window, worktrees: worktrees.filter { draft.removedWorktrees.contains($0.id) && draft.canRemove($0) }.map(\.id))
+            case .removeWorktree(let worktree):
+                store.removeWorktree(worktree, kill: !worktree.sessions.isEmpty, force: draft.force)
             }
         default: break
         }

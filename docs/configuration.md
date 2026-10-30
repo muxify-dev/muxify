@@ -1079,6 +1079,7 @@ the palette lists the path again.
 | `topic-session` | A running Session in an open Topic |
 | `session-path` | A Session Path, or a checkout inside the folder of a bare repository, with no running Session |
 | `worktree` | A Worktree outside the folder of its Session Path, with no running Session |
+| `muxify-worktree` | A [Muxify Worktree](#muxify-worktrees), in Remove Worktree |
 | `window` | A Window |
 | `agent` | An Agent |
 | `command` | A Command, or a choice in an Action |
@@ -1118,7 +1119,9 @@ pick_lists:
 | `move` | Move to…, the Topic step | `topic` |
 | `move_session` | Move to…, the step that chooses a Session | `session`, `topic-session` |
 | `tags` | The Tags of New Topic and Edit Tags… | `tag` |
-| `worktree_start` | Add a Session › New Worktree from | `command` |
+| `worktree_start` | Add a Session › New Worktree from, and New Worktree's start | `command` |
+| `new_worktree` | New Worktree, the checkout it starts from | `session-path`, `worktree` |
+| `remove_worktree` | Remove Worktree | `muxify-worktree` |
 
 A pick list without an entry lists every kind, with the default `tiebreak`. The
 rows that a pick list always shows, such as New Topic in Move to…, ignore `show`.
@@ -1126,6 +1129,58 @@ These problems apply to one entry: a name that is not in the table, a key other
 than `show` and `tiebreak`, an empty `show`, or a kind that the pick list does
 not have. Muxify shows the problem, and that pick list keeps every kind and the
 default `tiebreak`.
+
+## Muxify Worktrees
+
+A Muxify Worktree is a Worktree that Muxify made and remembers, in a Topic or not
+([ADR 0062](adr/0062-a-muxify-worktree-can-exist-without-a-topic.md)). Add a Session
+with New Worktree makes one for a Topic. **New Worktree** in the Commands palette, or
+`muxify worktree create <name>`, makes one with a No Topic Session `<repository>/<name>`
+in it: choose the checkout to start from, type the name, then choose the start. HEAD
+makes the branch `<name>`, or checks it out when it exists; a ref makes it there; a
+branch row checks out that branch. **Remove Worktree**, or `muxify worktree remove`,
+lists the Muxify Worktrees of the App Window's Environment. ↩ removes one that no
+Session uses; ⌘↩ also stops the Sessions that use it. The Force row removes it with
+changes, or after a failed preDelete hook. The branch always stays, and a Topic
+forgets its Sessions in the removed Worktree. Both Actions work in a Remote
+Environment too, where git runs on its machine. `muxify worktree list` lists them.
+
+New Worktrees go in `<root>/<repository>/<name>`:
+
+```yaml
+worktrees:
+  root_path: ~/worktrees    # default: $XDG_STATE_HOME/muxify/worktrees
+```
+
+`root_path` is absolute or starts with `~/`, the home of the Environment's machine.
+Muxify removes only a Worktree it remembers, so a Worktree that it did not make
+stays, also inside `root_path`.
+
+A project sets up its new Worktrees in `.worktree.json`, in the checkout the Worktree
+starts from or in the main working tree. It is JSON with comments and trailing commas:
+
+```jsonc
+{
+  "worktreePath": "~/trees/app",   // replaces <root>/<repository>
+  "sync": {
+    "copyFiles": [".envrc", "docker-compose.override.yml"],
+    "symlinkDirs": ["node_modules"],
+    "exclude": []
+  },
+  "hooks": {
+    "postCreate": ["direnv allow", "docker compose up -d db"],
+    "preDelete": ["docker compose down -v --remove-orphans"]
+  }
+}
+```
+
+`copyFiles` are copied and `symlinkDirs` linked from that checkout; a missing one is
+skipped. A file that git does not ignore makes the Worktree unclean, so Remove
+Worktree then needs Force. `postCreate` runs in the first Window of the new Session,
+each hook in `bash -lc`, and stops at the first that fails. `preDelete` runs before
+the removal, and a failed hook keeps the Worktree. Hooks get `MUXIFY_WORKTREE_PATH`,
+`MUXIFY_WORKTREE_NAME`, `MUXIFY_WORKTREE_BRANCH` and `MUXIFY_REPOSITORY_PATH`. A file
+that is not valid stops the Action before it changes anything.
 
 ## A Remote Environment's own Config
 

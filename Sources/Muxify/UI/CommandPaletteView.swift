@@ -423,9 +423,9 @@ struct PaletteIcon: View {
                 .font(.system(size: size * 0.78))
                 .foregroundStyle(theme.cyan.gradient)
                 .frame(width: size, height: size)
-        case .item(_, let kind) where kind == .sessionPath || kind == .worktree:
-            Image(systemName: kind == .worktree ? "arrow.triangle.branch" : "folder")
-                .font(.system(size: size * (kind == .worktree ? 0.6 : 0.72)))
+        case .item(_, let kind) where kind == .sessionPath || kind == .worktree || kind == .muxifyWorktree:
+            Image(systemName: kind == .sessionPath ? "folder" : "arrow.triangle.branch")
+                .font(.system(size: size * (kind == .sessionPath ? 0.72 : 0.6)))
                 .foregroundStyle(theme.cyan)
                 .frame(width: size, height: size)
         case .item(let item, .tag):

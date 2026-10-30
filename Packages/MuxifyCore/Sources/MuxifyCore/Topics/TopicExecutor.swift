@@ -32,24 +32,36 @@ struct TopicExecutor {
         var placeholderWindowID: String?
         var reopenedSessionIDs: [String] = []
         var made: TmuxMade?
+        // The postCreate command of each Worktree that Reopen made again, by folder, for the first Session there.
+        var postCreates: [String: String] = [:]
         do {
             for command in commands {
                 switch command {
                 case .restoreWorktree(let worktree, let base):
+                    guard !FileManager.default.fileExists(atPath: worktree.path) else { continue }
                     try TopicWorktrees.restore(worktree, base: base)
+                    postCreates[worktree.path] = try setUpRestored(worktree, base: base)
                 case .removeCleanWorktree(let worktree):
                     let snapshot = try server.snapshot()
                     guard snapshot.serverRunning else { throw TmuxError.notReady }
+                    try preDelete(worktree)
                     try TopicWorktrees.removeClean(worktree, root: worktreesRoot, windows: snapshot.windows, panes: snapshot.panes)
+                    try forgetRecord(of: worktree)
                 case .removeMergedWorktree(let worktree):
                     let snapshot = try server.snapshot()
                     guard snapshot.serverRunning else { throw TmuxError.notReady }
+                    try preDelete(worktree)
                     try TopicWorktrees.removeMerged(worktree, root: worktreesRoot, windows: snapshot.windows, panes: snapshot.panes)
+                    try forgetRecord(of: worktree)
                 case .reopenSession(let name, let directory, let windowName):
                     let session = try TmuxMade(output: server.run(["new-session", "-d", "-P", "-F", TmuxMade.format, "-s", name, "-c", directory,
                                                                     "-n", windowName]))
                     reopenedSessionIDs.append(session.session.rawValue)
                     made = made ?? session
+                    if let postCreate = postCreates.removeValue(forKey: directory) {
+                        try server.run(["send-keys", "-t", session.pane.rawValue, "-l", postCreate])
+                        try server.run(["send-keys", "-t", session.pane.rawValue, "Enter"])
+                    }
                 case .tmux(let arguments):
                     try server.run(arguments)
                 case .tmuxMaking(let arguments):
@@ -73,6 +85,40 @@ struct TopicExecutor {
             throw error
         }
         return made
+    }
+
+    /// Topics are local, so their Worktree scripts run on this Mac.
+    private var worktrees: MuxifyWorktrees { MuxifyWorktrees(scripts: LocalScripts()) }
+    private var records: MuxifyWorktreeStore { MuxifyWorktreeStore(folder: URL(fileURLWithPath: worktreesRoot)) }
+
+    /// A Worktree that Reopen made again is a new folder: it gets its sync again, and the command that runs its
+    /// postCreate hooks (ADR 0062). Its record stays.
+    private func setUpRestored(_ worktree: TopicPlan.WorktreeSpec, base: String?) throws -> String? {
+        let repository = try worktrees.repository(at: worktree.repositoryPath)
+        guard let folder = repository.setupFolder else { return nil }
+        _ = try worktrees.sync(repository.setup, from: folder, to: worktree.path)
+        guard !repository.setup.postCreate.isEmpty else { return nil }
+        let record = (try? records.all())?.first { $0.environment == nil && $0.path == worktree.path }
+            ?? MuxifyWorktreeRecord(environment: nil, repository: repository.main, name: (worktree.path as NSString).lastPathComponent,
+                                    path: worktree.path, branch: worktree.branch, base: base ?? "")
+        return try worktrees.postCreateCommand(record, hooks: repository.setup.postCreate, setupFile: folder + "/" + WorktreeSetup.fileName)
+    }
+
+    /// A failed hook keeps the Worktree: Settle and Forget have no --force.
+    private func preDelete(_ worktree: TopicPlan.WorktreeSpec) throws {
+        guard FileManager.default.fileExists(atPath: worktree.path) else { return }
+        let hooks = try worktrees.repository(at: worktree.path).setup.preDelete
+        guard !hooks.isEmpty else { return }
+        let record = (try? records.all())?.first { $0.environment == nil && $0.path == worktree.path }
+            ?? MuxifyWorktreeRecord(environment: nil, repository: worktree.repositoryPath, name: (worktree.path as NSString).lastPathComponent,
+                                    path: worktree.path, branch: worktree.branch, base: "")
+        _ = try worktrees.runPreDelete(record, hooks: hooks)
+    }
+
+    private func forgetRecord(of worktree: TopicPlan.WorktreeSpec) throws {
+        for record in try records.all() where record.environment == nil && Folder.local(record.path) == Folder.local(worktree.path) {
+            try records.remove(record.id)
+        }
     }
 
     /// The Pane that `request` names, checked against a snapshot. tmux may answer for a Window that the
