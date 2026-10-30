@@ -537,6 +537,34 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try topicList(), ["Pinned", "C", "B", "A", "lock:notes"])
     }
 
+    func testATradeExchangesThePlacesOfTwoCardsAndMovesNoOther() throws {
+        let inPlay = service(inPlay: 2)
+        for title in ["A", "B", "C", "D", "Pinned"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("Pinned")))))
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        _ = try change(inPlay.handle(EnvironmentRequest(.lock, target: .sessionName("notes"))))
+        let notes = try XCTUnwrap(SessionID(rawValue: server.snapshot().windows.first { $0.sessionName == "notes" }!.sessionID))
+        XCTAssertEqual(try topicList(), ["Pinned", "A", "B", "D", "C", "lock:notes"])
+
+        _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.trade(.topic(.named("C")))), target: .topic(.named("A")))))
+        XCTAssertEqual(try topicList(), ["Pinned", "C", "B", "D", "A", "lock:notes"], "A takes the place of C, not the end of the Bench")
+        let traded = try change(inPlay.handle(EnvironmentRequest(.moveCard(.trade(.topic(.named("B")))), target: .sessionName("notes"))))
+        XCTAssertEqual(traded.session, notes)
+        XCTAssertEqual(try topicList(), ["Pinned", "C", "lock:notes", "D", "A", "B"], "a Locked Session trades too")
+
+        let refused: [(EnvironmentTarget, TopicListRef, TopicFailure.Kind)] = [
+            (.topic(.named("Pinned")), .topic(.named("A")), .cardPinned),
+            (.topic(.named("A")), .topic(.named("Pinned")), .cardPinned),
+            (.topic(.named("A")), .topic(.named("Missing")), .topicUnavailable),
+        ]
+        for (target, other, kind) in refused {
+            let refusal = try failure(inPlay.handle(EnvironmentRequest(.moveCard(.trade(other)), target: target)))
+            XCTAssertEqual(refusal.kind, kind, "\(target) with \(other)")
+            XCTAssertEqual(refusal.phase, .nothingChanged)
+        }
+        XCTAssertEqual(try topicList(), ["Pinned", "C", "lock:notes", "D", "A", "B"])
+    }
+
     func testAPathThroughASymlinkFindsTheSessionPathThatTheConfigNames() throws {
         // The Config names the SessionPaths through dev, a symlink to work, as ~/Dev can be; the CLI gives the real path.
         let dev = root.appendingPathComponent("dev")

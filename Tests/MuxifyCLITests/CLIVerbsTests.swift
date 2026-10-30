@@ -116,6 +116,9 @@ final class CLIVerbsTests: XCTestCase {
             (["topic", "unpin", "--topic", "Fix"], request(.pin(false), target: .topic(.named("Fix")))),
             (["topic", "move", "up"], request(.moveCard(.up))),
             (["topic", "move", "down", "--topic", "Fix"], request(.moveCard(.down), target: .topic(.named("Fix")))),
+            (["topic", "move", "--trade-with", "Next"], request(.tradeCard(with: .topic("Next")))),
+            (["topic", "move", "--trade-with-session", "notes", "--topic", "Fix"],
+             request(.tradeCard(with: .session("notes")), target: .topic(.named("Fix")))),
             (["session", "move", "up", "--session", "notes"], request(.moveSession(.up), target: .sessionName("notes"))),
             (["session", "move", "down"], request(.moveSession(.down))),
             (["topic", "sort-sessions", "--topic", "Fix"], request(.sortSessions, target: .topic(.named("Fix")))),
@@ -129,6 +132,8 @@ final class CLIVerbsTests: XCTestCase {
             XCTAssertEqual(try CLICommand(arguments: arguments, environment: inside), expected, "\(arguments)")
         }
         for arguments in [["topic", "pin", "now"], ["topic", "move"], ["topic", "move", "left"], ["topic", "move", "up", "down"],
+                          ["topic", "move", "up", "--trade-with", "Next"], ["topic", "move", "--trade-with", ""],
+                          ["topic", "move", "--trade-with", "A", "--trade-with-session", "notes"],
                           ["session", "move", "up", "--window", "@1"], ["session", "move", "up", "--topic", "Fix"],
                           ["topic", "replace-from-bench"], ["topic", "replace-from-bench", "Next"],
                           ["topic", "replace-from-bench", "--with", "Next", "--with-session", "notes"],

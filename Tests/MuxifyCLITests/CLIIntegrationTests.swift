@@ -462,6 +462,31 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertTrue(again.stderr.contains("not In Play"), again.stderr)
     }
 
+    func testTopicMoveTradeWithExchangesTheTwoCardsAndMovesNoOtherAndRefusesAPinnedCard() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        for name in ["First", "Second", "Third", "Fourth"] { _ = try await newTopic(name, in: sandbox.game, sandbox: sandbox) }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        func order() async throws -> [String] {
+            let list = try await run(cli, arguments: ["topic", "list"], environment: environment)
+            return list.stdout.split(separator: "\n").map { String($0.prefix { $0 != "\t" }) }
+        }
+        let before = try await order()
+
+        let traded = try await run(cli, arguments: ["topic", "move", "--trade-with", before[2], "--topic", before[0]], environment: environment)
+        XCTAssertEqual(traded.status, 0, traded.output)
+        let afterTrade = try await order()
+        XCTAssertEqual(afterTrade, [before[2], before[1], before[0], before[3]],
+                       "the two cards change places, and the first does not go to the end as with Replace from Bench")
+
+        let pinned = try await run(cli, arguments: ["topic", "pin", "--topic", before[3]], environment: environment)
+        XCTAssertEqual(pinned.status, 0, pinned.output)
+        let refused = try await run(cli, arguments: ["topic", "move", "--trade-with", before[3], "--topic", before[1]], environment: environment)
+        XCTAssertEqual(refused.status, 1, refused.output)
+        let afterRefusal = try await order()
+        XCTAssertEqual(afterRefusal, [before[3], before[2], before[1], before[0]], "only the Pin moved a card")
+    }
+
     func testChooseInPlayPutsTheNamedCardsFirstInTheOrderOfTheCommandLine() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }

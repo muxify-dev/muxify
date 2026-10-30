@@ -256,6 +256,19 @@ public enum TopicOrder {
         return normalized(zone)
     }
 
+    /// A trade: two cards that are not Pinned exchange their places, and no other card moves. So across the Bench line,
+    /// one goes In Play and the other goes to the Bench, and the line stays under the same number of cards.
+    public static func trading(_ card: TopicListID, with other: TopicListID, in entries: [TopicListEntry]) throws -> [TopicListEntry] {
+        let original = sorted(entries)
+        guard let source = original.first(where: { $0.id == card }) else { throw Failure.sourceUnavailable }
+        guard let anchor = original.first(where: { $0.id == other }) else { throw Failure.anchorUnavailable }
+        guard !source.isPinned, !anchor.isPinned else { throw Failure.pinned }
+        var zone = original.filter { !$0.isPinned }
+        let from = zone.firstIndex { $0.id == card }!, to = zone.firstIndex { $0.id == other }!
+        zone.swapAt(from, to)
+        return normalized(zone)
+    }
+
     /// Locks the Session last among the entries that are not Pinned.
     static func appendingLock(of sessionID: String, in entries: [TopicListEntry]) -> [TopicListEntry] {
         let original = sorted(entries)

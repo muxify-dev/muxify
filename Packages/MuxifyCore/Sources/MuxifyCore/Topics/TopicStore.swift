@@ -260,6 +260,11 @@ public struct TopicTransaction {
     }
 
     @discardableResult
+    public mutating func trade(_ id: TopicListID, with other: TopicListID) throws -> [SessionLock] {
+        put(try TopicOrder.trading(id, with: other, in: entries))
+    }
+
+    @discardableResult
     public mutating func pin(_ id: String, _ pinned: Bool) throws -> [SessionLock] {
         put(try TopicOrder.pinning(id, pinned, in: entries))
     }

@@ -30,15 +30,30 @@ enum DropPlacement<ID: Hashable>: Equatable {
     }
 }
 
+/// Where a lifted item would land, away from its own place.
+enum DropLanding<ID: Hashable>: Equatable {
+    /// On its own side of the list's divider, next to another item.
+    case place(DropPlacement<ID>)
+    /// Across the divider, on the item it trades places with; nil while it is over no item there.
+    case across(trade: ID?)
+}
+
 /// A place in a list's stack: an item that a drag moves, or a fixed view between the items, such as a line. A fixed
 /// view keeps the number of slots above it, so it slides only when the items above it change height.
 enum StackSlot<ID: Hashable>: Hashable {
     case item(ID)
     case fixed(String)
+    /// An item that keeps its place in this drag, as a fixed view does. It has the height that its item measured.
+    case held(ID)
 
     var item: ID? {
         if case .item(let id) = self { return id }
         return nil
+    }
+
+    var measured: StackSlot<ID> {
+        if case .held(let id) = self { return .item(id) }
+        return self
     }
 }
 
@@ -56,41 +71,77 @@ struct StackLayout<ID: Hashable> {
         return top
     }
 
-    func height(_ slot: StackSlot<ID>) -> CGFloat { heights[slot] ?? 0 }
+    func height(_ slot: StackSlot<ID>) -> CGFloat { heights[slot.measured] ?? 0 }
 
     /// Where `id` lands after it moved `translation` down from its place in `order`: before the first item above it
     /// whose middle its top edge passed, after the last item below it whose middle its bottom edge passed, or nil at
     /// its own place. Each edge leads the way it moves, so a tall item passes a short one as soon as it covers half of it.
     /// A fixed slot is no place to land, so the item passes it as it passes the gap between two items.
-    func placement(of id: ID, movedBy translation: CGFloat, in order: [StackSlot<ID>]) -> DropPlacement<ID>? {
+    /// Only the slots in `side` are places to land.
+    func placement(of id: ID, movedBy translation: CGFloat, in order: [StackSlot<ID>],
+                   side: Range<Int>? = nil) -> DropPlacement<ID>? {
         guard let index = order.firstIndex(of: .item(id)) else { return nil }
+        let side = side ?? order.indices
         let top = top(of: .item(id), in: order) + translation
         let bottom = top + height(.item(id))
         let middle = { (slot: StackSlot<ID>) in self.top(of: slot, in: order) + self.height(slot) / 2 }
-        if let passed = order[..<index].first(where: { $0.item != nil && top < middle($0) })?.item { return .before(passed) }
-        if let passed = order[(index + 1)...].last(where: { $0.item != nil && bottom > middle($0) })?.item {
+        if let passed = order[side.lowerBound..<index].first(where: { $0.item != nil && top < middle($0) })?.item {
+            return .before(passed)
+        }
+        if let passed = order[(index + 1)..<side.upperBound].last(where: { $0.item != nil && bottom > middle($0) })?.item {
             return .after(passed)
         }
         return nil
     }
 
+    /// Where `id` lands after it moved `translation` down, in a list that the fixed slot `divider` splits in two. On its
+    /// own side, it lands as `placement` gives. Once its middle passes the divider's middle, it is across: there it lands
+    /// on the item whose place, with half the spacing around it, holds its middle. Without the divider, as `placement`.
+    func landing(of id: ID, movedBy translation: CGFloat, in order: [StackSlot<ID>], divider: String?) -> DropLanding<ID>? {
+        guard let index = order.firstIndex(of: .item(id)) else { return nil }
+        guard let line = divider.flatMap({ order.firstIndex(of: .fixed($0)) }) else {
+            return placement(of: id, movedBy: translation, in: order).map(DropLanding.place)
+        }
+        let middle = top(of: .item(id), in: order) + translation + height(.item(id)) / 2
+        let lineMiddle = top(of: order[line], in: order) + height(order[line]) / 2
+        let above = index < line
+        if above == (middle < lineMiddle) {
+            let side = above ? 0..<line : (line + 1)..<order.count
+            return placement(of: id, movedBy: translation, in: order, side: side).map(DropLanding.place)
+        }
+        let others = above ? order[(line + 1)...] : order[..<line]
+        let target = others.first { slot in
+            let top = self.top(of: slot, in: order)
+            return slot.item != nil && top - spacing / 2 <= middle && middle <= top + height(slot) + spacing / 2
+        }
+        return .across(trade: target?.item)
+    }
+
     /// `translation` held so `id` stays within the list, from the top of its first item to the bottom of its last, and
-    /// moves up no more than `headroom`. An item that is already past the headroom does not move up at all.
-    func bounded(_ translation: CGFloat, of id: ID, in order: [StackSlot<ID>], headroom: CGFloat = .infinity) -> CGFloat {
+    /// moves up no more than `headroom`. An item that is already past the headroom does not move up at all. With a
+    /// `divider` in the list, its middle can go down to the end of the last slot, so it can cross a divider that ends
+    /// the list.
+    func bounded(_ translation: CGFloat, of id: ID, in order: [StackSlot<ID>], headroom: CGFloat = .infinity,
+                 divider: String? = nil) -> CGFloat {
         guard let first = order.first(where: { $0.item != nil }), let last = order.last(where: { $0.item != nil }) else {
             return translation
         }
         let top = top(of: .item(id), in: order)
         let low = max(self.top(of: first, in: order) - top, -max(headroom, 0))
-        let high = max(low, self.top(of: last, in: order) + height(last) - top - height(.item(id)))
+        var high = max(low, self.top(of: last, in: order) + height(last) - top - height(.item(id)))
+        if let divider, order.contains(.fixed(divider)), let end = order.last {
+            high = max(high, self.top(of: end, in: order) + height(end) - top - height(.item(id)) / 2)
+        }
         return min(max(translation, low), high)
     }
 }
 
 /// The drag of a list's items. A press that moves a few points lifts the item at once, and a press that lets go before
 /// that is a click. The lifted item follows the pointer, and the items it passes slide aside to leave a placeholder
-/// where it would land. Let go, it glides into the placeholder and stays there until the list shows the
-/// new order, so nothing jumps. A list holds one for all its items, since only one item moves at a time.
+/// where it would land. Let go, it glides into the placeholder and stays there until the list shows the new order, so
+/// nothing jumps. A list with a divider, such as the Bench line, trades across it: the lifted item that crosses the
+/// divider lands on an item there, and on the drop the two items pass each other to the other's place. A list holds one
+/// for all its items, since only one item moves at a time.
 @MainActor @Observable
 final class ListDrag<ID: Hashable> {
     enum Phase: Equatable {
@@ -99,6 +150,9 @@ final class ListDrag<ID: Hashable> {
         case lifted(ID)
         /// Let go: the item glides to where it lands and stays there until the list shows the new order.
         case settling(ID)
+        /// Let go on `with` across the divider: the two items pass each other and stay in the other's place until the
+        /// list shows them there.
+        case trading(ID, with: ID)
     }
 
     /// How long a dropped item waits for the list to show the new order before the list goes back to the order it shows.
@@ -106,15 +160,20 @@ final class ListDrag<ID: Hashable> {
     /// A lifted item grows by this much around this point.
     static var liftScale: CGFloat { 1.03 }
     static var liftAnchor: UnitPoint { UnitPoint(x: 0.5, y: 0.3) }
+    static var tradeDuration: Double { 0.56 }
 
     private(set) var phase: Phase = .idle
     /// How far the lifted item follows the pointer. Only the lifted item reads it, so the others do not draw again as the
     /// pointer moves.
     private(set) var translation: CGFloat = 0
     /// Where the lifted item would land; nil at its own place.
-    private(set) var placement: DropPlacement<ID>?
-    /// The items' heights when the item lifted.
+    private(set) var landing: DropLanding<ID>?
+    /// How far two traded items went on their paths, from 0 at the drop to 1 in the other's place.
+    private(set) var tradeProgress: CGFloat = 0
+    /// The items' heights when the item lifted, and of the items that came into its list since.
     private(set) var layout: StackLayout<ID>
+    /// The fixed slot across which a drop trades. Without it, every drop places.
+    let divider: String?
     @ObservationIgnored private var heights: [StackSlot<ID>: CGFloat] = [:]
     /// How far each item's top is below the top of the scroll view's visible part, or below a card header that sticks there.
     @ObservationIgnored private var visibleTops: [ID: CGFloat] = [:]
@@ -122,31 +181,58 @@ final class ListDrag<ID: Hashable> {
     @ObservationIgnored private var headroom: CGFloat = .infinity
     /// Each item's list as its stack shows it now. One drag can serve several lists, such as the Pinned Topics and the others.
     @ObservationIgnored private var lists: [ID: [StackSlot<ID>]] = [:]
-    /// The lifted item's list when it lifted.
+    /// The lifted item's list as its stack shows it.
     @ObservationIgnored private var order: [StackSlot<ID>] = []
     @ObservationIgnored private var timer: Task<Void, Never>?
 
-    /// `spacing` is the room between two items in the list's stack.
-    init(spacing: CGFloat) {
+    /// `spacing` is the room between two items in the list's stack, and `divider` the fixed slot across which a drop trades.
+    init(spacing: CGFloat, tradesAcross divider: String? = nil) {
         layout = StackLayout(heights: [:], spacing: spacing)
+        self.divider = divider
     }
 
-    /// The lifted or settling item.
     var dragged: ID? {
         switch phase {
-        case .lifted(let id), .settling(let id): return id
+        case .lifted(let id), .settling(let id), .trading(let id, _): return id
         default: return nil
         }
     }
 
+    /// Where the lifted item lands next to another item; nil at its own place and across the divider.
+    var placement: DropPlacement<ID>? {
+        if case .place(let placement) = landing { return placement }
+        return nil
+    }
+
+    var isAcross: Bool {
+        if case .across = landing { return true }
+        return false
+    }
+
+    var tradeTarget: ID? {
+        if case .across(let target) = landing { return target }
+        return nil
+    }
+
     /// How far `slot` moves from its place in `shown`, its list as the stack shows it now, to its place in the order
-    /// that the dragged item's placement makes. Zero once the stack shows that order, and zero in a list without the
-    /// placement's anchor. A list without the dragged item takes it as an item from below its end, so the list makes
-    /// room when the item lands before one of its items.
+    /// that the dragged item's placement makes. Zero once the stack shows that order.
     func shift(of slot: StackSlot<ID>, in shown: [StackSlot<ID>]) -> CGFloat {
-        guard let dragged, let placement else { return 0 }
-        let full = shown.contains(.item(dragged)) ? shown : shown + [.item(dragged)]
-        return layout.top(of: slot, in: placement.placing(dragged, in: full)) - layout.top(of: slot, in: shown)
+        guard let dragged, let placement, shown.contains(.item(dragged)) else { return 0 }
+        return layout.top(of: slot, in: placement.placing(dragged, in: shown)) - layout.top(of: slot, in: shown)
+    }
+
+    /// How far below its own place the trade target shows the item that would land in the lifted item's place.
+    func tradeGhostOffset(of id: ID) -> CGFloat? {
+        guard let dragged, phase == .lifted(dragged), tradeTarget == id else { return nil }
+        return layout.top(of: .item(dragged), in: order) - layout.top(of: .item(id), in: order)
+    }
+
+    /// The path of a traded item: from where it was let go, down by `from`, to the other's place, down by `to`. `side`
+    /// is how far it bows out on the way, so the two items pass each other on curves.
+    func tradePath(of id: ID) -> (from: CGFloat, to: CGFloat, side: CGFloat)? {
+        guard case .trading(let dragged, let target) = phase, id == dragged || id == target else { return nil }
+        let distance = layout.top(of: .item(target), in: order) - layout.top(of: .item(dragged), in: order)
+        return id == dragged ? (translation, distance, 26) : (0, -distance, -26)
     }
 
     /// An item or a fixed view reports its height, and its place in the scroll view, each time they change.
@@ -157,18 +243,42 @@ final class ListDrag<ID: Hashable> {
 
     func show(_ shown: [StackSlot<ID>], at id: ID) {
         lists[id] = shown
-        guard phase == .settling(id), let placement, placement.placing(id, in: shown) == shown else { return }
-        // The stack lays the items out where they were drawn, so the drag ends without moving anything.
+        switch phase {
+        case .lifted(id):
+            order = shown
+            updateLayout()
+        case .settling(id):
+            guard let placement, placement.placing(id, in: shown) == shown else { return }
+            finish()
+        case .trading(id, let target):
+            guard shown.firstIndex(of: .item(id)) == order.firstIndex(of: .item(target)) else { return }
+            finish()
+        default:
+            break
+        }
+    }
+
+    private func finish() {
         timer?.cancel()
         withTransaction(Transaction(animation: nil)) {
             phase = .idle
-            self.placement = nil
+            landing = nil
+            tradeProgress = 0
         }
+    }
+
+    private func updateLayout() {
+        let measured = Set(order.map(\.measured))
+        let heights = heights.filter { measured.contains($0.key) }
+        if heights != layout.heights { layout.heights = heights }
     }
 
     func press(_ id: ID) {
         timer?.cancel()
-        withTransaction(Transaction(animation: nil)) { placement = nil }
+        withTransaction(Transaction(animation: nil)) {
+            landing = nil
+            tradeProgress = 0
+        }
         phase = .pressing(id)
     }
 
@@ -176,7 +286,7 @@ final class ListDrag<ID: Hashable> {
     func lift(_ id: ID) {
         guard phase == .pressing(id) else { return }
         order = lists[id] ?? [.item(id)]
-        layout.heights = heights.filter { order.contains($0.key) }
+        updateLayout()
         // Grown by the lift, its top stands a little higher than its place.
         headroom = (visibleTops[id] ?? .infinity) - (Self.liftScale - 1) * Self.liftAnchor.y * layout.height(.item(id))
         translation = 0
@@ -187,11 +297,14 @@ final class ListDrag<ID: Hashable> {
 
     func follow(_ id: ID, translation: CGFloat) {
         guard phase == .lifted(id) else { return }
-        self.translation = layout.bounded(translation, of: id, in: order, headroom: headroom)
-        let placement = layout.placement(of: id, movedBy: self.translation, in: order)
-        guard placement != self.placement else { return }
-        withAnimation(.spring(duration: 0.3, bounce: 0.15)) { self.placement = placement }
-        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        updateLayout()
+        self.translation = layout.bounded(translation, of: id, in: order, headroom: headroom, divider: divider)
+        let landing = layout.landing(of: id, movedBy: self.translation, in: order, divider: divider)
+        guard landing != self.landing else { return }
+        withAnimation(.spring(duration: 0.3, bounce: 0.15)) { self.landing = landing }
+        if landing != .across(trade: nil) {
+            NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        }
     }
 
     /// The pointer moved on an item that cannot move: the press is neither a click nor a drag.
@@ -201,8 +314,9 @@ final class ListDrag<ID: Hashable> {
     }
 
     /// The press on `id` ended: a click if the item did not lift. A lifted item glides to where it lands, and `onDrop`
-    /// gets its placement once it is there; with no placement it glides back.
-    func end(_ id: ID, onTap: () -> Void, onDrop: @escaping (DropPlacement<ID>) -> Void) {
+    /// gets its placement once it is there; with no placement, or across the divider on no item, it glides back. On a
+    /// trade target, the two items pass each other, and `onTrade` gets the target once they are in place.
+    func end(_ id: ID, onTap: () -> Void, onDrop: @escaping (DropPlacement<ID>) -> Void, onTrade: @escaping (ID) -> Void) {
         timer?.cancel()
         switch phase {
         case .pressing(id):
@@ -210,7 +324,12 @@ final class ListDrag<ID: Hashable> {
             onTap()
         case .lifted(id):
             NSCursor.pop()
+            if let target = tradeTarget {
+                trade(id, with: target, onTrade: onTrade)
+                return
+            }
             let placement = placement
+            if placement == nil { landing = nil }
             withAnimation(.spring(duration: 0.3, bounce: 0.15)) {
                 phase = .settling(id)
             } completion: { [weak self] in
@@ -222,17 +341,38 @@ final class ListDrag<ID: Hashable> {
                 NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
                 // The list shows the new order at once or after tmux answers; `show` then ends the drag.
                 onDrop(placement)
-                timer = Task { [weak self] in
-                    try? await Task.sleep(for: Self.settleLimit)
-                    guard let self, !Task.isCancelled, phase == .settling(id) else { return }
-                    withAnimation(.spring(duration: 0.3)) {
-                        self.phase = .idle
-                        self.placement = nil
-                    }
-                }
+                waitForTheList(of: id)
             }
         default:
             break
+        }
+    }
+
+    private func trade(_ id: ID, with target: ID, onTrade: @escaping (ID) -> Void) {
+        withTransaction(Transaction(animation: nil)) { tradeProgress = 0 }
+        withAnimation(.spring(duration: 0.25)) {
+            phase = .trading(id, with: target)
+            landing = nil
+        }
+        withAnimation(.timingCurve(0.45, 0, 0.2, 1, duration: Self.tradeDuration)) {
+            tradeProgress = 1
+        } completion: { [weak self] in
+            guard let self, phase == .trading(id, with: target) else { return }
+            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+            onTrade(target)
+            waitForTheList(of: id)
+        }
+    }
+
+    private func waitForTheList(of id: ID) {
+        timer = Task { [weak self] in
+            try? await Task.sleep(for: Self.settleLimit)
+            guard let self, !Task.isCancelled, dragged == id else { return }
+            withAnimation(.spring(duration: 0.3)) {
+                self.phase = .idle
+                self.landing = nil
+                self.tradeProgress = 0
+            }
         }
     }
 
@@ -245,7 +385,7 @@ final class ListDrag<ID: Hashable> {
             NSCursor.pop()
             withAnimation(.spring(duration: 0.3)) {
                 phase = .idle
-                placement = nil
+                landing = nil
             }
         default:
             break
@@ -259,6 +399,7 @@ private struct ListDragHandle<ID: Hashable>: ViewModifier {
     let isEnabled: Bool
     let onTap: () -> Void
     let onDrop: (DropPlacement<ID>) -> Void
+    let onTrade: (ID) -> Void
 
     /// The pointer moved on an item that cannot move: the press is neither a click nor a drag.
     @State private var cancelled = false
@@ -303,7 +444,7 @@ private struct ListDragHandle<ID: Hashable>: ViewModifier {
             cancelled = false
             return
         }
-        drag.end(id, onTap: onTap, onDrop: onDrop)
+        drag.end(id, onTap: onTap, onDrop: onDrop, onTrade: onTrade)
     }
 }
 
@@ -317,23 +458,40 @@ private struct ListDragItem<ID: Hashable>: ViewModifier {
 
     func body(content: Content) -> some View {
         let isLifted = drag.phase == .lifted(id)
-        let isDragged = isLifted || drag.phase == .settling(id)
+        let path = drag.tradePath(of: id)
+        let isRaised = isLifted || path != nil
+        let isDragged = isRaised || drag.phase == .settling(id)
+        let stepsAside = isLifted && drag.tradeTarget != nil
+        let isTarget = drag.tradeTarget == id
         // Its own place in the new order for the dropped item, the placeholder's place for the lifted one, and for the
         // others the place they slide aside to.
         let shift = drag.shift(of: .item(id), in: shown)
         content
             .transformEnvironment(\.isLiftedByDrag) { if isLifted { $0 = true } }
             .background {
-                if isLifted { plate.transition(.opacity) }
+                if isRaised { plate.transition(.opacity) }
             }
-            .scaleEffect(isLifted ? ListDrag<ID>.liftScale : 1, anchor: ListDrag<ID>.liftAnchor)
-            .shadow(color: .black.opacity(isLifted ? 0.4 : 0), radius: isLifted ? 14 : 0, y: isLifted ? 10 : 0)
+            .overlay {
+                if isTarget { TradeMark(cornerRadius: cornerRadius).transition(.opacity) }
+            }
+            .animation(.spring(duration: 0.2), value: isTarget)
+            .scaleEffect(isLifted ? (stepsAside ? 0.94 : ListDrag<ID>.liftScale) : 1, anchor: ListDrag<ID>.liftAnchor)
+            .opacity(stepsAside ? 0.9 : 1)
+            .shadow(color: .black.opacity(isRaised ? 0.4 : 0), radius: isRaised ? 14 : 0, y: isRaised ? 10 : 0)
             .animation(.spring(duration: 0.25, bounce: 0.3), value: isLifted)
+            .animation(.spring(duration: 0.25), value: stepsAside)
+            .offset(x: stepsAside ? 34 : 0)
             .offset(y: isLifted ? drag.translation : shift)
             // The lifted item stays under the pointer while the others slide; let go, it glides.
             .transaction { if isLifted { $0.animation = nil } }
+            .modifier(TradeArc(progress: path == nil ? 0 : drag.tradeProgress, path: path))
             .background(alignment: .top) {
-                if isLifted { DropSlot(cornerRadius: cornerRadius).offset(y: shift).transition(.opacity) }
+                if isLifted { DropSlot(cornerRadius: cornerRadius, trades: stepsAside).offset(y: shift).transition(.opacity) }
+            }
+            .background(alignment: .top) {
+                if let offset = drag.tradeGhostOffset(of: id) {
+                    TradeGhost(cornerRadius: cornerRadius) { content }.offset(y: offset).transition(.opacity)
+                }
             }
             // Its place without its own offset, in the visible part of the list's scroll view.
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .scrollView) } action: { frame in
@@ -398,15 +556,81 @@ private struct ListDragFixed<ID: Hashable>: ViewModifier {
     }
 }
 
-/// The place a lifted item would land: a slot of its size, outlined.
+/// The place a lifted item would land: a slot of its size, outlined. In the trade colour while the lifted item is over
+/// a trade target, as the target lands there.
 private struct DropSlot: View {
     let cornerRadius: CGFloat
+    let trades: Bool
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        shape.fill(Color.accentColor.opacity(0.08))
-            .overlay { shape.strokeBorder(Color.accentColor.opacity(0.55), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])) }
+        let color = trades ? Color.tradeMark : Color.accentColor
+        shape.fill(color.opacity(0.08))
+            .overlay { shape.strokeBorder(color.opacity(0.55), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])) }
             .allowsHitTesting(false)
+    }
+}
+
+extension Color {
+    static var tradeMark: Color { .orange }
+}
+
+private struct TradeMark: View {
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius + 2, style: .continuous)
+        shape.fill(Color.tradeMark.opacity(0.1))
+            .overlay { shape.strokeBorder(Color.tradeMark, style: StrokeStyle(lineWidth: 2, dash: [5, 4])) }
+            .padding(-2)
+            .overlay(alignment: .topTrailing) {
+                Text("⇄ Trade")
+                    .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                    .padding(.horizontal, 7).padding(.vertical, 1)
+                    .background(Capsule().fill(Color.tradeMark))
+                    .padding(.top, 6).padding(.trailing, 8)
+            }
+            .allowsHitTesting(false)
+            .accessibilityElement()
+            .accessibilityLabel("Trade")
+            .accessibilityIdentifier("list-drag-trade-target")
+    }
+}
+
+private struct TradeGhost<Content: View>: View {
+    let cornerRadius: CGFloat
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .opacity(0.45)
+            .overlay(alignment: .bottomTrailing) {
+                Text("lands here")
+                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.tradeMark)
+                    .padding(.bottom, 4).padding(.trailing, 8)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Moves a traded item along its path: down from `from` to `to` as `progress` goes from 0 to 1, and out to the side and
+/// back on the way, so two traded items pass each other on curves and do not cover each other.
+private struct TradeArc: GeometryEffect {
+    var progress: CGFloat
+    let path: (from: CGFloat, to: CGFloat, side: CGFloat)?
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        guard let path else { return ProjectionTransform() }
+        let bow = sin(.pi * progress)
+        return ProjectionTransform(CGAffineTransform(translationX: path.side * bow,
+                                                     y: path.from + (path.to - path.from) * progress))
     }
 }
 
@@ -414,15 +638,16 @@ extension View {
     /// Makes the view the handle of a `ListDrag` item: a click calls `onTap`, a press that moves lifts the item, and
     /// letting go of a lifted item calls `onDrop` with its placement once it glided there. While disabled, a press that
     /// moves does nothing and a click still works.
+    /// In a list with a divider, letting go on a trade target calls `onTrade` with it once the two items passed each other.
     func listDrag<ID: Hashable>(_ id: ID, drag: ListDrag<ID>, isEnabled: Bool = true, onTap: @escaping () -> Void,
-                                     onDrop: @escaping (DropPlacement<ID>) -> Void) -> some View {
-        modifier(ListDragHandle(id: id, drag: drag, isEnabled: isEnabled, onTap: onTap, onDrop: onDrop))
+                                     onDrop: @escaping (DropPlacement<ID>) -> Void,
+                                     onTrade: @escaping (ID) -> Void = { _ in }) -> some View {
+        modifier(ListDragHandle(id: id, drag: drag, isEnabled: isEnabled, onTap: onTap, onDrop: onDrop, onTrade: onTrade))
     }
 
     /// Makes the view an item of a `ListDrag` list, whose handle may be the view or a part of it. `shown` is its
-    /// list as the stack shows it now: the items it can reach in a drag. An item from below the end of that list can
-    /// come into it, and the list then makes room. `cornerRadius` is the item's corners, for the plate it stands on
-    /// while lifted and the placeholder where it would land.
+    /// list as the stack shows it now: the items it can reach in a drag. `cornerRadius` is the item's corners, for the
+    /// plate it stands on while lifted and the placeholder where it would land.
     func listDragItem<ID: Hashable>(_ id: ID, drag: ListDrag<ID>, shown: [ID], cornerRadius: CGFloat) -> some View {
         listDragItem(id, drag: drag, shown: shown.map(StackSlot.item), cornerRadius: cornerRadius)
     }

@@ -271,6 +271,15 @@ struct TopicsModel {
         var count: Int { topics.count + hiddenCount }
     }
 
+    /// Benched cards that a drag across the Bench line shows for a moment while the Bench is hidden. The user's choice
+    /// to show or hide the Bench stays as it is.
+    enum BenchPeek: Equatable {
+        /// An In Play card crossed the hidden line: the Bench shows until the drag ends.
+        case all
+        /// The card that a trade sent to the hidden Bench shows under the line, then folds into it.
+        case card(TopicGroupID)
+    }
+
     /// One item of the Topics list, in the order the Sidebar shows them.
     enum ListItem: Identifiable {
         case card(Row)
@@ -279,6 +288,11 @@ struct TopicsModel {
         case noTopicSession(Session)
 
         var id: String { cardID?.accessibilityID ?? "bench-line" }
+
+        var dragSlot: StackSlot<TopicListID> {
+            if case .card(let row) = self, let listID = row.id.listID { return .item(listID) }
+            return .fixed(id)
+        }
 
         /// The card's Topic, Locked Session or No Topic; nil for the Bench line.
         var cardID: TopicGroupID? {
@@ -327,19 +341,28 @@ struct TopicsModel {
     /// The cards of `rows`, as MuxifyCore orders them for the CLI too (`TopicCards`).
     private let cards: [TopicListEntry]
 
-    /// The items of `list` that the item `id` can reach in a drag: the cards with its Pin and, among the cards that are
-    /// not Pinned, the Bench line and the opened No Topic Session. While the Bench is hidden, an In Play card gets only
-    /// the items above the line and the line: dropped below it, it would put a card that the Bench hides In Play. The
-    /// card under the line can go up past it, so it, the line and the No Topic Session get every item.
-    func dragItems(around id: ListItem.ID) -> [ListItem] {
+    /// The slots of `list` that the item `id` can reach in a drag: the cards with its Pin and, among the cards that are
+    /// not Pinned, the Bench line and the opened No Topic Session, which a card passes. A card that crosses the line
+    /// trades with a card on the other side. Under the line, the Location's card and the other Benched cards hold their
+    /// places for each other: the Location's card stays right under the line, away from its place in the list, so a
+    /// reorder among them would not show where it lands.
+    func dragSlots(around id: ListItem.ID) -> [StackSlot<TopicListID>] {
         func isPinned(_ item: ListItem) -> Bool {
             if case .card(let row) = item { return row.isPinned }
             return false
         }
         guard let dragged = list.first(where: { $0.id == id }) else { return [] }
         let items = list.filter { isPinned($0) == isPinned(dragged) }
-        guard isBenchShown == false, let line = items.firstIndex(where: { $0.cardID == nil }) else { return items }
-        return items[..<line].contains { $0.id == id } ? Array(items[...line]) : items
+        let line = items.firstIndex { $0.cardID == nil } ?? items.endIndex
+        let benched = Set(items[line...].compactMap(\.cardID))
+        guard let card = dragged.cardID, benched.contains(card), let held = activeTopic, benched.contains(held) else {
+            return items.map(\.dragSlot)
+        }
+        return items.map { item in
+            guard let other = item.cardID, benched.contains(other), other != card, other == held || card == held,
+                  let listID = other.listID else { return item.dragSlot }
+            return .held(listID)
+        }
     }
 
     /// The cards right above and below a card in the Topics list, among those with its Pin. None for a Topic outside it.
@@ -396,6 +419,7 @@ struct TopicsModel {
 
     init(records: [TopicRecord], windows: [TmuxWindow], config: Config, selection: TopicSelection, location: Location? = nil,
          mode: SidebarMode = .topics, groups groupsState: TopicGroupsState = TopicGroupsState(), benchShown: Bool = false,
+         benchPeek: BenchPeek? = nil,
          agents: [Agent] = [], panes: [TmuxPane]? = nil) {
         topicsEnabled = config.sidebar.topics
         sessionsEnabled = config.sidebar.sessions
@@ -527,7 +551,7 @@ struct TopicsModel {
                                    uniquingKeysWith: { first, _ in first })
         self.rows = rows
         list = Self.list(rows, inPlay: self.mode == .topics ? config.topics.inPlay : nil, benchShown: benchShown,
-                         location: active, noTopic: openedNoTopicSession)
+                         peek: benchPeek, location: active, noTopic: openedNoTopicSession)
         let settled = records.filter { $0.settledAt != nil }
             .sorted { ($0.settledAt ?? "", $0.id) > ($1.settledAt ?? "", $1.id) }
         settledTopicIDs = settled.map(\.id)
@@ -581,9 +605,10 @@ struct TopicsModel {
     }
 
     /// The first `inPlay` cards that are not Pinned are In Play, and the cards after them are on the Bench. While the
-    /// Bench is hidden, only the Location's card shows from it. The opened No Topic Session counts toward nothing and
-    /// shows right under the line, so it does not move when the Bench shows or hides.
-    private static func list(_ rows: [Row], inPlay: Int?, benchShown: Bool, location: TopicGroupID?,
+    /// Bench is hidden, only the Location's card and the card that `peek` holds show from it. The Location's card and
+    /// the opened No Topic Session show right under the line, so they do not move when the Bench shows or hides. The
+    /// opened No Topic Session counts toward nothing.
+    private static func list(_ rows: [Row], inPlay: Int?, benchShown: Bool, peek: BenchPeek?, location: TopicGroupID?,
                              noTopic: Session?) -> [ListItem] {
         let opened = noTopic.map { [ListItem.noTopicSession($0)] } ?? []
         var front: [Row] = [], bench: [Row] = []
@@ -599,8 +624,10 @@ struct TopicsModel {
             }
         }
         guard !bench.isEmpty else { return front.map(ListItem.card) + opened }
-        let benchCards = benchShown ? bench : bench.filter { $0.id == location }
-        return front.map(ListItem.card) + [.benchLine(isBenchShown: benchShown)] + opened + benchCards.map(ListItem.card)
+        let shown = benchShown || peek == .all
+        let underLine = bench.filter { $0.id == location } + bench.filter { $0.id != location }
+        let benchCards = shown ? underLine : underLine.filter { $0.id == location || peek == .card($0.id) }
+        return front.map(ListItem.card) + [.benchLine(isBenchShown: shown)] + opened + benchCards.map(ListItem.card)
     }
 
     /// A Settled Topic's row, with the Sessions and Windows its record remembers.

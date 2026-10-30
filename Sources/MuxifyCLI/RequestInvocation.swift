@@ -55,6 +55,8 @@ struct RequestInvocation: Equatable {
         case note(String?)
         /// The Topic's card, one place up or down.
         case moveCard(CardMove)
+        /// The card that trades places with the Topic's card, as a drag across the Bench line does.
+        case tradeCard(with: CardName)
         /// The cards In Play, in their order, and then the top of the Bench.
         case chooseInPlay([CardName])
         /// The Benched card that takes the place of the target's card In Play.
@@ -70,7 +72,7 @@ struct RequestInvocation: Equatable {
         var targets: [TargetOption] {
             switch self {
             case .new: return []
-            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .moveCard, .sortSessions:
+            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .moveCard, .tradeCard, .sortSessions:
                 return [.topic, .window, .pane]
             case .moveSession: return [.session, .pane]
             case .replaceFromBench: return [.topic, .session, .window, .pane]
@@ -105,7 +107,7 @@ struct RequestInvocation: Equatable {
         /// A Tag change needs no SessionPath, and a command that shows a Topic finds only the SessionPaths of its Sessions.
         var findsAllSessionPaths: Bool {
             switch self {
-            case .new, .tag, .note, .lock, .pin, .moveCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
+            case .new, .tag, .note, .lock, .pin, .moveCard, .tradeCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
                  .placeWindow, .zoomPane: return false
             default: return !showsTopic
             }
@@ -143,7 +145,7 @@ struct RequestInvocation: Equatable {
             case .placeWindow: return "window move"
             case .kill(let session): return session ? "session kill" : "window kill"
             case .pin(let pinned): return pinned ? "topic pin" : "topic unpin"
-            case .moveCard: return "topic move"
+            case .moveCard, .tradeCard: return "topic move"
             case .chooseInPlay: return "topic choose-in-play"
             case .replaceFromBench: return "topic replace-from-bench"
             case .moveSession: return "session move"
@@ -461,6 +463,7 @@ extension RequestInvocation {
         case .kill(let session): return session ? .killSession : .killWindow
         case .pin(let pinned): return pinned ? .pin : .unpin
         case .moveCard(let move): return .moveCard(move)
+        case .tradeCard(let other): return .moveCard(.trade(try other.ref))
         case .chooseInPlay(let cards): return .chooseInPlay(try cards.map { try $0.ref })
         case .replaceFromBench(let benched): return .replaceFromBench(with: try benched.ref)
         case .moveSession(let placement): return .moveSession(to: placement)

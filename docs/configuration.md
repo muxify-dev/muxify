@@ -209,19 +209,28 @@ Sidebar then shows every card.
   a card. It has no count and no Agent marks.
 - The Bench stays as you leave it. Going to a card, by a click, a Hint, a
   Topic step or a Command Palette, does not show or hide it.
-- The card that you are on always shows. When it is on the hidden Bench, after
-  a Command Palette jump for example, it shows alone under the line. The Bench
-  does not show for a jump.
+- The card that you are on always shows. When it is on the Bench, after a
+  Command Palette jump for example, it shows directly under the line: alone
+  while the Bench is hidden, and above the other Benched cards while it shows.
+  So it does not move when the Bench shows or hides, and its place in the list
+  does not change. The Bench does not show for a jump.
 - The No Topic Session that you are on shows directly under the line, above the
   first Benched card. It does not count toward `in_play`.
 - Hints and ⌃1 … ⌃9 number only the cards that show. To reach a hidden Benched
   card, show the Bench or use a Command Palette. Show Next Topic, Move Topic Up
   and Move Topic Down still go through every card.
-- To put a Benched card In Play, show the Bench and drag the card above the
-  line. The line stays under the same number of cards, so the last card In
-  Play goes to the Bench. A card dragged below the line goes to the Bench the
-  same way. While the Bench is hidden, a drag moves a card only on its side of
-  the line.
+- A drag on one side of the line moves the card among the cards on that side.
+- A drag across the line trades: let go on a card on the other side, and the
+  two cards change places. No other card moves. While the drag is over a card,
+  that card shows a "⇄ Trade" mark, and the place that you lifted your card
+  from shows the card that will land there. Let go across the line but not on a
+  card, and nothing changes. Pinned cards do not trade.
+- An In Play card dragged down past the hidden line shows the Bench until you
+  let go. Then the Bench hides again, and the card that went to the Bench goes
+  in under the line. The card that you are on, shown alone under the hidden
+  line, can trade up with any In Play card the same way.
+- `muxify topic move --trade-with <id|label>` and `--trade-with-session
+  <name|id>` make the same trade. They do not change the Location.
 - The "N more below" line counts only the cards that show.
 
 Each App Window shows or hides its own Bench, and a restart hides it. The

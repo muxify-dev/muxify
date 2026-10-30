@@ -295,6 +295,17 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(.moveCard(move), target: target))
     }
 
+    /// The Sidebar drag across the Bench line: the two cards exchange their places. While the Bench is hidden, the card
+    /// that goes to the Bench shows under the line until the Sidebar folds it in.
+    func tradeCard(_ id: TopicListID, with other: TopicListID) {
+        guard let target = Self.target(of: id), let ref = Self.ref(of: other), let inPlay = topicConfig.inPlay else { return }
+        if !benchShown, benchPeek != .all {
+            let leaving = topics.split(inPlay: inPlay).inPlay.map(\.id).first { $0.listID == id || $0.listID == other }
+            benchPeek = leaving.map(TopicsModel.BenchPeek.card)
+        }
+        perform(EnvironmentRequest(.moveCard(.trade(ref)), target: target))
+    }
+
     /// Move Up and Move Down: MuxifyCore finds the neighbor among the cards that the Topics list shows.
     func moveCard(_ id: TopicListID, _ step: TopicCards.Step) {
         guard let target = Self.target(of: id) else { return }
@@ -730,6 +741,7 @@ final class WorkspaceStore {
     var topicGroups = TopicGroupsState()
     /// Whether the Bench shows. Only the user shows or hides it. Each App Window has its own, and no restart keeps it.
     var benchShown = false
+    var benchPeek: TopicsModel.BenchPeek?
 
     /// Built again only after a change to what it reads. The Sidebar, the menus
     /// and the terminal area read it many times in each update, and each build is expensive.
@@ -741,7 +753,8 @@ final class WorkspaceStore {
         // Topic records and SessionPaths are on this Mac; a Remote App Window shows Sessions only.
         if isRemote { config.sidebar.topics = false }
         return TopicsModel(records: topicWatcher.records, windows: windows, config: config,
-                           selection: topicSelection, location: location, mode: sidebarMode, groups: topicGroups, benchShown: benchShown, agents: agents,
+                           selection: topicSelection, location: location, mode: sidebarMode, groups: topicGroups, benchShown: benchShown,
+                           benchPeek: benchPeek, agents: agents,
                            panes: panesVisible ? panes : nil)
     }
 
@@ -773,6 +786,7 @@ final class WorkspaceStore {
     /// Shows or hides the Bench, while the Topics list has one.
     func toggleBench() {
         guard topics.isBenchShown != nil else { return }
+        benchPeek = nil
         benchShown.toggle()
     }
 
