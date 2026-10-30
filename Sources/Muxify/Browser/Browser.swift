@@ -164,8 +164,15 @@ final class Browser {
         changed()
     }
 
+    /// The user's close, from the panel, a menu or ⌘W: the Tab shown next takes Focus,
+    /// as the closed Tab's page had it. An Agent's `close` leaves Focus where it is.
+    func closeAndFocus(_ tab: BrowserTab) {
+        close(tab)
+        focusShownTab()
+    }
+
     func closeActiveTab() {
-        if let activeTab { close(activeTab) }
+        if let activeTab { closeAndFocus(activeTab) }
     }
 
     var canReopenClosedTab: Bool { !closedTabs.isEmpty }
@@ -218,6 +225,12 @@ final class Browser {
     func selectTab(offset: Int) {
         guard let index = tabs.firstIndex(where: { $0.id == activeTabID }), tabs.count > 1 else { return }
         select(tabs[(index + offset + tabs.count) % tabs.count])
+        focusShownTab()
+    }
+
+    /// The page that had Focus goes with its Tab, so the Tab shown next must take it.
+    private func focusShownTab() {
+        if layout.shows(.browser), activeTab != nil { requestFocus() }
     }
 
     /// Releases every Tab's web content (the Window is gone).

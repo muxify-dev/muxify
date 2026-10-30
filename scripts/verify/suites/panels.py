@@ -29,10 +29,10 @@ class Panels(unittest.TestCase):
     def setUp(self):
         self.window = self.new_window(self.id().rsplit('.', 1)[-1][:24])
 
-    def new_window(self, name, tabs=True):
+    def new_window(self, name, tabs=True, pages=PAGE):
         """A Window that shows its Terminal and, with tabs, its Browser, selected with the Sidebar shown."""
         # One tmux call, so the app never reads the Window without its Browser options.
-        options = [arg for option, value in [('@muxify_tabs', PAGE), ('@muxify_active_tab', '0'), ('@muxify_browser', 'on')]
+        options = [arg for option, value in [('@muxify_tabs', pages), ('@muxify_active_tab', '0'), ('@muxify_browser', 'on')]
                    for arg in (';', 'set-option', '-w', '-t', 'panels:' + name, option, value)] if tabs else []
         self.s.tmux('new-window', '-d', '-t', self.session + ':', '-n', name, SHELL, *options)
         window = self.s.tmux('display-message', '-p', '-t', 'panels:' + name, '#{window_id}')
@@ -234,6 +234,26 @@ class Panels(unittest.TestCase):
         self.s.wait_rows(lambda rs: markers(rs) == set(), 'the Focus marker shows on the Browser alone: %s' % markers(None))
         self.s.act('press', 'toggle-terminal')
         self.wait_panels({'sidebar', 'terminal', 'browser'}, 'the Terminal toggle did not show the Terminal again')
+
+    def test_closing_a_tab_gives_the_browser_focus(self):
+        self.new_window('close-tab', pages=PAGE + ' ' + PAGE + '-second')
+        self.s.act('press', 'Focus Terminal')
+        self.wait_focus('terminal', 'Focus Terminal did not give the Terminal Focus')
+        titles = lambda rs: [key for key in self.s.ids(rs) if key.startswith('browser-tab-title-')]
+        self.assertEqual(len(titles(None)), 2, 'the Browser does not show its two Tabs: %s' % titles(None))
+        # Only the active Tab shows its close button.
+        self.s.act('press', next(key for key in self.s.ids(self.s.rows()) if key.startswith('browser-tab-close-')))
+        self.s.wait_rows(lambda rs: len(titles(rs)) == 1, 'the close button did not close its Tab')
+        self.wait_focus('browser', 'closing a Tab did not give the Browser Focus')
+
+    def test_showing_another_tab_keeps_the_browser_focus(self):
+        self.new_window('switch-tab', pages=PAGE + ' ' + PAGE + '-2 ' + PAGE + '-3')
+        self.s.act('press', 'Focus Browser')
+        self.wait_focus('browser', 'Focus Browser did not give the Browser Focus')
+        self.s.act('press', 'Show Next Tab')
+        self.wait_focus('browser', 'Show Next Tab took Focus from the Browser')
+        self.s.act('press', 'Close Tab')
+        self.wait_focus('browser', 'Close Tab took Focus from the Browser')
 
     def test_the_tmux_client_keeps_its_width_while_the_terminal_is_hidden(self):
         time.sleep(SETTLE)
