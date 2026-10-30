@@ -343,6 +343,41 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(locked ? .lock : .unlock, target: .session(id)))
     }
 
+    /// A card that Make a Guest and End Guest act on: a Topic, or a No Topic Session, which is a Guest through its Lock.
+    enum GuestCard: Equatable {
+        case topic(String)
+        case session(String)
+    }
+
+    /// Whether the card is a Guest; nil when neither Make a Guest nor End Guest applies to it: the Config does not set
+    /// `topics.in_play`, or the card is Pinned, or it is In Play and not a Guest.
+    func guestState(of card: GuestCard) -> Bool? {
+        guard let inPlay = topicConfig.inPlay, !isRemote, topics.topicsEnabled else { return nil }
+        switch card {
+        case .session(let id): return lockState(ofSession: id)
+        case .topic(let id):
+            guard let row = topics.rows.first(where: { $0.id == .topic(id) }), !row.isPinned else { return nil }
+            if row.isGuest { return true }
+            return topics.split(inPlay: inPlay).bench.contains { $0.id == row.id } ? false : nil
+        }
+    }
+
+    /// The card that the Make a Guest and End Guest Commands act on: the Active Topic, else the Session of the Location.
+    var currentGuestCard: GuestCard? {
+        if let id = activeTopicID { return .topic(id) }
+        return selectedWindow.map { .session($0.sessionID) }
+    }
+
+    /// Make a Guest and End Guest go through the Topic service, as `muxify topic make-guest` and `muxify session lock`
+    /// do. A Session is a Guest through its Lock.
+    func setGuest(_ card: GuestCard, _ guest: Bool) {
+        guard guestState(of: card) == !guest else { return }
+        switch card {
+        case .topic(let id): perform(EnvironmentRequest(guest ? .makeGuest : .endGuest, target: .topic(.id(id))))
+        case .session(let id): setLock(ofSession: id, guest)
+        }
+    }
+
     func toggleLockOfCurrentSession() {
         guard let id = selectedWindow?.sessionID, let locked = lockState(ofSession: id) else { return }
         setLock(ofSession: id, !locked)
@@ -501,6 +536,29 @@ final class WorkspaceStore {
             self.changingTopic = false
             self.topicWatcher.reload()
             if let failure { NSLog("muxify: topics: upgrade: \(failure.message)") }
+        }
+    }
+
+    /// When the Config sets `topics.in_play`, each Lock becomes a Guest at the end of In Play (ADR 0061). The flag in
+    /// UserDefaults says that this Mac gathered them for the `in_play` now set, so a restart or a reload does not move
+    /// the Guests again.
+    private func gatherGuestsWhenInPlayIsSet() {
+        let key = "guestsGathered"
+        guard !isRemote, topics.topicsEnabled else { return }
+        guard topicConfig.inPlay != nil else {
+            if UserDefaults.standard.bool(forKey: key) { UserDefaults.standard.set(false, forKey: key) }
+            return
+        }
+        guard !UserDefaults.standard.bool(forKey: key), !changingTopic else { return }
+        changingTopic = true
+        let service = topicService()
+        Task { [weak self] in
+            let failure = await Task.detached(priority: .userInitiated) { service.gatherGuests() }.value
+            guard let self else { return }
+            self.changingTopic = false
+            self.topicWatcher.reload()
+            if let failure { NSLog("muxify: topics: gather Guests: \(failure.message)") }
+            else { UserDefaults.standard.set(true, forKey: key) }
         }
     }
 
@@ -799,7 +857,8 @@ final class WorkspaceStore {
     /// The check step of Choose In Play, with the In Play cards checked.
     func presentChooseInPlay(keepingHistory: Bool = false) {
         guard canChooseInPlay, let inPlay = topicConfig.inPlay else { return }
-        let draft = CheckDraft(action: .chooseInPlay(places: inPlay), checked: Set(topics.split(inPlay: inPlay).inPlay.map(\.id)))
+        let regular = topics.split(inPlay: inPlay).inPlay.filter { !$0.isGuest }
+        let draft = CheckDraft(action: .chooseInPlay(places: inPlay), checked: Set(regular.map(\.id)))
         palette.begin(.check(draft), keepingHistory: keepingHistory)
     }
 
@@ -1367,7 +1426,10 @@ final class WorkspaceStore {
         recordVisit()
         consumeOpenRequests()
         publishBrowserSocket(snapshot)
-        if !updateUnread(snapshot.panes) { upgradeTopicRecords() }
+        if !updateUnread(snapshot.panes) {
+            upgradeTopicRecords()
+            gatherGuestsWhenInPlayIsSet()
+        }
 
         // (Re)start listening once there is a Session to attach to.
         if snapshot.serverRunning, isConnected, !events.isRunning,

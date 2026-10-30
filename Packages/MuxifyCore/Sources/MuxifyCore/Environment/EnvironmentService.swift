@@ -28,7 +28,7 @@ public struct EnvironmentService: Sendable {
         self.topics = topics
         self.topicsAvailable = topicsAvailable
         self.editLockTimeout = editLockTimeout
-        store = TopicStore(paths: paths)
+        store = TopicStore(paths: paths, inPlay: topics.inPlay)
     }
 
     /// `client` is the host's tmux client: the one that types keys for a plan and that switches to the result.
@@ -278,6 +278,7 @@ public struct EnvironmentService: Sendable {
             case .notBenched: return .cardNotBenched
             case .pinned: return .cardPinned
             case .chosenTwice: return .unsupported
+            case .guest: return .cardGuest
             }
         case is TopicTransaction.Failure: return .topicUnavailable
         case is FileLock.Busy: return .storeBusy
@@ -297,7 +298,8 @@ extension EnvironmentCommand {
     var lane: Lane {
         switch self {
         case .list, .show: return .read
-        case .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .markRead, .markAllRead: return .records
+        case .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .endGuest, .markRead, .markAllRead:
+            return .records
         case .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename,
              .reopen, .startFresh, .moveSession, .sortSessions, .lock, .unlock, .newWindow, .newSession, .renameSession,
              .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession: return .edit
@@ -313,7 +315,8 @@ extension EnvironmentCommand {
         case .markRead(_, let scope): return scope == .topic
         case .markAllRead: return false
         case .list, .show, .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename, .reopen, .startFresh,
-             .moveSession, .sortSessions, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench:
+             .moveSession, .sortSessions, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench,
+             .makeGuest, .endGuest:
             return true
         }
     }

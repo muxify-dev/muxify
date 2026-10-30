@@ -480,9 +480,9 @@ struct TopicCard: View {
     }
 
     private var header: some View {
-        CardHeader(title: formatted.title, isOpen: topic.isExpanded, mark: topic.mark, isPinned: topic.isPinned,
+        CardHeader(title: formatted.title, isOpen: topic.isExpanded, mark: topic.mark, isPinned: topic.isPinned, isGuest: topic.isGuest,
                    hintTarget: list == nil ? nil : namedTopicID.map { .topic($0) },
-                   notes: (topic.isPinned ? ["Pinned"] : []) + (topic.usesRowMarks && topic.isUnread && topic.mark != .unread ? ["unread"] : []) + (groupDetail.map { [$0] } ?? []) + (topic.idleLabel.map { [$0] } ?? []),
+                   notes: (topic.isPinned ? ["Pinned"] : []) + (topic.isGuest ? ["Guest"] : []) + (topic.usesRowMarks && topic.isUnread && topic.mark != .unread ? ["unread"] : []) + (groupDetail.map { [$0] } ?? []) + (topic.idleLabel.map { [$0] } ?? []),
                    summary: list == nil ? "" : formatted.summary, cornerWidth: list == nil ? CardCorner.groupWidth : CardCorner.width,
                    tags: tags, note: topic.note) {
             if list != nil || topic.isExpanded {
@@ -536,6 +536,7 @@ struct TopicCard: View {
         if case .topic(let id) = topic.id {
             Button("Forget Topic…") { store.presentForgetTopic(id) }.disabled(store.changingTopic)
             pinButton(id)
+            guestButton(id)
             CardMoveButtons(store: store, id: .topic(id), neighbors: list.neighbors)
             Button("Rename Topic…") {
                 DispatchQueue.main.async { list.rename(id) }
@@ -576,6 +577,7 @@ struct TopicCard: View {
                 .disabled(store.changingTopic)
             Divider()
             pinButton(id)
+            guestButton(id)
             CardMoveButtons(store: store, id: .topic(id), neighbors: list.neighbors)
         }
     }
@@ -596,6 +598,16 @@ struct TopicCard: View {
         Button(topic.isPinned ? "Unpin Topic" : "Pin Topic") { store.pinTopic(id, !topic.isPinned) }
             .accessibilityIdentifier("pin-topic")
             .disabled(store.changingTopic)
+    }
+
+    /// Make a Guest on a Benched Topic, End Guest on a Guest Topic, while the Config sets `topics.in_play`.
+    @ViewBuilder
+    private func guestButton(_ id: String) -> some View {
+        if let guest = store.guestState(of: .topic(id)) {
+            Button(guest ? "End Guest" : "Make a Guest") { store.setGuest(.topic(id), !guest) }
+                .accessibilityIdentifier(guest ? "end-guest" : "make-guest")
+                .disabled(store.changingTopic)
+        }
     }
 
     /// A press on the Active Topic's header opens or closes the card; on another Topic's header it goes to that Topic,
@@ -707,8 +719,8 @@ private struct LockedCard: View {
     }
 
     private var header: some View {
-        CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isLocked: true, hintTarget: .locked(sessionID),
-                   notes: ["Locked"], summary: formatted.summary) {
+        CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isLocked: true, isGuest: row.isGuest,
+                   hintTarget: .locked(sessionID), notes: [row.isGuest ? "Guest" : "Locked"], summary: formatted.summary) {
             if !row.isExpanded, row.sessions.flatMap(\.windows).contains(where: \.hasBell) {
                 BellMark()
             }
@@ -731,10 +743,11 @@ private struct LockedCard: View {
         }
     }
 
-    /// The Actions of a Locked Session. It is not a Topic, so it has no Settle, Pin or Forget.
+    /// The Actions of a Locked Session. It is not a Topic, so it has no Settle, Pin or Forget. With `topics.in_play`
+    /// it is a Guest, and its Unlock is End Guest.
     @ViewBuilder
     private var actions: some View {
-        Button("Unlock Session") { store.setLock(ofSession: sessionID, false) }
+        Button(row.isGuest ? "End Guest" : "Unlock Session") { store.setLock(ofSession: sessionID, false) }
             .disabled(store.changingTopic)
         if let window {
             Button("Rename Session…") { store.palette.begin(.text(.renameSession(window)), text: window.sessionName) }
@@ -920,8 +933,9 @@ private struct SessionCard<Row: View>: View {
         let isLocked = model.lockedSessionIDs.contains(session.id)
         SidebarCard(isOpen: isOpen, holdsSelection: holdsSelection, mark: mark,
                     viewport: viewport) {
-            CardHeader(title: formatted.title, isOpen: isOpen, mark: mark, isLocked: isLocked, hintTarget: .session(session.id),
-                       notes: isLocked ? ["Locked"] : [],
+            let isGuest = isLocked && store.topicConfig.inPlay != nil
+            CardHeader(title: formatted.title, isOpen: isOpen, mark: mark, isLocked: isLocked, isGuest: isGuest, hintTarget: .session(session.id),
+                       notes: isGuest ? ["Guest"] : isLocked ? ["Locked"] : [],
                        summary: formatted.summary) {
                 if !isOpen, session.windows.contains(where: \.hasBell) {
                     BellMark()
@@ -958,10 +972,14 @@ private struct SessionCard<Row: View>: View {
         store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[session.id])
     }
 
-    /// Only a No Topic Session of a Local App Window can be Locked.
+    /// Only a No Topic Session of a Local App Window can be Locked. With `topics.in_play`, a Lock is a Guest.
     @ViewBuilder
     private var lockButton: some View {
-        if let locked = store.lockState(ofSession: session.id) {
+        if let guest = store.guestState(of: .session(session.id)) {
+            Button(guest ? "End Guest" : "Make a Guest") { store.setGuest(.session(session.id), !guest) }
+                .accessibilityIdentifier(guest ? "end-guest" : "make-guest")
+                .disabled(store.changingTopic)
+        } else if let locked = store.lockState(ofSession: session.id) {
             Button(locked ? "Unlock Session" : "Lock Session") { store.setLock(ofSession: session.id, !locked) }
                 .disabled(store.changingTopic)
         }

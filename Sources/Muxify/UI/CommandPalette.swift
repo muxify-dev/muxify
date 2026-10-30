@@ -151,6 +151,7 @@ final class CommandPalette {
                 actions += [.settleTopic, .addSessionToTopic, .rename, .setTopicNote] + (topic.note == nil ? [] : [.clearTopicNote])
                     + (store.topicConfig.tags == nil ? [] : [.editTags])
                     + [topic.isPinned ? .unpinTopic : .pinTopic]
+                    + (store.guestState(of: .topic(id)).map { [$0 ? .endGuest : .makeGuest] } ?? [])
             }
             if topic.settledAt != nil || (!topic.sessions.isEmpty && !store.windows.contains(where: { $0.topicID == id })) {
                 actions += [.reopenTopic, .startTopicFresh]
@@ -161,7 +162,8 @@ final class CommandPalette {
                 actions += [.move]
                 if session.windows.first?.topicID != nil { actions += [.removeFromTopic, .removeFromTopicAndKill] }
             }
-            if let locked = store?.lockState(ofSession: session.id) { actions += [locked ? .unlockSession : .lockSession] }
+            if let guest = store?.guestState(of: .session(session.id)) { actions += [guest ? .endGuest : .makeGuest] }
+            else if let locked = store?.lockState(ofSession: session.id) { actions += [locked ? .unlockSession : .lockSession] }
             actions += [.newSession, .rename, .newWindow, .killSession]
         case .window(let window):
             if store?.isRemote == false { actions += [.move]; if window.topicID != nil { actions += [.removeFromTopic] } }
@@ -222,6 +224,8 @@ final class CommandPalette {
         case .killSession: return "Kill Session"
         case .lockSession: return "Lock"
         case .unlockSession: return "Unlock"
+        case .makeGuest: return "Make a Guest"
+        case .endGuest: return "End Guest"
         default: return action.rawValue
         }
     }

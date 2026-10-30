@@ -11,6 +11,8 @@ extension EnvironmentService {
         case .moveCard(let move): return moveCard(request, move, client: client)
         case .chooseInPlay(let cards): return chooseInPlay(cards, client: client)
         case .replaceFromBench(let benched): return replaceFromBench(request, with: benched, client: client)
+        case .makeGuest: return guest(request, true, client: client)
+        case .endGuest: return guest(request, false, client: client)
         case .markRead(let change, let scope): return markRead(request, change, scope: scope, client: client)
         case .markAllRead: return markRead(request, .read, scope: nil, client: client)
         default: preconditionFailure("\(request.command) is not in the records lane")
@@ -27,7 +29,7 @@ extension EnvironmentService {
             let locks = SessionLock.locks(in: try server.snapshot().windows, records: contents.records)
             let moved = try store.upgrade(locks: locks, arrival: topics.arrival)
             phase = .recordSaved
-            try executor.run(moved.map { .tmux($0.setOption) }, client: client)
+            try executor.run(moved.map { .tmux($0.command) }, client: client)
             return nil
         } catch {
             return failure(error, phase: phase)
@@ -45,7 +47,7 @@ extension EnvironmentService {
             if topic.isPinned == pinned { return .changed(TopicChange(topicID: topic.id)) }
             let moved = try store.write(locks: SessionLock.locks(in: snapshot.windows, records: records)) { try $0.pin(topic.id, pinned) }
             phase = .changesStarted
-            try executor.run(moved.map { .tmux($0.setOption) }, client: client)
+            try executor.run(moved.map { .tmux($0.command) }, client: client)
             return .changed(TopicChange(topicID: topic.id))
         } catch {
             return .failed(failure(error, phase: phase))
@@ -59,7 +61,7 @@ extension EnvironmentService {
             let contents = try store.read()
             let snapshot = try server.snapshot()
             let card = try self.card(request.target, caller: request.caller, records: contents.records, snapshot: snapshot, client: client)
-            let change: (inout TopicTransaction) throws -> [SessionLock]
+            let change: (inout TopicTransaction) throws -> [SessionLockChange]
             switch move {
             case .up, .down:
                 let cards = TopicCards.order(records: contents.records, windows: snapshot.windows)
@@ -80,7 +82,7 @@ extension EnvironmentService {
             }
             let moved = try store.write(locks: SessionLock.locks(in: snapshot.windows, records: contents.records), change)
             phase = .changesStarted
-            try executor.run(moved.map { .tmux($0.setOption) }, client: client)
+            try executor.run(moved.map { .tmux($0.command) }, client: client)
             switch card.id {
             case .topic(let id): return .changed(TopicChange(topicID: id))
             case .lock(let sessionID): return .changed(TopicChange(topicID: nil, session: SessionID(rawValue: sessionID)))
@@ -94,13 +96,15 @@ extension EnvironmentService {
     private func chooseInPlay(_ cards: [TopicListRef], client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
-            guard topics.inPlay != nil else { throw TopicRequestError.inPlayOff }
+            guard let inPlay = topics.inPlay else { throw TopicRequestError.inPlayOff }
             let contents = try store.read()
             let snapshot = try server.snapshot()
             let chosen = try cards.map { try listID($0, records: contents.records) }
-            let moved = try store.write(locks: SessionLock.locks(in: snapshot.windows, records: contents.records)) { try $0.chooseInPlay(chosen) }
+            let moved = try store.write(locks: SessionLock.locks(in: snapshot.windows, records: contents.records)) {
+                try $0.chooseInPlay(chosen, inPlay: inPlay)
+            }
             phase = .changesStarted
-            try executor.run(moved.map { .tmux($0.setOption) }, client: client)
+            try executor.run(moved.map { .tmux($0.command) }, client: client)
             return .changed(TopicChange(topicID: nil))
         } catch {
             return .failed(failure(error, phase: phase))
@@ -120,13 +124,52 @@ extension EnvironmentService {
                 try $0.replaceFromBench(card.id, with: benched, inPlay: inPlay)
             }
             phase = .changesStarted
-            try executor.run(moved.map { .tmux($0.setOption) }, client: client)
+            try executor.run(moved.map { .tmux($0.command) }, client: client)
             switch benched {
             case .topic(let id): return .changed(TopicChange(topicID: id))
             case .lock(let sessionID): return .changed(TopicChange(topicID: nil, session: SessionID(rawValue: sessionID)))
             }
         } catch {
             return .failed(failure(error, phase: phase))
+        }
+    }
+
+    /// Make a Guest and End Guest of a Topic write the order of the Topics list and the Topic's Guest mark. A Topic that
+    /// already has that mark does not change. A Session is a Guest through its Lock, so `lock` and `unlock` make and
+    /// end it.
+    private func guest(_ request: EnvironmentRequest, _ guest: Bool, client: String?) -> EnvironmentResponse {
+        var phase = TopicFailure.Phase.nothingChanged
+        do {
+            guard let inPlay = topics.inPlay else { throw TopicRequestError.inPlayOff }
+            let records = try store.read().records
+            let snapshot = try server.snapshot()
+            let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
+            if topic.isGuest == guest, !topic.isPinned { return .changed(TopicChange(topicID: topic.id)) }
+            let moved = try store.write(locks: SessionLock.locks(in: snapshot.windows, records: records)) {
+                guest ? try $0.makeGuest(topic.id, inPlay: inPlay) : try $0.endGuest(topic.id, inPlay: inPlay)
+            }
+            phase = .changesStarted
+            try executor.run(moved.map { .tmux($0.command) }, client: client)
+            return .changed(TopicChange(topicID: topic.id))
+        } catch {
+            return .failed(failure(error, phase: phase))
+        }
+    }
+
+    /// Puts each Guest at the end of In Play: the host calls it when the Config sets `topics.in_play`, so the Locks
+    /// that were in the order of the Topics become Guests under the In Play Topics. Nil when it succeeded.
+    public func gatherGuests(client: String? = nil) -> TopicFailure? {
+        guard let inPlay = topics.inPlay, topicsAvailable else { return nil }
+        var phase = TopicFailure.Phase.nothingChanged
+        do {
+            let records = try store.read().records
+            let locks = SessionLock.locks(in: try server.snapshot().windows, records: records)
+            let moved = try store.write(locks: locks) { $0.gatherGuests(inPlay: inPlay) }
+            phase = .recordSaved
+            try executor.run(moved.map { .tmux($0.command) }, client: client)
+            return nil
+        } catch {
+            return failure(error, phase: phase)
         }
     }
 

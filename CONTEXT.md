@@ -115,19 +115,19 @@ An open Topic that has no live Session and remembers no Session: the user stoppe
 _Avoid_: Dormant (when it remembers no Session), blank, cleared
 
 **In Play**:
-The first open Topics and Locked Sessions in the Topics list that are not Pinned, up to the number that the Config gives. Their cards always show in the Sidebar, under the Pinned Topics and above the Bench line.
+The Guests and the first open Topics in the Topics list that are not Pinned and are not Guests, up to the number that the Config gives. Their cards always show in the Sidebar, under the Pinned Topics and above the Bench line.
 _Avoid_: active Topics, focus Topics, front Topics, WIP limit
 
 **Bench**:
-The open Topics and Locked Sessions in the Topics list after the In Play ones. The Sidebar hides them behind the Bench line until the user shows the Bench. A Benched Topic or Locked Session keeps its place in the list, its Sessions and its Agents.
+The open Topics in the Topics list after the In Play ones. The Sidebar hides them behind the Bench line until the user shows the Bench. A Benched Topic keeps its place in the list, its Sessions and its Agents. A Locked Session is never Benched: with In Play it is a Guest.
 _Avoid_: backlog, queue, hidden Topics, overflow, Snooze (when you mean the Bench)
 
 **Choose In Play**:
-A Command that sets which open Topics and Locked Sessions are In Play, and in what order. The user checks them, then chooses the one for each place in turn. The checked ones after the last place go to the top of the Bench.
+A Command that sets which open Topics are In Play, and in what order. The user checks them, then chooses the one for each place in turn. A place skips the positions that Guests hold, and the Guests stay where they are. The checked ones after the last place go to the top of the Bench.
 _Avoid_: In Play Prioritisation Session, prioritise, reorder, Zen
 
 **Replace from Bench**:
-An Action on an In Play Topic or Locked Session. A Benched Topic or Locked Session that the user chooses takes its place, and the replaced card goes to the end of the Bench.
+An Action on an In Play card. A Benched Topic that the user chooses takes its place, and the replaced card goes to the end of the Bench. On a Guest, the card that comes in gets the Guest mark.
 _Avoid_: Done, Switch Topic Places, swap, Snooze
 
 **Pin**:
@@ -135,16 +135,32 @@ To keep a Topic above every Topic that is not Pinned, in each list of Topics, un
 _Avoid_: favorite, star, sticky, keep on top
 
 **Lock**:
-To keep a No Topic Session in the Topics list as a card with a number, in the order of the Topics, until the user Unlocks it, the Session ends, or the Session goes into a Topic.
+To keep a No Topic Session in the Topics list as a card with a number, in the order of the Topics, until the user Unlocks it, the Session ends, or the Session goes into a Topic. With In Play, a Lock makes the Session a Guest, so the user does it with Make a Guest.
 _Avoid_: pin, keep, dock, sticky
 
 **Locked Session**:
-A No Topic Session that the user Locked. It has a card among the Topics, but it is not a Topic: it cannot be Settled, Pinned or Forgotten.
+A No Topic Session that the user Locked. It has a card among the Topics, but it is not a Topic: it cannot be Settled, Pinned or Forgotten. With In Play, every Locked Session is a Guest.
 _Avoid_: kept Session, pinned Session, Topic (when you mean the Session)
 
 **Unlock**:
-To end a Lock. The Session stays, as a No Topic Session.
+To end a Lock. The Session stays, as a No Topic Session. With In Play, End Guest of a Session Unlocks it.
 _Avoid_: unpin, release
+
+**Guest**:
+A card In Play above the number that the Config gives: a Topic with the Guest mark, or a Locked Session. It does not count toward that number, and it keeps its position In Play when another card leaves. It never waits on the Bench.
+_Avoid_: visitor, temporary Topic, extra slot, Pin (when you mean a Guest)
+
+**Make a Guest**:
+An Action on a Benched Topic or a No Topic Session. The card goes to the end of In Play, directly above the Bench line, as a Guest. No other card goes to the Bench. For a Session, it is a Lock.
+_Avoid_: put In Play, promote, Lock (when the Config sets In Play)
+
+**End Guest**:
+An Action on a Guest. A Guest Topic goes to the top of the Bench, and a Guest Session is Unlocked, so its card ends. In Play is one card shorter, and no Benched card moves up.
+_Avoid_: demote, bench, Unlock (when the Config sets In Play)
+
+**Trade**:
+A Sidebar drag that takes a card across the Bench line and lets it go on a card on the other side. The two cards exchange their places in the Topics list, so one goes In Play and the other goes to the Bench. No other card moves. A Guest gives its Guest mark to the card that comes In Play.
+_Avoid_: swap, Replace from Bench (when the replaced card does not go to the end of the Bench), exchange
 
 ### Browser
 

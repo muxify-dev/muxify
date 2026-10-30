@@ -42,14 +42,14 @@ extension EnvironmentService {
             var commands = edit.commands
             if let record = edit.record {
                 let locks = SessionLock.locks(in: snapshot.windows, records: records)
-                let moved = try store.write(locks: locks) { transaction -> [SessionLock] in
+                let moved = try store.write(locks: locks) { transaction -> [SessionLockChange] in
                     if let left = edit.leftTopic {
                         _ = try transaction.apply(TopicRecordChange(before: records.first { $0.id == left.id }, after: left))
                     }
                     return try transaction.apply(TopicRecordChange(before: read, after: record), arrival: topics.arrival,
                                                  replacingLockOf: planned.replacedLockOf)
                 }
-                commands += moved.map { .tmux($0.setOption) }
+                commands += moved.map { .tmux($0.command) }
                 phase = .recordSaved
             } else {
                 phase = .changesStarted
@@ -62,9 +62,11 @@ extension EnvironmentService {
                 let moved = try store.write(locks: locks) {
                     try $0.apply(TopicRecordChange(before: before, after: record), arrival: topics.arrival)
                 }
-                try executor.run(moved.map { .tmux($0.setOption) }, client: client)
+                try executor.run(moved.map { .tmux($0.command) }, client: client)
             case .forget(let id):
-                try store.write { try $0.forget(id) }
+                let locks = SessionLock.locks(in: try server.snapshot().windows, records: try store.read().records)
+                let moved = try store.write(locks: locks) { try $0.forget(id) }
+                try executor.run(moved.map { .tmux($0.command) }, client: client)
             case nil: break
             }
             phase = .selectionFailed
@@ -86,7 +88,8 @@ extension EnvironmentService {
             return (resolved.source, resolved.snapshot)
         }
         switch request.command {
-        case .list, .show, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .markRead, .markAllRead:
+        case .list, .show, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .endGuest,
+             .markRead, .markAllRead:
             throw TopicRequestError.noTarget
         case .create(let title, let tags):
             let tags = Set(tags ?? [])
@@ -284,7 +287,8 @@ extension EnvironmentService {
         }
     }
 
-    /// Lock and Unlock change only the Session option and, when a Lock renumbers the list, the Topic records.
+    /// Lock and Unlock change only the Session option and, when a Lock renumbers the list, the Topic records. With
+    /// `topics.in_play` they are Make a Guest and End Guest of a Session.
     func changeLock(_ request: EnvironmentRequest, locked: Bool, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
@@ -292,10 +296,14 @@ extension EnvironmentService {
             let snapshot = try server.snapshot()
             let window = try noTopicSession(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             let commands: [TopicPlan.Command]
+            let locks = SessionLock.locks(in: snapshot.windows, records: records)
             if locked {
-                let locks = SessionLock.locks(in: snapshot.windows, records: records)
                 let changed = try store.write(locks: locks) { $0.lock(window.sessionID) }
-                commands = changed.map { .tmux($0.setOption) }
+                commands = changed.map { .tmux($0.command) }
+            } else if topics.inPlay != nil, locks.contains(where: { $0.sessionID == window.sessionID }) {
+                // With in_play the Lock is a Guest, and the other Guests keep their positions when it ends.
+                let changed = try store.write(locks: locks) { $0.unlock(window.sessionID) }
+                commands = changed.map { .tmux($0.command) }
             } else {
                 commands = window.lockOrder == nil ? [] : [.tmux(SessionLock.unsetOption(window.sessionID))]
             }
