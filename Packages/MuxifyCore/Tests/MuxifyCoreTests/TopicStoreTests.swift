@@ -239,10 +239,10 @@ final class TopicStoreTests: XCTestCase {
         let store = TopicStore(paths: paths)
         try seed(record("a", order: 0), record("b", order: 1))
         let locks = [SessionLock(sessionID: "$1", order: 0.5)]
-        let added = try store.write(locks: locks) { transaction -> [SessionLock] in
+        let added = try store.write(locks: locks) { transaction -> [SessionLockChange] in
             transaction.lock("$2") + transaction.lock("$1")
         }
-        XCTAssertEqual(added, [SessionLock(sessionID: "$2", order: 2)])
+        XCTAssertEqual(added, [.set(SessionLock(sessionID: "$2", order: 2))])
     }
 
     func testCreationDoesNotReplaceAnUnreadableTopicFile() throws {
@@ -400,7 +400,7 @@ final class TopicStoreTests: XCTestCase {
                 : [.topic("p"), .lock(sessionID: "$1"), .topic("a"), .topic("new")]
             XCTAssertEqual(shown.map(\.id), expected)
             XCTAssertTrue(shown.allSatisfy { $0.order?.isFinite == true })
-            XCTAssertEqual(moved, transaction.locks)
+            XCTAssertEqual(moved, transaction.locks.map(SessionLockChange.set))
         }
     }
 
@@ -465,7 +465,7 @@ final class TopicStoreTests: XCTestCase {
     func testTheUpgradeEndsZenThenPutsEachSnoozedTopicAtTheTopOfTheBenchInWakeOrder() throws {
         let lock = SessionLock(sessionID: "$1", order: 1.5)
         let cases: [(inPlay: Int?, position: TopicInsertPosition, expected: [String])] = [
-            (2, .bottom, ["p", "kept", "zenA", "early", "zenB", "never", "$1", "c", "d"]),
+            (2, .bottom, ["p", "kept", "zenA", "$1", "early", "zenB", "never", "c", "d"]),
             (nil, .top, ["p", "early", "zenB", "never", "kept", "zenA", "$1", "c", "d"]),
             (nil, .bottom, ["p", "kept", "zenA", "$1", "c", "d", "early", "zenB", "never"]),
         ]

@@ -35,6 +35,8 @@ extension EnvironmentCommand {
         case .moveCard: .verb(.topicMove)
         case .chooseInPlay: .verb(.topicChooseInPlay)
         case .replaceFromBench: .verb(.topicReplaceFromBench)
+        case .makeGuest: .verb(.topicMakeGuest)
+        case .endGuest: .verb(.topicEndGuest)
         case .markRead(let change, let scope): .verb(.markRead(change, scope: scope))
         case .markAllRead: .verb(.markAllRead)
         }

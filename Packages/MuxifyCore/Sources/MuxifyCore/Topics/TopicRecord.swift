@@ -60,6 +60,9 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     public var hasManualSessionOrder = false
     /// The Topic stays above every Topic that is not Pinned (`pinned: true`).
     public var isPinned = false
+    /// The Topic is a Guest: In Play above `topics.in_play` (`guest: true`). Without `in_play` the mark has no effect,
+    /// and the record keeps it.
+    public var isGuest = false
     public var isUnread = false
     /// The record keeps them in `tags` as an array of names, A→Z, and leaves the key out when it has nothing to keep.
     public var tags: Set<Tag> = []
@@ -80,7 +83,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case id, title, slug, outcome, order, sessions
         case createdAt = "created_at", settledAt = "settled_at"
-        case sessionOrder = "session_order", pinned, unread, tags, note
+        case sessionOrder = "session_order", pinned, guest, unread, tags, note
     }
 
     private struct FieldKey: CodingKey {
@@ -105,6 +108,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         sessions = try values.decodeIfPresent([JSONValue].self, forKey: .sessions) ?? []
         hasManualSessionOrder = (try? values.decodeIfPresent(String.self, forKey: .sessionOrder)) == "manual"
         isPinned = (try? values.decodeIfPresent(Bool.self, forKey: .pinned)) == true
+        isGuest = (try? values.decodeIfPresent(Bool.self, forKey: .guest)) == true
         isUnread = (try? values.decodeIfPresent(Bool.self, forKey: .unread)) == true
         note = try values.decodeIfPresent(String.self, forKey: .note)
         switch try values.decodeIfPresent(JSONValue.self, forKey: .tags) {
@@ -138,6 +142,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         if hasManualSessionOrder { try values.encode("manual", forKey: .sessionOrder) }
         if isUnread { try values.encode(true, forKey: .unread) }
         if isPinned { try values.encode(true, forKey: .pinned) }
+        if isGuest { try values.encode(true, forKey: .guest) }
         try values.encodeIfPresent(note, forKey: .note)
         let names = tags.sorted().map { JSONValue.string($0.name) }
         switch unreadableTags {

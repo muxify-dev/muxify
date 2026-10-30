@@ -15,16 +15,21 @@ public struct TopicContents: Equatable, Sendable {
 /// under the record lock, so the app and the command line tool can both write.
 public struct TopicStore: Sendable {
     public let paths: MuxifyPaths
+    /// The Config's `topics.in_play`. A write that takes cards out of the Topics list keeps the Guests at their
+    /// positions In Play by it.
+    public let inPlay: Int?
     private let lockTimeout: TimeInterval
     private let writeData: @Sendable (Data, URL) throws -> Void
 
-    public init(paths: MuxifyPaths, lockTimeout: TimeInterval = 10) {
-        self.init(paths: paths, lockTimeout: lockTimeout) { data, url in try data.write(to: url, options: .atomic) }
+    public init(paths: MuxifyPaths, inPlay: Int? = nil, lockTimeout: TimeInterval = 10) {
+        self.init(paths: paths, inPlay: inPlay, lockTimeout: lockTimeout) { data, url in try data.write(to: url, options: .atomic) }
     }
 
     /// `writeData` writes one record file; tests replace it to fail part of the way.
-    init(paths: MuxifyPaths, lockTimeout: TimeInterval = 10, writeData: @escaping @Sendable (Data, URL) throws -> Void) {
+    init(paths: MuxifyPaths, inPlay: Int? = nil, lockTimeout: TimeInterval = 10,
+         writeData: @escaping @Sendable (Data, URL) throws -> Void) {
         self.paths = paths
+        self.inPlay = inPlay
         self.lockTimeout = lockTimeout
         self.writeData = writeData
     }
@@ -55,7 +60,7 @@ public struct TopicStore: Sendable {
         try FileLock.withLock(paths.recordLock, .exclusive, rank: .record, timeout: lockTimeout) {
             removeOrphanStagingFolders()
             let contents = readFiles()
-            var transaction = TopicTransaction(records: contents.records, topics: paths.topics)
+            var transaction = TopicTransaction(records: contents.records, topics: paths.topics, inPlay: inPlay)
             transaction.locks = locks
             let result = try body(&transaction)
             let changed = try transaction.records.filter { record in
@@ -166,11 +171,14 @@ public struct TopicTransaction {
     /// The Locked Sessions, which share the records' order. A change of order that moves or renumbers them returns
     /// the Locks it changed, and the caller writes them to tmux.
     public internal(set) var locks: [SessionLock] = []
+    /// The Config's `topics.in_play`: with it, the Locked Sessions are Guests, and a change keeps the Guests.
+    public let inPlay: Int?
     private let topics: URL
 
-    init(records: [TopicRecord], topics: URL) {
+    init(records: [TopicRecord], topics: URL, inPlay: Int? = nil) {
         self.records = records
         self.topics = topics
+        self.inPlay = inPlay
     }
 
     public enum Failure: Error, CustomStringConvertible {
@@ -185,18 +193,20 @@ public struct TopicTransaction {
 
     private var entries: [TopicListEntry] { records.map(TopicListEntry.topic) + locks.map(TopicListEntry.lock) }
 
-    /// Adds a new Topic where `arrival` puts it, or in the place of the Lock of `lockedSessionID`, which then ends. A
-    /// file of that name that is not a valid record is not replaced.
+    /// Adds a new Topic where `arrival` puts it, or in the place of the Lock of `lockedSessionID`, which then ends. With
+    /// `in_play`, that Lock is a Guest, so the Topic gets the Guest mark. A file of that name that is not a valid record
+    /// is not replaced. The plan that makes the Topic ends the Lock in tmux, so the result leaves it out.
     @discardableResult
-    public mutating func create(_ record: TopicRecord, arrival: TopicArrival = .end(.bottom), replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLock] {
+    public mutating func create(_ record: TopicRecord, arrival: TopicArrival = .end(.bottom), replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLockChange] {
         _ = try TopicStore.encoded(record)
         guard !FileManager.default.fileExists(atPath: topics.appendingPathComponent(record.id + ".json").path) else {
             throw CocoaError(.fileWriteFileExists)
         }
-        if let index = locks.firstIndex(where: { $0.sessionID == lockedSessionID }) {
+        if let lock = locks.first(where: { $0.sessionID == lockedSessionID }) {
             var placed = record
-            placed.order = locks.remove(at: index).order
-            return put([.topic(placed)])
+            placed.order = lock.order
+            placed.isGuest = inPlay != nil
+            return put(TopicListChange([.topic(placed)], endedLocks: [lock.sessionID])).filter { $0 != .end(sessionID: lock.sessionID) }
         }
         return put(TopicOrder.inserting(record, at: arrival, in: entries))
     }
@@ -214,7 +224,7 @@ public struct TopicTransaction {
     /// the plan ran stays. When two writers change one key, the last write wins for that key. A Topic that is
     /// not on disk is created only when the plan read no previous record, as `create` does.
     @discardableResult
-    public mutating func apply(_ change: TopicRecordChange, arrival: TopicArrival = .end(.bottom), replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLock] {
+    public mutating func apply(_ change: TopicRecordChange, arrival: TopicArrival = .end(.bottom), replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLockChange] {
         guard let current = records.first(where: { $0.id == change.after.id }) else {
             guard change.before == nil else { throw Failure.topicUnavailable(change.after.id) }
             return try create(change.after, arrival: arrival, replacingLockOf: lockedSessionID)
@@ -249,55 +259,108 @@ public struct TopicTransaction {
         records[index].note = line.isEmpty ? nil : line
     }
 
-    public mutating func forget(_ id: String) throws {
+    @discardableResult
+    public mutating func forget(_ id: String) throws -> [SessionLockChange] {
         guard records.contains(where: { $0.id == id }) else { throw Failure.topicUnavailable(id) }
+        let before = entries
         records.removeAll { $0.id == id }
+        return keepingGuestPlaces(from: before)
     }
 
     @discardableResult
-    public mutating func move(_ id: TopicListID, to placement: TopicPlacement) throws -> [SessionLock] {
+    public mutating func move(_ id: TopicListID, to placement: TopicPlacement) throws -> [SessionLockChange] {
         put(try TopicOrder.moving(id, to: placement, in: entries))
     }
 
     @discardableResult
-    public mutating func trade(_ id: TopicListID, with other: TopicListID) throws -> [SessionLock] {
-        put(try TopicOrder.trading(id, with: other, in: entries))
+    public mutating func trade(_ id: TopicListID, with other: TopicListID) throws -> [SessionLockChange] {
+        put(try TopicOrder.trading(id, with: other, inPlay: inPlay, in: entries))
     }
 
     @discardableResult
-    public mutating func pin(_ id: String, _ pinned: Bool) throws -> [SessionLock] {
-        put(try TopicOrder.pinning(id, pinned, in: entries))
+    public mutating func pin(_ id: String, _ pinned: Bool) throws -> [SessionLockChange] {
+        put(try TopicOrder.pinning(id, pinned, inPlay: inPlay, in: entries))
     }
 
     @discardableResult
-    public mutating func chooseInPlay(_ chosen: [TopicListID]) throws -> [SessionLock] {
-        put(try TopicOrder.choosingInPlay(chosen, in: entries))
+    public mutating func chooseInPlay(_ chosen: [TopicListID], inPlay: Int) throws -> [SessionLockChange] {
+        put(try TopicOrder.choosingInPlay(chosen, inPlay: inPlay, in: entries))
     }
 
     @discardableResult
-    public mutating func replaceFromBench(_ card: TopicListID, with benched: TopicListID, inPlay: Int) throws -> [SessionLock] {
+    public mutating func replaceFromBench(_ card: TopicListID, with benched: TopicListID, inPlay: Int) throws -> [SessionLockChange] {
         put(try TopicOrder.replacingFromBench(card, with: benched, inPlay: inPlay, in: entries))
     }
 
-    /// Locks the Session last among the Topics that are not Pinned. A Session that is already Locked keeps its place.
     @discardableResult
-    public mutating func lock(_ sessionID: String) -> [SessionLock] {
-        guard !locks.contains(where: { $0.sessionID == sessionID }) else { return [] }
-        return put(TopicOrder.appendingLock(of: sessionID, in: entries))
+    public mutating func makeGuest(_ id: String, inPlay: Int) throws -> [SessionLockChange] {
+        put(try TopicOrder.makingGuest(id, inPlay: inPlay, in: entries))
     }
 
-    /// Returns the Locks among `changed`.
     @discardableResult
-    private mutating func put(_ changed: [TopicListEntry]) -> [SessionLock] {
-        for record in changed.records {
+    public mutating func endGuest(_ id: String, inPlay: Int) throws -> [SessionLockChange] {
+        put(try TopicOrder.endingGuest(id, inPlay: inPlay, in: entries))
+    }
+
+    /// Puts every Guest at the end of In Play, as the Config's `in_play` does to the Locks when it is set.
+    @discardableResult
+    public mutating func gatherGuests(inPlay: Int) -> [SessionLockChange] {
+        put(TopicOrder.gatheringGuests(inPlay: inPlay, in: entries))
+    }
+
+    /// Locks the Session last among the Topics that are not Pinned, or with `in_play` at the end of In Play, where it is
+    /// a Guest. A Session that is already Locked keeps its place.
+    @discardableResult
+    public mutating func lock(_ sessionID: String) -> [SessionLockChange] {
+        guard !locks.contains(where: { $0.sessionID == sessionID }) else { return [] }
+        return put(TopicOrder.appendingLock(of: sessionID, inPlay: inPlay, in: entries))
+    }
+
+    /// Ends the Lock of the Session. With `in_play` it is a Guest that leaves, so the other Guests keep their positions.
+    @discardableResult
+    public mutating func unlock(_ sessionID: String) -> [SessionLockChange] {
+        guard locks.contains(where: { $0.sessionID == sessionID }) else { return [] }
+        return put(TopicListChange([], endedLocks: [sessionID]))
+    }
+
+    @discardableResult
+    private mutating func put(_ changed: [TopicListEntry]) -> [SessionLockChange] {
+        put(TopicListChange(changed))
+    }
+
+    /// Writes the change into the transaction and returns what tmux must change. A Settled or Pinned Topic loses its
+    /// Guest mark. When the change takes a card out of the Topics list, the Guests keep their positions.
+    private mutating func put(_ change: TopicListChange) -> [SessionLockChange] {
+        let before = entries
+        for var record in change.entries.records {
+            if record.settledAt != nil || record.isPinned { record.isGuest = false }
             if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record }
             else { records.append(record) }
         }
-        for lock in changed.locks {
+        for lock in change.entries.locks {
             if let index = locks.firstIndex(where: { $0.sessionID == lock.sessionID }) { locks[index] = lock }
             else { locks.append(lock) }
         }
-        return changed.locks
+        locks.removeAll { change.endedLocks.contains($0.sessionID) }
+        let written = change.entries.locks.map(SessionLockChange.set) + change.endedLocks.map { SessionLockChange.end(sessionID: $0) }
+        return merging(written, keepingGuestPlaces(from: before))
+    }
+
+    /// With `in_play`, the order that keeps each Guest at its position after the cards that left the Topics list since
+    /// `before`. Returns the Locks it moved.
+    private mutating func keepingGuestPlaces(from before: [TopicListEntry]) -> [SessionLockChange] {
+        guard let inPlay else { return [] }
+        let open = { (entries: [TopicListEntry]) in Set(TopicOrder.sorted(entries).filter { !$0.isPinned }.map(\.id)) }
+        guard !open(before).subtracting(open(entries)).isEmpty else { return [] }
+        let moved = TopicOrder.keepingGuestPlaces(from: before, in: entries, inPlay: inPlay)
+        for record in moved.records { records[records.firstIndex { $0.id == record.id }!] = record }
+        for lock in moved.locks { locks[locks.firstIndex { $0.sessionID == lock.sessionID }!] = lock }
+        return moved.locks.map(SessionLockChange.set)
+    }
+
+    /// One change for each Session: the later one wins.
+    private func merging(_ first: [SessionLockChange], _ second: [SessionLockChange]) -> [SessionLockChange] {
+        first.filter { change in !second.contains { $0.sessionID == change.sessionID } } + second
     }
 
     private static func fields(_ record: TopicRecord) throws -> [String: JSONValue] {
@@ -307,7 +370,7 @@ public struct TopicTransaction {
     /// Ends the old Zen as it ended before: each Topic it Snoozed gets its earlier `snoozed_until` back. Then each
     /// open Topic that is not Pinned and has a Snooze goes where `arrival` puts a returning Topic, in the order it would
     /// wake. Last, no record keeps `snoozed_until`, so a second run changes nothing.
-    mutating func upgradeSnoozes(endingZen zen: SnoozeUpgrade.Zen?, arrival: TopicArrival) throws -> [SessionLock] {
+    mutating func upgradeSnoozes(endingZen zen: SnoozeUpgrade.Zen?, arrival: TopicArrival) throws -> [SessionLockChange] {
         var stored: [String: String] = [:]
         for record in records where record.settledAt == nil {
             if case .string(let value)? = record.unknownFields[SnoozeUpgrade.field] { stored[record.id] = value }
@@ -330,7 +393,7 @@ public struct TopicTransaction {
             anchor = .after(id)
         }
         for index in records.indices { records[index].unknownFields[SnoozeUpgrade.field] = nil }
-        return locks.filter { moved.contains($0.sessionID) }
+        return locks.filter { moved.contains($0.sessionID) }.map(SessionLockChange.set)
     }
 }
 

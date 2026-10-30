@@ -237,6 +237,8 @@ struct TopicsModel {
         var agentSpines: [String: AgentMark] = [:]
         var usesRowMarks = false
         var isUnread = false
+        /// A Guest, while the Config sets `topics.in_play`: a Topic with the Guest mark, or a Locked Session.
+        var isGuest = false
         let isPinned: Bool
         let sessions: [Session]
         let isExpanded: Bool
@@ -502,7 +504,8 @@ struct TopicsModel {
             }
             return Row(id: id, title: title, kind: .open, mark: RowMark(unread: record.isUnread, agent: mark(agents)),
                        agentSpines: spines, usesRowMarks: id == active && openTopics.contains(id),
-                       isUnread: record.isUnread, isPinned: record.isPinned, sessions: sessions, isExpanded: openTopics.contains(id),
+                       isUnread: record.isUnread, isGuest: config.topics.inPlay != nil && record.isGuest && !record.isPinned,
+                       isPinned: record.isPinned, sessions: sessions, isExpanded: openTopics.contains(id),
                        remembersSessions: !record.sessions.isEmpty, tags: config.topics.tags?.shown(record.tags) ?? [], note: record.note)
         }
         /// A Locked Session's row: one Session, titled by the Session card Formats.
@@ -510,7 +513,8 @@ struct TopicsModel {
             let id = TopicGroupID.locked(lock.sessionID)
             let agents = agentsByGroup[id] ?? []
             let members = grouped[id] ?? []
-            return Row(id: id, title: members.first?.sessionName ?? lock.sessionID, kind: .open, mark: mark(agents).map(RowMark.agent), isPinned: false,
+            return Row(id: id, title: members.first?.sessionName ?? lock.sessionID, kind: .open, mark: mark(agents).map(RowMark.agent),
+                       isGuest: config.topics.inPlay != nil, isPinned: false,
                        sessions: sessions(of: id, members: members, record: nil), isExpanded: openTopics.contains(id))
         }
         let untitledRecords = open.filter { $0.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true }
@@ -604,25 +608,15 @@ struct TopicsModel {
             + scoped.filter { agentMarks[$0.paneID] == nil }
     }
 
-    /// The first `inPlay` cards that are not Pinned are In Play, and the cards after them are on the Bench. While the
-    /// Bench is hidden, only the Location's card and the card that `peek` holds show from it. The Location's card and
+    /// The Guests and the first `inPlay` other cards that are not Pinned are In Play, and the other cards are on the
+    /// Bench (`InPlayCut`). While the Bench is hidden, only the Location's card and the card that `peek` holds show from it. The Location's card and
     /// the opened No Topic Session show right under the line, so they do not move when the Bench shows or hides. The
     /// opened No Topic Session counts toward nothing.
     private static func list(_ rows: [Row], inPlay: Int?, benchShown: Bool, peek: BenchPeek?, location: TopicGroupID?,
                              noTopic: Session?) -> [ListItem] {
         let opened = noTopic.map { [ListItem.noTopicSession($0)] } ?? []
-        var front: [Row] = [], bench: [Row] = []
-        var unpinned = 0
-        for row in rows {
-            if row.isPinned {
-                front.append(row)
-            } else if let inPlay, unpinned >= inPlay {
-                bench.append(row)
-            } else {
-                unpinned += 1
-                front.append(row)
-            }
-        }
+        let cut = InPlayCut(rows.filter { !$0.isPinned }, limit: inPlay ?? .max, isGuest: \.isGuest)
+        let front = rows.filter(\.isPinned) + cut.inPlay, bench = cut.bench
         guard !bench.isEmpty else { return front.map(ListItem.card) + opened }
         let shown = benchShown || peek == .all
         let underLine = bench.filter { $0.id == location } + bench.filter { $0.id != location }

@@ -1,11 +1,10 @@
 import MuxifyCore
 
 extension TopicsModel {
-    /// The cards that are not Pinned, in list order, split after the first `inPlay`: the In Play cards and the Bench.
-    /// It does not follow the Sidebar mode, so the In Play Actions work in Sessions mode too.
-    func split(inPlay: Int) -> (inPlay: [Row], bench: [Row]) {
-        let cards = rows.filter { !$0.isPinned }
-        return (Array(cards.prefix(inPlay)), Array(cards.dropFirst(inPlay)))
+    /// The cards that are not Pinned, cut at the Bench line: the Guests and the first `inPlay` other cards are In
+    /// Play. It does not follow the Sidebar mode, so the In Play Actions work in Sessions mode too.
+    func split(inPlay: Int) -> InPlayCut<Row> {
+        InPlayCut(rows.filter { !$0.isPinned }, limit: inPlay, isGuest: \.isGuest)
     }
 }
 

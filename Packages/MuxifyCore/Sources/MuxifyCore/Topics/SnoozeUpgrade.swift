@@ -31,7 +31,7 @@ extension TopicStore {
     /// Upgrades the records in one write and removes `zen.json`. Returns the Locks that the write moved: the caller
     /// sets them in tmux. With nothing to upgrade it changes nothing, so every reader can call it.
     @discardableResult
-    public func upgrade(locks: [SessionLock], arrival: TopicArrival) throws -> [SessionLock] {
+    public func upgrade(locks: [SessionLock], arrival: TopicArrival) throws -> [SessionLockChange] {
         let file = paths.legacyZenFile
         let moved = try write(locks: locks) { transaction in
             // A `zen.json` that does not read is no Zen: its Topics keep their Snoozes and go to the Bench with the others.

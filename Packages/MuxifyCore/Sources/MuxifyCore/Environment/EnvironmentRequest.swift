@@ -296,10 +296,11 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case moveSession(to: TopicSessionPlacement)
     /// The target Topic lists its Sessions by when tmux created them again, in the Config's order.
     case sortSessions
-    /// Locks the target No Topic Session: it gets a card last among the Topics that are not Pinned (ADR 0018).
-    /// A Locked Session stays where it is.
+    /// Locks the target No Topic Session: it gets a card last among the Topics that are not Pinned (ADR 0018), or with
+    /// `topics.in_play` at the end of In Play, where it is a Guest (ADR 0061). A Locked Session stays where it is.
     case lock
-    /// Ends the Lock of the target Session. A Session that is not Locked does not change.
+    /// Ends the Lock of the target Session. A Session that is not Locked does not change. With `topics.in_play` it is
+    /// End Guest, so the other Guests keep their positions.
     case unlock
     /// Changes the Tags of the target's open Topic. It changes nothing in tmux.
     case tags(TopicTagChange)
@@ -339,6 +340,12 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// The Benched card `with` takes the place of the target's card, which must be In Play. The target's card goes to
     /// the end of the Bench. It needs `topics.in_play`.
     case replaceFromBench(with: TopicListRef)
+    /// Make a Guest: the target's Benched Topic goes to the end of In Play with the Guest mark, and no card goes to
+    /// the Bench for it. It needs `topics.in_play`. A Session is a Guest through its Lock, so `lock` makes it one.
+    case makeGuest
+    /// End Guest: the target's Guest Topic goes to the top of the Bench, and In Play is one card shorter. It needs
+    /// `topics.in_play`. `unlock` ends a Guest Session.
+    case endGuest
     /// Marks the `scope` of the target Read or Unread: the Topic Unread of a Topic, and each Agent there that
     /// `change` applies to.
     case markRead(ReadChange, scope: ReadScope)
@@ -365,6 +372,8 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
         case moveCard = "move_card"
         case chooseInPlay = "choose_in_play"
         case replaceFromBench = "replace_from_bench"
+        case makeGuest = "make_guest"
+        case endGuest = "end_guest"
         case markRead = "mark_read"
         case markAllRead = "mark_all_read"
     }
@@ -523,6 +532,7 @@ public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConv
         public static let cardNotInPlay = Kind(rawValue: "card_not_in_play")
         public static let cardNotBenched = Kind(rawValue: "card_not_benched")
         public static let cardPinned = Kind(rawValue: "card_pinned")
+        public static let cardGuest = Kind(rawValue: "card_guest")
     }
 
     /// How far the request got before it failed.

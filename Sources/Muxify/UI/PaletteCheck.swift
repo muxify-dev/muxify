@@ -3,8 +3,9 @@ import MuxifyCore
 /// What a check step does with the cards that go on from it. Each Action that starts with a check step is a case, and
 /// the compiler finds every place that must answer for it.
 enum CheckAction: Equatable {
-    /// Choose In Play: the cards that are not Pinned, with the In Play ones checked first. Going on orders every checked
-    /// card: the first `places` fill the In Play places, and the others go to the top of the Bench.
+    /// Choose In Play: the cards that are not Pinned and are not Guests, with the In Play ones checked first. Going on
+    /// orders every checked card: the first `places` fill the In Play places that no Guest holds, and the others go to
+    /// the top of the Bench. The Guests keep their positions.
     case chooseInPlay(places: Int)
 
     var title: String {
@@ -16,7 +17,7 @@ enum CheckAction: Equatable {
     /// The cards that the step lists, in list order.
     func listed(_ topics: TopicsModel) -> [TopicsModel.Row] {
         switch self {
-        case .chooseInPlay: topics.rows.filter { !$0.isPinned }
+        case .chooseInPlay: topics.rows.filter { !$0.isPinned && !$0.isGuest }
         }
     }
 

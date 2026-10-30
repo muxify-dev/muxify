@@ -25,6 +25,8 @@ enum PaletteCommand: String, CaseIterable {
     case unpinTopic = "Unpin Topic"
     case lockSession = "Lock Session"
     case unlockSession = "Unlock Session"
+    case makeGuest = "Make a Guest"
+    case endGuest = "End Guest"
     case maximize = "Maximize"
     case restore = "Restore"
     case maximizeTerminal = "Maximize Terminal"
@@ -135,6 +137,8 @@ enum PaletteCommand: String, CaseIterable {
         case .unpinTopic: .verb(.topicUnpin)
         case .lockSession: .verb(.sessionLock)
         case .unlockSession: .verb(.sessionUnlock)
+        case .makeGuest: .verbs([.topicMakeGuest, .sessionLock])
+        case .endGuest: .verbs([.topicEndGuest, .sessionUnlock])
         case .newWindow: .verb(.windowNew)
         case .newSession: .verb(.sessionNew)
         case .zoomPane: .verb(.windowZoom)
@@ -198,8 +202,12 @@ extension CommandPalette {
                 guard canChangeTopics, let topic = store.pinnableActiveTopic else { return false }
                 return topic.isPinned == (command == .unpinTopic)
             case .lockSession, .unlockSession:
-                guard canChangeTopics, let id = store.selectedWindow?.sessionID, let locked = store.lockState(ofSession: id) else { return false }
+                guard canChangeTopics, store.topicConfig.inPlay == nil, let id = store.selectedWindow?.sessionID,
+                      let locked = store.lockState(ofSession: id) else { return false }
                 return locked == (command == .unlockSession)
+            case .makeGuest, .endGuest:
+                guard canChangeTopics, let card = store.currentGuestCard, let guest = store.guestState(of: card) else { return false }
+                return guest == (command == .endGuest)
             case .installExtensions: return !store.isRemote
             case .nextSession, .previousSession, .nextTopic, .previousTopic:
                 guard let step = command.keybinding?.step else { return false }
@@ -280,6 +288,7 @@ extension CommandPalette {
             if let window = store.selectedWindow { begin(.text(.renameWindow(window)), text: window.name, keepingHistory: true) }
         case .editTags: if let id = store.activeTopicID { store.presentEditTags(of: id, keepingHistory: true) }
         case .lockSession, .unlockSession: store.toggleLockOfCurrentSession()
+        case .makeGuest, .endGuest: if let card = store.currentGuestCard { store.setGuest(card, command == .makeGuest) }
         case .moveTopicUp: store.moveActiveCard(.previous)
         case .moveTopicDown: store.moveActiveCard(.next)
         case .pinTopic, .unpinTopic: store.togglePinOfActiveTopic()

@@ -1,5 +1,7 @@
 # The Sidebar shows only the Topics In Play
 
+> **Update 2026-10-30:** A Locked Session no longer counts toward N. With `topics.in_play`, every Locked Session is a Guest, a card In Play above the limit, and a Topic can be a Guest too ([ADR 0061](0061-a-guest-is-in-play-above-the-limit-and-keeps-its-position.md)). In Play is the Guests and the first N other cards. The rule "Locked Sessions count toward N" below is replaced. A Trade of a Guest gives its Guest mark to the card that comes In Play.
+
 When the Config sets `topics.in_play`, the Sidebar shows the Pinned Topics and the first N other cards, Topics or Locked Sessions. The other open Topics and Locked Sessions are the Bench, and they hide behind one line under the In Play cards. The goal is to limit how many Topics the user sees at one time. Each rule below keeps that limit in place and does not let it lose a Topic the user works on.
 
 - **Pinned Topics do not count toward N.** A Pinned Topic always shows. Pin is how the user keeps a Topic in view, so the limit does not override it.

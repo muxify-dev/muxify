@@ -439,27 +439,59 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(sandbox.repositoryPaths(of: try XCTUnwrap(sandbox.records().only)), [sandbox.game.path])
     }
 
-    func testReplaceFromBenchSwapsATopicAndALockedSessionNamedByName() async throws {
+    func testReplaceFromBenchOnALockedSessionGivesItsGuestMarkToTheTopicAndEndsTheLock() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
         let config = try String(contentsOf: sandbox.config, encoding: .utf8)
         try Data(config.replacingOccurrences(of: "topics:\n", with: "topics:\n  in_play: 1\n").utf8).write(to: sandbox.config)
         _ = try await newTopic("First", in: sandbox.game, sandbox: sandbox)
+        _ = try await newTopic("Second", in: sandbox.game, sandbox: sandbox)
         try sandbox.tmux(["new-session", "-d", "-s", "notes", "-c", sandbox.tools.path])
         let environment = sandbox.cliEnvironment(pane: try sandbox.pane(of: "main"))
         let locked = try await run(cli, arguments: ["session", "lock", "--session", "notes"], environment: environment)
         XCTAssertEqual(locked.status, 0, locked.output)
 
-        let replaced = try await run(cli, arguments: ["topic", "replace-from-bench", "--with-session", "notes", "--topic", "First"],
+        let refused = try await run(cli, arguments: ["topic", "replace-from-bench", "--with-session", "notes", "--topic", "First"],
+                                    environment: environment)
+        XCTAssertEqual(refused.status, 1, "with in_play, a Locked Session is a Guest, In Play: " + refused.output)
+        XCTAssertTrue(refused.stderr.contains("not on the Bench"), refused.stderr)
+        let replaced = try await run(cli, arguments: ["topic", "replace-from-bench", "--with", "Second", "--session", "notes"],
                                      environment: environment)
         XCTAssertEqual(replaced.status, 0, replaced.output)
-        let back = try await run(cli, arguments: ["topic", "replace-from-bench", "--with", "First", "--session", "notes"],
-                                 environment: environment)
-        XCTAssertEqual(back.status, 0, "First went to the Bench, so it can come back: " + back.output)
-        let again = try await run(cli, arguments: ["topic", "replace-from-bench", "--with", "First", "--session", "notes"],
-                                  environment: environment)
-        XCTAssertEqual(again.status, 1, again.output)
-        XCTAssertTrue(again.stderr.contains("not In Play"), again.stderr)
+        XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "notes", "@muxify_lock"]), "", "the Lock of the Guest Session ends")
+        XCTAssertEqual(try sandbox.records().filter { $0["guest"] as? Bool == true }.compactMap { $0["title"] as? String }, ["Second"],
+                       "the Topic that comes In Play gets the Guest mark")
+    }
+
+    func testTopicMakeGuestAndEndGuestMoveABenchedTopicInPlayAndBack() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let config = try String(contentsOf: sandbox.config, encoding: .utf8)
+        try Data(config.replacingOccurrences(of: "topics:\n", with: "topics:\n  in_play: 1\n").utf8).write(to: sandbox.config)
+        let first = try await newTopic("First", in: sandbox.game, sandbox: sandbox)
+        let second = try await newTopic("Second", in: sandbox.game, sandbox: sandbox)
+        let third = try await newTopic("Third", in: sandbox.game, sandbox: sandbox)
+        let environment = sandbox.cliEnvironment(pane: nil)
+        func order() async throws -> [String] {
+            let list = try await run(cli, arguments: ["topic", "list"], environment: environment)
+            return list.stdout.split(separator: "\n").map { String($0.prefix { $0 != "\t" }) }
+        }
+        let created = try await order()
+        XCTAssertEqual(created, [first, third, second])
+
+        let made = try await run(cli, arguments: ["topic", "make-guest", "--topic", "Second"], environment: environment)
+        XCTAssertEqual(made.status, 0, made.output)
+        let afterMake = try await order()
+        XCTAssertEqual(afterMake, [first, second, third], "Second goes to the end of In Play, and First stays In Play")
+        let inPlay = try await run(cli, arguments: ["topic", "make-guest", "--topic", "First"], environment: environment)
+        XCTAssertEqual(inPlay.status, 1, inPlay.output)
+        XCTAssertTrue(inPlay.stderr.contains("not on the Bench"), inPlay.stderr)
+
+        let ended = try await run(cli, arguments: ["topic", "end-guest", "--topic", "Second"], environment: environment)
+        XCTAssertEqual(ended.status, 0, ended.output)
+        let afterEnd = try await order()
+        XCTAssertEqual(afterEnd, [first, second, third], "Second is at the top of the Bench")
+        XCTAssertFalse(try sandbox.records().contains { $0["guest"] as? Bool == true })
     }
 
     func testTopicMoveTradeWithExchangesTheTwoCardsAndMovesNoOtherAndRefusesAPinnedCard() async throws {
@@ -499,13 +531,15 @@ final class CLIIntegrationTests: XCTestCase {
         let locked = try await run(cli, arguments: ["session", "lock", "--session", "notes"], environment: environment)
         XCTAssertEqual(locked.status, 0, locked.output)
 
-        let chosen = try await run(cli, arguments: ["topic", "choose-in-play", "--session", "notes", "--topic", "Second"], environment: environment)
+        let guest = try await run(cli, arguments: ["topic", "choose-in-play", "--session", "notes", "--topic", "Second"], environment: environment)
+        XCTAssertEqual(guest.status, 1, "a Locked Session is a Guest, which keeps its place: " + guest.output)
+        let chosen = try await run(cli, arguments: ["topic", "choose-in-play", "--topic", "Second"], environment: environment)
         XCTAssertEqual(chosen.status, 0, chosen.output)
         let list = try await run(cli, arguments: ["topic", "list"], environment: environment)
         XCTAssertEqual(list.stdout.split(separator: "\n").map { String($0.prefix { $0 != "\t" }) }, [second, first])
         let replaced = try await run(cli, arguments: ["topic", "replace-from-bench", "--with", "First", "--session", "notes"],
                                      environment: environment)
-        XCTAssertEqual(replaced.status, 0, "the Locked Session went In Play and First to the Bench: " + replaced.output)
+        XCTAssertEqual(replaced.status, 0, "the Guest Session is In Play and First on the Bench: " + replaced.output)
     }
 
     func testWindowMoveToATopicThatDoesNotExistFailsAndChangesNothing() async throws {

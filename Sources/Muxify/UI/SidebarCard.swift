@@ -163,6 +163,8 @@ struct CardHeader<Details: View>: View {
     var isPinned = false
     /// A Locked Session's card shows a lock where a Pinned Topic's card shows its pin.
     var isLocked = false
+    /// A Guest's card shows the Guest mark there.
+    var isGuest = false
     var hintTarget: QuickSwitchTarget? = nil
     @Environment(\.quickSwitchHints) private var hints
     /// Words for the accessibility value after the open state, such as "Dormant".
@@ -226,7 +228,8 @@ struct CardHeader<Details: View>: View {
                 HStack(alignment: .titleLine, spacing: 5) {
                     // The Hint badge takes the mark's place while it shows.
                     let markOpacity: Double = hintTarget.map { hints[$0].isEmpty ? 1 : 0 } ?? 1
-                    if isPinned { PinMark().opacity(markOpacity) } else if isLocked { LockMark().opacity(markOpacity) }
+                    if isPinned { PinMark().opacity(markOpacity) } else if isGuest { GuestMark().opacity(markOpacity) }
+                    else if isLocked { LockMark().opacity(markOpacity) }
                     if let tagsInTitleLine { CardTagsSlot(tags: tagsInTitleLine) }
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { titleLineEnd = $0 }
@@ -305,6 +308,13 @@ extension VerticalAlignment {
 struct PinMark: View {
     var body: some View {
         Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(.secondary)
+    }
+}
+
+/// The mark after a Guest's title: a card In Play above `topics.in_play`.
+struct GuestMark: View {
+    var body: some View {
+        Text("Guest").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
     }
 }
 

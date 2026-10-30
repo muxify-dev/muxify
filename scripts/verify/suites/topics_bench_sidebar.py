@@ -244,6 +244,50 @@ class TopicsBenchSidebar(TopicsSidebar):
         self.assertEqual(self.cards('bench-visit-back', s.rows()), before, 'the card let go below the line moved')
         self.assertEqual(orders(), saved, 'the card let go below the line changed the order')
 
+    def test_make_a_guest_puts_a_benched_topic_in_play_with_its_mark_and_end_guest_puts_it_on_top_of_the_bench(self):
+        # The card's accessibility actions are its context menu (`listActions` in UI/SidebarView.swift).
+        s = self.s
+        self.bench_topics('bench-guest')
+        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        self.show_bench()
+        guest = 'topic-bench-guest-c'
+        s.wait_rows(lambda rs: self.cards('bench-guest', rs) == ['topic-bench-guest-a', LINE, 'topic-bench-guest-b', guest],
+                    'the Bench did not show: %s' % self.cards('bench-guest', s.rows()))
+        s.act('action', guest, 'Make a Guest')
+        s.wait_rows(lambda rs: self.cards('bench-guest', rs) == ['topic-bench-guest-a', guest, LINE, 'topic-bench-guest-b'],
+                    'the Guest is not at the end of In Play, or a card went to the Bench: %s' % self.cards('bench-guest', s.rows()))
+        wait(lambda: self.records()['bench-guest-c'].get('guest') is True,
+             'the record has no Guest mark: %s' % self.records()['bench-guest-c'], seconds=5)
+        s.wait_rows(lambda rs: 'Guest' in s.row(guest, rs).get('accessibilityValue', ''),
+                    'the card shows no Guest mark: %s' % self.describe(guest, s.rows()))
+
+        s.act('action', guest, 'End Guest')
+        s.wait_rows(lambda rs: self.cards('bench-guest', rs) == ['topic-bench-guest-a', LINE, guest, 'topic-bench-guest-b'],
+                    'End Guest did not put the card at the top of the Bench: %s' % self.cards('bench-guest', s.rows()))
+        wait(lambda: 'guest' not in self.records()['bench-guest-c'],
+             'the record keeps its Guest mark: %s' % self.records()['bench-guest-c'], seconds=5)
+
+    def test_with_in_play_a_locked_session_is_a_guest_at_the_end_of_in_play(self):
+        # The Session card's accessibility actions are its context menu (`lockButton` in UI/SidebarView.swift).
+        s = self.s
+        self.bench_topics('bench-guest-lock')
+        sid = self.new_session('bench-guest-lock-notes', self.beta)
+        window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
+        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        self.show_bench()
+        s.show(window)
+        card = 'no-topic-session-' + sid
+        s.wait_rows(lambda rs: s.has(card, rs), 'the No Topic Session has no card: %s' % s.ids())
+        s.act('action', card, 'Make a Guest')
+        locked = 'locked-' + sid
+        s.wait_rows(lambda rs: [k for k in s.ids(rs) if k in ('topic-bench-guest-lock-a', locked, LINE)]
+                    == ['topic-bench-guest-lock-a', locked, LINE],
+                    'the Guest Session is not at the end of In Play: %s' % s.ids())
+        self.assertIn('Guest', s.row(locked).get('accessibilityValue', ''), 'the card shows no Guest mark')
+        self.assertTrue(s.tmux('show-options', '-qv', '-t', sid, '@muxify_lock').strip(), 'Make a Guest wrote no Lock')
+        s.act('action', locked, 'End Guest')
+        wait(lambda: not s.tmux('show-options', '-qv', '-t', sid, '@muxify_lock').strip(), 'End Guest did not end the Lock')
+
 
 if __name__ == '__main__':
     unittest.main()

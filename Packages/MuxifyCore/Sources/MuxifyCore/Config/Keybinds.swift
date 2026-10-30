@@ -244,6 +244,8 @@ public enum PaletteAction: String, KeybindAction {
     case killSession = "kill_session"
     case lockSession = "lock_session"
     case unlockSession = "unlock_session"
+    case makeGuest = "make_guest"
+    case endGuest = "end_guest"
     case choosePane = "choose_pane"
     case chooseWindow = "choose_window"
     case chooseSession = "choose_session"
@@ -281,6 +283,8 @@ public enum PaletteAction: String, KeybindAction {
         .killSession: [],
         .lockSession: [],
         .unlockSession: [],
+        .makeGuest: [],
+        .endGuest: [],
         .choosePane: ["alt+1"],
         .chooseWindow: ["alt+2"],
         .chooseSession: ["alt+3"],
