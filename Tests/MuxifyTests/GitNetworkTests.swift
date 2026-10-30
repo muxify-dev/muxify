@@ -82,14 +82,15 @@ final class GitCredentialPromptTests: XCTestCase {
 }
 
 final class TerminalCommandTests: XCTestCase {
-    private func run(_ script: String, timeout: TimeInterval = 10, onPrompt: @escaping (GitCredentialPrompt, TerminalCommand?) -> Void = { _, _ in })
+    private func run(_ script: String, timeout: TimeInterval = 10, answerTimeout: TimeInterval = 600,
+                     onPrompt: @escaping (GitCredentialPrompt, TerminalCommand?) -> Void = { _, _ in })
         throws -> (result: Result<String, Error>?, prompts: [GitCredentialPrompt]) {
         var prompts: [GitCredentialPrompt] = []
         var result: Result<String, Error>?
         let done = expectation(description: "the command ends")
         var command: TerminalCommand?
         command = try TerminalCommand(CommandInvocation(executable: "/bin/sh", arguments: ["-c", script]), timeout: timeout,
-                                      onPrompt: { prompt in prompts.append(prompt); onPrompt(prompt, command) },
+                                      answerTimeout: answerTimeout, onPrompt: { prompt in prompts.append(prompt); onPrompt(prompt, command) },
                                       completion: { result = $0; done.fulfill() })
         wait(for: [done], timeout: 20)
         return (result, prompts)
@@ -121,6 +122,24 @@ final class TerminalCommandTests: XCTestCase {
     func testACommandThatRunsTooLongTimesOut() throws {
         let (result, _) = try run("sleep 10", timeout: 0.3)
         guard case .failure(TmuxError.timedOut)? = result else { return XCTFail("\(String(describing: result))") }
+    }
+
+    func testAQuestionNobodyAnswersTimesTheCommandOutAndStopsWhatItStarted() throws {
+        let directory = try TestDirectory()
+        let pids = directory.url.appendingPathComponent("pids")
+        // The background sleep stands in for the ssh that git starts to ask the question.
+        let script = "sleep 60 & echo \"$$ $!\" > '\(pids.path)'; printf 'Password: '; read -r answer; echo 'should not run'"
+        let (result, prompts) = try run(script, timeout: 30, answerTimeout: 0.5)
+        XCTAssertEqual(prompts.map(\.kind), [.password])
+        guard case .failure(TmuxError.timedOut)? = result else { return XCTFail("\(String(describing: result))") }
+        let started = try String(contentsOf: pids, encoding: .utf8).split(separator: " ").compactMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        XCTAssertEqual(started.count, 2)
+        let gone = expectation(description: "the command and what it started are gone")
+        DispatchQueue.global().async {
+            while started.contains(where: { kill($0, 0) == 0 }) { usleep(50_000) }
+            gone.fulfill()
+        }
+        wait(for: [gone], timeout: 5)
     }
 
     func testCancellingAQuestionStopsTheCommand() throws {

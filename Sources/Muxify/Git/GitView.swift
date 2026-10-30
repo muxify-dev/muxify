@@ -2714,11 +2714,16 @@ final class GitView {
         networkActivity.append(activity)
         let running = RunningCommand()
         running.command = store.runGitNetworkScript(script, arguments: arguments, onPrompt: { [weak self] question in
-            self?.ask(Self.credentialPrompt(question, id: running.id, answer: { running.command?.answer($0) },
-                                            cancel: { running.command?.cancel() }))
+            guard let self else {
+                // The Git View is gone with its Window, so nobody can answer the question.
+                running.command?.cancel()
+                return
+            }
+            self.ask(Self.credentialPrompt(question, id: running.id, answer: { running.command?.answer($0) },
+                                           cancel: { running.command?.cancel() }))
         }, completion: { [weak self] result in
-            guard let self else { return }
             running.command = nil
+            guard let self else { return }
             if let index = self.networkActivity.firstIndex(of: activity) { self.networkActivity.remove(at: index) }
             // A question the command no longer waits for goes.
             self.waitingPrompts.removeAll { $0.id == running.id }

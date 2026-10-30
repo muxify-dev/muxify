@@ -2088,13 +2088,20 @@ final class WorkspaceStore {
             return nil
         }
         let current = generation
-        return connection.startTerminalScript(script, arguments: arguments, timeout: timeout, onPrompt: { [weak self] prompt in
-            guard let self, self.generation == current else { return }
+        weak var command: TerminalCommand?
+        let started = connection.startTerminalScript(script, arguments: arguments, timeout: timeout, onPrompt: { [weak self] prompt in
+            guard let self, self.generation == current else {
+                // Nobody is left to answer the question, so the command would wait on it forever.
+                command?.cancel()
+                return
+            }
             onPrompt(prompt)
         }, completion: { [weak self] result in
             guard let self, self.generation == current else { return }
             completion(result)
         })
+        command = started
+        return started
     }
 
     // MARK: - Browser
