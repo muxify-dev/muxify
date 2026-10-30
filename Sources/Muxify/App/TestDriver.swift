@@ -162,9 +162,9 @@ enum TestDriver {
     /// or its lower quarter with the option `edge: "bottom"`. With the option `via`, it first moves to the same quarter
     /// of the element that `via` names, as a user who changes their mind on the way. A destination that does not show yet,
     /// such as a Benched card that the drag shows, is found after half a second at `via`. Each tick hands one mouse event to
-    /// the window, never through the window server, so the pointer does not move. The app stays in the background, so
-    /// the window is not key: only a gesture that takes the first click (`takesFirstClick` in SidebarView) follows, and
-    /// a system drag session would follow the real pointer instead.
+    /// the app, past its event monitors as a real click goes, but never through the window server, so the pointer does
+    /// not move. The app stays in the background, so the window is not key: only a gesture that takes the first click
+    /// (`takesFirstClick` in SidebarView) follows, and a system drag session would follow the real pointer instead.
     private final class Drag: Steps {
         let nonce: String
         private weak var window: NSWindow?
@@ -234,12 +234,19 @@ enum TestDriver {
                 moves = end.map { (.leftMouseDragged, $0) } + [(.leftMouseUp, end.last ?? held)]
             }
             guard let window, !moves.isEmpty else { return ["rows": TestDriver.dump().map(\.row), "pressed": pressed] }
+            func event(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent? {
+                NSEvent.mouseEvent(with: type, location: window.convertPoint(fromScreen: point), modifierFlags: modifierFlags,
+                                   timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                                   eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)
+            }
             let (type, point) = moves.removeFirst()
             lastPoint = point
-            NSEvent.mouseEvent(with: type, location: window.convertPoint(fromScreen: point), modifierFlags: modifierFlags,
-                               timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
-                               eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)
-                .map(window.sendEvent)
+            // A text field follows the mouse in a loop of its own until the mouse up comes from the queue.
+            if type == .leftMouseDown, let up = moves.first, up.type == .leftMouseUp {
+                moves.removeFirst()
+                event(up.type, at: up.point).map { NSApp.postEvent($0, atStart: false) }
+            }
+            event(type, at: point).map(NSApp.sendEvent)
             return nil
         }
     }

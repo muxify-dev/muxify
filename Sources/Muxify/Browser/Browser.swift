@@ -228,8 +228,9 @@ final class Browser {
         focusShownTab()
     }
 
-    /// The page that had Focus goes with its Tab, so the Tab shown next must take it.
-    private func focusShownTab() {
+    /// Gives Focus to the Tab the panel shows, when the panel shows. The page that had Focus goes with its Tab, so
+    /// the Tab shown next must take it; and a click anywhere in the panel ends here.
+    func focusShownTab() {
         if layout.shows(.browser), activeTab != nil { requestFocus() }
     }
 

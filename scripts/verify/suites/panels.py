@@ -255,6 +255,23 @@ class Panels(unittest.TestCase):
         self.s.act('press', 'Close Tab')
         self.wait_focus('browser', 'Close Tab took Focus from the Browser')
 
+    def test_clicking_a_toolbar_button_gives_the_browser_focus(self):
+        self.new_window('reload-click')
+        self.s.act('press', 'Focus Terminal')
+        self.wait_focus('terminal', 'Focus Terminal did not give the Terminal Focus')
+        self.s.act('click', 'browser-reload')
+        self.wait_focus('browser', 'a click on Reload left Focus in the Terminal')
+
+    def test_clicking_the_address_field_keeps_focus_in_it(self):
+        self.new_window('address-click')
+        self.s.act('press', 'Focus Terminal')
+        self.wait_focus('terminal', 'Focus Terminal did not give the Terminal Focus')
+        self.s.act('click', 'browser-address')
+        in_field = lambda: [name for name in self.s.driver('responder')['responders'] if name.endswith('FieldEditor')]
+        wait(in_field, 'a click on the address field did not give it Focus: %s' % self.s.driver('responder')['responders'])
+        time.sleep(SETTLE)
+        self.assertTrue(in_field(), 'the page took Focus from the address field: %s' % self.s.driver('responder')['responders'])
+
     def test_the_tmux_client_keeps_its_width_while_the_terminal_is_hidden(self):
         time.sleep(SETTLE)
         before = self.client_width()

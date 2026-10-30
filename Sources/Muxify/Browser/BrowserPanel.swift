@@ -17,6 +17,51 @@ struct BrowserPanel: View {
                 Color(nsColor: .windowBackgroundColor)
             }
         }
+        .background(ClickTakesFocus(browser: browser))
+    }
+}
+
+/// Every click in the panel gives the Browser Focus, so a new control needs no Focus code of its own. A click on the
+/// page or a field takes Focus by itself; a click on a button, the menu or the tab strip leaves it where it was.
+private struct ClickTakesFocus: NSViewRepresentable {
+    let browser: Browser
+
+    func makeNSView(context: Context) -> ClickTakesFocusView {
+        ClickTakesFocusView()
+    }
+
+    func updateNSView(_ view: ClickTakesFocusView, context: Context) {
+        view.browser = browser
+    }
+}
+
+/// Sizes itself to the panel and watches the app's mouse downs. After the click is handled, it requests Focus when
+/// the window's first responder is outside the panel: the Terminal, or no view at all.
+private final class ClickTakesFocusView: NSView {
+    weak var browser: Browser?
+    private var monitor: Any?
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        monitor.map(NSEvent.removeMonitor)
+        monitor = nil
+        guard window != nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+            guard let self, event.window === window, bounds.contains(convert(event.locationInWindow, from: nil)) else { return event }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !panelHasFirstResponder else { return }
+                browser?.focusShownTab()
+            }
+            return event
+        }
+    }
+
+    private var panelHasFirstResponder: Bool {
+        guard let responder = window?.firstResponder as? NSView, responder !== window?.contentView else { return false }
+        let frame = responder.convert(responder.bounds, to: nil)
+        return convert(bounds, to: nil).contains(NSPoint(x: frame.midX, y: frame.midY))
     }
 }
 
@@ -210,6 +255,7 @@ private struct TabContent: View {
                 action: tab.reloadOrStop
             )
             .disabled(!tab.hasPage)
+            .accessibilityIdentifier("browser-reload")
 
             addressField
                 .padding(.horizontal, 4)
