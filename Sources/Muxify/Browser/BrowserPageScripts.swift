@@ -12,7 +12,6 @@ enum BrowserPageScripts {
         let controller = WKUserContentController()
         controller.add(messages, contentWorld: world, name: Message.findFrame.rawValue)
         controller.add(messages, contentWorld: world, name: Message.scrollKey.rawValue)
-        controller.add(messages, contentWorld: world, name: Message.history.rawValue)
         install(in: controller)
         return controller
     }()
@@ -61,8 +60,6 @@ enum BrowserPageScripts {
         case findFrame = "muxifyFindFrame"
         /// A Vim Key went down or up; the body names the ScrollKey.
         case scrollKey = "muxifyScrollKey"
-        /// H or L went down; the body is "back" or "forward".
-        case history = "muxifyHistory"
     }
 
     private final class Messages: NSObject, WKScriptMessageHandler {
@@ -76,12 +73,6 @@ enum BrowserPageScripts {
                 guard let body = message.body as? [String: Any], let name = body["key"] as? String,
                       let key = ScrollKey(rawValue: name) else { return }
                 key.send(to: webView, down: body["down"] as? Bool ?? false, isRepeat: body["repeat"] as? Bool ?? false)
-            case .history:
-                switch message.body as? String {
-                case "back": webView.goBack()
-                case "forward": webView.goForward()
-                default: break
-                }
             case nil:
                 break
             }
@@ -374,7 +365,9 @@ enum BrowserPageScripts {
 
     /// h, j, k, l, d, u, gg and G press the arrow, Page Down, Page Up, Home or
     /// End key in their place, down and up with them. H and L go back and
-    /// forward, as the Back and Forward buttons do, once for each press. A key
+    /// forward in the page's history, once for each press. They do not call
+    /// WKWebView's goBack: since macOS 27.2 it drops the forward entry when a
+    /// script made the entry it leaves, so L after H did nothing. A key
     /// the page handled, a key with a modifier, and typing in a text field pass
     /// through.
     static let vimKeysSource = #"""
@@ -382,7 +375,7 @@ enum BrowserPageScripts {
       if (globalThis.muxifyVimKeys) return;
       const state = globalThis.muxifyVimKeys = { enabled: true };
       const KEYS = { j: 'ArrowDown', k: 'ArrowUp', h: 'ArrowLeft', l: 'ArrowRight', d: 'PageDown', u: 'PageUp', G: 'End' };
-      const HISTORY = { H: 'back', L: 'forward' };
+      const HISTORY = { H: () => history.back(), L: () => history.forward() };
       const held = new Map();
       let gPressedAt = 0;
 
@@ -402,7 +395,7 @@ enum BrowserPageScripts {
         if (editable(event.composedPath()[0] || event.target)) return;
         if (HISTORY[event.key]) {
           event.preventDefault();
-          if (!event.repeat) webkit.messageHandlers.muxifyHistory.postMessage(HISTORY[event.key]);
+          if (!event.repeat) HISTORY[event.key]();
           return;
         }
         let key = KEYS[event.key];

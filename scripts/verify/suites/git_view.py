@@ -1468,10 +1468,18 @@ class GitView(unittest.TestCase):
         origin = self.bare_remote('push-plain')
         self.commit_here('to push')
         self.key('f')
-        self.s.wait_rows(lambda rs: '↑1 ↓0 vs origin/main' in self.toolbar(rs), 'the Git View does not count the commit as unpushed', seconds=15)
+        # Without an upstream the counts are against main, which is origin/main too, so a read from before
+        # `push -u` set the upstream shows the same counts, and shift+p would ask for an upstream.
+        self.s.wait_rows(lambda rs: 'no upstream' not in self.toolbar(rs) and '↑1 ↓0 vs origin/main' in self.toolbar(rs),
+                         'the Git View does not count the commit as unpushed to the upstream', seconds=15)
         self.key('3')
         self.key('shift+p')
-        wait(lambda: self.remote_main(origin) == self.git('rev-parse', 'HEAD').strip(), 'shift+p did not push main', seconds=15)
+        try:
+            wait(lambda: self.remote_main(origin) == self.git('rev-parse', 'HEAD').strip(), 'shift+p did not push main', seconds=15)
+        except AssertionError:
+            rs = self.s.rows()
+            self.fail('shift+p did not push main: the toolbar says %r, the error says %r' % (
+                self.toolbar(rs), self.s.row('git-write-error', rs).get('accessibilityLabel')))
         self.s.wait_rows(lambda rs: '↑0 ↓0 vs origin/main' in self.toolbar(rs) and 'Pushing…' not in self.toolbar(rs),
                          'the counts do not update after the push', seconds=15)
         self.assertFalse(self.s.has('git-write-error'), 'the push failed')
