@@ -40,6 +40,10 @@ _Avoid_: split, terminal
 A terminal attached to a tmux server, showing one of its Sessions. Each App Window's Terminal is one Client; Ghostty.app or another terminal attached to the same server is another.
 _Avoid_: attachment, connection, viewer
 
+**Watch Session**:
+The Session `muxify-watch`, where Muxify's control-mode Client listens for tmux changes. Muxify makes it while you have a Session of your own and kills it after your last one closes. It has no Window you can see in the Sidebar, the Command Palette or the CLI, and no Terminal attaches to it.
+_Avoid_: listener Session, infra Session, hidden Session
+
 **Find in Pane**:
 Searching the history of the current Window's active Pane, from a find bar over the Terminal, with every match highlighted. It never searches the other Panes, the Browser or a Command Palette.
 _Avoid_: terminal search, scrollback search, Find (alone)

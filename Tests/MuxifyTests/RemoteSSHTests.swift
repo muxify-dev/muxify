@@ -250,7 +250,7 @@ final class RemoteSSHTests: XCTestCase {
         let ssh = try remote(in: directory)
         let script = ssh.bootstrap(target: "$1:@1", createSessionIfNeeded: false)
         XCTAssertFalse(script.contains("new-session"))
-        XCTAssertTrue(script.contains("list-windows -a -F '#{session_id}:#{window_id}' | head -n 1"))
+        XCTAssertTrue(script.contains("list-windows -a -f \"$user_sessions\" -F '#{session_id}:#{window_id}' | head -n 1"))
         XCTAssertNoThrow(try CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-n", "-c", script])))
         XCTAssertTrue(ssh.bootstrap().contains("new-session -d -s main"), "Explicit reconnect can create main")
     }

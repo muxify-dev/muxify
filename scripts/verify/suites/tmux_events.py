@@ -42,6 +42,35 @@ class TmuxEvents(unittest.TestCase):
             n += 1
             self.s.tmux_ok('rename-window', '-t', 'main', 'w%d' % n)
 
+    def clients_by_session(self):
+        listing = self.s.tmux_ok('list-clients', '-F', '#{client_control_mode} #{session_name}').stdout.split('\n')
+        return sorted(line for line in listing if line)
+
+    def test_control_client_listens_from_the_watch_session_that_the_sidebar_never_shows(self):
+        # tmux answers a Pane's color query from the first client on its Session, and a control client answers black.
+        wait(lambda: '1 muxify-watch' in self.clients_by_session(), 'no control client on muxify-watch')
+        clients = self.clients_by_session()
+        self.assertEqual([c for c in clients if c.startswith('1 ')], ['1 muxify-watch'], clients)
+        self.assertNotIn('0 muxify-watch', clients, 'the app attached its Terminal to the Watch Session')
+        watch = self.s.tmux('list-windows', '-t', '=muxify-watch:', '-F', '#{window_id}').split()
+        user = self.s.tmux('list-windows', '-t', '=main:', '-F', '#{window_id}').split()
+        rows = self.s.wait_rows(lambda rs: any(self.s.has(prefix + w, rs) for w in user
+                                               for prefix in ('topic-window-', 'session-window-')),
+                                'the Sidebar does not show main')
+        shown = [key for key in self.s.ids(rows) if any(key.endswith('-window-' + w) for w in watch)]
+        self.assertEqual(shown, [], 'the Sidebar shows the Watch Session')
+
+    def test_the_watch_session_does_not_keep_the_server_running_after_the_last_session_closes(self):
+        wait(lambda: '1 muxify-watch' in self.clients_by_session(), 'no control client on muxify-watch')
+        server = int(self.s.tmux('display-message', '-p', '#{pid}'))
+        # The next check needs the app and a server again; setUp launches the app when it is gone.
+        self.addCleanup(lambda: alive(self.s.pid) and os.kill(self.s.pid, signal.SIGKILL))
+        for session in self.s.tmux('list-sessions', '-F', '#{session_name}').split('\n'):
+            if session != 'muxify-watch':
+                self.s.tmux_ok('kill-session', '-t', '=' + session)
+        wait(lambda: not alive(server), 'tmux server %d still runs: %s'
+             % (server, self.s.tmux_ok('list-sessions', '-F', '#{session_name}').stdout.split()), seconds=10)
+
     def test_send_keys_from_outside_tmux_works_while_the_control_client_is_newest(self):
         # tmux gives a command from outside tmux the client with the newest activity. A control client that starts
         # again after the app's own client is that client.

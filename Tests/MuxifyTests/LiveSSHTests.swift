@@ -133,7 +133,7 @@ final class LiveSSHTests: XCTestCase {
         let events = TmuxEvents()
         var notificationCount = 0
         events.onEvent = { _ in notificationCount += 1 }
-        events.start(sessionID: main.sessionID, connection: connection)
+        events.start(invocation: connection.invocation)
         defer { events.stop() }
         let eventDeadline = Date().addingTimeInterval(5)
         while Date() < eventDeadline {
@@ -168,7 +168,7 @@ final class LiveSSHTests: XCTestCase {
         _ = try connection.run(["switch-client", "-c", tty, "-t", other])
         let switched = try connection.snapshot()
         XCTAssertEqual(switched.clients.first { $0.tty == tty }?.sessionID, other)
-        XCTAssertEqual(switched.clients.first { $0.isControl }?.sessionID, main.sessionID)
+        XCTAssertEqual(switched.clients.first { $0.isControl }?.sessionID, try XCTUnwrap(switched.watchSessionID))
         _ = try connection.run(["rename-window", "-t", windowID, "renamed"])
         let disposable = try connection.run(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "\(main.sessionID):"])
             .trimmingCharacters(in: .whitespacesAndNewlines)

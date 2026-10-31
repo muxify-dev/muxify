@@ -94,7 +94,8 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.new_session('alpha/listed-topic', self.alpha, topic='listed-topic')
         self.write_topic('listed-topic', 'Listed proof', self.alpha)
         self.show_view('sessions')
-        live = dict(line.split('|', 1) for line in self.s.tmux('list-sessions', '-F', '#{session_id}|#{session_name}').splitlines())
+        live = dict(line.split('|', 1) for line in self.s.tmux('list-sessions', '-f', '#{!=:#{session_name},muxify-watch}',
+                                                               '-F', '#{session_id}|#{session_name}').splitlines())
         complete = lambda rs: (all(self.s.has('session-' + sid, rs) for sid in live) and not self.topic_rows(rs)
                                and not self.s.has('settled-topics', rs))
         latency, rs = self.rows_until(complete, seconds=5)

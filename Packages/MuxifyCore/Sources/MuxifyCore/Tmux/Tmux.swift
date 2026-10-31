@@ -192,6 +192,8 @@ public struct TmuxSnapshot {
     public var browserSocket: String?
     public var ownClientTTY: String?
     public var homeDirectory: String?
+    /// The Watch Session, when it runs. Its Windows and Panes are not in `windows` and `panes`.
+    public var watchSessionID: String?
 
     public init(windows: [TmuxWindow], clients: [TmuxClient], panes: [TmuxPane], lastWindowID: String? = nil, serverRunning: Bool, serverID: String? = nil, ownClientTTY: String? = nil, homeDirectory: String? = nil) {
         self.windows = windows
@@ -263,6 +265,11 @@ public enum Tmux {
     /// One-shot: programs set it to open a Tab; Muxify consumes and clears it.
     public static let openOption = "@muxify_open"
     public static let lastWindowOption = "@muxify_last_window"
+    /// The Watch Session: Muxify's control-mode client attaches here, alone. tmux answers a Pane's background
+    /// color query (OSC 11) from the first client on the Pane's Session, and a control client answers black.
+    public static let watchSessionName = "muxify-watch"
+    /// A `-f` filter for `list-sessions` and `list-windows` that leaves out the Watch Session.
+    public static let userSessionFilter = "#{!=:#{session_name},\(watchSessionName)}"
     // Pane options an Agent's Extension writes (ADR 0004).
     public static let agentOption = "@muxify_agent"
     public static let agentStatusOption = "@muxify_agent_status"
@@ -374,11 +381,16 @@ public enum Tmux {
         var socketPath: String?
         var browserSocket: String?
         var codexReports: [String] = []
+        var watchSessionID: String?
+        var watchWindowIDs: Set<String> = []
         for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
             let f = line.components(separatedBy: s)
             // Fields Topics added are optional, so older recorded snapshots still parse.
             let field = { (index: Int) in index < f.count ? f[index] : "" }
-            if f.first == "W", f.count >= 19 {
+            if f.first == "W", f.count >= 19, f[3] == watchSessionName {
+                watchSessionID = f[2]
+                watchWindowIDs.insert(f[1])
+            } else if f.first == "W", f.count >= 19 {
                 windows.append(TmuxWindow(
                     id: f[1], sessionID: f[2], sessionName: f[3], index: Int(f[4]) ?? 0,
                     name: f[5], paneTitle: f[6], path: f[7], command: f[8],
@@ -415,12 +427,14 @@ public enum Tmux {
         for index in windows.indices where windows[index].savedSessionID.isEmpty {
             windows[index].savedSessionID = "tmux:\(serverID ?? "unknown"):\(windows[index].sessionID):\(windows[index].sessionCreated)"
         }
+        panes.removeAll { watchWindowIDs.contains($0.windowID) }
         var snapshot = TmuxSnapshot(
             windows: windows, clients: clients, panes: panes,
             lastWindowID: lastWindowID, serverRunning: true, serverID: serverID
         )
         snapshot.socketPath = socketPath
         snapshot.browserSocket = browserSocket
+        snapshot.watchSessionID = watchSessionID
         CodexReports.apply(codexReports, to: &snapshot)
         return snapshot
     }

@@ -200,12 +200,16 @@ final class RemoteSSH {
         fi
         # Set this here rather than relying on the SSH server's AcceptEnv.
         export TERM COLORTERM=truecolor MUXIFY_TERMINAL=1
-        if ! tmux -u has-session 2>/dev/null; then
+        # The Watch Session is Muxify's own: it does not count, and the Terminal never attaches to it.
+        user_sessions=\(Tmux.shellQuote(Tmux.userSessionFilter))
+        if ! tmux -u list-sessions -f "$user_sessions" -F . 2>/dev/null | grep -q .; then
             \(createSessionIfNeeded ? "tmux -u new-session -d -s main -c \"$HOME\" || exit $?" : reportSnapshot + "\n    exit 0")
         fi
         \(targetSetup)
         if [ -n "$target" ] && ! tmux -u list-panes -t "$target" >/dev/null 2>&1; then target=; fi
-        \(createSessionIfNeeded ? "" : "if [ -z \"$target\" ]; then target=$(tmux -u list-windows -a -F '#{session_id}:#{window_id}' | head -n 1); fi")
+        \(createSessionIfNeeded
+            ? "if [ -z \"$target\" ]; then target=$(tmux -u list-sessions -f \"$user_sessions\" -F '#{session_activity} #{session_id}' | sort -rn | head -n 1 | cut -d ' ' -f 2); fi"
+            : "if [ -z \"$target\" ]; then target=$(tmux -u list-windows -a -f \"$user_sessions\" -F '#{session_id}:#{window_id}' | head -n 1); fi")
         # Some SSH servers (including OrbStack) omit SSH_TTY despite -tt.
         client_tty=${SSH_TTY:-$(tty)}
         case "$client_tty" in
