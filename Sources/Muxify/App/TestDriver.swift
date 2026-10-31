@@ -6,7 +6,8 @@ import MuxifyCore
 /// The script writes `command.json` (with a fresh nonce) into the folder
 /// named by MUXIFY_TEST_DRIVER; a timer on the main run loop answers each new
 /// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, hover, snapshot, responder, scroll, stall,
-/// binding, each with the option `reveal` that scrolls the target into view first. None of
+/// binding, each with the option `reveal` that scrolls the target into view first, and `watch` that reads frames of
+/// elements in each drawn frame after it. None of
 /// them activates the app, opens a menu or moves the pointer, so a run never takes focus.
 enum TestDriver {
     private static var activity: NSObjectProtocol?
@@ -94,6 +95,10 @@ enum TestDriver {
         lastNonce = nonce
         if command["reveal"] as? Bool == true, let target = command["target"] as? String, !target.isEmpty {
             pending = Reveal(nonce: nonce, target: target, command: command)
+            return
+        }
+        if let watched = command["watch"] as? [String], !watched.isEmpty {
+            pending = Watch(nonce: nonce, watched: watched, seconds: command["watch_seconds"] as? Double ?? 1, command: command)
             return
         }
         if ["drag", "click", "hover"].contains(command["command"] as? String), SidebarPagerMotion.isMoving {
@@ -336,6 +341,61 @@ enum TestDriver {
         private static func scrollViews(in view: NSView?) -> [NSScrollView] {
             guard let view, !view.isHidden else { return [] }
             return ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap(scrollViews)
+        }
+    }
+
+    /// The option `watch` runs a command and then reads the frames of the elements it names after each pass of the main
+    /// run loop, for `watch_seconds`. A run loop observer that comes after Core Animation's commit sees each layout
+    /// that is drawn, so a view that is somewhere else for one frame shows in the answer. It answers `frames`: for each
+    /// identifier, its frames (x, y, width, height in screen points) in the order they came, each once until it changes.
+    private final class Watch: Steps {
+        let nonce: String
+        private let watched: [String]
+        private let until: Date
+        private var result: [String: Any] = [:]
+        private var objects: [String: NSObject] = [:]
+        private var frames: [String: [[Double]]] = [:]
+        private var observer: CFRunLoopObserver?
+
+        init(nonce: String, watched: [String], seconds: Double, command: [String: Any]) {
+            self.nonce = nonce
+            self.watched = watched
+            until = Date().addingTimeInterval(seconds)
+            sample()
+            var command = command
+            command["watch"] = nil
+            result = TestDriver.run(command)
+            sample()
+            // After the commit observer (order 2 000 000), so each sample is the layout of a frame that is drawn.
+            let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, 3_000_000) {
+                [weak self] _, _ in self?.sample()
+            }
+            CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+            self.observer = observer
+        }
+
+        func step() -> [String: Any]? {
+            guard Date() >= until else { return nil }
+            if let observer { CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes) }
+            observer = nil
+            result["frames"] = frames
+            result["rows"] = TestDriver.dump().map(\.row)
+            return result
+        }
+
+        private func sample() {
+            if watched.contains(where: { objects[$0] == nil }) {
+                for element in TestDriver.dump() {
+                    if let identifier = element.row["accessibilityIdentifier"], watched.contains(identifier) {
+                        objects[identifier] = element.object
+                    }
+                }
+            }
+            for identifier in watched {
+                guard let frame = (objects[identifier]?.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue else { continue }
+                let value = [frame.minX, frame.minY, frame.width, frame.height].map(Double.init)
+                if frames[identifier]?.last != value { frames[identifier, default: []].append(value) }
+            }
         }
     }
 
