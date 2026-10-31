@@ -34,9 +34,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         return windows
 
     def long_bench(self, prefix):
-        """A shown Bench much longer than the Sidebar. Returns the identifiers of the Benched cards in list order. The
-        check stays in No Topic: a drag right after going to a Topic can come while the app still changes the Topic,
-        which turns the drag off."""
+        """A shown Bench much longer than the Sidebar. Returns the identifiers of the Benched cards in list order."""
         s = self.s
         self.bench_topics(prefix, dormant=17)
         bench = ['topic-%s-%s' % (prefix, name) for name in ['b', 'c'] + ['t%02d' % i for i in range(3, 20)]]
@@ -46,7 +44,6 @@ class TopicsBenchSidebar(TopicsSidebar):
                     'the long Bench did not show in list order: %s' % self.cards(prefix, s.rows()))
         s.wait_rows(lambda rs: frame(s.row(bench[-1], rs))[1] < frame(s.row('topics-list', rs))[0],
                     'the long Bench fits in the Sidebar')
-        # From the top, whatever an earlier check left.
         s.act('scroll', 'topics-list', from_end=100000)
         s.wait_rows(lambda rs: frame(s.row(bench[0], rs))[1] < frame(s.row(LINE, rs))[0],
                     'the Bench did not scroll back to its top')
@@ -262,8 +259,6 @@ class TopicsBenchSidebar(TopicsSidebar):
                     'the Benched card of the Location does not show under the line: %s' % self.cards('bench-visit-drag', s.rows()))
         orders = lambda: self.orders('bench-visit-drag')
         traded = lambda: orders()['bench-visit-drag-b'] < orders()['bench-visit-drag-a'] < orders()['bench-visit-drag-c']
-        # The app saves no change of the Topics while it still finishes going to b, and on a slow Mac the trade can come
-        # before that. Nothing changes then, and the card goes back, so the check drags again.
         for _ in range(2):
             s.act('drag', 'topic-bench-visit-drag-b', 'topic-bench-visit-drag-a')
             if self.rows_until(lambda rs: traded(), seconds=5)[0] is not None:
@@ -307,8 +302,6 @@ class TopicsBenchSidebar(TopicsSidebar):
         self.assertEqual(orders(), saved, 'the card let go below the line changed the order')
 
     def test_a_click_on_a_card_of_the_shown_bench_does_not_move_it(self):
-        # The opened No Topic Session under the line goes away with the click, so the clicked card is measured from the
-        # Benched card above it.
         s = self.s
         windows = self.bench_topics('bench-click')
         s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
@@ -316,14 +309,13 @@ class TopicsBenchSidebar(TopicsSidebar):
         order = ['topic-bench-click-a', LINE, 'topic-bench-click-b', 'topic-bench-click-c']
         rs = s.wait_rows(lambda rs: self.cards('bench-click', rs) == order,
                          'the Bench did not show in list order: %s' % self.cards('bench-click', s.rows()))
-        under_b = lambda rs: frame(s.row('topic-bench-click-b', rs))[0] - frame(s.row('topic-bench-click-c', rs))[1]
-        before = under_b(rs)
+        gap_from_b_to_c = lambda rs: frame(s.row('topic-bench-click-b', rs))[0] - frame(s.row('topic-bench-click-c', rs))[1]
+        before = gap_from_b_to_c(rs)
         s.act('click', 'topic-bench-click-c')
         s.wait_shown(windows['topic-bench-click-c'])
-        # The dump can list the line before the card above it for a moment after the click, with the same frames.
         rs = s.wait_rows(lambda rs: self.cards('bench-click', rs) == order,
                          'the click changed the order the Sidebar shows: %s' % self.cards('bench-click', s.rows()))
-        self.assertAlmostEqual(under_b(rs), before, delta=1, msg='the clicked card moved')
+        self.assertAlmostEqual(gap_from_b_to_c(rs), before, delta=1, msg='the clicked card moved')
 
     def test_scrolling_a_long_bench_leaves_the_cards_in_play_in_place(self):
         s = self.s
@@ -343,8 +335,6 @@ class TopicsBenchSidebar(TopicsSidebar):
         rs = s.rows()
         before = self.tops(fixed + [bench[-1]], rs)
         scrolled = lambda rs: self.tops([bench[-1]], rs)[bench[-1]] > before[bench[-1]] + 100
-        # The app can cancel a drag while it still finishes a change of the Location that an earlier check made, as
-        # after a click on a card. The card then goes back and nothing scrolls, so the check drags again.
         for _ in range(3):
             s.act('drag', bench[0], 'topics-list', edge='bottom', inset=10, hold=1.5)
             rs = s.rows()
@@ -353,7 +343,6 @@ class TopicsBenchSidebar(TopicsSidebar):
         self.assertTrue(scrolled(rs), 'the Bench did not scroll while the card was held at its bottom edge: %s, before %s'
                         % (self.tops([bench[-1]], rs), before))
         self.assert_in_place(fixed, before, rs)
-        # The card landed further down the Bench. Wait for the save, so that the cleanup removes the records after it.
         orders = lambda: self.orders('bench-edge')
         wait(lambda: orders()['bench-edge-b'] > orders()['bench-edge-c'], 'the drop did not save: %s' % orders(), seconds=5)
 
@@ -365,8 +354,8 @@ class TopicsBenchSidebar(TopicsSidebar):
         area_top = frame(s.row(bench[0], rs))[1] + 6
         list_bottom = frame(s.row('topics-list', rs))[0]
         last = frame(s.row(bench[-1], rs))
-        # The end of the content that puts the last card's bottom in the middle of the Bench area, away from its edges.
-        s.act('scroll', 'topics-list', from_end=(area_top - list_bottom) / 2 - (last[1] - last[0]) - 6)
+        last_card_mid_area = (area_top - list_bottom) / 2 - (last[1] - last[0]) - 6
+        s.act('scroll', 'topics-list', from_end=last_card_mid_area)
         rs = s.wait_rows(lambda rs: frame(s.row(bench[0], rs))[1] > area_top + 100, 'the Bench did not scroll')
         middle = (area_top + list_bottom) / 2
         target = min(bench, key=lambda key: abs(sum(frame(s.row(key, rs))) / 2 - middle))

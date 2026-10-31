@@ -37,8 +37,7 @@ import SwiftUI
         let end = max(0, document.bounds.height - clip.bounds.height)
         let offset = document.isFlipped ? clip.bounds.origin.y : end - clip.bounds.origin.y
         let step = EdgeAutoScroll.step(pointer: pointer, in: area(offset), offset: offset, end: end)
-        // Whole points, so the block that sticks by the scroll offset stays on the pixels it was on.
-        let delta = dwell.pass(step, at: ProcessInfo.processInfo.systemUptime).rounded()
+        let delta = dwell.pass(step, at: ProcessInfo.processInfo.systemUptime)
         guard delta != 0 else { return }
         let y = min(max(0, offset + delta), end)
         clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: document.isFlipped ? y : end - y))

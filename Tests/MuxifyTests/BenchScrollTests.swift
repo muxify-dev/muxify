@@ -1,7 +1,6 @@
 import XCTest
 
 final class BenchScrollTests: XCTestCase {
-    /// A 200-point block in a 600-point viewport: the Bench area starts at 204, under the 4-point inset.
     private let short = BenchGeometry(topHeight: 200, viewportHeight: 600)
 
     func testAShortBlockSticksAtOnceAndTheBenchScrollsUnderIt() {
@@ -23,19 +22,18 @@ final class BenchScrollTests: XCTestCase {
     }
 
     func testTheTailKeepsTheContentHeightWhenTheBlockOrTheLastCardGrows() {
-        // inset, block, spacing, the Bench's cards (the last one 40 of them), spacing, tail, inset.
         func content(_ geometry: BenchGeometry, bench: CGFloat, last: CGFloat) -> CGFloat {
-            4 + geometry.topHeight + 6 + bench + 6 + geometry.tail(afterCardOfHeight: last) + 4
+            let (inset, spacing) = (geometry.inset, geometry.spacing)
+            return inset + geometry.topHeight + spacing + bench + spacing + geometry.tail(afterCardOfHeight: last) + inset
         }
         let before = content(short, bench: 300, last: 40)
         XCTAssertEqual(content(BenchGeometry(topHeight: 240, viewportHeight: 600), bench: 300, last: 40), before,
                        "a block 40 points taller takes them from the tail")
         XCTAssertEqual(content(short, bench: 340, last: 80), before, "a last card 40 points taller takes them from the tail")
         XCTAssertEqual(content(short, bench: 40, last: 40), 600, "a Bench of one card does not scroll")
-        // At the end of the scroll, the last card's top is one spacing under the area's top.
         let end = before - 600
-        let lastTop = 4 + 200 + 6 + 300 - 40
-        XCTAssertEqual(CGFloat(lastTop) - end, short.areaTop + 6)
+        let lastTop = short.inset + short.topHeight + short.spacing + 300 - 40
+        XCTAssertEqual(lastTop - end, short.areaTop + short.spacing, "at the end the last card stands one spacing under the area's top")
     }
 
     func testThePointerScrollsAtTheEdgesOfTheAreaOnly() {

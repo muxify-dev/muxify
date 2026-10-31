@@ -121,8 +121,6 @@ final class TopicOrderTests: XCTestCase {
     }
 
     func testTheCardsAfterTheLastFixedSlotStandWhereTheirAreaScrolledThem() {
-        // Unscrolled: a at 0–40, b at 46–86, the line at 92–112 with its middle at 102, c at 118–158, d at 164–204.
-        // The Bench scrolled by 50: c at 68–108, d at 114–154. The line and the cards above it stay.
         var layout = StackLayout(heights: [.item("a"): 40, .item("b"): 40, .fixed("line"): 20, .item("c"): 40, .item("d"): 40],
                                  spacing: 6)
         let order: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line"), .item("c"), .item("d")]
@@ -141,7 +139,6 @@ final class TopicOrderTests: XCTestCase {
         XCTAssertEqual(layout.top(of: .item("b"), in: [.item("a"), .item("b")]), 46, "a list without a fixed slot has no area")
     }
 
-    /// A drag over a, b, the line, c and d, 40 points each and the line 20, each item 1000 points below the visible top.
     @MainActor private func tradingDrag() -> (ListDrag<String>, [StackSlot<String>]) {
         let drag = ListDrag<String>(spacing: 6, tradesAcross: "line")
         let all: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line"), .item("c"), .item("d")]

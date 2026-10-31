@@ -50,15 +50,18 @@ enum EdgeAutoScroll {
     /// going up and at `end`, the last offset, going down. `area` is in the viewport's points, as `pointer` is.
     static func step(pointer: CGFloat?, in area: ClosedRange<CGFloat>, offset: CGFloat, end: CGFloat) -> CGFloat {
         guard let pointer else { return 0 }
+        let isOverBlock = area.lowerBound > 0 && pointer < area.lowerBound
         if pointer > area.upperBound - band {
-            return offset < end ? speed * min(1, (pointer - (area.upperBound - band)) / band) : 0
+            return offset < end ? wholePoints(speed * min(1, (pointer - (area.upperBound - band)) / band)) : 0
         }
-        // Over the block the pointer does not scroll, but past the top of the viewport it does.
-        if pointer < area.lowerBound + band, pointer >= area.lowerBound || area.lowerBound <= 0 {
-            return offset > 0 ? -speed * min(1, (area.lowerBound + band - pointer) / band) : 0
+        if pointer < area.lowerBound + band, !isOverBlock {
+            return offset > 0 ? -wholePoints(speed * min(1, (area.lowerBound + band - pointer) / band)) : 0
         }
         return 0
     }
+
+    /// A step of whole points keeps the block, which moves by the scroll offset, on whole pixels.
+    private static func wholePoints(_ step: CGFloat) -> CGFloat { max(1, step.rounded()) }
 
     /// Holds a step back until the pointer has rested in a band for `delay`, so a card that only passes an edge on
     /// its way does not scroll the list.

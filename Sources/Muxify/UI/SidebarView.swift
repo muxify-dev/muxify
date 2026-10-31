@@ -130,7 +130,8 @@ private struct TopicsSection: View {
 
     private var topicsList: some View {
         let parts = model.listParts
-        let stick = parts.bench == nil ? 0 : geometry.stick(at: scrollOffset)
+        let hasBench = parts.bench != nil
+        let stick = hasBench ? geometry.stick(at: scrollOffset) : 0
         return ScrollViewReader { scroller in
             ScrollView {
                 // Not lazy: a lazy stack is one more accessibility element over all the cards, and a click tool
@@ -165,11 +166,9 @@ private struct TopicsSection: View {
                     default: if store.benchPeek != nil { withAnimation(.easeOut(duration: 0.2)) { store.benchPeek = nil } }
                     }
                 }
-                // The drag's stack shows the Benched cards where the Bench scrolled them.
                 .onChange(of: stick, initial: true) { _, stick in drag.scrollArea(by: stick) }
                 .padding(.horizontal, 6).padding(.vertical, Self.contentInset)
-                // Only a list with a Bench line draws again as it scrolls.
-                .onGeometryChange(for: CGFloat.self) { parts.bench == nil ? 0 : -$0.frame(in: .named(TopicCard.viewport)).minY } action: {
+                .onGeometryChange(for: CGFloat.self) { hasBench ? -$0.frame(in: .named(TopicCard.viewport)).minY : 0 } action: {
                     scrollOffset = $0
                 }
             }
@@ -296,6 +295,11 @@ private struct TopicsListPart: ViewModifier {
         case plain
         case top(isFirst: Bool, isLast: Bool)
         case bench(isLast: Bool)
+
+        var isTop: Bool { if case .top = self { true } else { false } }
+        var isFirst: Bool { if case .top(true, _) = self { true } else { false } }
+        var isLastOfTop: Bool { if case .top(_, true) = self { true } else { false } }
+        var isLastBenched: Bool { self == .bench(isLast: true) }
     }
 
     let part: Part
@@ -308,12 +312,7 @@ private struct TopicsListPart: ViewModifier {
     @Binding var benchEnd: CGFloat
 
     func body(content: Content) -> some View {
-        let isTop: Bool, isFirst: Bool, isLastOfTop: Bool, isLastBenched: Bool
-        switch part {
-        case .plain: (isTop, isFirst, isLastOfTop, isLastBenched) = (false, false, false, false)
-        case .top(let first, let last): (isTop, isFirst, isLastOfTop, isLastBenched) = (true, first, last, false)
-        case .bench(let last): (isTop, isFirst, isLastOfTop, isLastBenched) = (false, false, false, last)
-        }
+        let isTop = part.isTop, isFirst = part.isFirst, isLastOfTop = part.isLastOfTop, isLastBenched = part.isLastBenched
         return content
             .environment(\.scrollTopInset, part == .plain || isTop ? 0 : areaTop)
             .onGeometryChange(for: CGFloat?.self) { isLastBenched ? $0.size.height : nil } action: {
@@ -325,7 +324,6 @@ private struct TopicsListPart: ViewModifier {
             } action: { if let end = $0 { benchEnd = end } }
             .background {
                 if isTop {
-                    // Over the gap under the item and, for the first, over the content's inset above it.
                     Color.clear.chrome(theme: theme, material: .sidebar)
                         .padding(.top, isFirst ? -TopicsSection.contentInset : 0).padding(.bottom, -TopicsSection.contentSpacing)
                         .padding(.horizontal, -6)
