@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import MuxifyCore
 
 /// Hears about tmux changes as they happen through a control-mode client
 /// (`tmux -C`), so the sidebar doesn't wait for the next poll when a Window is
@@ -27,11 +28,15 @@ final class TmuxEvents {
     /// Read on the main thread.
     var isRunning: Bool { client?.isRunning == true }
 
-    /// Attaches to `sessionID`. Notifications cover every Session, so which
-    /// one doesn't matter. Call on the main thread.
-    func start(sessionID: String, connection: TmuxConnection) {
+    /// Attaches to the Watch Session, and makes it first when it is not there.
+    /// Notifications cover every Session, so the client hears the user's
+    /// Sessions from there, and their Panes never share a Session with it.
+    /// The Session runs `cat`, not a shell, so no shell startup file runs in it.
+    /// Call on the main thread.
+    func start(invocation: ([String]) throws -> CommandInvocation) {
         guard !isRunning, Date() >= nextStart,
-              let invocation = try? connection.invocation(["-C", "attach-session", "-f", "no-output,ignore-size", "-t", sessionID])
+              let invocation = try? invocation(["-C", "new-session", "-A", "-s", Tmux.watchSessionName,
+                                                "-f", "no-output,ignore-size", "cat"])
         else { return }
         stop()
         let token = UUID()

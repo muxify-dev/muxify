@@ -1438,10 +1438,14 @@ final class WorkspaceStore {
             gatherGuestsWhenInPlayIsSet()
         }
 
-        // (Re)start listening once there is a Session to attach to.
-        if snapshot.serverRunning, isConnected, !events.isRunning,
-           let sessionID = selectedWindow?.sessionID ?? windows.first?.sessionID {
-            if let connection { events.start(sessionID: sessionID, connection: connection) }
+        // Listen while the user has a Session. The Watch Session alone must not keep the server running.
+        if snapshot.serverRunning, isConnected, let connection {
+            if !windows.isEmpty {
+                if !events.isRunning { events.start(invocation: connection.invocation) }
+            } else if let watch = snapshot.watchSessionID {
+                events.stop()
+                runAsync(["kill-session", "-t", watch])
+            }
         }
 
         if snapshot.serverRunning {

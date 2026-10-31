@@ -42,6 +42,16 @@ final class TmuxServerTests: XCTestCase {
         XCTAssertEqual(snapshot.windows.map(\.name), ["editor"])
     }
 
+    func testTheSnapshotLeavesOutTheWatchSession() throws {
+        try other.run(["new-session", "-d", "-s", "work", "-c", directory.path])
+        let watchID = try other.run(["new-session", "-d", "-P", "-F", "#{session_id}", "-s", Tmux.watchSessionName, "-c", directory.path])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let snapshot = other.snapshot()
+        XCTAssertEqual(snapshot.windows.map(\.sessionName), ["work"])
+        XCTAssertEqual(Set(snapshot.panes.map(\.windowID)), Set(snapshot.windows.map(\.id)))
+        XCTAssertEqual(snapshot.watchSessionID, watchID)
+    }
+
     func testAWindowKeepsTheTogglesAndMaximizeWrittenOntoIt() throws {
         try other.run(["new-session", "-d", "-s", "work", "-c", directory.path])
         let windowID = try XCTUnwrap(other.snapshot().windows.first?.id)
