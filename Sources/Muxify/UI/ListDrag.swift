@@ -559,6 +559,19 @@ extension EnvironmentValues {
     }
 }
 
+private struct ScrollTopInsetKey: EnvironmentKey {
+    static let defaultValue: CGFloat = 0
+}
+
+extension EnvironmentValues {
+    /// Where the visible part of the scroll view starts for this view, below the scroll view's top: the bottom of a
+    /// block that sticks there, such as the In Play cards over the Bench. An open card's header sticks at it.
+    var scrollTopInset: CGFloat {
+        get { self[ScrollTopInsetKey.self] }
+        set { self[ScrollTopInsetKey.self] = newValue }
+    }
+}
+
 /// A fixed view between a `ListDrag` list's items, such as a line: it slides as the items above it make room for the
 /// lifted one, and it is no place to land.
 private struct ListDragFixed<ID: Hashable>: ViewModifier {

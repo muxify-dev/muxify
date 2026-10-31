@@ -22,15 +22,17 @@ struct SidebarCard<Header: View, Content: View>: View {
     /// top of the viewport when the card is dragged past it.
     @State private var frame: CGRect = .zero
     @Environment(\.isLiftedByDrag) private var isLifted
+    @Environment(\.scrollTopInset) private var scrollTopInset
     /// The card moved while lifted, so the header glides to its new place once the card lands.
     @State private var movedWhileLifted = false
     @State private var headerHeight: CGFloat = 0
     @State private var turn: Double = 0
 
-    /// How far the header moves down to stay at the top of the viewport, never past the card's last row.
+    /// How far the header moves down to stay at the top of the viewport, or under a block that sticks there, never past
+    /// the card's last row.
     private var stuck: CGFloat {
         guard isOpen, viewport != nil else { return 0 }
-        return min(max(0, -frame.minY), max(0, frame.height - headerHeight - 8))
+        return min(max(0, scrollTopInset - frame.minY), max(0, frame.height - headerHeight - 8))
     }
 
     var body: some View {
