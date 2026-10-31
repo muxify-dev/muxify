@@ -362,7 +362,8 @@ conflict with the actions above:
 | `lock_session` | Unbound | Lock the highlighted Session, which must be in No Topic |
 | `unlock_session` | Unbound | Unlock the highlighted Session |
 | `make_guest` | Unbound | Make the highlighted Benched Topic or No Topic Session a Guest, with `topics.in_play` |
-| `end_guest` | Unbound | End Guest of the highlighted Guest Topic or Guest Session, with `topics.in_play` |
+| `end_guest` | Unbound | End Guest of the highlighted Guest Session, with `topics.in_play` |
+| `bench_topic` | Unbound | Put the highlighted In Play Topic or Guest Topic at the top of the Bench, with `topics.in_play` |
 | `choose_pane` | ⌥1 | Select the Pane button in Move |
 | `choose_window` | ⌥2 | Select the Window button in Move |
 | `choose_session` | ⌥3 | Select the Session button in Move |

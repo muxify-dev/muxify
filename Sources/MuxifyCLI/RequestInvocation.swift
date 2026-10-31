@@ -51,8 +51,12 @@ struct RequestInvocation: Equatable {
         case zoomPane
         case kill(session: Bool)
         case pin(Bool)
-        /// Make a Guest (true) or End Guest (false) of the Topic.
-        case guest(Bool)
+        /// Make a Guest of the Benched Topic.
+        case makeGuest
+        /// Bench Topic: the In Play Topic goes to the top of the Bench.
+        case benchTopic
+        /// The Topic fills the Open Place at this In Play place, counted from 1.
+        case fillPlace(Int)
         /// Nil clears the Topic Note.
         case note(String?)
         /// The Topic's card, one place up or down.
@@ -80,7 +84,7 @@ struct RequestInvocation: Equatable {
         var targets: [TargetOption] {
             switch self {
             case .new: return []
-            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .guest, .moveCard, .tradeCard,
+            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .makeGuest, .benchTopic, .fillPlace, .moveCard, .tradeCard,
                  .sortSessions:
                 return [.topic, .window, .pane]
             case .moveSession: return [.session, .pane]
@@ -116,7 +120,7 @@ struct RequestInvocation: Equatable {
         /// A Tag change needs no SessionPath, and a command that shows a Topic finds only the SessionPaths of its Sessions.
         var findsAllSessionPaths: Bool {
             switch self {
-            case .new, .tag, .note, .lock, .pin, .guest, .moveCard, .tradeCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
+            case .new, .tag, .note, .lock, .pin, .makeGuest, .benchTopic, .fillPlace, .moveCard, .tradeCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
                  .placeWindow, .zoomPane, .createWorktree, .removeWorktree, .listWorktrees: return false
             default: return !showsTopic
             }
@@ -154,7 +158,9 @@ struct RequestInvocation: Equatable {
             case .placeWindow: return "window move"
             case .kill(let session): return session ? "session kill" : "window kill"
             case .pin(let pinned): return pinned ? "topic pin" : "topic unpin"
-            case .guest(let guest): return guest ? "topic make-guest" : "topic end-guest"
+            case .makeGuest: return "topic make-guest"
+            case .benchTopic: return "topic bench"
+            case .fillPlace: return "topic fill-place"
             case .moveCard, .tradeCard: return "topic move"
             case .chooseInPlay: return "topic choose-in-play"
             case .replaceFromBench: return "topic replace-from-bench"
@@ -487,7 +493,9 @@ extension RequestInvocation {
         case .placeWindow(let placement): return .moveWindow(to: placement)
         case .kill(let session): return session ? .killSession : .killWindow
         case .pin(let pinned): return pinned ? .pin : .unpin
-        case .guest(let guest): return guest ? .makeGuest : .endGuest
+        case .makeGuest: return .makeGuest
+        case .benchTopic: return .benchTopic
+        case .fillPlace(let place): return .fillOpenPlace(place: place)
         case .moveCard(let move): return .moveCard(move)
         case .tradeCard(let other): return .moveCard(.trade(try other.ref))
         case .chooseInPlay(let cards): return .chooseInPlay(try cards.map { try $0.ref })

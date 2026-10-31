@@ -7,6 +7,8 @@ public struct TopicContents: Equatable, Sendable {
     public var records: [TopicRecord]
     /// One line for each file that is not a valid record.
     public var problems: [String]
+    /// The Open Places of the Topics list (`TopicStore.openPlacesFile`).
+    public var openPlaces: [OpenPlace] = []
     /// An older Muxify left Snoozes or a running Zen: `TopicStore.upgrade` removes them.
     public var needsUpgrade = false
 }
@@ -14,9 +16,12 @@ public struct TopicContents: Equatable, Sendable {
 /// The Topic records on disk. It keeps no state: every read and write goes to the files,
 /// under the record lock, so the app and the command line tool can both write.
 public struct TopicStore: Sendable {
+    /// The file beside the records that keeps the Open Places. It has no `.json` extension, so no read takes it for a
+    /// record, and a swap of the folder writes it with the records.
+    public static let openPlacesFile = "open-places"
+
     public let paths: MuxifyPaths
-    /// The Config's `topics.in_play`. A write that takes cards out of the Topics list keeps the Guests at their
-    /// positions In Play by it.
+    /// The Config's `topics.in_play`. A write that takes a card out of an In Play place leaves an Open Place by it.
     public let inPlay: Int?
     private let lockTimeout: TimeInterval
     private let writeData: @Sendable (Data, URL) throws -> Void
@@ -44,7 +49,7 @@ public struct TopicStore: Sendable {
     /// Changes whenever a record file changes, in content or by a folder swap. It takes no lock, so a watcher can
     /// poll it often.
     public func stamp() -> String {
-        files().map { url in
+        (files() + [openPlacesURL]).map { url in
             var info = stat()
             guard lstat(url.path, &info) == 0 else { return url.lastPathComponent + "@-" }
             let nanoseconds = Int64(info.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(info.st_mtimespec.tv_nsec)
@@ -62,14 +67,20 @@ public struct TopicStore: Sendable {
             let contents = readFiles()
             var transaction = TopicTransaction(records: contents.records, topics: paths.topics, inPlay: inPlay)
             transaction.locks = locks
+            transaction.openPlaces = contents.openPlaces
             let result = try body(&transaction)
-            let changed = try transaction.records.filter { record in
+            var changed = try transaction.records.filter { record in
                 let old = contents.records.first { $0.id == record.id }
                 return try old.map { try Self.encoded($0) } != Self.encoded(record)
+            }.map { (name: $0.id + ".json", data: try Self.encoded($0)) }
+            var removed = contents.records.filter { old in !transaction.records.contains { $0.id == old.id } }.map { $0.id + ".json" }
+            if transaction.openPlaces != contents.openPlaces {
+                if transaction.openPlaces.isEmpty { removed.append(Self.openPlacesFile) }
+                else { changed.append((Self.openPlacesFile, try Self.encoder.encode(transaction.openPlaces))) }
             }
-            let removed = contents.records.filter { old in !transaction.records.contains { $0.id == old.id } }.map(\.id)
             if !removed.isEmpty { try swapFolder(with: changed, removing: removed) }
-            else if changed.count == 1 { try writeFile(changed[0]) } else if changed.count > 1 { try swapFolder(with: changed) }
+            else if changed.count == 1 { try writeFile(changed[0].data, named: changed[0].name) }
+            else if changed.count > 1 { try swapFolder(with: changed) }
             return result
         }
     }
@@ -93,8 +104,15 @@ public struct TopicStore: Sendable {
         }
         let needsUpgrade = FileManager.default.fileExists(atPath: paths.legacyZenFile.path)
             || records.contains { $0.unknownFields[SnoozeUpgrade.field] != nil }
-        return TopicContents(records: records, problems: problems, needsUpgrade: needsUpgrade)
+        var openPlaces: [OpenPlace] = []
+        if let data = try? Data(contentsOf: openPlacesURL) {
+            do { openPlaces = try JSONDecoder().decode([OpenPlace].self, from: data) }
+            catch { problems.append("\(openPlacesURL.path): \(error)") }
+        }
+        return TopicContents(records: records, problems: problems, openPlaces: openPlaces, needsUpgrade: needsUpgrade)
     }
+
+    private var openPlacesURL: URL { paths.topics.appendingPathComponent(Self.openPlacesFile) }
 
     private func files() -> [URL] {
         ((try? FileManager.default.contentsOfDirectory(at: paths.topics, includingPropertiesForKeys: nil)) ?? [])
@@ -115,15 +133,14 @@ public struct TopicStore: Sendable {
         return data
     }
 
-    private func writeFile(_ record: TopicRecord) throws {
+    private func writeFile(_ data: Data, named name: String) throws {
         try FileManager.default.createDirectory(at: paths.topics, withIntermediateDirectories: true)
-        try writeData(Self.encoded(record), paths.topics.appendingPathComponent(record.id + ".json"))
+        try writeData(data, paths.topics.appendingPathComponent(name))
     }
 
-    /// Copies the folder, writes the changed records into the copy, and swaps it in with one rename, so a reader
+    /// Copies the folder, writes the changed files into the copy, and swaps it in with one rename, so a reader
     /// sees all of the changes or none of them.
-    private func swapFolder(with records: [TopicRecord], removing ids: [String] = []) throws {
-        let writes = try records.map { ($0, try Self.encoded($0)) }
+    private func swapFolder(with writes: [(name: String, data: Data)], removing names: [String] = []) throws {
         let files = FileManager.default
         let directory = paths.topics
         try files.createDirectory(at: paths.state, withIntermediateDirectories: true)
@@ -132,9 +149,9 @@ public struct TopicStore: Sendable {
         do {
             if files.fileExists(atPath: directory.path) { try files.copyItem(at: directory, to: staging) }
             else { try files.createDirectory(at: staging, withIntermediateDirectories: false) }
-            for id in ids { try files.removeItem(at: staging.appendingPathComponent(id + ".json")) }
-            for (record, data) in writes {
-                try writeData(data, staging.appendingPathComponent(record.id + ".json"))
+            for name in names { try files.removeItem(at: staging.appendingPathComponent(name)) }
+            for (name, data) in writes {
+                try writeData(data, staging.appendingPathComponent(name))
             }
             if files.fileExists(atPath: directory.path) {
                 let result = directory.path.withCString { current in
@@ -171,7 +188,10 @@ public struct TopicTransaction {
     /// The Locked Sessions, which share the records' order. A change of order that moves or renumbers them returns
     /// the Locks it changed, and the caller writes them to tmux.
     public internal(set) var locks: [SessionLock] = []
-    /// The Config's `topics.in_play`: with it, the Locked Sessions are Guests, and a change keeps the Guests.
+    /// The Open Places, which share the records' order.
+    public internal(set) var openPlaces: [OpenPlace] = []
+    /// The Config's `topics.in_play`: with it, the Locked Sessions are Guests, and a regular card that leaves an In Play
+    /// place leaves an Open Place.
     public let inPlay: Int?
     private let topics: URL
 
@@ -191,7 +211,9 @@ public struct TopicTransaction {
         }
     }
 
-    private var entries: [TopicListEntry] { records.map(TopicListEntry.topic) + locks.map(TopicListEntry.lock) }
+    public var entries: [TopicListEntry] {
+        records.map(TopicListEntry.topic) + locks.map(TopicListEntry.lock) + openPlaces.map(TopicListEntry.openPlace)
+    }
 
     /// Adds a new Topic where `arrival` puts it, or in the place of the Lock of `lockedSessionID`, which then ends. With
     /// `in_play`, that Lock is a Guest, so the Topic gets the Guest mark. A file of that name that is not a valid record
@@ -264,7 +286,7 @@ public struct TopicTransaction {
         guard records.contains(where: { $0.id == id }) else { throw Failure.topicUnavailable(id) }
         let before = entries
         records.removeAll { $0.id == id }
-        return keepingGuestPlaces(from: before)
+        return put(TopicListChange([]), from: before)
     }
 
     @discardableResult
@@ -287,6 +309,18 @@ public struct TopicTransaction {
         put(try TopicOrder.choosingInPlay(chosen, inPlay: inPlay, in: entries))
     }
 
+    /// Bench Topic: the In Play Topic goes to the top of the Bench. From a place it leaves an Open Place there.
+    @discardableResult
+    public mutating func bench(_ id: String, inPlay: Int) throws -> [SessionLockChange] {
+        put(try TopicOrder.benching(id, inPlay: inPlay, in: entries))
+    }
+
+    /// The Guest Topic or Benched Topic `id` fills the Open Place `place`.
+    @discardableResult
+    public mutating func fillOpenPlace(_ place: String, with id: String, inPlay: Int) throws -> [SessionLockChange] {
+        put(try TopicOrder.fillingOpenPlace(place, with: id, inPlay: inPlay, in: entries))
+    }
+
     @discardableResult
     public mutating func replaceFromBench(_ card: TopicListID, with benched: TopicListID, inPlay: Int) throws -> [SessionLockChange] {
         put(try TopicOrder.replacingFromBench(card, with: benched, inPlay: inPlay, in: entries))
@@ -297,12 +331,7 @@ public struct TopicTransaction {
         put(try TopicOrder.makingGuest(id, inPlay: inPlay, in: entries))
     }
 
-    @discardableResult
-    public mutating func endGuest(_ id: String, inPlay: Int) throws -> [SessionLockChange] {
-        put(try TopicOrder.endingGuest(id, inPlay: inPlay, in: entries))
-    }
-
-    /// Puts every Guest at the end of In Play, as the Config's `in_play` does to the Locks when it is set.
+    /// Writes the order in the three sections, as the Config's `in_play` does to the Locks when it is set.
     @discardableResult
     public mutating func gatherGuests(inPlay: Int) -> [SessionLockChange] {
         put(TopicOrder.gatheringGuests(inPlay: inPlay, in: entries))
@@ -316,7 +345,7 @@ public struct TopicTransaction {
         return put(TopicOrder.appendingLock(of: sessionID, inPlay: inPlay, in: entries))
     }
 
-    /// Ends the Lock of the Session. With `in_play` it is a Guest that leaves, so the other Guests keep their positions.
+    /// Ends the Lock of the Session. With `in_play` it is a Guest that leaves, so it leaves no Open Place.
     @discardableResult
     public mutating func unlock(_ sessionID: String) -> [SessionLockChange] {
         guard locks.contains(where: { $0.sessionID == sessionID }) else { return [] }
@@ -329,9 +358,15 @@ public struct TopicTransaction {
     }
 
     /// Writes the change into the transaction and returns what tmux must change. A Settled or Pinned Topic loses its
-    /// Guest mark. When the change takes a card out of the Topics list, the Guests keep their positions.
-    private mutating func put(_ change: TopicListChange) -> [SessionLockChange] {
-        let before = entries
+    /// Guest mark. When a regular card left an In Play place since `before`, it leaves an Open Place there
+    /// (`TopicOrder.keepingPlaces`).
+    private mutating func put(_ change: TopicListChange, from before: [TopicListEntry]? = nil) -> [SessionLockChange] {
+        let before = before ?? entries
+        let written = apply(change)
+        return merging(written, apply(TopicOrder.keepingPlaces(from: before, in: entries, inPlay: inPlay)))
+    }
+
+    private mutating func apply(_ change: TopicListChange) -> [SessionLockChange] {
         for var record in change.entries.records {
             if record.settledAt != nil || record.isPinned { record.isGuest = false }
             if let index = records.firstIndex(where: { $0.id == record.id }) { records[index] = record }
@@ -341,21 +376,13 @@ public struct TopicTransaction {
             if let index = locks.firstIndex(where: { $0.sessionID == lock.sessionID }) { locks[index] = lock }
             else { locks.append(lock) }
         }
+        for place in change.entries.openPlaces {
+            if let index = openPlaces.firstIndex(where: { $0.id == place.id }) { openPlaces[index] = place }
+            else { openPlaces.append(place) }
+        }
         locks.removeAll { change.endedLocks.contains($0.sessionID) }
-        let written = change.entries.locks.map(SessionLockChange.set) + change.endedLocks.map { SessionLockChange.end(sessionID: $0) }
-        return merging(written, keepingGuestPlaces(from: before))
-    }
-
-    /// With `in_play`, the order that keeps each Guest at its position after the cards that left the Topics list since
-    /// `before`. Returns the Locks it moved.
-    private mutating func keepingGuestPlaces(from before: [TopicListEntry]) -> [SessionLockChange] {
-        guard let inPlay else { return [] }
-        let open = { (entries: [TopicListEntry]) in Set(TopicOrder.sorted(entries).filter { !$0.isPinned }.map(\.id)) }
-        guard !open(before).subtracting(open(entries)).isEmpty else { return [] }
-        let moved = TopicOrder.keepingGuestPlaces(from: before, in: entries, inPlay: inPlay)
-        for record in moved.records { records[records.firstIndex { $0.id == record.id }!] = record }
-        for lock in moved.locks { locks[locks.firstIndex { $0.sessionID == lock.sessionID }!] = lock }
-        return moved.locks.map(SessionLockChange.set)
+        openPlaces.removeAll { change.closedPlaces.contains($0.id) }
+        return change.entries.locks.map(SessionLockChange.set) + change.endedLocks.map { SessionLockChange.end(sessionID: $0) }
     }
 
     /// One change for each Session: the later one wins.

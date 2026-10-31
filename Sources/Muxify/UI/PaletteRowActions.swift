@@ -46,7 +46,8 @@ extension CommandPalette {
             case .addSessionToTopic: store.refreshSessionPaths(); begin(.addSession(topic), keepingHistory: true)
             case .pinTopic: close(); store.pinTopic(id, true)
             case .unpinTopic: close(); store.pinTopic(id, false)
-            case .makeGuest, .endGuest: close(); store.setGuest(.topic(id), action == .makeGuest)
+            case .makeGuest: close(); store.setGuest(.topic(id), true)
+            case .benchTopic: close(); store.benchTopic(id)
             case .reopenTopic: close(); store.reopenTopic(id, .reopen)
             case .startTopicFresh: close(); store.reopenTopic(id, .startFresh)
             default: break

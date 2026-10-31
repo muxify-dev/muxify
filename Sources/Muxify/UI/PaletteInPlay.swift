@@ -1,10 +1,9 @@
 import MuxifyCore
 
 extension TopicsModel {
-    /// The cards that are not Pinned, cut at the Bench line: the Guests and the first `inPlay` other cards are In
-    /// Play. It does not follow the Sidebar mode, so the In Play Actions work in Sessions mode too.
+    /// The rows that are not Pinned, cut at the Guests line and the Bench line, without the Open Places.
     func split(inPlay: Int) -> InPlayCut<Row> {
-        InPlayCut(rows.filter { !$0.isPinned }, limit: inPlay, isGuest: \.isGuest)
+        cut(inPlay: inPlay).compactMap(\.row)
     }
 }
 
@@ -15,11 +14,16 @@ struct OrderDraft: Equatable {
     let cards: [TopicGroupID]
     /// The In Play places.
     let places: Int
+    /// The checked Guest Topics. A Guest that no place takes stays a Guest, so it has no place on the Bench to choose.
+    var guests: Set<TopicGroupID> = []
     /// The card chosen for each place so far.
     var placed: [TopicGroupID] = []
 
-    /// The rows of the next place: the cards not placed yet, in list order, so ↩ on each place keeps the order.
-    var remaining: [TopicGroupID] { cards.filter { !placed.contains($0) } }
+    /// The rows of the next place: the cards not placed yet, in list order, so ↩ on each place keeps the order. Once
+    /// the In Play places are full, without the Guests.
+    var remaining: [TopicGroupID] {
+        cards.filter { !placed.contains($0) && (placed.count < places || !guests.contains($0)) }
+    }
 
     var place: Int { placed.count + 1 }
 
@@ -73,6 +77,20 @@ extension CommandPalette {
     /// The title of a card of the Topics list.
     func cardTitle(_ id: TopicGroupID) -> String {
         store?.topics.rows.first { $0.id == id }?.title ?? "Untitled Topic"
+    }
+
+    /// Fill an Open Place: the Guest Topics, then the Benched Topics. A Guest Session must become a Topic first, so it
+    /// has no row.
+    func openPlaceRows() -> PickList<PaletteItem> {
+        guard let store, let inPlay = store.topicConfig.inPlay else { return .empty }
+        let cut = store.topics.split(inPlay: inPlay)
+        let topics = { (rows: [TopicsModel.Row]) in
+            rows.filter { if case .topic = $0.id { return true } else { return false } }.map { self.cardCandidate($0, choice: .card($0.id)) }
+        }
+        return FuzzyRanker.list([
+            PickSectionInput(id: "guests", title: "Guests", rule: .ranked(showsWhenEmpty: false), candidates: topics(cut.guests)),
+            PickSectionInput(id: "bench", title: "Bench", rule: .ranked(showsWhenEmpty: true), candidates: topics(cut.bench)),
+        ], query: FuzzyQuery(query), rules: PickRules())
     }
 
     /// Replace from Bench: one row for each Benched card.

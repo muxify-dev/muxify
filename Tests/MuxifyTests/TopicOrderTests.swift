@@ -22,6 +22,7 @@ final class TopicOrderTests: XCTestCase {
             switch $0.id {
             case .topic(let id): return id
             case .lock(let sessionID): return "lock:" + sessionID
+            case .openPlace(let id): return "open:" + id
             }
         }
     }
@@ -79,7 +80,7 @@ final class TopicOrderTests: XCTestCase {
                                  spacing: 6)
         let order: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line"), .item("c"), .item("d")]
         func landing(_ id: String, _ translation: CGFloat) -> DropLanding<String>? {
-            layout.landing(of: id, movedBy: translation, in: order, divider: "line")
+            layout.landing(of: id, movedBy: translation, in: order, dividers: ["line"])
         }
         XCTAssertEqual(landing("a", 40), .place(.after("b")), "on its own side it reorders")
         XCTAssertEqual(landing("a", 60), .place(.after("b")), "a's bottom at 100 has not passed the line's middle")
@@ -91,7 +92,7 @@ final class TopicOrderTests: XCTestCase {
         XCTAssertNil(landing("c", -5), "c's top at 113 is still under the line's middle")
         XCTAssertEqual(landing("c", -20), .across(trade: nil), "c's top at 98 passed the line, not b's middle at 66")
         XCTAssertEqual(landing("c", -55), .across(trade: "b"))
-        XCTAssertEqual(layout.landing(of: "a", movedBy: 120, in: order, divider: nil), .place(.after("c")),
+        XCTAssertEqual(layout.landing(of: "a", movedBy: 120, in: order, dividers: []), .place(.after("c")),
                        "a list without a divider only reorders")
     }
 
@@ -99,17 +100,17 @@ final class TopicOrderTests: XCTestCase {
         // a at 0–40, the line at 46–66 with its middle at 56, t at 72–272.
         let layout = StackLayout(heights: [.item("a"): 40, .fixed("line"): 20, .item("t"): 200], spacing: 6)
         let order: [StackSlot<String>] = [.item("a"), .fixed("line"), .item("t")]
-        let highest = layout.bounded(-1000, of: "t", in: order, divider: "line")
+        let highest = layout.bounded(-1000, of: "t", in: order, dividers: ["line"])
         XCTAssertEqual(highest, -72, "t stops with its top at the top of a")
-        XCTAssertEqual(layout.landing(of: "t", movedBy: highest, in: order, divider: "line"), .across(trade: "a"))
+        XCTAssertEqual(layout.landing(of: "t", movedBy: highest, in: order, dividers: ["line"]), .across(trade: "a"))
     }
 
     func testWithADividerACardCanGoPastTheLineThatEndsItsList() {
         let layout = StackLayout(heights: [.item("a"): 40, .item("b"): 40, .fixed("line"): 20], spacing: 6)
         let order: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line")]
         XCTAssertEqual(layout.bounded(1000, of: "a", in: order), 46, "without a divider it stops at the bottom of the last card")
-        XCTAssertEqual(layout.bounded(1000, of: "a", in: order, divider: "line"), 72, "its bottom reaches the bottom of the line")
-        XCTAssertEqual(layout.landing(of: "a", movedBy: 72, in: order, divider: "line"), .across(trade: nil))
+        XCTAssertEqual(layout.bounded(1000, of: "a", in: order, dividers: ["line"]), 72, "its bottom reaches the bottom of the line")
+        XCTAssertEqual(layout.landing(of: "a", movedBy: 72, in: order, dividers: ["line"]), .across(trade: nil))
     }
 
     func testADraggedCardStopsAtTheBottomOfTheView() {
@@ -124,23 +125,41 @@ final class TopicOrderTests: XCTestCase {
         var layout = StackLayout(heights: [.item("a"): 40, .item("b"): 40, .fixed("line"): 20, .item("c"): 40, .item("d"): 40],
                                  spacing: 6)
         let order: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line"), .item("c"), .item("d")]
-        XCTAssertEqual(layout.landing(of: "a", movedBy: 85, in: order, divider: "line"), .across(trade: nil),
+        XCTAssertEqual(layout.landing(of: "a", movedBy: 85, in: order, dividers: ["line"]), .across(trade: nil),
                        "unscrolled, a's middle at 105 is over no card")
-        XCTAssertEqual(layout.landing(of: "d", movedBy: -100, in: order, divider: "line"), .across(trade: "b"))
+        XCTAssertEqual(layout.landing(of: "d", movedBy: -100, in: order, dividers: ["line"]), .across(trade: "b"))
         layout.areaScroll = 50
         XCTAssertEqual(layout.top(of: .fixed("line"), in: order), 92)
         XCTAssertEqual(layout.top(of: .item("b"), in: order), 46)
         XCTAssertEqual(layout.top(of: .item("c"), in: order), 68)
-        XCTAssertEqual(layout.landing(of: "a", movedBy: 85, in: order, divider: "line"), .across(trade: "c"),
+        XCTAssertEqual(layout.landing(of: "a", movedBy: 85, in: order, dividers: ["line"]), .across(trade: "c"),
                        "a's middle at 105 is on c, which the scroll brought up")
-        XCTAssertEqual(layout.landing(of: "d", movedBy: -100, in: order, divider: "line"), .across(trade: "a"),
+        XCTAssertEqual(layout.landing(of: "d", movedBy: -100, in: order, dividers: ["line"]), .across(trade: "a"),
                        "d's middle at 34 is on a")
         XCTAssertEqual(layout.placement(of: "c", movedBy: 30, in: order), .after("d"), "c's bottom at 138 passed d's middle at 134")
         XCTAssertEqual(layout.top(of: .item("b"), in: [.item("a"), .item("b")]), 46, "a list without a fixed slot has no area")
     }
 
+    func testACardCrossesEitherLineOfThreeSectionsAndReordersOnlyInItsOwn() {
+        // a 0–40, b 46–86, guests 92–112, g 118–158, h 164–204, bench 210–230, c 236–276.
+        let layout = StackLayout(heights: [.item("a"): 40, .item("b"): 40, .fixed("guests"): 20, .item("g"): 40, .item("h"): 40,
+                                           .fixed("bench"): 20, .item("c"): 40], spacing: 6)
+        let order: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("guests"), .item("g"), .item("h"), .fixed("bench"), .item("c")]
+        let lines = ["guests", "bench"]
+        XCTAssertEqual(layout.landing(of: "g", movedBy: 46, in: order, dividers: lines), .place(.after("h")),
+                       "inside the Guests, a drag reorders")
+        XCTAssertEqual(layout.landing(of: "g", movedBy: -100, in: order, dividers: lines), .across(trade: "a"),
+                       "up across the Guests line, it trades with a place")
+        XCTAssertEqual(layout.landing(of: "h", movedBy: 60, in: order, dividers: lines), .across(trade: "c"),
+                       "down across the Bench line, it trades with a Benched card")
+        XCTAssertEqual(layout.landing(of: "b", movedBy: 200, in: order, dividers: lines), .across(trade: "c"),
+                       "a place passes both lines to the Bench")
+        XCTAssertEqual(layout.landing(of: "a", movedBy: 30, in: order, dividers: lines), .place(.after("b")),
+                       "a place reorders among the places")
+    }
+
     @MainActor private func tradingDrag() -> (ListDrag<String>, [StackSlot<String>]) {
-        let drag = ListDrag<String>(spacing: 6, tradesAcross: "line")
+        let drag = ListDrag<String>(spacing: 6, tradesAcross: ["line"])
         let all: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line"), .item("c"), .item("d")]
         drag.measure(.fixed("line"), height: 20)
         for id in ["a", "b", "c", "d"] { drag.measure(id, ItemPlace(height: 40, visibleTop: 1000, footroom: 1000)) }

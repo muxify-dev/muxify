@@ -173,44 +173,63 @@ their Agents, but they hide behind one line under the In Play cards. Without
 Sidebar then shows every card.
 
 - Pinned Topics always show, and they do not count toward `in_play`.
+- The Sidebar shows the Pinned Topics, then the `in_play` In Play places, then
+  a "Guests" line and the Guests, then the Bench line and the Bench. A Guest
+  never shows between two places. The Guests line shows only when there is a
+  Guest.
 - A Guest is a card In Play above the limit, with a "Guest" mark. Make a Guest
   (Sidebar menu, Command Palette, `muxify topic make-guest`) puts a Benched
-  Topic or a No Topic Session at the end of In Play, and no other card goes to
-  the Bench. End Guest puts a Guest Topic at the top of the Bench, and In Play
-  is one card shorter. A Session is a Guest through its Lock: with `in_play`,
-  every Locked Session is a Guest, Make a Guest and End Guest take the place of
-  Lock Session and Unlock Session, and `muxify session lock` and `unlock` make
-  and end a Guest Session. When you set `in_play`, each Locked Session goes to
-  the end of In Play. When you remove it, each Guest Session stays a Locked
+  Topic or a No Topic Session at the end of the Guests, and no other card goes
+  to the Bench. A Session is a Guest through its Lock: with `in_play`, every
+  Locked Session is a Guest, Make a Guest and End Guest take the place of Lock
+  Session and Unlock Session, and `muxify session lock` and `unlock` make and
+  end a Guest Session. When you set `in_play`, each Locked Session goes to the
+  end of the Guests. When you remove it, each Guest Session stays a Locked
   Session at its place, and each Guest Topic keeps its mark for the next time.
-- A Guest keeps its position. When a card that is not a Guest leaves In Play,
-  the cards under it move up through the places that no Guest holds, and the
-  top Benched card fills the last place. When a Guest leaves, by Settle, Pin,
-  End Guest or the end of its Session, In Play is one card shorter. A drag in
-  In Play reorders the cards, and the Guest mark stays on its card. A trade
-  across the Bench line, or Replace from Bench, on a Guest gives its mark to
-  the card that comes In Play.
-- A new Topic goes to the top of the Bench, right after the In Play cards. A
-  Settled Topic that Reopen or Start Fresh brings back goes there too. When the
+- Bench Topic (Sidebar menu, Command Palette, `muxify topic bench`) puts an In
+  Play Topic or a Guest Topic at the top of the Bench. The Topic keeps its
+  Sessions and Agents, and a Guest Topic loses its mark.
+- When a card leaves an In Play place, by Settle, Forget, Pin or Bench Topic,
+  its place becomes an Open Place, a dashed card "Open Place". No Benched card
+  moves up, and the other places keep their positions. The Topic records keep
+  the Open Place (the file `open-places` beside them), so it stays after a
+  restart of Muxify or tmux, until you fill it. A click on an Open Place lists
+  the Guest Topics, then the Benched Topics. The Topic that you choose takes
+  the place, and a Guest loses its mark. `muxify topic fill-place` does the
+  same. A Guest Session must become a Topic before it can take a place. When
+  a Guest leaves, by Settle, Pin, Bench Topic, End Guest or the end of its
+  Session, it leaves no Open Place, and the Guests get one card shorter.
+- A drag inside one section reorders the cards there, and the Guest mark stays
+  on its card. A drag across the Guests line or the Bench line that you let go
+  on a card on the other side is a trade. The two cards exchange their places,
+  and no other card moves. Each card takes the mark of its new section. A Guest
+  that comes into a place loses its mark, and a card that comes into the Guests
+  gets it. A Guest dropped on an Open Place fills it. A Guest Session cannot
+  take a place, and an In Play card cannot trade with a Guest Session. Replace
+  from Bench on a Guest gives its mark to the card that comes in.
+- A new Topic goes to the top of the Bench, right after the In Play cards. It
+  does not fill an Open Place. A Settled Topic that Reopen or Start Fresh brings
+  back goes there too. When the
   list has fewer cards than `in_play`, it goes last. A Pinned Topic that
   returns goes last among the Pinned Topics. `topics.insert_position` does not
   apply.
-- When you Settle a card In Play that is not a Guest, the first card of the
-  Bench moves up into the free place.
 - Choose In Play… (`choose_in_play`, ⇧⌥⌘S) sets which cards are In Play, and
   in what order. It opens in the palette with a box on each open Topic that is
-  not Pinned and is not a Guest, and the In Play cards start checked. A
+  not Pinned, and the In Play Topics and the Guest Topics start checked. A
   query such as `#work` narrows the rows. Space in an empty field, ⇥ or a
   click checks or unchecks a row, and ⌘A checks every row that shows. ↩ goes
   on with the checked cards, or with the highlighted card when none is
-  checked. The note tells how many checked cards go to the top of the Bench
-  when you check more cards than `in_play`. Then you choose the card for each
+  checked. The note tells how many checked cards come after the last place
+  when you check more cards than `in_play`, and how many places stay Open
+  Places when you check fewer. Then you choose the card for each
   place in turn, one place for each checked card. The places after the In Play
   places are the top of the Bench, and the note tells when a place is on the
   Bench. The rows keep the list order, so ↩ on each place keeps it. ⌫ in the
-  empty field goes back one place. The last card needs no choice. The cards
-  that you did not check keep their order under the checked cards. A place
-  skips the positions that Guests hold, and each Guest stays where it is.
+  empty field goes back one place. The last card needs no choice. A Guest that
+  you choose for a place loses its mark. A Guest that you do not choose stays
+  a Guest, checked or not, and has no place on the Bench to choose. When you
+  check fewer cards than `in_play`, the other places are Open Places. The
+  cards that you did not check keep their order under the checked cards.
   `muxify topic choose-in-play` does the same.
 - Replace from Bench… (`replace_from_bench`, ⌥⌘S) works on the card that you
   are on while it is In Play, a Topic or a Locked Session. Choose a Benched card

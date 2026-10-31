@@ -38,7 +38,8 @@ public enum CLIVerbPath: String, CaseIterable, Sendable {
     case topicChooseInPlay = "topic choose-in-play"
     case topicReplaceFromBench = "topic replace-from-bench"
     case topicMakeGuest = "topic make-guest"
-    case topicEndGuest = "topic end-guest"
+    case topicBench = "topic bench"
+    case topicFillPlace = "topic fill-place"
     case topicSortSessions = "topic sort-sessions"
     case topicList = "topic list"
     case topicShow = "topic show"
@@ -114,7 +115,8 @@ extension PaletteAction {
         case .lockSession: .verb(.sessionLock)
         case .unlockSession: .verb(.sessionUnlock)
         case .makeGuest: .verbs([.topicMakeGuest, .sessionLock])
-        case .endGuest: .verbs([.topicEndGuest, .sessionUnlock])
+        case .endGuest: .verb(.sessionUnlock)
+        case .benchTopic: .verb(.topicBench)
         case .choosePane, .chooseWindow, .chooseSession: .verb(.windowMove)
         case .toggleIncludeTab: .noMirror("The Tab is the view of one App Window.")
         }

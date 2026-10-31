@@ -168,7 +168,7 @@ enum TestDriver {
     /// of the element in place of its quarter, and `hold` rests there for that many seconds, with no event, before it
     /// lets go, as a user who holds a card at the edge of a list. With the option `via`, it first moves to the same quarter
     /// of the element that `via` names, as a user who changes their mind on the way. A destination that does not show yet,
-    /// such as a Benched card that the drag shows, is found after half a second at `via`. Each tick hands one mouse event to
+    /// such as a Benched card that the drag shows, is waited for at `via`. Each tick hands one mouse event to
     /// the app, past its event monitors as a real click goes, but never through the window server, so the pointer does
     /// not move. The app stays in the background, so the window is not key: only a gesture that takes the first click
     /// (`takesFirstClick` in SidebarView) follows, and a system drag session would follow the real pointer instead.
@@ -183,6 +183,12 @@ enum TestDriver {
         private var inset: CGFloat?
         private var hold: TimeInterval = 0
         private var heldUntil: Date?
+        /// When the drag came to `via`. It waits there half a second, so the Bench that it opens comes to rest, and then
+        /// until the destination shows, for at most `viaWait` seconds: a busy Mac shows a Benched card late, and a drag
+        /// that let go before it showed would let go on the line.
+        private var arrivedAtVia: Date?
+        private static let viaRest: TimeInterval = 0.5
+        private static let viaWait: TimeInterval = 5
 
         init(nonce: String, command: [String: Any]) {
             self.nonce = nonce
@@ -219,7 +225,6 @@ enum TestDriver {
             }
             moves = [(.leftMouseDown, start)] + points.dropFirst().map { (.leftMouseDragged, $0) }
             if destination == nil {
-                moves += Array(repeating: (.leftMouseDragged, points.last!), count: Self.halfSecondOfTicks)
                 pendingDestination = (identifier, bottom)
             } else {
                 moves.append((.leftMouseUp, points.last!))
@@ -228,8 +233,6 @@ enum TestDriver {
         }
 
         /// Screen points grow upward, so the upper quarter is near maxY.
-        private static var halfSecondOfTicks: Int { 25 }
-
         private static func dropY(in frame: NSRect, bottom: Bool, inset: CGFloat?) -> CGFloat {
             let inset = inset ?? frame.height / 4
             return bottom ? frame.minY + inset : frame.maxY - inset
@@ -241,9 +244,16 @@ enum TestDriver {
 
         func step() -> [String: Any]? {
             if moves.isEmpty, let pendingDestination, let held = lastPoint {
-                self.pendingDestination = nil
                 let found = (TestDriver.dump().first { $0.row["accessibilityIdentifier"] == pendingDestination.identifier }?.object)?
                     .value(forKey: "accessibilityFrame") as? NSValue
+                let arrived = arrivedAtVia ?? Date()
+                arrivedAtVia = arrived
+                let waited = Date().timeIntervalSince(arrived)
+                if waited < Self.viaRest || found == nil && waited < Self.viaWait {
+                    moves = [(.leftMouseDragged, held)]
+                    return step()
+                }
+                self.pendingDestination = nil
                 let end = found.map { Self.leg(from: held, to: Self.dropY(in: $0.rectValue, bottom: pendingDestination.bottom, inset: inset)) } ?? []
                 moves = end.map { (.leftMouseDragged, $0) } + [(.leftMouseUp, end.last ?? held)]
             }

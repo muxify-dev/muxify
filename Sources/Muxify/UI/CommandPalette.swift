@@ -151,7 +151,8 @@ final class CommandPalette {
                 actions += [.settleTopic, .addSessionToTopic, .rename, .setTopicNote] + (topic.note == nil ? [] : [.clearTopicNote])
                     + (store.topicConfig.tags == nil ? [] : [.editTags])
                     + [topic.isPinned ? .unpinTopic : .pinTopic]
-                    + (store.guestState(of: .topic(id)).map { [$0 ? .endGuest : .makeGuest] } ?? [])
+                    + (store.guestState(of: .topic(id)) == false ? [.makeGuest] : [])
+                    + (store.canBench(id) ? [.benchTopic] : [])
             }
             if topic.settledAt != nil || (!topic.sessions.isEmpty && !store.windows.contains(where: { $0.topicID == id })) {
                 actions += [.reopenTopic, .startTopicFresh]
@@ -227,6 +228,7 @@ final class CommandPalette {
         case .unlockSession: return "Unlock"
         case .makeGuest: return "Make a Guest"
         case .endGuest: return "End Guest"
+        case .benchTopic: return "Bench Topic"
         default: return action.rawValue
         }
     }

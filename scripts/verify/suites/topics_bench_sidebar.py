@@ -6,6 +6,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_bench_sidebar
 """
 
+import json
 import re
 import time
 import unittest
@@ -14,6 +15,7 @@ from scripts.verify.sandbox import frame, wait
 from scripts.verify.topics_sidebar import TopicsSidebar
 
 LINE = 'topics-bench-line'
+GUESTS = 'topics-guests-line'
 
 
 class TopicsBenchSidebar(TopicsSidebar):
@@ -22,6 +24,8 @@ class TopicsBenchSidebar(TopicsSidebar):
         Topics with no Session, <prefix>-t03 on, make the Bench longer than the Sidebar. Returns the Window of each live
         Topic by its card identifier."""
         self.addCleanup(self.config.write_text, self.config_text)
+        # An Open Place that a check leaves would take the In Play place of the next check.
+        self.addCleanup((self.topics_dir/'open-places').unlink, missing_ok=True)
         self.config.write_text(self.config_text + 'topics:\n  in_play: 1\n')
         windows = {}
         for order, name in enumerate(['a', 'b', 'c']):
@@ -39,7 +43,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         s = self.s
         self.bench_topics(prefix, dormant=17)
         bench = ['topic-%s-%s' % (prefix, name) for name in ['b', 'c'] + ['t%02d' % i for i in range(3, 20)]]
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.show_bench()
         s.wait_rows(lambda rs: self.cards(prefix, rs) == ['topic-%s-a' % prefix, LINE] + bench,
                     'the long Bench did not show in list order: %s' % self.cards(prefix, s.rows()))
@@ -60,7 +64,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         windows['topic-' + topic] = self.s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
         bench = ['topic-%s-%s' % (prefix, name) for name in ['b', 'c'] + ['t%02d' % i for i in range(3, 20)] + ['z']]
         self.s.wait_rows(lambda rs: self.line(rs) is not None and self.s.has('topic-%s-a' % prefix, rs),
-                         'with topics.in_play: 1, the Sidebar shows no Bench line')
+                         self.no_bench_line)
         return windows, bench
 
     def top(self, key, rs):
@@ -137,6 +141,14 @@ class TopicsBenchSidebar(TopicsSidebar):
         for key in keys:
             self.assertAlmostEqual(after[key], before[key], delta=1, msg='%s moved with the Bench: %s, before %s' % (key, after, before))
 
+    def no_bench_line(self):
+        """The failure message of a wait for the Bench line: what the Sidebar and the Topics files show instead."""
+        places = self.topics_dir/'open-places'
+        orders = sorted((r.get('order', 0), r['id'], r.get('guest', False)) for r in self.records().values()
+                        if not r.get('settled_at'))
+        return ('with topics.in_play: 1, the Sidebar shows no Bench line: rows %s; open records %s; open-places %s'
+                % (self.s.ids(), orders, places.read_text() if places.exists() else None))
+
     def line(self, rs):
         return self.s.row(LINE, rs).get('accessibilityLabel')
 
@@ -158,17 +170,17 @@ class TopicsBenchSidebar(TopicsSidebar):
     def test_a_new_topic_goes_to_the_top_of_the_bench(self):
         s = self.s
         self.bench_topics('bench-new')
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.show_bench()
         key = 'topic-' + self.create_topic('Bench new')['id']
         expected = ['topic-bench-new-a', LINE, key, 'topic-bench-new-b', 'topic-bench-new-c']
         shown = lambda rs: [k for k in s.ids(rs) if k in expected]
         s.wait_rows(lambda rs: shown(rs) == expected, 'the new Topic is not first on the Bench: %s' % shown(s.rows()))
 
-    def test_settling_a_card_in_play_moves_the_top_of_the_bench_into_its_place(self):
+    def test_settling_a_card_in_play_leaves_an_open_place_that_a_click_fills_from_the_bench(self):
         s = self.s
         windows = self.bench_topics('bench-settle')
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.hide_bench()
         s.show(windows['topic-bench-settle-a'])
 
@@ -188,14 +200,32 @@ class TopicsBenchSidebar(TopicsSidebar):
             s.act('press', 'palette-accept')
             return False
         wait(settled, 'Settle did not close the palette')
-        s.wait_rows(lambda rs: self.cards('bench-settle', rs) == ['topic-bench-settle-b', LINE],
-                    'the first Benched card did not come In Play: %s' % self.cards('bench-settle', s.rows()))
+        wait(lambda: self.layout('bench-settle') == '_ b c',
+             'Settle did not leave an Open Place, or a Benched card moved up: %s' % self.layout('bench-settle'))
+        s.wait_rows(lambda rs: s.has('open-place-1', rs), 'the Sidebar shows no Open Place')
+
+        s.act('press', 'open-place-1')
+        s.wait_rows(lambda rs: 'Open Place 1' in self.describe('palette-breadcrumb', rs)
+                    and s.has('palette-row-topic-bench-settle-c', rs), 'a click on the Open Place did not list the Bench')
+        s.act('press', 'palette-row-topic-bench-settle-c')
+        wait(lambda: self.layout('bench-settle') == 'c b',
+             'the chosen Topic did not fill the Open Place: %s' % self.layout('bench-settle'))
+        s.wait_rows(lambda rs: not s.has('open-place-1', rs), 'the filled Open Place still shows')
+
+    def test_bench_topic_puts_a_card_in_play_on_top_of_the_bench_and_leaves_an_open_place(self):
+        # The card's accessibility actions are its context menu (`listActions` in UI/SidebarView.swift).
+        s = self.s
+        self.bench_topics('bench-topic')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
+        self.act_until('topic-bench-topic-a', 'Bench Topic', 'bench-topic', '_ a b c',
+                       'Bench Topic did not leave an Open Place and put the card on top of the Bench')
+        s.wait_rows(lambda rs: s.has('open-place-1', rs), 'the Sidebar shows no Open Place')
 
     def test_the_bench_line_shows_the_bench_and_going_to_a_topic_leaves_it_shown(self):
         s = self.s
         windows = self.bench_topics('bench-toggle')
         s.wait_rows(lambda rs: s.has('topic-bench-toggle-a', rs) and self.line(rs) is not None,
-                    'with topics.in_play: 1, the Sidebar shows no Bench line')
+                    self.no_bench_line)
         self.hide_bench()
         rs = s.rows()
         self.assertEqual(self.shown_after_line(rs), [], 'a hidden Bench shows cards: %s' % s.ids(rs))
@@ -220,12 +250,32 @@ class TopicsBenchSidebar(TopicsSidebar):
         s = self.s
         windows = self.bench_topics('bench-visit')
         s.wait_rows(lambda rs: s.has('topic-bench-visit-a', rs) and self.line(rs) is not None,
-                    'with topics.in_play: 1, the Sidebar shows no Bench line')
+                    self.no_bench_line)
         self.hide_bench()
         s.show(windows['topic-bench-visit-c'])
         s.wait_rows(lambda rs: self.shown_after_line(rs) == ['topic-bench-visit-c'],
                     'the Benched card of the Location does not show alone under the line: %s' % s.ids())
         self.assertEqual(self.line(s.rows()), 'Bench', 'going to a Benched Topic showed the whole Bench')
+
+    def layout(self, prefix):
+        """The cards of the check's Topics and the Open Places in the order that the app wrote: `name(G)` is a Guest and
+        `_` an Open Place. The app writes the order that the Sidebar shows, so this is the Sidebar order after a restart
+        too. The dump of a shown Bench lists the block over the Bench in no fixed order, so a check reads this."""
+        cards = [(r.get('order', 0), r['id'][len(prefix) + 1:] + ('(G)' if r.get('guest') else ''))
+                 for r in self.records().values() if r['id'].startswith(prefix + '-') and not r.get('settled_at')]
+        places = self.topics_dir/'open-places'
+        cards += [(p['order'], '_') for p in (json.loads(places.read_text()) if places.exists() else [])]
+        return ' '.join(name for _, name in sorted(cards))
+
+    def act_until(self, key, action, prefix, expected, message):
+        """Runs the card's accessibility action until the written order is `expected`. While another change of the
+        Topics runs, as the last check's clean-up, the card's actions are disabled."""
+        def done():
+            if self.layout(prefix) == expected:
+                return True
+            self.s.driver('action', key, action)
+            return False
+        wait(done, message, seconds=15, step=1)
 
     def cards(self, prefix, rs):
         """The cards of the check's Topics and the Bench line, in Sidebar order."""
@@ -237,7 +287,7 @@ class TopicsBenchSidebar(TopicsSidebar):
     def test_a_card_dragged_across_the_shown_bench_line_trades_with_the_card_it_is_let_go_on(self):
         s = self.s
         self.bench_topics('bench-drag')
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.show_bench()
         s.wait_rows(lambda rs: self.cards('bench-drag', rs)
                     == ['topic-bench-drag-a', LINE, 'topic-bench-drag-b', 'topic-bench-drag-c'],
@@ -259,7 +309,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         self.bench_topics('bench-tall')
         for n in range(6):
             self.new_session('beta/bench-tall-b-%d' % n, self.beta, topic='bench-tall-b')
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.show_bench()
         s.wait_rows(lambda rs: self.cards('bench-tall', rs)
                     == ['topic-bench-tall-a', LINE, 'topic-bench-tall-b', 'topic-bench-tall-c'],
@@ -282,7 +332,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         # The line is between the cards, so a card that reaches only the line has not passed the card under it.
         s = self.s
         self.bench_topics('bench-line-drop')
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         if self.line(s.rows()) == 'Bench':
             s.act('press', LINE)
         before = ['topic-bench-line-drop-a', LINE, 'topic-bench-line-drop-b', 'topic-bench-line-drop-c']
@@ -296,7 +346,7 @@ class TopicsBenchSidebar(TopicsSidebar):
     def test_a_card_in_play_let_go_across_the_hidden_line_on_no_card_goes_back_and_the_bench_hides_again(self):
         s = self.s
         self.bench_topics('bench-hidden-drop')
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.hide_bench()
         before = ['topic-bench-hidden-drop-a', LINE]
         s.wait_rows(lambda rs: self.cards('bench-hidden-drop', rs) == before,
@@ -312,7 +362,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         # The Benched card shows only once the drag opened the Bench, so the drag finds it after it waits on the line.
         s = self.s
         self.bench_topics('bench-hidden-trade')
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.hide_bench()
         s.wait_rows(lambda rs: self.cards('bench-hidden-trade', rs) == ['topic-bench-hidden-trade-a', LINE],
                     'the hidden Bench shows cards: %s' % self.cards('bench-hidden-trade', s.rows()))
@@ -332,7 +382,7 @@ class TopicsBenchSidebar(TopicsSidebar):
     def test_the_benched_card_of_the_location_dragged_onto_a_card_in_play_trades_with_it(self):
         s = self.s
         windows = self.bench_topics('bench-visit-drag')
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.hide_bench()
         s.show(windows['topic-bench-visit-drag-b'])
         s.wait_rows(lambda rs: self.cards('bench-visit-drag', rs) == ['topic-bench-visit-drag-a', LINE, 'topic-bench-visit-drag-b'],
@@ -354,7 +404,7 @@ class TopicsBenchSidebar(TopicsSidebar):
     def test_a_shown_bench_shows_the_benched_card_of_the_location_at_its_place_in_the_list(self):
         s = self.s
         windows = self.bench_topics('bench-visit-open')
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.hide_bench()
         s.show(windows['topic-bench-visit-open-c'])
         s.wait_rows(lambda rs: self.shown_after_line(rs) == ['topic-bench-visit-open-c'],
@@ -370,7 +420,7 @@ class TopicsBenchSidebar(TopicsSidebar):
     def test_the_benched_card_of_the_location_dragged_up_and_back_below_the_hidden_line_keeps_its_place(self):
         s = self.s
         windows = self.bench_topics('bench-visit-back')
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.hide_bench()
         s.show(windows['topic-bench-visit-back-c'])
         before = ['topic-bench-visit-back-a', LINE, 'topic-bench-visit-back-c']
@@ -386,7 +436,7 @@ class TopicsBenchSidebar(TopicsSidebar):
     def test_a_click_on_a_card_of_the_shown_bench_does_not_move_it(self):
         s = self.s
         windows = self.bench_topics('bench-click')
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.show_bench()
         order = ['topic-bench-click-a', LINE, 'topic-bench-click-b', 'topic-bench-click-c']
         rs = s.wait_rows(lambda rs: self.cards('bench-click', rs) == order,
@@ -449,36 +499,49 @@ class TopicsBenchSidebar(TopicsSidebar):
         s.act('drag', 'topic-%s-a' % prefix, target)
         wait(lambda: by_order() == expected, 'the card In Play did not trade with %s: %s' % (other, by_order()), seconds=5)
 
-    def test_make_a_guest_puts_a_benched_topic_in_play_with_its_mark_and_end_guest_puts_it_on_top_of_the_bench(self):
+    def test_make_a_guest_puts_a_benched_topic_under_the_guests_line_and_bench_topic_puts_it_on_top_of_the_bench(self):
         # The card's accessibility actions are its context menu (`listActions` in UI/SidebarView.swift).
         s = self.s
         self.bench_topics('bench-guest')
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.show_bench()
         guest = 'topic-bench-guest-c'
-        s.wait_rows(lambda rs: self.cards('bench-guest', rs) == ['topic-bench-guest-a', LINE, 'topic-bench-guest-b', guest],
-                    'the Bench did not show: %s' % self.cards('bench-guest', s.rows()))
-        s.act('action', guest, 'Make a Guest')
-        s.wait_rows(lambda rs: self.cards('bench-guest', rs) == ['topic-bench-guest-a', guest, LINE, 'topic-bench-guest-b'],
-                    'the Guest is not at the end of In Play, or a card went to the Bench: %s' % self.cards('bench-guest', s.rows()))
-        wait(lambda: self.records()['bench-guest-c'].get('guest') is True,
-             'the record has no Guest mark: %s' % self.records()['bench-guest-c'], seconds=5)
-        s.wait_rows(lambda rs: 'Guest' in s.row(guest, rs).get('accessibilityValue', ''),
-                    'the card shows no Guest mark: %s' % self.describe(guest, s.rows()))
+        s.wait_rows(lambda rs: s.has(guest, rs), 'the Bench did not show')
+        self.act_until(guest, 'Make a Guest', 'bench-guest', 'a c(G) b',
+                       'the Guest is not at the end of the Guests, or a card went to the Bench')
+        s.wait_rows(lambda rs: s.has(GUESTS, rs) and 'Guest' in s.row(guest, rs).get('accessibilityValue', ''),
+                    'the Sidebar shows no Guests line, or the card shows no Guest mark: %s' % self.describe(guest, s.rows()))
 
-        s.act('action', guest, 'End Guest')
-        s.wait_rows(lambda rs: self.cards('bench-guest', rs) == ['topic-bench-guest-a', LINE, guest, 'topic-bench-guest-b'],
-                    'End Guest did not put the card at the top of the Bench: %s' % self.cards('bench-guest', s.rows()))
-        wait(lambda: 'guest' not in self.records()['bench-guest-c'],
-             'the record keeps its Guest mark: %s' % self.records()['bench-guest-c'], seconds=5)
+        self.act_until(guest, 'Bench Topic', 'bench-guest', 'a c b',
+                       'Bench Topic did not put the Guest at the top of the Bench, or it left an Open Place')
+        s.wait_rows(lambda rs: not s.has(GUESTS, rs), 'the Guests line shows with no Guest')
 
-    def test_with_in_play_a_locked_session_is_a_guest_at_the_end_of_in_play(self):
+    def test_a_guest_dragged_across_the_guests_line_trades_and_the_marks_change_sides(self):
+        s = self.s
+        self.bench_topics('guest-trade')
+        a, c = 'topic-guest-trade-a', 'topic-guest-trade-c'
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
+        self.show_bench()
+        s.wait_rows(lambda rs: s.has(c, rs), 'the Bench did not show')
+        self.act_until(c, 'Make a Guest', 'guest-trade', 'a c(G) b', 'Make a Guest did not make c a Guest')
+        s.wait_rows(lambda rs: s.has(GUESTS, rs), 'the Sidebar shows no Guests line')
+        s.act('drag', c, a)
+        wait(lambda: self.layout('guest-trade') == 'c a(G) b',
+             'the Guest did not trade with the card In Play, or the mark did not change sides: %s' % self.layout('guest-trade'))
+
+        self.act_until(c, 'Bench Topic', 'guest-trade', '_ a(G) c b', 'Bench Topic did not leave an Open Place')
+        s.wait_rows(lambda rs: s.has('open-place-1', rs), 'the Sidebar shows no Open Place')
+        s.act('drag', a, 'open-place-1')
+        wait(lambda: self.layout('guest-trade') == 'a c b',
+             'the Guest dropped on the Open Place did not fill it without its mark: %s' % self.layout('guest-trade'))
+
+    def test_with_in_play_a_locked_session_is_a_guest_under_the_guests_line(self):
         # The Session card's accessibility actions are its context menu (`lockButton` in UI/SidebarView.swift).
         s = self.s
         self.bench_topics('bench-guest-lock')
         sid = self.new_session('bench-guest-lock-notes', self.beta)
         window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
-        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
         self.show_bench()
         s.show(window)
         card = 'no-topic-session-' + sid

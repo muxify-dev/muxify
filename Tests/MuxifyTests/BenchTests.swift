@@ -64,18 +64,18 @@ final class BenchTests: XCTestCase {
 
     func testAGuestIsInPlayAndDoesNotCountTowardInPlay() {
         let lock = model(inPlay: 2, windows: [window("2", lock: 0.5)])
-        XCTAssertEqual(shown(lock), ["topic-pinned", "topic-a", "locked-$2", "topic-b", "bench-line"],
-                       "a Locked Session is a Guest, at its position")
+        XCTAssertEqual(shown(lock), ["topic-pinned", "topic-a", "topic-b", "guests-line", "locked-$2", "bench-line"],
+                       "a Locked Session is a Guest, under the Guests line and never between two places")
         XCTAssertEqual(lock.rows.filter(\.isGuest).map(\.id), [.locked("$2")])
         XCTAssertEqual(CheckAction.chooseInPlay(places: 2).listed(lock).map(\.id), [.topic("a"), .topic("b"), .topic("c"), .topic("d")],
-                       "Choose In Play does not list a Guest")
+                       "Choose In Play does not list a Guest Session")
         XCTAssertEqual(shown(model(inPlay: nil, windows: [window("2", lock: 0.5)])),
                        ["topic-pinned", "topic-a", "locked-$2", "topic-b", "topic-c", "topic-d"])
 
         var records = self.records
         records[4].isGuest = true
         let topic = model(inPlay: 2, records: records)
-        XCTAssertEqual(shown(topic), ["topic-pinned", "topic-a", "topic-b", "topic-d", "bench-line"],
+        XCTAssertEqual(shown(topic), ["topic-pinned", "topic-a", "topic-b", "guests-line", "topic-d", "bench-line"],
                        "a Guest Topic is In Play, also when the order puts it after a Benched card")
         XCTAssertEqual(topic.split(inPlay: 2).bench.map(\.id), [.topic("c")])
         XCTAssertFalse(model(inPlay: nil, records: records).rows.contains(where: \.isGuest), "without in_play the mark has no effect")
@@ -144,7 +144,8 @@ final class BenchTests: XCTestCase {
         XCTAssertEqual(topics.dragSlots(around: "topic-a"), unpinned, "an In Play card can cross the hidden line")
         XCTAssertEqual(topics.dragSlots(around: "topic-d"), unpinned)
         let locked = model(inPlay: 2, at: "@2", windows: [window("1"), window("2", lock: 4)])
-        XCTAssertEqual(locked.dragSlots(around: "locked-$2"), [.item(.topic("a")), .item(.topic("b")), .item(.lock(sessionID: "$2")), .fixed("bench-line")],
+        XCTAssertEqual(locked.dragSlots(around: "locked-$2"),
+                       [.item(.topic("a")), .item(.topic("b")), .fixed("guests-line"), .item(.lock(sessionID: "$2")), .fixed("bench-line")],
                        "a Locked Session is a Guest, so it is In Play, also when its order is after the Bench")
     }
 

@@ -1,5 +1,7 @@
 # A Guest is In Play above the limit and keeps its position
 
+> **Partly superseded by [ADR-0064](0064-in-play-places-stay-open-and-guests-show-in-their-own-section.md):** a Guest no longer keeps its position among the In Play cards. The Guests show in their own section, under a Guests line after the In Play places. A regular card that leaves a place leaves an Open Place. A Trade across the Guests line gives the Guest mark to the card that leaves the places. Bench Topic takes the place of End Guest for a Guest Topic, and Choose In Play lists the Guest Topics. The rules for Make a Guest, the Lock and the mark in the record still apply.
+
 With `topics.in_play` set, a user who goes to a Benched Topic from a Command Palette had two ways to keep it in view: Replace from Bench or a Trade. Both send another card to the Bench. Often the user wants the Topic in view for a short time only, without a change to the regular In Play cards. A Locked Session had the same problem: it took one of the N places, so a Lock pushed a Topic to the Bench.
 
 We add the **Guest**: a card In Play above the limit. In Play is the first N + G cards that are not Pinned, where N is `topics.in_play` and G is the number of Guests. N counts only the cards that are not Guests.

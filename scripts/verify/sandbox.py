@@ -493,6 +493,7 @@ def _signal(pid, number):
 
 
 def wait(predicate, message, seconds=20, step=.1):
+    """`message` can be a function, so that a failure describes the state at its end."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         try:
@@ -502,4 +503,4 @@ def wait(predicate, message, seconds=20, step=.1):
         except (subprocess.CalledProcessError, KeyError, FileNotFoundError, json.JSONDecodeError):
             pass
         time.sleep(step)
-    raise AssertionError(message)
+    raise AssertionError(message() if callable(message) else message)

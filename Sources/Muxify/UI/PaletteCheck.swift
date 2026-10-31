@@ -3,9 +3,10 @@ import MuxifyCore
 /// What a check step does with the cards that go on from it. Each Action that starts with a check step is a case, and
 /// the compiler finds every place that must answer for it.
 enum CheckAction: Equatable {
-    /// Choose In Play: the cards that are not Pinned and are not Guests, with the In Play ones checked first. Going on
-    /// orders every checked card: the first `places` fill the In Play places that no Guest holds, and the others go to
-    /// the top of the Bench. The Guests keep their positions.
+    /// Choose In Play: the Topics that are not Pinned, with the In Play ones and the Guest Topics checked first. Going
+    /// on fills the `places` In Play places one at a time from the checked cards; a place that no checked card fills is
+    /// an Open Place. Of the other checked cards, the regular ones go to the top of the Bench, and a Guest stays a Guest.
+    /// A Guest Session cannot take a place, so the step does not list it.
     case chooseInPlay(places: Int)
 
     var title: String {
@@ -17,7 +18,10 @@ enum CheckAction: Equatable {
     /// The cards that the step lists, in list order.
     func listed(_ topics: TopicsModel) -> [TopicsModel.Row] {
         switch self {
-        case .chooseInPlay: topics.rows.filter { !$0.isPinned && !$0.isGuest }
+        case .chooseInPlay: topics.rows.filter { row in
+            guard case .topic = row.id else { return false }
+            return !row.isPinned
+        }
         }
     }
 
@@ -25,15 +29,19 @@ enum CheckAction: Equatable {
     func outcome(_ count: Int) -> String {
         switch self {
         case .chooseInPlay(let places):
+            let open = places - count
             return "\(count) checked for \(places) In Play \(places == 1 ? "place" : "places")."
-                + (count > places ? " The last \(count - places) go to the top of the Bench." : "")
+                + (count > places ? " The last \(count - places) go to the top of the Bench, and a Guest of them stays a Guest." : "")
+                + (open > 0 ? " \(open) \(open == 1 ? "place stays an Open Place" : "places stay Open Places")." : "")
         }
     }
 
     /// Runs the Action on the cards that go on, in list order.
     @MainActor func goOn(with ids: [TopicGroupID], in palette: CommandPalette) {
         switch self {
-        case .chooseInPlay(let places): palette.order(OrderDraft(cards: ids, places: places))
+        case .chooseInPlay(let places):
+            let guests = Set(ids.filter { id in palette.store?.topics.rows.contains { $0.id == id && $0.isGuest } == true })
+            palette.order(OrderDraft(cards: ids, places: places, guests: guests))
         }
     }
 }

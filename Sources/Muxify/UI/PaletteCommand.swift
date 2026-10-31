@@ -27,6 +27,7 @@ enum PaletteCommand: String, CaseIterable {
     case unlockSession = "Unlock Session"
     case makeGuest = "Make a Guest"
     case endGuest = "End Guest"
+    case benchTopic = "Bench Topic"
     case maximize = "Maximize"
     case restore = "Restore"
     case maximizeTerminal = "Maximize Terminal"
@@ -140,7 +141,8 @@ enum PaletteCommand: String, CaseIterable {
         case .lockSession: .verb(.sessionLock)
         case .unlockSession: .verb(.sessionUnlock)
         case .makeGuest: .verbs([.topicMakeGuest, .sessionLock])
-        case .endGuest: .verbs([.topicEndGuest, .sessionUnlock])
+        case .endGuest: .verb(.sessionUnlock)
+        case .benchTopic: .verb(.topicBench)
         case .newWindow: .verb(.windowNew)
         case .newSession: .verb(.sessionNew)
         case .newWorktree: .verb(.worktreeCreate)
@@ -212,6 +214,7 @@ extension CommandPalette {
             case .makeGuest, .endGuest:
                 guard canChangeTopics, let card = store.currentGuestCard, let guest = store.guestState(of: card) else { return false }
                 return guest == (command == .endGuest)
+            case .benchTopic: return canChangeTopics && store.activeTopicID.map(store.canBench) == true
             case .installExtensions: return !store.isRemote
             case .newWorktree: return !store.changingTopic && store.sessionPaths.contains { !$0.layout.worktrees.isEmpty }
             case .removeWorktree: return !store.changingTopic
@@ -296,6 +299,7 @@ extension CommandPalette {
         case .editTags: if let id = store.activeTopicID { store.presentEditTags(of: id, keepingHistory: true) }
         case .lockSession, .unlockSession: store.toggleLockOfCurrentSession()
         case .makeGuest, .endGuest: if let card = store.currentGuestCard { store.setGuest(card, command == .makeGuest) }
+        case .benchTopic: if let id = store.activeTopicID { store.benchTopic(id) }
         case .moveTopicUp: store.moveActiveCard(.previous)
         case .moveTopicDown: store.moveActiveCard(.next)
         case .pinTopic, .unpinTopic: store.togglePinOfActiveTopic()

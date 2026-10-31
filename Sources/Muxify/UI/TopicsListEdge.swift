@@ -48,6 +48,48 @@ struct BenchLine: View {
     }
 }
 
+/// The line between the In Play places and the Guests, which are In Play above `topics.in_play`. A drag across it trades.
+struct GuestsLine: View {
+    var body: some View {
+        HStack(spacing: 8) {
+            Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
+            Text("Guests").font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
+            Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
+        }
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 8).frame(height: 20)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Guests")
+        .accessibilityIdentifier("topics-guests-line")
+    }
+}
+
+/// An In Play place that no card fills. A click asks which Guest Topic or Benched Topic takes it, and a Guest or a
+/// Benched card dropped on it takes it.
+struct OpenPlaceCard: View {
+    let place: Int
+    let action: () -> Void
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: "plus.circle").font(.system(size: 11, weight: .semibold))
+                Text("Open Place").font(.system(size: 12, weight: .medium))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10).frame(height: 32)
+            .contentShape(shape)
+            .overlay { shape.strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [5, 4])) }
+        }
+        .buttonStyle(.plain)
+        .takesFirstClick()
+        .accessibilityLabel("Open Place \(place)")
+        .accessibilityIdentifier("open-place-\(place)")
+    }
+}
+
 /// Tells the user that the last card they see is not the last card. It lies over the bottom of the list, under a
 /// shadow, and a click scrolls the first hidden card to the top. In the last stretch of the list it moves down with
 /// the cards, so it slides out under the last card and does not go away in one frame.
