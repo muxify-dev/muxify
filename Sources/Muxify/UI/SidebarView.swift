@@ -86,8 +86,9 @@ private struct TopicsSection: View {
     @State private var showingAllRows: Set<TopicGroupID> = []
     /// The No Topic Session cards whose "N more…" the user pressed, by Session ID.
     @State private var showingAllSessionRows: Set<String> = []
-    /// The cards that end below the bottom edge of the Topics list, which the "N more below" line counts.
-    @State private var cardsBelow: Set<TopicGroupID> = []
+    /// Where each card stands against the visible part of the Topics list: the "N more above" and "N more below" lines
+    /// count from it, and a Jump To scrolls to a Benched card that is out of view.
+    @State private var places: [TopicGroupID: EdgePlace] = [:]
     /// How far the end of the Topics list is below its bottom edge, up to the height of the "N more below" line. With
     /// a Bench line, the end is the last Benched card's bottom, not the empty space after it.
     @State private var listEnd: CGFloat = 0
@@ -194,8 +195,23 @@ private struct TopicsSection: View {
             .overlay(alignment: .bottom) {
                 if let first = hiddenBelow.first {
                     MoreBelowLine(count: hiddenBelow.count, listEnd: parts.bench == nil ? listEnd : benchEnd, theme: store.theme) {
-                        withAnimation(.easeOut(duration: 0.2)) { scroller.scrollTo(first, anchor: .top) }
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            // A Benched card goes under the line, not to the viewport's top under the block.
+                            if let card = first.cardID, model.isBenched(card) {
+                                reveal(card, scroller)
+                            } else {
+                                scroller.scrollTo(first.id, anchor: .top)
+                            }
+                        }
                     }
+                }
+            }
+            .overlay(alignment: .top) {
+                if hasBench, let last = hiddenAbove.last {
+                    MoreAboveLine(count: hiddenAbove.count, benchScroll: stick, theme: store.theme) {
+                        withAnimation(.easeOut(duration: 0.2)) { reveal(last, scroller) }
+                    }
+                    .padding(.top, geometry.areaTop)
                 }
             }
         }
@@ -205,9 +221,10 @@ private struct TopicsSection: View {
     private func listItem(_ item: TopicsModel.ListItem) -> some View {
         switch item {
         case .card(let topic):
-            listCard(topic, order: model.dragSlots(around: item.id)).tracksBottomEdge(topic.id, in: $cardsBelow)
+            listCard(topic, order: model.dragSlots(around: item.id)).tracksEdges(topic.id, in: $places)
                 .modifier(KeepsPlaceWhenBenchShows(isBenchedLocation: topic.id == model.benchedLocation,
                                                    isBenchShown: model.isBenchShown == true, driver: driver))
+                .background(alignment: .top) { Color.clear.frame(height: 0).id(BenchMarker(card: topic.id)) }
         case .benchLine(let isBenchShown):
             BenchLine(isBenchShown: isBenchShown) { withAnimation(.easeOut(duration: 0.15)) { store.toggleBench() } }
                 .listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
@@ -249,9 +266,21 @@ private struct TopicsSection: View {
     }
 
     /// The cards below the bottom edge, in list order, so that a click on the line scrolls to the first one.
-    /// They are the ids of the `ForEach` over `model.list`, which are the ids that `scrollTo` finds.
-    private var hiddenBelow: [TopicsModel.ListItem.ID] {
-        model.list.filter { $0.cardID.map(cardsBelow.contains) ?? false }.map(\.id)
+    /// Their ids are the ids of the `ForEach` over `model.list`, which are the ids that `scrollTo` finds.
+    private var hiddenBelow: [TopicsModel.ListItem] {
+        model.list.filter { $0.cardID.flatMap { places[$0] }?.isBelow == true }
+    }
+
+    /// The Benched cards above the top edge of the Bench area, in list order, so that a click on the line scrolls to
+    /// the last one.
+    private var hiddenAbove: [TopicGroupID] {
+        model.benchCardIDs.filter { places[$0]?.isAbove == true }
+    }
+
+    /// Scrolls the Bench so that the card stands directly under the line. The mark of no height at the card's top lets
+    /// `scrollTo` put that top at a point of the viewport, whatever the card's height.
+    private func reveal(_ card: TopicGroupID, _ scroller: ScrollViewProxy) {
+        scroller.scrollTo(BenchMarker(card: card), anchor: UnitPoint(x: 0, y: geometry.underLine))
     }
 
     /// The No Topic Session the user opened, as the card Sessions mode shows. No Topic has no group row.
@@ -264,7 +293,7 @@ private struct TopicsSection: View {
                         onShowAllRows: { showingAllSessionRows.insert(session.id) }) { item in
                 TopicItemRow(store: store, item: item, titles: model.titles, isDimmed: false)
             }
-            .tracksBottomEdge(.noTopic, in: $cardsBelow)
+            .tracksEdges(.noTopic, in: $places)
         }
     }
 
@@ -346,14 +375,22 @@ private struct TopicsListPart: ViewModifier {
 }
 
 private extension View {
-    /// Keeps the card's ID in `cardsBelow` while the card ends below the bottom edge of the Topics list. The ID also
-    /// lets the "N more below" line scroll to the card.
-    func tracksBottomEdge(_ id: TopicGroupID, in cardsBelow: Binding<Set<TopicGroupID>>) -> some View {
-        self.id(id)
-            .onPassingBottomEdge(of: TopicCard.viewport) { below in
-                if below { cardsBelow.wrappedValue.insert(id) } else { cardsBelow.wrappedValue.remove(id) }
-            }
-            .onDisappear { cardsBelow.wrappedValue.remove(id) }
+    /// Keeps the card's place against the edges of the Topics list in `places`, from the top of the visible part that
+    /// `scrollTopInset` gives: under the block for a Benched card.
+    func tracksEdges(_ id: TopicGroupID, in places: Binding<[TopicGroupID: EdgePlace]>) -> some View {
+        modifier(EdgeTracker(id: id, places: places))
+    }
+}
+
+private struct EdgeTracker: ViewModifier {
+    @Environment(\.scrollTopInset) private var scrollTopInset
+    let id: TopicGroupID
+    @Binding var places: [TopicGroupID: EdgePlace]
+
+    func body(content: Content) -> some View {
+        content.id(id)
+            .onEdgePlace(of: TopicCard.viewport, visibleTop: scrollTopInset) { if places[id] != $0 { places[id] = $0 } }
+            .onDisappear { places[id] = nil }
     }
 }
 
@@ -383,6 +420,11 @@ private struct KeepsPlaceWhenBenchShows: ViewModifier {
             if let scroll = place?.openingScroll(after: last.place) { driver.scroll(by: scroll) }
         }
     }
+}
+
+/// The id of a mark at the top of a card in the Topics list, for `scrollTo`.
+private struct BenchMarker: Hashable {
+    let card: TopicGroupID
 }
 
 private extension View {

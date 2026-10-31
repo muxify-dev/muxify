@@ -6,6 +6,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_bench_sidebar
 """
 
+import re
 import time
 import unittest
 
@@ -69,6 +70,10 @@ class TopicsBenchSidebar(TopicsSidebar):
         """How far the card's top is from where a card directly under the Bench line has its top."""
         return self.top(key, rs) - (frame(self.s.row(LINE, rs))[0] - 6)
 
+    def more_above(self, rs):
+        found = re.search(r'(\d+) more above', self.s.row('topics-more-above', rs).get('accessibilityLabel', ''))
+        return int(found.group(1)) if found else None
+
     def test_the_benched_card_of_the_location_keeps_its_place_on_screen_when_the_bench_shows(self):
         s = self.s
         windows, bench = self.far_bench('bench-open-far')
@@ -85,6 +90,7 @@ class TopicsBenchSidebar(TopicsSidebar):
             tops = [y + height for _, y, _, height in shown['frames'][key]]
             self.assertTrue(all(abs(top - before[key]) <= 1 for top in tops),
                             'a drawn frame showed %s elsewhere: %s, before %s' % (key, tops, before[key]))
+        self.assertEqual(self.more_above(rs), len(bench) - 1, 'the "more above" line does not count the cards before it')
 
     def test_the_bench_shown_on_a_card_in_play_opens_at_its_top(self):
         s = self.s
@@ -95,6 +101,21 @@ class TopicsBenchSidebar(TopicsSidebar):
         self.show_bench()
         rs = s.wait_rows(lambda rs: s.has(bench[0], rs), 'the Bench did not show its first card')
         self.assertAlmostEqual(self.under_line(bench[0], rs), 0, delta=1, msg='the first Benched card is not directly under the line')
+        self.assertIsNone(self.more_above(rs), 'a Bench at its top shows a "more above" line')
+
+    def test_a_click_on_more_above_scrolls_the_nearest_hidden_card_under_the_line(self):
+        s = self.s
+        windows, bench = self.far_bench('bench-more-above')
+        z = bench[-1]
+        self.hide_bench()
+        s.show(windows[z])
+        s.wait_rows(lambda rs: self.shown_after_line(rs) == [z], 'the Benched card of the Location does not show under the line')
+        self.show_bench()
+        s.wait_rows(lambda rs: self.more_above(rs) == len(bench) - 1, 'the "more above" line does not count the cards before z')
+        s.act('press', 'topics-more-above')
+        rs = s.wait_rows(lambda rs: abs(self.under_line(bench[-2], rs)) <= 1,
+                         'the click did not scroll %s under the line: %s' % (bench[-2], self.under_line(bench[-2], s.rows())))
+        self.assertEqual(self.more_above(rs), len(bench) - 2, 'the line does not count one card less after the click')
 
     def tops(self, keys, rs):
         return {key: frame(self.s.row(key, rs))[1] for key in keys}
@@ -330,7 +351,8 @@ class TopicsBenchSidebar(TopicsSidebar):
         self.show_bench()
         # The Bench opens scrolled to c, so b is above the Bench area, under the line.
         b, c = 'topic-bench-visit-open-b', 'topic-bench-visit-open-c'
-        rs = s.wait_rows(lambda rs: s.has(b, rs), 'the shown Bench does not show b')
+        rs = s.wait_rows(lambda rs: s.has(b, rs) and self.more_above(rs) == 1,
+                         'the shown Bench does not show b above the area: %s' % self.describe('topics-more-above', s.rows()))
         self.assertGreater(self.top(b, rs), self.top(c, rs), 'the shown Bench is not in list order')
         self.assertEqual(self.orders('bench-visit-open'), saved, 'showing the Bench changed the order')
 

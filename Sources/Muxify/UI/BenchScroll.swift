@@ -32,6 +32,10 @@ struct BenchGeometry: Equatable {
     /// back what they take, and a hidden Bench with one card does not scroll at all.
     func tail(afterCardOfHeight last: CGFloat) -> CGFloat { max(0, areaHeight - spacing - last - spacing - inset) }
 
+    /// Where a Benched card's top stands when it is directly under the line, as a part of the viewport's height: the
+    /// anchor that puts a mark of no height at the card's top there.
+    var underLine: CGFloat { viewportHeight > 0 ? (areaTop + spacing) / viewportHeight : 0 }
+
     /// The part of the viewport whose edges scroll the list while a lifted card's pointer rests there: from the
     /// block's bottom to the viewport's bottom, or from the viewport's top while the block still scrolls.
     func autoScrollRange(at offset: CGFloat) -> ClosedRange<CGFloat> {
@@ -94,5 +98,31 @@ struct BenchedLocationPlace: Equatable {
     func openingScroll(after before: BenchedLocationPlace?) -> CGFloat? {
         guard let before, !before.isBenchShown, isBenchShown else { return nil }
         return top - before.top
+    }
+}
+
+/// Where a card stands against the part of a scroll view the user sees: from `visibleTop`, which is the bottom of a
+/// block that sticks over it, down to the viewport's bottom. The "more above" and "more below" lines count from it, and a
+/// Jump To scrolls only to a card that is out of view.
+struct EdgePlace: Equatable {
+    /// The card's top is above the visible top, also when the rest of it shows.
+    var isAbove: Bool
+    /// The card ends below the visible bottom, also when the rest of it shows.
+    var isBelow: Bool
+    /// No point of the card shows.
+    var isOutOfView: Bool
+
+    /// The place of a card from `top` to `bottom`, in the viewport's points. One point of slack at each edge, so a
+    /// card that ends on an edge is in view.
+    init(top: CGFloat, bottom: CGFloat, visibleTop: CGFloat, visibleBottom: CGFloat) {
+        isAbove = top < visibleTop - 1
+        isBelow = bottom > visibleBottom + 1
+        isOutOfView = bottom <= visibleTop + 1 || top >= visibleBottom - 1
+    }
+
+    init(isAbove: Bool = false, isBelow: Bool = false, isOutOfView: Bool = false) {
+        self.isAbove = isAbove
+        self.isBelow = isBelow
+        self.isOutOfView = isOutOfView
     }
 }

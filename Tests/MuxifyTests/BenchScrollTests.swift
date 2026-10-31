@@ -54,6 +54,13 @@ final class BenchScrollTests: XCTestCase {
                           "while the block scrolls, above the viewport it scrolls up")
     }
 
+    func testACardScrolledUnderTheLineHasItsTopOneSpacingUnderTheBlock() {
+        XCTAssertEqual(short.underLine * short.viewportHeight, short.areaTop + short.spacing)
+        let tall = BenchGeometry(topHeight: 700, viewportHeight: 600)
+        XCTAssertEqual(tall.underLine * tall.viewportHeight, 600 - BenchGeometry.leastAreaHeight + tall.spacing,
+                       "under a tall block that stuck")
+    }
+
     func testTheShownBenchKeepsTheLocationsCardWhereItStood() {
         let hidden = BenchedLocationPlace(top: 210, isBenchShown: false)
         XCTAssertEqual(BenchedLocationPlace(top: 1490, isBenchShown: true).openingScroll(after: hidden), 1280,
@@ -65,6 +72,18 @@ final class BenchScrollTests: XCTestCase {
         XCTAssertNil(hidden.openingScroll(after: .init(top: 900, isBenchShown: true)), "a hide does not scroll")
         XCTAssertNil(BenchedLocationPlace(top: 1490, isBenchShown: true).openingScroll(after: nil),
                      "a card that just became the Location on a shown Bench does not scroll")
+    }
+
+    func testACardCountsAboveOrBelowWhenAnyPartIsHiddenAndIsOutOfViewWhenNoPartShows() {
+        func place(_ top: CGFloat, _ bottom: CGFloat) -> EdgePlace {
+            EdgePlace(top: top, bottom: bottom, visibleTop: 100, visibleBottom: 500)
+        }
+        XCTAssertEqual(place(106, 200), EdgePlace(), "a card directly under the line is in view")
+        XCTAssertEqual(place(60, 140), EdgePlace(isAbove: true), "a card partly under the block counts as above")
+        XCTAssertEqual(place(-40, 100), EdgePlace(isAbove: true, isOutOfView: true), "a card that ends at the block's bottom is out of view")
+        XCTAssertEqual(place(450, 560), EdgePlace(isBelow: true))
+        XCTAssertEqual(place(500, 560), EdgePlace(isBelow: true, isOutOfView: true))
+        XCTAssertEqual(place(60, 560), EdgePlace(isAbove: true, isBelow: true), "a card taller than the area counts both ways")
     }
 
     func testThePointerScrollsOnlyAfterItRestsInTheBand() {
