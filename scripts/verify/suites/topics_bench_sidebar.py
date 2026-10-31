@@ -9,7 +9,7 @@ Run from the repo root after `make build`:
 import time
 import unittest
 
-from scripts.verify.sandbox import wait
+from scripts.verify.sandbox import frame, wait
 from scripts.verify.topics_sidebar import TopicsSidebar
 
 LINE = 'topics-bench-line'
@@ -143,6 +143,32 @@ class TopicsBenchSidebar(TopicsSidebar):
         s.wait_rows(lambda rs: self.cards('bench-drag', rs)
                     == ['topic-bench-drag-c', LINE, 'topic-bench-drag-b', 'topic-bench-drag-a'],
                     'the Benched card and the card In Play did not trade places: %s' % self.cards('bench-drag', s.rows()))
+
+    def test_a_tall_benched_card_trades_with_a_short_first_card_in_play(self):
+        # An open card lists its Sessions. The tall card stops with its top at the top of the first card, where its
+        # middle stays under the line.
+        s = self.s
+        self.bench_topics('bench-tall')
+        for n in range(6):
+            self.new_session('beta/bench-tall-b-%d' % n, self.beta, topic='bench-tall-b')
+        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        self.show_bench()
+        s.wait_rows(lambda rs: self.cards('bench-tall', rs)
+                    == ['topic-bench-tall-a', LINE, 'topic-bench-tall-b', 'topic-bench-tall-c'],
+                    'the Bench did not show: %s' % self.cards('bench-tall', s.rows()))
+        self.expand('topic-bench-tall-b')
+        rs = s.rows()
+
+        def height(key):
+            """The span of the card's header and its Session rows."""
+            card = [frame(r) for r in rs if r.get('accessibilityIdentifier', '').startswith(key)]
+            return max(end for _, end in card) - min(start for start, _ in card)
+        self.assertGreater(height('topic-bench-tall-b'), 3 * height('topic-bench-tall-a'),
+                           'the Benched card is not tall enough for the check')
+        s.act('drag', 'topic-bench-tall-b', 'topic-bench-tall-a')
+        orders = lambda: self.orders('bench-tall')
+        wait(lambda: orders()['bench-tall-b'] < orders()['bench-tall-a'] < orders()['bench-tall-c'],
+             'the tall card did not trade with the first card: %s' % orders(), seconds=5)
 
     def test_a_card_let_go_on_the_shown_bench_line_stays_in_its_place(self):
         # The line is between the cards, so a card that reaches only the line has not passed the card under it.
