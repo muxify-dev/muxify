@@ -54,6 +54,10 @@ enum StackSlot<ID: Hashable>: Hashable {
 struct StackLayout<ID: Hashable> {
     var heights: [StackSlot<ID>: CGFloat]
     var spacing: CGFloat
+    /// How far the slots after the list's last fixed slot stand above their stacked place: the scroll of the area they
+    /// scroll in alone, such as the Bench under the line, while the slots up to the fixed ones stay. Zero in a list
+    /// with one scroll, so every top, landing and bound is in the terms of the screen.
+    var areaScroll: CGFloat = 0
 
     func top(of slot: StackSlot<ID>, in order: [StackSlot<ID>]) -> CGFloat {
         var top: CGFloat = 0
@@ -61,7 +65,9 @@ struct StackLayout<ID: Hashable> {
             if other == slot { break }
             top += height(other) + spacing
         }
-        return top
+        guard areaScroll != 0, let index = order.firstIndex(of: slot),
+              let lastFixed = order.lastIndex(where: { $0.item == nil }), index > lastFixed else { return top }
+        return top - areaScroll
     }
 
     func height(_ slot: StackSlot<ID>) -> CGFloat { heights[slot] ?? 0 }
@@ -113,11 +119,11 @@ struct StackLayout<ID: Hashable> {
     }
 
     /// `translation` held so `id` stays within the list, from the top of its first item to the bottom of its last, and
-    /// moves up no more than `headroom`. An item that is already past the headroom does not move up at all. With a
-    /// `divider` in the list, its bottom can go down to the end of the last slot, so it can cross a divider that ends
-    /// the list.
+    /// moves up no more than `headroom` and down no more than `footroom`. An item that is already past the headroom
+    /// does not move up at all, and one past the footroom does not move down. With a `divider` in the list, its bottom
+    /// can go down to the end of the last slot, so it can cross a divider that ends the list.
     func bounded(_ translation: CGFloat, of id: ID, in order: [StackSlot<ID>], headroom: CGFloat = .infinity,
-                 divider: String? = nil) -> CGFloat {
+                 footroom: CGFloat = .infinity, divider: String? = nil) -> CGFloat {
         guard let first = order.first(where: { $0.item != nil }), let last = order.last(where: { $0.item != nil }) else {
             return translation
         }
@@ -127,6 +133,7 @@ struct StackLayout<ID: Hashable> {
         if let divider, order.contains(.fixed(divider)), let end = order.last {
             high = max(high, self.top(of: end, in: order) + height(end) - top - height(.item(id)))
         }
+        high = max(low, min(high, max(footroom, 0)))
         return min(max(translation, low), high)
     }
 }
@@ -179,6 +186,8 @@ final class ListDrag<ID: Hashable> {
     /// The lifted item's list as its stack shows it.
     @ObservationIgnored private var order: [StackSlot<ID>] = []
     @ObservationIgnored private var timer: Task<Void, Never>?
+    /// How far the pointer moved since the lift, before `bounded`.
+    @ObservationIgnored private var rawTranslation: CGFloat = 0
 
     /// `spacing` is the room between two items in the list's stack, and `divider` the fixed slot across which a drop trades.
     init(spacing: CGFloat, tradesAcross divider: String? = nil) {
@@ -292,6 +301,7 @@ final class ListDrag<ID: Hashable> {
 
     func follow(_ id: ID, translation: CGFloat) {
         guard phase == .lifted(id) else { return }
+        rawTranslation = translation
         updateLayout()
         self.translation = layout.bounded(translation, of: id, in: order, headroom: headroom, divider: divider)
         let landing = layout.landing(of: id, movedBy: self.translation, in: order, divider: divider)
@@ -300,6 +310,20 @@ final class ListDrag<ID: Hashable> {
         if landing != .across(trade: nil) {
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
         }
+    }
+
+    /// The area after the list's last fixed slot scrolled to `scroll`. The stack shows its items there, and a lifted
+    /// item finds where it lands again, as the pointer did not move.
+    func scrollArea(by scroll: CGFloat) {
+        guard layout.areaScroll != scroll else { return }
+        layout.areaScroll = scroll
+        reland()
+    }
+
+    /// `follow` without a new event from the pointer: the places under it moved.
+    private func reland() {
+        guard case .lifted(let id) = phase else { return }
+        follow(id, translation: rawTranslation)
     }
 
     /// The pointer moved on an item that cannot move: the press is neither a click nor a drag.
