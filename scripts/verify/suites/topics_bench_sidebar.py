@@ -6,6 +6,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_bench_sidebar
 """
 
+import re
 import time
 import unittest
 
@@ -16,9 +17,10 @@ LINE = 'topics-bench-line'
 
 
 class TopicsBenchSidebar(TopicsSidebar):
-    def bench_topics(self, prefix):
-        """Topics <prefix>-a, -b and -c in that order, each with one live Session, and only one In Play. Returns the
-        Window of each Topic by its card identifier."""
+    def bench_topics(self, prefix, dormant=0):
+        """Topics <prefix>-a, -b and -c in that order, each with one live Session, and only one In Play. `dormant` more
+        Topics with no Session, <prefix>-t03 on, make the Bench longer than the Sidebar. Returns the Window of each live
+        Topic by its card identifier."""
         self.addCleanup(self.config.write_text, self.config_text)
         self.config.write_text(self.config_text + 'topics:\n  in_play: 1\n')
         windows = {}
@@ -27,7 +29,113 @@ class TopicsBenchSidebar(TopicsSidebar):
             self.write_topic(topic, topic.capitalize(), self.beta, order=order)
             sid = self.new_session('beta/' + topic, self.beta, topic=topic)
             windows['topic-' + topic] = self.s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
+        for order in range(3, 3 + dormant):
+            topic = '%s-t%02d' % (prefix, order)
+            self.write_topic(topic, topic.capitalize(), self.beta, order=order)
         return windows
+
+    def long_bench(self, prefix):
+        """A shown Bench much longer than the Sidebar. Returns the identifiers of the Benched cards in list order."""
+        s = self.s
+        self.bench_topics(prefix, dormant=17)
+        bench = ['topic-%s-%s' % (prefix, name) for name in ['b', 'c'] + ['t%02d' % i for i in range(3, 20)]]
+        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        self.show_bench()
+        s.wait_rows(lambda rs: self.cards(prefix, rs) == ['topic-%s-a' % prefix, LINE] + bench,
+                    'the long Bench did not show in list order: %s' % self.cards(prefix, s.rows()))
+        s.wait_rows(lambda rs: frame(s.row(bench[-1], rs))[1] < frame(s.row('topics-list', rs))[0],
+                    'the long Bench fits in the Sidebar')
+        s.act('scroll', 'topics-list', from_end=100000)
+        s.wait_rows(lambda rs: frame(s.row(bench[0], rs))[1] < frame(s.row(LINE, rs))[0],
+                    'the Bench did not scroll back to its top')
+        return bench
+
+    def far_bench(self, prefix):
+        """A Bench much longer than the Sidebar whose last card, <prefix>-z, has a live Session. Returns the Window of
+        each live Topic by its card identifier, and the identifiers of the Benched cards in list order."""
+        windows = self.bench_topics(prefix, dormant=17)
+        topic = prefix + '-z'
+        self.write_topic(topic, topic.capitalize(), self.beta, order=20)
+        sid = self.new_session('beta/' + topic, self.beta, topic=topic)
+        windows['topic-' + topic] = self.s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
+        bench = ['topic-%s-%s' % (prefix, name) for name in ['b', 'c'] + ['t%02d' % i for i in range(3, 20)] + ['z']]
+        self.s.wait_rows(lambda rs: self.line(rs) is not None and self.s.has('topic-%s-a' % prefix, rs),
+                         'with topics.in_play: 1, the Sidebar shows no Bench line')
+        return windows, bench
+
+    def top(self, key, rs):
+        return frame(self.s.row(key, rs))[1]
+
+    def under_line(self, key, rs):
+        """How far the card's top is from where a card directly under the Bench line has its top."""
+        return self.top(key, rs) - (frame(self.s.row(LINE, rs))[0] - 6)
+
+    def more_above(self, rs):
+        found = re.search(r'(\d+) more above', self.s.row('topics-more-above', rs).get('accessibilityLabel', ''))
+        return int(found.group(1)) if found else None
+
+    def test_the_benched_card_of_the_location_keeps_its_place_on_screen_when_the_bench_shows(self):
+        s = self.s
+        windows, bench = self.far_bench('bench-open-far')
+        z = bench[-1]
+        self.hide_bench()
+        s.show(windows[z])
+        rs = s.wait_rows(lambda rs: self.shown_after_line(rs) == [z],
+                         'the Benched card of the Location does not show alone under the line: %s' % self.shown_after_line(s.rows()))
+        before = {key: self.top(key, rs) for key in (z, LINE)}
+        shown = s.act('press', LINE, watch=[z, LINE], watch_seconds=1)
+        rs = s.wait_rows(lambda rs: self.line(rs) == 'Hide Bench', 'the Bench did not show')
+        self.assertAlmostEqual(self.top(z, rs), before[z], delta=1, msg='the card of the Location moved when the Bench showed')
+        for key in (z, LINE):
+            tops = [y + height for _, y, _, height in shown['frames'][key]]
+            self.assertTrue(all(abs(top - before[key]) <= 1 for top in tops),
+                            'a drawn frame showed %s elsewhere: %s, before %s' % (key, tops, before[key]))
+        self.assertEqual(self.more_above(rs), len(bench) - 1, 'the "more above" line does not count the cards before it')
+
+    def test_the_bench_shown_on_a_card_in_play_opens_at_its_top(self):
+        s = self.s
+        windows, bench = self.far_bench('bench-open-top')
+        self.hide_bench()
+        s.show(windows['topic-bench-open-top-a'])
+        s.wait_rows(lambda rs: self.shown_after_line(rs) == [], 'the hidden Bench shows cards: %s' % self.shown_after_line(s.rows()))
+        self.show_bench()
+        rs = s.wait_rows(lambda rs: s.has(bench[0], rs), 'the Bench did not show its first card')
+        self.assertAlmostEqual(self.under_line(bench[0], rs), 0, delta=1, msg='the first Benched card is not directly under the line')
+        self.assertIsNone(self.more_above(rs), 'a Bench at its top shows a "more above" line')
+
+    def test_a_click_on_more_above_scrolls_the_nearest_hidden_card_under_the_line(self):
+        s = self.s
+        windows, bench = self.far_bench('bench-more-above')
+        z = bench[-1]
+        self.hide_bench()
+        s.show(windows[z])
+        s.wait_rows(lambda rs: self.shown_after_line(rs) == [z], 'the Benched card of the Location does not show under the line')
+        self.show_bench()
+        s.wait_rows(lambda rs: self.more_above(rs) == len(bench) - 1, 'the "more above" line does not count the cards before z')
+        s.act('press', 'topics-more-above')
+        rs = s.wait_rows(lambda rs: abs(self.under_line(bench[-2], rs)) <= 1,
+                         'the click did not scroll %s under the line: %s' % (bench[-2], self.under_line(bench[-2], s.rows())))
+        self.assertEqual(self.more_above(rs), len(bench) - 2, 'the line does not count one card less after the click')
+
+    def test_a_jump_to_a_benched_card_out_of_view_scrolls_it_under_the_line(self):
+        s = self.s
+        windows, bench = self.far_bench('bench-jump')
+        z = bench[-1]
+        s.show(windows['topic-bench-jump-a'])
+        self.show_bench()
+        rs = s.wait_rows(lambda rs: s.has(z, rs) and self.top(z, rs) < frame(s.row('topics-list', rs))[0],
+                         'the last Benched card is in view')
+        s.show(windows[z])
+        s.wait_rows(lambda rs: abs(self.under_line(z, rs)) <= 1,
+                    'the Jump To did not scroll %s under the line: %s' % (z, self.under_line(z, s.rows())))
+
+    def tops(self, keys, rs):
+        return {key: frame(self.s.row(key, rs))[1] for key in keys}
+
+    def assert_in_place(self, keys, before, rs):
+        after = self.tops(keys, rs)
+        for key in keys:
+            self.assertAlmostEqual(after[key], before[key], delta=1, msg='%s moved with the Bench: %s, before %s' % (key, after, before))
 
     def line(self, rs):
         return self.s.row(LINE, rs).get('accessibilityLabel')
@@ -229,10 +337,13 @@ class TopicsBenchSidebar(TopicsSidebar):
         s.show(windows['topic-bench-visit-drag-b'])
         s.wait_rows(lambda rs: self.cards('bench-visit-drag', rs) == ['topic-bench-visit-drag-a', LINE, 'topic-bench-visit-drag-b'],
                     'the Benched card of the Location does not show under the line: %s' % self.cards('bench-visit-drag', s.rows()))
-        s.act('drag', 'topic-bench-visit-drag-b', 'topic-bench-visit-drag-a')
         orders = lambda: self.orders('bench-visit-drag')
-        wait(lambda: orders()['bench-visit-drag-b'] < orders()['bench-visit-drag-a'] < orders()['bench-visit-drag-c'],
-             'the drag did not save b, a, c: %s' % orders(), seconds=5)
+        traded = lambda: orders()['bench-visit-drag-b'] < orders()['bench-visit-drag-a'] < orders()['bench-visit-drag-c']
+        for _ in range(2):
+            s.act('drag', 'topic-bench-visit-drag-b', 'topic-bench-visit-drag-a')
+            if self.rows_until(lambda rs: traded(), seconds=5)[0] is not None:
+                break
+        self.assertTrue(traded(), 'the drag did not save b, a, c: %s' % orders())
         s.wait_rows(lambda rs: self.cards('bench-visit-drag', rs) == ['topic-bench-visit-drag-b', LINE],
                     'the card it replaced did not fold into the hidden Bench: %s' % self.cards('bench-visit-drag', s.rows()))
         self.show_bench()
@@ -240,7 +351,7 @@ class TopicsBenchSidebar(TopicsSidebar):
                     == ['topic-bench-visit-drag-b', LINE, 'topic-bench-visit-drag-a', 'topic-bench-visit-drag-c'],
                     'the card it replaced did not take its place on the Bench: %s' % self.cards('bench-visit-drag', s.rows()))
 
-    def test_the_benched_card_of_the_location_stays_right_under_the_line_when_the_bench_shows(self):
+    def test_a_shown_bench_shows_the_benched_card_of_the_location_at_its_place_in_the_list(self):
         s = self.s
         windows = self.bench_topics('bench-visit-open')
         s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
@@ -250,8 +361,10 @@ class TopicsBenchSidebar(TopicsSidebar):
                     'the Benched card of the Location does not show under the line: %s' % s.ids())
         saved = self.orders('bench-visit-open')
         self.show_bench()
-        s.wait_rows(lambda rs: self.shown_after_line(rs) == ['topic-bench-visit-open-c', 'topic-bench-visit-open-b'],
-                    'the card of the Location moved when the Bench showed: %s' % self.shown_after_line(s.rows()))
+        b, c = 'topic-bench-visit-open-b', 'topic-bench-visit-open-c'
+        rs = s.wait_rows(lambda rs: s.has(b, rs) and self.more_above(rs) == 1,
+                         'the shown Bench does not show b above the area: %s' % self.describe('topics-more-above', s.rows()))
+        self.assertGreater(self.top(b, rs), self.top(c, rs), 'the shown Bench is not in list order')
         self.assertEqual(self.orders('bench-visit-open'), saved, 'showing the Bench changed the order')
 
     def test_the_benched_card_of_the_location_dragged_up_and_back_below_the_hidden_line_keeps_its_place(self):
@@ -269,6 +382,72 @@ class TopicsBenchSidebar(TopicsSidebar):
         time.sleep(2)
         self.assertEqual(self.cards('bench-visit-back', s.rows()), before, 'the card let go below the line moved')
         self.assertEqual(orders(), saved, 'the card let go below the line changed the order')
+
+    def test_a_click_on_a_card_of_the_shown_bench_does_not_move_it(self):
+        s = self.s
+        windows = self.bench_topics('bench-click')
+        s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
+        self.show_bench()
+        order = ['topic-bench-click-a', LINE, 'topic-bench-click-b', 'topic-bench-click-c']
+        rs = s.wait_rows(lambda rs: self.cards('bench-click', rs) == order,
+                         'the Bench did not show in list order: %s' % self.cards('bench-click', s.rows()))
+        gap_from_b_to_c = lambda rs: frame(s.row('topic-bench-click-b', rs))[0] - frame(s.row('topic-bench-click-c', rs))[1]
+        before = gap_from_b_to_c(rs)
+        s.act('click', 'topic-bench-click-c')
+        s.wait_shown(windows['topic-bench-click-c'])
+        rs = s.wait_rows(lambda rs: self.cards('bench-click', rs) == order,
+                         'the click changed the order the Sidebar shows: %s' % self.cards('bench-click', s.rows()))
+        self.assertAlmostEqual(gap_from_b_to_c(rs), before, delta=1, msg='the clicked card moved')
+
+    def test_scrolling_a_long_bench_leaves_the_cards_in_play_in_place(self):
+        s = self.s
+        bench = self.long_bench('bench-scroll')
+        fixed = ['topic-bench-scroll-a', LINE]
+        rs = s.rows()
+        before = self.tops(fixed + [bench[0]], rs)
+        s.act('scroll', 'topics-list', from_end=10)
+        rs = s.wait_rows(lambda rs: self.tops([bench[0]], rs)[bench[0]] > before[bench[0]] + 100,
+                         'the Bench did not scroll: %s' % self.tops([bench[0]], s.rows()))
+        self.assert_in_place(fixed, before, rs)
+
+    def test_a_lifted_card_held_at_the_bottom_edge_scrolls_the_bench(self):
+        s = self.s
+        bench = self.long_bench('bench-edge')
+        fixed = ['topic-bench-edge-a', LINE]
+        rs = s.rows()
+        before = self.tops(fixed + [bench[-1]], rs)
+        scrolled = lambda rs: self.tops([bench[-1]], rs)[bench[-1]] > before[bench[-1]] + 100
+        for _ in range(3):
+            s.act('drag', bench[0], 'topics-list', edge='bottom', inset=10, hold=1.5)
+            rs = s.rows()
+            if scrolled(rs):
+                break
+        self.assertTrue(scrolled(rs), 'the Bench did not scroll while the card was held at its bottom edge: %s, before %s'
+                        % (self.tops([bench[-1]], rs), before))
+        self.assert_in_place(fixed, before, rs)
+        orders = lambda: self.orders('bench-edge')
+        wait(lambda: orders()['bench-edge-b'] > orders()['bench-edge-c'], 'the drop did not save: %s' % orders(), seconds=5)
+
+    def test_a_card_in_play_trades_with_the_card_it_is_let_go_on_in_a_scrolled_bench(self):
+        s = self.s
+        prefix = 'bench-scrolled-trade'
+        bench = self.long_bench(prefix)
+        rs = s.rows()
+        area_top = frame(s.row(bench[0], rs))[1] + 6
+        list_bottom = frame(s.row('topics-list', rs))[0]
+        last = frame(s.row(bench[-1], rs))
+        last_card_mid_area = (area_top - list_bottom) / 2 - (last[1] - last[0]) - 6
+        s.act('scroll', 'topics-list', from_end=last_card_mid_area)
+        rs = s.wait_rows(lambda rs: frame(s.row(bench[0], rs))[1] > area_top + 100, 'the Bench did not scroll')
+        middle = (area_top + list_bottom) / 2
+        target = min(bench, key=lambda key: abs(sum(frame(s.row(key, rs))) / 2 - middle))
+        self.assertGreater(bench.index(target), 5, 'the card in the middle of the Bench area is not far down the Bench')
+        by_order = lambda: [name for name, _ in sorted(self.orders(prefix).items(), key=lambda item: (item[1], item[0]))]
+        before = by_order()
+        a, other = prefix + '-a', target[len('topic-'):]
+        expected = [other if name == a else a if name == other else name for name in before]
+        s.act('drag', 'topic-%s-a' % prefix, target)
+        wait(lambda: by_order() == expected, 'the card In Play did not trade with %s: %s' % (other, by_order()), seconds=5)
 
     def test_make_a_guest_puts_a_benched_topic_in_play_with_its_mark_and_end_guest_puts_it_on_top_of_the_bench(self):
         # The card's accessibility actions are its context menu (`listActions` in UI/SidebarView.swift).

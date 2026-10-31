@@ -1,13 +1,14 @@
 import SwiftUI
 
 extension View {
-    /// Calls `action` when this view starts or stops ending below the visible part of the scroll view whose
-    /// coordinate space is `viewport`. SwiftUI runs the check on each scroll step, but calls `action` only when its
-    /// answer changes.
-    func onPassingBottomEdge(of viewport: String, _ action: @escaping (Bool) -> Void) -> some View {
-        onGeometryChange(for: Bool.self) { proxy in
-            guard let visible = proxy.bounds(of: .named(viewport)) else { return false }
-            return proxy.size.height > visible.maxY + 1
+    /// Calls `action` with where this view stands against the visible part of the scroll view whose coordinate space is
+    /// `viewport`, whose top is `visibleTop` points under the viewport's top. SwiftUI runs the check on each scroll step,
+    /// but calls `action` only when its answer changes.
+    func onEdgePlace(of viewport: String, visibleTop: CGFloat, _ action: @escaping (EdgePlace) -> Void) -> some View {
+        onGeometryChange(for: EdgePlace.self) { proxy in
+            guard let visible = proxy.bounds(of: .named(viewport)) else { return EdgePlace() }
+            return EdgePlace(top: -visible.minY, bottom: proxy.size.height - visible.minY, visibleTop: visibleTop,
+                             visibleBottom: visible.height)
         } action: { action($0) }
     }
 
@@ -82,6 +83,45 @@ struct MoreBelowLine: View {
             .accessibilityIdentifier("topics-more-below")
         }
         .offset(y: Self.height - min(listEnd, Self.height))
+        .clipped()
+    }
+}
+
+/// Tells the user that cards of the Bench are above its top edge, under the block that sticks. It lies over the top of
+/// the Bench area, over a shadow, and a click scrolls up to the nearest hidden card. In the first stretch of the Bench's
+/// scroll it moves up with the cards, so it slides in from under the block and does not come in one frame.
+struct MoreAboveLine: View {
+    let count: Int
+    /// How far the Bench has scrolled under the block, which counts up to `height`.
+    let benchScroll: CGFloat
+    let theme: TerminalTheme?
+    let action: () -> Void
+
+    static var height: CGFloat { shade + bar }
+    private static var shade: CGFloat { 10 }
+    private static var bar: CGFloat { 20 }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button(action: action) {
+                HStack(spacing: 8) {
+                    Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
+                    Text("\(count) more above").font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
+                    Image(systemName: "chevron.up").font(.system(size: 9, weight: .bold))
+                    Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14).frame(height: Self.bar)
+                .chrome(theme: theme, material: .sidebar)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("topics-more-above")
+            LinearGradient(colors: [.black.opacity(0.12), .clear], startPoint: .top, endPoint: .bottom)
+                .frame(height: Self.shade)
+                .allowsHitTesting(false)
+        }
+        .offset(y: min(benchScroll, Self.height) - Self.height)
         .clipped()
     }
 }

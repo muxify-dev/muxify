@@ -86,10 +86,31 @@ private struct TopicsSection: View {
     @State private var showingAllRows: Set<TopicGroupID> = []
     /// The No Topic Session cards whose "N more…" the user pressed, by Session ID.
     @State private var showingAllSessionRows: Set<String> = []
-    /// The cards that end below the bottom edge of the Topics list, which the "N more below" line counts.
-    @State private var cardsBelow: Set<TopicGroupID> = []
-    /// How far the end of the Topics list is below its bottom edge, up to the height of the "N more below" line.
+    /// Where each card stands against the visible part of the Topics list: the "N more above" and "N more below" lines
+    /// count from it, and a Jump To scrolls to a Benched card that is out of view.
+    @State private var places: [TopicGroupID: EdgePlace] = [:]
+    /// How far the end of the Topics list is below its bottom edge, up to the height of the "N more below" line. With
+    /// a Bench line, the end is the last Benched card's bottom, not the empty space after it.
     @State private var listEnd: CGFloat = 0
+    @State private var benchEnd: CGFloat = 0
+    /// How far the content has scrolled up in the viewport.
+    @State private var scrollOffset: CGFloat = 0
+    /// The height of the block that sticks at the top while the Bench scrolls: the bottom of its last item.
+    @State private var topHeight: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
+    @State private var lastBenchHeight: CGFloat = 0
+    /// The top of the Topics list's viewport in the window, where a lifted card's pointer is.
+    @State private var viewportTop: CGFloat = 0
+    @State private var driver = ScrollDriver()
+
+    /// The coordinate space of the Topics list's content, from the top of its first item.
+    static let contentSpace = "topics-content"
+    static let contentSpacing: CGFloat = 6
+    static let contentInset: CGFloat = 4
+
+    private var geometry: BenchGeometry {
+        BenchGeometry(topHeight: topHeight, viewportHeight: viewportHeight, spacing: Self.contentSpacing, inset: Self.contentInset)
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -109,44 +130,62 @@ private struct TopicsSection: View {
     }
 
     private var topicsList: some View {
-        ScrollViewReader { scroller in
+        let parts = model.listParts
+        let hasBench = parts.bench != nil
+        let stick = hasBench ? geometry.stick(at: scrollOffset) : 0
+        return ScrollViewReader { scroller in
             ScrollView {
                 // Not lazy: a lazy stack is one more accessibility element over all the cards, and a click tool
                 // such as Homerow clicks its centre, on whichever card is there.
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: Self.contentSpacing) {
+                    // One ForEach for both parts, so a card that trades across the line keeps its view.
                     ForEach(model.list) { item in
-                        switch item {
-                        case .card(let topic):
-                            listCard(topic, order: model.dragSlots(around: item.id)).tracksBottomEdge(topic.id, in: $cardsBelow)
-                        case .benchLine(let isBenchShown):
-                            BenchLine(isBenchShown: isBenchShown) { withAnimation(.easeOut(duration: 0.15)) { store.toggleBench() } }
-                                .listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
-                        case .noTopicSession(let opened):
-                            noTopicCard(opened).listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
-                        }
+                        listItem(item)
+                            .modifier(TopicsListPart(part: part(of: item, in: parts), stick: stick, areaTop: geometry.areaTop,
+                                                     isRaised: isRaised(item), theme: store.theme,
+                                                     blockBottom: $topHeight, lastBenchHeight: $lastBenchHeight, benchEnd: $benchEnd))
+                    }
+                    if let bench = parts.bench, !bench.isEmpty {
+                        Color.clear.frame(height: geometry.tail(afterCardOfHeight: lastBenchHeight)).accessibilityHidden(true)
                     }
                 }
+                .coordinateSpace(.named(Self.contentSpace))
+                .background { ScrollDriverView(driver: driver) }
                 .onOverhangingBottomEdge(of: TopicCard.viewport, upTo: MoreBelowLine.height) { listEnd = $0 }
                 // An In Play card that crosses the hidden line opens the Bench, so the user sees what it can trade with.
                 .onChange(of: drag.isAcross) { _, across in
                     guard across, !store.benchShown, store.benchPeek != .all, let dragged = drag.dragged,
                           model.split(inPlay: store.topicConfig.inPlay ?? 0).inPlay.contains(where: { $0.id.listID == dragged })
                     else { return }
-                    withAnimation(.easeOut(duration: 0.2)) { store.benchPeek = .all }
+                    store.benchPeek = .all
                 }
                 // What a drag showed of the hidden Bench folds into the line as soon as the cards no longer need it: at
                 // the drop, while a card glides back, or once two traded cards are in their new places.
                 .onChange(of: drag.phase) { _, phase in
                     switch phase {
                     case .lifted, .trading: return
-                    default: if store.benchPeek != nil { withAnimation(.easeOut(duration: 0.2)) { store.benchPeek = nil } }
+                    default: if store.benchPeek != nil { store.benchPeek = nil }
                     }
                 }
-                .padding(.horizontal, 6).padding(.vertical, 4)
+                .onChange(of: stick, initial: true) { _, stick in drag.scrollArea(by: stick) }
+                .padding(.horizontal, 6).padding(.vertical, Self.contentInset)
+                .onGeometryChange(for: CGFloat.self) { hasBench ? -$0.frame(in: .named(TopicCard.viewport)).minY : 0 } action: {
+                    scrollOffset = $0
+                }
             }
             .coordinateSpace(.named(TopicCard.viewport))
             .scrollIndicators(.never)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { viewportTop = $0 }
+            .background {
+                EdgeAutoScroller(drag: drag, driver: driver, viewportTop: viewportTop,
+                                 geometry: parts.bench == nil ? nil : geometry, viewportHeight: viewportHeight)
+            }
             .accessibilityIdentifier("topics-list")
+            .onChange(of: model.activeTopic) { _, card in
+                guard let card, model.isBenched(card), places[card]?.isOutOfView == true else { return }
+                revealOnceLaidOut(card, scroller)
+            }
             .overlay {
                 if model.rows.isEmpty && model.openedNoTopicSession == nil && model.groups.isEmpty {
                     Text("No Topics").font(typography.font(for: .title)).foregroundStyle(.secondary)
@@ -156,12 +195,57 @@ private struct TopicsSection: View {
             // and at the end of the list that moves every card by the row's height.
             .overlay(alignment: .bottom) {
                 if let first = hiddenBelow.first {
-                    MoreBelowLine(count: hiddenBelow.count, listEnd: listEnd, theme: store.theme) {
-                        withAnimation(.easeOut(duration: 0.2)) { scroller.scrollTo(first, anchor: .top) }
+                    MoreBelowLine(count: hiddenBelow.count, listEnd: parts.bench == nil ? listEnd : benchEnd, theme: store.theme) {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            if let card = first.cardID, model.isBenched(card) {
+                                reveal(card, scroller)
+                            } else {
+                                scroller.scrollTo(first.id, anchor: .top)
+                            }
+                        }
                     }
                 }
             }
+            .overlay(alignment: .top) {
+                if hasBench, let last = hiddenAbove.last {
+                    MoreAboveLine(count: hiddenAbove.count, benchScroll: stick, theme: store.theme) {
+                        withAnimation(.easeOut(duration: 0.2)) { reveal(last, scroller) }
+                    }
+                    .padding(.top, geometry.areaTop)
+                }
+            }
         }
+    }
+
+    @ViewBuilder
+    private func listItem(_ item: TopicsModel.ListItem) -> some View {
+        switch item {
+        case .card(let topic):
+            listCard(topic, order: model.dragSlots(around: item.id)).tracksEdges(topic.id, in: $places)
+                .modifier(KeepsPlaceWhenBenchShows(isBenchedLocation: topic.id == model.benchedLocation,
+                                                   isBenchShown: model.isBenchShown == true, driver: driver))
+                .background(alignment: .top) { Color.clear.frame(height: 0).id(BenchMarker(card: topic.id)) }
+        case .benchLine(let isBenchShown):
+            BenchLine(isBenchShown: isBenchShown) { store.toggleBench() }
+                .listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
+        case .noTopicSession(let opened):
+            noTopicCard(opened).listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
+        }
+    }
+
+    private func part(of item: TopicsModel.ListItem, in parts: (top: ArraySlice<TopicsModel.ListItem>,
+                                                             bench: ArraySlice<TopicsModel.ListItem>?)) -> TopicsListPart.Part {
+        guard let bench = parts.bench else { return .plain }
+        if let index = parts.top.firstIndex(where: { $0.id == item.id }) {
+            return .top(isFirst: index == parts.top.startIndex, isLast: index == parts.top.index(before: parts.top.endIndex))
+        }
+        return .bench(isLast: item.id == bench.last?.id)
+    }
+
+    /// A card the drag lifts or moves draws above every other card, also above the block that sticks.
+    private func isRaised(_ item: TopicsModel.ListItem) -> Bool {
+        guard let id = item.cardID?.listID else { return false }
+        return drag.dragged == id || drag.tradePath(of: id) != nil
     }
 
     @ViewBuilder
@@ -182,9 +266,27 @@ private struct TopicsSection: View {
     }
 
     /// The cards below the bottom edge, in list order, so that a click on the line scrolls to the first one.
-    /// They are the ids of the `ForEach` over `model.list`, which are the ids that `scrollTo` finds.
-    private var hiddenBelow: [TopicsModel.ListItem.ID] {
-        model.list.filter { $0.cardID.map(cardsBelow.contains) ?? false }.map(\.id)
+    /// Their ids are the ids of the `ForEach` over `model.list`, which are the ids that `scrollTo` finds.
+    private var hiddenBelow: [TopicsModel.ListItem] {
+        model.list.filter { $0.cardID.flatMap { places[$0] }?.isBelow == true }
+    }
+
+    /// The Benched cards above the top edge of the Bench area, in list order, so that a click on the line scrolls to
+    /// the last one.
+    private var hiddenAbove: [TopicGroupID] {
+        model.benchCardIDs.filter { places[$0]?.isAbove == true }
+    }
+
+    /// `reveal` on the next turn of the main queue, after the layout of the change that is in progress: the card the
+    /// user leaves can close then, and the block that sticks gets shorter with it.
+    private func revealOnceLaidOut(_ card: TopicGroupID, _ scroller: ScrollViewProxy) {
+        DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.2)) { reveal(card, scroller) } }
+    }
+
+    /// Scrolls the Bench so that the card stands directly under the line. The mark of no height at the card's top lets
+    /// `scrollTo` put that top at a point of the viewport, whatever the card's height.
+    private func reveal(_ card: TopicGroupID, _ scroller: ScrollViewProxy) {
+        scroller.scrollTo(BenchMarker(card: card), anchor: UnitPoint(x: 0, y: geometry.underLine))
     }
 
     /// The No Topic Session the user opened, as the card Sessions mode shows. No Topic has no group row.
@@ -197,7 +299,7 @@ private struct TopicsSection: View {
                         onShowAllRows: { showingAllSessionRows.insert(session.id) }) { item in
                 TopicItemRow(store: store, item: item, titles: model.titles, isDimmed: false)
             }
-            .tracksBottomEdge(.noTopic, in: $cardsBelow)
+            .tracksEdges(.noTopic, in: $places)
         }
     }
 
@@ -207,16 +309,128 @@ private struct TopicsSection: View {
     }
 }
 
-private extension View {
-    /// Keeps the card's ID in `cardsBelow` while the card ends below the bottom edge of the Topics list. The ID also
-    /// lets the "N more below" line scroll to the card.
-    func tracksBottomEdge(_ id: TopicGroupID, in cardsBelow: Binding<Set<TopicGroupID>>) -> some View {
-        self.id(id)
-            .onPassingBottomEdge(of: TopicCard.viewport) { below in
-                if below { cardsBelow.wrappedValue.insert(id) } else { cardsBelow.wrappedValue.remove(id) }
-            }
-            .onDisappear { cardsBelow.wrappedValue.remove(id) }
+/// Hands a lifted card's pointer to `driver`, so the Topics list scrolls while the pointer rests at an edge: the edges
+/// of the Bench area under the block that sticks, or of the whole list without a Bench line. A view of its own, so only
+/// it draws again as the pointer moves.
+private struct EdgeAutoScroller: View {
+    let drag: ListDrag<TopicListID>
+    let driver: ScrollDriver
+    let viewportTop: CGFloat
+    let geometry: BenchGeometry?
+    let viewportHeight: CGFloat
+
+    var body: some View {
+        Color.clear.onChange(of: drag.pointer.map { $0 - viewportTop }, initial: true) { _, pointer in
+            let geometry = geometry, height = viewportHeight
+            driver.autoScroll(pointer: pointer) { offset in geometry?.autoScrollRange(at: offset) ?? 0...height }
+        }
     }
+}
+
+/// Where an item of the Topics list stands while the list has a Bench line. An item of the block at the top moves down
+/// as far as the list scrolled, so it stays, and it stands on the Sidebar's chrome above the Benched cards, which pass
+/// under it. A Benched card's open header sticks under the block. Without a Bench line the item is as it was.
+private struct TopicsListPart: ViewModifier {
+    enum Part: Equatable {
+        case plain
+        case top(isFirst: Bool, isLast: Bool)
+        case bench(isLast: Bool)
+
+        var isTop: Bool { if case .top = self { true } else { false } }
+        var isFirst: Bool { if case .top(true, _) = self { true } else { false } }
+        var isLastOfTop: Bool { if case .top(_, true) = self { true } else { false } }
+        var isLastBenched: Bool { self == .bench(isLast: true) }
+    }
+
+    let part: Part
+    let stick: CGFloat
+    let areaTop: CGFloat
+    let isRaised: Bool
+    let theme: TerminalTheme?
+    @Binding var blockBottom: CGFloat
+    @Binding var lastBenchHeight: CGFloat
+    @Binding var benchEnd: CGFloat
+
+    func body(content: Content) -> some View {
+        let isTop = part.isTop, isFirst = part.isFirst, isLastOfTop = part.isLastOfTop, isLastBenched = part.isLastBenched
+        return content
+            .environment(\.scrollTopInset, part == .plain || isTop ? 0 : areaTop)
+            .onGeometryChange(for: CGFloat?.self) { isLastBenched ? $0.size.height : nil } action: {
+                if let height = $0 { lastBenchHeight = height }
+            }
+            .onGeometryChange(for: CGFloat?.self) { proxy in
+                guard isLastBenched, let visible = proxy.bounds(of: .named(TopicCard.viewport)) else { return nil }
+                return min(max(0, proxy.size.height - visible.maxY), MoreBelowLine.height)
+            } action: { if let end = $0 { benchEnd = end } }
+            .background {
+                if isTop {
+                    Color.clear.chrome(theme: theme, material: .sidebar)
+                        .padding(.top, isFirst ? -TopicsSection.contentInset : 0).padding(.bottom, -TopicsSection.contentSpacing)
+                        .padding(.horizontal, -6)
+                        .contentShape(Rectangle())
+                }
+            }
+            .offset(y: isTop ? stick : 0)
+            // Outside the offset, so the block's height does not grow as it sticks.
+            .onGeometryChange(for: CGFloat?.self) { isLastOfTop ? $0.frame(in: .named(TopicsSection.contentSpace)).maxY : nil } action: {
+                if let bottom = $0 { blockBottom = bottom }
+            }
+            // The stack sees this zIndex, not the drag's inside the item, so it keeps the drag's raise.
+            .zIndex(isRaised ? 30 : isTop ? 1 : 0)
+    }
+}
+
+private extension View {
+    /// Keeps the card's place against the edges of the Topics list in `places`, from the top of the visible part that
+    /// `scrollTopInset` gives: under the block for a Benched card.
+    func tracksEdges(_ id: TopicGroupID, in places: Binding<[TopicGroupID: EdgePlace]>) -> some View {
+        modifier(EdgeTracker(id: id, places: places))
+    }
+}
+
+private struct EdgeTracker: ViewModifier {
+    @Environment(\.scrollTopInset) private var scrollTopInset
+    let id: TopicGroupID
+    @Binding var places: [TopicGroupID: EdgePlace]
+
+    func body(content: Content) -> some View {
+        content.id(id)
+            .onEdgePlace(of: TopicCard.viewport, visibleTop: scrollTopInset) { if places[id] != $0 { places[id] = $0 } }
+            .onDisappear { places[id] = nil }
+    }
+}
+
+/// Keeps the Location's Benched card where it is on the screen when the Bench shows: the list scrolls by as far as the
+/// cards shown before it pushed it down. Without a Benched Location nothing scrolls, and the Bench opens at its top.
+///
+/// The scroll comes from the card's geometry change in the layout that shows the Bench, before that layout is drawn.
+/// `scrollTo` from `onChange` cannot do it: the scroll view has the hidden Bench's height until that layout, so it has
+/// nowhere to scroll to.
+private struct KeepsPlaceWhenBenchShows: ViewModifier {
+    let isBenchedLocation: Bool
+    let isBenchShown: Bool
+    let driver: ScrollDriver
+    @State private var last = Last()
+
+    /// A class, so that the action can keep the last place without drawing the card again.
+    final class Last {
+        var place: BenchedLocationPlace?
+    }
+
+    func body(content: Content) -> some View {
+        let isBenchedLocation = isBenchedLocation, isBenchShown = isBenchShown
+        return content.onGeometryChange(for: BenchedLocationPlace?.self) { proxy in
+            isBenchedLocation ? BenchedLocationPlace(top: proxy.frame(in: .named(TopicCard.viewport)).minY, isBenchShown: isBenchShown) : nil
+        } action: { place in
+            defer { last.place = place }
+            if let scroll = place?.openingScroll(after: last.place) { driver.scroll(by: scroll) }
+        }
+    }
+}
+
+/// The id of a mark at the top of a card in the Topics list, for `scrollTo`.
+private struct BenchMarker: Hashable {
+    let card: TopicGroupID
 }
 
 private extension View {

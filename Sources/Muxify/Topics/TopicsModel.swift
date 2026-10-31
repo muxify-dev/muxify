@@ -330,8 +330,29 @@ struct TopicsModel {
     }
 
     /// The Pinned and In Play cards, then the Bench line, the opened No Topic Session and the Benched cards that
-    /// show. Without a Bench: the cards of `rows`, then the opened No Topic Session.
+    /// show, in list order. Without a Bench: the cards of `rows`, then the opened No Topic Session.
     let list: [ListItem]
+    /// The Topics list in two parts: the items that stay at the top of the Sidebar (the Pinned and In Play cards, the
+    /// Bench line and the opened No Topic Session), and the Benched cards that show, which scroll alone under them.
+    /// `bench` is nil without a Bench line, and then every item is in `top`.
+    var listParts: (top: ArraySlice<ListItem>, bench: ArraySlice<ListItem>?) {
+        guard let line = list.firstIndex(where: { $0.cardID == nil }) else { return (list[...], nil) }
+        let start = list[(line + 1)...].firstIndex { if case .card = $0 { return true } else { return false } } ?? list.endIndex
+        return (list[..<start], list[start...])
+    }
+
+    /// The Benched cards that show, in list order. Empty without a Bench line.
+    var benchCardIDs: [TopicGroupID] { listParts.bench?.compactMap(\.cardID) ?? [] }
+
+    func isBenched(_ id: TopicGroupID) -> Bool { benchCardIDs.contains(id) }
+
+    /// The Location's card while it is on the Bench, shown or hidden. The Bench shows with this card where it was, and
+    /// without one it shows at its top.
+    var benchedLocation: TopicGroupID? {
+        guard let activeTopic, isBenched(activeTopic) else { return nil }
+        return activeTopic
+    }
+
     /// Whether the Bench shows; nil while the Topics list has no Bench line.
     var isBenchShown: Bool? {
         list.lazy.compactMap { item -> Bool? in
@@ -345,26 +366,14 @@ struct TopicsModel {
 
     /// The slots of `list` that the item `id` can reach in a drag: the cards with its Pin and, among the cards that are
     /// not Pinned, the Bench line and the opened No Topic Session, which a card passes. A card that crosses the line
-    /// trades with a card on the other side. Under the line, the Location's card and the other Benched cards hold their
-    /// places for each other: the Location's card stays right under the line, away from its place in the list, so a
-    /// reorder among them would not show where it lands.
+    /// trades with a card on the other side.
     func dragSlots(around id: ListItem.ID) -> [StackSlot<TopicListID>] {
         func isPinned(_ item: ListItem) -> Bool {
             if case .card(let row) = item { return row.isPinned }
             return false
         }
         guard let dragged = list.first(where: { $0.id == id }) else { return [] }
-        let items = list.filter { isPinned($0) == isPinned(dragged) }
-        let line = items.firstIndex { $0.cardID == nil } ?? items.endIndex
-        let benched = Set(items[line...].compactMap(\.cardID))
-        guard let card = dragged.cardID, benched.contains(card), let held = activeTopic, benched.contains(held) else {
-            return items.map(\.dragSlot)
-        }
-        return items.map { item in
-            guard let other = item.cardID, benched.contains(other), other != card, other == held || card == held,
-                  let listID = other.listID else { return item.dragSlot }
-            return .held(listID)
-        }
+        return list.filter { isPinned($0) == isPinned(dragged) }.map(\.dragSlot)
     }
 
     /// The cards right above and below a card in the Topics list, among those with its Pin. None for a Topic outside it.
@@ -609,9 +618,9 @@ struct TopicsModel {
     }
 
     /// The Guests and the first `inPlay` other cards that are not Pinned are In Play, and the other cards are on the
-    /// Bench (`InPlayCut`). While the Bench is hidden, only the Location's card and the card that `peek` holds show from it. The Location's card and
-    /// the opened No Topic Session show right under the line, so they do not move when the Bench shows or hides. The
-    /// opened No Topic Session counts toward nothing.
+    /// Bench (`InPlayCut`). A shown Bench shows each Benched card at its place in the list. While the Bench is hidden,
+    /// only the Location's card and the card that `peek` holds show from it. The opened No Topic Session shows right
+    /// under the line and counts toward nothing.
     private static func list(_ rows: [Row], inPlay: Int?, benchShown: Bool, peek: BenchPeek?, location: TopicGroupID?,
                              noTopic: Session?) -> [ListItem] {
         let opened = noTopic.map { [ListItem.noTopicSession($0)] } ?? []
@@ -619,8 +628,7 @@ struct TopicsModel {
         let front = rows.filter(\.isPinned) + cut.inPlay, bench = cut.bench
         guard !bench.isEmpty else { return front.map(ListItem.card) + opened }
         let shown = benchShown || peek == .all
-        let underLine = bench.filter { $0.id == location } + bench.filter { $0.id != location }
-        let benchCards = shown ? underLine : underLine.filter { $0.id == location || peek == .card($0.id) }
+        let benchCards = shown ? bench : bench.filter { $0.id == location || peek == .card($0.id) }
         return front.map(ListItem.card) + [.benchLine(isBenchShown: shown)] + opened + benchCards.map(ListItem.card)
     }
 

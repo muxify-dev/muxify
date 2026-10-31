@@ -112,21 +112,73 @@ final class TopicOrderTests: XCTestCase {
         XCTAssertEqual(layout.landing(of: "a", movedBy: 72, in: order, divider: "line"), .across(trade: nil))
     }
 
-    func testAHeldItemKeepsItsPlaceAndIsNoPlaceToLand() {
-        // a at 0–40, the line at 46–66, h at 72–112, c at 118–158, d at 164–204.
-        let layout = StackLayout(heights: [.item("a"): 40, .fixed("line"): 20, .item("h"): 40, .item("c"): 40, .item("d"): 40],
+    func testADraggedCardStopsAtTheBottomOfTheView() {
+        let layout = StackLayout(heights: [.item("a"): 40, .item("b"): 100, .item("c"): 40], spacing: 6)
+        let order: [StackSlot<String>] = [.item("a"), .item("b"), .item("c")]
+        XCTAssertEqual(layout.bounded(1000, of: "b", in: order, footroom: 20), 20, "it stops at the bottom of the view first")
+        XCTAssertEqual(layout.bounded(1000, of: "b", in: order, footroom: -15), 0, "a card already past the bottom does not go down")
+        XCTAssertEqual(layout.bounded(-30, of: "b", in: order, footroom: -15), -30, "it still goes up")
+    }
+
+    func testTheCardsAfterTheLastFixedSlotStandWhereTheirAreaScrolledThem() {
+        var layout = StackLayout(heights: [.item("a"): 40, .item("b"): 40, .fixed("line"): 20, .item("c"): 40, .item("d"): 40],
                                  spacing: 6)
-        let order: [StackSlot<String>] = [.item("a"), .fixed("line"), .held("h"), .item("c"), .item("d")]
-        XCTAssertEqual(layout.top(of: .item("c"), in: order), 118, "a held item has the height that its item measured")
-        XCTAssertNil(layout.landing(of: "c", movedBy: -50, in: order, divider: "line"), "c passes h and does not land before it")
-        XCTAssertEqual(DropPlacement.after("d").placing("c", in: order), [.item("a"), .fixed("line"), .held("h"), .item("d"), .item("c")])
+        let order: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line"), .item("c"), .item("d")]
+        XCTAssertEqual(layout.landing(of: "a", movedBy: 85, in: order, divider: "line"), .across(trade: nil),
+                       "unscrolled, a's middle at 105 is over no card")
+        XCTAssertEqual(layout.landing(of: "d", movedBy: -100, in: order, divider: "line"), .across(trade: "b"))
+        layout.areaScroll = 50
+        XCTAssertEqual(layout.top(of: .fixed("line"), in: order), 92)
+        XCTAssertEqual(layout.top(of: .item("b"), in: order), 46)
+        XCTAssertEqual(layout.top(of: .item("c"), in: order), 68)
+        XCTAssertEqual(layout.landing(of: "a", movedBy: 85, in: order, divider: "line"), .across(trade: "c"),
+                       "a's middle at 105 is on c, which the scroll brought up")
+        XCTAssertEqual(layout.landing(of: "d", movedBy: -100, in: order, divider: "line"), .across(trade: "a"),
+                       "d's middle at 34 is on a")
+        XCTAssertEqual(layout.placement(of: "c", movedBy: 30, in: order), .after("d"), "c's bottom at 138 passed d's middle at 134")
+        XCTAssertEqual(layout.top(of: .item("b"), in: [.item("a"), .item("b")]), 46, "a list without a fixed slot has no area")
+    }
+
+    @MainActor private func tradingDrag() -> (ListDrag<String>, [StackSlot<String>]) {
+        let drag = ListDrag<String>(spacing: 6, tradesAcross: "line")
+        let all: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line"), .item("c"), .item("d")]
+        drag.measure(.fixed("line"), height: 20)
+        for id in ["a", "b", "c", "d"] { drag.measure(id, ItemPlace(height: 40, visibleTop: 1000, footroom: 1000)) }
+        for id in ["a", "b", "c", "d"] { drag.show(all, at: id) }
+        return (drag, all)
+    }
+
+    @MainActor func testALiftedCardStaysUnderThePointerWhenTheListScrollsUnderIt() {
+        let (drag, _) = tradingDrag()
+        drag.press("c")
+        drag.lift("c")
+        drag.follow("c", translation: 20, pointer: 500)
+        XCTAssertEqual(drag.translation, 20)
+        XCTAssertEqual(drag.pointer, 500)
+        XCTAssertNil(drag.placement, "c's bottom at 178 has not passed d's middle at 184")
+        drag.measure("c", ItemPlace(height: 40, visibleTop: 980, footroom: 1020))
+        XCTAssertEqual(drag.translation, 40, "its place went up 20, so it goes down 20 more from its place")
+        XCTAssertEqual(drag.placement, .after("d"), "with no new pointer event, it passed d's middle")
+        drag.measure("c", ItemPlace(height: 40, visibleTop: 980, footroom: 10))
+        XCTAssertEqual(drag.translation, 40, "a place that did not move changes nothing")
+        drag.end("c", onTap: {}, onDrop: { _ in }, onTrade: { _ in })
+        XCTAssertNil(drag.pointer, "let go, the list no longer scrolls for it")
+    }
+
+    @MainActor func testALiftedCardLandsAgainWhenTheAreaUnderItScrolls() {
+        let (drag, _) = tradingDrag()
+        drag.press("a")
+        drag.lift("a")
+        drag.follow("a", translation: 85)
+        XCTAssertTrue(drag.isAcross)
+        XCTAssertNil(drag.tradeTarget, "a's middle at 105 is over no card")
+        drag.scrollArea(by: 50)
+        XCTAssertEqual(drag.tradeTarget, "c", "with no new pointer event, the scrolled Bench brought c under a")
+        XCTAssertEqual(drag.tradeGhostOffset(of: "c"), -68, "c shows itself in a's place, 68 points above where it shows")
     }
 
     @MainActor func testADropOnATradeTargetPassesTheTwoItemsToEachOthersPlaces() {
-        let drag = ListDrag<String>(spacing: 6, tradesAcross: "line")
-        let all: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line"), .item("c"), .item("d")]
-        for slot in all { drag.measure(slot, height: slot.item == nil ? 20 : 40, visibleTop: 1000) }
-        for id in ["a", "b", "c", "d"] { drag.show(all, at: id) }
+        let (drag, all) = tradingDrag()
         drag.press("a")
         drag.lift("a")
         drag.follow("a", translation: 120)

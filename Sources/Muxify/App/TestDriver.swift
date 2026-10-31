@@ -6,7 +6,8 @@ import MuxifyCore
 /// The script writes `command.json` (with a fresh nonce) into the folder
 /// named by MUXIFY_TEST_DRIVER; a timer on the main run loop answers each new
 /// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, hover, snapshot, responder, scroll, stall,
-/// binding, each with the option `reveal` that scrolls the target into view first. None of
+/// binding, each with the option `reveal` that scrolls the target into view first, and `watch` that reads frames of
+/// elements in each drawn frame after it. None of
 /// them activates the app, opens a menu or moves the pointer, so a run never takes focus.
 enum TestDriver {
     private static var activity: NSObjectProtocol?
@@ -96,6 +97,10 @@ enum TestDriver {
             pending = Reveal(nonce: nonce, target: target, command: command)
             return
         }
+        if let watched = command["watch"] as? [String], !watched.isEmpty {
+            pending = Watch(nonce: nonce, watched: watched, seconds: command["watch_seconds"] as? Double ?? 1, command: command)
+            return
+        }
         if ["drag", "click", "hover"].contains(command["command"] as? String), SidebarPagerMotion.isMoving {
             pending = Settle(nonce: nonce, command: command)
             return
@@ -159,7 +164,9 @@ enum TestDriver {
     /// `click` presses the target at its centre and lets go there, without moving: a plain click of the mouse.
     /// The option `command_key` holds ⌘ through the click, as a ⌘-click does.
     /// `drag` presses the target, moves to the element named by `text` and lets go there: in its upper quarter,
-    /// or its lower quarter with the option `edge: "bottom"`. With the option `via`, it first moves to the same quarter
+    /// or its lower quarter with the option `edge: "bottom"`. The option `inset` lets go that many points from that edge
+    /// of the element in place of its quarter, and `hold` rests there for that many seconds, with no event, before it
+    /// lets go, as a user who holds a card at the edge of a list. With the option `via`, it first moves to the same quarter
     /// of the element that `via` names, as a user who changes their mind on the way. A destination that does not show yet,
     /// such as a Benched card that the drag shows, is found after half a second at `via`. Each tick hands one mouse event to
     /// the app, past its event monitors as a real click goes, but never through the window server, so the pointer does
@@ -173,6 +180,9 @@ enum TestDriver {
         private var pressed = false
         private var pendingDestination: (identifier: String, bottom: Bool)?
         private var lastPoint: NSPoint?
+        private var inset: CGFloat?
+        private var hold: TimeInterval = 0
+        private var heldUntil: Date?
 
         init(nonce: String, command: [String: Any]) {
             self.nonce = nonce
@@ -195,13 +205,16 @@ enum TestDriver {
             }
             let via = frame(command["via"] as? String)
             let bottom = command["edge"] as? String == "bottom"
+            let inset = (command["inset"] as? Double).map { CGFloat($0) }
+            self.inset = inset
+            hold = command["hold"] as? Double ?? 0
             let destination = frame(command["text"] as? String)
             guard via != nil || command["via"] == nil, destination != nil || via != nil,
                   let identifier = command["text"] as? String else { return }
             self.window = window
-            let viaY = via.map { Self.dropY(in: $0, bottom: bottom) }
+            let viaY = via.map { Self.dropY(in: $0, bottom: bottom, inset: inset) }
             var points = [start]
-            for stopY in [viaY, destination.map { Self.dropY(in: $0, bottom: bottom) }].compactMap({ $0 }) {
+            for stopY in [viaY, destination.map { Self.dropY(in: $0, bottom: bottom, inset: inset) }].compactMap({ $0 }) {
                 points += Self.leg(from: points.last!, to: stopY)
             }
             moves = [(.leftMouseDown, start)] + points.dropFirst().map { (.leftMouseDragged, $0) }
@@ -217,8 +230,9 @@ enum TestDriver {
         /// Screen points grow upward, so the upper quarter is near maxY.
         private static var halfSecondOfTicks: Int { 25 }
 
-        private static func dropY(in frame: NSRect, bottom: Bool) -> CGFloat {
-            bottom ? frame.minY + frame.height / 4 : frame.maxY - frame.height / 4
+        private static func dropY(in frame: NSRect, bottom: Bool, inset: CGFloat?) -> CGFloat {
+            let inset = inset ?? frame.height / 4
+            return bottom ? frame.minY + inset : frame.maxY - inset
         }
 
         private static func leg(from: NSPoint, to stopY: CGFloat) -> [NSPoint] {
@@ -230,8 +244,13 @@ enum TestDriver {
                 self.pendingDestination = nil
                 let found = (TestDriver.dump().first { $0.row["accessibilityIdentifier"] == pendingDestination.identifier }?.object)?
                     .value(forKey: "accessibilityFrame") as? NSValue
-                let end = found.map { Self.leg(from: held, to: Self.dropY(in: $0.rectValue, bottom: pendingDestination.bottom)) } ?? []
+                let end = found.map { Self.leg(from: held, to: Self.dropY(in: $0.rectValue, bottom: pendingDestination.bottom, inset: inset)) } ?? []
                 moves = end.map { (.leftMouseDragged, $0) } + [(.leftMouseUp, end.last ?? held)]
+            }
+            if hold > 0, moves.first?.type == .leftMouseUp {
+                let until = heldUntil ?? Date().addingTimeInterval(hold)
+                heldUntil = until
+                if Date() < until { return nil }
             }
             guard let window, !moves.isEmpty else { return ["rows": TestDriver.dump().map(\.row), "pressed": pressed] }
             func event(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent? {
@@ -322,6 +341,61 @@ enum TestDriver {
         private static func scrollViews(in view: NSView?) -> [NSScrollView] {
             guard let view, !view.isHidden else { return [] }
             return ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap(scrollViews)
+        }
+    }
+
+    /// The option `watch` runs a command and then reads the frames of the elements it names after each pass of the main
+    /// run loop, for `watch_seconds`. A run loop observer that comes after Core Animation's commit sees each layout
+    /// that is drawn, so a view that is somewhere else for one frame shows in the answer. It answers `frames`: for each
+    /// identifier, its frames (x, y, width, height in screen points) in the order they came, each once until it changes.
+    private final class Watch: Steps {
+        let nonce: String
+        private let watched: [String]
+        private let until: Date
+        private var result: [String: Any] = [:]
+        private var objects: [String: NSObject] = [:]
+        private var frames: [String: [[Double]]] = [:]
+        private var observer: CFRunLoopObserver?
+
+        init(nonce: String, watched: [String], seconds: Double, command: [String: Any]) {
+            self.nonce = nonce
+            self.watched = watched
+            until = Date().addingTimeInterval(seconds)
+            sample()
+            var command = command
+            command["watch"] = nil
+            result = TestDriver.run(command)
+            sample()
+            // After the commit observer (order 2 000 000), so each sample is the layout of a frame that is drawn.
+            let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, 3_000_000) {
+                [weak self] _, _ in self?.sample()
+            }
+            CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+            self.observer = observer
+        }
+
+        func step() -> [String: Any]? {
+            guard Date() >= until else { return nil }
+            if let observer { CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes) }
+            observer = nil
+            result["frames"] = frames
+            result["rows"] = TestDriver.dump().map(\.row)
+            return result
+        }
+
+        private func sample() {
+            if watched.contains(where: { objects[$0] == nil }) {
+                for element in TestDriver.dump() {
+                    if let identifier = element.row["accessibilityIdentifier"], watched.contains(identifier) {
+                        objects[identifier] = element.object
+                    }
+                }
+            }
+            for identifier in watched {
+                guard let frame = (objects[identifier]?.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue else { continue }
+                let value = [frame.minX, frame.minY, frame.width, frame.height].map(Double.init)
+                if frames[identifier]?.last != value { frames[identifier, default: []].append(value) }
+            }
         }
     }
 
