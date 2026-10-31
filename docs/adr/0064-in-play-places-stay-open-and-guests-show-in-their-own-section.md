@@ -1,0 +1,30 @@
+# In Play places stay open, and the Guests show in their own section
+
+With `topics.in_play` set, a Settle of an In Play card pulled the top Benched card into In Play ([ADR 0054](0054-choose-in-play-and-replace-from-bench-replace-snooze-and-zen.md)). The user did not choose that card, and it often was not the next Topic they wanted. A Guest kept its position among the In Play cards ([ADR 0061](0061-a-guest-is-in-play-above-the-limit-and-keeps-its-position.md)), so a Guest could show between two regular cards, and Choose In Play had to skip the positions that Guests held. We change both rules.
+
+- **Three sections.** The Sidebar shows the Pinned Topics, then the N In Play places, then a "Guests" line and every Guest (Guest Topics and Guest Sessions), then the Bench line and the Bench. N is `topics.in_play`. A Guest never shows between two places. The Guests line shows only when there is a Guest. Make a Guest puts the card at the end of the Guests.
+- **Open Place.** When a regular card leaves an In Play place, by Settle, Forget, Pin or Bench Topic, its place becomes an Open Place. No Benched card moves up, and the other places keep their positions. When a Guest leaves, by Settle, Pin, Bench Topic, End Guest or the end of its Lock, it leaves no Open Place, and the Guests section gets one card shorter. The Sidebar shows an Open Place as a dashed card "Open Place". A click on it opens a choose-a-row step ([ADR 0014](0014-every-action-runs-in-the-palettes-view.md)) that lists the Guest Topics, then the Benched Topics. The chosen Topic takes the place, and a Guest loses its Guest mark. A Guest Session is not listed: it must become a Topic first. A new Topic still goes to the top of the Bench, and it does not fill an Open Place.
+- **Bench Topic** is a new Action on an In Play Topic or a Guest Topic, in the Command Palette and the card menu. It runs at once. The Topic goes to the top of the Bench and keeps its Sessions and Agents. From a place, it leaves an Open Place. A Guest Topic loses its mark and leaves no Open Place. Bench Topic takes the place of End Guest for a Guest Topic. End Guest stays for a Guest Session, where it Unlocks the Session. Bench Topic is not offered on a Benched or Pinned Topic.
+- **Choose In Play** lists the Guest Topics too. The In Play Topics and the Guest Topics start checked. Step 2 fills the N places one at a time from the checked rows. A Guest that fills a place loses its mark. A Guest that fills no place, checked or not, stays a Guest, so step 2 does not ask for its place on the Bench. A regular card that is checked but fills no place goes to the top of the Bench. An unchecked one goes to the Bench, as before. When the user checks fewer cards than there are places, the other places are Open Places. A Guest Session is not listed, because it cannot take a place.
+- **Trade across the Guests line.** A drag inside one section is a reorder. A drag across the Guests line that ends on a card on the other side is a Trade, as a drag across the Bench line is. The two cards exchange their places, and no other card moves. Each card takes the mark of the section it comes into. So the Guest comes into the place without its mark, and the In Play card goes to the Guest's position with the mark. This reverses the rule of ADR 0061, where the card that came In Play got the mark. A Guest dropped on an Open Place fills it and loses its mark, and a Benched card dropped on an Open Place fills it too. A Guest Session cannot Trade into a place, and an In Play card cannot Trade onto a Guest Session. A Trade across the Bench line works as before.
+
+The CLI gets `topic bench` and `topic fill-place <place>`. `topic end-guest` goes away, and `session unlock` ends a Guest Session ([ADR 0039](0039-the-cli-can-do-what-the-command-palette-can-do.md)).
+
+## How the order holds an Open Place
+
+An Open Place is an entry of the Topics list with an id and an order, as a Locked Session is. The Topic records keep the Open Places in the file `open-places` beside them. The file has no `.json` extension, so no read takes it for a record. A swap of the folder writes it together with the records. So an Open Place stays after a restart of Muxify or tmux.
+
+`InPlayCut` cuts the cards that are not Pinned into the places (the first N regular cards and Open Places), the Guests (every Guest, wherever its order puts it) and the Bench (the other regular cards). An Open Place past the last place holds no place. Each change in `TopicOrder` writes the order in the three sections, so the order on disk is the order that the Sidebar shows. `TopicTransaction` writes every change. After each change it puts an Open Place where a regular card left a place, and it closes each Open Place past the last place. Without `topics.in_play`, it closes every Open Place at the next write, because an Open Place holds nothing then.
+
+## Considered Options
+
+- **Fill the place from the top of the Bench, as before.** Rejected: the user then sees a Topic In Play that they did not choose, and must send it back.
+- **Each In Play Topic keeps a place number in its record, and an Open Place is a number that no record has.** Rejected: a Locked Session has no record, every existing record needs a number on upgrade, and a missing number cannot tell an Open Place from a list with fewer Topics than places.
+- **Keep a Guest at its position among the places.** Rejected: with Open Places, a Guest between places makes "place 2" depend on where the Guests are, and Choose In Play has to explain which positions it skips.
+- **A new Topic fills the first Open Place.** Rejected: a new Topic is often a short note, and the user keeps the place for a Topic they choose.
+
+## Consequences
+
+- An Open Place keeps a place until the user fills it. With no Guest Topic and no Benched Topic, its step lists nothing.
+- When the user lowers `topics.in_play`, the Open Places past the new last place close at the next write. When they raise it, the Benched cards fill the new places in their order, as before.
+- An Open Place has no card to drag, and it cannot be a target of `topic move`. A card can move past it.

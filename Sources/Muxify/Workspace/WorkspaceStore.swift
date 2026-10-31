@@ -295,15 +295,34 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(.moveCard(move), target: target))
     }
 
-    /// The Sidebar drag across the Bench line: the two cards exchange their places. While the Bench is hidden, the card
-    /// that goes to the Bench shows under the line until the Sidebar folds it in.
+    /// The Sidebar drag across the Guests line or the Bench line: the two cards exchange their places. A card dropped
+    /// on an Open Place fills it. While the Bench is hidden, the card that goes to the Bench shows under the line until
+    /// the Sidebar folds it in.
     func tradeCard(_ id: TopicListID, with other: TopicListID) {
-        guard let target = Self.target(of: id), let ref = Self.ref(of: other), let inPlay = topicConfig.inPlay else { return }
-        if !benchShown, benchPeek != .all {
-            let leaving = topics.split(inPlay: inPlay).inPlay.map(\.id).first { $0.listID == id || $0.listID == other }
+        guard let inPlay = topicConfig.inPlay else { return }
+        if case .openPlace(let place) = other, case .topic(let topic) = id {
+            let places = topics.cut(inPlay: inPlay).places
+            guard let index = places.firstIndex(where: { if case .openPlace(place) = $0 { return true } else { return false } }) else { return }
+            return fillOpenPlace(index + 1, with: topic)
+        }
+        guard let target = Self.target(of: id), let ref = Self.ref(of: other) else { return }
+        let cut = topics.split(inPlay: inPlay)
+        if !benchShown, benchPeek != .all, cut.bench.contains(where: { $0.id.listID == id || $0.id.listID == other }) {
+            let leaving = cut.inPlay.map(\.id).first { $0.listID == id || $0.listID == other }
             benchPeek = leaving.map(TopicsModel.BenchPeek.card)
         }
         perform(EnvironmentRequest(.moveCard(.trade(ref)), target: target))
+    }
+
+    /// Fill an Open Place goes through the Topic service, as `muxify topic fill-place` does.
+    func fillOpenPlace(_ place: Int, with topic: String) {
+        perform(EnvironmentRequest(.fillOpenPlace(place: place), target: .topic(.id(topic))))
+    }
+
+    /// The step that asks what fills the Open Place at In Play place `place`.
+    func presentFillOpenPlace(_ place: Int) {
+        guard !isRemote, !changingTopic, topicConfig.inPlay != nil else { return }
+        palette.begin(.fillOpenPlace(place))
     }
 
     /// Move Up and Move Down: MuxifyCore finds the neighbor among the cards that the Topics list shows.
@@ -316,6 +335,7 @@ final class WorkspaceStore {
         switch card {
         case .topic(let id): return .topic(.id(id))
         case .lock(let sessionID): return SessionID(rawValue: sessionID).map(EnvironmentTarget.session)
+        case .openPlace: return nil
         }
     }
 
@@ -323,6 +343,7 @@ final class WorkspaceStore {
         switch card {
         case .topic(let id): return .topic(.id(id))
         case .lock(let sessionID): return SessionID(rawValue: sessionID).map(TopicListRef.lock)
+        case .openPlace: return nil
         }
     }
 
@@ -350,16 +371,26 @@ final class WorkspaceStore {
     }
 
     /// Whether the card is a Guest; nil when neither Make a Guest nor End Guest applies to it: the Config does not set
-    /// `topics.in_play`, or the card is Pinned, or it is In Play and not a Guest.
+    /// `topics.in_play`, or the card is a Topic that is not on the Bench. A Guest Topic leaves through Bench Topic, so End
+    /// Guest is only for a Guest Session.
     func guestState(of card: GuestCard) -> Bool? {
         guard let inPlay = topicConfig.inPlay, !isRemote, topics.topicsEnabled else { return nil }
         switch card {
         case .session(let id): return lockState(ofSession: id)
-        case .topic(let id):
-            guard let row = topics.rows.first(where: { $0.id == .topic(id) }), !row.isPinned else { return nil }
-            if row.isGuest { return true }
-            return topics.split(inPlay: inPlay).bench.contains { $0.id == row.id } ? false : nil
+        case .topic(let id): return topics.split(inPlay: inPlay).bench.contains { $0.id == .topic(id) } ? false : nil
         }
+    }
+
+    /// Bench Topic applies to a Topic In Play: in an In Play place, or a Guest Topic. Not to a Benched or Pinned Topic.
+    func canBench(_ id: String) -> Bool {
+        guard let inPlay = topicConfig.inPlay, !isRemote, topics.topicsEnabled else { return false }
+        return topics.split(inPlay: inPlay).inPlay.contains { $0.id == .topic(id) }
+    }
+
+    /// Bench Topic goes through the Topic service, as `muxify topic bench` does.
+    func benchTopic(_ id: String) {
+        guard canBench(id), !changingTopic else { return }
+        perform(EnvironmentRequest(.benchTopic, target: .topic(.id(id))))
     }
 
     /// The card that the Make a Guest and End Guest Commands act on: the Active Topic, else the Session of the Location.
@@ -373,7 +404,7 @@ final class WorkspaceStore {
     func setGuest(_ card: GuestCard, _ guest: Bool) {
         guard guestState(of: card) == !guest else { return }
         switch card {
-        case .topic(let id): perform(EnvironmentRequest(guest ? .makeGuest : .endGuest, target: .topic(.id(id))))
+        case .topic(let id): perform(EnvironmentRequest(.makeGuest, target: .topic(.id(id))))
         case .session(let id): setLock(ofSession: id, guest)
         }
     }
@@ -817,7 +848,7 @@ final class WorkspaceStore {
         var config = self.config
         // Topic records and SessionPaths are on this Mac; a Remote App Window shows Sessions only.
         if isRemote { config.sidebar.topics = false }
-        return TopicsModel(records: topicWatcher.records, windows: windows, config: config,
+        return TopicsModel(records: topicWatcher.records, openPlaces: topicWatcher.openPlaces, windows: windows, config: config,
                            selection: topicSelection, location: location, mode: sidebarMode, groups: topicGroups, benchShown: benchShown,
                            benchPeek: benchPeek, agents: agents,
                            panes: panesVisible ? panes : nil)
@@ -861,11 +892,11 @@ final class WorkspaceStore {
         !isRemote && !changingTopic && topics.topicsEnabled && topicConfig.inPlay != nil && topics.rows.contains { !$0.isPinned }
     }
 
-    /// The check step of Choose In Play, with the In Play cards checked.
+    /// The check step of Choose In Play, with the In Play Topics and the Guest Topics checked.
     func presentChooseInPlay(keepingHistory: Bool = false) {
         guard canChooseInPlay, let inPlay = topicConfig.inPlay else { return }
-        let regular = topics.split(inPlay: inPlay).inPlay.filter { !$0.isGuest }
-        let draft = CheckDraft(action: .chooseInPlay(places: inPlay), checked: Set(regular.map(\.id)))
+        let topics = self.topics.split(inPlay: inPlay).inPlay.filter { if case .topic = $0.id { return true } else { return false } }
+        let draft = CheckDraft(action: .chooseInPlay(places: inPlay), checked: Set(topics.map(\.id)))
         palette.begin(.check(draft), keepingHistory: keepingHistory)
     }
 

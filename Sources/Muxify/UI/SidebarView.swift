@@ -81,7 +81,8 @@ private struct TopicsSection: View {
     @Environment(\.sidebarTypography) private var typography
     let store: WorkspaceStore
     let model: TopicsModel
-    @State private var drag = ListDrag<TopicListID>(spacing: 6, tradesAcross: TopicsModel.ListItem.benchLine(isBenchShown: false).id)
+    @State private var drag = ListDrag<TopicListID>(spacing: 6, tradesAcross: [TopicsModel.ListItem.guestsLineID,
+                                                                                TopicsModel.ListItem.benchLineID])
     /// The cards whose "N more…" the user pressed.
     @State private var showingAllRows: Set<TopicGroupID> = []
     /// The No Topic Session cards whose "N more…" the user pressed, by Session ID.
@@ -142,7 +143,9 @@ private struct TopicsSection: View {
                     ForEach(model.list) { item in
                         listItem(item)
                             .modifier(TopicsListPart(part: part(of: item, in: parts), stick: stick, areaTop: geometry.areaTop,
-                                                     isRaised: isRaised(item), theme: store.theme,
+                                                     isRaised: isRaised(item),
+                                                     dragShift: drag.shift(of: item.dragSlot, in: model.dragSlots(around: item.id)),
+                                                     theme: store.theme,
                                                      blockBottom: $topHeight, lastBenchHeight: $lastBenchHeight, benchEnd: $benchEnd))
                     }
                     if let bench = parts.bench, !bench.isEmpty {
@@ -152,7 +155,7 @@ private struct TopicsSection: View {
                 .coordinateSpace(.named(Self.contentSpace))
                 .background { ScrollDriverView(driver: driver) }
                 .onOverhangingBottomEdge(of: TopicCard.viewport, upTo: MoreBelowLine.height) { listEnd = $0 }
-                // An In Play card that crosses the hidden line opens the Bench, so the user sees what it can trade with.
+                // An In Play card that crosses a line opens the hidden Bench, so the user sees what it can trade with.
                 .onChange(of: drag.isAcross) { _, across in
                     guard across, !store.benchShown, store.benchPeek != .all, let dragged = drag.dragged,
                           model.split(inPlay: store.topicConfig.inPlay ?? 0).inPlay.contains(where: { $0.id.listID == dragged })
@@ -225,6 +228,11 @@ private struct TopicsSection: View {
                 .modifier(KeepsPlaceWhenBenchShows(isBenchedLocation: topic.id == model.benchedLocation,
                                                    isBenchShown: model.isBenchShown == true, driver: driver))
                 .background(alignment: .top) { Color.clear.frame(height: 0).id(BenchMarker(card: topic.id)) }
+        case .openPlace(let id, let place):
+            OpenPlaceCard(place: place) { store.presentFillOpenPlace(place) }
+                .listDragItem(TopicListID.openPlace(id), drag: drag, shown: model.dragSlots(around: item.id), cornerRadius: 9)
+        case .guestsLine:
+            GuestsLine().listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
         case .benchLine(let isBenchShown):
             BenchLine(isBenchShown: isBenchShown) { store.toggleBench() }
                 .listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
@@ -346,6 +354,8 @@ private struct TopicsListPart: ViewModifier {
     let stick: CGFloat
     let areaTop: CGFloat
     let isRaised: Bool
+    /// How far a drag moves the item from its place, as `ListDrag.shift` gives: for the lifted item, the placeholder.
+    let dragShift: CGFloat
     let theme: TerminalTheme?
     @Binding var blockBottom: CGFloat
     @Binding var lastBenchHeight: CGFloat
@@ -368,6 +378,8 @@ private struct TopicsListPart: ViewModifier {
                         .padding(.top, isFirst ? -TopicsSection.contentInset : 0).padding(.bottom, -TopicsSection.contentSpacing)
                         .padding(.horizontal, -6)
                         .contentShape(Rectangle())
+                        // With its card as the cards slide aside, so it does not cover a card that slides into its place.
+                        .offset(y: dragShift)
                 }
             }
             .offset(y: isTop ? stick : 0)
@@ -814,12 +826,17 @@ struct TopicCard: View {
             .disabled(store.changingTopic)
     }
 
-    /// Make a Guest on a Benched Topic, End Guest on a Guest Topic, while the Config sets `topics.in_play`.
+    /// Make a Guest on a Benched Topic, Bench Topic on an In Play Topic, while the Config sets `topics.in_play`.
     @ViewBuilder
     private func guestButton(_ id: String) -> some View {
-        if let guest = store.guestState(of: .topic(id)) {
-            Button(guest ? "End Guest" : "Make a Guest") { store.setGuest(.topic(id), !guest) }
-                .accessibilityIdentifier(guest ? "end-guest" : "make-guest")
+        if store.guestState(of: .topic(id)) == false {
+            Button("Make a Guest") { store.setGuest(.topic(id), true) }
+                .accessibilityIdentifier("make-guest")
+                .disabled(store.changingTopic)
+        }
+        if store.canBench(id) {
+            Button("Bench Topic") { store.benchTopic(id) }
+                .accessibilityIdentifier("bench-topic")
                 .disabled(store.changingTopic)
         }
     }

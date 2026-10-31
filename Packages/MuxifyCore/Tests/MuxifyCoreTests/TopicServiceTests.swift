@@ -283,13 +283,16 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertNil(again.topicID, "a second move changes nothing")
     }
 
-    /// The Topics list as the app orders it: Topic ids, and `lock:` with the Session name for a Locked Session.
+    /// The Topics list as the app orders it: Topic ids, `lock:` with the Session name for a Locked Session, and `_` for
+    /// an Open Place.
     private func topicList() throws -> [String] {
         let windows = server.snapshot().windows
-        return TopicOrder.sorted(TopicListEntry.all(records: try records(), windows: windows)).map { entry in
+        let openPlaces = try TopicStore(paths: paths).read().openPlaces
+        return TopicOrder.sorted(TopicListEntry.all(records: try records(), windows: windows, openPlaces: openPlaces)).map { entry in
             switch entry {
             case .topic(let record): return record.title ?? record.id
             case .lock(let lock): return "lock:" + (windows.first { $0.sessionID == lock.sessionID }?.sessionName ?? "?")
+            case .openPlace: return "_"
             }
         }
     }
@@ -487,7 +490,7 @@ final class TopicServiceTests: XCTestCase {
         Set(try records().filter { $0.isGuest && $0.settledAt == nil }.compactMap(\.title))
     }
 
-    func testChooseInPlayFillsThePlacesThatNoGuestHoldsInTheChosenOrder() throws {
+    func testChooseInPlayFillsThePlacesInTheChosenOrderAndLeavesTheOthersOpen() throws {
         let inPlay = service(inPlay: 2)
         for title in ["A", "B", "C", "D", "Pinned"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
         _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("Pinned")))))
@@ -499,11 +502,11 @@ final class TopicServiceTests: XCTestCase {
         func choose(_ cards: [TopicListRef]) -> EnvironmentResponse { inPlay.handle(EnvironmentRequest(.chooseInPlay(cards))) }
 
         _ = try change(choose([.topic(.named("C")), .topic(.named("A"))]))
-        XCTAssertEqual(try topicList(), ["Pinned", "C", "A", "lock:notes", "B", "D"], "the Guest keeps its position")
+        XCTAssertEqual(try topicList(), ["Pinned", "C", "A", "lock:notes", "B", "D"], "the Guest stays a Guest")
         _ = try change(choose([.topic(.named("D")), .topic(.named("A")), .topic(.named("B"))]))
         XCTAssertEqual(try topicList(), ["Pinned", "D", "A", "lock:notes", "B", "C"], "the card after the last place leads the Bench")
         _ = try change(choose([.topic(.named("B"))]))
-        XCTAssertEqual(try topicList(), ["Pinned", "B", "D", "lock:notes", "A", "C"], "with fewer cards than places, the next card fills the place")
+        XCTAssertEqual(try topicList(), ["Pinned", "B", "_", "lock:notes", "D", "A", "C"], "with fewer cards than places, a place is open")
 
         let refused: [(EnvironmentService, [TopicListRef], TopicFailure.Kind)] = [
             (inPlay, [.topic(.named("A")), .topic(.named("Pinned"))], .cardPinned),
@@ -517,7 +520,7 @@ final class TopicServiceTests: XCTestCase {
             XCTAssertEqual(refusal.kind, kind, "\(cards)")
             XCTAssertEqual(refusal.phase, .nothingChanged)
         }
-        XCTAssertEqual(try topicList(), ["Pinned", "B", "D", "lock:notes", "A", "C"])
+        XCTAssertEqual(try topicList(), ["Pinned", "B", "_", "lock:notes", "D", "A", "C"])
     }
 
     func testReplaceFromBenchPutsTheBenchedCardInThePlaceAndGivesItTheMarkOfAGuest() throws {
@@ -555,7 +558,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try topicList(), ["Pinned", "C", "B", "E", "A"])
     }
 
-    func testATradeExchangesThePlacesOfTwoCardsAndAGuestGivesItsMarkToTheCardThatComesIn() throws {
+    func testATradeExchangesThePlacesOfTwoCardsAndEachCardTakesTheMarkOfItsNewSection() throws {
         let inPlay = service(inPlay: 2)
         for title in ["A", "B", "C", "D", "Pinned"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
         _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("Pinned")))))
@@ -574,21 +577,26 @@ final class TopicServiceTests: XCTestCase {
         _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.trade(.topic(.named("A")))), target: .topic(.named("D")))))
         XCTAssertEqual(try topicList(), ["Pinned", "C", "B", "A", "D"], "a Guest Topic goes to the Bench as a usual card")
         XCTAssertEqual(try guests(), ["A"])
+        _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.trade(.topic(.named("A")))), target: .topic(.named("B")))))
+        XCTAssertEqual(try topicList(), ["Pinned", "C", "A", "B", "D"], "across the Guests line, the Guest comes In Play without its mark")
+        XCTAssertEqual(try guests(), ["B"], "and the In Play card takes it")
+        _ = try change(inPlay.handle(EnvironmentRequest(.lock, target: .sessionName("notes"))))
 
         let refused: [(EnvironmentTarget, TopicListRef, TopicFailure.Kind)] = [
             (.topic(.named("Pinned")), .topic(.named("A")), .cardPinned),
             (.topic(.named("A")), .topic(.named("Pinned")), .cardPinned),
             (.topic(.named("A")), .topic(.named("Missing")), .topicUnavailable),
+            (.topic(.named("A")), .lock(notes), .cardGuest),
         ]
         for (target, other, kind) in refused {
             let refusal = try failure(inPlay.handle(EnvironmentRequest(.moveCard(.trade(other)), target: target)))
             XCTAssertEqual(refusal.kind, kind, "\(target) with \(other)")
             XCTAssertEqual(refusal.phase, .nothingChanged)
         }
-        XCTAssertEqual(try topicList(), ["Pinned", "C", "B", "A", "D"])
+        XCTAssertEqual(try topicList(), ["Pinned", "C", "A", "B", "lock:notes", "D"])
     }
 
-    func testMakeAGuestPutsABenchedTopicAtTheEndOfInPlayAndEndGuestPutsItAtTheTopOfTheBench() throws {
+    func testMakeAGuestPutsABenchedTopicAtTheEndOfTheGuestsAndBenchTopicPutsItAtTheTopOfTheBench() throws {
         let inPlay = service(inPlay: 2)
         for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
         XCTAssertEqual(try topicList(), ["A", "B", "D", "C"])
@@ -602,20 +610,26 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(TopicStore(paths: paths).stamp(), stamp, "a Guest that is made a Guest again does not change")
 
         _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("D")))))
-        _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.before(.topic(.named("A")))), target: .topic(.named("C")))))
-        XCTAssertEqual(try topicList(), ["C", "A", "B", "D"], "a drag moves a Guest, and it keeps its mark")
-        XCTAssertEqual(try guests(), ["C", "D"])
-        _ = try change(inPlay.handle(EnvironmentRequest(.endGuest, target: .topic(.named("C")))))
-        XCTAssertEqual(try topicList(), ["A", "B", "D", "C"], "the other Guest keeps its place, at the new end of In Play")
+        XCTAssertEqual(try topicList(), ["A", "B", "C", "D"])
+        _ = try change(inPlay.handle(EnvironmentRequest(.benchTopic, target: .topic(.named("C")))))
+        XCTAssertEqual(try topicList(), ["A", "B", "D", "C"], "a Guest leaves no Open Place")
         XCTAssertEqual(try guests(), ["D"])
-        _ = try change(inPlay.handle(EnvironmentRequest(.endGuest, target: .topic(.named("D")))))
-        XCTAssertEqual(try topicList(), ["A", "B", "D", "C"], "End Guest puts the Topic at the top of the Bench")
+        _ = try change(inPlay.handle(EnvironmentRequest(.benchTopic, target: .topic(.named("A")))))
+        XCTAssertEqual(try topicList(), ["_", "B", "D", "A", "C"], "a Topic from a place leaves an Open Place and goes to the top of the Bench")
+
+        _ = try change(inPlay.handle(EnvironmentRequest(.fillOpenPlace(place: 1), target: .topic(.named("C")))))
+        XCTAssertEqual(try topicList(), ["C", "B", "D", "A"], "the Benched Topic fills the Open Place, and no other card moves")
+        _ = try change(inPlay.handle(EnvironmentRequest(.benchTopic, target: .topic(.named("B")))))
+        _ = try change(inPlay.handle(EnvironmentRequest(.fillOpenPlace(place: 2), target: .topic(.named("D")))))
+        XCTAssertEqual(try topicList(), ["C", "D", "B", "A"], "a Guest fills it without its mark")
         XCTAssertEqual(try guests(), [])
 
         let refused: [(EnvironmentService, EnvironmentCommand, String, TopicFailure.Kind)] = [
-            (inPlay, .makeGuest, "A", .cardNotBenched),
-            (service(), .makeGuest, "C", .inPlayOff),
-            (service(), .endGuest, "C", .inPlayOff),
+            (inPlay, .makeGuest, "C", .cardNotBenched),
+            (inPlay, .benchTopic, "A", .cardNotInPlay),
+            (inPlay, .fillOpenPlace(place: 1), "A", .placeNotOpen),
+            (service(), .makeGuest, "A", .inPlayOff),
+            (service(), .benchTopic, "C", .inPlayOff),
         ]
         for (service, command, title, kind) in refused {
             let refusal = try failure(service.handle(EnvironmentRequest(command, target: .topic(.named(title)))))
@@ -624,7 +638,7 @@ final class TopicServiceTests: XCTestCase {
         }
     }
 
-    func testAGuestKeepsItsPositionWhenARegularCardLeavesAndALeavingGuestMovesNoBenchedCard() throws {
+    func testARegularCardThatLeavesAPlaceLeavesAnOpenPlaceAndALeavingGuestLeavesNone() throws {
         let inPlay = service(inPlay: 2)
         for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
@@ -633,14 +647,14 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try topicList(), ["A", "B", "lock:notes", "C", "D"])
 
         _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("A")))))
-        XCTAssertEqual(try topicList(), ["A", "B", "D", "lock:notes", "C"], "D fills the free place, and the Guests stay at positions 3 and 4")
+        XCTAssertEqual(try topicList(), ["A", "_", "B", "lock:notes", "C", "D"], "D does not move up")
         _ = try change(inPlay.handle(EnvironmentRequest(.unlock, target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["A", "B", "D", "C"], "the end of a Guest Session makes In Play one card shorter")
+        XCTAssertEqual(try topicList(), ["A", "_", "B", "C", "D"], "the end of a Guest Session leaves no Open Place")
         _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("C")))))
-        XCTAssertEqual(try topicList(), ["A", "C", "B", "D"])
+        XCTAssertEqual(try topicList(), ["A", "C", "_", "B", "D"])
         XCTAssertEqual(try guests(), [], "Pin ends the Guest mark")
         _ = try change(inPlay.handle(EnvironmentRequest(.unpin, target: .topic(.named("C")))))
-        XCTAssertEqual(try topicList(), ["A", "B", "D", "C"], "with in_play, Unpin puts the Topic at the top of the Bench")
+        XCTAssertEqual(try topicList(), ["A", "_", "B", "C", "D"], "with in_play, Unpin puts the Topic at the top of the Bench")
     }
 
     func testSettingInPlayGathersTheLocksAtTheEndOfInPlayAndANewTopicFromAGuestSessionIsAGuest() throws {

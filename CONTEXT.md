@@ -99,7 +99,7 @@ An optional line of text on a Topic that tells the user what they were doing the
 _Avoid_: next step, comment, description, memo, Summary (when you mean the Note)
 
 **Settle**:
-To mark a Topic as done. It leaves the Sidebar, its Sessions are killed or leave the Topic, and its record stays so that it can be reopened.
+To mark a Topic as done. It leaves the Sidebar, its Sessions are killed or leave the Topic, and its record stays so that it can be reopened. A Topic that held an In Play place leaves an Open Place there.
 _Avoid_: close, archive, resolve, complete
 
 **Reopen**:
@@ -127,19 +127,19 @@ An open Topic that has no live Session and remembers no Session: the user stoppe
 _Avoid_: Dormant (when it remembers no Session), blank, cleared
 
 **In Play**:
-The Guests and the first open Topics in the Topics list that are not Pinned and are not Guests, up to the number that the Config gives. Their cards always show in the Sidebar, under the Pinned Topics and above the Bench line.
+The In Play places and the Guests. The number of places is the number that the Config gives. Each place holds an open Topic that is not Pinned and is not a Guest. A place that holds no Topic is an Open Place. The Sidebar shows the Pinned Topics, then the places, then the Guests line and the Guests, then the Bench line. A Guest never shows between two places.
 _Avoid_: active Topics, focus Topics, front Topics, WIP limit
 
 **Bench**:
-The open Topics in the Topics list after the In Play ones. The Sidebar hides them behind the Bench line until the user shows the Bench. A Benched Topic keeps its place in the list, its Sessions and its Agents. A Locked Session is never Benched: with In Play it is a Guest.
+The open Topics in the Topics list that are not Pinned, not Guests and hold no In Play place. The Sidebar hides them behind the Bench line until the user shows the Bench. A Benched Topic keeps its place in the list, its Sessions and its Agents. A Locked Session is never Benched: with In Play it is a Guest.
 _Avoid_: backlog, queue, hidden Topics, overflow, Snooze (when you mean the Bench)
 
 **Choose In Play**:
-A Command that sets which open Topics are In Play, and in what order. The user checks them, then chooses the one for each place in turn. A place skips the positions that Guests hold, and the Guests stay where they are. The checked ones after the last place go to the top of the Bench.
+A Command that sets which open Topics are In Play, and in what order. The user checks them, then chooses the one for each place in turn. The In Play Topics and the Guest Topics start checked. A Guest that takes a place loses its Guest mark. A Guest that takes no place stays a Guest. The other checked Topics go to the top of the Bench. When the user checks fewer Topics than there are places, the other places are Open Places.
 _Avoid_: In Play Prioritisation Session, prioritise, reorder, Zen
 
 **Replace from Bench**:
-An Action on an In Play card. A Benched Topic that the user chooses takes its place, and the replaced card goes to the end of the Bench. On a Guest, the card that comes in gets the Guest mark.
+An Action on an In Play card. A Benched Topic that the user chooses takes its position, and the replaced card goes to the end of the Bench. On a Guest, the card that comes in gets the Guest mark.
 _Avoid_: Done, Switch Topic Places, swap, Snooze
 
 **Pin**:
@@ -159,19 +159,27 @@ To end a Lock. The Session stays, as a No Topic Session. With In Play, End Guest
 _Avoid_: unpin, release
 
 **Guest**:
-A card In Play above the number that the Config gives: a Topic with the Guest mark, or a Locked Session. It does not count toward that number, and it keeps its position In Play when another card leaves. It never waits on the Bench.
+A card In Play above the number that the Config gives: a Topic with the Guest mark, or a Locked Session. It does not count toward that number, and it shows under the Guests line, after the In Play places. It never waits on the Bench, and when it leaves it leaves no Open Place.
 _Avoid_: visitor, temporary Topic, extra slot, Pin (when you mean a Guest)
 
 **Make a Guest**:
-An Action on a Benched Topic or a No Topic Session. The card goes to the end of In Play, directly above the Bench line, as a Guest. No other card goes to the Bench. For a Session, it is a Lock.
+An Action on a Benched Topic or a No Topic Session. The card goes to the end of the Guests, directly above the Bench line, as a Guest. No other card goes to the Bench. For a Session, it is a Lock.
 _Avoid_: put In Play, promote, Lock (when the Config sets In Play)
 
 **End Guest**:
-An Action on a Guest. A Guest Topic goes to the top of the Bench, and a Guest Session is Unlocked, so its card ends. In Play is one card shorter, and no Benched card moves up.
-_Avoid_: demote, bench, Unlock (when the Config sets In Play)
+An Action on a Guest Session. It Unlocks the Session, so its card ends. The Guests get one card shorter, no Benched card moves up, and no Open Place stays. For a Guest Topic, use Bench Topic.
+_Avoid_: demote, Bench Topic (when you mean a Session), Unlock (when the Config sets In Play)
+
+**Bench Topic**:
+An Action on an In Play Topic or a Guest Topic. The Topic goes to the top of the Bench and keeps its Sessions and Agents. From an In Play place it leaves an Open Place there. A Guest Topic loses its Guest mark and leaves no Open Place.
+_Avoid_: End Guest (when you mean a Topic), Snooze, hide, demote
+
+**Open Place**:
+An In Play place that no card fills. Settle, Forget, Pin and Bench Topic on a regular In Play card leave an Open Place at its place. No Benched card moves up, and the other places keep their positions. The Open Place stays until the user fills it with a Guest Topic or a Benched Topic, also after Muxify or tmux restarts. The Sidebar shows it as a dashed card.
+_Avoid_: empty slot, hole, gap, free place
 
 **Trade**:
-A Sidebar drag that takes a card across the Bench line and lets it go on a card on the other side. The two cards exchange their places in the Topics list, so one goes In Play and the other goes to the Bench. No other card moves. A Guest gives its Guest mark to the card that comes In Play.
+A Sidebar drag that takes a card across the Guests line or the Bench line and lets it go on a card on the other side. The two cards exchange their places in the Topics list, and no other card moves. Each card takes the mark of the section it comes into. A Guest that comes into an In Play place loses its Guest mark, and a card that comes into the Guests gets it. A Guest dropped on an Open Place fills it. A Guest Session cannot take an In Play place.
 _Avoid_: swap, Replace from Bench (when the replaced card does not go to the end of the Bench), exchange
 
 ### Browser

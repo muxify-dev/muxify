@@ -1,5 +1,7 @@
 # Choose In Play and Replace from Bench replace Snooze and Zen
 
+> **Partly superseded by [ADR-0064](0064-in-play-places-stay-open-and-guests-show-in-their-own-section.md):** a Settle of an In Play card no longer moves the top of the Bench up. It leaves an Open Place. Choose In Play also lists the Guest Topics, and the places that no checked card fills are Open Places. The other rules below still apply.
+
 With `topics.in_play` set, the Bench ([ADR 0055](0055-the-sidebar-shows-only-the-topics-in-play.md)) already keeps out of view the Topics that the user does not work on now. Snooze and Zen did the same job in a second way, and the user used Snooze mostly to hide one part of the day's Topics, such as personal Topics during work. We remove Snooze, Unsnooze, Snooze Topics…, Unsnooze Topics… and Zen. Two Actions set the In Play Topics instead. Both use palette steps that already exist, and both show only while `topics.in_play` is set.
 
 - **Choose In Play…** has two steps. The first is the Check step of [ADR 0035](0035-a-check-step-checks-topics-for-snooze-and-unsnooze.md). The current In Play cards start checked. The step has no Tag rows: a query such as `#work` narrows the rows, and the user checks each card by its own row. The second step is one choose-a-row for each place, with the rows in their current order, so ↩ on each place keeps the order. Each checked card gets a place: the places after the last In Play place are the top of the Bench, so the checked cards after the last In Play place go there in the order the user chose.

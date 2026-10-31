@@ -27,9 +27,18 @@ final class PaletteCheckTests: XCTestCase {
         XCTAssertEqual(OrderDraft(cards: [.topic("a")], places: 5).chosen, [.topic("a")])
     }
 
+    func testAGuestThatNoPlaceTakesHasNoPlaceOnTheBenchToChoose() {
+        let draft = OrderDraft(cards: [.topic("a"), .topic("g"), .topic("b"), .topic("c")], places: 1, guests: [.topic("g")])
+        XCTAssertEqual(draft.remaining, [.topic("a"), .topic("g"), .topic("b"), .topic("c")], "a Guest can fill a place")
+        let full = draft.placing(.topic("b"))
+        XCTAssertEqual(full.remaining, [.topic("a"), .topic("c")], "once the places are full, the Guest stays a Guest")
+        XCTAssertEqual(full.placing(.topic("c")).chosen, [.topic("b"), .topic("c"), .topic("a")])
+    }
+
     func testTheCheckNoteSaysHowManyCheckedCardsGoToTheTopOfTheBench() {
-        XCTAssertEqual(CheckAction.chooseInPlay(places: 2).outcome(4), "4 checked for 2 In Play places. The last 2 go to the top of the Bench.")
+        XCTAssertEqual(CheckAction.chooseInPlay(places: 2).outcome(4), "4 checked for 2 In Play places. The last 2 go to the top of the Bench, and a Guest of them stays a Guest.")
         XCTAssertEqual(CheckAction.chooseInPlay(places: 2).outcome(2), "2 checked for 2 In Play places.")
-        XCTAssertEqual(CheckAction.chooseInPlay(places: 1).outcome(0), "0 checked for 1 In Play place.")
+        XCTAssertEqual(CheckAction.chooseInPlay(places: 3).outcome(1), "1 checked for 3 In Play places. 2 places stay Open Places.")
+        XCTAssertEqual(CheckAction.chooseInPlay(places: 2).outcome(1), "1 checked for 2 In Play places. 1 place stays an Open Place.")
     }
 }

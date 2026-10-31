@@ -123,6 +123,8 @@ enum PaletteFlow {
     case confirm(PaletteConfirmation)
     /// Replace from Bench: a Benched card takes the place of this card In Play.
     case replaceFromBench(TopicGroupID)
+    /// Fill an Open Place: a Guest Topic or a Benched Topic takes the Open Place at this In Play place, counted from 1.
+    case fillOpenPlace(Int)
     /// Clear Browser History: a row for each `ClearRange`, and the chosen row clears.
     case clearHistory
 
@@ -131,6 +133,7 @@ enum PaletteFlow {
         case .check: "Topics and Locked Sessions, or #tag"
         case .order(let draft): "What goes at place \(draft.place)?"
         case .replaceFromBench: "What comes In Play?"
+        case .fillOpenPlace: "What takes this place?"
         case .clearHistory: "Which visits?"
         case .move(let draft): draft.destination == .topics ? "Topic or new title" : "Destination Session"
         case .addSession: "Search Sessions and Session Paths"
@@ -194,6 +197,7 @@ extension CommandPalette {
         case .check(let draft): return "\(draft.action.title) › Check"
         case .order(let draft): return "Choose In Play › Place \(draft.place)"
         case .replaceFromBench(let card): return "\(cardTitle(card)) › Replace from Bench"
+        case .fillOpenPlace(let place): return "Open Place \(place)"
         case .clearHistory: return "Clear Browser History"
         case .text(.tags(let field)):
             switch field.mode {
@@ -252,6 +256,7 @@ extension CommandPalette {
         case .check(let draft): return checkNote(draft)
         case .order(let draft): return orderNote(draft)
         case .replaceFromBench(let card): return "\(cardTitle(card)) goes to the end of the Bench."
+        case .fillOpenPlace: return "A Guest loses its Guest mark. No other card moves."
         case .clearHistory: return "Browser History forgets the pages you visited in this time. ↩ clears at once."
         case .confirm(let draft):
             if case .loading = draft.choices { return "Checking Sessions and Worktrees…" }
@@ -327,6 +332,7 @@ extension CommandPalette {
         case .check(let draft): return checkRows(draft)
         case .order(let draft): return orderRows(draft)
         case .replaceFromBench: return benchRows()
+        case .fillOpenPlace: return openPlaceRows()
         case .clearHistory:
             let rows = ClearRange.allCases.map { range in
                 PickCandidate(id: "clear-" + range.title, kind: .command, title: range.title, isDestructive: range == .allTime,
@@ -611,6 +617,7 @@ extension CommandPalette {
         case (.check, .check(let id)): returnOnCheck(id)
         case (.order(let draft), .card(let id)): order(draft.placing(id))
         case (.replaceFromBench(let card), .card(let benched)): store.replaceFromBench(card, with: benched)
+        case (.fillOpenPlace(let place), .card(.topic(let id))): close(); store.fillOpenPlace(place, with: id)
         case (.clearHistory, .clearHistory(let range)):
             close()
             store.browserHistory.clear(range)

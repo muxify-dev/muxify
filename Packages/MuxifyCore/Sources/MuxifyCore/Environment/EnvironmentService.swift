@@ -295,7 +295,10 @@ public struct EnvironmentService: Sendable {
             case .notBenched: return .cardNotBenched
             case .pinned: return .cardPinned
             case .chosenTwice: return .unsupported
-            case .guest: return .cardGuest
+            case .guestSession: return .cardGuest
+            case .notOpenPlace: return .placeNotOpen
+            case .cannotFill: return .cardCannotFill
+            case .notInPlayTopic: return .cardNotInPlay
             }
         case let error as MuxifyWorktreeError:
             switch error {
@@ -327,7 +330,7 @@ extension EnvironmentCommand {
     var lane: Lane {
         switch self {
         case .list, .show, .listWorktrees: return .read
-        case .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .endGuest, .markRead, .markAllRead:
+        case .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .benchTopic, .fillOpenPlace, .markRead, .markAllRead:
             return .records
         case .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename,
              .reopen, .startFresh, .moveSession, .sortSessions, .lock, .unlock, .newWindow, .newSession, .renameSession,
@@ -347,7 +350,7 @@ extension EnvironmentCommand {
         case .markAllRead: return false
         case .list, .show, .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename, .reopen, .startFresh,
              .moveSession, .sortSessions, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench,
-             .makeGuest, .endGuest:
+             .makeGuest, .benchTopic, .fillOpenPlace:
             return true
         }
     }

@@ -13,9 +13,9 @@ public enum TopicCards {
         case hidden
     }
 
-    /// The open Topics and the Locked Sessions, in list order: Pinned first.
-    public static func order(records: [TopicRecord], windows: [TmuxWindow]) -> [TopicListEntry] {
-        TopicOrder.sorted(TopicListEntry.all(records: records, windows: windows))
+    /// The open Topics, the Locked Sessions and the Open Places, in list order: Pinned first.
+    public static func order(records: [TopicRecord], windows: [TmuxWindow], openPlaces: [OpenPlace] = []) -> [TopicListEntry] {
+        TopicOrder.sorted(TopicListEntry.all(records: records, windows: windows, openPlaces: openPlaces))
     }
 
     /// Where one step puts the card: before the card above it, or after the card below it, among the cards with its Pin.

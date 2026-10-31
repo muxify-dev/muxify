@@ -497,7 +497,7 @@ final class TopicStoreTests: XCTestCase {
             let upgraded = try store.read()
             let shown = TopicOrder.sorted(upgraded.records.map(TopicListEntry.topic) + [.lock(lock)]).map { entry in
                 switch entry.id {
-                case .topic(let id): return id
+                case .topic(let id), .openPlace(let id): return id
                 case .lock(let sessionID): return sessionID
                 }
             }

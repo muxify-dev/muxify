@@ -96,7 +96,7 @@ extension EnvironmentService {
             return (resolved.source, resolved.snapshot)
         }
         switch request.command {
-        case .list, .show, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .endGuest,
+        case .list, .show, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .benchTopic, .fillOpenPlace,
              .markRead, .markAllRead, .createWorktree, .removeWorktree, .listWorktrees:
             throw TopicRequestError.noTarget
         case .create(let title, let tags):

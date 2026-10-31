@@ -463,7 +463,7 @@ final class CLIIntegrationTests: XCTestCase {
                        "the Topic that comes In Play gets the Guest mark")
     }
 
-    func testTopicMakeGuestAndEndGuestMoveABenchedTopicInPlayAndBack() async throws {
+    func testTopicMakeGuestBenchAndFillPlaceMoveTopicsBetweenTheSections() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
         let config = try String(contentsOf: sandbox.config, encoding: .utf8)
@@ -482,16 +482,28 @@ final class CLIIntegrationTests: XCTestCase {
         let made = try await run(cli, arguments: ["topic", "make-guest", "--topic", "Second"], environment: environment)
         XCTAssertEqual(made.status, 0, made.output)
         let afterMake = try await order()
-        XCTAssertEqual(afterMake, [first, second, third], "Second goes to the end of In Play, and First stays In Play")
+        XCTAssertEqual(afterMake, [first, second, third], "Second goes to the end of the Guests, and First stays In Play")
         let inPlay = try await run(cli, arguments: ["topic", "make-guest", "--topic", "First"], environment: environment)
         XCTAssertEqual(inPlay.status, 1, inPlay.output)
         XCTAssertTrue(inPlay.stderr.contains("not on the Bench"), inPlay.stderr)
 
-        let ended = try await run(cli, arguments: ["topic", "end-guest", "--topic", "Second"], environment: environment)
+        let ended = try await run(cli, arguments: ["topic", "bench", "--topic", "Second"], environment: environment)
         XCTAssertEqual(ended.status, 0, ended.output)
         let afterEnd = try await order()
         XCTAssertEqual(afterEnd, [first, second, third], "Second is at the top of the Bench")
         XCTAssertFalse(try sandbox.records().contains { $0["guest"] as? Bool == true })
+
+        let benched = try await run(cli, arguments: ["topic", "bench", "--topic", "First"], environment: environment)
+        XCTAssertEqual(benched.status, 0, benched.output)
+        let afterBench = try await order()
+        XCTAssertEqual(afterBench, [first, second, third], "First goes to the top of the Bench and leaves an Open Place")
+        let filled = try await run(cli, arguments: ["topic", "fill-place", "1", "--topic", "Third"], environment: environment)
+        XCTAssertEqual(filled.status, 0, filled.output)
+        let afterFill = try await order()
+        XCTAssertEqual(afterFill, [third, first, second], "Third fills the Open Place, and no other card moves")
+        let full = try await run(cli, arguments: ["topic", "fill-place", "1", "--topic", "First"], environment: environment)
+        XCTAssertEqual(full.status, 1, full.output)
+        XCTAssertTrue(full.stderr.contains("not an Open Place"), full.stderr)
     }
 
     func testTopicMoveTradeWithExchangesTheTwoCardsAndMovesNoOtherAndRefusesAPinnedCard() async throws {

@@ -58,10 +58,10 @@ class PaletteInPlay(PaletteFixture):
         s.act('action', 'palette-search', 'Space')
         rs = s.wait_rows(lambda rs: checked(rs) == [key('b'), key('c'), key('d')],
                          'Space in the empty field did not uncheck the first row: %s' % checked(s.rows()))
-        self.assertIn('3 checked for 2 In Play places. The last 1 go to the top of the Bench.', self.text('palette-note', rs))
+        self.assertIn('3 checked for 2 In Play places. The last 1 go to the top of the Bench, and a Guest of them stays a Guest.', self.text('palette-note', rs))
         s.act('press', key('a'))
         rs = s.wait_rows(lambda rs: len(checked(rs)) == 4, 'a click did not check the row: %s' % checked(s.rows()))
-        self.assertIn('4 checked for 2 In Play places. The last 2 go to the top of the Bench.', self.text('palette-note', rs))
+        self.assertIn('4 checked for 2 In Play places. The last 2 go to the top of the Bench, and a Guest of them stays a Guest.', self.text('palette-note', rs))
 
         s.act('action', 'palette-search', 'Accept')
         place = lambda name: 'palette-row-place-topic-cip-' + name
@@ -86,6 +86,30 @@ class PaletteInPlay(PaletteFixture):
              'the chosen cards are not In Play and at the top of the Bench in their order')
         self.assertEqual(self.record('cip-p').get('order'), -1, 'Choose In Play moved a Pinned Topic')
         s.wait_rows(lambda rs: not s.has('palette-search', rs), 'Choose In Play did not close the palette')
+
+    def test_choose_in_play_lists_the_guest_topics_checked_and_a_chosen_guest_loses_its_mark(self):
+        s = self.s
+        for order, name in enumerate(['cig-a', 'cig-b', 'cig-g', 'cig-d']):
+            self.topic(name, order=order, **({'guest': True} if name == 'cig-g' else {}))
+        key = lambda name: 'palette-row-topic-cig-' + name
+        rows = lambda rs: [k for k in s.ids(rs) if k.startswith('palette-row-topic-cig-')]
+        checked = lambda rs: [k for k in rows(rs) if 'checked' in s.row(k, rs).get('accessibilityValue', '')]
+        s.wait_rows(lambda rs: s.has('topic-cig-g', rs), 'the Topics did not appear')
+        self.run_command('Choose In Play…')
+        rs = s.wait_rows(lambda rs: 'Choose In Play › Check' in self.text('palette-breadcrumb', rs) and len(rows(rs)) == 4,
+                         'Choose In Play did not list the Guest Topic: %s' % rows(s.rows()))
+        self.assertEqual(checked(rs), [key('a'), key('b'), key('g')], 'the In Play cards and the Guest Topic do not start checked')
+
+        s.act('action', 'palette-search', 'Accept')
+        place = lambda name: 'palette-row-place-topic-cig-' + name
+        s.wait_rows(lambda rs: 'Place 1' in self.text('palette-breadcrumb', rs) and s.has(place('g'), rs),
+                    'the first place does not list the Guest')
+        s.act('press', place('g'))
+        s.wait_rows(lambda rs: 'Place 2' in self.text('palette-breadcrumb', rs), 'the second place did not open')
+        s.act('press', place('a'))
+        wait(lambda: self.order('cig-') == ['cig-g', 'cig-a', 'cig-b', 'cig-d'],
+             'the Guest did not take place 1, or the checked card did not lead the Bench: %s' % self.order('cig-'))
+        wait(lambda: 'guest' not in self.record('cig-g'), 'the Guest that took a place keeps its mark: %s' % self.record('cig-g'))
 
     def test_replace_from_bench_puts_the_chosen_card_in_the_place_and_goes_to_it(self):
         s = self.s

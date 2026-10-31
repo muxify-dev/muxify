@@ -333,19 +333,24 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case unpin
     /// Moves the card of the target's Topic, or of the target's Locked Session, among the cards with its Pin.
     case moveCard(CardMove)
-    /// Puts `cards` first among the cards of the Topics list that are not Pinned, in this order: they fill the In Play
-    /// places, and the ones after the last place go to the top of the Bench. The other cards keep their order under
-    /// them. It takes no target, and it needs `topics.in_play`.
+    /// Choose In Play: the first `topics.in_play` of `cards` fill the In Play places in this order, and the places after
+    /// the last of them are Open Places. A Guest Topic that fills a place loses its Guest mark. Of the other cards, the
+    /// regular ones go to the top of the Bench, and a Guest stays a Guest. A Guest Session cannot fill a place. It takes
+    /// no target, and it needs `topics.in_play`.
     case chooseInPlay([TopicListRef])
-    /// The Benched card `with` takes the place of the target's card, which must be In Play. The target's card goes to
-    /// the end of the Bench. It needs `topics.in_play`.
+    /// The Benched card `with` takes the position of the target's card, which must be In Play. The target's card goes
+    /// to the end of the Bench. It needs `topics.in_play`.
     case replaceFromBench(with: TopicListRef)
-    /// Make a Guest: the target's Benched Topic goes to the end of In Play with the Guest mark, and no card goes to
+    /// Make a Guest: the target's Benched Topic goes to the end of the Guests with the Guest mark, and no card goes to
     /// the Bench for it. It needs `topics.in_play`. A Session is a Guest through its Lock, so `lock` makes it one.
     case makeGuest
-    /// End Guest: the target's Guest Topic goes to the top of the Bench, and In Play is one card shorter. It needs
-    /// `topics.in_play`. `unlock` ends a Guest Session.
-    case endGuest
+    /// Bench Topic: the target's In Play Topic goes to the top of the Bench without a Guest mark. A Topic in an In Play
+    /// place leaves an Open Place there; a Guest Topic leaves none. It needs `topics.in_play`. `unlock` ends a Guest
+    /// Session.
+    case benchTopic
+    /// The target's Guest Topic or Benched Topic fills the Open Place at In Play place `place`, counted from 1, and
+    /// loses its Guest mark. No other card moves. It needs `topics.in_play`.
+    case fillOpenPlace(place: Int)
     /// Marks the `scope` of the target Read or Unread: the Topic Unread of a Topic, and each Agent there that
     /// `change` applies to.
     case markRead(ReadChange, scope: ReadScope)
@@ -383,7 +388,8 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
         case chooseInPlay = "choose_in_play"
         case replaceFromBench = "replace_from_bench"
         case makeGuest = "make_guest"
-        case endGuest = "end_guest"
+        case benchTopic = "bench_topic"
+        case fillOpenPlace = "fill_open_place"
         case markRead = "mark_read"
         case markAllRead = "mark_all_read"
         case createWorktree = "create_worktree"
@@ -412,6 +418,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     private enum MoveCardCodingKeys: String, CodingKey { case _0 = "move" }
     private enum ChooseInPlayCodingKeys: String, CodingKey { case _0 = "cards" }
     private enum ReplaceFromBenchCodingKeys: String, CodingKey { case with }
+    private enum FillOpenPlaceCodingKeys: String, CodingKey { case place }
     private enum MarkReadCodingKeys: String, CodingKey {
         case _0 = "change"
         case scope
@@ -558,6 +565,8 @@ public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConv
         public static let cardNotBenched = Kind(rawValue: "card_not_benched")
         public static let cardPinned = Kind(rawValue: "card_pinned")
         public static let cardGuest = Kind(rawValue: "card_guest")
+        public static let placeNotOpen = Kind(rawValue: "place_not_open")
+        public static let cardCannotFill = Kind(rawValue: "card_cannot_fill")
         public static let worktreeExists = Kind(rawValue: "worktree_exists")
         public static let worktreeUnavailable = Kind(rawValue: "worktree_unavailable")
         public static let worktreeAmbiguous = Kind(rawValue: "worktree_ambiguous")

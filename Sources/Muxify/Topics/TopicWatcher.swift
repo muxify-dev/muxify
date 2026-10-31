@@ -8,6 +8,7 @@ import MuxifyCore
 final class TopicWatcher {
     let store: TopicStore
     private(set) var records: [TopicRecord] = []
+    private(set) var openPlaces: [OpenPlace] = []
     private(set) var problems: [String] = []
     /// The records hold Snoozes or a Zen from an older Muxify, which `EnvironmentService.upgradeRecords` removes.
     private(set) var needsUpgrade = false
@@ -40,6 +41,7 @@ final class TopicWatcher {
             return
         }
         records = contents.records
+        openPlaces = contents.openPlaces
         needsUpgrade = contents.needsUpgrade
         problems = contents.problems
         for problem in problems { Diagnostics.report("topics: \(problem)") }
