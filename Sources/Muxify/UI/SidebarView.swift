@@ -185,6 +185,13 @@ private struct TopicsSection: View {
                                  geometry: parts.bench == nil ? nil : geometry, viewportHeight: viewportHeight)
             }
             .accessibilityIdentifier("topics-list")
+            // A Jump To a Benched card out of view scrolls it under the line. A card that shows, such as one clicked,
+            // stays where it is.
+            .onChange(of: model.activeTopic) { _, card in
+                guard let card, model.isBenched(card), places[card]?.isOutOfView == true else { return }
+                // After the layout of this change: the card the user leaves can close, and the block with it.
+                DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.2)) { reveal(card, scroller) } }
+            }
             .overlay {
                 if model.rows.isEmpty && model.openedNoTopicSession == nil && model.groups.isEmpty {
                     Text("No Topics").font(typography.font(for: .title)).foregroundStyle(.secondary)

@@ -117,6 +117,18 @@ class TopicsBenchSidebar(TopicsSidebar):
                          'the click did not scroll %s under the line: %s' % (bench[-2], self.under_line(bench[-2], s.rows())))
         self.assertEqual(self.more_above(rs), len(bench) - 2, 'the line does not count one card less after the click')
 
+    def test_a_jump_to_a_benched_card_out_of_view_scrolls_it_under_the_line(self):
+        s = self.s
+        windows, bench = self.far_bench('bench-jump')
+        z = bench[-1]
+        s.show(windows['topic-bench-jump-a'])
+        self.show_bench()
+        rs = s.wait_rows(lambda rs: s.has(z, rs) and self.top(z, rs) < frame(s.row('topics-list', rs))[0],
+                         'the last Benched card is in view')
+        s.show(windows[z])
+        s.wait_rows(lambda rs: abs(self.under_line(z, rs)) <= 1,
+                    'the Jump To did not scroll %s under the line: %s' % (z, self.under_line(z, s.rows())))
+
     def tops(self, keys, rs):
         return {key: frame(self.s.row(key, rs))[1] for key in keys}
 
