@@ -361,7 +361,6 @@ class TopicsBenchSidebar(TopicsSidebar):
                     'the Benched card of the Location does not show under the line: %s' % s.ids())
         saved = self.orders('bench-visit-open')
         self.show_bench()
-        # The Bench opens scrolled to c, so b is above the Bench area, under the line.
         b, c = 'topic-bench-visit-open-b', 'topic-bench-visit-open-c'
         rs = s.wait_rows(lambda rs: s.has(b, rs) and self.more_above(rs) == 1,
                          'the shown Bench does not show b above the area: %s' % self.describe('topics-more-above', s.rows()))

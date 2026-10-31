@@ -157,14 +157,14 @@ private struct TopicsSection: View {
                     guard across, !store.benchShown, store.benchPeek != .all, let dragged = drag.dragged,
                           model.split(inPlay: store.topicConfig.inPlay ?? 0).inPlay.contains(where: { $0.id.listID == dragged })
                     else { return }
-                    withAnimation(.easeOut(duration: 0.2)) { store.benchPeek = .all }
+                    store.benchPeek = .all
                 }
                 // What a drag showed of the hidden Bench folds into the line as soon as the cards no longer need it: at
                 // the drop, while a card glides back, or once two traded cards are in their new places.
                 .onChange(of: drag.phase) { _, phase in
                     switch phase {
                     case .lifted, .trading: return
-                    default: if store.benchPeek != nil { withAnimation(.easeOut(duration: 0.2)) { store.benchPeek = nil } }
+                    default: if store.benchPeek != nil { store.benchPeek = nil }
                     }
                 }
                 .onChange(of: stick, initial: true) { _, stick in drag.scrollArea(by: stick) }
@@ -175,9 +175,6 @@ private struct TopicsSection: View {
             }
             .coordinateSpace(.named(TopicCard.viewport))
             .scrollIndicators(.never)
-            // The Location's card keeps its place on the screen when the Bench shows or hides, so neither the cards nor
-            // the scroll range may glide.
-            .transaction(value: model.isBenchShown) { $0.animation = nil }
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { viewportTop = $0 }
             .background {
@@ -185,12 +182,9 @@ private struct TopicsSection: View {
                                  geometry: parts.bench == nil ? nil : geometry, viewportHeight: viewportHeight)
             }
             .accessibilityIdentifier("topics-list")
-            // A Jump To a Benched card out of view scrolls it under the line. A card that shows, such as one clicked,
-            // stays where it is.
             .onChange(of: model.activeTopic) { _, card in
                 guard let card, model.isBenched(card), places[card]?.isOutOfView == true else { return }
-                // After the layout of this change: the card the user leaves can close, and the block with it.
-                DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.2)) { reveal(card, scroller) } }
+                revealOnceLaidOut(card, scroller)
             }
             .overlay {
                 if model.rows.isEmpty && model.openedNoTopicSession == nil && model.groups.isEmpty {
@@ -203,7 +197,6 @@ private struct TopicsSection: View {
                 if let first = hiddenBelow.first {
                     MoreBelowLine(count: hiddenBelow.count, listEnd: parts.bench == nil ? listEnd : benchEnd, theme: store.theme) {
                         withAnimation(.easeOut(duration: 0.2)) {
-                            // A Benched card goes under the line, not to the viewport's top under the block.
                             if let card = first.cardID, model.isBenched(card) {
                                 reveal(card, scroller)
                             } else {
@@ -233,7 +226,7 @@ private struct TopicsSection: View {
                                                    isBenchShown: model.isBenchShown == true, driver: driver))
                 .background(alignment: .top) { Color.clear.frame(height: 0).id(BenchMarker(card: topic.id)) }
         case .benchLine(let isBenchShown):
-            BenchLine(isBenchShown: isBenchShown) { withAnimation(.easeOut(duration: 0.15)) { store.toggleBench() } }
+            BenchLine(isBenchShown: isBenchShown) { store.toggleBench() }
                 .listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
         case .noTopicSession(let opened):
             noTopicCard(opened).listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
@@ -282,6 +275,12 @@ private struct TopicsSection: View {
     /// the last one.
     private var hiddenAbove: [TopicGroupID] {
         model.benchCardIDs.filter { places[$0]?.isAbove == true }
+    }
+
+    /// `reveal` on the next turn of the main queue, after the layout of the change that is in progress: the card the
+    /// user leaves can close then, and the block that sticks gets shorter with it.
+    private func revealOnceLaidOut(_ card: TopicGroupID, _ scroller: ScrollViewProxy) {
+        DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.2)) { reveal(card, scroller) } }
     }
 
     /// Scrolls the Bench so that the card stands directly under the line. The mark of no height at the card's top lets
