@@ -73,7 +73,7 @@ final class TopicOrderTests: XCTestCase {
         XCTAssertEqual(DropPlacement.after("x").placing("a", in: order), order, "an anchor that left keeps the list")
     }
 
-    func testACardThatCrossesTheDividerTradesWithTheCardUnderItsMiddle() {
+    func testACardThatCrossesTheDividerTradesWithTheCardItsLeadingEdgePassed() {
         // a at 0–40, b at 46–86, the line at 92–112 with its middle at 102, c at 118–158, d at 164–204.
         let layout = StackLayout(heights: [.item("a"): 40, .item("b"): 40, .fixed("line"): 20, .item("c"): 40, .item("d"): 40],
                                  spacing: 6)
@@ -82,22 +82,34 @@ final class TopicOrderTests: XCTestCase {
             layout.landing(of: id, movedBy: translation, in: order, divider: "line")
         }
         XCTAssertEqual(landing("a", 40), .place(.after("b")), "on its own side it reorders")
-        XCTAssertEqual(landing("a", 80), .place(.after("b")), "a's middle at 100 has not passed the line's middle")
-        XCTAssertEqual(landing("a", 120), .across(trade: "c"), "a's middle at 140 is on c")
-        XCTAssertEqual(landing("a", 165), .across(trade: "d"))
-        XCTAssertEqual(landing("a", 300), .across(trade: nil), "past every card it is across, on no card")
-        XCTAssertEqual(landing("d", -150), .across(trade: "a"), "a Benched card trades up the same way")
-        XCTAssertNil(landing("c", -10), "c's middle at 128 is still under the line")
+        XCTAssertEqual(landing("a", 60), .place(.after("b")), "a's bottom at 100 has not passed the line's middle")
+        XCTAssertEqual(landing("a", 80), .across(trade: nil), "a's bottom at 120 passed the line, not c's middle at 138")
+        XCTAssertEqual(landing("a", 100), .across(trade: "c"), "a's bottom at 140 passed c's middle")
+        XCTAssertEqual(landing("a", 150), .across(trade: "d"), "a's bottom at 190 passed d's middle at 184")
+        XCTAssertEqual(landing("a", 300), .across(trade: "d"), "past every card it trades with the last")
+        XCTAssertEqual(landing("d", -150), .across(trade: "a"), "a Benched card trades up the same way, by its top")
+        XCTAssertNil(landing("c", -5), "c's top at 113 is still under the line's middle")
+        XCTAssertEqual(landing("c", -20), .across(trade: nil), "c's top at 98 passed the line, not b's middle at 66")
+        XCTAssertEqual(landing("c", -55), .across(trade: "b"))
         XCTAssertEqual(layout.landing(of: "a", movedBy: 120, in: order, divider: nil), .place(.after("c")),
                        "a list without a divider only reorders")
+    }
+
+    func testATallBenchedCardTradesWithASmallFirstCard() {
+        // a at 0–40, the line at 46–66 with its middle at 56, t at 72–272.
+        let layout = StackLayout(heights: [.item("a"): 40, .fixed("line"): 20, .item("t"): 200], spacing: 6)
+        let order: [StackSlot<String>] = [.item("a"), .fixed("line"), .item("t")]
+        let highest = layout.bounded(-1000, of: "t", in: order, divider: "line")
+        XCTAssertEqual(highest, -72, "t stops with its top at the top of a")
+        XCTAssertEqual(layout.landing(of: "t", movedBy: highest, in: order, divider: "line"), .across(trade: "a"))
     }
 
     func testWithADividerACardCanGoPastTheLineThatEndsItsList() {
         let layout = StackLayout(heights: [.item("a"): 40, .item("b"): 40, .fixed("line"): 20], spacing: 6)
         let order: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line")]
         XCTAssertEqual(layout.bounded(1000, of: "a", in: order), 46, "without a divider it stops at the bottom of the last card")
-        XCTAssertEqual(layout.bounded(1000, of: "a", in: order, divider: "line"), 92, "its middle reaches the bottom of the line")
-        XCTAssertEqual(layout.landing(of: "a", movedBy: 92, in: order, divider: "line"), .across(trade: nil))
+        XCTAssertEqual(layout.bounded(1000, of: "a", in: order, divider: "line"), 72, "its bottom reaches the bottom of the line")
+        XCTAssertEqual(layout.landing(of: "a", movedBy: 72, in: order, divider: "line"), .across(trade: nil))
     }
 
     func testAHeldItemKeepsItsPlaceAndIsNoPlaceToLand() {

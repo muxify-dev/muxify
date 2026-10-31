@@ -95,31 +95,33 @@ struct StackLayout<ID: Hashable> {
     }
 
     /// Where `id` lands after it moved `translation` down, in a list that the fixed slot `divider` splits in two. On its
-    /// own side, it lands as `placement` gives. Once its middle passes the divider's middle, it is across: there it lands
-    /// on the item whose place, with half the spacing around it, holds its middle. Without the divider, as `placement`.
+    /// own side, it lands as `placement` gives. The edge that faces the divider leads, as in `placement`: once it passes
+    /// the divider's middle, the item is across, and there it lands on the farthest item whose middle that edge passed.
+    /// So a tall item reaches a short item at the end of the list. Without the divider, as `placement`.
     func landing(of id: ID, movedBy translation: CGFloat, in order: [StackSlot<ID>], divider: String?) -> DropLanding<ID>? {
         guard let index = order.firstIndex(of: .item(id)) else { return nil }
         guard let line = divider.flatMap({ order.firstIndex(of: .fixed($0)) }) else {
             return placement(of: id, movedBy: translation, in: order).map(DropLanding.place)
         }
-        let middle = top(of: .item(id), in: order) + translation + height(.item(id)) / 2
-        let lineMiddle = top(of: order[line], in: order) + height(order[line]) / 2
-        let above = index < line
-        if above == (middle < lineMiddle) {
-            let side = above ? 0..<line : (line + 1)..<order.count
-            return placement(of: id, movedBy: translation, in: order, side: side).map(DropLanding.place)
+        let top = top(of: .item(id), in: order) + translation
+        let lineMiddle = self.top(of: order[line], in: order) + height(order[line]) / 2
+        let middle = { (slot: StackSlot<ID>) in self.top(of: slot, in: order) + self.height(slot) / 2 }
+        if index < line {
+            let bottom = top + height(.item(id))
+            guard bottom > lineMiddle else {
+                return placement(of: id, movedBy: translation, in: order, side: 0..<line).map(DropLanding.place)
+            }
+            return .across(trade: order[(line + 1)...].last { $0.item != nil && bottom > middle($0) }?.item)
         }
-        let others = above ? order[(line + 1)...] : order[..<line]
-        let target = others.first { slot in
-            let top = self.top(of: slot, in: order)
-            return slot.item != nil && top - spacing / 2 <= middle && middle <= top + height(slot) + spacing / 2
+        guard top < lineMiddle else {
+            return placement(of: id, movedBy: translation, in: order, side: (line + 1)..<order.count).map(DropLanding.place)
         }
-        return .across(trade: target?.item)
+        return .across(trade: order[..<line].first { $0.item != nil && top < middle($0) }?.item)
     }
 
     /// `translation` held so `id` stays within the list, from the top of its first item to the bottom of its last, and
     /// moves up no more than `headroom`. An item that is already past the headroom does not move up at all. With a
-    /// `divider` in the list, its middle can go down to the end of the last slot, so it can cross a divider that ends
+    /// `divider` in the list, its bottom can go down to the end of the last slot, so it can cross a divider that ends
     /// the list.
     func bounded(_ translation: CGFloat, of id: ID, in order: [StackSlot<ID>], headroom: CGFloat = .infinity,
                  divider: String? = nil) -> CGFloat {
@@ -130,7 +132,7 @@ struct StackLayout<ID: Hashable> {
         let low = max(self.top(of: first, in: order) - top, -max(headroom, 0))
         var high = max(low, self.top(of: last, in: order) + height(last) - top - height(.item(id)))
         if let divider, order.contains(.fixed(divider)), let end = order.last {
-            high = max(high, self.top(of: end, in: order) + height(end) - top - height(.item(id)) / 2)
+            high = max(high, self.top(of: end, in: order) + height(end) - top - height(.item(id)))
         }
         return min(max(translation, low), high)
     }
