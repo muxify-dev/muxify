@@ -49,6 +49,53 @@ class TopicsBenchSidebar(TopicsSidebar):
                     'the Bench did not scroll back to its top')
         return bench
 
+    def far_bench(self, prefix):
+        """A Bench much longer than the Sidebar whose last card, <prefix>-z, has a live Session. Returns the Window of
+        each live Topic by its card identifier, and the identifiers of the Benched cards in list order."""
+        windows = self.bench_topics(prefix, dormant=17)
+        topic = prefix + '-z'
+        self.write_topic(topic, topic.capitalize(), self.beta, order=20)
+        sid = self.new_session('beta/' + topic, self.beta, topic=topic)
+        windows['topic-' + topic] = self.s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
+        bench = ['topic-%s-%s' % (prefix, name) for name in ['b', 'c'] + ['t%02d' % i for i in range(3, 20)] + ['z']]
+        self.s.wait_rows(lambda rs: self.line(rs) is not None and self.s.has('topic-%s-a' % prefix, rs),
+                         'with topics.in_play: 1, the Sidebar shows no Bench line')
+        return windows, bench
+
+    def top(self, key, rs):
+        return frame(self.s.row(key, rs))[1]
+
+    def under_line(self, key, rs):
+        """How far the card's top is from where a card directly under the Bench line has its top."""
+        return self.top(key, rs) - (frame(self.s.row(LINE, rs))[0] - 6)
+
+    def test_the_benched_card_of_the_location_keeps_its_place_on_screen_when_the_bench_shows(self):
+        s = self.s
+        windows, bench = self.far_bench('bench-open-far')
+        z = bench[-1]
+        self.hide_bench()
+        s.show(windows[z])
+        rs = s.wait_rows(lambda rs: self.shown_after_line(rs) == [z],
+                         'the Benched card of the Location does not show alone under the line: %s' % self.shown_after_line(s.rows()))
+        before = {key: self.top(key, rs) for key in (z, LINE)}
+        shown = s.act('press', LINE, watch=[z, LINE], watch_seconds=1)
+        rs = s.wait_rows(lambda rs: self.line(rs) == 'Hide Bench', 'the Bench did not show')
+        self.assertAlmostEqual(self.top(z, rs), before[z], delta=1, msg='the card of the Location moved when the Bench showed')
+        for key in (z, LINE):
+            tops = [y + height for _, y, _, height in shown['frames'][key]]
+            self.assertTrue(all(abs(top - before[key]) <= 1 for top in tops),
+                            'a drawn frame showed %s elsewhere: %s, before %s' % (key, tops, before[key]))
+
+    def test_the_bench_shown_on_a_card_in_play_opens_at_its_top(self):
+        s = self.s
+        windows, bench = self.far_bench('bench-open-top')
+        self.hide_bench()
+        s.show(windows['topic-bench-open-top-a'])
+        s.wait_rows(lambda rs: self.shown_after_line(rs) == [], 'the hidden Bench shows cards: %s' % self.shown_after_line(s.rows()))
+        self.show_bench()
+        rs = s.wait_rows(lambda rs: s.has(bench[0], rs), 'the Bench did not show its first card')
+        self.assertAlmostEqual(self.under_line(bench[0], rs), 0, delta=1, msg='the first Benched card is not directly under the line')
+
     def tops(self, keys, rs):
         return {key: frame(self.s.row(key, rs))[1] for key in keys}
 
@@ -281,8 +328,10 @@ class TopicsBenchSidebar(TopicsSidebar):
                     'the Benched card of the Location does not show under the line: %s' % s.ids())
         saved = self.orders('bench-visit-open')
         self.show_bench()
-        s.wait_rows(lambda rs: self.shown_after_line(rs) == ['topic-bench-visit-open-b', 'topic-bench-visit-open-c'],
-                    'the shown Bench is not in list order: %s' % self.shown_after_line(s.rows()))
+        # The Bench opens scrolled to c, so b is above the Bench area, under the line.
+        b, c = 'topic-bench-visit-open-b', 'topic-bench-visit-open-c'
+        rs = s.wait_rows(lambda rs: s.has(b, rs), 'the shown Bench does not show b')
+        self.assertGreater(self.top(b, rs), self.top(c, rs), 'the shown Bench is not in list order')
         self.assertEqual(self.orders('bench-visit-open'), saved, 'showing the Bench changed the order')
 
     def test_the_benched_card_of_the_location_dragged_up_and_back_below_the_hidden_line_keeps_its_place(self):

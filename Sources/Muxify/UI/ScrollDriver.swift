@@ -1,11 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// Scrolls the SwiftUI scroll view that `ScrollDriverView` sits in while a lifted card's pointer rests at an edge.
-/// `ScrollViewReader` scrolls to a view; an auto-scroll scrolls by points, each tick, with no gesture event to drive
-/// it. It is the same NSClipView move that the TestDriver's Reveal makes.
+/// Scrolls the SwiftUI scroll view that `ScrollDriverView` sits in by points: while a lifted card's pointer rests at an
+/// edge, each tick, with no gesture event to drive it, and by the distance a card moved in a layout, before that layout
+/// is drawn. `ScrollViewReader` scrolls to a view, and only within the content's height of the last layout. It is the
+/// same NSClipView move that the TestDriver's Reveal makes.
 @MainActor final class ScrollDriver {
-    fileprivate weak var scrollView: NSScrollView?
+    private weak var scrollView: NSScrollView?
+    private weak var document: NSView?
     private var pointer: CGFloat?
     private var area: (CGFloat) -> ClosedRange<CGFloat> = { _ in 0...0 }
     private var dwell = EdgeAutoScroll.Dwell()
@@ -31,6 +33,53 @@ import SwiftUI
         }
     }
 
+    /// Moves the content `delta` points up. In the layout that makes the content taller, SwiftUI reports the new
+    /// geometry before AppKit gives the scroll view its new height, so a move past the old end waits: the rest is
+    /// moved when the content's frame changes, in the same pass of the run loop, before it is drawn. What is left at the
+    /// end of that pass is dropped.
+    func scroll(by delta: CGFloat) {
+        pending = move(by: delta)
+        guard pending != 0, waits == nil else { return }
+        let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, false, 3_000_000) {
+            [weak self] _, _ in
+            self?.pending = 0
+            self?.waits = nil
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        waits = observer
+    }
+
+    private var pending: CGFloat = 0
+    private var waits: CFRunLoopObserver?
+    private var resizes: NSObjectProtocol?
+
+    fileprivate func attach(_ scrollView: NSScrollView) {
+        guard scrollView !== self.scrollView || scrollView.documentView !== document else { return }
+        self.scrollView = scrollView
+        document = scrollView.documentView
+        if let resizes { NotificationCenter.default.removeObserver(resizes) }
+        document?.postsFrameChangedNotifications = true
+        resizes = NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: document,
+                                                         queue: nil) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.pending != 0 else { return }
+                self.pending = self.move(by: self.pending)
+            }
+        }
+    }
+
+    /// Moves the content `delta` points within its scroll range, and returns the part of `delta` it could not move.
+    private func move(by delta: CGFloat) -> CGFloat {
+        guard let scrollView, let document = scrollView.documentView else { return 0 }
+        let clip = scrollView.contentView
+        let end = max(0, document.bounds.height - clip.bounds.height)
+        let offset = document.isFlipped ? clip.bounds.origin.y : end - clip.bounds.origin.y
+        let y = min(max(0, offset + delta), end)
+        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: document.isFlipped ? y : end - y))
+        scrollView.reflectScrolledClipView(clip)
+        return offset + delta - y
+    }
+
     private func tick() {
         guard let scrollView, let document = scrollView.documentView else { return }
         let clip = scrollView.contentView
@@ -38,10 +87,7 @@ import SwiftUI
         let offset = document.isFlipped ? clip.bounds.origin.y : end - clip.bounds.origin.y
         let step = EdgeAutoScroll.step(pointer: pointer, in: area(offset), offset: offset, end: end)
         let delta = dwell.pass(step, at: ProcessInfo.processInfo.systemUptime)
-        guard delta != 0 else { return }
-        let y = min(max(0, offset + delta), end)
-        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: document.isFlipped ? y : end - y))
-        scrollView.reflectScrolledClipView(clip)
+        if delta != 0 { _ = move(by: delta) }
     }
 }
 
@@ -54,7 +100,7 @@ struct ScrollDriverView: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            driver?.scrollView = enclosingScrollView
+            if let scrollView = enclosingScrollView { driver?.attach(scrollView) }
         }
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -68,6 +114,6 @@ struct ScrollDriverView: NSViewRepresentable {
 
     func updateNSView(_ view: Anchor, context: Context) {
         view.driver = driver
-        if let scrollView = view.enclosingScrollView { driver.scrollView = scrollView }
+        if let scrollView = view.enclosingScrollView { driver.attach(scrollView) }
     }
 }

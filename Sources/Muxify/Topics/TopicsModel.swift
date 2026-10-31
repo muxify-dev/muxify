@@ -346,10 +346,10 @@ struct TopicsModel {
 
     func isBenched(_ id: TopicGroupID) -> Bool { benchCardIDs.contains(id) }
 
-    /// The card the Bench opens scrolled to: the Location's card while it is on a shown Bench, else nil, and the Bench
-    /// opens at its top.
-    var benchOpening: TopicGroupID? {
-        guard isBenchShown == true, let activeTopic, isBenched(activeTopic) else { return nil }
+    /// The Location's card while it is on the Bench, shown or hidden. The Bench shows with this card where it was, and
+    /// without one it shows at its top.
+    var benchedLocation: TopicGroupID? {
+        guard let activeTopic, isBenched(activeTopic) else { return nil }
         return activeTopic
     }
 

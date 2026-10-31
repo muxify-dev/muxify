@@ -81,3 +81,18 @@ enum EdgeAutoScroll {
         }
     }
 }
+
+/// Where the Location's Benched card stands in the Topics list's viewport, at one layout.
+struct BenchedLocationPlace: Equatable {
+    /// The card's top, in the viewport's points.
+    var top: CGFloat
+    var isBenchShown: Bool
+
+    /// How far to scroll so that the card is back where it stood at the layout before, `before`: the distance the
+    /// cards that just showed above it pushed it down. Nil unless the Bench showed between the two layouts, so a scroll
+    /// of a shown Bench or a hide does not scroll again.
+    func openingScroll(after before: BenchedLocationPlace?) -> CGFloat? {
+        guard let before, !before.isBenchShown, isBenchShown else { return nil }
+        return top - before.top
+    }
+}

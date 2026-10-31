@@ -54,6 +54,19 @@ final class BenchScrollTests: XCTestCase {
                           "while the block scrolls, above the viewport it scrolls up")
     }
 
+    func testTheShownBenchKeepsTheLocationsCardWhereItStood() {
+        let hidden = BenchedLocationPlace(top: 210, isBenchShown: false)
+        XCTAssertEqual(BenchedLocationPlace(top: 1490, isBenchShown: true).openingScroll(after: hidden), 1280,
+                       "the list scrolls as far as the cards that showed above pushed the card down")
+        XCTAssertEqual(BenchedLocationPlace(top: 210, isBenchShown: true).openingScroll(after: hidden), 0,
+                       "the first Benched card does not move")
+        XCTAssertNil(BenchedLocationPlace(top: 180, isBenchShown: true).openingScroll(after: .init(top: 210, isBenchShown: true)),
+                     "a scroll of the shown Bench does not scroll again")
+        XCTAssertNil(hidden.openingScroll(after: .init(top: 900, isBenchShown: true)), "a hide does not scroll")
+        XCTAssertNil(BenchedLocationPlace(top: 1490, isBenchShown: true).openingScroll(after: nil),
+                     "a card that just became the Location on a shown Bench does not scroll")
+    }
+
     func testThePointerScrollsOnlyAfterItRestsInTheBand() {
         var dwell = EdgeAutoScroll.Dwell()
         XCTAssertEqual(dwell.pass(8, at: 0), 0)

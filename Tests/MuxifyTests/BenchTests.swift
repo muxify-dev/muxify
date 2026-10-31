@@ -98,10 +98,10 @@ final class BenchTests: XCTestCase {
         let topics = model(inPlay: 2, benchShown: true, at: "d")
         XCTAssertEqual(shown(topics), ["topic-pinned", "topic-a", "topic-b", "bench-line", "topic-c", "topic-d"],
                        "nothing reorders for display")
-        XCTAssertEqual(topics.benchOpening, .topic("d"), "the Bench opens scrolled to the Location's card")
-        XCTAssertNil(model(inPlay: 2, at: "d").benchOpening, "a hidden Bench does not scroll")
-        XCTAssertNil(model(inPlay: 2, benchShown: true, at: "a").benchOpening, "on an In Play card the Bench opens at its top")
-        XCTAssertNil(model(inPlay: 2, benchShown: true, at: "@1").benchOpening, "the opened No Topic Session is not on the Bench")
+        XCTAssertEqual(topics.benchedLocation, .topic("d"))
+        XCTAssertEqual(model(inPlay: 2, at: "d").benchedLocation, .topic("d"), "the hidden Bench shows the Location's card")
+        XCTAssertNil(model(inPlay: 2, benchShown: true, at: "a").benchedLocation, "an In Play card is not on the Bench")
+        XCTAssertNil(model(inPlay: 2, benchShown: true, at: "@1").benchedLocation, "the opened No Topic Session is not on the Bench")
     }
 
     func testTheListSplitsIntoTheTopThatStaysAndTheBenchedCardsThatScroll() {

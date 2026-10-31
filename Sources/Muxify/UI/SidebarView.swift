@@ -174,6 +174,9 @@ private struct TopicsSection: View {
             }
             .coordinateSpace(.named(TopicCard.viewport))
             .scrollIndicators(.never)
+            // The Location's card keeps its place on the screen when the Bench shows or hides, so neither the cards nor
+            // the scroll range may glide.
+            .transaction(value: model.isBenchShown) { $0.animation = nil }
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { viewportTop = $0 }
             .background {
@@ -203,6 +206,8 @@ private struct TopicsSection: View {
         switch item {
         case .card(let topic):
             listCard(topic, order: model.dragSlots(around: item.id)).tracksBottomEdge(topic.id, in: $cardsBelow)
+                .modifier(KeepsPlaceWhenBenchShows(isBenchedLocation: topic.id == model.benchedLocation,
+                                                   isBenchShown: model.isBenchShown == true, driver: driver))
         case .benchLine(let isBenchShown):
             BenchLine(isBenchShown: isBenchShown) { withAnimation(.easeOut(duration: 0.15)) { store.toggleBench() } }
                 .listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
@@ -349,6 +354,34 @@ private extension View {
                 if below { cardsBelow.wrappedValue.insert(id) } else { cardsBelow.wrappedValue.remove(id) }
             }
             .onDisappear { cardsBelow.wrappedValue.remove(id) }
+    }
+}
+
+/// Keeps the Location's Benched card where it is on the screen when the Bench shows: the list scrolls by as far as the
+/// cards shown before it pushed it down. Without a Benched Location nothing scrolls, and the Bench opens at its top.
+///
+/// The scroll comes from the card's geometry change in the layout that shows the Bench, before that layout is drawn.
+/// `scrollTo` from `onChange` cannot do it: the scroll view has the hidden Bench's height until that layout, so it has
+/// nowhere to scroll to.
+private struct KeepsPlaceWhenBenchShows: ViewModifier {
+    let isBenchedLocation: Bool
+    let isBenchShown: Bool
+    let driver: ScrollDriver
+    @State private var last = Last()
+
+    /// A class, so that the action can keep the last place without drawing the card again.
+    final class Last {
+        var place: BenchedLocationPlace?
+    }
+
+    func body(content: Content) -> some View {
+        let isBenchedLocation = isBenchedLocation, isBenchShown = isBenchShown
+        return content.onGeometryChange(for: BenchedLocationPlace?.self) { proxy in
+            isBenchedLocation ? BenchedLocationPlace(top: proxy.frame(in: .named(TopicCard.viewport)).minY, isBenchShown: isBenchShown) : nil
+        } action: { place in
+            defer { last.place = place }
+            if let scroll = place?.openingScroll(after: last.place) { driver.scroll(by: scroll) }
+        }
     }
 }
 
