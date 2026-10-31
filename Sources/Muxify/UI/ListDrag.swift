@@ -138,6 +138,14 @@ struct StackLayout<ID: Hashable> {
     }
 }
 
+/// Where an item stands in its scroll view: its height, how far its top is below the visible top (or below a header
+/// that sticks there), and how far its bottom is above the visible bottom.
+struct ItemPlace: Equatable {
+    var height: CGFloat
+    var visibleTop: CGFloat
+    var footroom: CGFloat
+}
+
 /// The drag of a list's items. A press that moves a few points lifts the item at once, and a press that lets go before
 /// that is a click. The lifted item follows the pointer, and the items it passes slide aside to leave a placeholder
 /// where it would land. Let go, it glides into the placeholder and stays there until the list shows the new order, so
@@ -172,15 +180,22 @@ final class ListDrag<ID: Hashable> {
     private(set) var landing: DropLanding<ID>?
     /// How far two traded items went on their paths, from 0 at the drop to 1 in the other's place.
     private(set) var tradeProgress: CGFloat = 0
+    /// The pointer's y in the window while an item is lifted, nil otherwise. The list reads it to scroll at its edges.
+    private(set) var pointer: CGFloat?
     /// The items' heights when the item lifted, and of the items that came into its list since.
     private(set) var layout: StackLayout<ID>
     /// The fixed slot across which a drop trades. Without it, every drop places.
     let divider: String?
     @ObservationIgnored private var heights: [StackSlot<ID>: CGFloat] = [:]
-    /// How far each item's top is below the top of the scroll view's visible part, or below a card header that sticks there.
-    @ObservationIgnored private var visibleTops: [ID: CGFloat] = [:]
-    /// How far the lifted item may move up before its top leaves the visible part of the scroll view.
+    /// Where each item stands in the visible part of its scroll view.
+    @ObservationIgnored private var places: [ID: ItemPlace] = [:]
+    /// How far the lifted item may move up before its top leaves the visible part of the scroll view, and down before
+    /// its bottom does.
     @ObservationIgnored private var headroom: CGFloat = .infinity
+    @ObservationIgnored private var footroom: CGFloat = .infinity
+    /// How far the lifted item's place moved up since the lift, as when the list scrolled under it. The item moves down
+    /// as far, so it stays under the pointer.
+    @ObservationIgnored private var placeShift: CGFloat = 0
     /// Each item's list as its stack shows it now. One drag can serve several lists, such as the Pinned Topics and the others.
     @ObservationIgnored private var lists: [ID: [StackSlot<ID>]] = [:]
     /// The lifted item's list as its stack shows it.
@@ -239,10 +254,21 @@ final class ListDrag<ID: Hashable> {
         return id == dragged ? (translation, distance, 26) : (0, -distance, -26)
     }
 
-    /// An item or a fixed view reports its height, and its place in the scroll view, each time they change.
-    func measure(_ slot: StackSlot<ID>, height: CGFloat, visibleTop: CGFloat) {
+    /// An item reports its place in the scroll view each time it changes. When the lifted item's place moves, as when
+    /// the list scrolls under a pointer that rests, the item keeps its place under the pointer and finds where it lands.
+    func measure(_ id: ID, _ place: ItemPlace) {
+        heights[.item(id)] = place.height
+        let before = places[id]
+        places[id] = place
+        guard phase == .lifted(id), let before, before.visibleTop != place.visibleTop else { return }
+        placeShift += before.visibleTop - place.visibleTop
+        fitBounds(of: id)
+        land(id)
+    }
+
+    /// A fixed view reports its height each time it changes.
+    func measure(_ slot: StackSlot<ID>, height: CGFloat) {
         heights[slot] = height
-        if let id = slot.item { visibleTops[id] = visibleTop }
     }
 
     func show(_ shown: [StackSlot<ID>], at id: ID) {
@@ -265,6 +291,7 @@ final class ListDrag<ID: Hashable> {
     private func finish() {
         timer?.cancel()
         withTransaction(Transaction(animation: nil)) {
+            pointer = nil
             phase = .idle
             landing = nil
             tradeProgress = 0
@@ -291,19 +318,33 @@ final class ListDrag<ID: Hashable> {
         guard phase == .pressing(id) else { return }
         order = lists[id] ?? [.item(id)]
         updateLayout()
-        // Grown by the lift, its top stands a little higher than its place.
-        headroom = (visibleTops[id] ?? .infinity) - (Self.liftScale - 1) * Self.liftAnchor.y * layout.height(.item(id))
+        placeShift = 0
+        fitBounds(of: id)
         translation = 0
         withAnimation(.spring(duration: 0.25, bounce: 0.3)) { phase = .lifted(id) }
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         NSCursor.closedHand.push()
     }
 
-    func follow(_ id: ID, translation: CGFloat) {
+    /// Grown by the lift, the item's top stands a little higher than its place and its bottom a little lower.
+    private func fitBounds(of id: ID) {
+        let place = places[id], height = layout.height(.item(id))
+        headroom = (place?.visibleTop ?? .infinity) - (Self.liftScale - 1) * Self.liftAnchor.y * height
+        footroom = (place?.footroom ?? .infinity) - (Self.liftScale - 1) * (1 - Self.liftAnchor.y) * height
+    }
+
+    /// The lifted item moved `translation` down with the pointer, which is at `pointer` in the window.
+    func follow(_ id: ID, translation: CGFloat, pointer: CGFloat? = nil) {
         guard phase == .lifted(id) else { return }
         rawTranslation = translation
+        if self.pointer != pointer { self.pointer = pointer }
+        land(id)
+    }
+
+    private func land(_ id: ID) {
         updateLayout()
-        self.translation = layout.bounded(translation, of: id, in: order, headroom: headroom, divider: divider)
+        self.translation = layout.bounded(rawTranslation + placeShift, of: id, in: order, headroom: headroom,
+                                          footroom: footroom, divider: divider)
         let landing = layout.landing(of: id, movedBy: self.translation, in: order, divider: divider)
         guard landing != self.landing else { return }
         withAnimation(.spring(duration: 0.3, bounce: 0.15)) { self.landing = landing }
@@ -323,12 +364,13 @@ final class ListDrag<ID: Hashable> {
     /// `follow` without a new event from the pointer: the places under it moved.
     private func reland() {
         guard case .lifted(let id) = phase else { return }
-        follow(id, translation: rawTranslation)
+        land(id)
     }
 
     /// The pointer moved on an item that cannot move: the press is neither a click nor a drag.
     func cancel() {
         timer?.cancel()
+        pointer = nil
         withAnimation(.spring(duration: 0.25)) { phase = .idle }
     }
 
@@ -343,6 +385,7 @@ final class ListDrag<ID: Hashable> {
             onTap()
         case .lifted(id):
             NSCursor.pop()
+            pointer = nil
             if let target = tradeTarget {
                 trade(id, with: target, onTrade: onTrade)
                 return
@@ -402,6 +445,7 @@ final class ListDrag<ID: Hashable> {
             cancel()
         case .lifted(id):
             NSCursor.pop()
+            pointer = nil
             withAnimation(.spring(duration: 0.3)) {
                 phase = .idle
                 landing = nil
@@ -443,12 +487,12 @@ private struct ListDragHandle<ID: Hashable>: ViewModifier {
         guard !cancelled else { return }
         switch drag.phase {
         case .lifted(id):
-            drag.follow(id, translation: value.translation.height)
+            drag.follow(id, translation: value.translation.height, pointer: value.location.y)
         case .pressing(id):
             guard hypot(value.translation.width, value.translation.height) > Self.slop else { return }
             if isEnabled {
                 drag.lift(id)
-                drag.follow(id, translation: value.translation.height)
+                drag.follow(id, translation: value.translation.height, pointer: value.location.y)
             } else {
                 cancelled = true
                 drag.cancel()
@@ -513,9 +557,11 @@ private struct ListDragItem<ID: Hashable>: ViewModifier {
                 }
             }
             // Its place without its own offset, in the visible part of the list's scroll view.
-            .onGeometryChange(for: CGRect.self) { $0.frame(in: .scrollView) } action: { frame in
-                drag.measure(.item(id), height: frame.height, visibleTop: frame.minY - topInset)
-            }
+            .onGeometryChange(for: ItemPlace.self) { proxy in
+                let frame = proxy.frame(in: .scrollView)
+                let footroom = proxy.bounds(of: .scrollView).map { $0.maxY - frame.height } ?? .infinity
+                return ItemPlace(height: frame.height, visibleTop: frame.minY - topInset, footroom: footroom)
+            } action: { drag.measure(id, $0) }
             .onChange(of: shown, initial: true) { _, shown in drag.show(shown, at: id) }
             // The Window or Session it stands for went away while it was lifted.
             .onDisappear { drag.abandon(id) }
@@ -583,7 +629,7 @@ private struct ListDragFixed<ID: Hashable>: ViewModifier {
         content
             .offset(y: drag.shift(of: .fixed(key), in: shown))
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                drag.measure(.fixed(key), height: height, visibleTop: 0)
+                drag.measure(.fixed(key), height: height)
             }
     }
 }

@@ -159,7 +159,9 @@ enum TestDriver {
     /// `click` presses the target at its centre and lets go there, without moving: a plain click of the mouse.
     /// The option `command_key` holds ⌘ through the click, as a ⌘-click does.
     /// `drag` presses the target, moves to the element named by `text` and lets go there: in its upper quarter,
-    /// or its lower quarter with the option `edge: "bottom"`. With the option `via`, it first moves to the same quarter
+    /// or its lower quarter with the option `edge: "bottom"`. The option `inset` lets go that many points from that edge
+    /// of the element in place of its quarter, and `hold` rests there for that many seconds, with no event, before it
+    /// lets go, as a user who holds a card at the edge of a list. With the option `via`, it first moves to the same quarter
     /// of the element that `via` names, as a user who changes their mind on the way. A destination that does not show yet,
     /// such as a Benched card that the drag shows, is found after half a second at `via`. Each tick hands one mouse event to
     /// the app, past its event monitors as a real click goes, but never through the window server, so the pointer does
@@ -173,6 +175,9 @@ enum TestDriver {
         private var pressed = false
         private var pendingDestination: (identifier: String, bottom: Bool)?
         private var lastPoint: NSPoint?
+        private var inset: CGFloat?
+        private var hold: TimeInterval = 0
+        private var heldUntil: Date?
 
         init(nonce: String, command: [String: Any]) {
             self.nonce = nonce
@@ -195,13 +200,16 @@ enum TestDriver {
             }
             let via = frame(command["via"] as? String)
             let bottom = command["edge"] as? String == "bottom"
+            let inset = (command["inset"] as? Double).map { CGFloat($0) }
+            self.inset = inset
+            hold = command["hold"] as? Double ?? 0
             let destination = frame(command["text"] as? String)
             guard via != nil || command["via"] == nil, destination != nil || via != nil,
                   let identifier = command["text"] as? String else { return }
             self.window = window
-            let viaY = via.map { Self.dropY(in: $0, bottom: bottom) }
+            let viaY = via.map { Self.dropY(in: $0, bottom: bottom, inset: inset) }
             var points = [start]
-            for stopY in [viaY, destination.map { Self.dropY(in: $0, bottom: bottom) }].compactMap({ $0 }) {
+            for stopY in [viaY, destination.map { Self.dropY(in: $0, bottom: bottom, inset: inset) }].compactMap({ $0 }) {
                 points += Self.leg(from: points.last!, to: stopY)
             }
             moves = [(.leftMouseDown, start)] + points.dropFirst().map { (.leftMouseDragged, $0) }
@@ -217,8 +225,9 @@ enum TestDriver {
         /// Screen points grow upward, so the upper quarter is near maxY.
         private static var halfSecondOfTicks: Int { 25 }
 
-        private static func dropY(in frame: NSRect, bottom: Bool) -> CGFloat {
-            bottom ? frame.minY + frame.height / 4 : frame.maxY - frame.height / 4
+        private static func dropY(in frame: NSRect, bottom: Bool, inset: CGFloat?) -> CGFloat {
+            let inset = inset ?? frame.height / 4
+            return bottom ? frame.minY + inset : frame.maxY - inset
         }
 
         private static func leg(from: NSPoint, to stopY: CGFloat) -> [NSPoint] {
@@ -230,8 +239,13 @@ enum TestDriver {
                 self.pendingDestination = nil
                 let found = (TestDriver.dump().first { $0.row["accessibilityIdentifier"] == pendingDestination.identifier }?.object)?
                     .value(forKey: "accessibilityFrame") as? NSValue
-                let end = found.map { Self.leg(from: held, to: Self.dropY(in: $0.rectValue, bottom: pendingDestination.bottom)) } ?? []
+                let end = found.map { Self.leg(from: held, to: Self.dropY(in: $0.rectValue, bottom: pendingDestination.bottom, inset: inset)) } ?? []
                 moves = end.map { (.leftMouseDragged, $0) } + [(.leftMouseUp, end.last ?? held)]
+            }
+            if hold > 0, moves.first?.type == .leftMouseUp {
+                let until = heldUntil ?? Date().addingTimeInterval(hold)
+                heldUntil = until
+                if Date() < until { return nil }
             }
             guard let window, !moves.isEmpty else { return ["rows": TestDriver.dump().map(\.row), "pressed": pressed] }
             func event(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent? {

@@ -98,6 +98,9 @@ private struct TopicsSection: View {
     @State private var topHeight: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
     @State private var lastBenchHeight: CGFloat = 0
+    /// The top of the Topics list's viewport in the window, where a lifted card's pointer is.
+    @State private var viewportTop: CGFloat = 0
+    @State private var driver = ScrollDriver()
 
     /// The coordinate space of the Topics list's content, from the top of its first item.
     static let contentSpace = "topics-content"
@@ -145,6 +148,7 @@ private struct TopicsSection: View {
                     }
                 }
                 .coordinateSpace(.named(Self.contentSpace))
+                .background { ScrollDriverView(driver: driver) }
                 .onOverhangingBottomEdge(of: TopicCard.viewport, upTo: MoreBelowLine.height) { listEnd = $0 }
                 // An In Play card that crosses the hidden line opens the Bench, so the user sees what it can trade with.
                 .onChange(of: drag.isAcross) { _, across in
@@ -164,11 +168,19 @@ private struct TopicsSection: View {
                 // The drag's stack shows the Benched cards where the Bench scrolled them.
                 .onChange(of: stick, initial: true) { _, stick in drag.scrollArea(by: stick) }
                 .padding(.horizontal, 6).padding(.vertical, Self.contentInset)
-                .onGeometryChange(for: CGFloat.self) { -$0.frame(in: .named(TopicCard.viewport)).minY } action: { scrollOffset = $0 }
+                // Only a list with a Bench line draws again as it scrolls.
+                .onGeometryChange(for: CGFloat.self) { parts.bench == nil ? 0 : -$0.frame(in: .named(TopicCard.viewport)).minY } action: {
+                    scrollOffset = $0
+                }
             }
             .coordinateSpace(.named(TopicCard.viewport))
             .scrollIndicators(.never)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { viewportHeight = $0 }
+            .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).minY } action: { viewportTop = $0 }
+            .background {
+                EdgeAutoScroller(drag: drag, driver: driver, viewportTop: viewportTop,
+                                 geometry: parts.bench == nil ? nil : geometry, viewportHeight: viewportHeight)
+            }
             .accessibilityIdentifier("topics-list")
             .overlay {
                 if model.rows.isEmpty && model.openedNoTopicSession == nil && model.groups.isEmpty {
@@ -255,6 +267,24 @@ private struct TopicsSection: View {
     private func renameTopic(_ id: String) {
         guard let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return }
         store.palette.begin(.text(.renameTopic(topic)), text: topic.title ?? "")
+    }
+}
+
+/// Hands a lifted card's pointer to `driver`, so the Topics list scrolls while the pointer rests at an edge: the edges
+/// of the Bench area under the block that sticks, or of the whole list without a Bench line. A view of its own, so only
+/// it draws again as the pointer moves.
+private struct EdgeAutoScroller: View {
+    let drag: ListDrag<TopicListID>
+    let driver: ScrollDriver
+    let viewportTop: CGFloat
+    let geometry: BenchGeometry?
+    let viewportHeight: CGFloat
+
+    var body: some View {
+        Color.clear.onChange(of: drag.pointer.map { $0 - viewportTop }, initial: true) { _, pointer in
+            let geometry = geometry, height = viewportHeight
+            driver.autoScroll(pointer: pointer) { offset in geometry?.autoScrollRange(at: offset) ?? 0...height }
+        }
     }
 }
 
