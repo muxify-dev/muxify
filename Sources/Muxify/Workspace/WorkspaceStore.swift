@@ -23,7 +23,7 @@ final class WorkspaceStore {
     @ObservationIgnored private var readVisits = AgentReadVisits()
     @ObservationIgnored private var readWindowID: String?
     @ObservationIgnored private var readGeneration = 0
-    @ObservationIgnored private var pendingReads = 0
+    private var pendingReads = 0
     private var readSnapshotPending = false
     private var pendingReadNavigations: Set<UUID> = []
 
@@ -1057,7 +1057,7 @@ final class WorkspaceStore {
     @ObservationIgnored private var started = false
     @ObservationIgnored private var connection: TmuxConnection?
     @ObservationIgnored private var generation = UUID()
-    @ObservationIgnored private var isTransitioning = false
+    private var isTransitioning = false
     @ObservationIgnored private var reconnectWork: DispatchWorkItem?
     @ObservationIgnored private var reconnectAttempt = 0
     @ObservationIgnored private var attachmentTarget: Target?
@@ -1730,7 +1730,10 @@ final class WorkspaceStore {
                        reconnectIfNeeded: Bool = true, onFailure: ((Error) -> Void)? = nil) {
         let old = location
         let facts = facts ?? routingFacts()
-        let effects = router.handle(event, facts)
+        var next = router
+        let effects = next.handle(event, facts)
+        // Each tmux read routes, and an unchanged write would still build `topics` and the whole Sidebar again.
+        if next != router { router = next }
         if old != location { locationChanged(from: old) }
         for effect in effects {
             switch effect {
