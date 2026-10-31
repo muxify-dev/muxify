@@ -1,7 +1,6 @@
 import XCTest
 import MuxifyCore
 import MuxifyTestSupport
-@testable import Muxify
 
 /// Runs the events client against a throwaway tmux server.
 final class TmuxEventsTests: XCTestCase {
