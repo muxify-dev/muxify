@@ -43,17 +43,10 @@ enum DropLanding<ID: Hashable>: Equatable {
 enum StackSlot<ID: Hashable>: Hashable {
     case item(ID)
     case fixed(String)
-    /// An item that keeps its place in this drag, as a fixed view does. It has the height that its item measured.
-    case held(ID)
 
     var item: ID? {
         if case .item(let id) = self { return id }
         return nil
-    }
-
-    var measured: StackSlot<ID> {
-        if case .held(let id) = self { return .item(id) }
-        return self
     }
 }
 
@@ -71,7 +64,7 @@ struct StackLayout<ID: Hashable> {
         return top
     }
 
-    func height(_ slot: StackSlot<ID>) -> CGFloat { heights[slot.measured] ?? 0 }
+    func height(_ slot: StackSlot<ID>) -> CGFloat { heights[slot] ?? 0 }
 
     /// Where `id` lands after it moved `translation` down from its place in `order`: before the first item above it
     /// whose middle its top edge passed, after the last item below it whose middle its bottom edge passed, or nil at
@@ -270,7 +263,7 @@ final class ListDrag<ID: Hashable> {
     }
 
     private func updateLayout() {
-        let measured = Set(order.map(\.measured))
+        let measured = Set(order)
         let heights = heights.filter { measured.contains($0.key) }
         if heights != layout.heights { layout.heights = heights }
     }

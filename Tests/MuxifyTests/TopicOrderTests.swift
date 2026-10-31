@@ -112,16 +112,6 @@ final class TopicOrderTests: XCTestCase {
         XCTAssertEqual(layout.landing(of: "a", movedBy: 72, in: order, divider: "line"), .across(trade: nil))
     }
 
-    func testAHeldItemKeepsItsPlaceAndIsNoPlaceToLand() {
-        // a at 0–40, the line at 46–66, h at 72–112, c at 118–158, d at 164–204.
-        let layout = StackLayout(heights: [.item("a"): 40, .fixed("line"): 20, .item("h"): 40, .item("c"): 40, .item("d"): 40],
-                                 spacing: 6)
-        let order: [StackSlot<String>] = [.item("a"), .fixed("line"), .held("h"), .item("c"), .item("d")]
-        XCTAssertEqual(layout.top(of: .item("c"), in: order), 118, "a held item has the height that its item measured")
-        XCTAssertNil(layout.landing(of: "c", movedBy: -50, in: order, divider: "line"), "c passes h and does not land before it")
-        XCTAssertEqual(DropPlacement.after("d").placing("c", in: order), [.item("a"), .fixed("line"), .held("h"), .item("d"), .item("c")])
-    }
-
     @MainActor func testADropOnATradeTargetPassesTheTwoItemsToEachOthersPlaces() {
         let drag = ListDrag<String>(spacing: 6, tradesAcross: "line")
         let all: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line"), .item("c"), .item("d")]

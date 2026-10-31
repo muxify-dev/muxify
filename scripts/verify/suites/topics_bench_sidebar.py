@@ -240,7 +240,7 @@ class TopicsBenchSidebar(TopicsSidebar):
                     == ['topic-bench-visit-drag-b', LINE, 'topic-bench-visit-drag-a', 'topic-bench-visit-drag-c'],
                     'the card it replaced did not take its place on the Bench: %s' % self.cards('bench-visit-drag', s.rows()))
 
-    def test_the_benched_card_of_the_location_stays_right_under_the_line_when_the_bench_shows(self):
+    def test_a_shown_bench_shows_the_benched_card_of_the_location_at_its_place_in_the_list(self):
         s = self.s
         windows = self.bench_topics('bench-visit-open')
         s.wait_rows(lambda rs: self.line(rs) is not None, 'with topics.in_play: 1, the Sidebar shows no Bench line')
@@ -250,8 +250,8 @@ class TopicsBenchSidebar(TopicsSidebar):
                     'the Benched card of the Location does not show under the line: %s' % s.ids())
         saved = self.orders('bench-visit-open')
         self.show_bench()
-        s.wait_rows(lambda rs: self.shown_after_line(rs) == ['topic-bench-visit-open-c', 'topic-bench-visit-open-b'],
-                    'the card of the Location moved when the Bench showed: %s' % self.shown_after_line(s.rows()))
+        s.wait_rows(lambda rs: self.shown_after_line(rs) == ['topic-bench-visit-open-b', 'topic-bench-visit-open-c'],
+                    'the shown Bench is not in list order: %s' % self.shown_after_line(s.rows()))
         self.assertEqual(self.orders('bench-visit-open'), saved, 'showing the Bench changed the order')
 
     def test_the_benched_card_of_the_location_dragged_up_and_back_below_the_hidden_line_keeps_its_place(self):
