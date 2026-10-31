@@ -674,7 +674,6 @@ final class WorkspaceStore {
     func perform(_ request: EnvironmentRequest, presenting presentation: TopicPresentation = .edit, onLocalServer: Bool = false,
                  before: [[String]] = []) -> Bool {
         guard !changingTopic else { return false }
-        flushTopicMemory()
         let browserCommands = pendingBrowserCommands
         changingTopic = true
         topicEditGeneration += 1
@@ -686,15 +685,16 @@ final class WorkspaceStore {
         let environment = generation
         let invocation = palette.invocation
         Task { [weak self] in
+            await self?.flushTopicMemory()
             let response = await Task.detached(priority: .userInitiated) {
                 for arguments in browserCommands { _ = try? TmuxServer.app.run(arguments) }
                 if !before.isEmpty { _ = try? service.server.run(Array(before.joined(separator: [";"]))) }
                 return service.handle(request, client: client)
             }.value
             guard let self else { return }
+            await self.topicWatcher.reloaded()
             guard self.generation == environment else {
                 self.changingTopic = false
-                self.topicWatcher.reload()
                 self.refresh(attachIfNeeded: true)
                 return
             }
@@ -723,7 +723,6 @@ final class WorkspaceStore {
     }
 
     private func present(_ response: EnvironmentResponse, as presentation: TopicPresentation, invocation: UUID) {
-        topicWatcher.reload()
         changingTopic = false
         let ownsPalette = palette.invocation == invocation
         switch response {
@@ -789,12 +788,13 @@ final class WorkspaceStore {
         refresh(attachIfNeeded: changed && surface == nil)
     }
 
-    /// Writes the remembered Sessions that wait for their write delay.
-    private func flushTopicMemory() {
+    /// Writes the remembered Sessions that wait for their write delay, after the writes that already run.
+    private func flushTopicMemory() async {
+        if !persistingTopics.isEmpty { await topicWatcher.caughtUp() }
         for id in Array(topicSnapshots.keys) {
             topicPersistWork[id]?.cancel()
             topicPersistWork[id] = nil
-            persistRememberedTopic(id)
+            await persistRememberedTopic(id)
         }
     }
 
@@ -1059,6 +1059,8 @@ final class WorkspaceStore {
     @ObservationIgnored private var topicSnapshotBases: [String: [JSONValue]] = [:]
     @ObservationIgnored private var memoryServerID: String?
     @ObservationIgnored private var topicPersistWork: [String: DispatchWorkItem] = [:]
+    /// The Topics whose remembered Sessions are being written now.
+    @ObservationIgnored private var persistingTopics: Set<String> = []
     /// Each Window's Git View, made when it first opens and kept while the
     /// Window lives. Observed, for the sidebar's Git View icons.
     private var gitViews: [String: GitView] = [:]
@@ -1665,14 +1667,16 @@ final class WorkspaceStore {
     /// request would make the next edit wait until it ends.
     private func readTopicsOnVisit(_ ids: Set<String>) {
         guard !config.notifications.manualRead, !isRemote, !isTransitioning, !ids.isEmpty else { return }
-        do {
-            try topicWatcher.write { transaction in
-                for record in transaction.records where ids.contains(record.id) && record.isUnread {
-                    try transaction.update(record.id) { $0.isUnread = false }
+        Task {
+            do {
+                try await topicWatcher.write { transaction in
+                    for record in transaction.records where ids.contains(record.id) && record.isUnread {
+                        try transaction.update(record.id) { $0.isUnread = false }
+                    }
                 }
+            } catch {
+                showTopicFailure(error)
             }
-        } catch {
-            showTopicFailure(error)
         }
     }
 
@@ -2427,34 +2431,52 @@ final class WorkspaceStore {
                 topicPersistWork[record.id]?.cancel()
                 topicPersistWork[record.id] = nil
             }
-            let id = record.id
-            guard topicPersistWork[id] == nil, topicSnapshots[id] != nil else { continue }
-            let work = DispatchWorkItem { [weak self] in
-                guard let self else { return }
-                self.topicPersistWork[id] = nil
-                guard !self.changingTopic else { return }
-                self.persistRememberedTopic(id)
-            }
-            topicPersistWork[id] = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+            schedulePersist(record.id)
         }
+    }
+
+    /// Writes the Topic's remembered Sessions after the write delay, unless a write is already waiting or runs.
+    private func schedulePersist(_ id: String) {
+        guard topicPersistWork[id] == nil, !persistingTopics.contains(id), topicSnapshots[id] != nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.topicPersistWork[id] = nil
+            guard !self.changingTopic else { return }
+            Task { await self.persistRememberedTopic(id) }
+        }
+        topicPersistWork[id] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
 
     /// Writes the Sessions that the last snapshot gave the Topic onto its record as it is on disk now.
     /// When another writer changed the Sessions after the snapshot, as `muxify topic remove` does, the snapshot
     /// is stale and is dropped: it would put a removed Session back, and the Topic would be Dormant, not Empty.
-    private func persistRememberedTopic(_ id: String) {
-        guard let updated = rememberedTopics[id] else { return }
+    private func persistRememberedTopic(_ id: String) async {
+        guard let updated = rememberedTopics[id], !persistingTopics.contains(id) else { return }
         let base = topicSnapshotBases[id]
+        persistingTopics.insert(id)
+        defer { persistingTopics.remove(id) }
+        let wrote: Bool
         do {
-            try topicWatcher.write { transaction in
-                guard let current = transaction.records.first(where: { $0.id == id }), current.sessions == base else { return }
+            wrote = try await topicWatcher.write { transaction in
+                guard let current = transaction.records.first(where: { $0.id == id }), current.sessions == base else { return false }
                 try transaction.update(id) { $0.sessions = updated.sessions }
+                return true
             }
-            rememberedTopics[id] = nil
-            topicSnapshots[id] = nil
-            topicSnapshotBases[id] = nil
-        } catch { Diagnostics.report("remembering Topic \(id): \(error)") }
+        } catch {
+            Diagnostics.report("remembering Topic \(id): \(error)")
+            return
+        }
+        // A snapshot while the write ran remembered more. It goes onto the Sessions this write left on disk.
+        if wrote, rememberedTopics[id]?.sessions != updated.sessions {
+            topicSnapshotBases[id] = updated.sessions
+            persistingTopics.remove(id)
+            schedulePersist(id)
+            return
+        }
+        rememberedTopics[id] = nil
+        topicSnapshots[id] = nil
+        topicSnapshotBases[id] = nil
     }
 
     // MARK: - Keyboard

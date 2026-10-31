@@ -34,7 +34,9 @@ final class TopicsTests: XCTestCase {
         wait(for: [changed], timeout: 0.95)
         secondTimer.invalidate()
         try FileManager.default.removeItem(at: file)
-        store.reload()
+        let reloaded = expectation(description: "a reload shows the removal")
+        Task { await store.reloaded(); reloaded.fulfill() }
+        wait(for: [reloaded], timeout: 2)
         XCTAssertTrue(store.records.isEmpty)
     }
 
