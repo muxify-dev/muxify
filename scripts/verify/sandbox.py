@@ -13,7 +13,6 @@ teardown first copies the app logs to the evidence folder of the run, which
 nothing deletes.
 """
 
-import fcntl
 import hashlib
 import json
 import os
@@ -428,14 +427,6 @@ def frame(row):
     """(bottom, top) of a dump row's accessibilityFrame, in screen points: a larger value is higher on screen."""
     x, y, width, height = map(float, re.findall(r'-?[\d.]+', row['accessibilityFrame']))
     return y, y + height
-
-
-def remove_topic(path):
-    """Deletes a Topic record while holding the app's record lock (MuxifyPaths.recordLock). An app write reads a
-    record and renames its new version in under that lock, so a delete between the two would bring the record back."""
-    with open(path.parent.parent/'topics.lock', 'a') as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        path.unlink(missing_ok=True)
 
 
 def sweep():

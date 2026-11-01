@@ -13,6 +13,7 @@ import subprocess
 import unittest
 
 from scripts.verify.sandbox import DEBUG_APP, Sandbox, wait
+from scripts.verify.topic_records import TopicRecords
 
 CLI = DEBUG_APP/'Contents/Resources/bin/muxify'
 
@@ -42,6 +43,7 @@ class WorktreesCli(unittest.TestCase):
         s.tmux('new-session', '-d', '-s', 'base', '-c', str(s.root))
         cls.pane = s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
         cls.records = s.root/'state/muxify/worktrees'
+        cls.store = TopicRecords(s.root/'state/muxify')
 
     def muxify(self, *args, cwd, pane=None):
         environment = dict(self.s.env, TMUX_PANE=pane or self.pane)
@@ -176,7 +178,7 @@ class WorktreesCli(unittest.TestCase):
         self.assertEqual((worktree/'.envrc').read_text(), 'export SECRET=1\n', 'the Topic Worktree did not get its sync')
         wait(lambda: (worktree/'post-created.log').exists(), 'postCreate did not run in the Topic Session', seconds=15)
         [record] = self.records_of('worktree-topic')
-        topic = json.loads((self.s.root/'state/muxify/topics'/(topic_id + '.json')).read_text())
+        topic = self.store.get(topic_id)
         self.assertIn(record['id'], [s.get('worktree_id') for s in topic['sessions']], topic)
         listed = self.muxify('worktree', 'list', '--json', cwd=repository)
         [shown] = [w for w in json.loads(listed.stdout)['worktrees'] if w['id'] == record['id']]
@@ -184,7 +186,7 @@ class WorktreesCli(unittest.TestCase):
 
         removed = self.muxify('worktree', 'remove', 'worktree-topic', '--kill', cwd=repository)
         self.assertEqual(removed.returncode, 0, removed.stderr)
-        topic = json.loads((self.s.root/'state/muxify/topics'/(topic_id + '.json')).read_text())
+        topic = self.store.get(topic_id)
         self.assertEqual([s for s in topic['sessions'] if s.get('worktree_path')], [], 'the Topic still remembers the removed Worktree')
 
 

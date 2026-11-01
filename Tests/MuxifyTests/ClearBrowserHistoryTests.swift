@@ -24,7 +24,7 @@ final class ClearBrowserHistoryTests: XCTestCase {
         let directory = try TestDirectory()
         let history = history(directory)
         let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify-clear-history.yaml"), browserHistory: history)
-        defer { store.palette.close(restoringFocus: false) }
+        defer { store.palette.close() }
         XCTAssertFalse(store.palette.commands.contains(.clearBrowserHistory), "nothing to clear while it is off and has no file")
 
         history.setEnabled(true)

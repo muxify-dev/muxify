@@ -542,7 +542,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         s.tmux('kill-session', '-t', sid)
         wait(lambda: self.records()['split-dormant'].get('sessions') == [], 'confirmed closure did not empty the Topic')
         # A deliberate saved-layout fixture; individually stopped Sessions no longer reopen themselves.
-        (self.topics_dir/'split-dormant.json').write_text(json.dumps(saved))
+        self.store.put(saved)
         self.find('topic-split-dormant')
         s.wait_rows(lambda rs: 'Dormant' in self.describe('topic-split-dormant', rs), 'the Topic did not become Dormant')
 

@@ -445,7 +445,9 @@ private struct TabContent: View {
         guard let request = browser.focusRequest else { return }
         browser.focusRequest = nil
         switch request {
-        case .addressBar: DispatchQueue.main.async { addressFocused = true }
+        case .addressBar:
+            tab.cancelWaitingPageFocus()
+            DispatchQueue.main.async { addressFocused = true }
         case .page: focusPage()
         }
     }
@@ -457,10 +459,7 @@ private struct TabContent: View {
 
     private func focusPage() {
         addressFocused = false
-        DispatchQueue.main.async {
-            guard tab.webView.window?.makeFirstResponder(tab.webView) == true else { return }
-            BrowserPageScripts.focusMainPart(of: tab.webView)
-        }
+        DispatchQueue.main.async { tab.focusPage() }
     }
 
     private func scanPorts() {
@@ -561,22 +560,34 @@ private struct SuggestionRow: View {
 private struct WebViewHost: NSViewRepresentable {
     let tab: BrowserTab
 
-    func makeNSView(context: Context) -> NSView {
-        let container = NSView()
+    func makeNSView(context: Context) -> PageHostView {
+        let container = PageHostView()
         attach(to: container)
         return container
     }
 
-    func updateNSView(_ container: NSView, context: Context) {
+    func updateNSView(_ container: PageHostView, context: Context) {
         attach(to: container)
     }
 
-    private func attach(to container: NSView) {
+    private func attach(to container: PageHostView) {
+        container.tab = tab
         let pageView = tab.pageView
         guard pageView.superview !== container else { return }
         pageView.removeFromSuperview()
         pageView.frame = container.bounds
         pageView.autoresizingMask = [.width, .height]
         container.addSubview(pageView)
+        if container.window != nil { tab.pageEnteredWindow() }
+    }
+}
+
+/// Tells the Tab when its page comes into a window, so a Focus that waited for the page completes.
+private final class PageHostView: NSView {
+    weak var tab: BrowserTab?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { tab?.pageEnteredWindow() }
     }
 }

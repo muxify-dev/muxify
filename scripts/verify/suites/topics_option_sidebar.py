@@ -1,4 +1,4 @@
-"""Topics in the Sidebar: the tmux Topic option, Topic files, the Sidebar views, New Topic and the muxify://topic URL.
+"""Topics in the Sidebar: the tmux Topic option, Topic records, the Sidebar views, New Topic and the muxify://topic URL.
 
 The fixture and the helpers that several suites use are in scripts/verify/topics_sidebar.py.
 
@@ -6,7 +6,6 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_option_sidebar
 """
 
-import fcntl
 import json
 import os
 import subprocess
@@ -14,13 +13,13 @@ import time
 import unittest
 from urllib.parse import quote
 
-from scripts.verify.sandbox import remove_topic, wait
+from scripts.verify.sandbox import wait
 from scripts.verify.topics_sidebar import REFRESH_LIMIT, TopicsSidebar
 
 
 class TopicsOptionSidebar(TopicsSidebar):
     def test_app_answers_while_another_process_holds_the_topic_records(self):
-        # The held record lock stands in for a file open that a virus scanner holds for seconds. A new Topic file and a
+        # The held record lock stands in for a file open that a virus scanner holds for seconds. A new Topic record and a
         # renamed Window of a Topic make the app read and write the records while the lock is held.
         s = self.s
         self.write_topic('held-records', 'Held records', self.beta, order=-1000200)
@@ -29,8 +28,7 @@ class TopicsOptionSidebar(TopicsSidebar):
         saved_names = lambda: [w.get('name') for row in self.records()['held-records'].get('sessions', [])
                                for w in row.get('windows', [])]
         wait(lambda: saved_names(), 'the Topic did not remember its Session')
-        with open(self.topics_dir.parent/'topics.lock', 'a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+        with self.store.held():
             self.write_topic('held-newcomer', 'Held newcomer', self.beta, order=-1000199)
             s.tmux_ok('rename-window', '-t', window, 'held-rename')
             slowest, end = 0, time.monotonic() + 3
@@ -183,7 +181,7 @@ class TopicsOptionSidebar(TopicsSidebar):
         subprocess.run(['open', '-g', '-a', str(self.s.app), url], check=True, capture_output=True)
         record = wait(lambda: next((r for r in self.records().values() if r.get('title') == 'URL proof'), None),
                       'no Topic record for the URL', seconds=10)
-        self.addCleanup(remove_topic, self.topics_dir/(record['id'] + '.json'))
+        self.addCleanup(self.store.remove, record['id'])
         self.assertEqual(record.get('sessions', []), [], 'the URL Topic is not Empty')
         rs = self.s.wait_rows(lambda rs: self.s.has('topic-' + record['id'], rs), 'no card for the URL Topic')
         self.assertEqual(self.s.tmux('list-sessions', '-F', '#{session_id}'), sessions, 'the URL started a Session')

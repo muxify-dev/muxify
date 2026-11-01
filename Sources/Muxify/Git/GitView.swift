@@ -504,8 +504,12 @@ final class GitView {
         startRefreshing()
     }
 
-    func close(restoringFocus: Bool = true) {
+    /// Gives Focus back to the view that had it before the Git View opened, when the key view has it now. Else the
+    /// Focus rule (ADR 0065) gives it to a side once the key view is gone, unless a step after the close takes it.
+    func close() {
         guard isOpen else { return }
+        let window = store?.terminalHost.window
+        let keyViewHasFocus = hasKeyFocus(in: window)
         isOpen = false
         store?.terminalVisibilityChanged()
         base = nil
@@ -528,13 +532,8 @@ final class GitView {
         stopRefreshing()
         let responder = previousResponder
         previousResponder = nil
-        guard restoringFocus, let store else { return }
-        DispatchQueue.main.async { [weak store] in
-            guard let store else { return }
-            if let responder, responder !== self.keyView,
-               let window = store.terminalHost.window, window.makeFirstResponder(responder) { return }
-            store.moveFocusIntoWindow()
-        }
+        guard keyViewHasFocus, let window, let responder, responder !== keyView else { return }
+        DispatchQueue.main.async { window.makeFirstResponder(responder) }
     }
 
     /// The Location left its Window, for another Window or an Empty Topic
@@ -1953,7 +1952,7 @@ final class GitView {
     private func openInBrowser(_ url: URL) {
         guard let store else { return }
         store.openInBrowser(url, windowID: windowID)
-        if store.config.gitView.display == .popup { close(restoringFocus: false) }
+        if store.config.gitView.display == .popup { close() }
         if isCurrent { store.browser(for: windowID).requestFocus() }
     }
 

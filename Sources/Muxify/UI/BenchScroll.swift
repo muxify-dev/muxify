@@ -13,6 +13,8 @@ struct BenchGeometry: Equatable {
     var spacing: CGFloat = 6
     /// The content's padding above the block and below the Bench.
     var inset: CGFloat = 4
+    /// The band at the top of the Bench area that the "more above" pill lies in while cards are above the area.
+    var indicatorHeight: CGFloat = EdgePill.height
 
     /// The Bench area is never shorter than this while the block sticks.
     static let leastAreaHeight: CGFloat = 96
@@ -35,6 +37,13 @@ struct BenchGeometry: Equatable {
     /// Where a Benched card's top stands when it is directly under the line, as a part of the viewport's height: the
     /// anchor that puts a mark of no height at the card's top there.
     var underLine: CGFloat { viewportHeight > 0 ? (areaTop + spacing) / viewportHeight : 0 }
+
+    /// Where a Benched card's top stands when it is directly under the "more above" pill, as `underLine` is.
+    var underIndicator: CGFloat { viewportHeight > 0 ? (areaTop + indicatorHeight + spacing) / viewportHeight : 0 }
+
+    /// The anchor that reveals a Benched card: under the line for the first Benched card, under the pill for a card
+    /// with Benched cards before it, because the pill shows while those cards are above the area.
+    func revealAnchor(hasCardsAbove: Bool) -> CGFloat { hasCardsAbove ? underIndicator : underLine }
 
     /// The part of the viewport whose edges scroll the list while a lifted card's pointer rests there: from the
     /// block's bottom to the viewport's bottom, or from the viewport's top while the block still scrolls.
@@ -91,18 +100,22 @@ struct BenchedLocationPlace: Equatable {
     /// The card's top, in the viewport's points.
     var top: CGFloat
     var isBenchShown: Bool
+    /// Benched cards come before it in the list, so a shown Bench has cards above the area, under the "more above"
+    /// pill.
+    var hasCardsAbove: Bool
 
     /// How far to scroll so that the card is back where it stood at the layout before, `before`: the distance the
-    /// cards that just showed above it pushed it down. Nil unless the Bench showed between the two layouts, so a scroll
-    /// of a shown Bench or a hide does not scroll again.
-    func openingScroll(after before: BenchedLocationPlace?) -> CGFloat? {
+    /// cards that just showed above it pushed it down, less the pill's band when those cards put the pill over the
+    /// card's top. Nil unless the Bench showed between the two layouts, so a scroll of a shown Bench or a hide does not
+    /// scroll again.
+    func openingScroll(after before: BenchedLocationPlace?, indicatorHeight: CGFloat) -> CGFloat? {
         guard let before, !before.isBenchShown, isBenchShown else { return nil }
-        return top - before.top
+        return max(0, top - before.top - (hasCardsAbove ? indicatorHeight : 0))
     }
 }
 
 /// Where a card stands against the part of a scroll view the user sees: from `visibleTop`, which is the bottom of a
-/// block that sticks over it, down to the viewport's bottom. The "more above" and "more below" lines count from it, and a
+/// block that sticks over it, down to the viewport's bottom. The "more above" and "more below" pills count from it, and a
 /// Jump To scrolls only to a card that is out of view.
 struct EdgePlace: Equatable {
     /// The card's top is above the visible top, also when the rest of it shows.
@@ -111,18 +124,29 @@ struct EdgePlace: Equatable {
     var isBelow: Bool
     /// No point of the card shows.
     var isOutOfView: Bool
+    /// The card's top is in or above the band of the "more above" pill, so the pill covers it when it shows. The pill
+    /// shows because a card `isAbove`; it then counts the cards `isUnderIndicator`, which include that card.
+    var isUnderIndicator: Bool
+    /// The card's bottom is in or below the band of the "more below" pill, so the pill covers it when it shows. The
+    /// pill shows because a card `isBelow`; it then counts the cards `isOverBottomIndicator`, which include that card.
+    var isOverBottomIndicator: Bool
 
     /// The place of a card from `top` to `bottom`, in the viewport's points. One point of slack at each edge, so a
     /// card that ends on an edge is in view.
-    init(top: CGFloat, bottom: CGFloat, visibleTop: CGFloat, visibleBottom: CGFloat) {
+    init(top: CGFloat, bottom: CGFloat, visibleTop: CGFloat, visibleBottom: CGFloat, indicatorHeight: CGFloat) {
         isAbove = top < visibleTop - 1
         isBelow = bottom > visibleBottom + 1
         isOutOfView = bottom <= visibleTop + 1 || top >= visibleBottom - 1
+        isUnderIndicator = top < visibleTop + indicatorHeight - 1
+        isOverBottomIndicator = bottom > visibleBottom - indicatorHeight + 1
     }
 
-    init(isAbove: Bool = false, isBelow: Bool = false, isOutOfView: Bool = false) {
+    init(isAbove: Bool = false, isBelow: Bool = false, isOutOfView: Bool = false, isUnderIndicator: Bool = false,
+         isOverBottomIndicator: Bool = false) {
         self.isAbove = isAbove
         self.isBelow = isBelow
         self.isOutOfView = isOutOfView
+        self.isUnderIndicator = isUnderIndicator
+        self.isOverBottomIndicator = isOverBottomIndicator
     }
 }

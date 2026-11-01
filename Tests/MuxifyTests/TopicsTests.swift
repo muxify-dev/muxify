@@ -13,20 +13,19 @@ final class TopicsTests: XCTestCase {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: state) }
         let paths = MuxifyPaths(environment: ["XDG_STATE_HOME": state.path], home: "/nonexistent")
-        let directory = paths.topics
         let store = TopicWatcher(store: TopicStore(paths: paths))
         store.start()
         XCTAssertTrue(store.records.isEmpty)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let file = directory.appendingPathComponent("external.json")
-        try Data(#"{"id":"external","title":"First"}"#.utf8).write(to: file, options: .atomic)
+        try FileManager.default.createDirectory(at: paths.state, withIntermediateDirectories: true)
+        let file = paths.topicRecords
+        try Data(#"{"records":[{"id":"external","title":"First"}],"open_places":[]}"#.utf8).write(to: file, options: .atomic)
         let appeared = expectation(description: "external Topic appears within one second")
         let firstTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { timer in
             if store.records.first?.title == "First" { timer.invalidate(); appeared.fulfill() }
         }
         wait(for: [appeared], timeout: 0.95)
         firstTimer.invalidate()
-        try Data(#"{"id":"external","title":"Second"}"#.utf8).write(to: file, options: .atomic)
+        try Data(#"{"records":[{"id":"external","title":"Second"}],"open_places":[]}"#.utf8).write(to: file, options: .atomic)
         let changed = expectation(description: "external replacement appears within one second")
         let secondTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { timer in
             if store.records.first?.title == "Second" { timer.invalidate(); changed.fulfill() }

@@ -171,7 +171,7 @@ final class TopicServiceTests: XCTestCase {
             try TopicStore(paths: paths).write { try $0.create(record) }
             try assertThrowawayServer()
             _ = try change(service().handle(EnvironmentRequest(.forget(choices: [], worktrees: []), target: .topic(.id(state)))))
-            XCTAssertFalse(FileManager.default.fileExists(atPath: paths.topics.appendingPathComponent(state + ".json").path))
+            XCTAssertNil(try paths.storedTopicRecord(state))
         }
     }
 
@@ -737,14 +737,12 @@ final class TopicServiceTests: XCTestCase {
         guard case .topics = service.handle(EnvironmentRequest(.list)) else { return XCTFail("a list does not wait for an edit") }
     }
 
-    func testListGivesTheOpenTopicsWithTheirLabelsAndSkipsInvalidFiles() throws {
-        try FileManager.default.createDirectory(at: paths.topics, withIntermediateDirectories: true)
-        let files = [
-            "a.json": #"{"id":"a","title":"Fix"}"#, "b.json": #"{"id":"b","slug":"fix-login"}"#, "c.json": #"{"id":"c","title":""}"#,
-            "d.json": #"{"id":"d","title":"Done","settled_at":"2026-10-01T10:00:00Z"}"#,
-            "e.json": #"{"id":"e","title":7}"#, "f.json": #"{"id":"other"}"#,
-        ]
-        for (name, text) in files { try Data(text.utf8).write(to: paths.topics.appendingPathComponent(name)) }
+    func testListGivesTheOpenTopicsWithTheirLabelsAndSkipsInvalidEntries() throws {
+        try paths.seedTopicRecords(entries: [
+            #"{"id":"a","title":"Fix"}"#, #"{"id":"b","slug":"fix-login"}"#, #"{"id":"c","title":""}"#,
+            #"{"id":"d","title":"Done","settled_at":"2026-10-01T10:00:00Z"}"#,
+            #"{"id":"e","title":7}"#, #"{"id":"a","title":"Twin"}"#,
+        ])
         XCTAssertEqual(service().handle(EnvironmentRequest(.list)), .topics([
             TopicSummary(id: "a", label: "Fix"), TopicSummary(id: "b", label: "fix-login"), TopicSummary(id: "c", label: "Untitled Topic"),
         ]))
@@ -752,10 +750,10 @@ final class TopicServiceTests: XCTestCase {
 
     func testTheSettlePreviewOffersEachLiveSessionAndChangesNothing() throws {
         let id = try topicWithSession("Ship", at: sessionPath.folder.path, using: service())
-        let before = try Data(contentsOf: paths.topics.appendingPathComponent(id + ".json"))
+        let before = try Data(contentsOf: paths.topicRecords)
         let choices = try service().settleChoices(for: .topic(.id(id))).get()
         XCTAssertEqual(choices.map(\.name), ["game/ship"])
-        XCTAssertEqual(try Data(contentsOf: paths.topics.appendingPathComponent(id + ".json")), before)
+        XCTAssertEqual(try Data(contentsOf: paths.topicRecords), before)
     }
 
     /// A Topic with a Session in game and one in tools.
@@ -1481,7 +1479,7 @@ final class TopicServiceTests: XCTestCase {
     func testReopenFailsAndChangesNothingWhenTheRecordedBaseIsGone() throws {
         let app = try repository()
         let (id, base) = try settledWithGoneWorktree(of: app)
-        let file = paths.topics.appendingPathComponent(id + ".json")
+        let file = paths.topicRecords
         let missing = String(repeating: "0", count: 40)
         try String(contentsOf: file, encoding: .utf8).replacingOccurrences(of: base, with: missing).write(to: file, atomically: true, encoding: .utf8)
         let before = try records()

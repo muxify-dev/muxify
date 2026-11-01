@@ -1,8 +1,22 @@
-# Topic record files
+# The Topic records file
 
-Store one UTF-8 JSON object in `$XDG_STATE_HOME/muxify/topics/<id>.json`.
-If `XDG_STATE_HOME` is absent, use `~/.local/state/muxify/topics/`.
-The filename must match the `id` field. The id must be a nonempty filename without `/`.
+Every Topic record and the Open Places are one UTF-8 JSON object in
+`$XDG_STATE_HOME/muxify/topics.json`. If `XDG_STATE_HOME` is absent, use
+`~/.local/state/muxify/topics.json`.
+
+```json
+{
+  "open_places": [{"id": "6f1c0d2e", "order": 2.5}],
+  "records": [{"id": "reward-drop", "title": "Fix reward drop"}]
+}
+```
+
+`records` holds one object for each Topic, in id order by bytes. `open_places`
+holds the Open Places of the Topics list, each with its `id` and its `order`
+in the scale of the records' `order`. An id must be nonempty, not `.` or `..`,
+and have no `/`.
+
+A record:
 
 ```json
 {
@@ -79,16 +93,37 @@ space, and removes the key for text with no words. Settle and Reopen keep the
 Note.
 
 The store retains unknown JSON fields during writes, including nested fields
-in remembered Sessions and Windows. Writes replace the file atomically. The
-app checks for external changes every 0.25 seconds.
+in remembered Sessions and Windows. A write that changes anything replaces
+the whole file with one atomic rename, and a write that changes nothing
+writes no file. The app checks the file's inode, modification time and size
+every 0.25 seconds.
 
-The app and `muxify` both write these files. Each write holds an exclusive
+An entry of `records` that is not a valid record, such as a record with a
+field of the wrong type, a second record with the id of an earlier one, or a
+value that is not an object, is reported in the Diagnostics log and written
+back unchanged by every write. A new Topic cannot take its id. A file that is
+not an object with a `records` array is reported, and no write replaces it:
+the write fails and names the file.
+
+The app and `muxify` both write this file. Each write holds an exclusive
 `flock` on `$XDG_STATE_HOME/muxify/topics.lock`, and each read holds a shared
-one. The file stays empty, and Muxify never removes it. A program that writes
-the record files must hold the exclusive lock while it reads, changes and
-writes them. A write rereads the files under the lock. A Topic edit changes
+one. The lock file stays empty, and Muxify never removes it. A program that
+writes the records file must hold the exclusive lock while it reads, changes
+and replaces it. A write rereads the file under the lock. A Topic edit changes
 only the JSON keys that it changed itself, so it keeps a key that another
 writer set while the edit ran.
+
+## Upgrade from one file for each Topic
+
+An older Muxify kept one file for each Topic in `$XDG_STATE_HOME/muxify/topics/`
+and the Open Places in `topics/open-places`. Until the first write, a read
+reads that folder, so nothing disappears after the update. The first write,
+under the record lock, reads the folder, writes `topics.json`, and removes
+each file it read, then the folder when it is empty. A file that is JSON but
+not a record becomes an entry of `records` as it is. A file that is not JSON
+stays in the folder, with the folder, and each read reports that the folder
+stays until you remove it by hand. The write also removes the `.topics-*`
+staging folders that a writer of the old layout left when it crashed.
 
 Live membership comes only from the tmux Session option. For example:
 
@@ -189,7 +224,7 @@ Windows.
 
 ## Locked Sessions
 
-A Lock (ADR 0018) has no record file. tmux keeps it in the Session option
+A Lock (ADR 0018) has no record. tmux keeps it in the Session option
 `@muxify_lock`. Its value is the place of the Session's card in the Topics list,
 in the same scale as the `order` of the Topic records:
 
@@ -240,7 +275,7 @@ writes their new `@muxify_lock` values to tmux.
 
 ## Forget
 
-Forget removes `topics/<id>.json` after it kills or detaches the Topic's live Sessions.
+Forget removes the Topic's record after it kills or detaches the Topic's live Sessions.
 The Topic cannot be Reopened. Forget applies to open, Dormant and Settled Topics.
 Each live Session uses the same Kill or Keep with no Topic choice as Settle.
 The palette presets every Session to Kill. A request that names no choice for a Session, such as a URL or the CLI without `--kill-sessions`, keeps it. Keeping restores its base name, with `+x` on collision.
@@ -258,10 +293,12 @@ Add `--remove-worktrees` to remove eligible Worktrees. The URL forms are
 Both use the Topic service. They keep Worktrees unless the request selects them.
 
 A stale record update or remembered-Session write cannot create the removed Topic again.
-Only an explicit creation with no previous record can create a Topic file.
+Only an explicit creation with no previous record can create a Topic record.
 
 ## One-off beta migration
 
+It rewrites the files of the old layout, one for each Topic in `topics/`; the app
+then moves them into `topics.json` on its first write.
 Quit Muxify and stop Topic CLI edits before migrating. There is no legacy record reader.
 The Bash entry point requires Python 3 and reads tmux without changing Sessions:
 

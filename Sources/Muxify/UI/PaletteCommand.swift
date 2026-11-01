@@ -276,7 +276,7 @@ extension CommandPalette {
         case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addSession, .settleTopic,
              .forgetTopic, .renameTopic, .setTopicNote, .renameWindow, .editTags, .chooseInPlay, .replaceFromBench, .clearBrowserHistory,
              .newWorktree, .removeWorktree: break
-        default: close(restoringFocus: false)
+        default: close()
         }
         switch command {
         case .markRead: store.markCurrentRead()

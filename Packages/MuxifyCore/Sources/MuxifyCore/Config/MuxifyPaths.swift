@@ -19,10 +19,14 @@ public struct MuxifyPaths: Equatable, Sendable {
         }
     }
 
-    public var topics: URL { state.appendingPathComponent("topics", isDirectory: true) }
+    /// Every Topic record and the Open Places, in one file. A write replaces it with one rename.
+    public var topicRecords: URL { state.appendingPathComponent("topics.json") }
+    /// Where an older Muxify kept one file for each Topic. The first write after the update moves them into
+    /// `topicRecords` and removes the folder.
+    public var legacyTopicsFolder: URL { state.appendingPathComponent("topics", isDirectory: true) }
     /// The Zen record of an older Muxify. Only the upgrade of the records reads it, then removes it.
     public var legacyZenFile: URL { state.appendingPathComponent("zen.json") }
-    /// Empty, and never removed: only its lock matters. Every write of the record files holds it.
+    /// Empty, and never removed: only its lock matters. Every write of the records file holds it.
     public var recordLock: URL { state.appendingPathComponent("topics.lock") }
     /// Empty, like the record lock. One Topic edit at a time holds it, from its read to its last tmux command,
     /// so a second edit sees the first one's Topic and Session names before it chooses its own.

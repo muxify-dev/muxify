@@ -47,7 +47,7 @@ final class TopicStoreTests: XCTestCase {
         remembered.sessions = [.object(["repository_path": .string("/sessionPath")])]
         try store.write { try $0.forget(kept.id) }
         XCTAssertEqual(try store.read().records.map(\.id), [other.id])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.topics.appendingPathComponent("kept.json").path))
+        XCTAssertNil(try paths.storedTopicRecord("kept"))
         XCTAssertThrowsError(try store.write { try $0.apply(TopicRecordChange(before: kept, after: remembered)) })
         XCTAssertThrowsError(try store.write { try $0.update(kept.id) { $0.title = "Stale" } })
         XCTAssertEqual(try store.read().records.map(\.id), [other.id])
@@ -61,10 +61,13 @@ final class TopicStoreTests: XCTestCase {
 
     private func records(_ store: TopicStore) throws -> [TopicRecord] { try store.read().records }
 
-    /// Writes the records as they are, as files that another writer left.
+    /// Writes the records as they are, as another writer left them.
     private func seed(_ records: TopicRecord...) throws {
-        try FileManager.default.createDirectory(at: paths.topics, withIntermediateDirectories: true)
-        for record in records { try TopicStore.encoded(record).write(to: paths.topics.appendingPathComponent(record.id + ".json")) }
+        try paths.seedTopicRecords(entries: records.map { String(decoding: try TopicStore.encoded($0), as: UTF8.self) })
+    }
+
+    private func stored(_ id: String) throws -> [String: JSONValue] {
+        try XCTUnwrap(paths.storedTopicRecord(id), "no entry \(id) in the records file")
     }
 
     func testAnOldPlanKeepsTheNoteThatAnotherWriterSet() throws {
@@ -140,13 +143,110 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(try records(store).map(\.title), ["20"], "each increment read the one before it")
     }
 
-    func testAWriteRemovesTheStagingFolderThatACrashedSwapLeft() throws {
-        let store = TopicStore(paths: paths)
-        try store.write { try $0.create(record("a", order: 0)) }
+    func testTheFirstWriteMovesTheRecordsOfTheOldFolderIntoTheFileAndRemovesTheFolder() throws {
+        try paths.seedLegacyTopicsFolder([
+            "a.json": #"{"id":"a","title":"A","order":0,"future":{"kept":true}}"#,
+            "b.json": #"{"id":"b","title":"B","order":1}"#,
+            "odd.json": #"{"id":"odd","title":7}"#,
+            "edge.json": #"{"id":"edge","order":-1.7976931348623157e+308}"#,
+            "open-places": #"[{"id":"p1","order":0.5}]"#,
+        ])
         let orphan = paths.state.appendingPathComponent(".topics-crashed", isDirectory: true)
         try FileManager.default.createDirectory(at: orphan, withIntermediateDirectories: true)
-        try store.write { try $0.update("a") { $0.title = "Next" } }
-        XCTAssertFalse(FileManager.default.fileExists(atPath: orphan.path))
+        let store = TopicStore(paths: paths)
+
+        let before = try store.read()
+        XCTAssertEqual(before.records.map(\.id), ["a", "b", "edge"], "a read before the first write reads the old folder")
+        XCTAssertEqual(before.openPlaces, [OpenPlace(id: "p1", order: 0.5)])
+        XCTAssertEqual(before.problems.count, 1, "\(before.problems)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.topicRecords.path), "a read moves nothing")
+        let stamp = store.stamp()
+
+        try store.write { try $0.update("b") { $0.title = "B2" } }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.legacyTopicsFolder.path), "the write removed the folder")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: orphan.path), "the write removed the staging folder of a crashed writer")
+        XCTAssertNotEqual(store.stamp(), stamp)
+        let after = try store.read()
+        XCTAssertEqual(after.records.map(\.title), ["A", "B2", nil], "an order past the range of Decimal moves too")
+        XCTAssertEqual(after.records[0].unknownFields["future"], .object(["kept": .bool(true)]))
+        XCTAssertEqual(after.openPlaces, [OpenPlace(id: "p1", order: 0.5)])
+        XCTAssertEqual(try stored("odd"), ["id": .string("odd"), "title": .integer(7)], "the file keeps the record that did not read")
+        XCTAssertEqual(after.problems.count, 1, "\(after.problems)")
+    }
+
+    func testTheMigrationLeavesAFileThatIsNotJSONAndTheFolderWithIt() throws {
+        try paths.seedLegacyTopicsFolder(["a.json": #"{"id":"a"}"#, "broken.json": "{"])
+        let store = TopicStore(paths: paths)
+        try store.write { try $0.create(record("b", order: nil)) }
+        XCTAssertEqual(try store.read().records.map(\.id), ["a", "b"])
+        let left = try FileManager.default.contentsOfDirectory(atPath: paths.legacyTopicsFolder.path)
+        XCTAssertEqual(left, ["broken.json"], "only the file that could not be read stays")
+        let problems = try store.read().problems
+        XCTAssertEqual(problems.count, 1, "a read says that the folder stays: \(problems)")
+        try store.write { try $0.update("b") { $0.title = "Again" } }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: paths.legacyTopicsFolder.path), ["broken.json"],
+                       "a later write does not read the folder again")
+    }
+
+    func testAnEntryThatIsNotARecordStaysInTheFileAcrossWritesAndTakesItsID() throws {
+        try paths.seedTopicRecords(entries: [#"{"id":"a","title":"A"}"#, #"{"id":"odd","title":7,"future":[1,2]}"#, "42", #"{"id":"a","title":"Twin"}"#])
+        let store = TopicStore(paths: paths)
+        let contents = try store.read()
+        XCTAssertEqual(contents.records.map(\.title), ["A"], "the first entry with an id is the record")
+        XCTAssertEqual(contents.problems.count, 3, "\(contents.problems)")
+        try store.write { try $0.update("a") { $0.title = "A2" } }
+        let entries = Optional(try paths.storedTopicEntries())
+        XCTAssertEqual(entries?.count, 4)
+        XCTAssertEqual(entries?[1], .object(["id": .string("odd"), "title": .integer(7), "future": .array([.integer(1), .integer(2)])]))
+        XCTAssertEqual(entries?[2], .integer(42))
+        XCTAssertEqual(entries?[3], .object(["id": .string("a"), "title": .string("Twin")]), "the twin stays as it is")
+        XCTAssertThrowsError(try store.write { try $0.create(record("odd", order: nil)) }, "the id of an invalid entry is taken")
+        XCTAssertEqual(try store.read().records.map(\.title), ["A2"])
+    }
+
+    func testAWriteRefusesAFileThatIsNotARecordsFile() throws {
+        try FileManager.default.createDirectory(at: paths.state, withIntermediateDirectories: true)
+        let text = Data(#"{"records":"gone"}"#.utf8)
+        try text.write(to: paths.topicRecords)
+        let store = TopicStore(paths: paths)
+        XCTAssertEqual(try store.read().records, [])
+        XCTAssertEqual(try store.read().problems.count, 1)
+        XCTAssertThrowsError(try store.write { try $0.create(record("a", order: nil)) }) { error in
+            XCTAssertTrue("\(error)".contains("not a Topic records file"), "\(error)")
+        }
+        XCTAssertEqual(try Data(contentsOf: paths.topicRecords), text, "the file is left for the user")
+    }
+
+    /// A virus scanner holds each new file open for seconds, so a write must make one new file, whatever it changes.
+    func testAWriteOfSeveralRecordsMakesOneNewFile() throws {
+        let store = TopicStore(paths: paths)
+        try store.write { transaction in
+            for id in ["a", "b", "c"] { try transaction.create(record(id, order: nil)) }
+        }
+        let before = try inodes()
+        try store.write { transaction in
+            try transaction.update("a") { $0.title = "A2" }
+            try transaction.update("b") { $0.title = "B2" }
+        }
+        XCTAssertEqual(try records(store).map(\.title), ["A2", "B2", "C"])
+        let new = try inodes().subtracting(before)
+        XCTAssertEqual(new.count, 1, "a write of two records made \(new.count) new files or folders")
+    }
+
+    /// The inode of every file and folder under the state folder.
+    private func inodes() throws -> Set<UInt64> {
+        var found: Set<UInt64> = []
+        func walk(_ url: URL) throws {
+            for name in try FileManager.default.contentsOfDirectory(atPath: url.path) {
+                let child = url.appendingPathComponent(name)
+                var info = stat()
+                guard lstat(child.path, &info) == 0 else { continue }
+                found.insert(UInt64(info.st_ino))
+                if (info.st_mode & S_IFMT) == S_IFDIR { try walk(child) }
+            }
+        }
+        try walk(paths.state)
+        return found
     }
 
     func testAReadWithoutAStateFolderCreatesNothing() throws {
@@ -174,15 +274,14 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(loaded, expected)
         XCTAssertEqual(loaded.unknownFields["future"]?["large"], .unsignedInteger(UInt64.max))
         XCTAssertEqual(loaded.sessions.first?["future_session"], .integer(42))
-        let rewritten = try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf: paths.topics.appendingPathComponent("test.json")))
+        let rewritten = try stored("test")
         XCTAssertEqual(rewritten["sessions"], try JSONDecoder().decode([String: JSONValue].self, from: data)["sessions"])
         XCTAssertEqual(rewritten["title"], .string("After"))
     }
 
-    func testInvalidFileDoesNotHideOtherTopicsAndAWriteRejectsPathIDs() throws {
+    func testInvalidEntryDoesNotHideOtherTopicsAndAWriteRejectsPathIDs() throws {
         let store = TopicStore(paths: paths)
-        try store.write { try $0.create(TopicRecord(id: "valid")) }
-        try Data("{".utf8).write(to: paths.topics.appendingPathComponent("bad.json"))
+        try paths.seedTopicRecords(entries: [#"{"id":"valid"}"#, #"{"id":"bad/id"}"#])
         let contents = try store.read()
         XCTAssertEqual(contents.records.map(\.id), ["valid"])
         XCTAssertEqual(contents.problems.count, 1)
@@ -212,12 +311,11 @@ final class TopicStoreTests: XCTestCase {
         let store = TopicStore(paths: paths)
         let existing = record("a", order: -.greatestFiniteMagnitude)
         try seed(existing)
-        let file = paths.topics.appendingPathComponent("a.json")
-        let before = try Data(contentsOf: file)
+        let before = try Data(contentsOf: paths.topicRecords)
         XCTAssertThrowsError(try store.write { try $0.create(record("../invalid", order: nil)) })
-        XCTAssertEqual(try Data(contentsOf: file), before)
+        XCTAssertEqual(try Data(contentsOf: paths.topicRecords), before)
         XCTAssertThrowsError(try store.write { try $0.move(.topic("a"), to: .after(.topic("missing"))) })
-        XCTAssertEqual(try Data(contentsOf: file), before)
+        XCTAssertEqual(try Data(contentsOf: paths.topicRecords), before)
         try store.write { try $0.create(record("new", order: nil), arrival: .end(.top)) }
         XCTAssertEqual(TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id), ["new", "a"])
         XCTAssertTrue(try records(store).allSatisfy { $0.order?.isFinite == true })
@@ -245,27 +343,21 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(added, [.set(SessionLock(sessionID: "$2", order: 2))])
     }
 
-    func testCreationDoesNotReplaceAnUnreadableTopicFile() throws {
-        try FileManager.default.createDirectory(at: paths.topics, withIntermediateDirectories: true)
-        let file = paths.topics.appendingPathComponent("occupied.json")
-        let contents = Data("not json".utf8)
-        try contents.write(to: file)
+    func testCreationDoesNotReplaceAnEntryThatIsNotARecord() throws {
+        try paths.seedTopicRecords(entries: [#"{"id":"occupied","order":"first"}"#])
+        let contents = try Data(contentsOf: paths.topicRecords)
         XCTAssertThrowsError(try TopicStore(paths: paths).write { try $0.create(record("occupied", order: nil)) })
-        XCTAssertEqual(try Data(contentsOf: file), contents)
+        XCTAssertEqual(try Data(contentsOf: paths.topicRecords), contents)
     }
 
-    func testAFailedMoveAfterOneStagedWriteKeepsTheOrderOnDisk() throws {
+    func testAFailedWriteKeepsTheFileOnDisk() throws {
         let originals = [record("a", order: 0), record("b", order: 0), record("c", order: 0)]
         try seed(originals[0], originals[1], originals[2])
-        let writes = Counter()
-        let failing = TopicStore(paths: paths) { data, url in
-            if writes.next() == 2 { throw CocoaError(.fileWriteUnknown) }
-            try data.write(to: url, options: .atomic)
-        }
+        let before = try Data(contentsOf: paths.topicRecords)
+        let failing = TopicStore(paths: paths) { _, _ in throw CocoaError(.fileWriteUnknown) }
         XCTAssertThrowsError(try failing.write { try $0.move(.topic("c"), to: .before(.topic("b"))) })
-        XCTAssertEqual(writes.count, 2)
+        XCTAssertEqual(try Data(contentsOf: paths.topicRecords), before)
         XCTAssertEqual(TopicOrder.sorted(try records(failing).map(TopicListEntry.topic)).records.map(\.id), ["a", "b", "c"])
-        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: paths.state.path).filter { $0.hasPrefix(".topics-") }, [])
     }
 
     func testApplyingANewTopicPutsItLast() throws {
@@ -331,9 +423,9 @@ final class TopicStoreTests: XCTestCase {
         other.isPinned = true
         try seed(other, record("a", order: 0), record("t", order: 1))
         try store.write { try $0.pin("t", true) }
-        let file = try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf: paths.topics.appendingPathComponent("t.json")))
+        let file = try stored("t")
         XCTAssertEqual(file["pinned"], .bool(true))
-        let unpinned = try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf: paths.topics.appendingPathComponent("a.json")))
+        let unpinned = try stored("a")
         XCTAssertNil(unpinned["pinned"], "a Topic that is not Pinned has no pinned key")
         XCTAssertEqual(try records(store).first { $0.id == "t" }?.unknownFields, [:])
 
@@ -356,9 +448,7 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertNil(old.note, "a record without a note key has no Note")
         let store = TopicStore(paths: paths)
         try store.write { try $0.create(old) }
-        func file() throws -> [String: JSONValue] {
-            try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf: paths.topics.appendingPathComponent("t.json")))
-        }
+        func file() throws -> [String: JSONValue] { try stored("t") }
 
         try store.write { try $0.setNote(of: "t", "  Repro with seed 4411\n\n   then bisect \r\n") }
         XCTAssertEqual(try file()["note"], .string("Repro with seed 4411 then bisect"))
@@ -391,7 +481,7 @@ final class TopicStoreTests: XCTestCase {
             let edge: Double = position == .top ? -.greatestFiniteMagnitude : .greatestFiniteMagnitude
             var pinned = record("p", order: 0)
             pinned.isPinned = true
-            var transaction = TopicTransaction(records: [pinned, record("a", order: edge)], topics: paths.topics)
+            var transaction = TopicTransaction(records: [pinned, record("a", order: edge)])
             transaction.locks = [SessionLock(sessionID: "$1", order: edge)]
             let moved = try transaction.create(record("new", order: nil), arrival: .end(position))
             let shown = TopicOrder.sorted(transaction.records.map(TopicListEntry.topic) + transaction.locks.map(TopicListEntry.lock))
@@ -420,7 +510,7 @@ final class TopicStoreTests: XCTestCase {
                             let initial = [first, topic, last]
                             let plan = try TopicReopenPlan(topic: topic, records: initial, windows: [], sessionPaths: [],
                                                           existingDirectories: [], choice: choice).edit
-                            var transaction = TopicTransaction(records: initial, topics: paths.topics)
+                            var transaction = TopicTransaction(records: initial)
                             if let saved = plan.savedCompletionRecord {
                                 try transaction.apply(TopicRecordChange(before: topic, after: saved), arrival: .end(position))
                             }
@@ -443,7 +533,7 @@ final class TopicStoreTests: XCTestCase {
         current.isPinned = true
         var pinned = record("p", order: 0)
         pinned.isPinned = true
-        var transaction = TopicTransaction(records: [pinned, current, record("a", order: 0)], topics: paths.topics)
+        var transaction = TopicTransaction(records: [pinned, current, record("a", order: 0)])
         let change = TopicRecordChange(before: settled, after: reopened)
         try transaction.apply(change, arrival: .end(.bottom))
         XCTAssertEqual(TopicOrder.sorted(transaction.records.map(TopicListEntry.topic)).records.map(\.id), ["p", "returning", "a"])
@@ -471,7 +561,7 @@ final class TopicStoreTests: XCTestCase {
         ]
         for (inPlay, position, expected) in cases {
             try? FileManager.default.removeItem(at: root)
-            try FileManager.default.createDirectory(at: paths.topics, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: paths.state, withIntermediateDirectories: true)
             let zenUntil = "2026-11-03T17:00:00Z"
             let files = [
                 "p": #"{"id":"p","order":0,"pinned":true,"snoozed_until":"never"}"#,
@@ -484,7 +574,7 @@ final class TopicStoreTests: XCTestCase {
                 "d": #"{"id":"d","order":6}"#,
                 "s": #"{"id":"s","order":7,"settled_at":"2026-10-01T00:00:00Z","snoozed_until":"never"}"#,
             ]
-            for (id, json) in files { try Data(json.utf8).write(to: paths.topics.appendingPathComponent(id + ".json")) }
+            try paths.seedTopicRecords(entries: files.keys.sorted().map { files[$0]! })
             try Data(#"""
             {"kept_topic_id":"kept","until":"\#(zenUntil)","changes":[
               {"topic_id":"zenA","previous_snoozed_until":null},
@@ -505,8 +595,7 @@ final class TopicStoreTests: XCTestCase {
             XCTAssertFalse(upgraded.needsUpgrade)
             XCTAssertFalse(FileManager.default.fileExists(atPath: paths.legacyZenFile.path), "the upgrade removes zen.json")
             for id in files.keys {
-                let saved = try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf: paths.topics.appendingPathComponent(id + ".json")))
-                XCTAssertNil(saved["snoozed_until"], "\(id) is written without its Snooze")
+                XCTAssertNil(try stored(id)["snoozed_until"], "\(id) is written without its Snooze")
             }
 
             let stamp = store.stamp()

@@ -30,7 +30,7 @@ final class GuestTests: XCTestCase {
             record.isGuest = guest
             records.append(record)
         }
-        var transaction = TopicTransaction(records: records, topics: URL(fileURLWithPath: "/nonexistent/topics"), inPlay: inPlay)
+        var transaction = TopicTransaction(records: records, inPlay: inPlay)
         transaction.locks = locks
         transaction.openPlaces = places
         return transaction
@@ -145,12 +145,12 @@ final class GuestTests: XCTestCase {
 
         try store.write { try $0.fillOpenPlace(read.openPlaces[0].id, with: "release", inPlay: limit) }
         XCTAssertEqual(try store.read().openPlaces, [], "a filled Open Place closes")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.topics.appendingPathComponent(TopicStore.openPlacesFile).path))
+        XCTAssertEqual(try paths.storedOpenPlaces(), .array([]))
     }
 
     func testAnOpenPlaceClosesWithoutInPlayOrPastTheLastPlace() throws {
         var off = transaction("payments _ docs + | release")
-        off = TopicTransaction(records: off.records, topics: URL(fileURLWithPath: "/nonexistent/topics"), inPlay: nil)
+        off = TopicTransaction(records: off.records, inPlay: nil)
         off.openPlaces = transaction("payments _ docs + | release").openPlaces
         try off.move(.topic("docs"), to: .before(.topic("payments")))
         XCTAssertEqual(off.openPlaces, [], "without in_play an Open Place holds no place")
@@ -298,7 +298,7 @@ final class GuestTests: XCTestCase {
 
     func testSettingInPlayPutsEachLockInTheGuestsAndRemovingItKeepsEveryPlace() throws {
         var s1 = transaction("payments 🔒scratch auth-bug docs infra 🔒tmp", inPlay: nil)
-        s1 = { var t = TopicTransaction(records: s1.records, topics: URL(fileURLWithPath: "/nonexistent/topics"), inPlay: limit)
+        s1 = { var t = TopicTransaction(records: s1.records, inPlay: limit)
                t.locks = s1.locks; return t }()
         try s1.gatherGuests(inPlay: limit)
         XCTAssertEqual(sidebar(s1), "payments auth-bug docs + ~scratch(G) ~tmp(G) | infra")

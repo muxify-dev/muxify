@@ -15,7 +15,7 @@ import time
 import unittest
 
 from scripts.verify.palette_fixture import PaletteFixture
-from scripts.verify.sandbox import remove_topic, wait
+from scripts.verify.sandbox import wait
 
 TAGS = ['release', 'backend', 'writing', 'ops', 'qa', 'docs', 'alpha', 'bravo', 'charlie', 'one', 'two', 'be']
 
@@ -151,7 +151,7 @@ class PaletteTags(PaletteFixture):
         self.s.act('action', 'palette-search', 'Accept')
         made = wait(lambda: next((record for record in self.records() if record['id'] not in before), None),
                     'New Topic did not write a record')
-        self.addCleanup(remove_topic, self.topics/(made['id'] + '.json'))
+        self.addCleanup(self.store.remove, made['id'])
         self.assertEqual((made.get('title'), made.get('tags')), ('Ship it', ['docs', 'qa']), made)
         self.s.wait_rows(lambda rs: 'Add a Session' in self.text('palette-breadcrumb', rs), 'New Topic did not go on to Add a Session')
         self.s.act('action', 'palette-search', 'Close')
@@ -269,7 +269,7 @@ class PaletteTags(PaletteFixture):
         self.s.act('action', 'palette-search', 'Accept')
         made = wait(lambda: next((record for record in self.records() if record['id'] not in before), None),
                     'New Topic did not write a record with Tags off')
-        self.addCleanup(remove_topic, self.topics/(made['id'] + '.json'))
+        self.addCleanup(self.store.remove, made['id'])
         self.assertEqual((made.get('title'), made.get('tags')), ('Fix #123 #ops', None), made)
         self.s.wait_rows(lambda rs: 'Add a Session' in self.text('palette-breadcrumb', rs), 'New Topic did not go on to Add a Session')
         self.s.act('action', 'palette-search', 'Close')

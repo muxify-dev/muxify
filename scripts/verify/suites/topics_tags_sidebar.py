@@ -8,12 +8,12 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_tags_sidebar
 """
 
-import json
 import re
 import time
 import unittest
 
-from scripts.verify.sandbox import Sandbox, remove_topic, wait
+from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.topic_records import TopicRecords
 
 SHELL = '/bin/zsh -f'
 TAGS = '  tags:\n    work: {color: blue}\n    personal: {}\n'
@@ -33,8 +33,7 @@ class TopicsTagsSidebar(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         cls.project = s.root/'projects/alpha'
         cls.project.mkdir(parents=True)
-        cls.topics = s.root/'state/muxify/topics'
-        cls.topics.mkdir(parents=True)
+        cls.store = TopicRecords(s.root/'state/muxify')
         cls.config = s.root/'config/muxify/config.yaml'
         cls.config.write_text(cls.config_text())
         cls.base = s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', 'base', '-c', str(cls.project), SHELL)
@@ -61,10 +60,9 @@ class TopicsTagsSidebar(unittest.TestCase):
 
     def topic(self, name, tags, session=True, **fields):
         """A Topic record with `tags`, and a live Session in it unless `session` is false; returns its Window."""
-        path = self.topics/(name + '.json')
-        path.write_text(json.dumps(dict(id=name, title=fields.pop('title', name), slug=name, home_project=str(self.project),
-                                        tags=tags, **fields)))
-        self.addCleanup(remove_topic, path)
+        self.store.put(dict(id=name, title=fields.pop('title', name), slug=name, home_project=str(self.project),
+                                        tags=tags, **fields))
+        self.addCleanup(self.store.remove, name)
         if not session:
             return None
         window = self.s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', name, '-c', str(self.project), SHELL)

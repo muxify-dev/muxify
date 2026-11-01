@@ -61,29 +61,49 @@ final class BenchScrollTests: XCTestCase {
                        "under a tall block that stuck")
     }
 
+    func testACardWithCardsBeforeItIsRevealedUnderTheMoreAbovePill() {
+        let geometry = BenchGeometry(topHeight: 200, viewportHeight: 600, indicatorHeight: 30)
+        XCTAssertEqual(geometry.revealAnchor(hasCardsAbove: false) * 600, geometry.areaTop + geometry.spacing,
+                       "the first Benched card goes directly under the line, where no pill shows")
+        XCTAssertEqual(geometry.revealAnchor(hasCardsAbove: true) * 600, geometry.areaTop + 30 + geometry.spacing,
+                       "a card with cards before it goes under the pill that counts them")
+        XCTAssertEqual(BenchGeometry(topHeight: 200, viewportHeight: 0).revealAnchor(hasCardsAbove: true), 0,
+                       "no viewport, no anchor")
+    }
+
     func testTheShownBenchKeepsTheLocationsCardWhereItStood() {
-        let hidden = BenchedLocationPlace(top: 210, isBenchShown: false)
-        XCTAssertEqual(BenchedLocationPlace(top: 1490, isBenchShown: true).openingScroll(after: hidden), 1280,
-                       "the list scrolls as far as the cards that showed above pushed the card down")
-        XCTAssertEqual(BenchedLocationPlace(top: 210, isBenchShown: true).openingScroll(after: hidden), 0,
-                       "the first Benched card does not move")
-        XCTAssertNil(BenchedLocationPlace(top: 180, isBenchShown: true).openingScroll(after: .init(top: 210, isBenchShown: true)),
+        let hidden = BenchedLocationPlace(top: 210, isBenchShown: false, hasCardsAbove: true)
+        func opening(_ top: CGFloat, hasCardsAbove: Bool = true, after before: BenchedLocationPlace? = hidden) -> CGFloat? {
+            BenchedLocationPlace(top: top, isBenchShown: true, hasCardsAbove: hasCardsAbove).openingScroll(after: before, indicatorHeight: 30)
+        }
+        XCTAssertEqual(opening(1490), 1250,
+                       "the list scrolls as far as the cards that showed above pushed the card down, less the pill over them")
+        XCTAssertEqual(opening(210, hasCardsAbove: false), 0, "the first Benched card does not move, and no pill shows over it")
+        XCTAssertEqual(opening(230), 0, "a push shorter than the pill does not scroll the Bench up past its top")
+        XCTAssertNil(opening(180, after: .init(top: 210, isBenchShown: true, hasCardsAbove: true)),
                      "a scroll of the shown Bench does not scroll again")
-        XCTAssertNil(hidden.openingScroll(after: .init(top: 900, isBenchShown: true)), "a hide does not scroll")
-        XCTAssertNil(BenchedLocationPlace(top: 1490, isBenchShown: true).openingScroll(after: nil),
-                     "a card that just became the Location on a shown Bench does not scroll")
+        XCTAssertNil(hidden.openingScroll(after: .init(top: 900, isBenchShown: true, hasCardsAbove: true), indicatorHeight: 30),
+                     "a hide does not scroll")
+        XCTAssertNil(opening(1490, after: nil), "a card that just became the Location on a shown Bench does not scroll")
     }
 
     func testACardCountsAboveOrBelowWhenAnyPartIsHiddenAndIsOutOfViewWhenNoPartShows() {
         func place(_ top: CGFloat, _ bottom: CGFloat) -> EdgePlace {
-            EdgePlace(top: top, bottom: bottom, visibleTop: 100, visibleBottom: 500)
+            EdgePlace(top: top, bottom: bottom, visibleTop: 100, visibleBottom: 500, indicatorHeight: 30)
         }
-        XCTAssertEqual(place(106, 200), EdgePlace(), "a card directly under the line is in view")
-        XCTAssertEqual(place(60, 140), EdgePlace(isAbove: true), "a card partly under the block counts as above")
-        XCTAssertEqual(place(-40, 100), EdgePlace(isAbove: true, isOutOfView: true), "a card that ends at the block's bottom is out of view")
-        XCTAssertEqual(place(450, 560), EdgePlace(isBelow: true))
-        XCTAssertEqual(place(500, 560), EdgePlace(isBelow: true, isOutOfView: true))
-        XCTAssertEqual(place(60, 560), EdgePlace(isAbove: true, isBelow: true), "a card taller than the area counts both ways")
+        XCTAssertEqual(place(136, 200), EdgePlace(), "a card directly under the pill is in view")
+        XCTAssertEqual(place(106, 200), EdgePlace(isUnderIndicator: true),
+                       "a card directly under the line is in view, but a shown pill covers its top")
+        XCTAssertEqual(place(60, 140), EdgePlace(isAbove: true, isUnderIndicator: true), "a card partly under the block counts as above")
+        XCTAssertEqual(place(-40, 100), EdgePlace(isAbove: true, isOutOfView: true, isUnderIndicator: true),
+                       "a card that ends at the block's bottom is out of view")
+        XCTAssertEqual(place(400, 464), EdgePlace(), "a card directly above the bottom pill is in view")
+        XCTAssertEqual(place(400, 480), EdgePlace(isOverBottomIndicator: true),
+                       "a card that ends in the bottom pill's band is in view, but a shown pill covers its bottom")
+        XCTAssertEqual(place(450, 560), EdgePlace(isBelow: true, isOverBottomIndicator: true))
+        XCTAssertEqual(place(500, 560), EdgePlace(isBelow: true, isOutOfView: true, isOverBottomIndicator: true))
+        XCTAssertEqual(place(60, 560), EdgePlace(isAbove: true, isBelow: true, isUnderIndicator: true, isOverBottomIndicator: true),
+                       "a card taller than the area counts both ways")
     }
 
     func testThePointerScrollsOnlyAfterItRestsInTheBand() {

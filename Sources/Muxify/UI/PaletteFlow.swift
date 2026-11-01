@@ -577,7 +577,7 @@ extension CommandPalette {
                 case .topic(let id): target = id
                 case .noTopic: target = nil
                 default:
-                    close(restoringFocus: false)
+                    close()
                     store.move(draft, to: destination)
                     return
                 }
@@ -591,7 +591,7 @@ extension CommandPalette {
                     return
                 }
             }
-            close(restoringFocus: false)
+            close()
             store.move(draft, to: destination)
         case (.addSession(let topic), .sessionPath(let sessionPath)):
             if newWorktree, sessionPath.worktree != nil {

@@ -1,7 +1,7 @@
-import json
 import unittest
 
 from scripts.verify.sandbox import Sandbox
+from scripts.verify.topic_records import TopicRecords
 
 
 class AgentFormatsSidebar(unittest.TestCase):
@@ -11,9 +11,8 @@ class AgentFormatsSidebar(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         cls.config = s.root / 'config/muxify/config.yaml'
         cls.config.write_text('sidebar:\n  agents_scope: all\n')
-        topics = s.root / 'state/muxify/topics'
-        topics.mkdir(parents=True)
-        (topics / 'formats.json').write_text(json.dumps(dict(id='formats', title='Format Topic', slug='formats')))
+        store = TopicRecords(s.root/'state/muxify')
+        store.put(dict(id='formats', title='Format Topic', slug='formats'))
         cls.session, cls.window, cls.pane = s.tmux(
             'new-session', '-d', '-P', '-F', '#{session_id} #{window_id} #{pane_id}',
             '-s', 'format-session', '-n', 'stable-window', 'sleep 600').split()

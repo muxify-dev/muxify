@@ -308,7 +308,11 @@ final class CommandPalette {
     private func open() {
         store?.hintHold.receive(.reset)
         if !isOpen {
-            previousResponder = store?.terminalHost.window?.firstResponder
+            // A field editor serves one field at a time, and the palette's field takes it: the field it edited is
+            // what gets Focus back.
+            let responder = store?.terminalHost.window?.firstResponder
+            let editor = responder as? NSTextView
+            previousResponder = editor?.isFieldEditor == true ? editor?.delegate as? NSResponder ?? responder : responder
             query = ""
             selectedID = nil
         }
@@ -316,7 +320,10 @@ final class CommandPalette {
         actionIndex = 0
     }
 
-    func close(restoringFocus: Bool = true) {
+    /// Gives Focus back to the view that had it before the palette opened, when the palette's field has it now.
+    /// Else the Focus rule (ADR 0065) gives it to the holder that had it last, once the field is gone, unless a
+    /// step after the close takes it first.
+    func close() {
         guard isOpen else { return }
         presentation = nil
         history = []
@@ -324,11 +331,11 @@ final class CommandPalette {
         showsActions = false
         let responder = previousResponder
         previousResponder = nil
-        guard restoringFocus, let store else { return }
+        guard let store, let window = store.terminalHost.window,
+              (window.firstResponder as? NSTextView)?.isFieldEditor == true else { return }
         DispatchQueue.main.async { [weak store] in
-            guard let store, !store.palette.isOpen else { return }
-            if let responder, let window = store.terminalHost.window, window.makeFirstResponder(responder) { return }
-            store.focusTerminal()
+            guard let store, !store.palette.isOpen, let responder else { return }
+            window.makeFirstResponder(responder)
         }
     }
 
@@ -354,7 +361,7 @@ final class CommandPalette {
                 run(command)
                 return
             }
-            close(restoringFocus: false)
+            close()
             switch item.ref {
             case .topic(let id, let window):
                 if let window { store.select(window) } else { store.goToTopic(.topic(id)) }
@@ -368,7 +375,7 @@ final class CommandPalette {
             case .command: break
             }
         case .newSession:
-            close(restoringFocus: false)
+            close()
             switch item.ref {
             case .sessionPath(let target): store.newSession(in: target)
             case .session(let session):
@@ -385,10 +392,9 @@ final class CommandPalette {
             copy(target, title: row.kind == .agent ? "Copied Pane ID" : "Copied tmux Target", shown: target)
         case .pasteFolder:
             guard let paste = row.paste else { return }
-            let responder = previousResponder
             close()
             // close() gives Focus back on the next turn of the main queue; the text follows it there.
-            DispatchQueue.main.async { [weak store] in store?.paste(paste, into: responder) }
+            DispatchQueue.main.async { [weak store] in store?.paste(paste, into: store?.terminalHost.window?.firstResponder) }
         default: performRowAction(action, item: item)
         }
     }
@@ -410,7 +416,7 @@ final class CommandPalette {
         guard isOpen, let store else { return false }
         // Clicked away (into the terminal or a page): typing goes there.
         guard (event.window?.firstResponder as? NSTextView)?.isFieldEditor == true else {
-            close(restoringFocus: false)
+            close()
             return false
         }
         if trigger == Self.escape { escape(); return true }

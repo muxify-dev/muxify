@@ -25,20 +25,30 @@ final class BenchTests: XCTestCase {
 
     /// The Topics model as the Sidebar builds it, at the Location of a Topic id, a Window id ("@…") or nowhere.
     private func model(inPlay: Int?, benchShown: Bool = false, at place: String? = nil,
-                       records: [TopicRecord]? = nil, windows: [TmuxWindow]? = nil,
+                       records: [TopicRecord]? = nil, windows: [TmuxWindow]? = nil, openPlaces: [OpenPlace] = [],
                        benchPeek: TopicsModel.BenchPeek? = nil) -> TopicsModel {
         var config = Config()
         config.topics.inPlay = inPlay
         let location: Location? = place.map { place in
             place.hasPrefix("@") ? .window(WindowID(rawValue: place)!) : .emptyTopic(.topic(place))
         }
-        return TopicsModel(records: records ?? self.records, windows: windows ?? self.windows, config: config,
+        return TopicsModel(records: records ?? self.records, openPlaces: openPlaces, windows: windows ?? self.windows, config: config,
                            selection: TopicSelection(), location: location, benchShown: benchShown, benchPeek: benchPeek)
     }
 
     private func shown(_ model: TopicsModel) -> [String] { model.list.map(\.id) }
 
-    private func cards(_ model: TopicsModel) -> [QuickSwitchTarget] {
+    func testAnOpenPlaceKeepsItsCardNumberSoTheCardsUnderItKeepTheirs() {
+        let open = model(inPlay: 3, at: "@1", openPlaces: [OpenPlace(id: "o", order: 0.5)])
+        XCTAssertEqual(shown(open), ["topic-pinned", "topic-a", "open-place-2", "topic-b", "bench-line", "no-topic"])
+        let targets = QuickSwitchTargets(model: open, sessions: [], windows: [], tabIDs: [])
+        XCTAssertEqual(targets.cards, [.topic("pinned"), .topic("a"), nil, .topic("b")])
+        XCTAssertNil(targets.target(for: .card(3)), "Select Card 3 goes somewhere from an Open Place")
+        XCTAssertEqual(targets.target(for: .card(4)), .topic("b"))
+        XCTAssertEqual(targets.step(.topic, .next, from: .topic("a")), .topic("b"), "Next Topic stops on the Open Place")
+    }
+
+    private func cards(_ model: TopicsModel) -> [QuickSwitchTarget?] {
         QuickSwitchTargets(model: model, sessions: [], windows: [], tabIDs: []).cards
     }
 

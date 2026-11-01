@@ -745,10 +745,10 @@ final class WorkspaceStore {
         case .changed(let change):
             switch presentation {
             case .membership(let windowID):
-                if ownsPalette, case .addSession = palette.flow { palette.close(restoringFocus: false) }
+                if ownsPalette, case .addSession = palette.flow { palette.close() }
                 if let id = windowID.flatMap(WindowID.init(rawValue:)) { route(.result(.window(id), lastStartedRead: lastStartedRead)) }
             case .settle(let next):
-                if ownsPalette { palette.close(restoringFocus: false) }
+                if ownsPalette { palette.close() }
                 route(.settled(next: next))
             case .move(let source, let tab):
                 if case .window(let destination)? = change.shown {
@@ -758,10 +758,10 @@ final class WorkspaceStore {
                     route(.result(.window(destination), lastStartedRead: lastStartedRead))
                 }
             case .goTo(let card):
-                if ownsPalette { palette.close(restoringFocus: false) }
+                if ownsPalette { palette.close() }
                 goToTopic(card)
             case .edit, .newTopic, .newSession:
-                if ownsPalette { palette.close(restoringFocus: false) }
+                if ownsPalette { palette.close() }
                 switch change.shown {
                 case .emptyTopic(.topic(let id))?:
                     showEmptyTopic(id)
@@ -958,6 +958,8 @@ final class WorkspaceStore {
         updateTopicSelection()
         let previousID = old?.windowID?.rawValue
         guard selectedWindowID != previousID else { return }
+        // A Window starts in its Terminal, as moveFocusIntoWindow gives it, not in the side the last Window used.
+        lastFocus = nil
         paneFinder.close()
         let previous = previousID.flatMap { gitViews[$0] }
         let coveredWindow = previous?.isOpen == true
@@ -1278,7 +1280,7 @@ final class WorkspaceStore {
         readSnapshotPending = false
         windows = []
         agents = []
-        palette.close(restoringFocus: false)
+        palette.close()
         route(.serverChanged)
         topicSelection = TopicSelection()
         hasNoSessions = false
@@ -1491,7 +1493,7 @@ final class WorkspaceStore {
                 persistWork.removeValue(forKey: id)?.cancel()
             }
             for id in gitViews.keys where !live.contains(id) {
-                gitViews.removeValue(forKey: id)?.close(restoringFocus: false)
+                gitViews.removeValue(forKey: id)?.close()
             }
         }
     }
@@ -1884,9 +1886,43 @@ final class WorkspaceStore {
     /// shows the side that Focus is leaving.
     private var incomingFocus: PanelLayout.Side?
 
+    /// The holder that had Focus last, for the Focus rule. A palette's field or a sheet's field is not a holder.
+    private var lastFocus: FocusHolder?
+
     func readFocusedPanel() {
-        focusedPanel = terminalHost.window?.firstResponder is NSView ? keyFocus : nil
+        guard let window = terminalHost.window else { return }
+        focusedPanel = window.firstResponder is NSView ? keyFocus : nil
         incomingFocus = nil
+        if window.firstResponder is NSView {
+            if let holder = focusHolder { lastFocus = holder }
+        } else {
+            // One turn, so a route or a close that gives Focus somewhere goes first.
+            DispatchQueue.main.async { [weak self] in self?.restoreFocus() }
+        }
+    }
+
+    /// The holder that has Focus now, nil while a palette's field or another view has it.
+    private var focusHolder: FocusHolder? {
+        guard !palette.isOpen else { return nil }
+        if terminalSideHasFocus { return .terminal }
+        if currentGitView?.hasKeyFocus == true { return .gitView }
+        return browserHasFocus ? .browser : nil
+    }
+
+    /// The Focus rule (ADR 0065): the App Window itself holds Focus only while nothing takes input, so Focus goes
+    /// back to a view when the window is still the first responder a turn after it became one.
+    private func restoreFocus() {
+        guard let window = terminalHost.window else { return }
+        let gap = FocusGap(firstResponderIsView: window.firstResponder is NSView, paletteIsOpen: palette.isOpen,
+                           sheetIsOpen: window.attachedSheet != nil || NSApp.modalWindow != nil,
+                           showsEmptyPage: showsEmptyPage, gitViewIsOpen: currentGitView?.isOpen == true,
+                           layout: panelLayout, lastFocus: lastFocus)
+        switch gap.focusToRestore {
+        case .terminal?: moveFocus(into: .terminal)
+        case .browser?: moveFocus(into: .browser)
+        case .gitView?: currentGitView?.takeFocus()
+        case nil: break
+        }
     }
 
     /// Only a move to the other side changes the first responder, which ends the move.
@@ -2183,7 +2219,7 @@ final class WorkspaceStore {
     }
 
     private func removeGitViews() {
-        gitViews.values.forEach { $0.close(restoringFocus: false) }
+        gitViews.values.forEach { $0.close() }
         gitViews.removeAll()
     }
 

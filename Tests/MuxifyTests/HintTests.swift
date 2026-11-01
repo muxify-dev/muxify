@@ -105,7 +105,7 @@ final class HintTests: XCTestCase {
         for modifiers in [KeyTrigger.Modifiers.control, .option, .command] {
             let hints = HintPresentation(modifiers: modifiers, keybinds: .defaults, targets: targets,
                                          sidebar: false, browser: false, terminal: false)
-            for target in targets.cards + targets.windows + targets.tabs + [.terminal] {
+            for target in targets.cards.compactMap { $0 } + targets.windows + targets.tabs + [.terminal] {
                 XCTAssertTrue(hints[target].isEmpty)
             }
         }
@@ -170,7 +170,7 @@ final class HintTests: XCTestCase {
         for modifiers in [KeyTrigger.Modifiers.control, .command, .option] {
             let hints = HintPresentation(modifiers: modifiers, keybinds: config.keybinds, targets: targets,
                                          sidebar: true, browser: true, terminal: true, config: config.hints)
-            for target in targets.cards + targets.windows + targets.tabs + [.terminal] {
+            for target in targets.cards.compactMap { $0 } + targets.windows + targets.tabs + [.terminal] {
                 XCTAssertNil(hints.restKey(for: target))
                 XCTAssertTrue(hints[target].isEmpty)
             }

@@ -13,7 +13,8 @@ import shlex
 import time
 
 from scripts.verify.git_view_fixture import GitViewFixture, MAIN_COMMITS, SHELL
-from scripts.verify.sandbox import remove_topic, wait
+from scripts.verify.sandbox import wait
+from scripts.verify.topic_records import TopicRecords
 
 
 class GitViewDiff(GitViewFixture):
@@ -278,11 +279,9 @@ class GitViewDiff(GitViewFixture):
 
     def empty_topic(self, name):
         """A Topic with no Session, and its card."""
-        topics = self.s.root/'state/muxify/topics'
-        topics.mkdir(parents=True, exist_ok=True)
-        path = topics/(name + '.json')
-        path.write_text(json.dumps(dict(id=name, title=name, slug=name)))
-        self.addCleanup(remove_topic, path)
+        store = TopicRecords(self.s.root/'state/muxify')
+        store.put(dict(id=name, title=name, slug=name))
+        self.addCleanup(store.remove, name)
         self.s.wait_rows(lambda rs: self.s.has('topic-' + name, rs), 'the Topic card of %s did not show' % name)
 
     def test_an_empty_topic_page_shows_no_git_view_and_its_window_shows_it_again_as_it_was_left(self):

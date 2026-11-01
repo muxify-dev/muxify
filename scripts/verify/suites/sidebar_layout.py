@@ -14,6 +14,7 @@ import re
 import unittest
 
 from scripts.verify.sandbox import Sandbox, frame
+from scripts.verify.topic_records import TopicRecords
 
 SHELL = '/bin/zsh -f'
 
@@ -25,14 +26,13 @@ class SidebarLayout(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         cls.project = s.root/'projects/alpha'
         cls.project.mkdir(parents=True)
-        cls.topics_dir = s.root/'state/muxify/topics'
-        cls.topics_dir.mkdir(parents=True)
+        cls.store = TopicRecords(s.root/'state/muxify')
         cls.config = s.root/'config/muxify/config.yaml'
         cls.write_config('')
         for topic_id, fields in [('layout-open', {}), ('layout-other', {}),
                                  ('layout-settled', {'settled_at': '2026-01-01T00:00:00Z'})]:
-            (cls.topics_dir/(topic_id + '.json')).write_text(json.dumps(dict(
-                id=topic_id, title=topic_id, slug=topic_id, home_project=str(cls.project), **fields)))
+            cls.store.put(dict(
+                id=topic_id, title=topic_id, slug=topic_id, home_project=str(cls.project), **fields))
         sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'layout-open', '-c', str(cls.project), SHELL)
         s.tmux('set-option', '-t', sid, '@muxify_topic', 'layout-open')
         cls.panes = s.tmux('list-panes', '-t', sid + ':', '-F', '#{pane_id}').split()

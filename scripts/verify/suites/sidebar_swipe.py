@@ -4,11 +4,11 @@ SidebarPager exposes Debug-only accessibility samples while the sandbox's TestDr
 the real gesture recognizer and release path; no check needs to move the pointer or use the user's tmux server.
 """
 
-import json
 import time
 import unittest
 
 from scripts.verify.sandbox import Sandbox
+from scripts.verify.topic_records import TopicRecords
 
 
 class SidebarSwipe(unittest.TestCase):
@@ -20,9 +20,8 @@ class SidebarSwipe(unittest.TestCase):
         project.mkdir()
         cls.config = s.root/'config/muxify/config.yaml'
         cls.config.write_text('sidebar:\n  agents: false\n')
-        topics = s.root/'state/muxify/topics'
-        topics.mkdir()
-        (topics/'swipe.json').write_text(json.dumps(dict(id='swipe', title='Sidebar swipe', slug='swipe')))
+        store = TopicRecords(s.root/'state/muxify')
+        store.put(dict(id='swipe', title='Sidebar swipe', slug='swipe'))
         cls.session = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'sidebar-swipe',
                              '-c', str(project), '/bin/zsh -f')
         s.tmux('set-option', '-t', cls.session, '@muxify_topic', 'swipe')

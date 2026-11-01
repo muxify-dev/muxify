@@ -12,7 +12,7 @@ final class PaletteCacheTests: XCTestCase {
         let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify-cache-tests.yaml"))
         palette.store = store
         XCTAssertFalse(palette.results.rows.isEmpty)
-        palette.close(restoringFocus: false)
+        palette.close()
     }
 
     @MainActor func testTypingDoesNotInvalidateTheSessionPathRows() {
@@ -30,6 +30,6 @@ final class PaletteCacheTests: XCTestCase {
             _ = store.palette.results
         }
         XCTAssertFalse(changed.observed)
-        store.palette.close(restoringFocus: false)
+        store.palette.close()
     }
 }

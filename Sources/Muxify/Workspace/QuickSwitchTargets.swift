@@ -79,7 +79,9 @@ enum QuickSwitchTarget: Hashable {
 }
 
 struct QuickSwitchTargets {
-    let cards: [QuickSwitchTarget]
+    /// The targets of Select Card 1 to 9, by number. An Open Place keeps its number with no target, so the cards
+    /// under it keep theirs when a place opens or fills.
+    let cards: [QuickSwitchTarget?]
     let windows: [QuickSwitchTarget]
     /// The Windows a Topic Window step goes through: the Active Topic's in Sidebar order in Topics mode, the
     /// Session's in Sessions mode.
@@ -91,7 +93,7 @@ struct QuickSwitchTargets {
     let topics: [QuickSwitchTarget]
 
     func target(for selection: QuickSwitchSelection) -> QuickSwitchTarget? {
-        let targets: [QuickSwitchTarget]
+        let targets: [QuickSwitchTarget?]
         let position: Int
         switch selection {
         case .card(let value): targets = cards; position = value
@@ -124,11 +126,15 @@ extension QuickSwitchTargets {
         // No Topic Sessions get no number: the Topics list shows at most one of them, and only while it is open.
         // A Locked Session's card is numbered by its place among the Topics. A hidden Benched card gets no number,
         // and a Topic step skips it, so repeated steps do not go through the whole Bench.
-        let cards = model.list.compactMap { $0.cardID?.quickSwitchTarget }
+        let numbered: [QuickSwitchTarget?] = model.list.compactMap { item in
+            if case .openPlace = item { return .some(nil) }
+            return item.cardID?.quickSwitchTarget.map { .some($0) }
+        }
+        let cards = numbered.compactMap { $0 }
         let allSessions = sessions.map { QuickSwitchTarget.session($0.id) }
         let sessionWindows = windows.map { QuickSwitchTarget.window($0.id) }
         let shown = model.mode == .topics ? Self.sessions(of: model) : nil
-        self.init(cards: model.mode == .topics ? cards : allSessions, windows: sessionWindows,
+        self.init(cards: model.mode == .topics ? numbered : allSessions, windows: sessionWindows,
                   topicWindows: shown.map { $0.flatMap(\.windows).map { .window($0.id) } } ?? sessionWindows,
                   tabs: tabIDs.map { .tab($0) }, sessions: shown.map { $0.map { .session($0.id.session) } } ?? allSessions,
                   topics: cards)

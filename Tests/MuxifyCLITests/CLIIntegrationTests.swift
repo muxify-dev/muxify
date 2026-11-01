@@ -121,9 +121,8 @@ final class CLIIntegrationTests: XCTestCase {
             try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path)
             try? FileManager.default.removeItem(at: state)
         }
-        let topics = folder.appendingPathComponent("topics")
-        try FileManager.default.createDirectory(at: topics, withIntermediateDirectories: true)
-        try Data(#"{"id":"a","title":"Valid"}"#.utf8).write(to: topics.appendingPathComponent("a.json"))
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data(#"{"records":[{"id":"a","title":"Valid"}],"open_places":[]}"#.utf8).write(to: folder.appendingPathComponent("topics.json"))
         // The read takes the record lock, and it cannot make the lock file in a read-only state folder.
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
         let binary = cli
@@ -1457,14 +1456,13 @@ private final class TopicSandbox {
     }
 
     /// The record files as JSON objects, as another reader of the state folder sees them.
+    /// The entries of `records` in the records file, in file order, as the CLI wrote them.
     func records() throws -> [[String: Any]] {
-        let folder = root.appendingPathComponent("state/muxify/topics")
-        guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return [] }
-        return try names.filter { $0.hasSuffix(".json") }.sorted().map { name in
-            let data = try Data(contentsOf: folder.appendingPathComponent(name))
-            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw CLIError("\(name) is not an object") }
-            return object
-        }
+        let file = root.appendingPathComponent("state/muxify/topics.json")
+        guard let data = try? Data(contentsOf: file) else { return [] }
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = object["records"] as? [[String: Any]] else { throw CLIError("\(file.path) is not a records file") }
+        return entries
     }
 
     /// The remembered Session of `record` in `sessionPath`.

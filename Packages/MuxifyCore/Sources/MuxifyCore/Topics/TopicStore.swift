@@ -1,25 +1,35 @@
 import Foundation
 import Darwin
 
-/// What the record files hold at one moment.
+/// What the records file holds at one moment.
 public struct TopicContents: Equatable, Sendable {
-    /// The valid Topic records, in file name order.
+    /// The valid Topic records, in id order.
     public var records: [TopicRecord]
-    /// One line for each file that is not a valid record.
+    /// One line for each entry that is not a valid record, and for a file of the old folder that cannot be read.
     public var problems: [String]
-    /// The Open Places of the Topics list (`TopicStore.openPlacesFile`).
+    /// The Open Places of the Topics list.
     public var openPlaces: [OpenPlace] = []
     /// An older Muxify left Snoozes or a running Zen: `TopicStore.upgrade` removes them.
     public var needsUpgrade = false
+    /// The entries of `records` in the file that are not valid records, as the file has them. A write puts them back,
+    /// so a record with one bad field is never lost.
+    var invalidEntries: [JSONValue] = []
+    /// An `open_places` value that is not a list of Open Places. A write puts it back until it changes the Open Places.
+    var unreadableOpenPlaces: JSONValue?
+
+    public init(records: [TopicRecord], problems: [String], openPlaces: [OpenPlace] = [], needsUpgrade: Bool = false) {
+        self.records = records
+        self.problems = problems
+        self.openPlaces = openPlaces
+        self.needsUpgrade = needsUpgrade
+    }
 }
 
-/// The Topic records on disk. It keeps no state: every read and write goes to the files,
-/// under the record lock, so the app and the command line tool can both write.
+/// The Topic records on disk: one file, `topics.json`, that holds every record and the Open Places. It keeps no
+/// state: every read and write goes to the file, under the record lock, so the app and the command line tool can
+/// both write. A write replaces the file with one rename, so it makes one new file, whatever it changed, and a
+/// reader opens one file.
 public struct TopicStore: Sendable {
-    /// The file beside the records that keeps the Open Places. It has no `.json` extension, so no read takes it for a
-    /// record, and a swap of the folder writes it with the records.
-    public static let openPlacesFile = "open-places"
-
     public let paths: MuxifyPaths
     /// The Config's `topics.in_play`. A write that takes a card out of an In Play place leaves an Open Place by it.
     public let inPlay: Int?
@@ -30,7 +40,7 @@ public struct TopicStore: Sendable {
         self.init(paths: paths, inPlay: inPlay, lockTimeout: lockTimeout) { data, url in try data.write(to: url, options: .atomic) }
     }
 
-    /// `writeData` writes one record file; tests replace it to fail part of the way.
+    /// `writeData` writes the records file; tests replace it to count the writes or to fail one.
     init(paths: MuxifyPaths, inPlay: Int? = nil, lockTimeout: TimeInterval = 10,
          writeData: @escaping @Sendable (Data, URL) throws -> Void) {
         self.paths = paths
@@ -39,91 +49,206 @@ public struct TopicStore: Sendable {
         self.writeData = writeData
     }
 
+    public enum Failure: Error, CustomStringConvertible {
+        /// The records file exists, but it is not a JSON object with a `records` array. A write would replace every
+        /// record with nothing, so no write happens until the file reads again.
+        case unreadableFile(String, String)
+
+        public var description: String {
+            switch self {
+            case .unreadableFile(let path, let reason): return "\(path) is not a Topic records file (\(reason)), so Muxify did not write to it."
+            }
+        }
+    }
+
     /// Reads under a shared lock, so a read never sees half of a write. Without a state folder there is
     /// nothing to read, and the read creates nothing.
     public func read() throws -> TopicContents {
         guard FileManager.default.fileExists(atPath: paths.state.path) else { return TopicContents(records: [], problems: []) }
-        return try FileLock.withLock(paths.recordLock, .shared, rank: .record, timeout: lockTimeout) { readFiles() }
+        return try FileLock.withLock(paths.recordLock, .shared, rank: .record, timeout: lockTimeout) { readSource().contents }
     }
 
-    /// Changes whenever a record file changes, in content or by a folder swap. It takes no lock, so a watcher can
-    /// poll it often.
+    /// Changes whenever the records file changes: its inode, its modification time and its size. Before the first
+    /// write moves the records into the file, it follows the files of the old folder. It takes no lock, so a
+    /// watcher can poll it often.
     public func stamp() -> String {
-        (files() + [openPlacesURL]).map { url in
-            var info = stat()
-            guard lstat(url.path, &info) == 0 else { return url.lastPathComponent + "@-" }
-            let nanoseconds = Int64(info.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(info.st_mtimespec.tv_nsec)
-            return "\(url.lastPathComponent)@\(info.st_ino):\(nanoseconds):\(info.st_size)"
-        }.joined(separator: "|")
+        if let stamp = Self.stamp(of: paths.topicRecords) { return stamp }
+        return LegacyFolder(paths: paths).stamp()
     }
 
-    /// Runs `body` on the files as they are now, under the exclusive record lock, and writes what it changed.
-    /// One changed record replaces its file; several replace the whole folder at once. `locks` are the Locked
-    /// Sessions as tmux has them now: a write that changes the order places the Topics among them.
+    private static func stamp(of url: URL) -> String? {
+        var info = stat()
+        guard lstat(url.path, &info) == 0 else { return nil }
+        let nanoseconds = Int64(info.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(info.st_mtimespec.tv_nsec)
+        return "\(info.st_ino):\(nanoseconds):\(info.st_size)"
+    }
+
+    /// Runs `body` on the records as they are now, under the exclusive record lock, and writes the file when
+    /// `body` changed something. `locks` are the Locked Sessions as tmux has them now: a write that changes the
+    /// order places the Topics among them. The first write after an update moves the records out of the old
+    /// folder, one file for each Topic, into the file.
     @discardableResult
     public func write<T>(locks: [SessionLock] = [], _ body: (inout TopicTransaction) throws -> T) throws -> T {
         try FileLock.withLock(paths.recordLock, .exclusive, rank: .record, timeout: lockTimeout) {
-            removeOrphanStagingFolders()
-            let contents = readFiles()
-            var transaction = TopicTransaction(records: contents.records, topics: paths.topics, inPlay: inPlay)
+            let source = readSource()
+            if case .unreadable(let reason) = source.origin { throw Failure.unreadableFile(paths.topicRecords.path, reason) }
+            let contents = source.contents
+            var transaction = TopicTransaction(records: contents.records, takenIDs: Set(contents.invalidEntries.compactMap { $0["id"]?.string }),
+                                               inPlay: inPlay)
             transaction.locks = locks
             transaction.openPlaces = contents.openPlaces
             let result = try body(&transaction)
-            var changed = try transaction.records.filter { record in
-                let old = contents.records.first { $0.id == record.id }
-                return try old.map { try Self.encoded($0) } != Self.encoded(record)
-            }.map { (name: $0.id + ".json", data: try Self.encoded($0)) }
-            var removed = contents.records.filter { old in !transaction.records.contains { $0.id == old.id } }.map { $0.id + ".json" }
-            if transaction.openPlaces != contents.openPlaces {
-                if transaction.openPlaces.isEmpty { removed.append(Self.openPlacesFile) }
-                else { changed.append((Self.openPlacesFile, try Self.encoder.encode(transaction.openPlaces))) }
+            let openPlaces: JSONValue
+            if let kept = contents.unreadableOpenPlaces, transaction.openPlaces == contents.openPlaces { openPlaces = kept }
+            else { openPlaces = try Self.value(of: transaction.openPlaces) }
+            for record in transaction.records { _ = try Self.encoded(record) }
+            let file = RecordsFile(records: Self.sorted(transaction.records).map { TopicEntry.record($0, raw: nil) }
+                                        + contents.invalidEntries.map { TopicEntry.invalid($0, problem: "") },
+                                   openPlaces: openPlaces)
+            let data = try Self.encoder.encode(file)
+            // No file and nothing to put in one: a write that changed nothing makes no empty file.
+            let empty = source.data == nil && file.records.isEmpty && transaction.openPlaces.isEmpty
+            if data != source.data, !empty {
+                try FileManager.default.createDirectory(at: paths.state, withIntermediateDirectories: true)
+                try writeData(data, paths.topicRecords)
             }
-            if !removed.isEmpty { try swapFolder(with: changed, removing: removed) }
-            else if changed.count == 1 { try writeFile(changed[0].data, named: changed[0].name) }
-            else if changed.count > 1 { try swapFolder(with: changed) }
+            if case .legacyFolder(let folder, let migrated) = source.origin { folder.remove(migrated) }
             return result
         }
     }
 
-    // MARK: - Files
+    // MARK: - The file
 
-    private func readFiles() -> TopicContents {
-        var records: [TopicRecord] = []
-        var problems: [String] = []
-        for url in files() {
-            do {
-                let record = try JSONDecoder().decode(TopicRecord.self, from: Data(contentsOf: url))
-                guard url.deletingPathExtension().lastPathComponent == record.id else {
-                    problems.append("\(url.path): filename must match the Topic id")
-                    continue
-                }
-                records.append(record)
-            } catch {
-                problems.append("\(url.path): \(error)")
-            }
+    /// `topics.json`: a `records` array of entries and the `open_places` array.
+    private struct RecordsFile: Codable {
+        var records: [TopicEntry]
+        var openPlaces: JSONValue?
+
+        private enum CodingKeys: String, CodingKey {
+            case records, openPlaces = "open_places"
         }
-        let needsUpgrade = FileManager.default.fileExists(atPath: paths.legacyZenFile.path)
-            || records.contains { $0.unknownFields[SnoozeUpgrade.field] != nil }
-        var openPlaces: [OpenPlace] = []
-        if let data = try? Data(contentsOf: openPlacesURL) {
-            do { openPlaces = try JSONDecoder().decode([OpenPlace].self, from: data) }
-            catch { problems.append("\(openPlacesURL.path): \(error)") }
-        }
-        return TopicContents(records: records, problems: problems, openPlaces: openPlaces, needsUpgrade: needsUpgrade)
     }
 
-    private var openPlacesURL: URL { paths.topics.appendingPathComponent(Self.openPlacesFile) }
+    /// One entry of `records`: a record, or a value that is not a valid record, with why, and goes back into the
+    /// file as it is. A record read from the file keeps its `raw` value, so a second record with the same id goes
+    /// back as it is too.
+    private enum TopicEntry: Codable {
+        case record(TopicRecord, raw: JSONValue?)
+        case invalid(JSONValue, problem: String)
 
-    private func files() -> [URL] {
-        ((try? FileManager.default.contentsOfDirectory(at: paths.topics, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.pathExtension == "json" }
-            .sorted { Array($0.lastPathComponent.utf8).lexicographicallyPrecedes(Array($1.lastPathComponent.utf8)) }
+        init(from decoder: Decoder) throws {
+            let value = try decoder.singleValueContainer()
+            // A `JSONValue` holds no number past the range of `Decimal`, so a record with such an `order` has no raw value.
+            let raw = try? value.decode(JSONValue.self)
+            do { self = .record(try value.decode(TopicRecord.self), raw: raw) }
+            catch {
+                guard let raw else { throw error }
+                self = .invalid(raw, problem: "\(error)")
+            }
+        }
+
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .record(let record, _): try record.encode(to: encoder)
+            case .invalid(let value, _): try value.encode(to: encoder)
+            }
+        }
+    }
+
+    /// Where a read found the records.
+    private enum Origin {
+        /// The records file, or no state at all.
+        case file
+        /// The old folder, one file for each Topic: the next write moves the records into the file and removes the
+        /// files it read.
+        case legacyFolder(LegacyFolder, migrated: [URL])
+        /// The records file exists, but it is not a records file.
+        case unreadable(String)
+    }
+
+    private struct Source {
+        var contents: TopicContents
+        /// The bytes of the records file, so a write that leaves them as they are writes nothing.
+        var data: Data?
+        var origin: Origin
+    }
+
+    private func readSource() -> Source {
+        var source = readFileOrFolder()
+        source.contents.needsUpgrade = source.contents.needsUpgrade || FileManager.default.fileExists(atPath: paths.legacyZenFile.path)
+        return source
+    }
+
+    private func readFileOrFolder() -> Source {
+        let folder = LegacyFolder(paths: paths)
+        guard let data = try? Data(contentsOf: paths.topicRecords) else {
+            if folder.exists {
+                let read = folder.read()
+                return Source(contents: read.contents, data: nil, origin: .legacyFolder(folder, migrated: read.migrated))
+            }
+            return Source(contents: TopicContents(records: [], problems: []), data: nil, origin: .file)
+        }
+        let file: RecordsFile
+        do { file = try JSONDecoder().decode(RecordsFile.self, from: data) } catch {
+            let reason = "\(error)"
+            return Source(contents: TopicContents(records: [], problems: ["\(paths.topicRecords.path): \(reason)"]), data: data, origin: .unreadable(reason))
+        }
+        var contents = Self.contents(of: file.records, openPlaces: file.openPlaces, in: paths.topicRecords.path)
+        if folder.exists {
+            contents.problems.append("\(folder.url.path): the records moved to \(paths.topicRecords.lastPathComponent), and the folder keeps files that Muxify could not read. Remove the folder by hand.")
+        }
+        return Source(contents: contents, data: data, origin: .file)
+    }
+
+    /// The valid records in id order, each id once, and the other entries as they are. A second entry with the id
+    /// of a record is not a record: it is kept as it is, so no write loses it.
+    private static func contents(of entries: [TopicEntry], openPlaces: JSONValue?, in path: String) -> TopicContents {
+        var records: [TopicRecord] = []
+        var invalid: [JSONValue] = []
+        var problems: [String] = []
+        var seen: Set<String> = []
+        for (index, entry) in entries.enumerated() {
+            switch entry {
+            case .record(let record, let raw):
+                if seen.insert(record.id).inserted { records.append(record) }
+                else {
+                    invalid.append(raw ?? .null)
+                    problems.append("\(path): records[\(index)]: a second record with the id \(record.id)")
+                }
+            case .invalid(let value, let problem):
+                invalid.append(value)
+                problems.append("\(path): records[\(index)]: \(problem)")
+            }
+        }
+        var contents = TopicContents(records: sorted(records), problems: problems)
+        contents.invalidEntries = invalid
+        switch openPlaces {
+        case nil, .null?: break
+        case let value?:
+            do { contents.openPlaces = try JSONDecoder().decode([OpenPlace].self, from: JSONEncoder().encode(value)) }
+            catch {
+                contents.unreadableOpenPlaces = value
+                problems.append("\(path): open_places: \(error)")
+            }
+        }
+        contents.problems = problems
+        contents.needsUpgrade = records.contains { $0.unknownFields[SnoozeUpgrade.field] != nil }
+        return contents
+    }
+
+    /// Id order, by bytes, so every read lists the records the same way.
+    private static func sorted(_ records: [TopicRecord]) -> [TopicRecord] {
+        records.sorted { Array($0.id.utf8).lexicographicallyPrecedes(Array($1.id.utf8)) }
     }
 
     private static var encoder: JSONEncoder {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         return encoder
+    }
+
+    private static func value<T: Encodable>(of item: T) throws -> JSONValue {
+        try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(item))
     }
 
     /// Also checks that the id is a filename, for records made in memory.
@@ -133,50 +258,82 @@ public struct TopicStore: Sendable {
         return data
     }
 
-    private func writeFile(_ data: Data, named name: String) throws {
-        try FileManager.default.createDirectory(at: paths.topics, withIntermediateDirectories: true)
-        try writeData(data, paths.topics.appendingPathComponent(name))
-    }
+    // MARK: - The old folder
 
-    /// Copies the folder, writes the changed files into the copy, and swaps it in with one rename, so a reader
-    /// sees all of the changes or none of them.
-    private func swapFolder(with writes: [(name: String, data: Data)], removing names: [String] = []) throws {
-        let files = FileManager.default
-        let directory = paths.topics
-        try files.createDirectory(at: paths.state, withIntermediateDirectories: true)
-        let staging = paths.state.appendingPathComponent(".topics-" + UUID().uuidString, isDirectory: true)
-        var committed = false
-        do {
-            if files.fileExists(atPath: directory.path) { try files.copyItem(at: directory, to: staging) }
-            else { try files.createDirectory(at: staging, withIntermediateDirectories: false) }
-            for name in names { try files.removeItem(at: staging.appendingPathComponent(name)) }
-            for (name, data) in writes {
-                try writeData(data, staging.appendingPathComponent(name))
-            }
-            if files.fileExists(atPath: directory.path) {
-                let result = directory.path.withCString { current in
-                    staging.path.withCString { replacement in
-                        renameatx_np(AT_FDCWD, current, AT_FDCWD, replacement, UInt32(RENAME_SWAP))
-                    }
-                }
-                guard result == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-                committed = true
-                try? files.removeItem(at: staging)
-            } else {
-                try files.moveItem(at: staging, to: directory)
-                committed = true
-            }
-        } catch {
-            if !committed { try? files.removeItem(at: staging) }
-            throw error
+    /// The records as an older Muxify kept them: `topics/<id>.json` for each Topic and `topics/open-places`.
+    /// A read before the first write reads them from here, so nothing disappears after an update.
+    private struct LegacyFolder {
+        static let openPlacesFile = "open-places"
+        let paths: MuxifyPaths
+        var url: URL { paths.legacyTopicsFolder }
+        var exists: Bool { FileManager.default.fileExists(atPath: url.path) }
+
+        /// `.json` files in name order, as the records were listed before.
+        private func files() -> [URL] {
+            ((try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? [])
+                .filter { $0.pathExtension == "json" }
+                .sorted { Array($0.lastPathComponent.utf8).lexicographicallyPrecedes(Array($1.lastPathComponent.utf8)) }
         }
-    }
 
-    /// A staging folder that exists while this process holds the record lock was left by a writer that crashed.
-    private func removeOrphanStagingFolders() {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: paths.state.path)) ?? []
-        for name in names where name.hasPrefix(".topics-") {
-            try? FileManager.default.removeItem(at: paths.state.appendingPathComponent(name))
+        func stamp() -> String {
+            (files() + [url.appendingPathComponent(Self.openPlacesFile)]).map { file in
+                file.lastPathComponent + "@" + (TopicStore.stamp(of: file) ?? "-")
+            }.joined(separator: "|")
+        }
+
+        /// A file that is a record, or JSON of another shape, becomes an entry, and `migrated` names it. A file that is
+        /// not JSON is a problem, and it stays in the folder: a write cannot put it into the records file without a
+        /// loss.
+        func read() -> (contents: TopicContents, migrated: [URL]) {
+            var entries: [TopicEntry] = []
+            var problems: [String] = []
+            var migrated: [URL] = []
+            for file in files() {
+                let data = try? Data(contentsOf: file)
+                let value = data.flatMap { try? JSONDecoder().decode(JSONValue.self, from: $0) }
+                let problem: String
+                do {
+                    let record = try JSONDecoder().decode(TopicRecord.self, from: data ?? Data())
+                    if record.id == file.deletingPathExtension().lastPathComponent {
+                        entries.append(.record(record, raw: value))
+                        migrated.append(file)
+                        continue
+                    }
+                    problem = "filename must match the Topic id"
+                } catch {
+                    problem = "\(error)"
+                }
+                guard let value else {
+                    problems.append("\(file.path): not JSON, so it stays in the folder")
+                    continue
+                }
+                entries.append(.invalid(value, problem: problem))
+                migrated.append(file)
+            }
+            let placesFile = url.appendingPathComponent(Self.openPlacesFile)
+            var openPlaces: JSONValue?
+            if let data = try? Data(contentsOf: placesFile) {
+                if let value = try? JSONDecoder().decode(JSONValue.self, from: data) {
+                    openPlaces = value
+                    migrated.append(placesFile)
+                } else {
+                    problems.append("\(placesFile.path): not JSON, so it stays in the folder")
+                }
+            }
+            var contents = TopicStore.contents(of: entries, openPlaces: openPlaces, in: url.path)
+            contents.problems = problems + contents.problems
+            return (contents, migrated)
+        }
+
+        /// After the write that moved the records: removes the files it read, the folder once it is empty, and the
+        /// staging folders of a writer that crashed before the update.
+        func remove(_ migrated: [URL]) {
+            let manager = FileManager.default
+            for file in migrated { try? manager.removeItem(at: file) }
+            if (try? manager.contentsOfDirectory(atPath: url.path))?.isEmpty == true { try? manager.removeItem(at: url) }
+            for name in (try? manager.contentsOfDirectory(atPath: paths.state.path)) ?? [] where name.hasPrefix(".topics-") {
+                try? manager.removeItem(at: paths.state.appendingPathComponent(name))
+            }
         }
     }
 }
@@ -193,11 +350,12 @@ public struct TopicTransaction {
     /// The Config's `topics.in_play`: with it, the Locked Sessions are Guests, and a regular card that leaves an In Play
     /// place leaves an Open Place.
     public let inPlay: Int?
-    private let topics: URL
+    /// The ids of the entries that are not valid records: no new Topic takes one, so a write cannot replace the entry.
+    private let takenIDs: Set<String>
 
-    init(records: [TopicRecord], topics: URL, inPlay: Int? = nil) {
+    init(records: [TopicRecord], takenIDs: Set<String> = [], inPlay: Int? = nil) {
         self.records = records
-        self.topics = topics
+        self.takenIDs = takenIDs
         self.inPlay = inPlay
     }
 
@@ -216,12 +374,12 @@ public struct TopicTransaction {
     }
 
     /// Adds a new Topic where `arrival` puts it, or in the place of the Lock of `lockedSessionID`, which then ends. With
-    /// `in_play`, that Lock is a Guest, so the Topic gets the Guest mark. A file of that name that is not a valid record
-    /// is not replaced. The plan that makes the Topic ends the Lock in tmux, so the result leaves it out.
+    /// `in_play`, that Lock is a Guest, so the Topic gets the Guest mark. An id that a record or an invalid entry has
+    /// is taken. The plan that makes the Topic ends the Lock in tmux, so the result leaves it out.
     @discardableResult
     public mutating func create(_ record: TopicRecord, arrival: TopicArrival = .end(.bottom), replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLockChange] {
         _ = try TopicStore.encoded(record)
-        guard !FileManager.default.fileExists(atPath: topics.appendingPathComponent(record.id + ".json").path) else {
+        guard !takenIDs.contains(record.id), !records.contains(where: { $0.id == record.id }) else {
             throw CocoaError(.fileWriteFileExists)
         }
         if let lock = locks.first(where: { $0.sessionID == lockedSessionID }) {

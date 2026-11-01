@@ -8,6 +8,7 @@ import subprocess
 import unittest
 
 from scripts.verify.sandbox import REPO, Sandbox, wait
+from scripts.verify.topic_records import TopicRecords
 
 
 class SessionIdentity(unittest.TestCase):
@@ -15,6 +16,7 @@ class SessionIdentity(unittest.TestCase):
     def setUpClass(cls):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(s.teardown)
+        cls.store = TopicRecords(s.root/'state/muxify')
         cls.paths = s.root/'folders'
         cls.paths.mkdir()
         cls.base = cls.paths/'base'
@@ -40,8 +42,7 @@ class SessionIdentity(unittest.TestCase):
         return sid
 
     def topic(self, name):
-        (self.s.root/'state/muxify/topics').mkdir(exist_ok=True)
-        (self.s.root/('state/muxify/topics/' + name + '.json')).write_text(json.dumps(dict(id=name, title=name, slug=name)))
+        self.store.put(dict(id=name, title=name, slug=name))
         return name
 
     def select(self, sid):
@@ -98,8 +99,7 @@ class SessionIdentity(unittest.TestCase):
         self.s.act('action', key, 'New Session')
         self.s.wait_shown('=debug+2/repeat-topic:')
         self.assertEqual(self.s.tmux('show-options', '-qv', '-t', '=debug+2/repeat-topic:', '@muxify_topic'), topic)
-        file = self.s.root/('state/muxify/topics/' + topic + '.json')
-        saved = wait(lambda: (data if len((data := json.loads(file.read_text())).get('sessions', [])) == 2 else None), 'two Sessions not remembered', seconds=10)
+        saved = wait(lambda: (data if len((data := self.store.get(topic)).get('sessions', [])) == 2 else None), 'two Sessions not remembered', seconds=10)
         self.assertEqual(len({row['id'] for row in saved['sessions']}), 2)
         self.assertEqual({row['base_name'] for row in saved['sessions']}, {'debug', 'debug+2'})
 
@@ -129,11 +129,10 @@ class SessionIdentity(unittest.TestCase):
         topic = self.topic('closed-topic')
         sid = self.session('debug/closed-topic', self.base, topic)
         self.select(sid)
-        file = self.s.root/('state/muxify/topics/' + topic + '.json')
-        wait(lambda: bool(json.loads(file.read_text()).get('sessions')), 'live Session not remembered', seconds=10)
+        wait(lambda: bool(self.store.get(topic).get('sessions')), 'live Session not remembered', seconds=10)
         self.select(self.base_id)
         self.s.tmux('kill-session', '-t', sid)
-        wait(lambda: json.loads(file.read_text()).get('sessions') == [], 'confirmed closure left a resurrectable Session', seconds=10)
+        wait(lambda: self.store.get(topic).get('sessions') == [], 'confirmed closure left a resurrectable Session', seconds=10)
 
 class TopicMigration(unittest.TestCase):
     def setUp(self):
