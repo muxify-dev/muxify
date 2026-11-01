@@ -1,6 +1,7 @@
 """Diagnostics: with `diagnostics.enabled` in the Config, the app logs into the sandbox's logs folder (docs/development.md)."""
 
 import re
+import time
 import unittest
 
 from scripts.verify.sandbox import Sandbox, wait
@@ -35,7 +36,12 @@ class Diagnostics(unittest.TestCase):
 
         def finished_samples():
             return [path for path in self.logs.glob('freeze-*.txt') if 'Binary Images:' in path.read_text(errors='replace')]
-        sample = wait(finished_samples, 'no finished freeze sample in %s' % self.logs, 20)[0].read_text(errors='replace')
+        # Under load, sample can start recording seconds after the app starts it, when the first stall has ended.
+        # Stalling on until the sample is written keeps the main thread in the stall while it records.
+        deadline = time.monotonic() + 20
+        while not finished_samples() and time.monotonic() < deadline:
+            self.s.act('stall', seconds=1.5)
+        sample = wait(finished_samples, 'no finished freeze sample in %s' % self.logs, 5)[0].read_text(errors='replace')
         # The call graph lists the main thread first.
         threads = re.split(r'\n    \d+ Thread_', sample[sample.index('Call graph:'):])
         main = threads[1]

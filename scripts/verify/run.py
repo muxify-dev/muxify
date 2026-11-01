@@ -6,8 +6,10 @@ Without a suite it runs every suite in suites/. A run of every suite is a full r
 (run_suite.py) with its own Sandbox, at most JOBS at the same time, the longest first; set
 MUXIFY_VERIFY_JOBS to change JOBS. Without the Accessibility permission it stops before any suite starts.
 
-After the parallel pass only the checks that failed run again, alone. A check that passes then is
-FLAKY. A suite that stops making progress reaches its timeout, and the
+Only the checks that failed run again. Their rerun starts as soon as the parallel pass has started every
+suite and at most RERUN_BESIDE suites still run, one suite's rerun at a time. A check that passes then is FLAKY.
+A check that fails in a rerun that ran beside another suite runs once more, fully alone, after everything else;
+only a check that fails alone is failed. A suite that stops making progress reaches its timeout, and the
 check that ran gets the status timeout. --repeat N runs the selection N times, and --shuffle shuffles
 the order of the checks in each suite, with a seed that the output names.
 
@@ -18,6 +20,7 @@ fails, and, for a full run, when the gate fails.
 
 import json
 import os
+from typing import NamedTuple
 import random
 import signal
 import subprocess
@@ -35,9 +38,21 @@ TIMINGS = gate.EVIDENCE/'timings.json'
 # Each suite runs its own app, and each app starts tmux every second. With all 30 suites at once on a
 # 12-core Mac, a process start took 30 times longer and checks failed by chance; 10 at once was faster.
 JOBS = 10
+# A rerun that starts beside this many suites still running saves their tail time, and is nearly alone.
+RERUN_BESIDE = 2
 PROGRESS_TIMEOUT = 120
 STOP_GRACE = 60
 FAILED = ('fail', 'error', 'timeout')
+
+
+class Job(NamedTuple):
+    """One process of run_suite.py: a suite, or the ids of some of its checks, with its evidence in out. beside is how
+    many other suites may run while it runs: JOBS - 1 in the parallel pass, 0 for a run that must be alone."""
+    suite: str
+    out: object
+    ids: list
+    seed: object
+    beside: int
 
 
 def results(out):
@@ -76,25 +91,30 @@ def finish_timeout(state, now):
                                        shuffle=frozen['shuffle'], checks=checks))
 
 
-def run_suites(jobs, starts, clock, *, timeout=PROGRESS_TIMEOUT, stop_grace=STOP_GRACE):
-    """Runs each (suite, out, ids, seed), `jobs` at a time and in the given order. Returns per out:
-    (status, seconds, timeout) with status ok, failed or timeout."""
+def run_suites(starts, clock, *, then=lambda job, outcome: [], timeout=PROGRESS_TIMEOUT, stop_grace=STOP_GRACE):
+    """Runs each Job. A job waits until it and every running job allow one more suite beside them; the jobs that allow
+    the most go first, so a job that must be alone runs after the others. When a job ends, then(job, outcome) gives
+    the jobs that follow it. Returns per out: dict(status, seconds, timeout, crowd), with status ok, failed or timeout
+    and crowd the most other suites that ran beside it at one time."""
     waiting, running, ended = list(starts), {}, {}
     while waiting or running:
-        while waiting and len(running) < jobs:
-            suite, out, ids, seed = waiting.pop(0)
-            out.mkdir(parents=True, exist_ok=True)
-            command = [sys.executable, '-m', 'scripts.verify.run_suite', suite, str(out), *ids]
-            if seed is not None:
-                command += ['--shuffle', str(seed)]
-            with open(out/'output.log', 'w') as handle:
+        waiting.sort(key=lambda job: -job.beside)
+        while waiting and all(len(running) <= other.beside for other in [waiting[0]] + [state['job'] for state in running.values()]):
+            job = waiting.pop(0)
+            job.out.mkdir(parents=True, exist_ok=True)
+            command = [sys.executable, '-m', 'scripts.verify.run_suite', job.suite, str(job.out), *job.ids]
+            if job.seed is not None:
+                command += ['--shuffle', str(job.seed)]
+            with open(job.out/'output.log', 'w') as handle:
                 # A session of its own, so a suite that ignores the stop dies with all its children.
                 process = subprocess.Popen(command, cwd=REPO, stdout=handle, stderr=subprocess.STDOUT,
-                                           env=dict(os.environ, **{EVIDENCE: str(out)}), start_new_session=True)
+                                           env=dict(os.environ, **{EVIDENCE: str(job.out)}), start_new_session=True)
             began = time.monotonic()
-            checkpoint = dict(phase=dict(check=None, began=began), records={}, expected=[], shuffle=seed)
-            running[process] = dict(suite=suite, out=out, began=began, limit=timeout, stopped=None,
-                                    checkpoint=checkpoint, expired=None)
+            checkpoint = dict(phase=dict(check=None, began=began), records={}, expected=[], shuffle=job.seed)
+            running[process] = dict(job=job, suite=job.suite, out=job.out, began=began, limit=timeout, stopped=None,
+                                    checkpoint=checkpoint, expired=None, crowd=0)
+        for state in running.values():
+            state['crowd'] = max(state['crowd'], len(running) - 1)
         now = time.monotonic()
         for process, state in list(running.items()):
             if process.poll() is None:
@@ -115,10 +135,11 @@ def run_suites(jobs, starts, clock, *, timeout=PROGRESS_TIMEOUT, stop_grace=STOP
             status = 'timeout' if state['stopped'] is not None else 'ok' if process.returncode == 0 else 'failed'
             if state['stopped'] is not None:
                 finish_timeout(state, now)
-            ended[state['out']] = (status, seconds, state['limit'])
+            outcome = ended[state['out']] = dict(status=status, seconds=seconds, timeout=state['limit'], crowd=state['crowd'])
             bad = [short(record['check']) for record in results(state['out']) if record['status'] in FAILED]
             print('%-7s %-30s %5.1f s  (at %4.0f s)%s' % (status.upper() if status != 'ok' else 'ok', state['out'].name,
                   seconds, now - clock, '  %s' % ', '.join(bad) if bad else ''), flush=True)
+            waiting += then(state['job'], outcome)
         time.sleep(.2)
     return ended
 
@@ -135,7 +156,7 @@ def covers(id, check):
 
 
 def judged(record, again):
-    """The verdict of one check from its parallel pass and the alone rerun of its suite.
+    """The verdict of one check from its parallel pass and the reruns of its suite.
 
     A check is judged by its own rerun record. The module id stands for a suite without per-check
     results, so every check of the rerun judges it. A class fixture that does not fail again passed
@@ -153,37 +174,49 @@ def judged(record, again):
     return dict(check=id, first=record, rerun=rerun, verdict=verdict)
 
 
+def failed_targets(records):
+    """The checks of a run to run again: what failed or did not run, a fixture error as the class it names."""
+    return sorted({rerun_target(record['check']) for record in records if record['status'] in FAILED + ('not-run',)})
+
+
 def run_round(names, round_dir, jobs, seed, timings):
-    """One parallel pass over the suites, then the alone rerun of what failed. Returns the suite summaries."""
+    """One parallel pass over the suites, and the reruns of what failed. Returns the suite summaries."""
     clock = time.monotonic()
     # Suites with no recorded time first: they may be long, and this run learns their time.
     order = sorted(names, key=lambda name: -timings.get(name, float('inf')))
-    ended = run_suites(jobs, [(name, round_dir/name, [], seed) for name in order], clock)
-    first = {name: results(round_dir/name) for name in names}
-    redo = {name: [record['check'] for record in records if record['status'] in FAILED + ('not-run',)]
-            for name, records in first.items() if ended[round_dir/name][0] != 'ok'}
-    redo = {name: ids for name, ids in redo.items() if ids}
-    if redo:
-        print('running again alone: %s' % ', '.join('%s (%d)' % item for item in
-                                                    ((name, len(ids)) for name, ids in redo.items())), flush=True)
-    again_ended = run_suites(1, [(name, round_dir/(name + '.rerun'), sorted({rerun_target(id) for id in ids}), None)
-                                 for name, ids in redo.items()], clock)
+    reruns = {name: [] for name in names}
+
+    def then(job, outcome):
+        ids = failed_targets(results(job.out)) if outcome['status'] != 'ok' else []
+        if not ids or (job.ids and outcome['crowd'] == 0):
+            return []
+        follow = Job(job.suite, round_dir/(job.suite + ('.alone' if job.ids else '.rerun')), ids, None,
+                     0 if job.ids else RERUN_BESIDE)
+        reruns[job.suite].append(follow.out)
+        print('running again %s: %s (%d)' % ('alone' if job.ids else 'beside at most %d' % RERUN_BESIDE,
+                                             job.suite, len(ids)), flush=True)
+        return [follow]
+
+    ended = run_suites([Job(name, round_dir/name, [], seed, jobs - 1) for name in order], clock, then=then)
 
     suites = []
     for name in order:
-        status, seconds, limit = ended[round_dir/name]
-        rerun = round_dir/(name + '.rerun')
-        again = results(rerun) if name in redo else []
-        checks = [judged(record, again) for record in first[name]]
-        suites.append(dict(suite=name, status=status, seconds=round(seconds, 1), timeout=limit,
+        outcome = ended[round_dir/name]
+        # A later rerun judges the checks it ran; a check that passed in an earlier one keeps that pass.
+        records = []
+        for out in reruns[name]:
+            records = [record for record in records if record['status'] in ('pass', 'skip')] + results(out)
+        checks = [judged(record, records) for record in results(round_dir/name)]
+        suites.append(dict(suite=name, status=outcome['status'], seconds=round(outcome['seconds'], 1),
+                           timeout=outcome['timeout'],
                            dir=str((round_dir/name).relative_to(gate.EVIDENCE)),
-                           rerun=dict(status=again_ended[rerun][0], dir=str(rerun.relative_to(gate.EVIDENCE)))
-                           if name in redo else None,
-                           files=sorted(str(path.relative_to(gate.EVIDENCE)) for folder in (round_dir/name, rerun)
+                           reruns=[dict(status=ended[out]['status'], beside=ended[out]['crowd'],
+                                        dir=str(out.relative_to(gate.EVIDENCE))) for out in reruns[name]],
+                           files=sorted(str(path.relative_to(gate.EVIDENCE)) for folder in [round_dir/name] + reruns[name]
                                         for path in folder.rglob('*') if path.is_file()),
                            checks=checks))
-        if status == 'ok':
-            timings[name] = round(seconds, 1)
+        if outcome['status'] == 'ok':
+            timings[name] = round(outcome['seconds'], 1)
     return suites
 
 
@@ -216,6 +249,11 @@ def main(argv):
         if time.monotonic() > deadline:
             sys.exit('nothing ran: ' + probe.stderr.strip())
         time.sleep(.5)
+
+    # While the display sleeps the apps draw no frames, so hover labels never open and checks that wait for a
+    # frame time out. The assertion ends with this process; -u wakes a display that already sleeps.
+    subprocess.run(['/usr/bin/caffeinate', '-u', '-t', '1'])
+    subprocess.Popen(['/usr/bin/caffeinate', '-d', '-i', '-w', str(os.getpid())])
 
     run_id = new_run_id()
     run_dir = RUNS/run_id

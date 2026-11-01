@@ -938,8 +938,13 @@ private struct GitDiffPane: View {
     /// Code wraps every `columns` characters, so a character's place on
     /// screen follows from its offset.
     private var metrics: GitView.TextMetrics {
+        // The font's advance for "0", not a typeset string: `size(withAttributes:)` on every redraw threw from inside
+        // CoreText and ended the app when many apps drew at once.
         let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        let charWidth = ("0000000000" as NSString).size(withAttributes: [.font: font]).width / 10
+        var zero = UniChar(48)
+        var glyph = CGGlyph(0)
+        CTFontGetGlyphsForCharacters(font as CTFont, &zero, &glyph, 1)
+        let charWidth = font.advancement(forCGGlyph: glyph).width
         let isSplit = gitView.layout == .split
         let codeX: CGFloat = isSplit ? 64 : 110
         let width = contentWidth > 0 ? contentWidth : gitView.diffWidth

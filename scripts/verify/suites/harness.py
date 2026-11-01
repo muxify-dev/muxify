@@ -35,7 +35,7 @@ time.sleep(600)
 
 class VerifyRunner(unittest.TestCase):
     def run_probe(self, source, *, timeout=3):
-        from scripts.verify.run import results, run_suites
+        from scripts.verify.run import Job, results, run_suites
 
         root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory(prefix='muxify-runner-')))
         module = root/'scripts/verify/suites/timeout_probe.py'
@@ -46,8 +46,9 @@ class VerifyRunner(unittest.TestCase):
         for key in ('TMUX', 'TMUX_PANE'):
             environment.pop(key, None)
         with patch.dict(os.environ, environment, clear=True):
-            status = run_suites(1, [('timeout_probe', out, [], None)], time.monotonic(),
-                                timeout=timeout, stop_grace=.5)[out]
+            outcome = run_suites([Job('timeout_probe', out, [], None, 0)], time.monotonic(),
+                                 timeout=timeout, stop_grace=.5)[out]
+            status = outcome['status'], outcome['seconds'], outcome['timeout']
         return status, results(out), out
 
     def test_runner_allows_a_suite_to_outlive_the_progress_deadline(self):
@@ -142,8 +143,61 @@ class VerifyRunner(unittest.TestCase):
                 else:
                     self.assertIn('test_b', records[1]['error'])
 
+    def run_round_of(self, probes):
+        """Runs the probe suites, name to the body of one check, as one round of make verify. A check can call
+        log(text), and reads `busy`, a file the probe `slow` removes when it ends. Returns the verdict of each
+        check and the logged lines."""
+        from scripts.verify import gate
+        from scripts.verify.run import run_round
+
+        root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory(prefix='muxify-runner-')))
+        suites = root/'scripts/verify/suites'
+        suites.mkdir(parents=True)
+        events, busy = root/'events', root/'busy'
+        busy.touch()
+        for name, body in probes.items():
+            (suites/(name + '.py')).write_text(
+                'import pathlib, time, unittest\nbusy = pathlib.Path(%r)\n'
+                'def log(text):\n    with open(%r, "a") as file: file.write(text + "\\n")\n'
+                'class Checks(unittest.TestCase):\n    def test_%s(self):\n%s'
+                % (str(busy), str(events), name, textwrap.indent(textwrap.dedent(body), ' ' * 8)))
+        environment = dict(os.environ, PYTHONPATH=str(root) + os.pathsep + os.environ.get('PYTHONPATH', ''))
+        for key in ('TMUX', 'TMUX_PANE'):
+            environment.pop(key, None)
+        with patch.dict(os.environ, environment, clear=True), patch.object(gate, 'EVIDENCE', root):
+            summaries = run_round(sorted(probes), root/'evidence', 10, None, {})
+        verdicts = {check['check'].rsplit('.', 1)[-1]: check['verdict'] for suite in summaries for check in suite['checks']}
+        return verdicts, events.read_text().splitlines()
+
+    def test_a_rerun_starts_once_two_suites_still_run_and_a_check_that_passes_there_is_flaky(self):
+        verdicts, events = self.run_round_of({
+            **{'slow_%d' % n: 'time.sleep(%g)\nlog("slow %d ends")\n' % (seconds, n) for n, seconds in [(1, 1.5), (2, 4), (3, 6.5)]},
+            'flaky': '''
+                ran = busy.with_name('flaky-ran')
+                first = not ran.exists()
+                ran.touch()
+                log('flaky runs')
+                self.assertFalse(first, 'the first run fails')
+            ''',
+        })
+        self.assertEqual(verdicts, dict(test_slow_1='pass', test_slow_2='pass', test_slow_3='pass', test_flaky='FLAKY'))
+        self.assertEqual(events, ['flaky runs', 'slow 1 ends', 'flaky runs', 'slow 2 ends', 'slow 3 ends'],
+                         'the rerun did not start beside the last two suites, or ran more than once')
+
+    def test_a_check_that_fails_beside_another_suite_runs_once_more_alone_and_only_that_run_fails_it(self):
+        verdicts, events = self.run_round_of({
+            'slow': 'time.sleep(4)\nbusy.unlink()\nlog("slow ends")\n',
+            'shy': 'log("shy runs")\nself.assertFalse(busy.exists(), "another suite runs")\n',
+            'broken': 'log("broken runs")\nself.fail("always")\n',
+        })
+        self.assertEqual(verdicts, dict(test_slow='pass', test_shy='FLAKY', test_broken='failed'))
+        self.assertEqual(events[events.index('slow ends'):].count('shy runs'), 1, events)
+        self.assertEqual(events.count('shy runs'), 3, 'shy did not run in the pass, beside slow, and alone: %s' % events)
+        self.assertEqual(events.count('broken runs'), 3, events)
+
 
 class Harness(unittest.TestCase):
+
     def test_fixture_commits_do_not_use_the_users_signer(self):
         from scripts.verify.suites.command_palette import CommandPalette
         from scripts.verify.topics_sidebar import TopicsSidebar

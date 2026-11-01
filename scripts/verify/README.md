@@ -19,7 +19,9 @@ make verify SUITE="topics_cards_sidebar command_palette"
 
 `make verify` runs each suite in its own process, and 10 suites at the same time (`run.py`). Set `MUXIFY_VERIFY_JOBS` to change the number. With all suites at the same time, the Mac starts processes so slowly that checks fail by chance. It writes one line when a suite ends. The full output of a suite goes to `build/verify/<suite>/last-run.log` in the checkout, so runs in two checkouts at the same time do not overwrite each other's logs. When a suite fails, `make verify` also writes that output.
 
-A suite that fails runs again alone after the others. When it passes then, the last line names it as FLAKY, and its first output stays in `first-run.log`. `make verify` fails only when a suite fails again. A FLAKY suite has a check that depends on timing: find the cause, do not ignore it.
+The checks that fail run again, in `<suite>.rerun`. A rerun starts when the parallel pass has started every suite and at most 2 suites still run. When a check fails in a rerun that ran beside another suite, it runs once more, alone, after everything else, in `<suite>.alone`. When it passes in a rerun, the last lines name it as FLAKY. `make verify` fails only when a check also fails in its last rerun, and that run was alone. A FLAKY check depends on timing: find the cause, do not ignore it.
+
+While it runs, `make verify` keeps the display awake with `caffeinate`, and wakes it when it sleeps. While the display sleeps, the app draws no frames, and checks fail that have no bug. The screen can stay locked.
 
 The runner stops a suite after 120 seconds without a check starting or ending. Import, discovery, and class fixtures have the same limit. Output does not extend it. A suite can take longer than 120 seconds while its checks make progress. After a timeout, the suite has 60 seconds to clean up before the runner kills its process group. The last completed checks and the active timeout remain in the results even if cleanup cannot finish. Previous suite times set the run order, not the timeout.
 

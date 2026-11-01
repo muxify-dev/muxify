@@ -59,7 +59,8 @@ def file_label(path):
     """output.log, rerun output.log, or app.log 0f799e: the last part of the Sandbox run id tells two app logs apart."""
     parts = path.split('/')
     label = '%s %s' % (parts[-1], parts[-2][-6:]) if 'app-logs' in parts else parts[-1]
-    return ('rerun ' if any(part.endswith('.rerun') for part in parts) else '') + label
+    run = next((part.rsplit('.', 1)[1] for part in parts if part.endswith(('.rerun', '.alone'))), None)
+    return ('%s ' % run if run else '') + label
 
 
 def suite_rows(summary):
@@ -69,7 +70,8 @@ def suite_rows(summary):
             links = [link(path, file_label(path)) for path in suite['files']]
             rows.append('<tr><td>%s</td><td>%s</td><td>%s%s</td><td>%.1f s</td><td>%d s</td><td>%s</td></tr>' % (
                 one['number'], esc(suite['suite']), tag(suite['status']),
-                ' then rerun %s' % tag(suite['rerun']['status']) if suite['rerun'] else '',
+                ''.join(' then %s %s' % ('alone' if rerun['beside'] == 0 else 'rerun beside %d' % rerun['beside'],
+                                         tag(rerun['status'])) for rerun in suite['reruns']),
                 suite['seconds'], suite['timeout'], ' · '.join(links)))
     return ''.join(rows)
 
@@ -98,7 +100,7 @@ def check_rows(summary):
                 cells.append('<td></td>')
                 continue
             errors = error_block(check['first'], 'parallel pass') + ''.join(
-                error_block(record, 'alone' + ('' if record['check'] == id else ': ' + record['check']))
+                error_block(record, 'rerun' + ('' if record['check'] == id else ': ' + record['check']))
                 for record in check['rerun'])
             cells.append('<td>%s <span class="muted">%.1f s</span>%s</td>' % (
                 tag(check['verdict']), check['first']['seconds'], errors))
@@ -127,7 +129,7 @@ def render(summary):
 <p><b>Checks:</b> %(totals)s.</p>
 %(problems)s
 <h2>Checks</h2>
-<p class="muted">A check that fails in the parallel pass runs again alone. When it passes then, it is FLAKY.</p>
+<p class="muted">A check that fails in the parallel pass runs again, beside at most two suites. When it fails there, it runs once more alone. When it passes again, it is FLAKY.</p>
 <table><tr><th>Suite</th><th>Check</th>%(rounds)s</tr>%(checks)s</table>
 <h2>Suites</h2>
 <table><tr><th>Round</th><th>Suite</th><th>Status</th><th>Time</th><th>Progress timeout</th><th>Evidence</th></tr>%(suites)s</table>
