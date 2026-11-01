@@ -250,6 +250,11 @@ def main(argv):
             sys.exit('nothing ran: ' + probe.stderr.strip())
         time.sleep(.5)
 
+    # While the display sleeps the apps draw no frames, so hover labels never open and checks that wait for a
+    # frame time out. The assertion ends with this process; -u wakes a display that already sleeps.
+    subprocess.run(['/usr/bin/caffeinate', '-u', '-t', '1'])
+    subprocess.Popen(['/usr/bin/caffeinate', '-d', '-i', '-w', str(os.getpid())])
+
     run_id = new_run_id()
     run_dir = RUNS/run_id
     jobs = int(os.environ.get('MUXIFY_VERIFY_JOBS') or JOBS)
