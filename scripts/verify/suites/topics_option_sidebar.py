@@ -6,6 +6,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_option_sidebar
 """
 
+import fcntl
 import json
 import os
 import subprocess
@@ -18,6 +19,30 @@ from scripts.verify.topics_sidebar import REFRESH_LIMIT, TopicsSidebar
 
 
 class TopicsOptionSidebar(TopicsSidebar):
+    def test_app_answers_while_another_process_holds_the_topic_records(self):
+        # The held record lock stands in for a file open that a virus scanner holds for seconds. A new Topic file and a
+        # renamed Window of a Topic make the app read and write the records while the lock is held.
+        s = self.s
+        self.write_topic('held-records', 'Held records', self.beta, order=-1000200)
+        sid = self.new_session('beta/held-records', self.beta, topic='held-records')
+        window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
+        saved_names = lambda: [w.get('name') for row in self.records()['held-records'].get('sessions', [])
+                               for w in row.get('windows', [])]
+        wait(lambda: saved_names(), 'the Topic did not remember its Session')
+        with open(self.topics_dir.parent/'topics.lock', 'a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            self.write_topic('held-newcomer', 'Held newcomer', self.beta, order=-1000199)
+            s.tmux_ok('rename-window', '-t', window, 'held-rename')
+            slowest, end = 0, time.monotonic() + 3
+            while time.monotonic() < end:
+                start = time.monotonic()
+                s.driver('responder', timeout=30)
+                slowest = max(slowest, time.monotonic() - start)
+        self.assertLess(slowest, 1, 'the app did not answer for %.1f s while the records were held' % slowest)
+        self.find('topic-held-newcomer', 'the new Topic did not show after the records were free')
+        wait(lambda: 'held-rename' in saved_names(), 'the renamed Window was not saved after the records were free: %s'
+             % saved_names(), seconds=REFRESH_LIMIT + 5)
+
     def test_session_without_topic_option_shows_as_the_no_topic_card_when_opened(self):
         sid = self.new_session('plain', self.beta)
         self.select_window(sid + ':')

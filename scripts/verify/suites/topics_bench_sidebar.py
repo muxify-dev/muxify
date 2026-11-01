@@ -194,10 +194,11 @@ class TopicsBenchSidebar(TopicsSidebar):
         wait(settle_opened, 'Settle did not open for the card In Play', seconds=20)
 
         def settled():
-            # The step takes no ↩ while another change of the Topics runs, as after the last check's clean-up.
+            # The step takes no ↩ while another change of the Topics runs, as after the last check's clean-up, or while
+            # the Settle that the last press started still runs.
             if not s.has('palette-search'):
                 return True
-            s.act('press', 'palette-accept')
+            s.driver('press', 'palette-accept')
             return False
         wait(settled, 'Settle did not close the palette')
         wait(lambda: self.layout('bench-settle') == '_ b c',
