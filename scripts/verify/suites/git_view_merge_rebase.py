@@ -7,6 +7,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.git_view_merge_rebase
 """
 
+import json
 import time
 
 from scripts.verify.git_view_fixture import GitViewFixture
@@ -127,6 +128,8 @@ class GitViewMergeRebase(GitViewFixture):
         """Sets the fixture's changes aside and makes `m-side`, one commit on a new file: `ahead` leaves main where it
         was, so main can fast-forward to it, `diverged` moves main on another file, and `conflict` moves main on
         `conflict.txt`, which `m-side` also changed. Everything is put back after the check."""
+        # Do not read the temporary HEAD while the fixture changes branches.
+        self.close_git_view()
         self.git('stash', 'push', '-q', '-u', '-m', 'e2e merge')
         self.addCleanup(self.git, 'stash', 'pop', '-q', '--index')
         before = self.git('rev-parse', 'HEAD').strip()
@@ -142,6 +145,11 @@ class GitViewMergeRebase(GitViewFixture):
             (self.repo/other).write_text('main\n')
             self.git('add', other)
             self.git('commit', '-q', '-m', 'main change')
+        self.open_git_view()
+        self.go_to('2')
+        head = self.git('rev-parse', 'HEAD').strip()
+        self.s.wait_rows(lambda rs: self.s.has('git-row-commit:' + head, rs),
+                         'History did not read the merge fixture')
         return before
 
     def undo_merge(self, before):
@@ -151,14 +159,20 @@ class GitViewMergeRebase(GitViewFixture):
         self.git('reset', '-q', '--hard', before)
 
     def ask_merge(self, branch='m-side'):
-        # R renames in Branches, so it comes first, from Changes.
-        self.key('1')
-        self.key('shift+r')
         self.go_to('3')
         self.select_row('git-row-branch:' + branch)
         self.key('shift+m')
-        return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == "Merge '%s' into 'main'" % branch,
-                                'shift+m did not open the merge menu')
+        last_rows = []
+
+        def opened(rs):
+            last_rows[:] = rs
+            return self.menu(rs).get('accessibilityLabel') == "Merge '%s' into 'main'" % branch
+
+        try:
+            return self.s.wait_rows(opened, 'shift+m did not open the merge menu')
+        except AssertionError:
+            (self.s.root/'logs/merge-menu-last-rows.json').write_text(json.dumps(last_rows, indent=2))
+            raise
 
     def parents(self):
         return len(self.git('rev-list', '--parents', '-1', 'HEAD').split()) - 1

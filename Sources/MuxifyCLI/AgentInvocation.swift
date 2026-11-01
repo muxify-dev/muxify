@@ -13,10 +13,17 @@ struct AgentInvocation: Equatable {
 }
 
 extension AgentInvocation {
-    func run() async throws {
+    @MainActor func run() async throws {
+        try await EnvironmentModule.withCommand(paths: paths) { module in
+            try await run(module: module)
+        }
+    }
+
+    @MainActor private func run(module: EnvironmentModule) async throws {
+        let read = await module.readNow()
         let records: [TopicRecord]
         do {
-            records = try TopicStore(paths: paths).read().records
+            records = try read.records.get().records
         } catch {
             throw CLIError("Muxify could not read the Topic records in \(paths.state.path). \(error.localizedDescription)")
         }
@@ -27,7 +34,7 @@ extension AgentInvocation {
             throw CLIError(error.description)
         }
         // No tmux server gives no Panes, so no Agents.
-        let rows = AgentRow.list(snapshot: TmuxServer.local.snapshot(), records: records).filter { row in
+        let rows = AgentRow.list(snapshot: try read.inventory.get(), records: records).filter { row in
             (topicID == nil || row.topic?.id == topicID)
                 && (status == nil || row.agent.status == status)
                 && (!unreadOnly || row.agent.unread)
@@ -229,8 +236,8 @@ extension AgentConversationInvocation {
         return roles
     }
 
-    func run(using runner: any CLICommandRunning) throws {
-        let read = try readConversation(using: runner)
+    @MainActor func run(using runner: any CLICommandRunning) async throws {
+        let read = try await readConversation(using: runner)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         encoder.dateEncodingStrategy = .iso8601
@@ -268,11 +275,14 @@ extension AgentConversationInvocation {
         let entries: [Entry]
     }
 
-    private func readConversation(using runner: any CLICommandRunning) throws -> Read {
+    @MainActor private func readConversation(using runner: any CLICommandRunning) async throws -> Read {
         let conversation: AgentConversation
         switch source {
         case .pane(let pane):
-            guard let tmuxPane = TmuxServer.local.snapshot().panes.first(where: { $0.id == pane.rawValue }) else {
+            let inventory = try await EnvironmentModule.withCommand(topicsAvailable: false) { module in
+                try await module.readNow().inventory.get()
+            }
+            guard let tmuxPane = inventory.panes.first(where: { $0.id == pane.rawValue }) else {
                 throw CLIError("No tmux Pane \(pane.rawValue).")
             }
             guard let found = AgentConversation(in: tmuxPane) else {

@@ -56,6 +56,24 @@ final class TopicBranchHoldersTests: XCTestCase {
         XCTAssertEqual(holders([record("b", sessions: [session(repository: root + "/link", branch: "fix")])]), ["b"])
     }
 
+    func testPublishedBranchesKeepSymlinkAndRealPathSpellings() throws {
+        let folders = [Folder.local(root + "/link"), Folder.local(root + "/repo")]
+        let branches = TopicBranches(paths: folders) { path in
+            path.hasSuffix("/.git/HEAD") ? "ref: refs/heads/fix" : nil
+        }
+        let copied = try JSONDecoder().decode(TopicBranches.self, from: JSONEncoder().encode(branches))
+        XCTAssertEqual(copied.branch(at: root + "/link"), "fix")
+        XCTAssertEqual(copied.branch(at: root + "/repo"), "fix")
+    }
+
+    func testRemoteSymlinkUsesTheEnvironmentResolver() {
+        let folder = Folder(path: "/remote/link", real: "/remote/repo")
+        let records = [record("remote", sessions: [session(repository: folder.path, branch: "fix")])]
+        let result = TopicBranchHolders.records(remembering: "fix", in: [Folder(path: folder.real, real: folder.real)],
+                                               among: records, folders: .known([folder]))
+        XCTAssertEqual(result.map(\.id), ["remote"])
+    }
+
     func testASessionWithoutAWorktreeRemembersNoBranch() {
         XCTAssertEqual(holders([record("a", sessions: [session(repository: root + "/repo", branch: nil)])]), [])
     }

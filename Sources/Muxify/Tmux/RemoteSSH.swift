@@ -3,10 +3,10 @@ import Darwin
 import MuxifyCore
 
 /// One foreground, prompt-owning SSH master and its master-only channels.
-/// No helper or listening port is installed on the remote machine.
 final class RemoteSSH {
     let environment: RemoteEnvironment
     let directory: URL
+    let markerID: UUID
     let nonce: String
     private let sshExecutable: String
     private var ownsDirectory = false
@@ -20,7 +20,8 @@ final class RemoteSSH {
          sshExecutable: String = "/usr/bin/ssh") throws {
         self.environment = environment
         self.sshExecutable = sshExecutable
-        nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        markerID = UUID()
+        nonce = markerID.uuidString.replacingOccurrences(of: "-", with: "").lowercased()
         directory = temporaryDirectory.appendingPathComponent("mx-\(nonce.prefix(10))")
         guard directory.appendingPathComponent("s").path.utf8.count < 104 else {
             throw TmuxError.failed(status: 1, stderr: "Temporary directory path is too long for an SSH control socket")

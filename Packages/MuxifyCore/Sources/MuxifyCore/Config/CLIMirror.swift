@@ -1,6 +1,7 @@
 /// The path of each verb of the command line, such as "topic settle". The CLI has one verb for each case, so a
 /// mirror that names a case names a verb that exists.
 public enum CLIVerbPath: String, CaseIterable, Sendable {
+    case environmentWatch = "environment watch"
     case browserOpen = "browser open"
     case browserAvailable = "browser available"
     case browserTabs = "browser tabs"

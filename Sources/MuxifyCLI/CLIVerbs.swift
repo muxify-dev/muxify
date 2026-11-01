@@ -3,7 +3,7 @@ import MuxifyCore
 
 /// Every verb of the command line, in the order that `muxify --help` lists them.
 enum CLIVerbs {
-    static let all: [CLIVerb] = browser + session + extensions + topic + window + worktree + agent + read
+    static let all: [CLIVerb] = browser + session + extensions + topic + window + worktree + agent + read + environment
 
     /// The verb that the words name, and the words after it. The longest match wins.
     static func verb(for arguments: ArraySlice<String>) -> (CLIVerb, ArraySlice<String>)? {
@@ -44,6 +44,15 @@ enum CLIVerbs {
     private static let agentOptions: [CLIOption] = [.value("--window", aliases: ["-w"]), .value("--tab")]
 
     private static let topicTarget = "[--topic <id|label> | --window <id> | --pane <id>]"
+
+    private static let environment: [CLIVerb] = [
+        CLIVerb(path: .environmentWatch, synopsis: "[--socket <path>] [--tmux-config <path>]",
+                options: [.value("--socket"), .value("--tmux-config")],
+                help: "Reads Environment requests on stdin and writes JSON lines until stdin closes.") { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            return .environmentWatch(socket: try parsed.value("--socket"), config: try parsed.value("--tmux-config"))
+        },
+    ]
 
     // MARK: - browser
 

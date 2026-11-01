@@ -37,7 +37,7 @@ class TopicsUnread(TopicsSidebar):
     def command(self, title):
         key = 'palette-row-command-' + title
         self.search('Commands', title, key)
-        self.s.act('press', key)
+        wait(lambda: self.s.driver('press', key)['pressed'], 'Command unavailable ' + title)
 
     def mark_row(self, topic, action):
         key = 'palette-row-topic-' + topic
@@ -234,6 +234,8 @@ class TopicsUnread(TopicsSidebar):
                 self.s.tmux('detach-client', '-t', tty)
         self.s.wait_rows(lambda rs: any(r.get('accessibilityLabel') == 'Reattach' for r in rs),
                          'The detached Client has no Reattach button')
+        wait(lambda: '@muxify_client_' not in self.s.tmux('show-options', '-s'),
+             'The detached Client marker was not removed before the read timeout')
         os.kill(server, signal.SIGSTOP)
         try:
             self.s.wait_rows(lambda rs: 'timed out' in self.s.row('header-environment-selector', rs).get('accessibilityHelp', ''),

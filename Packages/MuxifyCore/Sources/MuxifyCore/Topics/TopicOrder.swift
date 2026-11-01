@@ -226,7 +226,7 @@ extension Array where Element == TopicListEntry {
     }
 }
 
-public enum TopicInsertPosition: String, CaseIterable, Sendable {
+public enum TopicInsertPosition: String, Codable, CaseIterable, Sendable {
     case top, bottom
 }
 
