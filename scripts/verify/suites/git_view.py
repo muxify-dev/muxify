@@ -1821,6 +1821,15 @@ class GitView(unittest.TestCase):
         self.assertEqual(self.git('log', '-1', '--format=%s').strip(), "Merge branch 'm-side'")
         self.assertFalse(self.s.has('git-write-error'), 'the merge failed')
 
+    def test_a_merge_shows_a_confirmation_pill_that_names_the_branch(self):
+        self.merge_fixture('ahead')
+        self.ask_merge()
+        self.s.act('action', 'git-menu', 'n')
+        # The Pill lives 1.5 seconds, so it is read as soon as it shows.
+        rs = self.s.wait_rows(lambda rs: self.s.has('pill', rs), 'the merge showed no Pill', seconds=10)
+        pill = self.s.row('pill', rs)
+        self.assertEqual((pill.get('accessibilityLabel'), pill.get('accessibilityValue')), ('Merged', 'confirmation: m-side'))
+
     def test_shift_m_s_squashes_into_one_commit_and_u_leaves_the_changes_staged(self):
         before = self.merge_fixture('diverged')
         diverged = self.git('rev-parse', 'HEAD').strip()

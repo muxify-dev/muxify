@@ -57,11 +57,7 @@ final class CommandPalette {
     }
     var showsActions = false
     var actionIndex = 0
-    /// What the last Copy put on the pasteboard, shown briefly at the App Window's bottom.
-    private(set) var copied: PaletteCopy?
-
     weak var store: WorkspaceStore?
-    @ObservationIgnored private var copiedWork: DispatchWorkItem?
     @ObservationIgnored private var previousResponder: NSResponder?
     #if DEBUG
     @ObservationIgnored private var demoObserver: NSObjectProtocol?
@@ -397,27 +393,12 @@ final class CommandPalette {
         }
     }
 
-    /// The palette fades out while the pill springs in at the App Window's bottom.
+    /// The palette fades out while the Pill springs in at the App Window's bottom.
     private func copy(_ value: String, title: String, shown: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
         withAnimation(.easeOut(duration: 0.12)) { close() }
-        showCopied(title: title, value: shown)
-    }
-
-    /// Shared by palette and Browser copies, without taking Focus.
-    func showCopied(title: String, value: String) {
-        copiedWork?.cancel()
-        let confirmation = PaletteCopy(title: title, value: value)
-        withAnimation(.spring(duration: 0.4, bounce: 0.35)) { copied = confirmation }
-        let work = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.copied?.id == confirmation.id else { return }
-                withAnimation(.easeIn(duration: 0.2)) { self.copied = nil }
-            }
-        }
-        copiedWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+        store?.pills.show(Pill(.confirmation, title: title, value: shown))
     }
 
     // MARK: Keys
@@ -546,13 +527,6 @@ final class CommandPalette {
 }
 
 // MARK: - Theme
-
-/// A Copy's confirmation: "Copied Path" and what was copied.
-struct PaletteCopy: Equatable {
-    let id = UUID()
-    let title: String
-    let value: String
-}
 
 /// The Sidebar's colors (Ghostty background shaded toward the foreground)
 /// plus the Ghostty theme's ANSI colors. System colors without a theme.

@@ -242,7 +242,7 @@ _Avoid_: unseen, new
 A Config behavior that preserves Unread during visits and Zoom changes. Agent updates become Unread even in shown Panes.
 
 **Mark Read**:
-An Action that clears Unread in its named target without changing Agent Status. Its Command and direct shortcut target the current Window or its Zoomed Pane, or the Topic mark on an Empty Topic page.
+An Action that clears Unread in its named target without changing Agent Status. Its Command and direct shortcut target the current Window or its Zoomed Pane, or the Topic mark on an Empty Topic page. When they change nothing, or leave Unread Agents in Panes that Zoom hides, they show an Explanation Pill.
 _Avoid_: dismiss Status
 
 **Mark Unread**:
@@ -328,6 +328,10 @@ _Avoid_: UI font, terminal font (when you mean Sidebar text)
 **Action**:
 Something the user does to one Topic, Session, Window, Pane, Agent or Tab, such as Jump To, Rename, Replace from Bench or Settle. Every Action runs in the palette's view, whichever way the user starts it.
 _Avoid_: command (when you mean an Action on a thing), operation, menu item
+
+**Pill**:
+A short message at the bottom of an App Window that goes away after some seconds. A Confirmation Pill tells that a change ran, such as "Copied Path" or "Merged". An Explanation Pill tells why an Action changed nothing, or less than the user could expect. A Pill never takes Focus or clicks.
+_Avoid_: toast, banner, alert, Notification (when you mean the Pill)
 
 **Command**:
 An entry in the Commands Source that starts an app operation or an Action on the current Pane, Window, Session, Topic or Tab. It uses the current item without requiring a search result first.

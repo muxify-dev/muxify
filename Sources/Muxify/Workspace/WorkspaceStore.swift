@@ -986,6 +986,7 @@ final class WorkspaceStore {
     var config: Config { remoteConfig?.config ?? configStore.config }
     /// From the last look at `sessions.paths` on the Environment's machine.
     let palette = CommandPalette()
+    let pills = Pills()
     /// Find in Pane, over the Terminal of the current Window.
     let paneFinder = PaneFinder()
     let hintHold = HintHold()
@@ -1635,18 +1636,39 @@ final class WorkspaceStore {
         connection != nil && isConnected && pendingReads == 0 && !readSnapshotPending
     }
 
-    func canChangeRead(_ change: ReadChange, in target: ReadPlan.Place?) -> Bool {
-        guard let target, !isTransitioning, pendingReadNavigations.isEmpty,
-              router.intent == nil else { return false }
-        if isConnected, pendingReads > 0 || readSnapshotPending { return false }
-        let records = isRemote ? [] : topicWatcher.records
-        if case .topic(let id) = target, records.contains(where: { $0.id == id }) { return true }
-        let changes = ReadPlan.changes(change, in: target, records: records, agents: canWriteAgentRead ? agents : [], windows: windows)
-        return !changes.topicIDs.isEmpty || !changes.paneIDs.isEmpty
+    private func readDecision(_ change: ReadChange, in target: ReadPlan.Place) -> ReadPlan.Decision {
+        let busy = isTransitioning || !pendingReadNavigations.isEmpty || router.intent != nil
+            || (isConnected && (pendingReads > 0 || readSnapshotPending))
+        return ReadPlan.decide(change, in: target, records: isRemote ? [] : topicWatcher.records, agents: agents, windows: windows,
+                               busy: busy, agentsWritable: canWriteAgentRead)
     }
 
+    func canChangeRead(_ change: ReadChange, in target: ReadPlan.Place?) -> Bool {
+        guard let target, case .change = readDecision(change, in: target) else { return false }
+        return true
+    }
+
+    /// Mark Read or Mark Unread on a target that a row names. It does what it can, without a Pill.
     func changeRead(_ change: ReadChange, in target: ReadPlan.Place?) {
-        guard let target, canChangeRead(change, in: target), let request = target.request(change) else { return }
+        guard let target, canChangeRead(change, in: target) else { return }
+        applyRead(change, in: target)
+    }
+
+    /// The Command, the menu item and the shortcut: Mark Read on the current target. An Explanation Pill says why
+    /// nothing changed, or that a Read of the Zoomed Pane left hidden Panes Unread.
+    func markCurrentRead() {
+        guard let target = currentReadTarget else { return }
+        switch readDecision(.read, in: target) {
+        case .refused(let refusal):
+            if let pill = Pill(readRefusal: refusal, in: target) { pills.show(pill) }
+        case .change(_, let hidden):
+            applyRead(.read, in: target)
+            if hidden > 0 { pills.show(Pill(readOfZoomedPaneLeaving: hidden)) }
+        }
+    }
+
+    private func applyRead(_ change: ReadChange, in target: ReadPlan.Place) {
+        guard let request = target.request(change) else { return }
         let visits = canWriteAgentRead ? unreadChanges(panes) : []
         if !canWriteAgentRead {
             readVisits = AgentReadVisits()
@@ -2260,7 +2282,7 @@ final class WorkspaceStore {
         }
         browser.onCopyURL = { [weak self] url in
             guard let self, self.generation == current else { return }
-            self.palette.showCopied(title: "Copied URL", value: url)
+            self.pills.show(Pill(.confirmation, title: "Copied URL", value: url))
         }
         browsers[windowID] = browser
         return browser
@@ -2499,7 +2521,7 @@ final class WorkspaceStore {
         case .moveTopicUp: moveActiveCard(.previous)
         case .moveTopicDown: moveActiveCard(.next)
         case .togglePinTopic: togglePinOfActiveTopic()
-        case .markRead: changeRead(.read, in: currentReadTarget)
+        case .markRead: markCurrentRead()
         case .markUnread: changeRead(.unread, in: currentReadTarget)
         case .markAllRead: changeRead(.read, in: .environment)
         case .toggleSidebar: toggleSidebar()

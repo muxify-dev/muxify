@@ -2294,7 +2294,7 @@ final class GitView {
         write(GitRepository.operationScript, arguments: [snapshot.root, command, step.rawValue], timeout: 600) { [weak self] result in
             switch result {
             case .success:
-                self?.store?.palette.showCopied(title: step.past, value: noun)
+                self?.store?.pills.show(Pill(.confirmation, title: step.past, value: noun))
             case .failure(let error):
                 self?.writeError = Self.message(for: error)
             }
@@ -2339,7 +2339,7 @@ final class GitView {
         write(GitRepository.mergeScript, arguments: [snapshot.root, branch.name, kind.rawValue, into], timeout: 600) { [weak self] result in
             switch result {
             case .success:
-                self?.store?.palette.showCopied(title: "Merged", value: branch.name)
+                self?.store?.pills.show(Pill(.confirmation, title: "Merged", value: branch.name))
             case .failure(let error):
                 self?.writeError = Self.message(for: error)
             }
@@ -2374,7 +2374,7 @@ final class GitView {
         write(GitRepository.rebaseScript, arguments: [snapshot.root, branch.name, head], timeout: 600) { [weak self] result in
             switch result {
             case .success:
-                self?.store?.palette.showCopied(title: "Rebased", value: head)
+                self?.store?.pills.show(Pill(.confirmation, title: "Rebased", value: head))
             case .failure(let error):
                 self?.writeError = Self.message(for: error)
             }
@@ -2439,7 +2439,7 @@ final class GitView {
             switch result {
             case .success:
                 self?.copiedStore.remove(shas, in: key)
-                self?.store?.palette.showCopied(title: "Cherry-picked", value: shas.count == 1 ? "1 commit" : "\(shas.count) commits")
+                self?.store?.pills.show(Pill(.confirmation, title: "Cherry-picked", value: shas.count == 1 ? "1 commit" : "\(shas.count) commits"))
             case .failure(let error):
                 self?.writeError = Self.message(for: error)
             }
@@ -2495,7 +2495,7 @@ final class GitView {
         write(GitRepository.resetScript, arguments: [snapshot.root, kind.rawValue, target]) { [weak self] result in
             switch result {
             case .success:
-                self?.store?.palette.showCopied(title: "Reset (\(kind.rawValue))", value: name)
+                self?.store?.pills.show(Pill(.confirmation, title: "Reset (\(kind.rawValue))", value: name))
             case .failure(let error):
                 self?.writeError = Self.message(for: error)
             }
@@ -2532,7 +2532,7 @@ final class GitView {
         write(GitRepository.amendScript, arguments: [snapshot.root], timeout: 600) { [weak self] result in
             switch result {
             case .success(let output):
-                self?.store?.palette.showCopied(title: "Amended", value: output.trimmingCharacters(in: .whitespacesAndNewlines))
+                self?.store?.pills.show(Pill(.confirmation, title: "Amended", value: output.trimmingCharacters(in: .whitespacesAndNewlines)))
             case .failure(let error):
                 self?.writeError = Self.message(for: error)
             }
@@ -2568,7 +2568,7 @@ final class GitView {
                 self.commitSummary = ""
                 self.commitDescription = ""
                 self.closeCommit()
-                self.store?.palette.showCopied(title: "Committed", value: output.trimmingCharacters(in: .whitespacesAndNewlines))
+                self.store?.pills.show(Pill(.confirmation, title: "Committed", value: output.trimmingCharacters(in: .whitespacesAndNewlines)))
             case .failure(let error):
                 // Closed while committing: the banner says it instead.
                 if self.isCommitOpen { self.commitError = Self.message(for: error) } else { self.writeError = Self.message(for: error) }
@@ -2838,7 +2838,7 @@ final class GitView {
     func copy(_ value: String, title: String, shown: String? = nil) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
-        store?.palette.showCopied(title: title, value: shown ?? value)
+        store?.pills.show(Pill(.confirmation, title: title, value: shown ?? value))
     }
 
     // MARK: Selecting

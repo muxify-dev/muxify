@@ -419,6 +419,10 @@ target. The Command Summary names that target, including when the Terminal is hi
 Mark Unread applies to done, failed or blocked Agents. Neither Action changes
 Status, so a blocked Agent keeps its blocked mark.
 
+When the Mark Read Command or shortcut changes nothing, an Explanation Pill at
+the bottom of the App Window tells why. Mark Read on a Zoomed Pane also shows one
+when other Panes of the Window stay Unread, because Zoom hides them.
+
 A palette row Action uses the named Topic, Session, Window or Agent. An explicit
 Window Action includes all its Panes, even during Zoom. Topic and Session Actions
 include their hidden Windows. Working Agents cannot become Unread.
