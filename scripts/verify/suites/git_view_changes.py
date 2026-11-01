@@ -141,7 +141,8 @@ class GitViewChanges(GitViewFixture):
 
     def test_shift_d_offers_lazygits_reset_options_and_c_deletes_only_the_untracked_files(self):
         self.addCleanup(self.restore_fixture, len(self.stashes()))
-        self.wait_change('new.txt', bool, 'Changes do not list new.txt')
+        # Every choice is offered only with a staged change, so wait until the Git View has read the staged file again.
+        self.wait_change('staged.txt', lambda row: self.status(row) == 'M ', 'Changes do not show staged.txt staged')
         tree = self.porcelain()
         rs = self.open_reset_options()
         titles = {'x': 'Nuke working tree', 'u': 'Discard unstaged changes', 'c': 'Discard untracked files',

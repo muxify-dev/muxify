@@ -10,7 +10,7 @@ Run from the repo root after `make build`:
 import subprocess
 import time
 
-from scripts.verify.git_view_fixture import GitViewFixture, SHELL
+from scripts.verify.git_view_fixture import GitViewFixture, MAIN_COMMITS, SHELL
 from scripts.verify.sandbox import wait
 
 
@@ -319,7 +319,11 @@ class GitViewBranches(GitViewFixture):
         wait(lambda: 'unmerged-b' not in self.branches(), 'y did not force delete the branch', seconds=10)
 
     def test_the_current_branch_cannot_be_deleted(self):
-        rs = self.ask_to_delete('main')
+        # The menu offers the delete by the HEAD that the Git View read last, so wait until it has read that main is out.
+        self.key('shift+r')
+        self.go_to('2')
+        self.s.wait_rows(lambda rs: self.history_subjects(rs)[:1] == MAIN_COMMITS[:1], 'History does not start at main', seconds=15)
+        rs = self.ask_to_delete('main', refresh=False)
         self.assertEqual(self.s.row('git-menu-choice-c', rs).get('accessibilityValue'), 'highlighted=0 enabled=0')
         self.s.act('action', 'git-menu', 'c')
         self.s.act('action', 'git-menu', 'enter')
