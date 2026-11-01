@@ -168,6 +168,7 @@ class GitViewFixture(unittest.TestCase):
                               + list(args), check=True, capture_output=True, text=True).stdout
 
     def setUp(self):
+        self.s.show(self.window)
         self.close_git_view()
         self.open_git_view()
 

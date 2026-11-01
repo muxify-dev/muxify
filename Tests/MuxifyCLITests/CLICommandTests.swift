@@ -92,9 +92,9 @@ final class CLICommandTests: XCTestCase {
         try await CLICommand.browserOpen(window: "%7", tab: nil, urls: ["localhost:3000", "https://example.com"], json: false).execute(using: runner)
         XCTAssertEqual(runner.calls, [
             .init(command: "tmux", arguments: ["list-panes", "-t", "%7", "-F", "#{window_id}"], quiet: true),
-            .init(command: "tmux", arguments: ["show-options", "-sqv", "@muxify_browser_socket"], quiet: false),
+            .init(command: "tmux", arguments: ["show-options", "-sqv", "@muxify_browser_socket"], quiet: true),
             .init(command: "tmux", arguments: ["list-panes", "-t", "%7", "-F", "#{window_id}"], quiet: true),
-            .init(command: "tmux", arguments: ["set-option", "-wa", "-t", "@12", "@muxify_open", " localhost:3000 https://example.com"], quiet: false),
+            .init(command: "tmux", arguments: ["set-option", "-wa", "-t", "@12", "@muxify_open", " localhost:3000 https://example.com"], quiet: true),
         ])
     }
 
@@ -158,6 +158,23 @@ final class CLICommandTests: XCTestCase {
             XCTAssertEqual(error.localizedDescription, "no tmux session 'missing'")
         }
         XCTAssertEqual(runner.calls.count, 1)
+    }
+
+    func testOpenCommandsPreserveProcessLaunchErrors() async {
+        struct FailingRunner: CLICommandRunning {
+            func run(_ command: String, arguments: [String], quiet: Bool) throws -> CLICommandResult {
+                throw CocoaError(.fileNoSuchFile)
+            }
+        }
+        for command in [CLICommand.sessionOpen(name: "missing"), .windowOpen(target: "@0"),
+                        .browserOpen(window: "@0", tab: nil, urls: ["https://example.invalid"], json: false)] {
+            do {
+                try await command.execute(using: FailingRunner())
+                XCTFail("Expected a process launch failure")
+            } catch {
+                XCTAssertEqual(error.localizedDescription, CocoaError(.fileNoSuchFile).localizedDescription)
+            }
+        }
     }
 
     func testSubcommandFailurePreservesExitCode() async {
@@ -523,25 +540,26 @@ final class CLICommandTests: XCTestCase {
         XCTAssertEqual(attached, 0)
     }
 
-    func testBrowserAvailabilityAnswersForTheServerThatAMuxifyClientIsAttachedTo() throws {
+    func testBrowserAvailabilityAnswersForTheServerThatAMuxifyClientIsAttachedTo() async throws {
         // A plain Client with newer activity on the Pane's own Session no longer decides the answer.
         let clients = "1 999 /dev/ttys009\n0 300 /dev/ttys003\n0 100 /dev/ttys001\n"
-        XCTAssertEqual(try BrowserAvailability.check(pane: "%7", using: availabilityRunner(
-            clients: clients, markers: ["100␟/dev/ttys001␟home␟host␟remote"])), .remote)
-        XCTAssertEqual(try BrowserAvailability.check(pane: "%7", using: availabilityRunner(
-            clients: clients, markers: ["100␟/dev/ttys001␟home␟host␟remote", "300␟/dev/ttys003␟home␟host␟local"])), .local,
-                       "a local Client wins, because the Mac reaches the server's pages directly")
+        let remote = try await availability(availabilityRunner(
+            clients: clients, markers: ["100␟/dev/ttys001␟home␟host␟remote"]))
+        XCTAssertEqual(remote, .remote)
+        let local = try await availability(availabilityRunner(
+            clients: clients, markers: ["100␟/dev/ttys001␟home␟host␟remote", "300␟/dev/ttys003␟home␟host␟local"]))
+        XCTAssertEqual(local, .local, "a local Client wins, because the Mac reaches the server's pages directly")
     }
 
-    func testBrowserAvailabilityIgnoresMarkersOfClientsThatAreNotAttached() throws {
+    func testBrowserAvailabilityIgnoresMarkersOfClientsThatAreNotAttached() async throws {
         let clients = "1 999 /dev/ttys009\n0 100 /dev/ttys001\n"
         for marker in ["200␟/dev/ttys002␟home␟host␟local",
                        "100␟/dev/ttys005␟home␟host␟local",
                        "999␟/dev/ttys009␟home␟host␟local",
                        "100␟/dev/ttys001␟home␟host␟unknown",
                        "100"] {
-            XCTAssertEqual(try BrowserAvailability.check(pane: "%7", using: availabilityRunner(clients: clients, markers: [marker])),
-                           .no, marker)
+            let available = try await availability(availabilityRunner(clients: clients, markers: [marker]))
+            XCTAssertEqual(available, .no, marker)
         }
     }
 
@@ -550,14 +568,20 @@ final class CLICommandTests: XCTestCase {
             [.init(status: 1, output: "")],
             [.init(status: 0, output: "0 100 /dev/ttys001\n"), .init(status: 127, output: "")],
         ] {
-            let runner = RecordingRunner(results: results)
+            let runner = RecordingRunner(results: results.map { .init(status: $0.status, output: $0.output, errorOutput: "no server running") })
             do {
                 _ = try await CLICommand.browserAvailable(pane: "%7").execute(using: runner)
                 XCTFail("an unreadable tmux must not answer no")
             } catch let error as CLIError {
                 XCTAssertEqual(error.exitCode, 2)
+                XCTAssertTrue(error.localizedDescription.contains("no server running"), "tmux's own reason reaches the message")
             }
-            XCTAssertTrue(runner.calls.allSatisfy { !$0.quiet }, "tmux's own reason reaches stderr")
+        }
+    }
+
+    private func availability(_ runner: RecordingRunner) async throws -> EnvironmentBrowserAvailability {
+        try await EnvironmentModule.withCommand(server: CLITmuxTransport(runner: runner), topicsAvailable: false) { module in
+            try await module.queries().browserAvailability(pane: "%7").get()
         }
     }
 

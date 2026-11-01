@@ -1,7 +1,49 @@
 import XCTest
+import CryptoKit
 @testable import MuxifyCore
 
 final class RemoteSSHTests: XCTestCase {
+    func testRemoteUploadRejectsTruncatedBytesAndRetainsTwoBuilds() throws {
+        let directory = try TestDirectory()
+        let upload = directory.url.appendingPathComponent("upload")
+        let contents = Data("#!/bin/sh\nexit 0\n".utf8)
+        try contents.write(to: upload)
+        let version = SHA256.hash(data: contents).map { String(format: "%02x", $0) }.joined()
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = directory.url.path
+        environment["TMUX"] = nil
+        environment["TMUX_PANE"] = nil
+        func run(_ script: String, version: String, input: URL? = nil) throws -> String {
+            try CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", script, "muxify", version]),
+                                    environment: environment, inputFile: input)
+        }
+        let root = directory.url.appendingPathComponent(".local/share/muxify/bin")
+        let wrong = String(repeating: "a", count: 64)
+        XCTAssertThrowsError(try run(RemoteWatch.install, version: wrong, input: upload))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(wrong + "/muxify").path))
+        for name in [String(repeating: "1", count: 64), String(repeating: "2", count: 64)] {
+            let folder = root.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try contents.write(to: folder.appendingPathComponent("muxify"))
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: name.hasPrefix("1") ? 1 : 2)], ofItemAtPath: folder.path)
+        }
+        let uploads = DispatchGroup()
+        for _ in 0..<2 {
+            uploads.enter()
+            DispatchQueue.global().async {
+                defer { uploads.leave() }
+                do { _ = try run(RemoteWatch.install, version: version, input: upload) }
+                catch { XCTFail("Concurrent upload failed: \(error)") }
+            }
+        }
+        XCTAssertEqual(uploads.wait(timeout: .now() + 10), .success)
+        let installed = try run(RemoteWatch.validate, version: version)
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: installed)), contents)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(String(repeating: "1", count: 64)).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(String(repeating: "2", count: 64)).path))
+        XCTAssertEqual(try run(RemoteWatch.probe, version: version), "ready")
+    }
+
     private func remote(in directory: TestDirectory) throws -> RemoteSSH {
         try RemoteSSH(environment: RemoteEnvironment(name: "Home", host: "home.example.ts.net", username: "user",
                                                     port: 2222, identityFile: "/keys/space and 'quote'"),

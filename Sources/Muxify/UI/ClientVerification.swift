@@ -16,8 +16,13 @@ struct ClientVerification: ViewModifier {
                     }
                     Button("Reattach Client") { store.reattach() }
                     Button("New Window") { store.ghosttyNewTab() }
+                    Button("Close App Window") { store.terminalHost.window?.performClose(nil) }
                     Button("Paste Fixture Image") { pasteFixture(image: true) }
                     Button("Drop Fixture File") { pasteFixture(image: false) }
+                    Button("New Tab and Close App Window") {
+                        store.currentBrowser?.newTab()
+                        store.terminalHost.window?.performClose(nil)
+                    }
                 }
         }
         #else

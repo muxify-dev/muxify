@@ -2,6 +2,7 @@ import Foundation
 import MuxifyCore
 
 enum CLICommand: Equatable {
+    case environmentWatch(socket: String?, config: String?)
     case help
     case browserAvailable(pane: String?)
     /// `window` is a Window or a Pane id. With `tab`, the one URL loads in that Tab; without it, each URL opens a Tab.
@@ -37,11 +38,17 @@ enum CLICommand: Equatable {
     }
 
     @discardableResult
-    func execute(using runner: any CLICommandRunning = CLIProcessRunner(),
+    @MainActor func execute(using runner: any CLICommandRunning = CLIProcessRunner(),
                  executableURL: URL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])) async throws -> Int32 {
         switch self {
+        case .environmentWatch(let socket, let config):
+            let server = TmuxServer(socketPath: socket ?? TmuxServer.local.socketPath,
+                                    configPath: config, commandTimeout: 10)
+            try await EnvironmentWatchCommand.run(server: server)
         case .browserAvailable(let pane):
-            let result = try BrowserAvailability.check(pane: pane, using: runner)
+            let result = try await EnvironmentModule.withCommand(server: CLITmuxTransport(runner: runner), topicsAvailable: false) { module in
+                try await module.queries().browserAvailability(pane: pane).mapError { CLIError("cannot read tmux: \($0.message)", exitCode: 2) }.get()
+            }
             print(result.rawValue)
             return result.exitCode
         case .help: print(Self.usage)
@@ -57,46 +64,42 @@ enum CLICommand: Equatable {
             print(result.output, terminator: "")
             try Self.check(result, command: "Extension installer")
         case .browserOpen(let target, let tab, let urls, let json):
-            do {
-                for url in urls {
-                    switch try BrowserAgentInvocation.send(.open(url: url), target: target, tab: tab, using: runner) {
-                    case .opened(let tab): if json { print(try BrowserAgentInvocation.json(tab)) }
-                    case .failure(let message, let exitCode): throw CLIError(message, exitCode: exitCode)
-                    default: throw CLIError("Muxify sent an unexpected reply to browser open")
+            let tmux = CLITmuxTransport(runner: runner)
+            try await EnvironmentModule.withCommand(server: tmux, topicsAvailable: false) { module in
+                do {
+                    for url in urls {
+                        switch try await BrowserAgentInvocation.send(.open(url: url), target: target, tab: tab, module: module) {
+                        case .opened(let tab): if json { print(try BrowserAgentInvocation.json(tab)) }
+                        case .failure(let message, let exitCode): throw CLIError(message, exitCode: exitCode)
+                        default: throw CLIError("Muxify sent an unexpected reply to browser open")
+                        }
                     }
+                } catch let failure as BrowserAgentChannel.Failure {
+                    // Without the app, nothing can name the new Tab or load into one; a plain open waits for Muxify's next read.
+                    guard !json, tab == nil, case .unreachable = failure else { throw failure.cliError }
+                    let receipt = await module.perform(EnvironmentRequest(.runtime(.openBrowser(target: target, urls: urls))))
+                    if case .failed(let failure) = receipt.value { throw CLIError(failure.message, exitCode: tmux.failedStatus ?? 1) }
                 }
-            } catch let failure as BrowserAgentChannel.Failure {
-                // Without the app, nothing can name the new Tab or load into one; a plain open waits for Muxify's next read.
-                guard !json, tab == nil, case .unreachable = failure else { throw failure.cliError }
-                try Self.appendOpenRequest(target: target, urls: urls, using: runner)
             }
         case .browser(let invocation):
-            do { try invocation.run(using: runner) }
+            do { try await invocation.run(using: runner) }
             catch let failure as BrowserAgentChannel.Failure { throw failure.cliError }
         case .sessionOpen(let name):
-            let result = try runner.run("tmux", arguments: ["has-session", "-t", "=\(name)"], quiet: true)
-            guard result.status == 0 else { throw CLIError("no tmux session '\(name)'") }
-            try Self.open("muxify://select?session=\(Self.percentEncoded(name))", using: runner)
+            try await EnvironmentModule.withCommand(server: CLITmuxTransport(runner: runner), topicsAvailable: false) { module in
+                guard try await module.queries().sessionExists(name).mapError({ CLIError($0.message) }).get() else { throw CLIError("no tmux session '\(name)'") }
+                try Self.open("muxify://select?session=\(Self.percentEncoded(name))", using: runner)
+            }
         case .windowOpen(let target):
-            let result = try runner.run("tmux", arguments: ["list-panes", "-t", target, "-F", "#{window_id}"], quiet: true)
-            let window = result.output.components(separatedBy: "\n").first ?? ""
-            guard result.status == 0, !window.isEmpty else { throw CLIError("no tmux Window or Pane '\(target)'") }
-            try Self.open("muxify://select?window=\(Self.percentEncoded(window))", using: runner)
+            try await EnvironmentModule.withCommand(server: CLITmuxTransport(runner: runner), topicsAvailable: false) { module in
+                guard let window = try await module.queries().resolveWindow(target).mapError({ CLIError($0.message) }).get() else { throw CLIError("no tmux Window or Pane '\(target)'") }
+                try Self.open("muxify://select?window=\(Self.percentEncoded(window))", using: runner)
+            }
         case .request(let invocation): try await invocation.run()
         case .sessionList(let invocation): try await invocation.run()
         case .agent(let invocation): try await invocation.run()
-        case .agentConversation(let invocation): try invocation.run(using: runner)
+        case .agentConversation(let invocation): try await invocation.run(using: runner)
         }
         return 0
-    }
-
-    private static func appendOpenRequest(target: String, urls: [String], using runner: any CLICommandRunning) throws {
-        // list-panes validates the target; display-message succeeds even for missing Windows.
-        let result = try runner.run("tmux", arguments: ["list-panes", "-t", target, "-F", "#{window_id}"], quiet: true)
-        let window = result.output.components(separatedBy: "\n").first ?? ""
-        guard result.status == 0, !window.isEmpty else { throw CLIError("no tmux Window '\(target)'") }
-        // Append so requests made before Muxify's next poll aren't overwritten.
-        try check(runner.run("tmux", arguments: ["set-option", "-wa", "-t", window, Tmux.openOption, " " + urls.joined(separator: " ")], quiet: false), command: "tmux")
     }
 
     /// Hands a `muxify://` URL to the app. A view verb asks the app to show something; it changes no state.

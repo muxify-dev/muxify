@@ -166,12 +166,21 @@ final class TerminalAttachmentsTests: XCTestCase {
         board.setData(bytes, forType: .png)
         let attachments = try XCTUnwrap(TerminalAttachments.capture(board, in: root.url))
         let finished = expectation(description: "attachment pasted")
-        connection.pasteAttachments(attachments, client: client[0]) { result in
+        let module = MainActor.assumeIsolated { EnvironmentModule(server: connection, topicsAvailable: false) }
+        connection.prepareAttachments(attachments, client: client[0]) { result in
             switch result {
-            case .success(let target): XCTAssertEqual(target, pane)
-            case .failure(let error): XCTFail("Paste failed: \(error)")
+            case .success(let paste):
+                XCTAssertEqual(paste.pane.rawValue, pane)
+                MainActor.assumeIsolated {
+                    module.perform(EnvironmentRequest(.runtime(.pasteText(pane: paste.pane, text: paste.text)))) { receipt in
+                        if case .failed(let failure) = receipt.value { XCTFail("Paste failed: \(failure)") }
+                        finished.fulfill()
+                    }
+                }
+            case .failure(let error):
+                XCTFail("Preparation failed: \(error)")
+                finished.fulfill()
             }
-            finished.fulfill()
         }
         try eventually { fm.fileExists(atPath: started.path) }
         _ = try raw(["new-window", "-t", "paste:", "sleep 60"])

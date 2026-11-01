@@ -67,10 +67,10 @@ extension CommandPalette {
     }
 
     func loadRemoveWorktrees(_ draft: RemoveWorktreeDraft) {
-        guard let service = store?.environmentService() else { draft.rows = .failed("The Environment is not connected."); return }
+        guard let store else { return }
         let token = invocation
         Task {
-            let response = await Task.detached { service.handle(EnvironmentRequest(.listWorktrees(all: true, from: nil))) }.value
+            let response = await store.listWorktrees()
             guard self.invocation == token else { return }
             switch response {
             case .worktrees(let worktrees): draft.rows = .ready(worktrees)
@@ -82,35 +82,16 @@ extension CommandPalette {
 
     /// The branches of New Worktree's start step, read with git on the Environment's machine.
     func loadNewWorktreeStarts(_ draft: WorktreeStartDraft) {
-        guard let worktree = draft.choice.worktree, let service = store?.environmentService() else { return }
+        guard let store, let worktree = draft.choice.worktree else { return }
         let token = invocation
+        let queries = store.topicQueries()
         Task {
-            let result = await Task.detached { Result { try WorktreeStartChoice.read(from: worktree.folder.path, scripts: service.scripts) } }.value
+            let result = await queries.muxifyWorktreeStarts(from: worktree.folder.path)
             guard self.invocation == token else { return }
             switch result {
             case .success(let starts): draft.starts = .ready(starts)
-            case .failure(let error): draft.starts = .failed(String(describing: error))
+            case .failure(let error): draft.starts = .failed(error.message)
             }
         }
-    }
-}
-
-extension WorktreeStartChoice {
-    /// Each local branch, newest commit first, with the Worktree that has it checked out.
-    static let readScript = #"""
-    cd "$1" 2>/dev/null || { echo "No folder is at $1." >&2; exit 3; }
-    git worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^branch refs\/heads\//{print "W\t" substr($0,19) "\t" w}'
-    git for-each-ref --sort=-committerdate --format='B%09%(refname:short)' refs/heads
-    """#
-
-    static func read(from path: String, scripts: any ScriptRunning) throws -> [WorktreeStartChoice] {
-        var checkouts: [String: String] = [:]
-        var branches: [String] = []
-        for line in try scripts.runScript(readScript, arguments: [path], timeout: 20).split(separator: "\n") {
-            let fields = line.split(separator: "\t", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
-            if fields.count == 3, fields[0] == "W" { checkouts[fields[1]] = fields[2] }
-            if fields.count == 2, fields[0] == "B" { branches.append(fields[1]) }
-        }
-        return branches.map { WorktreeStartChoice(branch: $0, checkedOutAt: checkouts[$0]) }
     }
 }

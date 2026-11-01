@@ -16,6 +16,7 @@ struct MuxifyApp: App {
         let configStore = ConfigStore()
         configStore.start()
         let windows = AppWindows(configStore: configStore)
+        windows.startLocalEnvironment()
         _windows = State(initialValue: windows)
         GhosttyRuntime.shared.delegate = windows
     }

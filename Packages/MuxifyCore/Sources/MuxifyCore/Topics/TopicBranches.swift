@@ -1,15 +1,15 @@
 import Foundation
 
-public struct TopicBranches: Equatable {
-    private let values: [Folder: String]
+public struct TopicBranches: Equatable, Codable {
+    private let values: [String: String]
 
     /// `read` gives a file's contents by its path, as the folders spell it.
     public init(records: [TopicRecord] = [], paths: [Folder] = [], read: (String) -> String? = { _ in nil }) {
-        let folders = Set(paths).union(records.filter { $0.settledAt == nil }.flatMap(\.sessions).compactMap { session -> Folder? in
+        let folders = paths + records.filter { $0.settledAt == nil }.flatMap(\.sessions).compactMap { session -> Folder? in
             guard let path = session["worktree_path"]?.string, !path.isEmpty else { return nil }
             return Folder.local(path)
-        })
-        var values: [Folder: String] = [:]
+        }
+        var values: [String: String] = [:]
         var attempted: Set<String> = []
         var contents: [String: String] = [:]
         func cachedRead(_ path: String) -> String? {
@@ -40,12 +40,15 @@ public struct TopicBranches: Equatable {
                 let branch = String(head.dropFirst(16))
                 guard !branch.isEmpty, branch.rangeOfCharacter(from: .whitespacesAndNewlines) == nil,
                       branch.rangeOfCharacter(from: .controlCharacters) == nil else { break }
-                values[folder] = branch
+                values[folder.path] = branch
+                values[folder.real] = branch
                 break
             }
         }
         self.values = values
     }
 
-    public subscript(worktree: Folder) -> String? { values[worktree] }
+    public func branch(at path: String) -> String? { values[path] }
+
+    public subscript(worktree: Folder) -> String? { values[worktree.real] ?? values[worktree.path] }
 }

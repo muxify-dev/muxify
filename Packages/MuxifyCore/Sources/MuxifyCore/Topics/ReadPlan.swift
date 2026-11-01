@@ -35,8 +35,14 @@ public enum ReadPlan {
         case .environment: topicIDs = unread ? [] : records.filter(\.isUnread).map(\.id)
         case .session, .window, .pane: topicIDs = []
         }
-        let agents = agents.filter { agent in
-            guard change.applies(unread: agent.unread, status: agent.status) else { return false }
+        let agents = Self.agents(in: place, among: agents, windows: windows).filter {
+            change.applies(unread: $0.unread, status: $0.status)
+        }
+        return TopicReadChange(topicIDs: topicIDs, paneIDs: agents.compactMap { PaneID(rawValue: $0.paneID) })
+    }
+
+    static func agents(in place: Place, among agents: [Agent], windows: [TmuxWindow]) -> [Agent] {
+        agents.filter { agent in
             switch place {
             case .environment: return true
             case .topic(let id): return windows.contains { $0.id == agent.windowID && $0.topicID == id }
@@ -45,8 +51,8 @@ public enum ReadPlan {
             case .pane(let id): return agent.paneID == id
             }
         }
-        return TopicReadChange(topicIDs: topicIDs, paneIDs: agents.compactMap { PaneID(rawValue: $0.paneID) })
     }
+
 }
 
 extension ReadPlan {

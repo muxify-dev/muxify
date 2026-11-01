@@ -1,7 +1,6 @@
 import Foundation
 
 public struct Router: Equatable {
-    public typealias ReadNumber = Int
     public typealias IntentID = Int
 
     public struct WindowIntent: Equatable {
@@ -9,7 +8,7 @@ public struct Router: Equatable {
         public let target: WindowID
         public let from: Location?
         public let readsOnArrival: Bool
-        public var finishedBefore: ReadNumber?
+        public var completedRevision: EnvironmentRevision?
     }
 
     public enum Intent: Equatable {
@@ -24,10 +23,10 @@ public struct Router: Equatable {
         case go(Location, readsOnArrival: Bool = false)
         case attach(WindowID?, readsOnArrival: Bool = false)
         case request(SelectRequest, at: Date)
-        case result(Location?, lastStartedRead: ReadNumber)
+        case result(Location?, revision: EnvironmentRevision)
         case settled(next: TopicGroupID?)
-        case commandFinished(IntentID, CommandResult, lastStartedRead: ReadNumber)
-        case read(ReadNumber)
+        case commandFinished(IntentID, CommandResult, revision: EnvironmentRevision)
+        case read(EnvironmentRevision)
         case serverChanged
     }
 
@@ -72,7 +71,7 @@ public struct Router: Equatable {
     private struct ClientCommand: Equatable {
         var target: WindowID?
         let readsOnArrival: Bool
-        var finishedBefore: ReadNumber?
+        var completedRevision: EnvironmentRevision?
     }
 
     // A switch can still move the Client after a page replaces its Intent.
@@ -82,6 +81,8 @@ public struct Router: Equatable {
     private var lastWindow: WindowID?
     private var lastClientWindow: WindowID?
     private var lastInventory: [TmuxWindow] = []
+
+    public var hasPendingClientCommand: Bool { clientCommands.values.contains { $0.completedRevision == nil } }
 
     public init() {}
 
@@ -100,12 +101,12 @@ public struct Router: Equatable {
             intent = .request(request, until: at.addingTimeInterval(5))
             if case .topic = request { return [] }
             return resolveRequest(facts) ?? []
-        case .result(let destination, let lastStartedRead):
+        case .result(let destination, let revision):
             guard let destination else { return [] }
             let from = location
             setLocation(destination, facts)
             if case .window(let target) = destination {
-                intent = .window(makeIntent(target, from: from, readsOnArrival: false, finishedBefore: lastStartedRead))
+                intent = .window(makeIntent(target, from: from, readsOnArrival: false, completedRevision: revision))
             } else {
                 intent = nil
             }
@@ -113,13 +114,13 @@ public struct Router: Equatable {
         case .settled(let next):
             intent = next.map(Intent.topic)
             return []
-        case .commandFinished(let id, let result, let lastStartedRead):
-            guard var command = clientCommands[id], command.finishedBefore == nil else { return [] }
+        case .commandFinished(let id, let result, let revision):
+            guard var command = clientCommands[id], command.completedRevision == nil else { return [] }
             var effects: [Effect] = []
             switch result {
             case .success:
                 command.target = command.target ?? facts.ownClientWindow
-                command.finishedBefore = lastStartedRead
+                command.completedRevision = revision
                 clientCommands[id] = command
                 if command.readsOnArrival, let target = command.target { effects.append(.enterRead(target)) }
             case .failure:
@@ -131,7 +132,7 @@ public struct Router: Equatable {
                 setLocation(pending.from, facts)
                 intent = nil
             case .success:
-                pending.finishedBefore = lastStartedRead
+                pending.completedRevision = revision
                 intent = .window(pending)
             }
             return effects
@@ -145,8 +146,8 @@ public struct Router: Equatable {
         }
     }
 
-    private mutating func read(_ number: ReadNumber, _ facts: Facts) -> [Effect] {
-        let waitingForCommand = clientCommands.values.contains { $0.finishedBefore.map { number <= $0 } ?? true }
+    private mutating func read(_ revision: EnvironmentRevision, _ facts: Facts) -> [Effect] {
+        let waitingForCommand = clientCommands.values.contains { $0.completedRevision.map { !revision.isAfter($0) } ?? true }
         let commandedWindow = clientCommands.max { $0.key < $1.key }?.value.target
         let observedCommands = waitingForCommand ? [] : Array(clientCommands.keys)
         defer {
@@ -154,7 +155,7 @@ public struct Router: Equatable {
             for id in observedCommands { clientCommands[id] = nil }
         }
         if case .window(let pending) = intent,
-           pending.finishedBefore.map({ number <= $0 }) ?? true {
+           pending.completedRevision.map({ !revision.isAfter($0) }) ?? true {
             rememberInventory(facts)
             return attachIfNeeded(facts)
         }
@@ -239,7 +240,7 @@ public struct Router: Equatable {
         if case .emptyTopic = location { return [] }
         if case .window(var pending) = intent {
             guard facts.windows.contains(where: { $0.id == pending.target.rawValue }) else { return [] }
-            if pending.finishedBefore != nil {
+            if pending.completedRevision != nil {
                 pending = makeIntent(pending.target, from: pending.from, readsOnArrival: pending.readsOnArrival)
                 intent = .window(pending)
             }
@@ -257,17 +258,17 @@ public struct Router: Equatable {
     }
 
     private mutating func makeIntent(_ target: WindowID, from: Location?, readsOnArrival: Bool,
-                                     finishedBefore: ReadNumber? = nil) -> WindowIntent {
-        let id = makeCommand(target, readsOnArrival: readsOnArrival, finishedBefore: finishedBefore)
+                                     completedRevision: EnvironmentRevision? = nil) -> WindowIntent {
+        let id = makeCommand(target, readsOnArrival: readsOnArrival, completedRevision: completedRevision)
         return WindowIntent(id: id, target: target, from: from,
-                            readsOnArrival: readsOnArrival, finishedBefore: finishedBefore)
+                            readsOnArrival: readsOnArrival, completedRevision: completedRevision)
     }
 
     private mutating func makeCommand(_ target: WindowID?, readsOnArrival: Bool,
-                                      finishedBefore: ReadNumber? = nil) -> IntentID {
+                                      completedRevision: EnvironmentRevision? = nil) -> IntentID {
         nextIntentID += 1
         clientCommands[nextIntentID] = ClientCommand(target: target, readsOnArrival: readsOnArrival,
-                                                    finishedBefore: finishedBefore)
+                                                    completedRevision: completedRevision)
         return nextIntentID
     }
 
