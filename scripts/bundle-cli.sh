@@ -6,7 +6,8 @@ if [ "$CONFIGURATION" = Release ]; then
     swift build --package-path "$PROJECT_DIR" --scratch-path "$scratch" -c release --arch arm64 --arch x86_64 --product muxify
     products=$(swift build --package-path "$PROJECT_DIR" --scratch-path "$scratch" -c release --arch arm64 --arch x86_64 --show-bin-path)
     source="$products/muxify"
-    lipo "$source" -verify_arch arm64 x86_64
+    # lipo from Xcode 27 takes one architecture after -verify_arch, and reads a second one as an input file.
+    for arch in arm64 x86_64; do lipo "$source" -verify_arch "$arch"; done
 fi
 destination="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/bin"
 mkdir -p "$destination"
