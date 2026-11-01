@@ -1,29 +1,27 @@
 import Foundation
 
-/// The one way to read or change the Environment. The app's palette, the muxify://topic URL and the command line tool
-/// all send an `EnvironmentRequest` here, so each change takes the same locks and fails in the same way, by its
-/// command's `lane`. It blocks, so call it off the main thread.
-public struct EnvironmentService: Sendable {
-    public let paths: MuxifyPaths
-    public let server: any TmuxRunning
+/// Executes module requests with the locks required by each command's lane.
+struct EnvironmentService: Sendable {
+    let paths: MuxifyPaths
+    let server: any TmuxRunning
     /// The SessionPaths a request may name, with the layouts that git reported.
-    public let sessionPaths: [SessionPath]
+    let sessionPaths: [SessionPath]
     /// The Config's `topics`: where a new Session and a new Topic go, and the Tags a request may add.
-    public let topics: Config.Topics
+    let topics: Config.Topics
     /// False on a Remote Environment: Topic records are local, so a command that reads or writes one fails there.
-    public let topicsAvailable: Bool
+    let topicsAvailable: Bool
     /// Runs the Muxify Worktree scripts on the Environment's machine.
-    public let scripts: any ScriptRunning
+    let scripts: any ScriptRunning
     /// Nil on this Mac, else the Remote Environment's name, which the Muxify Worktree records keep.
-    public let environmentName: String?
+    let environmentName: String?
     /// The Config's `worktrees.root_path`.
-    public let worktreesRoot: String?
+    let worktreesRoot: String?
     let store: TopicStore
     let editLockTimeout: TimeInterval
 
-    public init(paths: MuxifyPaths, server: any TmuxRunning = TmuxServer.local, sessionPaths: [SessionPath] = [],
-                topics: Config.Topics = Config.Topics(), topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(),
-                environmentName: String? = nil, worktreesRoot: String? = nil) {
+    init(paths: MuxifyPaths, server: any TmuxRunning = TmuxServer.local, sessionPaths: [SessionPath] = [],
+         topics: Config.Topics = Config.Topics(), topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(),
+         environmentName: String? = nil, worktreesRoot: String? = nil) {
         self.init(paths: paths, server: server, sessionPaths: sessionPaths, topics: topics, topicsAvailable: topicsAvailable, scripts: scripts,
                   environmentName: environmentName, worktreesRoot: worktreesRoot, editLockTimeout: 10)
     }
@@ -46,7 +44,7 @@ public struct EnvironmentService: Sendable {
     /// `client` is the host's tmux client: the one that types keys for a plan and that switches to the result.
     /// It is a fact of the host, not of the request, so it is not on the wire. Nil switches nothing.
     /// A failure is returned, never thrown: its phase says how far the request got.
-    public func handle(_ request: EnvironmentRequest, client: String? = nil) -> EnvironmentResponse {
+    func handle(_ request: EnvironmentRequest, client: String? = nil) -> EnvironmentResponse {
         guard request.version == EnvironmentRequest.currentVersion else {
             return .failed(TopicFailure(kind: .unsupported, phase: .nothingChanged,
                                         message: "The Topic request has version \(request.version). This Muxify reads version \(EnvironmentRequest.currentVersion)."))
@@ -55,6 +53,9 @@ public struct EnvironmentService: Sendable {
             return .failed(failure(TopicRequestError.topicsUnavailable, phase: .nothingChanged))
         }
         switch request.command.lane {
+        case .runtime:
+            if case .runtime(let operation) = request.command { return execute(operation, client: client) }
+            preconditionFailure("Expected an Environment operation")
         case .read:
             if case .list = request.command { return list() }
             if case .listWorktrees(let all, let from) = request.command { return listWorktrees(request, all: all, from: from, client: client) }
@@ -83,7 +84,7 @@ public struct EnvironmentService: Sendable {
     }
 
     /// The Sessions the Settle sheet offers, as the Topic's live Sessions are now. It reads and writes nothing else.
-    public func settleChoices(for target: EnvironmentTarget) -> Result<[TopicSettleSession], TopicFailure> {
+    func settleChoices(for target: EnvironmentTarget) -> Result<[TopicSettleSession], TopicFailure> {
         do {
             let records = try store.read().records
             let snapshot = try server.snapshot()
@@ -96,7 +97,7 @@ public struct EnvironmentService: Sendable {
         }
     }
 
-    public func forgetChoices(for target: EnvironmentTarget) -> Result<TopicForgetChoices, TopicFailure> {
+    func forgetChoices(for target: EnvironmentTarget) -> Result<TopicForgetChoices, TopicFailure> {
         do {
             let records = try store.read().records
             let snapshot = try server.snapshot()
@@ -107,7 +108,7 @@ public struct EnvironmentService: Sendable {
 
     /// The local branches that a new Worktree from the Worktree at `path` can start from: the rows of the palette's
     /// start step. It reads git and changes nothing.
-    public func worktreeStarts(from path: String) -> Result<[WorktreeStartChoice], TopicFailure> {
+    func worktreeStarts(from path: String) -> Result<[WorktreeStartChoice], TopicFailure> {
         let folder = Folder.local(path)
         guard let base = sessionPaths.lazy.flatMap(\.layout.worktrees).first(where: { $0.folder == folder }) else {
             return .failure(failure(TopicRequestError.sessionPathUnavailable(path), phase: .nothingChanged))
@@ -117,7 +118,7 @@ public struct EnvironmentService: Sendable {
 
     /// The Worktree that the Topic made for the target's Session, which Remove and Kill can remove. Nil when the
     /// Session works in no such Worktree.
-    public func removeAndKillWorktree(of target: EnvironmentTarget) -> Result<TopicForgetChoices.Worktree?, TopicFailure> {
+    func removeAndKillWorktree(of target: EnvironmentTarget) -> Result<TopicForgetChoices.Worktree?, TopicFailure> {
         do {
             let records = try store.read().records
             let snapshot = try server.snapshot()
@@ -314,7 +315,7 @@ public struct EnvironmentService: Sendable {
             }
         case is TopicTransaction.Failure: return .topicUnavailable
         case is FileLock.Busy: return .storeBusy
-        case is TmuxError: return .tmuxFailed
+        case is TmuxError, is InventoryReadFailure: return .tmuxFailed
         case is ShellError: return .gitFailed
         default: return .storeFailed
         }
@@ -322,13 +323,14 @@ public struct EnvironmentService: Sendable {
 }
 
 extension EnvironmentCommand {
-    enum Lane { case read, records, edit }
+    enum Lane { case read, records, edit, runtime }
 
     /// The locks a command takes. `read`: none. `records`: the record lock only, for one write of record keys and the tmux options that go with it.
     /// `edit`: the edit lock, then read, plan, git, record, tmux, show. A new command does not compile until it
     /// chooses its lane.
     var lane: Lane {
         switch self {
+        case .runtime: return .runtime
         case .list, .show, .listWorktrees: return .read
         case .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .benchTopic, .fillOpenPlace, .markRead, .markAllRead:
             return .records
@@ -341,6 +343,7 @@ extension EnvironmentCommand {
     /// Whether the command reads or writes a Topic record whatever its target.
     var needsRecords: Bool {
         switch self {
+        case .runtime(let operation): return operation.needsRecords
         case .newWindow, .newSession, .renameSession, .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession: return false
         // A Remote Environment's Muxify Worktrees have no Topic; on this Mac the request also updates the Topics.
         case .createWorktree, .removeWorktree, .listWorktrees: return false

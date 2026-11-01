@@ -6,19 +6,22 @@ import Foundation
 final class ConnectionCleanup {
     private let pending = DispatchGroup()
 
-    func run(retire: @escaping () -> Void, closeSurface: @escaping () -> Void,
+    func run(drainPersistence: @escaping (@escaping () -> Void) -> Void = { $0() },
+             retire: @escaping () -> Void, closeSurface: @escaping () -> Void,
              cleanup: @escaping () -> Void, completion: @escaping () -> Void = {}) {
         precondition(Thread.isMainThread)
         pending.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            retire()
-            DispatchQueue.main.async {
-                closeSurface()
-                DispatchQueue.global(qos: .userInitiated).async {
-                    cleanup()
-                    DispatchQueue.main.async {
-                        completion()
-                        self.pending.leave()
+        drainPersistence {
+            DispatchQueue.global(qos: .userInitiated).async {
+                retire()
+                DispatchQueue.main.async {
+                    closeSurface()
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        cleanup()
+                        DispatchQueue.main.async {
+                            completion()
+                            self.pending.leave()
+                        }
                     }
                 }
             }

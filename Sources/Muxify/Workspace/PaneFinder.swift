@@ -15,14 +15,13 @@ final class PaneFinder: Finder {
     /// The find field has Focus. What the user types there is the Terminal's, so Browser keybinds do not act.
     var findFieldHasFocus = false
 
-    /// Runs a tmux command on the App Window's Environment. False when it cannot run one now.
-    @ObservationIgnored var tmux: ([String], @escaping (Result<String, Error>) -> Void) -> Bool = { _, _ in false }
+    @ObservationIgnored var perform: (PaneSearch.Operation, @escaping (Result<PaneSearch.Response, Error>) -> Void) -> Bool = { _, _ in false }
     /// The Window whose active Pane the search starts in.
     @ObservationIgnored var windowID: () -> String? = { nil }
     /// `ui.find_colors` as tmux styles.
     @ObservationIgnored var styles: () -> PaneSearch.Styles = { PaneSearch.Styles(match: "", current: "") }
     /// The Pane that the first step searched. The search stays in it until the bar closes.
-    @ObservationIgnored private var pane: String?
+    @ObservationIgnored private var pane: PaneID?
     /// Drops the answers of steps that a later step or a close replaced.
     @ObservationIgnored private var generation = 0
     /// tmux's count of the query's matches, which a step that tmux gives no count for keeps.
@@ -49,9 +48,9 @@ final class PaneFinder: Finder {
         guard isShown else { return }
         guard let pane else { return close() }
         let current = generation
-        let submitted = tmux(["display-message", "-p", "-t", pane, "#{pane_active}"]) { [weak self] result in
+        let submitted = perform(.isActive(pane)) { [weak self] result in
             guard let self, self.generation == current, self.pane == pane,
-                  case .success(let output) = result, output.trimmingCharacters(in: .whitespacesAndNewlines) == "1" else { return }
+                  case .success(.active(true)) = result else { return }
             self.close()
         }
         if !submitted { close() }
@@ -64,44 +63,44 @@ final class PaneFinder: Finder {
         findFieldHasFocus = false
         findStatus = .idle
         generation += 1
-        if let pane { _ = tmux(PaneSearch.cancel(pane: pane)) { _ in } }
+        if let pane { _ = perform(.cancel(pane)) { _ in } }
         pane = nil
     }
 
     private func search(_ step: PaneSearch.Step) {
-        guard isShown, let target = pane ?? windowID() else { return }
+        guard isShown else { return }
         generation += 1
         let current = generation
+        guard let pane else {
+            guard let window = windowID().flatMap(WindowID.init(rawValue:)) else { return }
+            let submitted = perform(.resolve(window)) { [weak self] result in
+                guard let self, self.generation == current, self.isShown,
+                      case .success(.resolved(let pane)) = result else { return }
+                self.pane = pane
+                self.search(.query)
+            }
+            if !submitted { findStatus = .idle }
+            return
+        }
         let query = findQuery
-        let submitted = tmux(PaneSearch.commands(step, query: query, target: target, styles: styles())) { [weak self] result in
+        let submitted = perform(.search(step: step, query: query, pane: pane, styles: styles(), previousTotal: total)) { [weak self] result in
             guard let self, self.generation == current else { return }
-            guard case .success(let output) = result, let status = PaneSearch.Status(output) else {
-                // The Pane is gone: the next step starts in the Window's active Pane.
+            guard case .success(.searched(let found, let total, let index)) = result else {
                 self.pane = nil
                 self.findStatus = .idle
                 return
             }
-            self.pane = status.pane
-            self.total = step == .query ? status.total : status.total ?? self.total
+            self.total = total
             guard !query.isEmpty else {
                 self.findStatus = .idle
                 return
             }
-            guard status.found, let total = self.total, total > 0 else {
-                self.findStatus = status.found ? .idle : .notFound
+            guard found, let total, total > 0 else {
+                self.findStatus = found ? .idle : .notFound
                 return
             }
-            self.count(query, status: status, total: total, generation: current)
-        }
-        if !submitted { findStatus = .idle }
-    }
-
-    private func count(_ query: String, status: PaneSearch.Status, total: Int, generation current: Int) {
-        let submitted = tmux(PaneSearch.capture(status)) { [weak self] result in
-            guard let self, self.generation == current else { return }
-            let index = (try? result.get()).map { PaneSearch.index(of: query, in: $0, column: status.column, total: total) } ?? 0
             self.findStatus = .match(index: index, total: total)
         }
-        if !submitted { findStatus = .match(index: 0, total: total) }
+        if !submitted { findStatus = .idle }
     }
 }

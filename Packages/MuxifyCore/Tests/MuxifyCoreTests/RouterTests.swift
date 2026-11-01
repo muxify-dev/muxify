@@ -2,12 +2,18 @@ import XCTest
 @testable import MuxifyCore
 
 final class RouterTests: XCTestCase {
+    private let moduleID = UUID()
+
+    private func revision(_ number: UInt64) -> EnvironmentRevision {
+        EnvironmentRevision(moduleID: moduleID, number: number)
+    }
+
     func testAnEmptyTopicPageEntersTheWindowThatAppears() {
         let target = WindowID(rawValue: "@2")!
         var router = Router()
         let page = Location.emptyTopic(.topic("work"))
         _ = router.handle(.go(page), .init(records: [TopicRecord(id: "work")]))
-        let effects = router.handle(.read(1), .init(windows: [window("@2")], records: [TopicRecord(id: "work")],
+        let effects = router.handle(.read(revision(1)), .init(windows: [window("@2")], records: [TopicRecord(id: "work")],
                                                    entryWindows: [.topic("work"): target]))
         XCTAssertEqual(router.location, .window(target))
         XCTAssertTrue(effects.contains(.visit(.window(target))))
@@ -20,7 +26,7 @@ final class RouterTests: XCTestCase {
         let intent = try windowIntent(router)
         XCTAssertEqual(router.location, .window(target))
         XCTAssertEqual(effects, [.visit(.window(target)), .switchClient(target, intent: intent.id)])
-        XCTAssertEqual(router.handle(.commandFinished(intent.id, .success, lastStartedRead: 4), .init()), [.enterRead(target)])
+        XCTAssertEqual(router.handle(.commandFinished(intent.id, .success, revision: revision(4)), .init()), [.enterRead(target)])
     }
 
     func testAGoToAPageCancelsAWindowIntentAndDoesNotMoveTheClient() throws {
@@ -30,25 +36,25 @@ final class RouterTests: XCTestCase {
         let page = Location.emptyTopic(.topic("work"))
         XCTAssertEqual(router.handle(.go(page), .init()), [.visit(page)])
         XCTAssertNil(router.intent)
-        XCTAssertTrue(router.handle(.commandFinished(old.id, .failure, lastStartedRead: 1), .init()).isEmpty)
+        XCTAssertTrue(router.handle(.commandFinished(old.id, .failure, revision: revision(1)), .init()).isEmpty)
         XCTAssertEqual(router.location, page)
     }
 
     func testAReadBeforeCompletionCannotRecoverAMissingTarget() throws {
         var router = Router()
         let facts = Router.Facts(windows: [window("@1"), window("@2")], ownClientWindow: id("@1"))
-        _ = router.handle(.read(1), facts)
+        _ = router.handle(.read(revision(1)), facts)
         _ = router.handle(.go(.window(id("@2"))), facts)
         let pending = try windowIntent(router)
         let old = Router.Facts(windows: [window("@1")], ownClientWindow: id("@1"))
-        XCTAssertTrue(router.handle(.read(2), old).isEmpty)
+        XCTAssertTrue(router.handle(.read(revision(2)), old).isEmpty)
         XCTAssertEqual(router.location, .window(id("@2")))
         XCTAssertEqual(router.intent, .window(pending))
-        _ = router.handle(.commandFinished(pending.id, .success, lastStartedRead: 3), facts)
-        XCTAssertTrue(router.handle(.read(3), old).isEmpty)
+        _ = router.handle(.commandFinished(pending.id, .success, revision: revision(3)), facts)
+        XCTAssertTrue(router.handle(.read(revision(3)), old).isEmpty)
         XCTAssertEqual(router.location, .window(id("@2")))
         XCTAssertNotNil(router.intent)
-        _ = router.handle(.read(4), .init(windows: facts.windows, ownClientWindow: id("@2")))
+        _ = router.handle(.read(revision(4)), .init(windows: facts.windows, ownClientWindow: id("@2")))
         XCTAssertNil(router.intent)
         XCTAssertEqual(router.location, .window(id("@2")))
     }
@@ -56,12 +62,12 @@ final class RouterTests: XCTestCase {
     func testAFreshReadEndsAnIntentWithoutATimeLimit() throws {
         var router = Router()
         let facts = Router.Facts(windows: [window("@1"), window("@2"), window("@3")], ownClientWindow: id("@1"))
-        _ = router.handle(.read(1), facts)
+        _ = router.handle(.read(revision(1)), facts)
         _ = router.handle(.go(.window(id("@2"))), facts)
         let pending = try windowIntent(router)
-        _ = router.handle(.commandFinished(pending.id, .success, lastStartedRead: 2), facts)
+        _ = router.handle(.commandFinished(pending.id, .success, revision: revision(2)), facts)
         let later = Router.Facts(windows: facts.windows, ownClientWindow: id("@3"), now: .distantFuture)
-        _ = router.handle(.read(3), later)
+        _ = router.handle(.read(revision(3)), later)
         XCTAssertNil(router.intent)
         XCTAssertEqual(router.location, .window(id("@3")))
     }
@@ -71,23 +77,36 @@ final class RouterTests: XCTestCase {
         let facts = Router.Facts(windows: [window("@2")], ownClientWindow: id("@2"))
         _ = router.handle(.go(.window(id("@2"))), facts)
         let pending = try windowIntent(router)
-        _ = router.handle(.read(1), facts)
+        _ = router.handle(.read(revision(1)), facts)
         XCTAssertNotNil(router.intent)
-        _ = router.handle(.commandFinished(pending.id, .success, lastStartedRead: 2), facts)
-        _ = router.handle(.read(2), facts)
+        _ = router.handle(.commandFinished(pending.id, .success, revision: revision(2)), facts)
+        _ = router.handle(.read(revision(2)), facts)
         XCTAssertNotNil(router.intent)
-        _ = router.handle(.read(3), facts)
+        _ = router.handle(.read(revision(3)), facts)
+        XCTAssertNil(router.intent)
+    }
+
+    func testAnotherModulesRevisionCannotConfirmAClientSwitch() throws {
+        var router = Router()
+        let target = id("@2")
+        let facts = Router.Facts(windows: [window("@2")], ownClientWindow: target)
+        _ = router.handle(.go(.window(target)), facts)
+        let pending = try windowIntent(router)
+        _ = router.handle(.commandFinished(pending.id, .success, revision: revision(2)), facts)
+        _ = router.handle(.read(EnvironmentRevision(moduleID: UUID(), number: 100)), facts)
+        XCTAssertNotNil(router.intent)
+        _ = router.handle(.read(revision(3)), facts)
         XCTAssertNil(router.intent)
     }
 
     func testACompletedIntentDoesNotFollowAClientThatDidNotMove() throws {
         var router = Router()
         let facts = Router.Facts(windows: [window("@1"), window("@2")], ownClientWindow: id("@1"))
-        _ = router.handle(.read(1), facts)
+        _ = router.handle(.read(revision(1)), facts)
         _ = router.handle(.go(.window(id("@2"))), facts)
         let pending = try windowIntent(router)
-        _ = router.handle(.commandFinished(pending.id, .success, lastStartedRead: 2), facts)
-        _ = router.handle(.read(3), facts)
+        _ = router.handle(.commandFinished(pending.id, .success, revision: revision(2)), facts)
+        _ = router.handle(.read(revision(3)), facts)
         XCTAssertNil(router.intent)
         XCTAssertEqual(router.location, .window(id("@2")))
     }
@@ -101,7 +120,7 @@ final class RouterTests: XCTestCase {
         let latest = try windowIntent(router)
         XCTAssertNotEqual(first.id, latest.id)
         for result in [Router.CommandResult.success, .failure] {
-            XCTAssertTrue(router.handle(.commandFinished(first.id, result, lastStartedRead: 4), .init()).isEmpty)
+            XCTAssertTrue(router.handle(.commandFinished(first.id, result, revision: revision(4)), .init()).isEmpty)
             XCTAssertEqual(router.intent, .window(latest))
             XCTAssertEqual(router.location, .window(id("@1")))
         }
@@ -113,24 +132,24 @@ final class RouterTests: XCTestCase {
             _ = router.handle(.go(origin), .init())
             _ = router.handle(.go(.window(id("@2"))), .init())
             let pending = try windowIntent(router)
-            _ = router.handle(.commandFinished(pending.id, .failure, lastStartedRead: 2), .init())
+            _ = router.handle(.commandFinished(pending.id, .failure, revision: revision(2)), .init())
             XCTAssertEqual(router.location, origin)
             XCTAssertNil(router.intent)
         }
     }
 
-    func testATopicResultUsesTheCompletionReadBarrierWithoutAnotherSwitch() throws {
+    func testATopicResultWaitsForItsRevisionWithoutAnotherSwitch() throws {
         var router = Router()
         let target = id("@2")
-        let effects = router.handle(.result(.window(target), lastStartedRead: 3), .init())
+        let effects = router.handle(.result(.window(target), revision: revision(3)), .init())
         XCTAssertEqual(effects, [.visit(.window(target))])
-        XCTAssertEqual(try windowIntent(router).finishedBefore, 3)
-        _ = router.handle(.read(3), .init(windows: [window("@1")], ownClientWindow: id("@1")))
+        XCTAssertEqual(try windowIntent(router).completedRevision, revision(3))
+        _ = router.handle(.read(revision(3)), .init(windows: [window("@1")], ownClientWindow: id("@1")))
         XCTAssertEqual(router.location, .window(target))
-        _ = router.handle(.read(4), .init(windows: [window("@2")], ownClientWindow: target))
+        _ = router.handle(.read(revision(4)), .init(windows: [window("@2")], ownClientWindow: target))
         XCTAssertNil(router.intent)
         XCTAssertEqual(router.location, .window(target))
-        XCTAssertTrue(router.handle(.result(nil, lastStartedRead: 4), .init()).isEmpty)
+        XCTAssertTrue(router.handle(.result(nil, revision: revision(4)), .init()).isEmpty)
         XCTAssertEqual(router.location, .window(target))
     }
 
@@ -138,13 +157,13 @@ final class RouterTests: XCTestCase {
         for origin in [Location.window(id("@1")), .emptyTopic(.topic("work")), .emptyTopic(.noTopic)] {
             var router = Router()
             let facts = Router.Facts(windows: [window("@1"), window("@2")], ownClientWindow: id("@1"), records: [TopicRecord(id: "work")])
-            _ = router.handle(.read(1), facts)
+            _ = router.handle(.read(revision(1)), facts)
             if origin.windowID == nil { _ = router.handle(.go(origin), facts) }
-            _ = router.handle(.read(2), facts)
+            _ = router.handle(.read(revision(2)), facts)
             XCTAssertEqual(router.location, origin)
             var moved = facts
             moved.ownClientWindow = id("@2")
-            XCTAssertEqual(router.handle(.read(3), moved), [.visit(.window(id("@2")))])
+            XCTAssertEqual(router.handle(.read(revision(3)), moved), [.visit(.window(id("@2")))])
             XCTAssertEqual(router.location, .window(id("@2")))
             XCTAssertNil(router.intent)
         }
@@ -155,13 +174,13 @@ final class RouterTests: XCTestCase {
         var settled = TopicRecord(id: "work")
         settled.settledAt = "2026-10-24T12:00:00Z"
         let facts = Router.Facts(windows: [window("@1")], ownClientWindow: id("@1"), records: [settled])
-        _ = router.handle(.read(1), facts)
+        _ = router.handle(.read(revision(1)), facts)
         _ = router.handle(.go(.emptyTopic(.topic("work"))), facts)
-        XCTAssertTrue(router.handle(.read(2), facts).isEmpty)
+        XCTAssertTrue(router.handle(.read(revision(2)), facts).isEmpty)
         XCTAssertEqual(router.location, .emptyTopic(.topic("work")))
         var forgotten = facts
         forgotten.records = []
-        XCTAssertEqual(router.handle(.read(3), forgotten), [.visit(.window(id("@1")))])
+        XCTAssertEqual(router.handle(.read(revision(3)), forgotten), [.visit(.window(id("@1")))])
         XCTAssertEqual(router.location, .window(id("@1")))
     }
 
@@ -171,7 +190,7 @@ final class RouterTests: XCTestCase {
         _ = router.handle(.settled(next: .topic("next")), .init())
         XCTAssertEqual(router.location, .emptyTopic(.topic("old")))
         let facts = Router.Facts(windows: [window("@1"), window("@2")], entryWindows: [.topic("next"): id("@2")])
-        _ = router.handle(.read(1), facts)
+        _ = router.handle(.read(revision(1)), facts)
         XCTAssertEqual(router.location, .window(id("@2")))
     }
 
@@ -179,7 +198,7 @@ final class RouterTests: XCTestCase {
         for (next, expected) in [(TopicGroupID.topic("work"), TopicGroupID.topic("work")), (.noTopic, .noTopic), (.locked("$1"), .noTopic)] {
             var router = Router()
             _ = router.handle(.settled(next: next), .init())
-            XCTAssertEqual(router.handle(.read(1), .init()), [.visit(.emptyTopic(expected))])
+            XCTAssertEqual(router.handle(.read(revision(1)), .init()), [.visit(.emptyTopic(expected))])
             XCTAssertEqual(router.location, .emptyTopic(expected))
             XCTAssertNil(router.intent)
         }
@@ -191,8 +210,8 @@ final class RouterTests: XCTestCase {
                                               ("@1", [before[1], before[2]], "@2"),
                                               ("@3", [before[0], before[3]], "@1")] {
             var router = Router()
-            _ = router.handle(.read(1), .init(windows: before, ownClientWindow: id(selected)))
-            _ = router.handle(.read(2), .init(windows: survivors))
+            _ = router.handle(.read(revision(1)), .init(windows: before, ownClientWindow: id(selected)))
+            _ = router.handle(.read(revision(2)), .init(windows: survivors))
             XCTAssertEqual(router.location, .window(id(target)))
         }
     }
@@ -202,9 +221,9 @@ final class RouterTests: XCTestCase {
         let before = [window("@1"), window("@2"), window("@3")]
         _ = router.handle(.go(.window(id("@3"))), .init(windows: before))
         let pending = try windowIntent(router)
-        _ = router.handle(.read(1), .init(windows: [before[0]]))
-        _ = router.handle(.commandFinished(pending.id, .success, lastStartedRead: 1), .init())
-        _ = router.handle(.read(2), .init(windows: [before[0], before[1]]))
+        _ = router.handle(.read(revision(1)), .init(windows: [before[0]]))
+        _ = router.handle(.commandFinished(pending.id, .success, revision: revision(1)), .init())
+        _ = router.handle(.read(revision(2)), .init(windows: [before[0], before[1]]))
         XCTAssertEqual(router.location, .window(id("@2")))
     }
 
@@ -212,9 +231,9 @@ final class RouterTests: XCTestCase {
         let before = [window("@1", sessionID: "$1"), window("@2", sessionID: "$2"), window("@3", sessionID: "$3")]
         for (survivors, target) in [([before[0], before[1]], Optional(id("@2"))), ([before[0]], Optional(id("@1"))), ([], nil)] {
             var router = Router()
-            _ = router.handle(.read(1), .init(windows: before, ownClientWindow: id("@2")))
-            _ = router.handle(.read(2), .init(windows: before, ownClientWindow: id("@3")))
-            _ = router.handle(.read(3), .init(windows: survivors))
+            _ = router.handle(.read(revision(1)), .init(windows: before, ownClientWindow: id("@2")))
+            _ = router.handle(.read(revision(2)), .init(windows: before, ownClientWindow: id("@3")))
+            _ = router.handle(.read(revision(3)), .init(windows: survivors))
             XCTAssertEqual(router.location, target.map(Location.window))
         }
     }
@@ -222,12 +241,12 @@ final class RouterTests: XCTestCase {
     func testAPageAndRepeatedReadsDoNotEraseThePreviousWindow() {
         var router = Router()
         let before = [window("@1", sessionID: "$1"), window("@2", sessionID: "$2"), window("@3", sessionID: "$3")]
-        _ = router.handle(.read(1), .init(windows: before, ownClientWindow: id("@2")))
-        _ = router.handle(.read(2), .init(windows: before, ownClientWindow: id("@3")))
-        _ = router.handle(.read(3), .init(windows: before, ownClientWindow: id("@3")))
+        _ = router.handle(.read(revision(1)), .init(windows: before, ownClientWindow: id("@2")))
+        _ = router.handle(.read(revision(2)), .init(windows: before, ownClientWindow: id("@3")))
+        _ = router.handle(.read(revision(3)), .init(windows: before, ownClientWindow: id("@3")))
         _ = router.handle(.go(.emptyTopic(.topic("work"))), .init())
-        _ = router.handle(.result(.window(id("@3")), lastStartedRead: 3), .init(windows: before))
-        _ = router.handle(.read(4), .init(windows: [before[0], before[1]]))
+        _ = router.handle(.result(.window(id("@3")), revision: revision(3)), .init(windows: before))
+        _ = router.handle(.read(revision(4)), .init(windows: [before[0], before[1]]))
         XCTAssertEqual(router.location, .window(id("@2")))
     }
 
@@ -237,9 +256,9 @@ final class RouterTests: XCTestCase {
             var router = Router()
             _ = router.handle(.request(request, at: now), .init(now: now))
             XCTAssertNotNil(router.intent)
-            _ = router.handle(.read(1), .init(windows: [window("@1")], now: now.addingTimeInterval(1)))
+            _ = router.handle(.read(revision(1)), .init(windows: [window("@1")], now: now.addingTimeInterval(1)))
             XCTAssertNotNil(router.intent)
-            _ = router.handle(.read(2), .init(windows: [window("@1"), window("@2", sessionName: "made")], now: now.addingTimeInterval(2)))
+            _ = router.handle(.read(revision(2)), .init(windows: [window("@1"), window("@2", sessionName: "made")], now: now.addingTimeInterval(2)))
             XCTAssertEqual(router.location, .window(id("@2")))
         }
     }
@@ -258,7 +277,7 @@ final class RouterTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 100)
         _ = router.handle(.go(.emptyTopic(.noTopic)), .init())
         _ = router.handle(.request(.window("@9"), at: now), .init(now: now))
-        _ = router.handle(.read(1), .init(now: now.addingTimeInterval(6)))
+        _ = router.handle(.read(revision(1)), .init(now: now.addingTimeInterval(6)))
         XCTAssertNil(router.intent)
         XCTAssertEqual(router.location, .emptyTopic(.noTopic))
     }
@@ -271,9 +290,9 @@ final class RouterTests: XCTestCase {
         XCTAssertTrue(router.handle(.request(.topic("work"), at: now), facts).isEmpty)
         var settled = facts
         settled.records[0].settledAt = "2026-10-24T12:00:00Z"
-        XCTAssertTrue(router.handle(.read(1), settled).isEmpty)
+        XCTAssertTrue(router.handle(.read(revision(1)), settled).isEmpty)
         XCTAssertNotNil(router.intent)
-        XCTAssertEqual(router.handle(.read(2), facts), [.requestTopic(.topic("work"))])
+        XCTAssertEqual(router.handle(.read(revision(2)), facts), [.requestTopic(.topic("work"))])
         XCTAssertNil(router.intent)
     }
 
@@ -282,10 +301,10 @@ final class RouterTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 100)
         var facts = Router.Facts(windows: [window("@2")], hasTerminal: false, now: now)
         XCTAssertTrue(router.handle(.request(.window("@2"), at: now), facts).isEmpty)
-        XCTAssertTrue(router.handle(.read(1), facts).isEmpty)
+        XCTAssertTrue(router.handle(.read(revision(1)), facts).isEmpty)
         XCTAssertNil(router.location)
         facts.allowAttach = true
-        let effects = router.handle(.read(2), facts)
+        let effects = router.handle(.read(revision(2)), facts)
         let pending = try windowIntent(router)
         XCTAssertEqual(router.location, .window(id("@2")))
         XCTAssertTrue(effects.contains(.attach(id("@2"), intent: pending.id)))
@@ -293,20 +312,20 @@ final class RouterTests: XCTestCase {
 
     func testAttachUsesAnIntentBeforeTheRememberedAndInitialWindows() throws {
         var router = Router()
-        _ = router.handle(.result(.window(id("@3")), lastStartedRead: 1), .init())
+        _ = router.handle(.result(.window(id("@3")), revision: revision(1)), .init())
         let pending = try windowIntent(router)
         let facts = Router.Facts(windows: [window("@1"), window("@2"), window("@3")], hasTerminal: false,
                                  allowAttach: true, rememberedWindow: id("@2"), initialWindow: id("@1"))
-        let attachment = router.handle(.read(1), facts)
+        let attachment = router.handle(.read(revision(1)), facts)
         let attaching = try windowIntent(router)
         XCTAssertNotEqual(attaching.id, pending.id)
-        XCTAssertNil(attaching.finishedBefore)
+        XCTAssertNil(attaching.completedRevision)
         XCTAssertEqual(attachment, [.attach(id("@3"), intent: attaching.id)])
         for (remembered, target) in [(Optional(id("@2")), id("@2")), (nil, id("@1")), (Optional(id("@9")), id("@1"))] {
             var fresh = Router()
             var next = facts
             next.rememberedWindow = remembered
-            let effects = fresh.handle(.read(1), next)
+            let effects = fresh.handle(.read(revision(1)), next)
             XCTAssertEqual(fresh.location, .window(target))
             XCTAssertTrue(effects.contains(.attach(target, intent: try windowIntent(fresh).id)))
         }
@@ -314,8 +333,8 @@ final class RouterTests: XCTestCase {
 
     func testAnEmptyServerCanAttachWithoutAWindowOnlyWhenAllowed() {
         var router = Router()
-        XCTAssertTrue(router.handle(.read(1), .init(hasTerminal: false)).isEmpty)
-        XCTAssertEqual(router.handle(.read(2), .init(hasTerminal: false, allowAttach: true)), [.attach(nil, intent: 1)])
+        XCTAssertTrue(router.handle(.read(revision(1)), .init(hasTerminal: false)).isEmpty)
+        XCTAssertEqual(router.handle(.read(revision(2)), .init(hasTerminal: false, allowAttach: true)), [.attach(nil, intent: 1)])
         XCTAssertNil(router.location)
     }
 
@@ -325,7 +344,7 @@ final class RouterTests: XCTestCase {
             let facts = Router.Facts(windows: [window("@1")], records: [TopicRecord(id: "work")],
                                      hasTerminal: false, allowAttach: true, initialWindow: id("@1"))
             _ = router.handle(.go(.emptyTopic(group)), facts)
-            XCTAssertTrue(router.handle(.read(1), facts).isEmpty)
+            XCTAssertTrue(router.handle(.read(revision(1)), facts).isEmpty)
             XCTAssertEqual(router.location, .emptyTopic(group))
         }
     }
@@ -340,7 +359,7 @@ final class RouterTests: XCTestCase {
         _ = router.handle(.go(.window(id("@1"))), .init())
         let new = try windowIntent(router)
         XCTAssertNotEqual(new.id, old.id)
-        _ = router.handle(.commandFinished(old.id, .failure, lastStartedRead: 9), .init())
+        _ = router.handle(.commandFinished(old.id, .failure, revision: revision(9)), .init())
         XCTAssertEqual(router.intent, .window(new))
     }
 
@@ -357,22 +376,22 @@ final class RouterTests: XCTestCase {
         var router = Router()
         var facts = Router.Facts(windows: [window("@1"), window("@2"), window("@3")],
                                  ownClientWindow: id("@1"), records: [TopicRecord(id: "work")])
-        _ = router.handle(.read(1), facts)
+        _ = router.handle(.read(revision(1)), facts)
         _ = router.handle(.go(.window(id("@2"))), facts)
         let old = try windowIntent(router)
         let page = Location.emptyTopic(.topic("work"))
         _ = router.handle(.go(page), facts)
         facts.ownClientWindow = id("@2")
-        _ = router.handle(.read(2), facts)
+        _ = router.handle(.read(revision(2)), facts)
         XCTAssertEqual(router.location, page)
-        _ = router.handle(.commandFinished(old.id, .success, lastStartedRead: 3), facts)
+        _ = router.handle(.commandFinished(old.id, .success, revision: revision(3)), facts)
         facts.ownClientWindow = id("@1")
-        _ = router.handle(.read(3), facts)
+        _ = router.handle(.read(revision(3)), facts)
         facts.ownClientWindow = id("@2")
-        _ = router.handle(.read(4), facts)
+        _ = router.handle(.read(revision(4)), facts)
         XCTAssertEqual(router.location, page)
         facts.ownClientWindow = id("@3")
-        _ = router.handle(.read(5), facts)
+        _ = router.handle(.read(revision(5)), facts)
         XCTAssertEqual(router.location, .window(id("@3")))
     }
 
@@ -381,56 +400,56 @@ final class RouterTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 100)
         _ = router.handle(.request(.window("@2"), at: now), .init(now: now))
         var facts = Router.Facts(windows: [window("@1"), window("@2")], ownClientWindow: id("@1"), now: now)
-        _ = router.handle(.read(1), facts)
+        _ = router.handle(.read(revision(1)), facts)
         let pending = try windowIntent(router)
         _ = router.handle(.go(.emptyTopic(.noTopic)), facts)
-        _ = router.handle(.commandFinished(pending.id, .success, lastStartedRead: 1), facts)
+        _ = router.handle(.commandFinished(pending.id, .success, revision: revision(1)), facts)
         facts.ownClientWindow = id("@2")
-        _ = router.handle(.read(2), facts)
+        _ = router.handle(.read(revision(2)), facts)
         XCTAssertEqual(router.location, .emptyTopic(.noTopic))
     }
 
     func testAnExternalMoveDuringAnOldCommandIsFollowedWhenTheCommandFails() throws {
         var router = Router()
         var facts = Router.Facts(windows: [window("@1"), window("@2"), window("@3")], ownClientWindow: id("@1"))
-        _ = router.handle(.read(1), facts)
+        _ = router.handle(.read(revision(1)), facts)
         _ = router.handle(.go(.window(id("@2"))), facts)
         let pending = try windowIntent(router)
         _ = router.handle(.go(.emptyTopic(.noTopic)), facts)
         facts.ownClientWindow = id("@3")
-        _ = router.handle(.read(2), facts)
-        _ = router.handle(.commandFinished(pending.id, .failure, lastStartedRead: 2), facts)
-        _ = router.handle(.read(3), facts)
+        _ = router.handle(.read(revision(2)), facts)
+        _ = router.handle(.commandFinished(pending.id, .failure, revision: revision(2)), facts)
+        _ = router.handle(.read(revision(3)), facts)
         XCTAssertEqual(router.location, .window(id("@3")))
     }
 
     func testAnUntargetedAttachmentPreservesANewerPageWhenItsClientAppears() throws {
         var router = Router()
-        let effects = router.handle(.read(1), .init(hasTerminal: false, allowAttach: true))
+        let effects = router.handle(.read(revision(1)), .init(hasTerminal: false, allowAttach: true))
         let command = try attachmentID(effects)
         XCTAssertNil(router.intent)
         var facts = Router.Facts(windows: [window("@1")], records: [TopicRecord(id: "work")])
         let page = Location.emptyTopic(.topic("work"))
         _ = router.handle(.go(page), facts)
-        _ = router.handle(.read(2), facts)
+        _ = router.handle(.read(revision(2)), facts)
         facts.ownClientWindow = id("@1")
-        _ = router.handle(.commandFinished(command, .success, lastStartedRead: 3), facts)
-        _ = router.handle(.read(3), facts)
-        _ = router.handle(.read(4), facts)
+        _ = router.handle(.commandFinished(command, .success, revision: revision(3)), facts)
+        _ = router.handle(.read(revision(3)), facts)
+        _ = router.handle(.read(revision(4)), facts)
         XCTAssertEqual(router.location, page)
         facts.windows.append(window("@2"))
         facts.ownClientWindow = id("@2")
-        _ = router.handle(.read(5), facts)
+        _ = router.handle(.read(revision(5)), facts)
         XCTAssertEqual(router.location, .window(id("@2")))
     }
 
     func testAnUntargetedAttachmentInitializesLocationWhenItsClientAppears() throws {
         var router = Router()
-        let command = try attachmentID(router.handle(.read(1), .init(hasTerminal: false, allowAttach: true)))
+        let command = try attachmentID(router.handle(.read(revision(1)), .init(hasTerminal: false, allowAttach: true)))
         let facts = Router.Facts(windows: [window("@1")], ownClientWindow: id("@1"))
-        _ = router.handle(.commandFinished(command, .success, lastStartedRead: 2), facts)
-        _ = router.handle(.read(2), facts)
-        _ = router.handle(.read(3), facts)
+        _ = router.handle(.commandFinished(command, .success, revision: revision(2)), facts)
+        _ = router.handle(.read(revision(2)), facts)
+        _ = router.handle(.read(revision(3)), facts)
         XCTAssertEqual(router.location, .window(id("@1")))
         XCTAssertNil(router.intent)
     }
@@ -441,15 +460,15 @@ final class RouterTests: XCTestCase {
         var facts = Router.Facts(windows: [window("@1")], hasTerminal: false, allowAttach: true,
                                  initialWindow: id("@1"), now: now)
         _ = router.handle(.request(.window("@9"), at: now), facts)
-        let command = try attachmentID(router.handle(.read(1), facts))
+        let command = try attachmentID(router.handle(.read(revision(1)), facts))
         XCTAssertEqual(router.intent, .request(.window("@9"), until: now.addingTimeInterval(5)))
         let page = Location.emptyTopic(.noTopic)
         _ = router.handle(.go(page), facts)
         facts.hasTerminal = true
-        _ = router.handle(.read(2), facts)
+        _ = router.handle(.read(revision(2)), facts)
         facts.ownClientWindow = id("@1")
-        _ = router.handle(.commandFinished(command, .success, lastStartedRead: 3), facts)
-        _ = router.handle(.read(4), facts)
+        _ = router.handle(.commandFinished(command, .success, revision: revision(3)), facts)
+        _ = router.handle(.read(revision(4)), facts)
         XCTAssertEqual(router.location, page)
     }
 
@@ -459,34 +478,34 @@ final class RouterTests: XCTestCase {
             let facts = Router.Facts(windows: [window("@2")])
             _ = router.handle(.request(request, at: .distantPast), facts)
             let command = try windowIntent(router)
-            XCTAssertEqual(router.handle(.commandFinished(command.id, .success, lastStartedRead: 1), facts), [.enterRead(id("@2"))])
+            XCTAssertEqual(router.handle(.commandFinished(command.id, .success, revision: revision(1)), facts), [.enterRead(id("@2"))])
         }
     }
 
     func testASuccessfulSupersededCommandStillReadsItsWindowOnce() throws {
         var router = Router()
         let facts = Router.Facts(windows: [window("@1"), window("@2")])
-        _ = router.handle(.read(1), .init(windows: facts.windows, ownClientWindow: id("@1")))
+        _ = router.handle(.read(revision(1)), .init(windows: facts.windows, ownClientWindow: id("@1")))
         _ = router.handle(.go(.window(id("@2")), readsOnArrival: true), facts)
         let second = try windowIntent(router)
         _ = router.handle(.go(.window(id("@1")), readsOnArrival: true), facts)
         let latest = try windowIntent(router)
-        XCTAssertEqual(router.handle(.commandFinished(second.id, .success, lastStartedRead: 2), facts), [.enterRead(id("@2"))])
+        XCTAssertEqual(router.handle(.commandFinished(second.id, .success, revision: revision(2)), facts), [.enterRead(id("@2"))])
         XCTAssertEqual(router.intent, .window(latest))
         XCTAssertEqual(router.location, .window(id("@1")))
-        XCTAssertTrue(router.handle(.commandFinished(second.id, .success, lastStartedRead: 2), facts).isEmpty)
+        XCTAssertTrue(router.handle(.commandFinished(second.id, .success, revision: revision(2)), facts).isEmpty)
     }
 
     func testTopicArrivalNextTopicAndRecoveryReadOnArrival() throws {
         let facts = Router.Facts(windows: [window("@2")], records: [TopicRecord(id: "work")],
                                  entryWindows: [.topic("work"): id("@2")])
         for origin in [Router.Event.go(.emptyTopic(.topic("work"))), .settled(next: .topic("work")),
-                       .result(.window(id("@1")), lastStartedRead: 0)] {
+                       .result(.window(id("@1")), revision: revision(0))] {
             var router = Router()
             _ = router.handle(origin, facts)
-            _ = router.handle(.read(1), facts)
+            _ = router.handle(.read(revision(1)), facts)
             let command = try windowIntent(router)
-            XCTAssertEqual(router.handle(.commandFinished(command.id, .success, lastStartedRead: 1), facts), [.enterRead(id("@2"))])
+            XCTAssertEqual(router.handle(.commandFinished(command.id, .success, revision: revision(1)), facts), [.enterRead(id("@2"))])
         }
     }
 
@@ -496,14 +515,14 @@ final class RouterTests: XCTestCase {
         let command = try attachmentID(router.handle(.attach(id("@1"), readsOnArrival: true), facts))
         XCTAssertEqual(router.location, .window(id("@1")))
         facts.hasTerminal = true
-        _ = router.handle(.read(1), facts)
+        _ = router.handle(.read(revision(1)), facts)
         XCTAssertNotNil(router.intent)
         let page = Location.emptyTopic(.noTopic)
         _ = router.handle(.go(page), facts)
-        _ = router.handle(.read(2), facts)
+        _ = router.handle(.read(revision(2)), facts)
         facts.ownClientWindow = id("@1")
-        XCTAssertEqual(router.handle(.commandFinished(command, .success, lastStartedRead: 3), facts), [.enterRead(id("@1"))])
-        _ = router.handle(.read(4), facts)
+        XCTAssertEqual(router.handle(.commandFinished(command, .success, revision: revision(3)), facts), [.enterRead(id("@1"))])
+        _ = router.handle(.read(revision(4)), facts)
         XCTAssertEqual(router.location, page)
     }
 
@@ -513,26 +532,26 @@ final class RouterTests: XCTestCase {
             let page = Location.emptyTopic(.noTopic)
             _ = router.handle(.go(page), .init())
             let command = try attachmentID(router.handle(.attach(target), .init(hasTerminal: false)))
-            _ = router.handle(.commandFinished(command, .failure, lastStartedRead: 1), .init())
+            _ = router.handle(.commandFinished(command, .failure, revision: revision(1)), .init())
             XCTAssertEqual(router.location, page)
             XCTAssertNil(router.intent)
-            _ = router.handle(.read(2), .init(windows: [window("@2")], ownClientWindow: id("@2")))
+            _ = router.handle(.read(revision(2)), .init(windows: [window("@2")], ownClientWindow: id("@2")))
             XCTAssertEqual(router.location, .window(id("@2")))
         }
     }
 
     func testAttachingATopicResultStartsANewCompletionBarrier() throws {
         var router = Router()
-        _ = router.handle(.result(.window(id("@1")), lastStartedRead: 1), .init())
+        _ = router.handle(.result(.window(id("@1")), revision: revision(1)), .init())
         var facts = Router.Facts(windows: [window("@1")], hasTerminal: false, allowAttach: true)
-        let command = try attachmentID(router.handle(.read(1), facts))
+        let command = try attachmentID(router.handle(.read(revision(1)), facts))
         facts.hasTerminal = true
-        _ = router.handle(.read(2), facts)
+        _ = router.handle(.read(revision(2)), facts)
         XCTAssertNotNil(router.intent)
         _ = router.handle(.go(.emptyTopic(.noTopic)), facts)
         facts.ownClientWindow = id("@1")
-        _ = router.handle(.commandFinished(command, .success, lastStartedRead: 3), facts)
-        _ = router.handle(.read(4), facts)
+        _ = router.handle(.commandFinished(command, .success, revision: revision(3)), facts)
+        _ = router.handle(.read(revision(4)), facts)
         XCTAssertEqual(router.location, .emptyTopic(.noTopic))
     }
 

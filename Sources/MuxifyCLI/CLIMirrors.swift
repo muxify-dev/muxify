@@ -5,6 +5,8 @@ extension EnvironmentCommand {
     /// its verbs.
     var mirror: CLIMirror {
         switch self {
+        case .runtime(.openBrowser): .verb(.browserOpen)
+        case .runtime: .noMirror("The app owns reader visits, Browser persistence and native Terminal commands.")
         case .list: .verb(.topicList)
         case .show: .verbs([.topicOpen, .topicShow, .topicStatus, .topicDiff, .topicExec])
         case .create: .verb(.topicNew)

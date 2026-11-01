@@ -11,6 +11,7 @@ import os
 import subprocess
 import time
 import unittest
+from pathlib import Path
 
 from scripts.verify.sandbox import Sandbox, wait
 from scripts.verify.topic_records import TopicRecords
@@ -115,6 +116,8 @@ class TopicsSidebar(unittest.TestCase):
         if sid in self.s.tmux('list-clients', '-F', '#{session_id}').split():
             self.select_window('base:')
             self.s.show(self.s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}'))
+        socket = self.s.tmux('display-message', '-p', '#{socket_path}').strip()
+        self.assertTrue(Path(socket).resolve().is_relative_to(self.s.root.resolve()), socket)
         self.s.tmux_ok('kill-session', '-t', sid)
 
     def write_topic(self, topic_id, title, home, **fields):

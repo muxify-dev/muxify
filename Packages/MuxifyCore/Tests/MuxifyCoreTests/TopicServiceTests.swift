@@ -64,6 +64,17 @@ final class TopicServiceTests: XCTestCase {
         guard socket.hasPrefix(root.path + "/") else { throw CancellationError() }
     }
 
+    func testCreateAndReopenCanStartAStoppedServer() throws {
+        try assertThrowawayServer()
+        try server.run(["kill-server"])
+        let id = try topicWithSession("Start", at: sessionPath.folder.path, using: service())
+        XCTAssertEqual(try sessions(of: id), ["game/start"])
+        try assertThrowawayServer()
+        try server.run(["kill-server"])
+        _ = try change(service().handle(EnvironmentRequest(.reopen, target: .topic(.id(id)))))
+        XCTAssertEqual(try sessions(of: id), ["game/start"])
+    }
+
     func testConfirmationRejectsChangedSessionsBeforeAnyEdits() throws {
         for dormant in [false, true] {
             let id = dormant ? try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Dormant")))).topicID)
@@ -72,14 +83,14 @@ final class TopicServiceTests: XCTestCase {
             for index in reviewed.indices { reviewed[index].disposition = .keep }
             _ = try change(service().handle(EnvironmentRequest(.addSession(sessionPath: tools.folder.path, workingCopy: .directory), target: .topic(.id(id)))))
             let before = try records()
-            let windows = server.snapshot().windows
+            let windows = try server.snapshot().windows
             for command in [EnvironmentCommand.settle(choices: reviewed, outcome: "Done"), .forget(choices: reviewed, worktrees: [])] {
                 try assertThrowawayServer()
                 let failed = try failure(service().handle(EnvironmentRequest(command, target: .topic(.id(id)), expectedSessionIDs: reviewed.map(\.id))))
                 XCTAssertEqual(failed.kind, .topicMembershipChanged)
                 XCTAssertEqual(failed.phase, .nothingChanged)
                 XCTAssertEqual(try records(), before)
-                let after = server.snapshot().windows
+                let after = try server.snapshot().windows
                 XCTAssertEqual(after.map(\.id), windows.map(\.id))
                 XCTAssertEqual(after.map(\.sessionID), windows.map(\.sessionID))
                 XCTAssertEqual(after.map(\.sessionName), windows.map(\.sessionName))
@@ -95,27 +106,27 @@ final class TopicServiceTests: XCTestCase {
             let id = try topicWithSession("Changed impact", at: sessionPath.folder.path, using: service())
             let choices = try service().settleChoices(for: .topic(.id(id))).get()
             let session = try XCTUnwrap(choices.first)
-            let window = try XCTUnwrap(server.snapshot().windows.first { $0.sessionID == session.id })
+            let window = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionID == session.id })
             if addWindow {
                 _ = try server.run(["new-window", "-d", "-t", session.id + ":"])
             } else {
                 _ = try server.run(["split-window", "-d", "-t", window.id])
             }
             let before = try records()
-            let panes = Set(server.snapshot().panes.map(\.id))
+            let panes = Set(try server.snapshot().panes.map(\.id))
             for command in [EnvironmentCommand.settle(choices: choices, outcome: "Done"), .forget(choices: choices, worktrees: [])] {
                 try assertThrowawayServer()
                 let failed = try failure(service().handle(EnvironmentRequest(command, target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id))))
                 XCTAssertEqual(failed.kind, .topicMembershipChanged)
                 XCTAssertEqual(failed.phase, .nothingChanged)
                 XCTAssertEqual(try records(), before)
-                XCTAssertEqual(Set(server.snapshot().panes.map(\.id)), panes)
+                XCTAssertEqual(Set(try server.snapshot().panes.map(\.id)), panes)
             }
             var refreshed = try service().settleChoices(for: .topic(.id(id))).get()
             for index in refreshed.indices { refreshed[index].disposition = .kill }
             _ = try change(service().handle(EnvironmentRequest(.settle(choices: refreshed, outcome: "Reviewed again"),
                                                         target: .topic(.id(id)), expectedSessionIDs: refreshed.map(\.id))))
-            XCTAssertFalse(server.snapshot().windows.contains { $0.sessionID == session.id })
+            XCTAssertFalse(try server.snapshot().windows.contains { $0.sessionID == session.id })
         }
     }
 
@@ -128,7 +139,7 @@ final class TopicServiceTests: XCTestCase {
             let command: EnvironmentCommand = forget ? .forget(choices: choices, worktrees: []) : .settle(choices: choices, outcome: "Done")
             try assertThrowawayServer()
             _ = try change(service().handle(EnvironmentRequest(command, target: .topic(.id(id)), expectedSessionIDs: choices.reversed().map(\.id))))
-            let windows = server.snapshot().windows
+            let windows = try server.snapshot().windows
             for choice in choices {
                 let kept = try XCTUnwrap(windows.first { $0.sessionID == choice.id })
                 XCTAssertNil(kept.topicID)
@@ -149,8 +160,8 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(forgotten.topicID, id)
         XCTAssertFalse(forgotten.created)
         XCTAssertFalse(try records().contains { $0.id == id })
-        XCTAssertFalse(server.snapshot().windows.contains { $0.sessionID == choices[0].id })
-        let kept = try XCTUnwrap(server.snapshot().windows.first { $0.sessionID == choices[1].id })
+        XCTAssertFalse(try server.snapshot().windows.contains { $0.sessionID == choices[0].id })
+        let kept = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionID == choices[1].id })
         XCTAssertNil(kept.topicID)
         XCTAssertEqual(try failure(service().handle(EnvironmentRequest(.reopen, target: .topic(.id(id))))).kind, .topicUnavailable)
     }
@@ -233,7 +244,7 @@ final class TopicServiceTests: XCTestCase {
     func testCreateFromAPaneMakesAnEmptyTopicAndLeavesThePane() throws {
         let pane = try XCTUnwrap(PaneID(rawValue: try server.run(["display-message", "-p", "-t", "=main:", "#{pane_id}"])
             .trimmingCharacters(in: .whitespacesAndNewlines)))
-        let windows = server.snapshot().windows
+        let windows = try server.snapshot().windows
         let created = try change(service().handle(EnvironmentRequest(.create(title: "Fix reward"), target: .pane(pane), caller: .pane(pane))))
         let record = try XCTUnwrap(records().first)
         XCTAssertEqual(created.topicID, record.id)
@@ -242,7 +253,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(record.sessions, [])
         XCTAssertEqual(created.shown, .emptyTopic(.topic(record.id)))
         // Not the whole Window: tmux renames it by itself once its shell starts, which a slow machine shows here.
-        let after = server.snapshot().windows
+        let after = try server.snapshot().windows
         XCTAssertEqual(after.map(\.id), windows.map(\.id), "an Empty Topic starts and moves nothing in tmux")
         XCTAssertEqual(after.map(\.sessionID), windows.map(\.sessionID))
         XCTAssertEqual(after.map(\.topicID), windows.map(\.topicID))
@@ -251,12 +262,12 @@ final class TopicServiceTests: XCTestCase {
     }
 
     func testCreateWithNoSessionPathAndNoTargetMakesATopicWithNoSession() throws {
-        let sessions = server.snapshot().windows.count
+        let sessions = try server.snapshot().windows.count
         let created = try change(service().handle(EnvironmentRequest(.create(title: "  Plan the week "))))
         let record = try XCTUnwrap(records().first)
         XCTAssertEqual(record.title, "Plan the week")
         XCTAssertEqual(created.shown, .emptyTopic(.topic(record.id)))
-        XCTAssertEqual(server.snapshot().windows.count, sessions)
+        XCTAssertEqual(try server.snapshot().windows.count, sessions)
     }
 
     func testTwoEditsAtOnceChooseDifferentNamesBecauseOneWaitsForTheOther() throws {
@@ -272,11 +283,11 @@ final class TopicServiceTests: XCTestCase {
     func testMoveTakesAWholeSessionIntoTheTopicThatARefNames() throws {
         try server.run(["new-session", "-d", "-s", "loose", "-c", sessionPath.folder.path])
         let topic = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Release")))).topicID)
-        let loose = try XCTUnwrap(server.snapshot().windows.first { $0.sessionName == "loose" })
+        let loose = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "loose" })
         let moved = try change(service().handle(EnvironmentRequest(.move(to: .topic(.named("Release"))),
                                                              target: .session(SessionID(rawValue: loose.sessionID)!))))
         XCTAssertEqual(moved.shown, .window(WindowID(rawValue: loose.id)!))
-        let window = try XCTUnwrap(server.snapshot().windows.first { $0.id == loose.id })
+        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.id == loose.id })
         XCTAssertEqual(window.topicID, topic)
         XCTAssertEqual(window.sessionName, "loose/release")
         let again = try change(service().handle(EnvironmentRequest(.move(to: .topic(.id(topic))), target: .session(SessionID(rawValue: loose.sessionID)!))))
@@ -286,7 +297,7 @@ final class TopicServiceTests: XCTestCase {
     /// The Topics list as the app orders it: Topic ids, `lock:` with the Session name for a Locked Session, and `_` for
     /// an Open Place.
     private func topicList() throws -> [String] {
-        let windows = server.snapshot().windows
+        let windows = try server.snapshot().windows
         let openPlaces = try TopicStore(paths: paths).read().openPlaces
         return TopicOrder.sorted(TopicListEntry.all(records: try records(), windows: windows, openPlaces: openPlaces)).map { entry in
             switch entry {
@@ -414,15 +425,15 @@ final class TopicServiceTests: XCTestCase {
         _ = try change(service().handle(EnvironmentRequest(.create(title: "Second"))))
         XCTAssertEqual(try topicList(), ["First", "lock:notes", "lock:chores", "Second"])
 
-        let notes = try XCTUnwrap(SessionID(rawValue: server.snapshot().windows.first { $0.sessionName == "notes" }!.sessionID))
+        let notes = try XCTUnwrap(SessionID(rawValue: try server.snapshot().windows.first { $0.sessionName == "notes" }!.sessionID))
         let created = try change(service().handle(EnvironmentRequest(.move(to: .newTopic(title: "Notes work")), target: .session(notes))))
         XCTAssertTrue(created.created)
         XCTAssertEqual(try topicList(), ["First", "Notes work", "lock:chores", "Second"], "the new Topic takes the Lock's place")
 
-        let chores = try XCTUnwrap(SessionID(rawValue: server.snapshot().windows.first { $0.sessionName == "chores" }!.sessionID))
+        let chores = try XCTUnwrap(SessionID(rawValue: try server.snapshot().windows.first { $0.sessionName == "chores" }!.sessionID))
         _ = try change(service().handle(EnvironmentRequest(.move(to: .topic(.named("Second"))), target: .session(chores))))
         XCTAssertEqual(try topicList(), ["First", "Notes work", "Second"], "the Topic that the Session moves to keeps its place")
-        XCTAssertTrue(server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
+        XCTAssertTrue(try server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
     }
 
     func testTopInsertionAndReturningTopicsUseTheConfiguredEndAmongLocks() throws {
@@ -537,7 +548,7 @@ final class TopicServiceTests: XCTestCase {
         _ = try change(inPlay.handle(EnvironmentRequest(.replaceFromBench(with: .topic(.named("A"))), target: .sessionName("notes"))))
         XCTAssertEqual(try topicList(), ["Pinned", "C", "B", "A"], "the Lock of a Guest Session ends")
         XCTAssertEqual(try guests(), ["A"], "the card that comes In Play takes the Guest mark")
-        XCTAssertTrue(server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
+        XCTAssertTrue(try server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
 
         _ = try change(inPlay.handle(EnvironmentRequest(.create(title: "E"))))
         _ = try change(inPlay.handle(EnvironmentRequest(.replaceFromBench(with: .topic(.named("E"))), target: .topic(.named("A")))))
@@ -763,13 +774,13 @@ final class TopicServiceTests: XCTestCase {
         return id
     }
 
-    private func sessions(of topic: String) -> [String] {
-        Set(server.snapshot().windows.filter { $0.topicID == topic }.map(\.sessionName)).sorted()
+    private func sessions(of topic: String) throws -> [String] {
+        Set(try server.snapshot().windows.filter { $0.topicID == topic }.map(\.sessionName)).sorted()
     }
 
     func testMovingASessionKeepsTheTopicsSessionsInThatOrderAndSortingByCreationLetsThemGo() throws {
         let id = try twoSessionPathTopic("Order")
-        let live = server.snapshot().windows.filter { $0.topicID == id }
+        let live = try server.snapshot().windows.filter { $0.topicID == id }
         let game = try XCTUnwrap(live.first { $0.sessionName == "game/order" }), tools = try XCTUnwrap(live.first { $0.sessionName == "tools/order" })
         let paths = { try XCTUnwrap(self.records().first { $0.id == id }).sessions.compactMap { $0["directory"]?.string }.map(Folder.local) }
         _ = try change(service().handle(EnvironmentRequest(.moveSession(to: .before(SessionID(rawValue: game.sessionID)!)),
@@ -787,7 +798,7 @@ final class TopicServiceTests: XCTestCase {
 
     func testSessionMoveUpAndDownStepsAmongTheTopicsSessionsAndMovesALockedSessionsCard() throws {
         let id = try twoSessionPathTopic("Steps")
-        let live = server.snapshot().windows.filter { $0.topicID == id }
+        let live = try server.snapshot().windows.filter { $0.topicID == id }
         let game = try XCTUnwrap(live.first { $0.sessionName == "game/steps" }), tools = try XCTUnwrap(live.first { $0.sessionName == "tools/steps" })
         let paths = { try XCTUnwrap(self.records().first { $0.id == id }).sessions.compactMap { $0["directory"]?.string }.map(Folder.local) }
         func step(_ placement: TopicSessionPlacement, _ target: EnvironmentTarget) -> EnvironmentResponse {
@@ -809,7 +820,7 @@ final class TopicServiceTests: XCTestCase {
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
         _ = try change(service().handle(EnvironmentRequest(.lock, target: .sessionName("notes"))))
         XCTAssertEqual(try topicList().last, "lock:notes")
-        let notes = try XCTUnwrap(server.snapshot().windows.first { $0.sessionName == "notes" }?.sessionID)
+        let notes = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "notes" }?.sessionID)
         XCTAssertEqual(try change(step(.up, .sessionName("notes"))).session, SessionID(rawValue: notes))
         XCTAssertEqual(try topicList(), ["lock:notes", "Steps"], "a Locked Session's card steps")
         XCTAssertEqual(try failure(step(.up, .sessionName("notes"))).kind, .cardAtEnd)
@@ -826,22 +837,22 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertNotNil(record.settledAt)
         XCTAssertEqual(record.outcome, "Shipped 1.2")
         XCTAssertEqual(record.sessions.compactMap { $0["directory"]?.string }, [sessionPath.folder.path, tools.folder.path])
-        let names = server.snapshot().windows.map(\.sessionName)
+        let names = try server.snapshot().windows.map(\.sessionName)
         XCTAssertFalse(names.contains("game/ship"), "the killed Session is gone")
-        XCTAssertEqual(server.snapshot().windows.filter { $0.sessionName == "tools" }.map(\.topicID), [nil],
+        XCTAssertEqual(try server.snapshot().windows.filter { $0.sessionName == "tools" }.map(\.topicID), [nil],
                        "the kept Session stays with no Topic")
         XCTAssertEqual(service().handle(EnvironmentRequest(.list)), .topics([]))
     }
 
     func testRenameChangesTheTitleAndRenamesEverySessionOfTheTopic() throws {
         let id = try twoSessionPathTopic("Ship")
-        let before = Set(server.snapshot().windows.filter { $0.topicID == id }.map(\.sessionID))
+        let before = Set(try server.snapshot().windows.filter { $0.topicID == id }.map(\.sessionID))
         _ = try change(service().handle(EnvironmentRequest(.rename(title: " Ship it "), target: .topic(.id(id)))))
         let record = try XCTUnwrap(records().first { $0.id == id })
         XCTAssertEqual(record.title, "Ship it")
         XCTAssertEqual(record.slug, "ship-it")
-        XCTAssertEqual(sessions(of: id), ["game/ship-it", "tools/ship-it"])
-        XCTAssertEqual(Set(server.snapshot().windows.filter { $0.topicID == id }.map(\.sessionID)), before, "the same Sessions, renamed")
+        XCTAssertEqual(try sessions(of: id), ["game/ship-it", "tools/ship-it"])
+        XCTAssertEqual(Set(try server.snapshot().windows.filter { $0.topicID == id }.map(\.sessionID)), before, "the same Sessions, renamed")
     }
 
     func testReopenCreatesTheRememberedSessionsAndWindowsOfASettledTopic() throws {
@@ -851,12 +862,12 @@ final class TopicServiceTests: XCTestCase {
         try waitForPath(sessionPath.folder.path, of: "=game/ship:notes")
         try waitForPath(root.path, of: "=game/ship:logs")
         _ = try change(service().handle(EnvironmentRequest(.settle(choices: [], outcome: "Paused"), target: .topic(.id(id)))))
-        XCTAssertEqual(sessions(of: id), [])
+        XCTAssertEqual(try sessions(of: id), [])
         let reopened = try change(service().handle(EnvironmentRequest(.reopen, target: .topic(.id(id)))))
         XCTAssertEqual(reopened.topicID, id)
         let record = try XCTUnwrap(records().first { $0.id == id })
         XCTAssertNil(record.settledAt)
-        let windows = server.snapshot().windows.filter { $0.topicID == id }.sorted { $0.index < $1.index }
+        let windows = try server.snapshot().windows.filter { $0.topicID == id }.sorted { $0.index < $1.index }
         XCTAssertEqual(windows.map(\.sessionName), ["game/ship", "game/ship"])
         XCTAssertEqual(windows.map(\.name), ["notes", "logs"])
         // tmux reports /tmp as /private/tmp.
@@ -876,25 +887,25 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertNil(record.title)
         XCTAssertEqual(record.sessions.first?["directory"]?.string.map(Folder.local), sessionPath.folder)
         XCTAssertEqual(moved.shown, WindowID(rawValue: windowID).map { .window($0) })
-        let topicWindows = server.snapshot().windows.filter { $0.topicID == record.id }
+        let topicWindows = try server.snapshot().windows.filter { $0.topicID == record.id }
         XCTAssertEqual(topicWindows.map(\.id), [windowID], "the new Session holds only the moved Window")
         XCTAssertEqual(topicWindows.first?.sessionName, "loose/" + (record.slug ?? ""))
-        XCTAssertEqual(server.snapshot().windows.filter { $0.sessionName == "loose" }.count, 1, "the other Window stays")
+        XCTAssertEqual(try server.snapshot().windows.filter { $0.sessionName == "loose" }.count, 1, "the other Window stays")
     }
 
     func testNewTopicFromPaneTakesOnlyThatPaneOutOfASplitWindow() throws {
         try server.run(["new-session", "-d", "-s", "loose", "-c", sessionPath.folder.path])
         let paneID = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=loose:", "-c", sessionPath.folder.path])
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let source = try XCTUnwrap(server.snapshot().windows.first { $0.sessionName == "loose" })
+        let source = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "loose" })
         let moved = try change(service().handle(EnvironmentRequest(.move(to: .newTopic(title: "")), target: .pane(try XCTUnwrap(PaneID(rawValue: paneID))))))
         let record = try XCTUnwrap(records().first)
-        let topicWindows = server.snapshot().windows.filter { $0.topicID == record.id }
+        let topicWindows = try server.snapshot().windows.filter { $0.topicID == record.id }
         XCTAssertEqual(topicWindows.map(\.paneCount), [1])
         XCTAssertEqual(moved.shown, topicWindows.first.flatMap { WindowID(rawValue: $0.id) }.map { .window($0) })
         let paneWindow = try server.run(["display-message", "-p", "-t", paneID, "#{window_id}"]).trimmingCharacters(in: .whitespacesAndNewlines)
         XCTAssertEqual(topicWindows.map(\.id), [paneWindow])
-        XCTAssertEqual(server.snapshot().windows.filter { $0.id == source.id }.map(\.paneCount), [1], "the other Pane stays in its Window")
+        XCTAssertEqual(try server.snapshot().windows.filter { $0.id == source.id }.map(\.paneCount), [1], "the other Pane stays in its Window")
     }
 
     func testMovePaneToExistingOrNewTopicKeepsItsProcessAndOtherPanes() throws {
@@ -902,7 +913,7 @@ final class TopicServiceTests: XCTestCase {
             for split in [false, true] {
                 let suffix = "\(existing)-\(split)"
                 try server.run(["new-session", "-d", "-s", "source-" + suffix, "-c", sessionPath.folder.path])
-                let source = try XCTUnwrap(server.snapshot().windows.first { $0.sessionName == "source-" + suffix })
+                let source = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "source-" + suffix })
                 let pane: String
                 if split {
                     pane = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", source.id])
@@ -917,14 +928,14 @@ final class TopicServiceTests: XCTestCase {
                 var previousWindow: String?
                 if existing {
                     expectedTopic = try topicWithSession(suffix, at: sessionPath.folder.path, using: service())
-                    previousWindow = server.snapshot().windows.first { $0.topicID == expectedTopic }?.id
+                    previousWindow = try server.snapshot().windows.first { $0.topicID == expectedTopic }?.id
                     destination = .topic(.id(expectedTopic!))
                 } else {
                     destination = .newTopic(title: suffix)
                 }
                 try assertThrowawayServer()
                 let moved = try change(service().handle(EnvironmentRequest(.move(to: destination), target: .pane(try XCTUnwrap(PaneID(rawValue: pane))))))
-                let result = server.snapshot()
+                let result = try server.snapshot()
                 let movedPane = try XCTUnwrap(result.panes.first { $0.id == pane })
                 let movedWindow = try XCTUnwrap(result.windows.first { $0.id == movedPane.windowID })
                 XCTAssertEqual(moved.shown, .window(try XCTUnwrap(WindowID(rawValue: movedWindow.id))))
@@ -952,16 +963,16 @@ final class TopicServiceTests: XCTestCase {
         let moved = try change(service().handle(EnvironmentRequest(.move(to: .newTopic(title: " Named work ")),
                                                                  target: .pane(try XCTUnwrap(PaneID(rawValue: pane))))))
         XCTAssertEqual(try records().first { $0.id == moved.topicID }?.title, "Named work")
-        XCTAssertTrue(server.snapshot().panes.contains { $0.id == pane })
+        XCTAssertTrue(try server.snapshot().panes.contains { $0.id == pane })
     }
 
     func testMovePaneToNewWindowStaysInItsSessionAndSetsTheTitle() throws {
-        let source = try XCTUnwrap(server.snapshot().windows.first { $0.sessionName == "main" })
+        let source = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "main" })
         let pane = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", source.id])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let target = EnvironmentTarget.pane(try XCTUnwrap(PaneID(rawValue: pane)))
         let moved = try change(service().handle(EnvironmentRequest(.move(to: .newWindow(title: " Notes ")), target: target)))
-        let result = server.snapshot()
+        let result = try server.snapshot()
         let movedPane = try XCTUnwrap(result.panes.first { $0.id == pane })
         let window = try XCTUnwrap(result.windows.first { $0.id == movedPane.windowID })
         XCTAssertEqual(window.sessionID, source.sessionID)
@@ -972,19 +983,19 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertTrue(try records().isEmpty)
         let again = try change(service().handle(EnvironmentRequest(.move(to: .newWindow(title: "Renamed")), target: target)))
         XCTAssertEqual(again.shown, moved.shown)
-        XCTAssertEqual(server.snapshot().windows.count, result.windows.count)
-        XCTAssertEqual(server.snapshot().windows.first { $0.id == window.id }?.name, "Renamed")
+        XCTAssertEqual(try server.snapshot().windows.count, result.windows.count)
+        XCTAssertEqual(try server.snapshot().windows.first { $0.id == window.id }?.name, "Renamed")
     }
 
     func testRemoveWindowFromTopicKeepsItsPanesAndSiblingWindowInTheTopic() throws {
         for existing in [false, true] {
             let id = try topicWithSession("Remove-\(existing)", at: sessionPath.folder.path, using: service())
-            let source = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
+            let source = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
             let sibling = try server.run(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", source.sessionID + ":", "-c", sessionPath.folder.path])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let pane = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", source.id])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let before = server.snapshot()
+            let before = try server.snapshot()
             let destination = before.windows.first { $0.topicID == nil && $0.sessionName == sessionPath.name }
             XCTAssertEqual(destination != nil, existing)
             let record = try XCTUnwrap(records().first { $0.id == id })
@@ -992,7 +1003,7 @@ final class TopicServiceTests: XCTestCase {
             let target = EnvironmentTarget.window(try XCTUnwrap(WindowID(rawValue: source.id)))
             let to: TopicDestination = destination.map { .session(SessionID(rawValue: $0.sessionID)!) } ?? .newSession(topic: nil)
             let removed = try change(service().handle(EnvironmentRequest(.move(to: to), target: target)))
-            let result = server.snapshot()
+            let result = try server.snapshot()
             let moved = try XCTUnwrap(result.windows.first { $0.id == source.id })
             XCTAssertNil(moved.topicID)
             XCTAssertEqual(moved.sessionName, sessionPath.name)
@@ -1013,44 +1024,44 @@ final class TopicServiceTests: XCTestCase {
         let record = try XCTUnwrap(records().first { $0.id == id }, file: file, line: line)
         XCTAssertEqual(record.sessions, [], file: file, line: line)
         XCTAssertNil(record.settledAt, file: file, line: line)
-        XCTAssertFalse(server.snapshot().windows.contains { $0.topicID == id }, file: file, line: line)
+        XCTAssertFalse(try server.snapshot().windows.contains { $0.topicID == id }, file: file, line: line)
     }
 
     func testRemovingTheOnlySessionLeavesTheTopicEmptyAndTheSessionLive() throws {
         let id = try topicWithSession("Only", at: sessionPath.folder.path, using: service())
-        let session = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
+        let session = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
         try assertThrowawayServer()
         _ = try change(service().handle(EnvironmentRequest(.removeFromTopic, target: .session(try XCTUnwrap(SessionID(rawValue: session.sessionID))))))
         try assertEmpty(id)
         XCTAssertEqual(try records().first { $0.id == id }?.title, "Only")
-        XCTAssertTrue(server.snapshot().windows.contains { $0.sessionID == session.sessionID && $0.topicID == nil })
+        XCTAssertTrue(try server.snapshot().windows.contains { $0.sessionID == session.sessionID && $0.topicID == nil })
     }
 
     func testRemovingTheLastWindowLeavesTheTopicEmpty() throws {
         let id = try topicWithSession("Last window", at: sessionPath.folder.path, using: service())
-        let window = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
+        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
         try assertThrowawayServer()
         _ = try change(service().handle(EnvironmentRequest(.move(to: .newSession(topic: nil)), target: .window(try XCTUnwrap(WindowID(rawValue: window.id))))))
         try assertEmpty(id)
-        XCTAssertNil(server.snapshot().windows.first { $0.id == window.id }?.topicID)
+        XCTAssertNil(try server.snapshot().windows.first { $0.id == window.id }?.topicID)
     }
 
     func testMovingTheOnlySessionLeavesTheSourceEmptyAndTheDestinationRemembersIt() throws {
         let source = try topicWithSession("From", at: sessionPath.folder.path, using: service())
         let destination = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "To")))).topicID)
-        let session = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == source })
+        let session = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == source })
         try assertThrowawayServer()
         _ = try change(service().handle(EnvironmentRequest(.move(to: .topic(.id(destination))),
                                                      target: .session(try XCTUnwrap(SessionID(rawValue: session.sessionID))))))
         try assertEmpty(source)
         XCTAssertEqual(try records().first { $0.id == destination }?.sessions.compactMap { $0["directory"]?.string }, [sessionPath.folder.path])
-        XCTAssertEqual(server.snapshot().windows.first { $0.sessionID == session.sessionID }?.topicID, destination)
+        XCTAssertEqual(try server.snapshot().windows.first { $0.sessionID == session.sessionID }?.topicID, destination)
     }
 
     func testRemovingOneOfTwoSessionsForgetsItInTheSameEdit() throws {
         let id = try topicWithSession("Two", at: sessionPath.folder.path, using: service())
         _ = try change(service().handle(EnvironmentRequest(.addSession(sessionPath: tools.folder.path, workingCopy: .directory), target: .topic(.id(id)))))
-        let session = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id && $0.sessionName.hasPrefix(tools.name + "/") })
+        let session = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id && $0.sessionName.hasPrefix(tools.name + "/") })
         try assertThrowawayServer()
         _ = try change(service().handle(EnvironmentRequest(.removeFromTopic, target: .session(try XCTUnwrap(SessionID(rawValue: session.sessionID))))))
         XCTAssertEqual(try records().first { $0.id == id }?.sessions.compactMap { $0["directory"]?.string }, [sessionPath.folder.path])
@@ -1058,25 +1069,25 @@ final class TopicServiceTests: XCTestCase {
 
     func testRemoveAndKillStopsTheOnlySessionAndShowsTheEmptyTopic() throws {
         let id = try topicWithSession("Stop", at: sessionPath.folder.path, using: service())
-        let session = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
+        let session = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
         try assertThrowawayServer()
         let removed = try change(service().handle(EnvironmentRequest(.removeAndKill(worktrees: []),
                                                                target: .session(try XCTUnwrap(SessionID(rawValue: session.sessionID))))))
         try assertEmpty(id)
-        XCTAssertFalse(server.snapshot().windows.contains { $0.sessionID == session.sessionID })
+        XCTAssertFalse(try server.snapshot().windows.contains { $0.sessionID == session.sessionID })
         XCTAssertEqual(removed.shown, .emptyTopic(.topic(id)))
     }
 
     func testRemoveAndKillOfOneOfTwoSessionsShowsTheOtherSession() throws {
         let id = try topicWithSession("Stop one", at: sessionPath.folder.path, using: service())
         _ = try change(service().handle(EnvironmentRequest(.addSession(sessionPath: tools.folder.path, workingCopy: .directory), target: .topic(.id(id)))))
-        let windows = server.snapshot().windows.filter { $0.topicID == id }
+        let windows = try server.snapshot().windows.filter { $0.topicID == id }
         let killed = try XCTUnwrap(windows.first { $0.sessionName.hasPrefix(tools.name + "/") })
         let other = try XCTUnwrap(windows.first { $0.sessionID != killed.sessionID })
         try assertThrowawayServer()
         let removed = try change(service().handle(EnvironmentRequest(.removeAndKill(worktrees: []),
                                                                target: .session(try XCTUnwrap(SessionID(rawValue: killed.sessionID))))))
-        XCTAssertFalse(server.snapshot().windows.contains { $0.sessionID == killed.sessionID })
+        XCTAssertFalse(try server.snapshot().windows.contains { $0.sessionID == killed.sessionID })
         XCTAssertEqual(try records().first { $0.id == id }?.sessions.compactMap { $0["directory"]?.string }, [sessionPath.folder.path])
         XCTAssertEqual(removed.shown, .window(try XCTUnwrap(WindowID(rawValue: other.id))))
     }
@@ -1089,7 +1100,7 @@ final class TopicServiceTests: XCTestCase {
             let session = try addNewWorktree(of: app, start: .head, title: title)
             let id = try XCTUnwrap(records().first { $0.title == title }?.id)
             let worktree = try XCTUnwrap(session["worktree_path"]?.string)
-            let live = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
+            let live = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
             try assertThrowawayServer()
             _ = try change(service.handle(EnvironmentRequest(.removeAndKill(worktrees: remove ? [worktree] : []),
                                                        target: .session(try XCTUnwrap(SessionID(rawValue: live.sessionID))))))
@@ -1192,7 +1203,7 @@ final class TopicServiceTests: XCTestCase {
         let id = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Ids")))).topicID)
         let added = try change(service().handle(EnvironmentRequest(.addSession(sessionPath: sessionPath.folder.path, workingCopy: .directory),
                                                                    target: .topic(.id(id)))))
-        let window = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
+        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
         XCTAssertEqual(added.topicID, id)
         XCTAssertEqual(added.session?.rawValue, window.sessionID)
         XCTAssertEqual(added.sessionName, "game/ids")
@@ -1204,10 +1215,10 @@ final class TopicServiceTests: XCTestCase {
 
     func testNewWindowGoesToTheTargetsSessionAndAnswersWithItsIds() throws {
         let id = try topicWithSession("Windows", at: sessionPath.folder.path, using: service())
-        let before = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
+        let before = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
         let made = try change(service().handle(EnvironmentRequest(.newWindow(command: ["sh", "-c", "echo made > made.txt; sleep 600"]),
                                                                   target: .topic(.id(id)))))
-        let window = try XCTUnwrap(server.snapshot().windows.first { $0.id == made.window?.rawValue })
+        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.id == made.window?.rawValue })
         XCTAssertEqual(window.sessionID, before.sessionID, "the Window is in the Topic's only Session")
         XCTAssertEqual(made.session?.rawValue, before.sessionID)
         XCTAssertNil(made.topicID, "a new Window writes no Topic record")
@@ -1222,7 +1233,7 @@ final class TopicServiceTests: XCTestCase {
 
     func testNewWindowInATopicWithNoneOrSeveralLiveSessionsFailsAndChangesNothing() throws {
         let empty = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Nothing yet")))).topicID)
-        let windows = server.snapshot().windows.count
+        let windows = try server.snapshot().windows.count
         let none = try failure(service().handle(EnvironmentRequest(.newWindow(command: nil), target: .topic(.id(empty)))))
         XCTAssertEqual(none.kind, .topicEmpty)
         XCTAssertEqual(none.message, "The Topic Nothing yet has no Session. Add one first: muxify topic add-session <dir> --topic \(empty).")
@@ -1232,7 +1243,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(several.kind, .chooseSession)
         XCTAssertTrue(several.message.contains("game/two-places ($") && several.message.contains("tools/two-places ($"), several.message)
         XCTAssertEqual(several.phase, .nothingChanged)
-        XCTAssertEqual(server.snapshot().windows.count, windows + 2, "only the two Sessions of the second Topic were made")
+        XCTAssertEqual(try server.snapshot().windows.count, windows + 2, "only the two Sessions of the second Topic were made")
     }
 
     func testNewSessionStartsANoTopicSessionNamedForItsSessionPathWithAFreeName() throws {
@@ -1241,7 +1252,7 @@ final class TopicServiceTests: XCTestCase {
         let named = try change(service().handle(EnvironmentRequest(.newSession(sessionPath: tools.folder.path, name: "debug"))))
         XCTAssertEqual([first.sessionName, second.sessionName, named.sessionName], ["game", "game+2", "debug"])
         XCTAssertNil(first.topicID)
-        let window = try XCTUnwrap(server.snapshot().windows.first { $0.sessionID == named.session?.rawValue })
+        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionID == named.session?.rawValue })
         XCTAssertEqual(window.id, named.window?.rawValue)
         XCTAssertNil(window.topicID)
         XCTAssertEqual(window.sessionPath, tools.folder.path)
@@ -1253,20 +1264,20 @@ final class TopicServiceTests: XCTestCase {
 
     func testRenameSessionKeepsTheTopicSlugAndAFreeNameAndRenameWindowRenamesIt() throws {
         let id = try topicWithSession("Slugged", at: sessionPath.folder.path, using: service())
-        let window = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
+        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
         let session = try XCTUnwrap(SessionID(rawValue: window.sessionID))
         try server.run(["new-session", "-d", "-s", "taken/slugged", "-c", root.path])
         let renamed = try change(service().handle(EnvironmentRequest(.renameSession(name: "taken"), target: .session(session))))
         XCTAssertEqual(renamed.sessionName, "taken+2/slugged")
         XCTAssertEqual(renamed.session, session)
-        XCTAssertEqual(server.snapshot().windows.first { $0.sessionID == window.sessionID }?.sessionName, "taken+2/slugged")
+        XCTAssertEqual(try server.snapshot().windows.first { $0.sessionID == window.sessionID }?.sessionName, "taken+2/slugged")
         let invalid = try failure(service().handle(EnvironmentRequest(.renameSession(name: "a:b"), target: .session(session))))
         XCTAssertEqual(invalid.kind, .sessionNameInvalid)
 
         let windowID = try XCTUnwrap(WindowID(rawValue: window.id))
         let logs = try change(service().handle(EnvironmentRequest(.renameWindow(name: "logs"), target: .window(windowID))))
         XCTAssertEqual(logs.window, windowID)
-        XCTAssertEqual(server.snapshot().windows.first { $0.id == window.id }?.name, "logs")
+        XCTAssertEqual(try server.snapshot().windows.first { $0.id == window.id }?.name, "logs")
     }
 
     func testZoomPaneZoomsThePaneAndASecondZoomEndsIt() throws {
@@ -1321,27 +1332,27 @@ final class TopicServiceTests: XCTestCase {
 
     func testMarkReadChangesTheTopicUnreadOnlyForATopicAndEachAgentInItsScope() throws {
         let id = try topicWithSession("Read it", at: sessionPath.folder.path, using: service())
-        let window = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
-        let main = try XCTUnwrap(server.snapshot().windows.first { $0.sessionName == "main" })
+        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
+        let main = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "main" })
         func agent(in window: TmuxWindow, status: String, unread: Bool) throws -> PaneID {
             let pane = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", window.id, "sleep 600"])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             try server.run(["set-option", "-p", "-t", pane, "@muxify_agent", "claude", ";", "set-option", "-p", "-t", pane, "@muxify_agent_status", status]
                            + (unread ? [";", "set-option", "-p", "-t", pane, "@muxify_agent_unread", "1"] : []))
             let deadline = Date().addingTimeInterval(5)
-            while server.snapshot().panes.first(where: { $0.id == pane })?.command != "sleep", Date() < deadline { usleep(20_000) }
+            while try server.snapshot().panes.first(where: { $0.id == pane })?.command != "sleep", Date() < deadline { usleep(20_000) }
             return try XCTUnwrap(PaneID(rawValue: pane))
         }
         let done = try agent(in: window, status: "done", unread: false)
         _ = try agent(in: window, status: "working", unread: false)
         let outside = try agent(in: main, status: "failed", unread: true)
-        func unreadPanes() -> Set<String> { Set(server.snapshot().panes.filter(\.unread).map(\.id)) }
+        func unreadPanes() throws -> Set<String> { Set(try server.snapshot().panes.filter(\.unread).map(\.id)) }
         func topicUnread() throws -> Bool { try XCTUnwrap(records().first { $0.id == id }).isUnread }
 
         XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.unread, scope: .topic), target: .topic(.id(id)))),
                        .readChanged(TopicReadChange(topicIDs: [id], paneIDs: [done])), "a working Agent does not become Unread")
         XCTAssertTrue(try topicUnread())
-        XCTAssertEqual(unreadPanes(), [done.rawValue, outside.rawValue])
+        XCTAssertEqual(try unreadPanes(), [done.rawValue, outside.rawValue])
 
         XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.read, scope: .session), target: .pane(done))),
                        .readChanged(TopicReadChange(paneIDs: [done])), "a Session leaves the Topic Unread as it is")
@@ -1351,7 +1362,7 @@ final class TopicServiceTests: XCTestCase {
 
         XCTAssertEqual(service().handle(EnvironmentRequest(.markAllRead)), .readChanged(TopicReadChange(topicIDs: [id], paneIDs: [outside])))
         XCTAssertFalse(try topicUnread())
-        XCTAssertEqual(unreadPanes(), [])
+        XCTAssertEqual(try unreadPanes(), [])
 
         try TopicStore(paths: paths).write { try $0.update(id) { $0.settledAt = "2026-10-01T00:00:00Z" } }
         XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.unread, scope: .topic), target: .topic(.id(id)))),
@@ -1369,21 +1380,21 @@ final class TopicServiceTests: XCTestCase {
 
     func testKillRunsOnlyWhileThePanesAreTheReviewedOnesAndTheLastSessionLeavesTheTopicEmpty() throws {
         let id = try topicWithSession("Stop it", at: sessionPath.folder.path, using: service())
-        let window = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
-        let reviewed = Set(server.snapshot().panes.filter { $0.windowID == window.id }.compactMap { PaneID(rawValue: $0.id) })
+        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
+        let reviewed = Set(try server.snapshot().panes.filter { $0.windowID == window.id }.compactMap { PaneID(rawValue: $0.id) })
         let agent = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", window.id, "sleep 600"]).trimmingCharacters(in: .whitespacesAndNewlines)
         try server.run(["set-option", "-p", "-t", agent, "@muxify_agent", "claude"])
         let session = try XCTUnwrap(SessionID(rawValue: window.sessionID))
         let changed = try failure(service().handle(EnvironmentRequest(.killSession, target: .session(session), expectedPaneIDs: reviewed)))
         XCTAssertEqual(changed.kind, .panesChanged)
         XCTAssertEqual(changed.phase, .nothingChanged)
-        XCTAssertTrue(server.snapshot().windows.contains { $0.sessionID == window.sessionID }, "a changed review killed nothing")
+        XCTAssertTrue(try server.snapshot().windows.contains { $0.sessionID == window.sessionID }, "a changed review killed nothing")
 
         let all = reviewed.union([PaneID(rawValue: agent)!])
         let killed = try change(service().handle(EnvironmentRequest(.killSession, target: .session(session), expectedPaneIDs: all)))
         XCTAssertEqual(killed.topicID, id)
         XCTAssertEqual(killed.stopped, [PaneID(rawValue: agent)!])
-        XCTAssertFalse(server.snapshot().windows.contains { $0.sessionID == window.sessionID })
+        XCTAssertFalse(try server.snapshot().windows.contains { $0.sessionID == window.sessionID })
         let record = try XCTUnwrap(records().first { $0.id == id })
         XCTAssertNil(record.settledAt, "the Topic stays open")
         XCTAssertEqual(record.sessions, [], "the user stopped its last Session, so the Topic is Empty")
@@ -1416,7 +1427,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try topicList(), ["First", "Third", "Second", "lock:notes"])
         _ = try change(move(.down, .topic(.named("First"))))
         XCTAssertEqual(try topicList(), ["Third", "First", "Second", "lock:notes"])
-        let notes = try XCTUnwrap(server.snapshot().windows.first { $0.sessionName == "notes" }?.sessionID)
+        let notes = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "notes" }?.sessionID)
         let locked = try change(move(.up, .sessionName("notes")))
         XCTAssertEqual(locked.session, SessionID(rawValue: notes))
         XCTAssertEqual(try topicList(), ["Third", "First", "lock:notes", "Second"], "a Locked Session's card steps too")
@@ -1430,7 +1441,7 @@ final class TopicServiceTests: XCTestCase {
     func testWithoutTopicsARequestThatNeedsARecordFailsAndANewWindowStillRuns() throws {
         let remote = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath], topicsAvailable: false)
         XCTAssertEqual(try failure(remote.handle(EnvironmentRequest(.list))).kind, .topicsUnavailable)
-        let main = try XCTUnwrap(server.snapshot().windows.first { $0.sessionName == "main" })
+        let main = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "main" })
         let made = try change(remote.handle(EnvironmentRequest(.newWindow(command: nil), target: .session(SessionID(rawValue: main.sessionID)!))))
         XCTAssertEqual(made.session?.rawValue, main.sessionID)
         let id = try XCTUnwrap(change(EnvironmentService(paths: paths, server: server).handle(EnvironmentRequest(.create(title: "Local")))).topicID)
@@ -1491,7 +1502,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try records(), before)
         XCTAssertFalse(FileManager.default.fileExists(atPath: worktree))
         XCTAssertEqual(try git(["branch", "--list", "ship"], in: app.folder.path), "")
-        XCTAssertEqual(sessions(of: id), [])
+        XCTAssertEqual(try sessions(of: id), [])
     }
 
     func testSettleRefusesToRemoveAWorktreeWithUncommittedWorkAndChangesNothing() throws {
@@ -1510,7 +1521,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(failed, TopicFailure(kind: .gitFailed, phase: .nothingChanged,
                                             message: "The Worktree \(worktree) has uncommitted changes. Commit or remove them, or keep the Worktree."))
         XCTAssertEqual(try records(), before, "the Topic is not Settled")
-        XCTAssertEqual(sessions(of: id), ["app/ship"])
+        XCTAssertEqual(try sessions(of: id), ["app/ship"])
         XCTAssertTrue(FileManager.default.fileExists(atPath: worktree + "/notes.txt"))
     }
 
