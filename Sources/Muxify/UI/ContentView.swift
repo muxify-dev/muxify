@@ -76,6 +76,7 @@ struct ContentView: View {
             }
         }
         .overlay { CommandPaletteOverlay(palette: store.palette) }
+        .overlay { PillOverlay(pills: store.pills, theme: PaletteTheme(store.theme)) }
         .overlay(alignment: .top) {
             ConfigProblemsBanner(store: store, configStore: configStore)
         }

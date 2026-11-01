@@ -72,9 +72,10 @@ import MuxifyCore
                 .keyboardShortcut(keybinds.firstTrigger(for: .settleTopic)?.shortcut)
                 .disabled(!topicsAvailable || store?.activeTopicID == nil)
             Divider()
-            Button("Mark Read") { store?.changeRead(.read, in: store?.currentReadTarget) }
+            // Enabled with any current target, so the shortcut always reaches `markCurrentRead` and its Pill.
+            Button("Mark Read") { store?.markCurrentRead() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .markRead)?.shortcut)
-                .disabled(store?.canChangeRead(.read, in: store?.currentReadTarget) != true)
+                .disabled(store?.currentReadTarget == nil)
             Button("Mark Unread") { store?.changeRead(.unread, in: store?.currentReadTarget) }
                 .keyboardShortcut(keybinds.firstTrigger(for: .markUnread)?.shortcut)
                 .disabled(store?.canChangeRead(.unread, in: store?.currentReadTarget) != true)

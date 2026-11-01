@@ -1,41 +1,21 @@
 import SwiftUI
 import MuxifyCore
 
-/// Hosts the Command Palette and its "Copied" pill over the App Window.
+/// Hosts the Command Palette over the App Window.
 struct CommandPaletteOverlay: View {
     let palette: CommandPalette
 
     var body: some View {
-        // Fills the App Window even with nothing shown, so the pill gets its
-        // width and sits at the bottom.
-        GeometryReader { proxy in
-            ZStack {
-                if palette.isOpen {
-                    SpotlightPalette(palette: palette)
-                        .transition(.opacity)
-                }
-                VStack {
-                    if let copied = palette.copied {
-                        CopiedPill(copied: copied, theme: palette.theme)
-                            .transition(.asymmetric(
-                                insertion: .scale(scale: 0.7, anchor: .bottom).combined(with: .opacity),
-                                removal: .opacity
-                            ))
-                            .id(copied.id)
-                    }
-                }
-                .frame(width: SpotlightPalette.width(in: proxy.size))
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .padding(.bottom, 28)
-                .allowsHitTesting(false)
-            }
+        if palette.isOpen {
+            SpotlightPalette(palette: palette)
+                .transition(.opacity)
         }
     }
 }
 
 /// Like macOS 26 Spotlight: a glass bar near the top that grows as results
 /// come in, with the actions in a menu that opens by the selected row.
-private struct SpotlightPalette: View {
+struct SpotlightPalette: View {
     @Bindable var palette: CommandPalette
     @FocusState private var focused: Bool
     @Environment(\.agentColors) private var agentColors
@@ -500,57 +480,6 @@ struct PaletteIcon: View {
     }
 }
 
-/// Springs in at the bottom after a Copy; its check is drawn on, then bounces
-/// once.
-private struct CopiedPill: View {
-    let copied: PaletteCopy
-    let theme: PaletteTheme
-    @State private var showsCheck = false
-    @State private var bounces = 0
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ZStack {
-                Circle().fill(theme.green)
-                if showsCheck { check }
-            }
-            .frame(width: 22, height: 22)
-            Text(copied.title)
-                .font(.system(size: 13, weight: .semibold))
-            Text(copied.value)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .padding(.leading, 2)
-        }
-        .padding(.leading, 8)
-        .padding(.trailing, 16)
-        .frame(height: 38)
-        .spotlightGlass(theme, cornerRadius: 19, tint: 0.6)
-        .foregroundStyle(.primary)
-        .environment(\.colorScheme, theme.colorScheme)
-        .task {
-            try? await Task.sleep(for: .milliseconds(120))
-            withAnimation(.easeOut(duration: 0.3)) { showsCheck = true }
-            try? await Task.sleep(for: .milliseconds(380))
-            bounces += 1
-        }
-    }
-
-    @ViewBuilder private var check: some View {
-        let image = Image(systemName: "checkmark")
-            .font(.system(size: 11, weight: .bold))
-            .foregroundStyle(.white)
-            .symbolEffect(.bounce, value: bounces)
-        if #available(macOS 26.0, *) {
-            image.transition(.symbolEffect(.drawOn))
-        } else {
-            image.transition(.scale(scale: 0.4).combined(with: .opacity))
-        }
-    }
-}
-
 /// A Tag chip in the search field, in its Tag's colour. ⌫ in the empty field removes the last one, and ← selects one.
 private struct FieldChipView: View {
     let chip: FieldChip
@@ -613,7 +542,9 @@ private extension View {
             .padding(.vertical, size * 0.18)
             .background(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).fill(isSelected ? color : color.opacity(0.16)))
     }
+}
 
+extension View {
     /// Liquid Glass tinted with the Sidebar's chrome, or a material before macOS 26.
     @ViewBuilder
     func spotlightGlass(_ theme: PaletteTheme, cornerRadius: CGFloat = 26, tint: Double = 0.45) -> some View {

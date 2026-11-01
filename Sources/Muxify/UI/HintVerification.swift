@@ -43,8 +43,8 @@ struct HintVerification: ViewModifier {
     }
 
     #if DEBUG
-    /// A Read change's shortcut, like its menu item, is inert until the app can take the change. The check sees
-    /// no Press action then, and waits for one, instead of a press that the app drops.
+    /// A Read change's shortcut has no Press action until the change can run. A check waits for one, instead of a
+    /// press that only shows an Explanation Pill.
     private func canPress(_ action: ConfigAction) -> Bool {
         switch action {
         case .markRead: store.canChangeRead(.read, in: store.currentReadTarget)

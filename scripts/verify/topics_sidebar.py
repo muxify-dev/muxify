@@ -268,8 +268,8 @@ class TopicsSidebar(unittest.TestCase):
         return sid, window, pane
 
     def press_shortcut(self, symbol):
-        """The app offers the Press action of a Read change's shortcut only while the change can run, as it enables
-        the menu item. After a Read change the next one waits for the snapshot that shows it."""
+        """The app offers the Press action of a Read change's shortcut only while the change can run. After a Read
+        change the next one waits for the snapshot that shows it."""
         wait(lambda: self.s.driver('action', 'quick-switch-input', 'Press ' + symbol)['pressed'],
              'the shortcut %s stays unavailable' % symbol, seconds=10)
 

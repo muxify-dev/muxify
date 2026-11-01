@@ -279,7 +279,7 @@ extension CommandPalette {
         default: close(restoringFocus: false)
         }
         switch command {
-        case .markRead: store.changeRead(.read, in: store.currentReadTarget)
+        case .markRead: store.markCurrentRead()
         case .markUnread: store.changeRead(.unread, in: store.currentReadTarget)
         case .markAllRead: store.changeRead(.read, in: .environment)
         case .newTopic: store.presentNewTopic(keepingHistory: true)

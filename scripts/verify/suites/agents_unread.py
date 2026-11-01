@@ -260,6 +260,48 @@ class AgentsUnread(TopicsSidebar):
         self.s.act('press', key)
         self.assert_read(one, two)
 
+    def zoom_and_wait_for_the_zoomed_target(self, command):
+        """The Command Summary of Mark Read or Mark Unread, whichever the Zoomed Pane's Agent takes, names the Zoomed
+        Pane only after the app reads the Zoom from tmux. Before that, the current target is the whole Window."""
+        self.run_command('Zoom Pane')
+        key = 'palette-row-command-' + command
+        self.search('Commands', command, key)
+        self.s.wait_rows(lambda rs: 'Zoomed Pane:' in self.describe(key, rs), 'the app did not see the Zoom')
+        self.s.act('action', 'palette-search', 'Close')
+
+    def pill(self, title, value):
+        """The Pill lives 3.5 seconds, so it is read as soon as it shows."""
+        return self.s.wait_rows(lambda rs: self.s.row('pill', rs).get('accessibilityLabel') == title
+                                and value in self.s.row('pill', rs).get('accessibilityValue', ''),
+                                lambda: 'no Pill %r with %r: %r' % (title, value, self.s.row('pill')), seconds=10)
+
+    def test_mark_read_on_a_zoomed_pane_with_nothing_unread_explains_the_hidden_unread_pane(self):
+        _, window, _ = self.agent_session('zoom-hidden-only', status='done', unread=False)
+        hidden = self.split_agent(window, status='done', unread=True)
+        self.s.show(window)
+        self.zoom_and_wait_for_the_zoomed_target('Mark Unread')
+        explanation = 'explanation: Zoomed Pane has nothing Unread · 1 hidden Pane is Unread'
+
+        # A press while the app is busy does nothing and shows no Pill, so the check presses until one runs.
+        def explained():
+            self.s.driver('press', 'Mark Read')
+            shown = self.s.row('pill').get('accessibilityValue')
+            self.assertIn(shown, (None, explanation), 'Mark Read showed a Pill other than the explanation')
+            return shown == explanation
+        wait(explained, lambda: 'Mark Read did not explain the hidden Pane: %r' % self.s.row('pill'), seconds=10)
+        self.assertEqual(self.s.row('pill').get('accessibilityLabel'), 'Not marked Read')
+        self.assert_unread(hidden)
+
+    def test_mark_read_on_a_zoomed_pane_clears_it_and_says_a_hidden_pane_is_still_unread(self):
+        _, window, shown = self.agent_session('zoom-partial-read', status='done', unread=True)
+        hidden = self.split_agent(window, status='done', unread=True)
+        self.s.show(window)
+        self.zoom_and_wait_for_the_zoomed_target('Mark Read')
+        self.press_shortcut('⇧⌘R')
+        self.pill('Marked Read', 'explanation: Zoomed Pane · 1 hidden Pane is still Unread')
+        self.assert_read(shown)
+        self.assert_unread(hidden)
+
     def test_automatic_same_window_visit_reads_only_the_zoomed_pane(self):
         self.configure(manual_read=False)
         _, window, one = self.agent_session('zoom-auto-target', status='done', unread=True)

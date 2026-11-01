@@ -262,10 +262,11 @@ final class AppWindowsTests: XCTestCase {
 
             try XCTUnwrap(browser.activeTab).copyURL(to: pasteboard)
 
-            let confirmation = try XCTUnwrap(first.palette.copied)
+            let confirmation = try XCTUnwrap(first.pills.shown)
+            XCTAssertEqual(confirmation.kind, .confirmation)
             XCTAssertEqual(confirmation.title, "Copied URL")
             XCTAssertEqual(confirmation.value, firstURL)
-            XCTAssertNil(second.palette.copied)
+            XCTAssertNil(second.pills.shown)
             XCTAssertFalse(first.palette.isOpen, "Showing the pill must not open the palette")
 
             browser.newTab()
@@ -273,11 +274,11 @@ final class AppWindowsTests: XCTestCase {
             try XCTUnwrap(browser.activeTab).load(try XCTUnwrap(URL(string: secondURL)))
             try XCTUnwrap(browser.activeTab).copyURL(to: pasteboard)
 
-            let replacement = try XCTUnwrap(first.palette.copied)
+            let replacement = try XCTUnwrap(first.pills.shown)
             XCTAssertEqual(replacement.value, secondURL)
             XCTAssertNotEqual(replacement.id, confirmation.id, "Every copy should replay the pill's animation")
             XCTAssertEqual(pasteboard.string(forType: .string), secondURL)
-            XCTAssertNil(second.palette.copied)
+            XCTAssertNil(second.pills.shown)
         }
     }
 
