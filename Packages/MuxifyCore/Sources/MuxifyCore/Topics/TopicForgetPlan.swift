@@ -1,7 +1,7 @@
 import Foundation
 
-public struct TopicForgetChoices: Codable, Sendable {
-    public struct Worktree: Codable, Identifiable, Sendable {
+public struct TopicForgetChoices: Sendable {
+    public struct Worktree: Identifiable, Sendable {
         public var id: String { spec.path }
         public let spec: TopicPlan.WorktreeSpec
         public let isClean: Bool

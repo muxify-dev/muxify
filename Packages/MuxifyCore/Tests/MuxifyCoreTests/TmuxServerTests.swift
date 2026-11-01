@@ -36,7 +36,7 @@ final class TmuxServerTests: XCTestCase {
         try other.run(["new-session", "-d", "-s", "work", "-n", "editor", "-c", directory.path])
         XCTAssertEqual(try other.run(["display-message", "-p", "#{socket_path}"]),
                        directory.appendingPathComponent("other").path + "\n")
-        let snapshot = try other.snapshot()
+        let snapshot = other.snapshot()
         XCTAssertTrue(snapshot.serverRunning)
         XCTAssertEqual(snapshot.windows.map(\.sessionName), ["work"])
         XCTAssertEqual(snapshot.windows.map(\.name), ["editor"])
@@ -46,7 +46,7 @@ final class TmuxServerTests: XCTestCase {
         try other.run(["new-session", "-d", "-s", "work", "-c", directory.path])
         let watchID = try other.run(["new-session", "-d", "-P", "-F", "#{session_id}", "-s", Tmux.watchSessionName, "-c", directory.path])
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let snapshot = try other.snapshot()
+        let snapshot = other.snapshot()
         XCTAssertEqual(snapshot.windows.map(\.sessionName), ["work"])
         XCTAssertEqual(Set(snapshot.panes.map(\.windowID)), Set(snapshot.windows.map(\.id)))
         XCTAssertEqual(snapshot.watchSessionID, watchID)
@@ -54,11 +54,11 @@ final class TmuxServerTests: XCTestCase {
 
     func testAWindowKeepsTheTogglesAndMaximizeWrittenOntoIt() throws {
         try other.run(["new-session", "-d", "-s", "work", "-c", directory.path])
-        let windowID = try XCTUnwrap(try other.snapshot().windows.first?.id)
+        let windowID = try XCTUnwrap(other.snapshot().windows.first?.id)
         for layout in [PanelLayout(shown: .browser, maximized: .terminal), PanelLayout(shown: .both, maximized: .browser), PanelLayout()] {
             let stored = StoredBrowser(tabURLs: ["https://example.com"], layout: layout)
             try other.run(stored.setOptionArgs(windowID: windowID))
-            XCTAssertEqual(try other.snapshot().windows.first?.storedBrowser, stored)
+            XCTAssertEqual(other.snapshot().windows.first?.storedBrowser, stored)
         }
     }
 
@@ -74,6 +74,6 @@ final class TmuxServerTests: XCTestCase {
             guard case TmuxError.failed(_, let stderr) = error else { return XCTFail("\(error)") }
             XCTAssertTrue(stderr.contains(directory.path + "/tmux-\(getuid())/default"), stderr)
         }
-        XCTAssertFalse(try TmuxServer.local.snapshot().serverRunning)
+        XCTAssertFalse(TmuxServer.local.snapshot().serverRunning)
     }
 }

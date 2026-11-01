@@ -36,10 +36,10 @@ class SessionIdentity(unittest.TestCase):
         return path
 
     def session(self, name, directory, topic=None):
-        commands = ['new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, '-c', str(directory), '/bin/zsh -f']
+        sid = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, '-c', str(directory), '/bin/zsh -f')
         if topic:
-            commands += [';', 'set-option', '-t', name, '@muxify_topic', topic]
-        return self.s.tmux(*commands)
+            self.s.tmux('set-option', '-t', sid, '@muxify_topic', topic)
+        return sid
 
     def topic(self, name):
         self.store.put(dict(id=name, title=name, slug=name))
@@ -92,7 +92,6 @@ class SessionIdentity(unittest.TestCase):
 
     def test_new_session_on_topic_member_keeps_scope_and_base_with_same_folder(self):
         topic = self.topic('repeat-topic')
-        self.search(topic, 'palette-row-topic-' + topic)
         path = self.folder('repeat-folder')
         sid = self.session('debug/repeat-topic', path, topic)
         key = 'palette-row-session:' + sid

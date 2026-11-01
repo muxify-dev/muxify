@@ -17,9 +17,10 @@ import MuxifyCore
 
     private var activeTabHasPage: Bool { store?.currentBrowser?.activeTab?.hasPage == true }
 
+    /// Topics live on this Mac, so only a Local App Window offers them.
     private var topicsAvailable: Bool {
         guard let store else { return false }
-        return store.supportsTopics && !store.changingTopic
+        return !store.isRemote && !store.changingTopic
     }
 
     var body: some Commands {

@@ -2,7 +2,7 @@ import Foundation
 import Darwin
 
 /// What the records file holds at one moment.
-public struct TopicContents: Equatable, Sendable, Codable {
+public struct TopicContents: Equatable, Sendable {
     /// The valid Topic records, in id order.
     public var records: [TopicRecord]
     /// One line for each entry that is not a valid record, and for a file of the old folder that cannot be read.
@@ -17,7 +17,7 @@ public struct TopicContents: Equatable, Sendable, Codable {
     /// An `open_places` value that is not a list of Open Places. A write puts it back until it changes the Open Places.
     var unreadableOpenPlaces: JSONValue?
 
-    public init(records: [TopicRecord] = [], problems: [String] = [], openPlaces: [OpenPlace] = [], needsUpgrade: Bool = false) {
+    public init(records: [TopicRecord], problems: [String], openPlaces: [OpenPlace] = [], needsUpgrade: Bool = false) {
         self.records = records
         self.problems = problems
         self.openPlaces = openPlaces

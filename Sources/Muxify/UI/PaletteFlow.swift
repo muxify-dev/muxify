@@ -310,7 +310,7 @@ extension CommandPalette {
     }
 
     func topicTitle(id: String) -> String {
-        store?.topics.titles[id] ?? store?.topicContents.records.first { $0.id == id }.map(topicTitle) ?? "Untitled Topic"
+        store?.topics.titles[id] ?? store?.topicWatcher.records.first { $0.id == id }.map(topicTitle) ?? "Untitled Topic"
     }
 
     func nextTopicNote(_ ids: [String]) -> String? {
@@ -459,17 +459,17 @@ extension CommandPalette {
         }
         draft.choices = .loading
         let token = invocation
-        let service = store.topicQueries()
+        let service = store.topicService()
         Task {
             if forget {
-                let result = await service.forgetChoices(for: target)
+                let result = await Task.detached { service.forgetChoices(for: target) }.value
                 guard self.invocation == token else { return }
                 switch result {
                 case .success(let choices): draft.choices = .ready(choices.sessions, choices.worktrees)
                 case .failure(let error): draft.choices = .failed(error.message)
                 }
             } else {
-                let result = await service.settleChoices(for: target)
+                let result = await Task.detached { service.settleChoices(for: target) }.value
                 guard self.invocation == token else { return }
                 switch result {
                 case .success(let choices): draft.choices = .ready(choices, [])
@@ -482,9 +482,9 @@ extension CommandPalette {
     private func loadWorktreeStarts(_ draft: WorktreeStartDraft) {
         guard let store, let worktree = draft.choice.worktree else { return }
         let token = invocation
-        let service = store.topicQueries()
+        let service = store.topicService()
         Task {
-            let result = await service.worktreeStarts(from: worktree.folder.path)
+            let result = await Task.detached { service.worktreeStarts(from: worktree.folder.path) }.value
             guard self.invocation == token else { return }
             switch result {
             case .success(let starts): draft.starts = .ready(starts)
@@ -498,9 +498,9 @@ extension CommandPalette {
         guard let store, let session = SessionID(rawValue: window.sessionID) else { return }
         draft.choices = .loading
         let token = invocation
-        let service = store.topicQueries()
+        let service = store.topicService()
         Task {
-            let result = await service.removeAndKillWorktree(of: .session(session))
+            let result = await Task.detached { service.removeAndKillWorktree(of: .session(session)) }.value
             guard self.invocation == token else { return }
             switch result {
             case .success(let tree):

@@ -22,7 +22,7 @@ extension EnvironmentService {
 
     /// Upgrades the records that a Muxify with Snooze and Zen wrote, with this service's place for a returning Topic,
     /// and sets the Locks it moved in tmux. Nil when it succeeded or had nothing to upgrade.
-    func upgradeRecords(client: String? = nil) -> TopicFailure? {
+    public func upgradeRecords(client: String? = nil) -> TopicFailure? {
         var phase = TopicFailure.Phase.nothingChanged
         do {
             let contents = try store.read()
@@ -176,7 +176,7 @@ extension EnvironmentService {
 
     /// Puts each Guest at the end of In Play: the host calls it when the Config sets `topics.in_play`, so the Locks
     /// that were in the order of the Topics become Guests under the In Play Topics. Nil when it succeeded.
-    func gatherGuests(client: String? = nil) -> TopicFailure? {
+    public func gatherGuests(client: String? = nil) -> TopicFailure? {
         guard let inPlay = topics.inPlay, topicsAvailable else { return nil }
         var phase = TopicFailure.Phase.nothingChanged
         do {
@@ -214,15 +214,9 @@ extension EnvironmentService {
                 changed.topicIDs = ids.filter(written.contains)
                 phase = .recordSaved
             }
-            let acknowledged = Set(ReadPlan.agents(in: place,
-                among: Agent.list(panes: snapshot.panes, windows: snapshot.windows, ordered: false),
-                windows: snapshot.windows).map(\.paneID))
-            let panes = snapshot.panes.filter { pane in
-                acknowledged.contains(pane.id) && (change == .read || changed.paneIDs.contains { $0.rawValue == pane.id })
-            }
-            if !panes.isEmpty {
+            if !changed.paneIDs.isEmpty {
                 if phase == .nothingChanged { phase = .changesStarted }
-                try executor.run(panes.map { .tmux(AgentUnread.acknowledge($0, unread: change == .unread)) }, client: client)
+                try executor.run(changed.paneIDs.map { .tmux(AgentUnread.command(change == .unread, paneID: $0.rawValue)) }, client: client)
             }
             return .readChanged(changed)
         } catch {

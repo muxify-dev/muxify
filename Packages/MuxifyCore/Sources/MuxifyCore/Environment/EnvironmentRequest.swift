@@ -189,7 +189,7 @@ public enum WorktreeStart: Codable, Hashable, Sendable {
 }
 
 /// A local branch that a new Worktree can start from, as the palette's start step lists it.
-public struct WorktreeStartChoice: Codable, Equatable, Sendable {
+public struct WorktreeStartChoice: Equatable, Sendable {
     public let branch: String
     /// The Worktree that has the branch checked out. git checks out a branch in one Worktree only.
     public let checkedOutAt: String?
@@ -266,7 +266,6 @@ public enum WindowPlacement: Codable, Hashable, Sendable {
 }
 
 public enum EnvironmentCommand: Codable, Hashable, Sendable {
-    case runtime(EnvironmentOperation)
     /// The open Topics.
     case list
     /// The target's open Topic, with its live Sessions, Windows, Panes and Agents. It changes nothing.
@@ -369,7 +368,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case listWorktrees(all: Bool, from: String?)
 
     private enum CodingKeys: String, CodingKey {
-        case runtime, list, show, create, settle, forget, move, rename, reopen, lock, unlock, tags, note
+        case list, show, create, settle, forget, move, rename, reopen, lock, unlock, tags, note
         case startFresh = "start_fresh"
         case moveSession = "move_session"
         case sortSessions = "sort_sessions"
@@ -427,8 +426,10 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
 }
 
 public struct EnvironmentRequest: Codable, Hashable, Sendable {
-    /// Requests cross a process in the Environment watch stream. Raise the version for a change that an older reader would misread.
-    public static let currentVersion = 3
+    /// No request JSON crosses a process today: the CLI runs the service in its own process, and the app builds each
+    /// request from the muxify://topic URL. So it stayed 2 when `create` and `new_worktree` changed (ADR 0039). Raise
+    /// it for a change that an older reader would misread once JSON crosses a process.
+    public static let currentVersion = 2
 
     public var version: Int
     public var command: EnvironmentCommand
@@ -543,7 +544,6 @@ public struct TopicFailure: Error, Codable, Hashable, Sendable, CustomStringConv
         public static let unsupported = Kind(rawValue: "unsupported")
         public static let sessionPathUnavailable = Kind(rawValue: "session_path_unavailable")
         public static let duplicateSession = Kind(rawValue: "duplicate_session")
-        public static let cancelled = Kind(rawValue: "cancelled")
         public static let tmuxFailed = Kind(rawValue: "tmux_failed")
         public static let gitFailed = Kind(rawValue: "git_failed")
         public static let storeBusy = Kind(rawValue: "store_busy")
@@ -665,11 +665,9 @@ public enum EnvironmentResponse: Codable, Hashable, Sendable {
     case changed(TopicChange)
     case readChanged(TopicReadChange)
     case worktrees([MuxifyWorktreeSummary])
-    case paneSearch(PaneSearch.Response)
     case failed(TopicFailure)
 
     private enum CodingKeys: String, CodingKey {
-        case paneSearch = "pane_search"
         case topics, topic, changed, failed, worktrees
         case readChanged = "read_changed"
     }
@@ -681,7 +679,6 @@ public enum EnvironmentResponse: Codable, Hashable, Sendable {
         else if let change = try values.decodeIfPresent(TopicChange.self, forKey: .changed) { self = .changed(change) }
         else if let change = try values.decodeIfPresent(TopicReadChange.self, forKey: .readChanged) { self = .readChanged(change) }
         else if let worktrees = try values.decodeIfPresent([MuxifyWorktreeSummary].self, forKey: .worktrees) { self = .worktrees(worktrees) }
-        else if let result = try values.decodeIfPresent(PaneSearch.Response.self, forKey: .paneSearch) { self = .paneSearch(result) }
         else { self = .failed(try values.decode(TopicFailure.self, forKey: .failed)) }
     }
 
@@ -693,7 +690,6 @@ public enum EnvironmentResponse: Codable, Hashable, Sendable {
         case .changed(let change): try values.encode(change, forKey: .changed)
         case .readChanged(let change): try values.encode(change, forKey: .readChanged)
         case .worktrees(let worktrees): try values.encode(worktrees, forKey: .worktrees)
-        case .paneSearch(let result): try values.encode(result, forKey: .paneSearch)
         case .failed(let failure): try values.encode(failure, forKey: .failed)
         }
     }

@@ -4,7 +4,7 @@ import Foundation
 /// the Config's `~/Dev/app` through a symlinked `~/Dev`. `real` is where it leads with symlinks resolved, as git,
 /// `pwd -P` and tmux's `pane_current_path` give it. Two Folders are the same folder when their real paths are equal,
 /// so no spelling of a path decides a match.
-public struct Folder: Hashable, Codable, Sendable, CustomStringConvertible {
+public struct Folder: Hashable, Sendable, CustomStringConvertible {
     public let path: String
     public let real: String
 

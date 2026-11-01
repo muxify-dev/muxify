@@ -1,6 +1,6 @@
 import Foundation
 
-public struct SessionPath: Codable, Equatable, Identifiable, Sendable {
+public struct SessionPath: Equatable, Identifiable, Sendable {
     public let folder: Folder
     /// Names the SessionPath's tmux Sessions and Topic records, so it never changes with the alias.
     public let name: String

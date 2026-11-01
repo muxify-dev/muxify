@@ -1,5 +1,4 @@
 import XCTest
-@testable import MuxifyCore
 
 final class ConnectionCleanupTests: XCTestCase {
     private let waitTimeout: TimeInterval = 10
@@ -70,52 +69,6 @@ final class ConnectionCleanupTests: XCTestCase {
         XCTAssertFalse(readyToQuit)
         releaseSwitch.signal()
         await fulfillment(of: [finished], timeout: waitTimeout)
-    }
-
-    @MainActor func testQuitWaitsForRecordsQueuedBeforeAnEnvironmentRetires() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-retirement-" + UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let store = TopicStore(paths: MuxifyPaths(environment: ["XDG_STATE_HOME": root.path], home: "/nonexistent"))
-        let module = EnvironmentModule()
-        let cleanup = ConnectionCleanup()
-        let retiring = expectation(description: "transport retirement started")
-        let finished = expectation(description: "saved records before quit")
-        var finishTransport: ((()) -> Void)?
-        var readyToQuit = false
-        module.write { finishTransport = $0 }
-        module.write(requiredPersistence: true, { finish in
-            let saved = Result { try store.write { try $0.create(TopicRecord(id: "remembered")) } }
-            finish(saved)
-        })
-        cleanup.run(drainPersistence: { module.retire(completion: $0) },
-                    retire: {
-                        XCTAssertEqual(try? store.read().records.map(\.id), ["remembered"])
-                        retiring.fulfill()
-                    }, closeSurface: {}, cleanup: {})
-        cleanup.run(retire: {}, closeSurface: {}, cleanup: {})
-        cleanup.whenFinished {
-            readyToQuit = true
-            finished.fulfill()
-        }
-        let responsive = expectation(description: "main queue remains responsive while persistence waits")
-        DispatchQueue.main.async { responsive.fulfill() }
-        await fulfillment(of: [responsive], timeout: waitTimeout)
-        XCTAssertFalse(readyToQuit)
-        XCTAssertTrue(try store.read().records.isEmpty)
-        try XCTUnwrap(finishTransport)(())
-        await fulfillment(of: [retiring, finished], timeout: waitTimeout)
-        XCTAssertEqual(try store.read().records.map(\.id), ["remembered"])
-    }
-
-    @MainActor func testShutdownRejectsNewRequestsInEachEnvironment() async {
-        let environments: [RemoteEnvironment?] = [nil, RemoteEnvironment(name: "Remote", host: "example.invalid", username: "test")]
-        for environment in environments {
-            let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify-retirement.yaml"), environment: environment)
-            let finished = expectation(description: "store shutdown")
-            store.shutdown { finished.fulfill() }
-            XCTAssertFalse(store.perform(EnvironmentRequest(.list)))
-            await fulfillment(of: [finished], timeout: waitTimeout)
-        }
     }
 
     @MainActor func testNoPendingCleanupStillCompletesAsynchronouslyOnMain() async {

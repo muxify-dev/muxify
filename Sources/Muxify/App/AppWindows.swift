@@ -1,14 +1,12 @@
 import AppKit
 import GhosttyKit
 import Observation
-import MuxifyCore
 
 /// One process/Config, with independent workspaces and owned connections for
 /// each native App Window. Closing a window cleans only that workspace.
 @MainActor @Observable
 final class AppWindows {
     let configStore: ConfigStore
-    let localEnvironment: EnvironmentWatchClient
     @ObservationIgnored private let initialEnvironmentName: String?
     private(set) var focusedID: UUID?
     @ObservationIgnored var openWindow: ((AppWindowRequest) -> Void)?
@@ -30,36 +28,9 @@ final class AppWindows {
 
     init(configStore: ConfigStore) {
         self.configStore = configStore
-        localEnvironment = Self.makeLocalEnvironment(config: configStore.config)
         let remembered = UserDefaults.standard.string(forKey: "selectedEnvironment")
         let name = configStore.config.remoteEnvironments.first { $0.name == remembered }?.name
         initialEnvironmentName = name
-    }
-
-    static func makeLocalEnvironment(config: Config) -> EnvironmentWatchClient {
-        let executable = Bundle.main.resourceURL?.appendingPathComponent("bin/muxify")
-            ?? URL(fileURLWithPath: CommandLine.arguments[0]).deletingLastPathComponent().appendingPathComponent("muxify")
-        var tmuxConfig: String?
-        #if DEBUG
-        if TestDriver.isRunning { tmuxConfig = "/dev/null" }
-        #endif
-        return EnvironmentWatchClient(executable: executable, socketPath: TmuxServer.app.socketPath,
-                                      configPath: tmuxConfig, settings: EnvironmentRuleSettings(config: config))
-    }
-
-    func startLocalEnvironment() {
-        localEnvironment.start()
-        observeRuleSettings()
-    }
-
-    private func observeRuleSettings() {
-        guard !isQuitting else { return }
-        let settings = withObservationTracking {
-            EnvironmentRuleSettings(config: configStore.config)
-        } onChange: { [weak self] in
-            DispatchQueue.main.async { self?.observeRuleSettings() }
-        }
-        localEnvironment.updateSettings(settings)
     }
 
     deinit {
@@ -75,7 +46,7 @@ final class AppWindows {
     func store(for request: AppWindowRequest) -> WorkspaceStore {
         if let store = stores[request.id] { return store }
         let environment = configStore.config.remoteEnvironments.first { $0.name == request.environmentName }
-        let store = WorkspaceStore(configStore: configStore, environment: environment, localEnvironment: localEnvironment)
+        let store = WorkspaceStore(configStore: configStore, environment: environment)
         // SwiftUI can evaluate a closing scene again after its cleanup finishes.
         // Do not resurrect its reservation or connection.
         if isQuitting || closedIDs.contains(request.id) {
@@ -200,9 +171,9 @@ final class AppWindows {
             pending.enter()
             store.shutdown { pending.leave() }
         }
-        pending.notify(queue: .main) { [weak self, localEnvironment] in
+        pending.notify(queue: .main) { [weak self] in
             self?.browserAgent.stop()
-            localEnvironment.stop(completion: completion)
+            completion()
         }
     }
 }

@@ -2,8 +2,8 @@ import Foundation
 
 /// The full command line of the program that runs in each Topic Pane, such as `npm run dev` where tmux says only
 /// `node`. Topic memory records it, so Reopen can type it again.
-public struct PaneCommandLines: Equatable, Sendable, Codable {
-    private struct Entry: Equatable, Sendable, Codable {
+public struct PaneCommandLines: Equatable, Sendable {
+    private struct Entry: Equatable, Sendable {
         /// The Pane's `pane_current_command` when `line` was read. Another program in the Pane makes `line` stale.
         let command: String
         /// Empty when `ps` gave no line, so a Pane that has none does not run `ps` again on each read.

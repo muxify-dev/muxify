@@ -71,7 +71,7 @@ class CommandPalette(unittest.TestCase):
     def new_session(self, name, directory, topic=None, command=SHELL):
         sid = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, '-c', str(directory), command)
         self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', sid)
-        self.addCleanup(self.s.show, self.base_window)
+        self.addCleanup(self.select_window, self.base_window)
         if topic:
             self.s.tmux('set-option', '-t', sid, '@muxify_topic', topic)
         return sid
@@ -88,14 +88,14 @@ class CommandPalette(unittest.TestCase):
         return self.s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
 
     def client_sessions(self):
-        return self.s.tmux('list-clients', '-F', '#{?client_control_mode,,#{session_name}}').split()
+        return self.s.tmux('list-clients', '-F', '#{session_name}').split()
 
     def client_windows(self):
-        return self.s.tmux('list-clients', '-F', '#{?client_control_mode,,#{window_id}}').split()
+        return self.s.tmux('list-clients', '-F', '#{window_id}').split()
 
     def select_window(self, window):
         """Moves the app's tmux client to the Window, as tmux navigation does, and lets the app see it."""
-        for tty in self.s.tmux('list-clients', '-F', '#{?client_control_mode,,#{client_tty}}').split():
+        for tty in self.s.tmux('list-clients', '-F', '#{client_tty}').split():
             self.s.tmux('switch-client', '-c', tty, '-t', window)
         self.s.wait_shown(window)
 
@@ -257,7 +257,7 @@ class CommandPalette(unittest.TestCase):
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close after open')
         sid = self.s.tmux('display-message', '-p', '-t', '=gamma/release:', '#{session_id}')
         self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', sid)
-        self.addCleanup(self.s.show, self.base_window)
+        self.addCleanup(self.select_window, self.base_window)
 
         self.select_window(self.base_window)
         self.open_palette()
@@ -278,7 +278,7 @@ class CommandPalette(unittest.TestCase):
         self.s.act('action', key, 'New Session')
         wait(lambda: self.s.tmux_ok('has-session', '-t', '=gamma/main+2').returncode == 0, 'no Session gamma/main+2 was created', seconds=10)
         self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', '=gamma/main+2')
-        self.addCleanup(self.s.show, self.base_window)
+        self.addCleanup(self.select_window, self.base_window)
         wait(lambda: 'gamma/main+2' in self.client_sessions(), 'the client did not go to the new Session', seconds=10)
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close after New Session')
         self.assertEqual(self.s.tmux('show-options', '-qv', '-t', '=gamma/main+2', '@muxify_topic'), '', 'the Session is not in No Topic')
@@ -298,7 +298,7 @@ class CommandPalette(unittest.TestCase):
         self.s.act('press', key)
         wait(lambda: self.s.tmux_ok('has-session', '-t', '=delta').returncode == 0, 'no Session delta was created', seconds=10)
         self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', '=delta')
-        self.addCleanup(self.s.show, self.base_window)
+        self.addCleanup(self.select_window, self.base_window)
         names = self.s.tmux('list-sessions', '-F', '#{session_name}').splitlines()
         self.assertNotIn('Delta Notes', names, 'the alias named a tmux Session')
         # The app selects the new Session after the palette closes; a kill before that leaves a modal alert.
@@ -500,7 +500,7 @@ class CommandPalette(unittest.TestCase):
         other = self.new_session('sw-slot-other', outside)
         for session in [sid, other, topic_sid]:
             self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', session)
-        self.addCleanup(self.s.show, self.base_window)
+        self.addCleanup(self.select_window, self.base_window)
         self.select_window(topic_window)
         rs = s.wait_rows(lambda rs: s.row('topic-window-' + topic_window, rs).get('accessibilityValue') == 'selected'
                          and s.has('settled-topics', rs), 'the Sidebar does not show the Topic Window selected and the Settled group')

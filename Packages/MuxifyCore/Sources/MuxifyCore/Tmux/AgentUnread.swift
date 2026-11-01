@@ -1,5 +1,3 @@
-import Foundation
-
 public enum AgentReading {
     case away, viewing, visiting
 }
@@ -21,25 +19,6 @@ public enum AgentUnread {
         unread
             ? ["set-option", "-pq", "-t", paneID, Tmux.agentUnreadOption, "1"]
             : ["set-option", "-pqu", "-t", paneID, Tmux.agentUnreadOption]
-    }
-
-    /// A Read request acknowledges the Status that it read, so a later rules owner cannot mark it again.
-    public static func acknowledge(_ pane: TmuxPane, unread: Bool) -> [String] {
-        command(unread, paneID: pane.id) + [";", "set-option", "-pq", "-t", pane.id,
-                                         Tmux.agentSeenStatusOption, pane.agentStatus.isEmpty ? "~" : pane.agentStatus,
-                                         ";", "set-option", "-pq", "-t", pane.id,
-                                         Tmux.agentReadVersionOption, UUID().uuidString]
-    }
-
-    static func ruleCommand(_ pane: TmuxPane, unread: Bool, serverID: String) -> [String]? {
-        guard pane.agentReadVersion.isEmpty || UUID(uuidString: pane.agentReadVersion) != nil,
-              serverID.allSatisfy({ $0.isNumber || $0 == ":" }) else { return nil }
-        let version = "#{==:#{\(Tmux.agentReadVersionOption)},\(pane.agentReadVersion)}"
-        let mark = "#{==:#{==:#{\(Tmux.agentUnreadOption)},1},\(pane.unread ? "1" : "0")}"
-        let incarnation = "#{==:#{pid}:#{start_time},\(serverID)}"
-        let condition = "#{&&:\(incarnation),#{&&:\(version),\(mark)}}"
-        let command = acknowledge(pane, unread: unread).map { $0 == ";" ? ";" : Tmux.shellQuote($0) }.joined(separator: " ")
-        return ["if-shell", "-F", "-t", pane.id, condition, command]
     }
 
     public static func change(for pane: TmuxPane, previousStatus: String?, reading: AgentReading, manualRead: Bool) -> Bool? {

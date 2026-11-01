@@ -1,7 +1,7 @@
 import Foundation
 import MuxifyCore
 
-/// One command line that sends a request through `EnvironmentModule` in this process, on the records under `paths`,
+/// One command line that sends a request through `EnvironmentService` in this process, on the records under `paths`,
 /// so it works without Muxify running. The service chooses what the request acts on: `target`, else `caller`.
 struct RequestInvocation: Equatable {
     enum Command: Equatable {
@@ -182,22 +182,18 @@ struct RequestInvocation: Equatable {
         case session(String)
 
         /// A Session name becomes its id here, because a card on the wire names a Locked Session by its id.
-        func ref(in windows: [TmuxWindow]) throws -> TopicListRef {
-            switch self {
-            case .topic(let name): return .topic(.named(name))
-            case .session(let value):
-                guard let window = windows.first(where: { $0.sessionID == value || $0.sessionName == value }),
-                      let id = SessionID(rawValue: window.sessionID) else {
-                    throw CLIError(TopicRequestError.sessionUnavailable(value).description)
+        var ref: TopicListRef {
+            get throws {
+                switch self {
+                case .topic(let name): return .topic(.named(name))
+                case .session(let value):
+                    guard let window = TmuxServer.local.snapshot().windows.first(where: { $0.sessionID == value || $0.sessionName == value }),
+                          let id = SessionID(rawValue: window.sessionID) else {
+                        throw CLIError(TopicRequestError.sessionUnavailable(value).description)
+                    }
+                    return .lock(id)
                 }
-                return .lock(id)
             }
-        }
-
-        /// The Windows that the cards' Session names resolve in. Only a card that names a Session needs Inventory.
-        @MainActor static func windows(for cards: [CardName], module: EnvironmentModule) async throws -> [TmuxWindow] {
-            guard cards.contains(where: { if case .session = $0 { return true } else { return false } }) else { return [] }
-            return try await module.readNow().inventory.get().windows
         }
     }
 
@@ -310,27 +306,24 @@ extension RequestInvocation {
         return "; name the target with " + list
     }
 
-    @MainActor func run() async throws {
-        try await EnvironmentModule.withCommand(paths: paths) { module in
-            try await run(module: module)
-        }
-    }
-
-    @MainActor private func run(module: EnvironmentModule) async throws {
-        let response: EnvironmentResponse
+    func run() async throws {
+        var response: EnvironmentResponse
         switch command {
         case .list:
-            response = await module.perform(EnvironmentRequest(.list)).value
+            response = EnvironmentService(paths: paths).handle(EnvironmentRequest(.list))
         default:
             let config = try await ConfigSessions.load(paths.configFile, within: command.findsAllSessionPaths ? nil : [])
-            do {
-                let command = try await request(sessionPaths: config.sessionPaths, topics: config.topics, module: module)
+            func handle() throws -> EnvironmentResponse {
+                let service = EnvironmentService(paths: paths, server: TmuxServer.local, sessionPaths: config.sessionPaths, topics: config.topics,
+                                                 worktreesRoot: config.worktreesRoot)
                 // No client: no terminal switches to the result, because a command changes what the user sees only
                 // when they ask for it. A new Worktree's Session is shown unless --no-open says not to, and a Remove
                 // that kills the caller's Session moves its terminal first.
-                response = await module.perform(EnvironmentRequest(command, target: target, caller: caller.map(TopicCaller.pane)),
-                                                client: callerClient, sessionPaths: config.sessionPaths, topics: config.topics,
-                                                worktreesRoot: config.worktreesRoot).value
+                return service.handle(EnvironmentRequest(try request(sessionPaths: config.sessionPaths, service: service), target: target,
+                                                         caller: caller.map(TopicCaller.pane)), client: callerClient)
+            }
+            do {
+                response = try handle()
             } catch let answer as Answer {
                 response = answer.response
             }
@@ -347,7 +340,7 @@ extension RequestInvocation {
                 return try TopicGit(report: .diff(stat: stat)).run(try TopicExec.sessions(of: topic, session: sessionPath),
                                                                    topic: topic, output: output)
             case .show(conversations: true):
-                return try await reportConversations(of: topic, module: module)
+                return try reportConversations(of: topic)
             case .open:
                 return try CLICommand.open("muxify://select?topic=\(CLICommand.percentEncoded(topic.id))")
             default: break
@@ -390,7 +383,7 @@ extension RequestInvocation {
                            worktree.topic ?? ""].map(\.oneLineField).joined(separator: "\t"))
                 }
             case .readChanged(let change): for id in change.topicIDs + change.paneIDs.map(\.rawValue) { print(id) }
-            case .paneSearch, .failed: break
+            case .failed: break
             }
         }
         if case .failed(let failure) = response { throw CLIError(failure) }
@@ -404,15 +397,14 @@ extension RequestInvocation {
 
     /// `topic show --conversations`: the Topic as `topic show` prints it, then the conversation of each Agent in its live
     /// Panes and in its remembered Sessions, which `agent conversation --conversation <id> --kind <kind>` reads.
-    @MainActor private func reportConversations(of topic: TopicDetail, module: EnvironmentModule) async throws {
-        let read = await module.readNow()
+    private func reportConversations(of topic: TopicDetail) throws {
         let record: TopicRecord?
         do {
-            record = try read.records.get().records.first { $0.id == topic.id }
+            record = try TopicStore(paths: paths).read().records.first { $0.id == topic.id }
         } catch {
             throw CLIError("Muxify could not read the Topic records in \(paths.state.path). \(error.localizedDescription)")
         }
-        let conversations = record?.agentConversations(in: try read.inventory.get()) ?? []
+        let conversations = record?.agentConversations(in: TmuxServer.local.snapshot()) ?? []
         switch output {
         case .json:
             let encoder = JSONEncoder()
@@ -426,8 +418,7 @@ extension RequestInvocation {
         }
     }
 
-    @MainActor private func request(sessionPaths: [SessionPath], topics: Config.Topics, module: EnvironmentModule) async throws -> EnvironmentCommand {
-        let queries = module.queries(sessionPaths: sessionPaths, topics: topics)
+    private func request(sessionPaths: [SessionPath], service: EnvironmentService) throws -> EnvironmentCommand {
         switch command {
         case .new(let title, let tags): return .create(title: title, tags: tags.isEmpty ? nil : tags)
         case .addSession(let path, let newWorktree):
@@ -443,14 +434,14 @@ extension RequestInvocation {
             return .addSession(sessionPath: choice.sessionPath.folder.path, workingCopy: choice.workingCopy(newWorktree: newWorktree != nil, start: newWorktree ?? .head), name: choice.name)
         case .forget(let remove, let kill):
             guard let target = target ?? caller.map(EnvironmentTarget.pane),
-                  var choices = try? await queries.forgetChoices(for: target).get() else { return .forget(choices: [], worktrees: []) }
+                  var choices = try? service.forgetChoices(for: target).get() else { return .forget(choices: [], worktrees: []) }
             for index in choices.sessions.indices { choices.sessions[index].disposition = kill ? .kill : .keep }
             return .forget(choices: choices.sessions, worktrees: remove ? choices.worktrees.filter { $0.canRemove(sessions: choices.sessions) }.map(\.id) : [])
         case .settle(let remove, let kill):
             // The palette defaults to Kill behind ⌘↩; the CLI stops a Session only with an explicit flag (ADR 0039).
             // Choices that fail to load leave the defaults, so the request itself reports why the Topic cannot settle.
             guard let settled = target ?? caller.map(EnvironmentTarget.pane),
-                  var choices = try? await queries.settleChoices(for: settled).get() else { return .settle(choices: [], outcome: "") }
+                  var choices = try? service.settleChoices(for: settled).get() else { return .settle(choices: [], outcome: "") }
             for index in choices.indices {
                 choices[index].disposition = kill ? .kill : .keep
                 choices[index].removeWorktree = remove && choices[index].worktree != nil
@@ -471,7 +462,7 @@ extension RequestInvocation {
         case .lock(let locked): return locked ? .lock : .unlock
         case .moveWindow(let topic, let session, let newSession):
             guard let session else { return .move(to: newSession ? .newSession(topic: .named(topic)) : .topic(.named(topic))) }
-            let response = await module.perform(EnvironmentRequest(.show, target: .topic(.named(topic))), sessionPaths: sessionPaths, topics: topics).value
+            let response = service.handle(EnvironmentRequest(.show, target: .topic(.named(topic))))
             guard case .topic(let detail) = response else { throw Answer(response) }
             guard let chosen = detail.sessions.first(where: { $0.id == session || $0.name == session }),
                   let id = SessionID(rawValue: chosen.id) else { throw CLIError("no live Session of the Topic \(detail.label) matches \(session)") }
@@ -482,7 +473,7 @@ extension RequestInvocation {
         case .removeSessionFromTopic(kill: true, let removeWorktree):
             guard removeWorktree, let session = target ?? caller.map(EnvironmentTarget.pane) else { return .removeAndKill(worktrees: []) }
             let worktree: TopicForgetChoices.Worktree?
-            switch await queries.removeAndKillWorktree(of: session) {
+            switch service.removeAndKillWorktree(of: session) {
             case .success(let made): worktree = made
             case .failure(let failure): throw Answer(.failed(failure))
             }
@@ -506,20 +497,15 @@ extension RequestInvocation {
         case .benchTopic: return .benchTopic
         case .fillPlace(let place): return .fillOpenPlace(place: place)
         case .moveCard(let move): return .moveCard(move)
-        case .tradeCard(let other):
-            return .moveCard(.trade(try other.ref(in: try await CardName.windows(for: [other], module: module))))
-        case .chooseInPlay(let cards):
-            let windows = try await CardName.windows(for: cards, module: module)
-            return .chooseInPlay(try cards.map { try $0.ref(in: windows) })
-        case .replaceFromBench(let benched):
-            return .replaceFromBench(with: try benched.ref(in: try await CardName.windows(for: [benched], module: module)))
+        case .tradeCard(let other): return .moveCard(.trade(try other.ref))
+        case .chooseInPlay(let cards): return .chooseInPlay(try cards.map { try $0.ref })
+        case .replaceFromBench(let benched): return .replaceFromBench(with: try benched.ref)
         case .moveSession(let placement): return .moveSession(to: placement)
         case .sortSessions: return .sortSessions
         case .removeWindowFromTopic(nil): return .move(to: .newSession(topic: nil))
         case .removeWindowFromTopic(let name?):
-            let read = await module.readNow()
-            let records = try read.records.get().records
-            guard let window = try read.inventory.get().windows.first(where: { $0.sessionID == name || $0.sessionName == name }),
+            let records = try TopicStore(paths: paths).read().records
+            guard let window = TmuxServer.local.snapshot().windows.first(where: { $0.sessionID == name || $0.sessionName == name }),
                   let id = SessionID(rawValue: window.sessionID) else { throw CLIError(TopicRequestError.sessionUnavailable(name).description) }
             if let topic = records.first(where: { $0.id == window.topicID && $0.settledAt == nil }) {
                 throw CLIError("The Session \(window.sessionName) is in the Topic \(TopicSummary(record: topic).label). Name a No Topic Session, "

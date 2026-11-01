@@ -87,7 +87,6 @@ private struct TabStrip: View {
                         )
                     }
                     ToolbarIconButton(systemName: "plus", help: "New Tab (⌘T)", action: browser.newTab)
-                        .accessibilityIdentifier("browser-new-tab")
                 }
                 .padding(.horizontal, 8)
                 .frame(height: proxy.size.height)

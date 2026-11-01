@@ -1983,8 +1983,10 @@ final class GitView {
 
     // MARK: Deleting branches
 
+    /// The Topic records of the Environment, which are on this Mac: a Remote Environment's Git View finds none.
+    /// `topicRecordsForTesting` stands in for them.
     private var topicRecords: [TopicRecord] {
-        topicRecordsForTesting ?? (store?.topicContents.records ?? [])
+        topicRecordsForTesting ?? (store?.isRemote == true ? [] : store?.topicWatcher.records ?? [])
     }
 
     @ObservationIgnored var topicRecordsForTesting: [TopicRecord]?
@@ -1995,7 +1997,7 @@ final class GitView {
         let resolver = store?.folders ?? .local
         let repository = ([snapshot.repositoryFolder, snapshot.root] + snapshot.branches.compactMap(\.worktreePath))
             .filter { !$0.isEmpty }.map(resolver.folder)
-        return TopicBranchHolders.records(remembering: branch.name, in: repository, among: topicRecords, folders: resolver).map {
+        return TopicBranchHolders.records(remembering: branch.name, in: repository, among: topicRecords).map {
             store?.topics.titles[$0.id] ?? $0.title ?? $0.slug ?? "Untitled Topic"
         }
     }

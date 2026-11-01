@@ -80,7 +80,7 @@ extension CommandPalette {
     /// listed too. When none matches, one row says so. Empty while there is no draft.
     func tagRows(_ field: TagField, rules: PickRules) -> PickList<PaletteItem> {
         guard let store, let defined = field.defined, let draft = field.text(query).draft else { return .empty }
-        let records = store.topicContents.records
+        let records = store.topicWatcher.records
         let candidates = defined.definitions.filter { !field.chipField.chips.contains($0.tag) }.map { definition in
             let count = records.filter { $0.tags.contains(definition.tag) }.count
             return PickCandidate(id: "tag-" + definition.tag.name, kind: .tag, title: definition.tag.description,

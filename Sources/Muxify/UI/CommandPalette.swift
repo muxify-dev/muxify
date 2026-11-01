@@ -106,7 +106,7 @@ final class CommandPalette {
         guard let store else { return nil }
         return PaletteCatalog(windows: store.windows, agents: store.agents, sessionPaths: store.sessionPaths, folders: store.folders,
                               selectedWindowID: store.selectedWindowID, homeDirectory: store.homeDirectory,
-                              topics: store.supportsTopics ? store.topics : nil, records: store.topicContents.records,
+                              topics: store.isRemote ? nil : store.topics, records: store.topicWatcher.records,
                               lastWindowByGroup: store.topicSelection.lastWindowByGroup, visits: store.visits, commands: commands,
                               commandShortcuts: Dictionary(uniqueKeysWithValues: commands.compactMap { command in
                                   shortcut(for: command).map { (command, $0) }
@@ -142,7 +142,7 @@ final class CommandPalette {
         if store?.canChangeRead(.unread, in: item.readTarget) == true { actions.append(.markUnread) }
         switch item.ref {
         case .topic(let id, _):
-            guard let store, store.supportsTopics, let topic = store.topicContents.records.first(where: { $0.id == id }) else { return actions }
+            guard let store, !store.isRemote, let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return actions }
             if topic.settledAt == nil {
                 actions += [.settleTopic, .addSessionToTopic, .rename, .setTopicNote] + (topic.note == nil ? [] : [.clearTopicNote])
                     + (store.topicConfig.tags == nil ? [] : [.editTags])
@@ -155,7 +155,7 @@ final class CommandPalette {
             }
             actions += [.forgetTopic]
         case .session(let session):
-            if store?.supportsTopics == true {
+            if store?.isRemote == false {
                 actions += [.move]
                 if session.windows.first?.topicID != nil { actions += [.removeFromTopic, .removeFromTopicAndKill] }
             }
@@ -163,10 +163,10 @@ final class CommandPalette {
             else if let locked = store?.lockState(ofSession: session.id) { actions += [locked ? .unlockSession : .lockSession] }
             actions += [.newSession, .rename, .newWindow, .killSession]
         case .window(let window):
-            if store?.supportsTopics == true { actions += [.move]; if window.topicID != nil { actions += [.removeFromTopic] } }
+            if store?.isRemote == false { actions += [.move]; if window.topicID != nil { actions += [.removeFromTopic] } }
             actions += [.rename, .newWindow, .killWindow]
         case .agent:
-            if store?.supportsTopics == true { actions += [.move] }
+            if store?.isRemote == false { actions += [.move] }
         case .sessionPath: actions += [.newSession]
         case .choice, .command, .tag: break
         }
@@ -184,7 +184,7 @@ final class CommandPalette {
             case _ where moving != nil: return "Move Here"
             case .topic:
                 guard case .topic(let id, nil) = item.ref,
-                      store?.topicContents.records.first(where: { $0.id == id })?.sessions.isEmpty == false else { return "Go to Topic" }
+                      store?.topicWatcher.records.first(where: { $0.id == id })?.sessions.isEmpty == false else { return "Go to Topic" }
                 return "Reopen Topic"
             case .settled: return "Reopen Topic"
             case .tag: return flow == nil ? "Show its Topics" : "Choose Tag"
@@ -380,7 +380,7 @@ final class CommandPalette {
             case .sessionPath(let target): store.newSession(in: target)
             case .session(let session):
                 guard let window = EntryWindow.ofSession(session.windows) else { return }
-                let topic = store.topicContents.records.first { $0.id == window.topicID && $0.settledAt == nil }
+                let topic = store.isRemote ? nil : store.topicWatcher.records.first { $0.id == window.topicID && $0.settledAt == nil }
                 store.newSession(in: OpenDirectory(directory: store.folders.folder(window.sessionPath.isEmpty ? window.path : window.sessionPath),
                     name: SessionNaming.base(of: window.sessionName, topic: topic)), topic: topic?.id)
             default: break

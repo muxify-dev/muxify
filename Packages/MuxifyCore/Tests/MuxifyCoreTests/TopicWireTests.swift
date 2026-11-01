@@ -31,7 +31,7 @@ final class TopicWireTests: XCTestCase {
             let text = try json(request)
             XCTAssertEqual(try JSONDecoder().decode(EnvironmentRequest.self, from: Data(text.utf8)), request)
             XCTAssertFalse(text.contains("project"), text)
-            XCTAssertTrue(text.contains(#""version":3"#), text)
+            XCTAssertTrue(text.contains(#""version":2"#), text)
         }
         XCTAssertEqual(try json(EnvironmentCommand.create(title: "Fix")), #"{"create":{"title":"Fix"}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.moveSession(to: .up)), #"{"move_session":{"to":{"up":{}}}}"#)
@@ -71,7 +71,7 @@ final class TopicWireTests: XCTestCase {
     }
 
     func testOtherRequestVersionsAreRefusedWithoutReadingAnyState() {
-        for version in [1, 2, 4] {
+        for version in [1, 3] {
             var request = EnvironmentRequest(.create(title: "Later"))
             request.version = version
             let paths = MuxifyPaths(environment: ["XDG_STATE_HOME": "/nonexistent/state"], home: "/nonexistent")

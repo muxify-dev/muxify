@@ -2,7 +2,7 @@ import Foundation
 import Darwin
 
 /// A tmux window as shown in the sidebar.
-public struct TmuxWindow: Identifiable, Hashable, Codable {
+public struct TmuxWindow: Identifiable, Hashable {
     /// Server-unique window id, e.g. "@27".
     public let id: String
     public let sessionID: String
@@ -99,7 +99,7 @@ public struct TmuxWindow: Identifiable, Hashable, Codable {
 /// are space-separated (URLs never contain spaces); an empty Tab is
 /// `about:blank`. `@muxify_browser` holds the toggles (`off`: the Terminal,
 /// `on`: both, `only`: the Browser) and `@muxify_maximize` the Maximized side.
-public struct StoredBrowser: Hashable, Codable, Sendable {
+public struct StoredBrowser: Hashable {
     public var tabURLs: [String] = []
     public var activeTab = 0
     public var layout = PanelLayout()
@@ -136,7 +136,7 @@ public struct StoredBrowser: Hashable, Codable, Sendable {
 }
 
 /// A client attached to the tmux server (one of them is ours).
-public struct TmuxClient: Hashable, Codable {
+public struct TmuxClient: Hashable {
     public let tty: String
     public let sessionID: String
     public let windowID: String
@@ -145,7 +145,7 @@ public struct TmuxClient: Hashable, Codable {
 }
 
 /// A tmux Pane, with the options an Agent's Extension writes onto it (ADR 0004).
-public struct TmuxPane: Hashable, Codable {
+public struct TmuxPane: Hashable {
     /// Server-unique pane id, e.g. "%42".
     public let id: String
     public let windowID: String
@@ -162,8 +162,6 @@ public struct TmuxPane: Hashable, Codable {
     public var agent: String
     /// The Extension's Status, empty before a report or after SessionEnd.
     public var agentStatus: String
-    public var agentSeenStatus: String = ""
-    public var agentReadVersion: String = ""
     /// `@muxify_agent_unread`, which Muxify itself sets.
     public let unread: Bool
     public var agentConversation: String = ""
@@ -180,7 +178,7 @@ public struct TmuxPane: Hashable, Codable {
     }
 }
 
-public struct TmuxSnapshot: Codable {
+public struct TmuxSnapshot {
     public var windows: [TmuxWindow]
     public var clients: [TmuxClient]
     public var panes: [TmuxPane]
@@ -216,32 +214,7 @@ public struct TmuxSnapshot: Codable {
     public var agents: [Agent] { Agent.list(panes: panes, windows: windows) }
 }
 
-public enum InventoryReadFailure: Error, Equatable, Codable, CustomStringConvertible {
-    case noServer
-    case timedOut
-    case connectionLost
-
-    public init?(_ error: TmuxError) {
-        switch error {
-        case .timedOut: self = .timedOut
-        case .failed(_, let stderr) where ["lost server", "server exited unexpectedly"].contains(stderr.lowercased()):
-            self = .connectionLost
-        default:
-            guard error.indicatesNoServer else { return nil }
-            self = .noServer
-        }
-    }
-
-    public var description: String {
-        switch self {
-        case .noServer: return "The tmux server is not running"
-        case .timedOut: return "The Inventory read timed out"
-        case .connectionLost: return "The Environment connection was lost"
-        }
-    }
-}
-
-public enum TmuxError: Error, Equatable, Codable, CustomStringConvertible {
+public enum TmuxError: Error, Equatable, CustomStringConvertible {
     case notInstalled
     case failed(status: Int32, stderr: String)
     case cancelled
@@ -250,13 +223,13 @@ public enum TmuxError: Error, Equatable, Codable, CustomStringConvertible {
 
     /// Permission errors and timeouts are not evidence that Sessions are gone.
     public var indicatesNoSessions: Bool {
-        guard case .failed(1, let stderr) = self else { return false }
+        guard case .failed(_, let stderr) = self else { return false }
         let message = stderr.lowercased()
         return message.contains("no sessions") || indicatesNoServer
     }
 
     public var indicatesNoServer: Bool {
-        guard case .failed(1, let stderr) = self else { return false }
+        guard case .failed(_, let stderr) = self else { return false }
         let message = stderr.lowercased()
         return message.contains("no server running")
             || (message.contains("error connecting") && message.contains("no such file or directory"))
@@ -300,8 +273,6 @@ public enum Tmux {
     // Pane options an Agent's Extension writes (ADR 0004).
     public static let agentOption = "@muxify_agent"
     public static let agentStatusOption = "@muxify_agent_status"
-    public static let agentSeenStatusOption = "@muxify_agent_seen_status"
-    public static let agentReadVersionOption = "@muxify_agent_read_version"
     public static let agentConversationOption = "@muxify_agent_conversation"
     /// Set by Muxify, not the Extension: the Agent finished or got blocked
     /// while you weren't looking at its Window.
@@ -345,13 +316,7 @@ public enum Tmux {
 
     /// Reads tmux inventory and the reports for its Codex conversations.
     public static func readSnapshot(using execute: ([String]) throws -> String) throws -> TmuxSnapshot {
-        let output: String
-        do { output = try execute(snapshotArguments) }
-        catch let error as TmuxError {
-            if let failure = InventoryReadFailure(error) { throw failure }
-            guard error.indicatesNoSessions else { throw error }
-            return TmuxSnapshot(windows: [], clients: [], panes: [], serverRunning: true)
-        }
+        let output = try execute(snapshotArguments)
         let snapshot = parseSnapshot(output)
         let prefixes = CodexReports.prefixes(in: snapshot)
         guard !prefixes.isEmpty else { return snapshot }
@@ -394,7 +359,7 @@ public enum Tmux {
         let paneFormat = [
             "P", "#{pane_id}", "#{window_id}", "#{pane_current_command}",
             "#{\(agentOption)}", "#{\(agentStatusOption)}", "#{\(agentUnreadOption)}", "#{\(agentConversationOption)}",
-            "#{pane_index}", "#{pane_active}", "#{pane_current_path}", "#{pane_title}", "#{pane_tty}", "#{\(agentSeenStatusOption)}", "#{\(agentReadVersionOption)}",
+            "#{pane_index}", "#{pane_active}", "#{pane_current_path}", "#{pane_title}", "#{pane_tty}",
         ].joined(separator: s)
 
         return [
@@ -449,7 +414,7 @@ public enum Tmux {
                 panes.append(TmuxPane(
                     id: f[1], windowID: f[2], index: Int(field(8)) ?? 0, isActive: field(9) == "1",
                     title: field(11), path: field(10), command: f[3],
-                    agent: f[4], agentStatus: f[5], agentSeenStatus: field(13), agentReadVersion: field(14), unread: f[6] == "1", agentConversation: field(7), tty: field(12)
+                    agent: f[4], agentStatus: f[5], unread: f[6] == "1", agentConversation: field(7), tty: field(12)
                 ))
             } else if f.first == "S", f.count >= 2 {
                 serverID = f[1]

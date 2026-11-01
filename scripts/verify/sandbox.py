@@ -392,8 +392,9 @@ class Sandbox:
         self.wait_shown(window)
 
     def wait_shown(self, target, seconds=10):
-        """Waits for the UI and native tmux Client to reach the Window. The UI can select its destination
-        before the queued switch finishes, so UI selection alone does not permit fixture cleanup."""
+        """Waits until the app shows the tmux Window: the App Window's title names its Session, and its Sidebar row,
+        in either mode, is selected when the dump has one. tmux moves a client at once; the app follows at its
+        next read of tmux."""
         window = session = ''
         last = {}
         def shown():
@@ -409,9 +410,7 @@ class Sandbox:
             title = next((r.get('accessibilityTitle') for r in rs if r.get('accessibilityRole') == 'AXWindow'), None)
             last.update(title=title, rows={r['accessibilityIdentifier']: r.get('accessibilityValue')
                                            for r in rs if r.get('accessibilityIdentifier') in keys})
-            clients = self.tmux_ok('list-clients', '-F', '#{client_control_mode}|#{window_id}').stdout.splitlines()
-            return (title == session and all(value == 'selected' for value in last['rows'].values())
-                    and '0|' + window in clients)
+            return title == session and all(value == 'selected' for value in last['rows'].values())
         try:
             wait(shown, 'the app does not show ' + target, seconds)
         except AssertionError as error:

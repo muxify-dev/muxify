@@ -7,35 +7,19 @@ public struct TmuxServer: Sendable {
     public static let local = TmuxServer(options: [])
 
     private let options: [String]
-    private let execute: @Sendable (CommandInvocation, [String: String]) throws -> String
 
-    init(options: [String], execute: @escaping @Sendable (CommandInvocation, [String: String]) throws -> String = {
-        try CommandRunner().run($0, timeout: 120, environment: $1)
-    }) {
-        self.options = options
-        self.execute = execute
-    }
+    private init(options: [String]) { self.options = options }
 
     /// The server at `socketPath`, such as a throwaway server in a test's run directory. `configPath` replaces
     /// the user's tmux config when this call starts the server.
-    public init(socketPath: String, configPath: String? = nil, commandTimeout: TimeInterval = 120) {
-        self.init(options: ["-S", socketPath] + (configPath.map { ["-f", $0] } ?? []), execute: {
-            try CommandRunner().run($0, timeout: commandTimeout, environment: $1)
-        })
+    public init(socketPath: String, configPath: String? = nil) {
+        self.init(options: ["-S", socketPath] + (configPath.map { ["-f", $0] } ?? []))
     }
 
     /// The default socket's server, with `configPath` in place of the user's tmux config when this call starts
     /// the server.
     public init(configPath: String) {
         self.init(options: ["-f", configPath])
-    }
-
-    public var socketPath: String {
-        if let index = options.firstIndex(of: "-S"), options.indices.contains(index + 1) {
-            return Folder.local(options[index + 1]).real
-        }
-        let root = ProcessInfo.processInfo.environment["TMUX_TMPDIR"].flatMap { $0.isEmpty ? nil : $0 } ?? "/tmp"
-        return Folder.local(root + "/tmux-\(getuid())/default").real
     }
 
     /// The tmux command line for `arguments` on this server.
@@ -53,14 +37,13 @@ public struct TmuxServer: Sendable {
         // tmux uses the socket in $TMUX before the one in $TMUX_TMPDIR.
         environment["TMUX"] = nil
         environment["TMUX_PANE"] = nil
-        return try execute(invocation(arguments), environment)
+        // The long deadline is Shell's: the same commands ran through it before.
+        return try CommandRunner().run(invocation(arguments), timeout: 120, environment: environment)
     }
 
-    /// A stopped server has an empty Inventory, so Create and Reopen can start it.
-    public func snapshot() throws -> TmuxSnapshot {
-        do { return try Tmux.readSnapshot(using: run) }
-        catch InventoryReadFailure.noServer {
-            return TmuxSnapshot(windows: [], clients: [], panes: [], serverRunning: false)
-        }
+    /// The server's Windows, clients and Panes; an empty snapshot when the server does not run.
+    public func snapshot() -> TmuxSnapshot {
+        (try? Tmux.readSnapshot(using: run))
+            ?? TmuxSnapshot(windows: [], clients: [], panes: [], lastWindowID: nil, serverRunning: false)
     }
 }

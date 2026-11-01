@@ -183,14 +183,14 @@ enum PaletteCommand: String, CaseIterable {
 extension CommandPalette {
     var commands: [PaletteCommand] {
         guard let store else { return [] }
-        let canChangeTopics = store.supportsTopics && !store.changingTopic && store.topics.topicsEnabled
-        let hasOpenTopic = store.topicContents.records.contains { $0.id == store.activeTopicID && $0.settledAt == nil }
+        let canChangeTopics = !store.isRemote && !store.changingTopic && store.topics.topicsEnabled
+        let hasOpenTopic = store.topicWatcher.records.contains { $0.id == store.activeTopicID && $0.settledAt == nil }
         return PaletteCommand.allCases.filter { command in
             switch command {
             case .markRead: return store.canChangeRead(.read, in: store.currentReadTarget)
             case .markUnread: return store.canChangeRead(.unread, in: store.currentReadTarget)
             case .markAllRead: return store.canChangeRead(.read, in: .environment)
-            case .newTopic: return store.supportsTopics && !store.changingTopic
+            case .newTopic: return !store.isRemote && !store.changingTopic
             case .movePane, .moveWindow, .moveSession: return canChangeTopics && store.selectedWindow != nil
             case .movePaneWithTab: return canChangeTopics && store.selectedWindow != nil && store.currentBrowser?.activeTab != nil
             case .addSession, .settleTopic: return canChangeTopics && hasOpenTopic
@@ -198,7 +198,7 @@ extension CommandPalette {
             case .forgetTopic, .renameTopic, .setTopicNote: return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
             case .clearTopicNote:
                 return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
-                    && store.topicContents.records.contains { $0.id == store.activeTopicID && $0.note != nil }
+                    && store.topicWatcher.records.contains { $0.id == store.activeTopicID && $0.note != nil }
             case .removeSessionFromTopic:
                 return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
                     && store.selectedWindow?.topicID == store.activeTopicID

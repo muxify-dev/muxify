@@ -25,19 +25,13 @@ final class TmuxConnection: @unchecked Sendable {
     private let attachmentQueue = DispatchQueue(label: "muxify.attachments", qos: .userInitiated)
     private let lock = NSLock()
     private var retired = false
+    private var localMarker: (option: String, pid: Int, registered: Bool)?
 
     init(environment: RemoteEnvironment?, sshExecutable: String = "/usr/bin/ssh") throws {
         remote = try environment.map { try RemoteSSH(environment: $0, sshExecutable: sshExecutable) }
     }
 
     var isRemote: Bool { remote != nil }
-
-    var rulesScope: EnvironmentRulesScope {
-        if let environment = remote?.environment {
-            return .remoteFallback(host: "\(environment.username)@\(environment.host):\(environment.port ?? 22)")
-        }
-        return .local(socketPath: TmuxServer.app.socketPath)
-    }
 
     func invocation(_ args: [String]) throws -> CommandInvocation {
         if let remote { return remote.command(args) }
@@ -50,6 +44,13 @@ final class TmuxConnection: @unchecked Sendable {
         lock.unlock()
         guard !stopped else { throw TmuxError.cancelled }
         return try runner.run(invocation(args))
+    }
+
+    func runAsync(_ args: [String], completion: ((Result<String, Error>) -> Void)? = nil) {
+        queue.async {
+            let result = Result { try self.run(args) }
+            if let completion { DispatchQueue.main.async { completion(result) } }
+        }
     }
 
     /// Runs a /bin/sh `script` on the Environment's machine: over the SSH
@@ -81,13 +82,8 @@ final class TmuxConnection: @unchecked Sendable {
 
     /// Resolve the actual Pane of this Client before the upload, independently
     /// of the Sidebar's polling snapshot. A slow upload never blocks tmux reads.
-    struct PreparedPaste {
-        let pane: PaneID
-        let text: String
-    }
-
-    func prepareAttachments(_ attachments: TerminalAttachments, client: String,
-                            completion: @escaping (Result<PreparedPaste, Error>) -> Void) {
+    func pasteAttachments(_ attachments: TerminalAttachments, client: String,
+                          completion: @escaping (Result<String, Error>) -> Void) {
         queue.async {
             let target = Result { try self.run(["display-message", "-p", "-c", client, "#{pane_id}"])
                 .trimmingCharacters(in: .newlines) }
@@ -95,7 +91,7 @@ final class TmuxConnection: @unchecked Sendable {
                 let result = Result {
                     defer { if self.isRemote { attachments.removeLocalCopy() } }
                     let pane = try target.get()
-                    guard let pane = PaneID(rawValue: pane) else { throw TmuxError.notReady }
+                    guard pane.hasPrefix("%"), Int(pane.dropFirst()) != nil else { throw TmuxError.notReady }
                     var words: [String] = []
                     for item in attachments.items {
                         switch item {
@@ -110,7 +106,11 @@ final class TmuxConnection: @unchecked Sendable {
                                          ? Tmux.shellQuote(path) : GhosttyInput.shellEscape(path))
                         }
                     }
-                    return PreparedPaste(pane: pane, text: words.joined(separator: " "))
+                    let buffer = "muxify-paste-" + UUID().uuidString
+                    defer { _ = try? self.run(["delete-buffer", "-b", buffer]) }
+                    _ = try self.run(["set-buffer", "-b", buffer, "--", words.joined(separator: " "), ";",
+                                      "paste-buffer", "-d", "-p", "-b", buffer, "-t", pane])
+                    return pane
                 }
                 DispatchQueue.main.async { completion(result) }
             }
@@ -140,21 +140,49 @@ final class TmuxConnection: @unchecked Sendable {
         }
     }
 
+    /// Serializes marker writes with removal, so a late registration cannot
+    /// survive detach or retirement. Each replacement gets its own option.
+    func updateLocalClient(_ client: TmuxClient?) {
+        guard !isRemote else { return }
+        queue.async {
+            self.lock.lock()
+            let stopped = self.retired
+            self.lock.unlock()
+            guard !stopped else { return }
+            if self.localMarker?.pid == client?.pid, self.localMarker?.registered != false { return }
+            if let marker = self.localMarker {
+                do {
+                    _ = try self.run(["set-option", "-su", marker.option])
+                    self.localMarker = nil
+                } catch {
+                    Diagnostics.report("could not remove Client marker: \(error)")
+                    return
+                }
+            }
+            guard let client, !client.isControl else { return }
+            let option = "@muxify_client_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            let value = [String(client.pid), client.tty, NSHomeDirectory(), Tmux.hostName, "local"]
+                .joined(separator: Tmux.separator)
+            self.localMarker = (option, client.pid, false)
+            do {
+                _ = try self.run(["set-option", "-sq", option, value])
+                self.localMarker = (option, client.pid, true)
+            } catch { Diagnostics.report("could not register Client marker: \(error)") }
+        }
+    }
+
     func snapshot() throws -> TmuxSnapshot {
         guard let remote else {
             do { return stamped(try Tmux.readSnapshot(using: run)) }
-            catch InventoryReadFailure.noServer {
-                return TmuxSnapshot(windows: [], clients: [], panes: [], serverRunning: false)
+            catch let error as TmuxError where error.indicatesNoSessions {
+                return TmuxSnapshot(windows: [], clients: [], panes: [], lastWindowID: nil, serverRunning: !error.indicatesNoServer)
             }
         }
-        do { _ = try runner.run(remote.control("check"), timeout: 1) }
-        catch TmuxError.timedOut { throw InventoryReadFailure.timedOut }
-        catch TmuxError.cancelled { throw TmuxError.cancelled }
-        catch { throw TmuxError.notReady }
-        let marker = try readRemote(["show-option", "-sqv", remote.markerOption])
+        guard (try? runner.run(remote.control("check"), timeout: 1)) != nil else { throw TmuxError.notReady }
+        let marker = try run(["show-option", "-sqv", remote.markerOption])
             .trimmingCharacters(in: .newlines).components(separatedBy: Tmux.separator)
         guard marker.count == 5, marker[4] == "remote", let pid = Int(marker[0]), !marker[1].isEmpty else { throw TmuxError.notReady }
-        var snapshot = try Tmux.readSnapshot(using: readRemote)
+        var snapshot = try Tmux.readSnapshot(using: run)
         guard let client = snapshot.clients.first(where: { $0.pid == pid && $0.tty == marker[1] && !$0.isControl }) else {
             throw TmuxError.notReady
         }
@@ -168,15 +196,6 @@ final class TmuxConnection: @unchecked Sendable {
         return stamped(snapshot)
     }
 
-    private func readRemote(_ arguments: [String]) throws -> String {
-        do { return try run(arguments) }
-        catch TmuxError.failed(255, _) { throw InventoryReadFailure.connectionLost }
-        catch let error as TmuxError {
-            if let failure = InventoryReadFailure(error) { throw failure }
-            throw error
-        }
-    }
-
     private func stamped(_ value: TmuxSnapshot) -> TmuxSnapshot {
         var snapshot = value
         for index in snapshot.windows.indices {
@@ -187,49 +206,32 @@ final class TmuxConnection: @unchecked Sendable {
 
     var closedSnapshot: TmuxSnapshot? { remote?.closedSnapshot.map(stamped) }
 
-    func terminalCommand(_ plan: EnvironmentAttachment) throws -> String {
-        if let remote { return remote.terminalCommand(target: plan.target, createSessionIfNeeded: plan.createSessionIfNeeded) }
-        return try invocation(["-u", "attach-session"] + (plan.target.map { ["-t", $0] } ?? [])).commandLine
+    func terminalCommand(_ args: [String], target: String? = nil, createSessionIfNeeded: Bool = true) throws -> String {
+        if let remote { return remote.terminalCommand(target: target, createSessionIfNeeded: createSessionIfNeeded) }
+        return try invocation(args).commandLine
     }
 
-    /// This read does not wait for the module queue. Each command in the probe has a one-second deadline.
-    func attachmentReady(tty: String?) -> Bool {
-        let probe = CommandRunner()
-        do {
-            let expectedTTY: String
-            let expectedPID: Int?
-            if let remote {
-                _ = try probe.run(remote.control("check"), timeout: 1)
-                let marker = try probe.run(remote.command(["show-option", "-sqv", remote.markerOption]), timeout: 1)
-                    .trimmingCharacters(in: .newlines).components(separatedBy: Tmux.separator)
-                guard marker.count == 5, marker[4] == "remote", let pid = Int(marker[0]) else { return false }
-                expectedTTY = marker[1]
-                expectedPID = pid
-            } else {
-                guard let tty else { return false }
-                expectedTTY = tty
-                expectedPID = nil
-            }
-            let rows = try probe.run(invocation(["list-clients", "-F", "#{client_tty}\t#{client_pid}\t#{client_control_mode}"]), timeout: 1)
-            return rows.split(separator: "\n").contains { row in
-                let fields = row.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-                return fields.count == 3 && fields[0] == expectedTTY && fields[2] == "0"
-                    && (expectedPID == nil || Int(fields[1]) == expectedPID)
-            }
-        } catch { return false }
-    }
-
-    /// Call after required Environment writes finish.
-    func retire() {
+    /// Cancel old operations immediately. Flush only idempotent Browser state,
+    /// then close our master (never the remote tmux server). Called off-main.
+    func retire(flushing commands: [[String]] = []) {
         lock.lock()
         guard !retired else { lock.unlock(); return }
         retired = true
         lock.unlock()
         runner.cancel()
+        // Drain a registration that was already running before cancellation.
+        let localOption = queue.sync { localMarker?.option }
         let finalRunner = CommandRunner()
-        if let remote {
-            _ = try? finalRunner.run(remote.control("exit"), timeout: 1)
+        let masterAvailable = remote.map { (try? finalRunner.run($0.control("check"), timeout: 1)) != nil } ?? true
+        if masterAvailable {
+            var flush = commands
+            if let localOption { flush.append(["set-option", "-su", localOption]) }
+            if let remote { flush.append(["set-option", "-su", remote.markerOption]) }
+            if !flush.isEmpty, let invocation = try? invocation(Array(flush.joined(separator: [";"]))) {
+                _ = try? finalRunner.run(invocation, timeout: 2)
+            }
         }
+        if let remote { _ = try? finalRunner.run(remote.control("exit"), timeout: 1) }
     }
 
     func cleanup() { remote?.cleanup() }

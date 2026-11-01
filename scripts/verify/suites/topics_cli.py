@@ -8,7 +8,6 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_cli
 """
 
-import fcntl
 import json
 import os
 import subprocess
@@ -43,63 +42,6 @@ class TopicsCli(unittest.TestCase):
         added = self.muxify('topic', 'add-session', str(directory), '--topic', topic_id, pane=pane)
         self.assertEqual(added.returncode, 0, added.stderr)
         return topic_id
-
-    def test_browser_open_appends_before_exit_and_keeps_the_callers_server(self):
-        other = Sandbox('topics_cli_browser_target')
-        self.addCleanup(other.teardown)
-        other.tmux('new-session', '-d', '-s', 'browser-target')
-        pane = other.tmux('display-message', '-p', '#{pane_id}')
-        window = other.tmux('display-message', '-p', '#{window_id}')
-        socket = other.tmux('display-message', '-p', '#{socket_path}')
-        inherited = socket + ',0,0'
-        for url in ['https://first.invalid', 'https://second.invalid']:
-            result = self.muxify('browser', 'open', url, pane=pane, env={'TMUX': inherited})
-            self.assertEqual((result.returncode, result.stdout), (0, ''), result.stderr)
-        self.assertEqual(other.tmux_ok('show-options', '-wqv', '-t', window, '@muxify_open').stdout,
-                         ' https://first.invalid https://second.invalid\n')
-        self.assertEqual(self.s.tmux('show-options', '-wqv', '-t', '@0', '@muxify_open'), '')
-
-    def test_lists_work_without_a_writable_topic_state_directory(self):
-        blocked_state = self.s.root/'blocked-list-state'
-        blocked_state.write_text('not a directory')
-        absent_state = self.s.root/'absent-list-state'
-        for state in [blocked_state, absent_state]:
-            for args in [('agent', 'list', '--json'), ('session', 'list', '--json')]:
-                result = self.muxify(*args, pane='', env={'XDG_STATE_HOME': str(state)})
-                self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertFalse(absent_state.exists())
-
-    def test_lists_do_not_wait_for_a_topic_edit(self):
-        pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
-        made = self.muxify('topic', 'new', 'Edit in progress', pane=pane)
-        self.assertEqual(made.returncode, 0, made.stderr)
-        edit_lock = os.open(self.s.root/'state/muxify/topic-edits.lock', os.O_RDONLY | os.O_CREAT, 0o644)
-        self.addCleanup(os.close, edit_lock)
-        fcntl.flock(edit_lock, fcntl.LOCK_EX)
-        for args in [('agent', 'list', '--json'), ('session', 'list', '--json')]:
-            start = time.monotonic()
-            result = self.muxify(*args, pane=pane)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertLess(time.monotonic() - start, 5, f'{" ".join(args)} waited for the edit lock')
-
-    def test_cli_reads_do_not_run_unread_or_the_record_upgrade(self):
-        project = self.projects/'cli-no-rules'
-        project.mkdir(parents=True)
-        pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
-        topic = self.new_topic('No CLI rules', project, pane=pane)
-        agent = self.fake_agent('cli-no-rules/no-cli-rules', 'done')
-        self.s.tmux('set-option', '-p', '-t', agent, '@muxify_agent_seen_status', 'working')
-        records = TopicRecords(self.s.root/'state/muxify')
-        record = records.get(topic)
-        record['snoozed_until'] = '2020-01-01T00:00:00Z'
-        records.put(record)
-        before = records.path.read_bytes()
-        for args in [('agent', 'list', '--json'), ('session', 'list', '--json'), ('topic', 'show', '--topic', topic)]:
-            result = self.muxify(*args, pane=pane)
-            self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(records.path.read_bytes(), before)
-        self.assertEqual(self.s.tmux('show-options', '-pqv', '-t', agent, '@muxify_agent_seen_status'), 'working')
-        self.assertEqual(self.s.tmux('show-options', '-pqv', '-t', agent, '@muxify_agent_unread'), '')
 
     def test_help_lists_each_verb_once_and_every_verb_gives_help(self):
         result = self.muxify('--help', pane='')
@@ -237,13 +179,6 @@ class TopicsCli(unittest.TestCase):
         self.assertEqual([(e['index'], e['role'], e['text']) for e in lines[1:]],
                          [(0, 'user', 'run the tests'), (3, 'assistant', 'The tests pass.')], read.stdout)
         self.assertIn('2 tool Entries hidden', read.stderr)
-
-        blocked_state = self.s.root/'blocked-conversation-state'
-        blocked_state.write_text('not a directory')
-        read = self.muxify('agent', 'conversation', agent, '--json', pane=pane,
-                           env={'CLAUDE_CONFIG_DIR': str(claude), 'XDG_STATE_HOME': str(blocked_state)})
-        self.assertEqual(read.returncode, 0, read.stderr)
-        self.assertEqual(json.loads(read.stdout.splitlines()[0])['conversation'], 'conv-check')
 
         listed = self.muxify('topic', 'show', '--conversations', pane=agent)
         self.assertEqual(listed.returncode, 0, listed.stderr)

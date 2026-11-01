@@ -69,7 +69,7 @@ final class LiveSSHTests: XCTestCase {
             let connection = try TmuxConnection(environment: environment, sshExecutable: shim.path)
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/script")
-            process.arguments = ["-q", "/dev/null", "/bin/sh", "-c", try connection.terminalCommand(EnvironmentAttachment())]
+            process.arguments = ["-q", "/dev/null", "/bin/sh", "-c", try connection.terminalCommand([])]
             var terminalEnvironment = ProcessInfo.processInfo.environment
             terminalEnvironment["TERM"] = "xterm-ghostty"
             process.environment = terminalEnvironment
@@ -236,13 +236,7 @@ final class LiveSSHTests: XCTestCase {
         // leaving tmux and its Browser state available for another attachment.
         let cleanup = ConnectionCleanup()
         let shutDown = expectation(description: "background SSH shutdown")
-        let module = MainActor.assumeIsolated { EnvironmentModule(server: recovered, topicsAvailable: false) }
-        cleanup.run(drainPersistence: { done in
-            MainActor.assumeIsolated {
-                module.perform(EnvironmentRequest(.runtime(.browser([EnvironmentBrowserState(window: WindowID(rawValue: windowID)!, browser: stored)]))))
-                module.retire(completion: done)
-            }
-        }, retire: { recovered.retire() },
+        cleanup.run(retire: { recovered.retire(flushing: [stored.setOptionArgs(windowID: windowID)]) },
                     closeSurface: { self.stop(recoveredTerminal) },
                     cleanup: { recovered.cleanup() })
         cleanup.whenFinished { shutDown.fulfill() }

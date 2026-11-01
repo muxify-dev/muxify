@@ -326,7 +326,7 @@ private struct TopicsSection: View {
     }
 
     private func renameTopic(_ id: String) {
-        guard let topic = store.topicContents.records.first(where: { $0.id == id }) else { return }
+        guard let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return }
         store.palette.begin(.text(.renameTopic(topic)), text: topic.title ?? "")
     }
 }
@@ -593,7 +593,7 @@ private struct TopicItemRow: View {
                           tooltips: store.config.sidebar.windowTooltips,
                           tabCount: store.tabCount(for: window), isGitViewOpen: store.isGitViewOpen(in: window.id), topicsView: true,
                           usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
-                              window, record: store.topicContents.records.first { $0.id == window.topicID }, sessionPaths: store.sessionPaths))
+                              window, record: store.topicWatcher.records.first { $0.id == window.topicID }, sessionPaths: store.sessionPaths))
             }
             .buttonStyle(.plain)
             .opacity(isDimmed ? 0.5 : 1)
@@ -711,7 +711,7 @@ struct TopicCard: View {
         guard let index = order.firstIndex(of: sessionID) else { return nil }
         return SessionOrdering(drag: sessionDrag,
                                above: index > 0 ? order[index - 1] : nil, below: index + 1 < order.count ? order[index + 1] : nil,
-                               isManual: store.topicContents.records.first { $0.id == id }?.hasManualSessionOrder ?? false)
+                               isManual: store.topicWatcher.records.first { $0.id == id }?.hasManualSessionOrder ?? false)
     }
 
     private var formatted: SidebarFormats.Text {
@@ -1128,7 +1128,7 @@ private struct SessionsSection: View {
                 tabCount: store.tabCount(for: window),
                 isGitViewOpen: store.isGitViewOpen(in: window.id),
                 usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
-                    window, record: store.topicContents.records.first { $0.id == window.topicID },
+                    window, record: store.topicWatcher.records.first { $0.id == window.topicID },
                     sessionPaths: store.sessionPaths)
             )
                 .accessibilityIdentifier("session-window-\(window.id)")
@@ -1153,7 +1153,7 @@ private struct SessionsSection: View {
         Button("Reveal in Finder") {
             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: window.path)
         }
-        .disabled(!store.supportsTopics)
+        .disabled(store.isRemote)
         Divider()
         Button("Kill Window…", role: .destructive) { confirmKill(window) }
     }

@@ -20,10 +20,8 @@ struct BrowserAgentInvocation: Equatable {
         self.screenshotPath = screenshotPath
     }
 
-    @MainActor func run(using runner: any CLICommandRunning) async throws {
-        let reply = try await EnvironmentModule.withCommand(server: CLITmuxTransport(runner: runner), topicsAvailable: false) { module in
-            try await Self.send(command, target: target, tab: tab, module: module)
-        }
+    func run(using runner: any CLICommandRunning) throws {
+        let reply = try Self.send(command, target: target, tab: tab, using: runner)
         switch reply {
         case .tabs(let tabs):
             if json { print(try Self.json(tabs)) }
@@ -66,14 +64,18 @@ struct BrowserAgentInvocation: Equatable {
 
     /// The app's reply for the caller's Window. A failure to reach the app is a `BrowserAgentChannel.Failure`, so
     /// `browser open` can fall back to `@muxify_open`; every other failure is a `CLIError`.
-    @MainActor static func send(_ command: BrowserAgentCommand, target: String, tab: UUID?,
-                                module: EnvironmentModule) async throws -> BrowserAgentReply {
-        let queries = module.queries()
-        guard let window = try await queries.resolveWindow(target).mapError({ CLIError($0.message) }).get() else {
+    static func send(_ command: BrowserAgentCommand, target: String, tab: UUID?,
+                     using runner: any CLICommandRunning) throws -> BrowserAgentReply {
+        let panes = try runner.run("tmux", arguments: ["list-panes", "-t", target, "-F", "#{window_id}"], quiet: true)
+        guard panes.status == 0, let window = panes.output.split(separator: "\n").first.map(String.init) else {
             throw CLIError("no tmux Window or Pane '\(target)'")
         }
-        let socket = try await queries.browserSocket().mapError { CLIError("cannot read tmux: \($0.message)", exitCode: 2) }.get()
-        guard let path = socket else {
+        let option = try runner.run("tmux", arguments: ["show-options", "-sqv", BrowserAgentChannel.option], quiet: false)
+        guard option.status == 0 else {
+            throw CLIError("cannot read tmux: tmux show-options exited with status \(option.status)", exitCode: 2)
+        }
+        let path = option.output.trimmingCharacters(in: .newlines)
+        guard !path.isEmpty else {
             throw BrowserAgentChannel.Failure.unreachable("Muxify does not serve the Browser of this tmux server")
         }
         return try BrowserAgentChannel.send(BrowserAgentRequest(window: window, tab: tab, command: command), to: path)

@@ -35,7 +35,7 @@ extension CommandPalette {
             return
         }
         if case .topic(let id, _) = item.ref,
-           let topic = store.topicContents.records.first(where: { $0.id == id }) {
+           let topic = store.topicWatcher.records.first(where: { $0.id == id }) {
             switch action {
             case .settleTopic: begin(.confirm(PaletteConfirmation(.settle(topic))), keepingHistory: true)
             case .forgetTopic: begin(.confirm(PaletteConfirmation(.forget(topic))), keepingHistory: true)
@@ -70,7 +70,7 @@ extension CommandPalette {
         case .rename:
             guard let window else { break }
             if scope == .session { begin(.text(.renameSession(window)), text: SessionNaming.base(of: window.sessionName,
-                topic: store.topicContents.records.first { $0.id == window.topicID }), keepingHistory: true) }
+                topic: store.topicWatcher.records.first { $0.id == window.topicID }), keepingHistory: true) }
             else { begin(.text(.renameWindow(window)), text: window.name, keepingHistory: true) }
         case .killWindow:
             if let window { begin(.confirm(PaletteConfirmation(.killWindow(window))), keepingHistory: true) }

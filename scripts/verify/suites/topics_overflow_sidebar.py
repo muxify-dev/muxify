@@ -49,7 +49,7 @@ class TopicsOverflowSidebar(TopicsSidebar):
                          'after the click, the line %r does not count the cards below the list' % s.row('topics-more-below', rs))
         self.assertLess(self.more_below(rs), len(hidden), 'the click did not reduce the count')
 
-        s.act('scroll', 'topics-list', from_end=0)
+        s.reveal('topic-' + ids[-1])
         end = s.wait_rows(lambda rs: not s.has('topics-more-below', rs),
                           'the "more below" pill stays when the list is scrolled to its end')
         self.assertEqual(frame(s.row('topics-list', end)), frame(s.row('topics-list', rs)),

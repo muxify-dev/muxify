@@ -15,17 +15,10 @@ struct SessionListInvocation: Equatable {
         var topic: TopicSummary?
     }
 
-    @MainActor func run() async throws {
-        try await EnvironmentModule.withCommand(paths: paths) { module in
-            try await run(module: module)
-        }
-    }
-
-    @MainActor private func run(module: EnvironmentModule) async throws {
+    func run() async throws {
         let config = try await ConfigSessions.load(paths.configFile)
-        let read = await module.readNow()
-        let records = try read.records.get().records
-        let windows = try read.inventory.get().windows
+        let records = try TopicStore(paths: paths).read().records
+        let windows = TmuxServer.local.snapshot().windows
         var names = Set<String>()
         var rows: [Entry] = []
         for window in windows where names.insert(window.sessionName).inserted {

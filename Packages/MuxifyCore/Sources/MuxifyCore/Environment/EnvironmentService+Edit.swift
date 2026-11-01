@@ -31,7 +31,7 @@ extension EnvironmentService {
     func edit(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
-            let records = topicsAvailable ? try store.read().records : []
+            let records = try store.read().records
             let snapshot = try server.snapshot()
             let planned = try plan(request, records: records, snapshot: snapshot, client: client)
             let edit = planned.edit
@@ -96,7 +96,7 @@ extension EnvironmentService {
             return (resolved.source, resolved.snapshot)
         }
         switch request.command {
-        case .runtime, .list, .show, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .benchTopic, .fillOpenPlace,
+        case .list, .show, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .benchTopic, .fillOpenPlace,
              .markRead, .markAllRead, .createWorktree, .removeWorktree, .listWorktrees:
             throw TopicRequestError.noTarget
         case .create(let title, let tags):
@@ -300,7 +300,7 @@ extension EnvironmentService {
     func changeLock(_ request: EnvironmentRequest, locked: Bool, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
-            let records = topicsAvailable ? try store.read().records : []
+            let records = try store.read().records
             let snapshot = try server.snapshot()
             let window = try noTopicSession(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             let commands: [TopicPlan.Command]
