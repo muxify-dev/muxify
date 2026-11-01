@@ -4,11 +4,11 @@ The suite calls production hold state and Config dispatch without posting keys o
 HintTests separately checks NSEvent conversion and the exact delay.
 """
 
-import json
 import time
 import unittest
 
 from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.topic_records import TopicRecords
 
 
 class QuickSwitchHints(unittest.TestCase):
@@ -17,13 +17,12 @@ class QuickSwitchHints(unittest.TestCase):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(s.teardown)
         (s.root/'config/muxify/config.yaml').write_text('keybindings:\n  select_window_1: ctrl+w\n')
-        topics = s.root/'state/muxify/topics'
-        topics.mkdir()
+        store = TopicRecords(s.root/'state/muxify')
         # The Dormant Topic remembers no Session and has no Home Session Path, so going to it shows its empty Topic view.
         for name, title, pinned, home in [('first', 'Pinned Topic', True, str(s.root)), ('dormant', 'Dormant Topic', False, None)]:
-            (topics/(name + '.json')).write_text(json.dumps(dict(
+            store.put(dict(
                 id=name, title=title, slug=name, home_project=home, pinned=pinned,
-                created_at='2026-01-01T00:00:00Z', order=0 if pinned else 1)))
+                created_at='2026-01-01T00:00:00Z', order=0 if pinned else 1))
         cls.session, cls.first = s.tmux('new-session', '-d', '-P', '-F', '#{session_id} #{window_id}',
                                       '-s', 'topic', '-c', str(s.root), '/bin/zsh -f').split()
         s.tmux('set-option', '-t', cls.session, '@muxify_topic', 'first')

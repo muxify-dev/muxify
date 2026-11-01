@@ -2,6 +2,7 @@ import json
 import unittest
 
 from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.topic_records import TopicRecords
 
 
 class WindowPartsSidebar(unittest.TestCase):
@@ -12,9 +13,8 @@ class WindowPartsSidebar(unittest.TestCase):
         cls.config = s.root / 'config/muxify/config.yaml'
         cls.default_config = "sidebar:\n  formats:\n    window:\n      title: 'Parts Window'\n"
         cls.config.write_text(cls.default_config)
-        topics = s.root / 'state/muxify/topics'
-        topics.mkdir(parents=True)
-        (topics / 'parts.json').write_text(json.dumps(dict(id='parts', title='Parts', slug='parts')))
+        store = TopicRecords(s.root/'state/muxify')
+        store.put(dict(id='parts', title='Parts', slug='parts'))
         cls.session = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'parts', '/bin/zsh -f')
         s.tmux('set-option', '-t', cls.session, '@muxify_topic', 'parts')
         cls.window = s.tmux('display-message', '-p', '-t', cls.session + ':', '#{window_id}')

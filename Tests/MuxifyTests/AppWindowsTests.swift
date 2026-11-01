@@ -242,11 +242,11 @@ final class AppWindowsTests: XCTestCase {
             let firstBrowser = first.browser(for: "@1")
             let secondBrowser = second.browser(for: "@1")
             XCTAssertFalse(firstBrowser === secondBrowser)
-            XCTAssertTrue(first.pendingBrowserCommands.isEmpty)
-            XCTAssertTrue(second.pendingBrowserCommands.isEmpty)
+            XCTAssertTrue(first.pendingBrowserStates.isEmpty)
+            XCTAssertTrue(second.pendingBrowserStates.isEmpty)
             firstBrowser.newTab()
-            XCTAssertEqual(first.pendingBrowserCommands, [firstBrowser.stored.setOptionArgs(windowID: "@1")])
-            XCTAssertTrue(second.pendingBrowserCommands.isEmpty)
+            XCTAssertEqual(first.pendingBrowserStates, [EnvironmentBrowserState(window: WindowID(rawValue: "@1")!, browser: firstBrowser.stored)])
+            XCTAssertTrue(second.pendingBrowserStates.isEmpty)
         }
     }
 

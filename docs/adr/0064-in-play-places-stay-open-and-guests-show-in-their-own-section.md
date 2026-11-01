@@ -12,7 +12,7 @@ The CLI gets `topic bench` and `topic fill-place <place>`. `topic end-guest` goe
 
 ## How the order holds an Open Place
 
-An Open Place is an entry of the Topics list with an id and an order, as a Locked Session is. The Topic records keep the Open Places in the file `open-places` beside them. The file has no `.json` extension, so no read takes it for a record. A swap of the folder writes it together with the records. So an Open Place stays after a restart of Muxify or tmux.
+An Open Place is an entry of the Topics list with an id and an order, as a Locked Session is. The Topic records keep the Open Places with them (since [ADR-0066](0066-the-topic-records-live-in-one-file.md), in `open_places` of the records file; before, in the file `open-places` beside the records). So an Open Place stays after a restart of Muxify or tmux.
 
 `InPlayCut` cuts the cards that are not Pinned into the places (the first N regular cards and Open Places), the Guests (every Guest, wherever its order puts it) and the Bench (the other regular cards). An Open Place past the last place holds no place. Each change in `TopicOrder` writes the order in the three sections, so the order on disk is the order that the Sidebar shows. `TopicTransaction` writes every change. After each change it puts an Open Place where a regular card left a place, and it closes each Open Place past the last place. Without `topics.in_play`, it closes every Open Place at the next write, because an Open Place holds nothing then.
 

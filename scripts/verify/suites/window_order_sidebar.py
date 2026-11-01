@@ -6,10 +6,10 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.window_order_sidebar
 """
 
-import json
 import unittest
 
-from scripts.verify.sandbox import Sandbox, remove_topic, wait
+from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.topic_records import TopicRecords
 
 SHELL = '/bin/zsh -f'
 
@@ -19,8 +19,7 @@ class WindowOrderSidebar(unittest.TestCase):
     def setUpClass(cls):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(s.teardown)
-        cls.topics = s.root/'state/muxify/topics'
-        cls.topics.mkdir(parents=True)
+        cls.store = TopicRecords(s.root/'state/muxify')
         # A Session no check uses, where the client waits while a check's Session ends.
         s.tmux('new-session', '-d', '-s', 'base', SHELL)
         s.tmux('set-option', '-g', 'detach-on-destroy', 'off')
@@ -30,9 +29,8 @@ class WindowOrderSidebar(unittest.TestCase):
         """A Session with three Windows, in the Topic `topic` when given; returns its Session ID and Window IDs."""
         s = self.s
         if topic:
-            path = self.topics/(topic + '.json')
-            self.addCleanup(remove_topic, path)
-            path.write_text(json.dumps(dict(id=topic, title=topic.capitalize(), slug=topic)))
+            self.addCleanup(self.store.remove, topic)
+            self.store.put(dict(id=topic, title=topic.capitalize(), slug=topic))
         sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, SHELL)
         self.addCleanup(self.end_session, sid)
         if topic:

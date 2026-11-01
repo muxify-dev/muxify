@@ -192,7 +192,7 @@ Sidebar then shows every card.
 - When a card leaves an In Play place, by Settle, Forget, Pin or Bench Topic,
   its place becomes an Open Place, a dashed card "Open Place". No Benched card
   moves up, and the other places keep their positions. The Topic records keep
-  the Open Place (the file `open-places` beside them), so it stays after a
+  the Open Place (`open_places` in the records file), so it stays after a
   restart of Muxify or tmux, until you fill it. A click on an Open Place lists
   the Guest Topics, then the Benched Topics. The Topic that you choose takes
   the place, and a Guest loses its mark. `muxify topic fill-place` does the
@@ -267,7 +267,7 @@ Sidebar then shows every card.
   line, can trade up with any In Play card the same way.
 - `muxify topic move --trade-with <id|label>` and `--trade-with-session
   <name|id>` make the same trade. They do not change the Location.
-- The "N more below" line counts only the cards that show.
+- The "N more below" pill counts only the cards that show.
 
 Each App Window shows or hides its own Bench, and a restart hides it. The
 Sessions mode and the Settled group have no Bench.

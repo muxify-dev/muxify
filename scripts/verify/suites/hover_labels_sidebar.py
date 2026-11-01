@@ -8,11 +8,11 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.hover_labels_sidebar
 """
 
-import json
 import time
 import unittest
 
 from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.topic_records import TopicRecords
 
 SHELL = '/bin/zsh -f'
 LONG = 'a-window-name-far-too-long-for-any-sidebar-row-to-show-whole'
@@ -38,9 +38,8 @@ class HoverLabelsSidebar(unittest.TestCase):
             "      title: '#{window_title}#{?#{==:#{window_name}," + STRETCHED + "}, " + SUFFIX + ",}'\n"
             "      summary: 'Tooltips default'\n")
         cls.config.write_text(cls.default_config)
-        topics = s.root/'state/muxify/topics'
-        topics.mkdir(parents=True)
-        (topics/'hover.json').write_text(json.dumps(dict(id='hover', title='Hover labels', slug='hover')))
+        store = TopicRecords(s.root/'state/muxify')
+        store.put(dict(id='hover', title='Hover labels', slug='hover'))
         s.tmux('new-session', '-d', '-s', 'base', '-n', LONG, '-c', str(project), SHELL)
         s.tmux('set-option', '-t', 'base', '@muxify_topic', 'hover')
         cls.session = s.tmux('display-message', '-p', '-t', 'base:', '#{session_id}')

@@ -84,19 +84,19 @@ final class SidebarFormatContextTests: XCTestCase {
         XCTAssertEqual(text.summary, "Agent task / /agent / working")
     }
 
-    func testRemoteContextsDoNotExposeLocalBranches() throws {
+    func testRemoteContextsUseBranchesFromTheirEnvironment() throws {
         let window = window(remote: true)
         let branches = TopicBranches(paths: [window.sessionPath].map(Folder.local)) {
-            $0 == window.sessionPath + "/.git/HEAD" ? "ref: refs/heads/local" : nil
+            $0 == window.sessionPath + "/.git/HEAD" ? "ref: refs/heads/remote" : nil
         }
-        XCTAssertEqual(branches[.local(window.sessionPath)], "local")
+        XCTAssertEqual(branches[.local(window.sessionPath)], "remote")
         let pane = TmuxPane(id: "%1", windowID: window.id, path: window.sessionPath, command: "sleep",
                             agent: "codex", agentStatus: "working", unread: false)
         let model = TopicsModel(records: [], windows: [window], config: Config(), selection: TopicSelection())
         let contexts = SidebarFormatContexts(model: model, windows: [window], panes: [pane], agents: [], branches: branches,
                                              records: [], sessionPaths: [], tabCounts: [:])
-        XCTAssertEqual(try SidebarFormat("#{branch}").expand(in: XCTUnwrap(contexts.sessions["$1"])), "")
-        XCTAssertEqual(try SidebarFormat("#{branch}").expand(in: XCTUnwrap(contexts.panes["%1"])), "")
+        XCTAssertEqual(try SidebarFormat("#{branch}").expand(in: XCTUnwrap(contexts.sessions["$1"])), "remote")
+        XCTAssertEqual(try SidebarFormat("#{branch}").expand(in: XCTUnwrap(contexts.panes["%1"])), "remote")
     }
 
     func testWindowAgentScopeWithNoSelectionShowsEveryAgent() {

@@ -1,7 +1,7 @@
 import Foundation
 
 /// One checkout of a SessionPath's repository, as `git worktree list` reports it.
-public struct Worktree: Hashable, Sendable {
+public struct Worktree: Codable, Hashable, Sendable {
     public let folder: Folder
     /// Nil when HEAD is detached.
     public let branch: String?
@@ -18,7 +18,7 @@ public struct Worktree: Hashable, Sendable {
 }
 
 /// What git says a SessionPath directory is. Read with `detect`, never from folder names.
-public enum RepositoryLayout: Equatable, Sendable {
+public enum RepositoryLayout: Codable, Equatable, Sendable {
     case directory
     case plainRepository([Worktree])
     case bareRepository([Worktree])

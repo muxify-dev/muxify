@@ -4,11 +4,12 @@ extension View {
     /// Calls `action` with where this view stands against the visible part of the scroll view whose coordinate space is
     /// `viewport`, whose top is `visibleTop` points under the viewport's top. SwiftUI runs the check on each scroll step,
     /// but calls `action` only when its answer changes.
-    func onEdgePlace(of viewport: String, visibleTop: CGFloat, _ action: @escaping (EdgePlace) -> Void) -> some View {
+    func onEdgePlace(of viewport: String, visibleTop: CGFloat, indicatorHeight: CGFloat,
+                     _ action: @escaping (EdgePlace) -> Void) -> some View {
         onGeometryChange(for: EdgePlace.self) { proxy in
             guard let visible = proxy.bounds(of: .named(viewport)) else { return EdgePlace() }
             return EdgePlace(top: -visible.minY, bottom: proxy.size.height - visible.minY, visibleTop: visibleTop,
-                             visibleBottom: visible.height)
+                             visibleBottom: visible.height, indicatorHeight: indicatorHeight)
         } action: { action($0) }
     }
 
@@ -90,80 +91,52 @@ struct OpenPlaceCard: View {
     }
 }
 
-/// Tells the user that the last card they see is not the last card. It lies over the bottom of the list, under a
-/// shadow, and a click scrolls the first hidden card to the top. In the last stretch of the list it moves down with
-/// the cards, so it slides out under the last card and does not go away in one frame.
-struct MoreBelowLine: View {
-    let count: Int
-    /// How far the end of the list is below the bottom edge, up to `height`.
-    let listEnd: CGFloat
-    let theme: TerminalTheme?
-    let action: () -> Void
-
-    static var height: CGFloat { shade + bar }
-    private static var shade: CGFloat { 10 }
-    private static var bar: CGFloat { 20 }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            LinearGradient(colors: [.clear, .black.opacity(0.12)], startPoint: .top, endPoint: .bottom)
-                .frame(height: Self.shade)
-                .allowsHitTesting(false)
-            Button(action: action) {
-                HStack(spacing: 8) {
-                    Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
-                    Text("\(count) more below").font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
-                    Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
-                }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 14).frame(height: Self.bar)
-                .chrome(theme: theme, material: .sidebar)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("topics-more-below")
-        }
-        .offset(y: Self.height - min(listEnd, Self.height))
-        .clipped()
+/// A pill over an edge of the Topics list that tells the user how many cards are past that edge: over the top of the
+/// Bench area for the cards above it, under the block that sticks, or over the bottom of the list for the cards below.
+/// A click scrolls the nearest hidden card into view. Near its edge it moves with the cards, so it slides in from under
+/// the block, or out under the last card, and does not come or go in one frame.
+struct EdgePill: View {
+    enum Edge {
+        case top, bottom
     }
-}
 
-/// Tells the user that cards of the Bench are above its top edge, under the block that sticks. It lies over the top of
-/// the Bench area, over a shadow, and a click scrolls up to the nearest hidden card. In the first stretch of the Bench's
-/// scroll it moves up with the cards, so it slides in from under the block and does not come in one frame.
-struct MoreAboveLine: View {
+    let edge: Edge
     let count: Int
-    /// How far the Bench has scrolled under the block, which counts up to `height`.
-    let benchScroll: CGFloat
+    /// How far the pill has come in from its edge, which counts up to `height`: for the top, how far the Bench has
+    /// scrolled under the block; for the bottom, how far the end of the list is below the bottom edge.
+    let slide: CGFloat
     let theme: TerminalTheme?
     let action: () -> Void
 
-    static var height: CGFloat { shade + bar }
-    private static var shade: CGFloat { 10 }
-    private static var bar: CGFloat { 20 }
+    /// The band the pill lies in: the pill and the room around it for its shadow. The Bench's geometry keeps a card it
+    /// reveals under this band.
+    static let height: CGFloat = 30
+    private static let margin: CGFloat = 4
 
     var body: some View {
-        VStack(spacing: 0) {
-            Button(action: action) {
-                HStack(spacing: 8) {
-                    Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
-                    Text("\(count) more above").font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
-                    Image(systemName: "chevron.up").font(.system(size: 9, weight: .bold))
-                    Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
-                }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 14).frame(height: Self.bar)
-                .chrome(theme: theme, material: .sidebar)
-                .contentShape(Rectangle())
+        let capsule = Capsule(style: .continuous)
+        let isTop = edge == .top
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: isTop ? "arrow.up" : "arrow.down").font(.system(size: 9, weight: .bold))
+                Text("\(count) more").font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("topics-more-above")
-            LinearGradient(colors: [.black.opacity(0.12), .clear], startPoint: .top, endPoint: .bottom)
-                .frame(height: Self.shade)
-                .allowsHitTesting(false)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 10).frame(height: Self.height - 2 * Self.margin)
+            // The surface of an open card over the Sidebar's chrome, so the cards under it do not show through.
+            .background(Color.primary.opacity(0.08))
+            .chrome(theme: theme, material: .sidebar)
+            .clipShape(capsule)
+            .overlay { capsule.strokeBorder(Color.primary.opacity(0.08), lineWidth: 1) }
+            .compositingGroup()
+            .shadow(color: .black.opacity(0.22), radius: 4, y: 1)
+            .frame(maxWidth: .infinity).frame(height: Self.height)
+            .contentShape(Rectangle())
         }
-        .offset(y: min(benchScroll, Self.height) - Self.height)
+        .buttonStyle(.plain)
+        .offset(y: isTop ? min(slide, Self.height) - Self.height : Self.height - min(slide, Self.height))
         .clipped()
+        .accessibilityLabel("\(count) more \(isTop ? "above" : "below")")
+        .accessibilityIdentifier(isTop ? "topics-more-above" : "topics-more-below")
     }
 }

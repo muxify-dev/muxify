@@ -251,9 +251,10 @@ def main(argv):
         time.sleep(.5)
 
     # While the display sleeps the apps draw no frames, so hover labels never open and checks that wait for a
-    # frame time out. The assertion ends with this process; -u wakes a display that already sleeps.
-    subprocess.run(['/usr/bin/caffeinate', '-u', '-t', '1'])
-    subprocess.Popen(['/usr/bin/caffeinate', '-d', '-i', '-w', str(os.getpid())])
+    # frame time out. The assertion ends with this process. -u wakes a display that already sleeps, and held for the
+    # run it keeps a locked screen from turning the display off again: a locked screen does that about ten seconds
+    # after each wake, and -d alone does not stop it.
+    subprocess.Popen(['/usr/bin/caffeinate', '-d', '-i', '-u', '-w', str(os.getpid())])
 
     run_id = new_run_id()
     run_dir = RUNS/run_id

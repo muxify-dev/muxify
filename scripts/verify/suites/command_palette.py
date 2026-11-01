@@ -9,13 +9,13 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.command_palette
 """
 
-import json
 import os
 import subprocess
 import time
 import unittest
 
-from scripts.verify.sandbox import Sandbox, frame, remove_topic, wait
+from scripts.verify.sandbox import Sandbox, frame, wait
+from scripts.verify.topic_records import TopicRecords
 from scripts.verify.topics_sidebar import remembered_session
 
 # The app reads tmux once per second; a visit is recorded when it sees the client move.
@@ -29,7 +29,7 @@ class CommandPalette(unittest.TestCase):
     def setUpClass(cls):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(s.teardown)
-        cls.topics_dir = s.root/'state/muxify/topics'
+        cls.store = TopicRecords(s.root/'state/muxify')
         # alpha is a plain repository, beta a plain directory, gamma a bare repository with two checkouts inside its
         # folder and a Worktree outside it, delta a plain directory with an alias.
         cls.alpha = s.root/'projects/alpha'
@@ -37,7 +37,7 @@ class CommandPalette(unittest.TestCase):
         cls.gamma = s.root/'projects/gamma'
         cls.delta = s.root/'projects/delta'
         cls.gamma_hotfix = s.root/'trees/gamma-hotfix'
-        for directory in [cls.topics_dir, cls.alpha, cls.beta, cls.delta]:
+        for directory in [cls.alpha, cls.beta, cls.delta]:
             directory.mkdir(parents=True, exist_ok=True)
         git = ['/usr/bin/git', '-C', str(cls.alpha), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid',
                '-c', 'commit.gpgSign=false']
@@ -71,38 +71,31 @@ class CommandPalette(unittest.TestCase):
     def new_session(self, name, directory, topic=None, command=SHELL):
         sid = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, '-c', str(directory), command)
         self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', sid)
-        self.addCleanup(self.select_window, self.base_window)
+        self.addCleanup(self.s.show, self.base_window)
         if topic:
             self.s.tmux('set-option', '-t', sid, '@muxify_topic', topic)
         return sid
 
     def write_topic(self, topic_id, title, home, **fields):
-        """A Topic file as a person writes one. Reopen names the Session after the title's slug, so a title
+        """A Topic record, written as a script writes one. Reopen names the Session after the title's slug, so a title
         such as "Sw dormant" for id sw-dormant keeps the Session name predictable."""
-        with open(self.topics_dir/(topic_id + '.json'), 'w') as handle:
-            handle.write(json.dumps(dict(id=topic_id, title=title, slug=topic_id, **fields)))
+        self.store.put(dict(id=topic_id, title=title, slug=topic_id, **fields))
 
     def records(self):
-        out = {}
-        for path in self.topics_dir.glob('*.json'):
-            try:
-                out[path.stem] = json.loads(path.read_text())
-            except json.JSONDecodeError:
-                pass
-        return out
+        return self.store.records()
 
     def window_of(self, sid):
         return self.s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
 
     def client_sessions(self):
-        return self.s.tmux('list-clients', '-F', '#{session_name}').split()
+        return self.s.tmux('list-clients', '-F', '#{?client_control_mode,,#{session_name}}').split()
 
     def client_windows(self):
-        return self.s.tmux('list-clients', '-F', '#{window_id}').split()
+        return self.s.tmux('list-clients', '-F', '#{?client_control_mode,,#{window_id}}').split()
 
     def select_window(self, window):
         """Moves the app's tmux client to the Window, as tmux navigation does, and lets the app see it."""
-        for tty in self.s.tmux('list-clients', '-F', '#{client_tty}').split():
+        for tty in self.s.tmux('list-clients', '-F', '#{?client_control_mode,,#{client_tty}}').split():
             self.s.tmux('switch-client', '-c', tty, '-t', window)
         self.s.wait_shown(window)
 
@@ -218,7 +211,7 @@ class CommandPalette(unittest.TestCase):
         for topic_id, title, fields in [('sw-rank-open', 'Sw quokkas frank', {}),
                                         ('sw-rank-settled', 'Sw quokka rank', dict(settled_at='2031-01-01T10:00:00Z'))]:
             self.write_topic(topic_id, title, self.beta, **fields)
-            self.addCleanup(remove_topic, self.topics_dir/(topic_id + '.json'))
+            self.addCleanup(self.store.remove, topic_id)
         self.open_palette()
         rs = self.search('quokka rank', 'palette-row-topic-sw-rank-open')
         ids = self.s.ids(rs)
@@ -228,7 +221,7 @@ class CommandPalette(unittest.TestCase):
 
     def test_one_list_ranks_sessions_and_topics_together_without_headers(self):
         self.write_topic('sw-one-weak', 'Sw wom-bat later', self.beta)
-        self.addCleanup(remove_topic, self.topics_dir/'sw-one-weak.json')
+        self.addCleanup(self.store.remove, 'sw-one-weak')
         sid = self.new_session('wombat', self.beta)
         session = 'palette-row-session:' + sid
         self.open_palette('One list')
@@ -241,7 +234,7 @@ class CommandPalette(unittest.TestCase):
 
     def test_a_palette_whose_show_leaves_out_topic_session_lists_a_no_topic_session_but_not_a_topics_session(self):
         self.write_topic('sw-show-member', 'Sw show member', self.beta)
-        self.addCleanup(remove_topic, self.topics_dir/'sw-show-member.json')
+        self.addCleanup(self.store.remove, 'sw-show-member')
         member = self.session_row(self.new_session('beta/sw-show-member', self.beta, topic='sw-show-member'))
         loose = self.session_row(self.new_session('sw-show-loose', self.beta))
         self.open_palette()
@@ -264,7 +257,7 @@ class CommandPalette(unittest.TestCase):
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close after open')
         sid = self.s.tmux('display-message', '-p', '-t', '=gamma/release:', '#{session_id}')
         self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', sid)
-        self.addCleanup(self.select_window, self.base_window)
+        self.addCleanup(self.s.show, self.base_window)
 
         self.select_window(self.base_window)
         self.open_palette()
@@ -285,7 +278,7 @@ class CommandPalette(unittest.TestCase):
         self.s.act('action', key, 'New Session')
         wait(lambda: self.s.tmux_ok('has-session', '-t', '=gamma/main+2').returncode == 0, 'no Session gamma/main+2 was created', seconds=10)
         self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', '=gamma/main+2')
-        self.addCleanup(self.select_window, self.base_window)
+        self.addCleanup(self.s.show, self.base_window)
         wait(lambda: 'gamma/main+2' in self.client_sessions(), 'the client did not go to the new Session', seconds=10)
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close after New Session')
         self.assertEqual(self.s.tmux('show-options', '-qv', '-t', '=gamma/main+2', '@muxify_topic'), '', 'the Session is not in No Topic')
@@ -305,7 +298,7 @@ class CommandPalette(unittest.TestCase):
         self.s.act('press', key)
         wait(lambda: self.s.tmux_ok('has-session', '-t', '=delta').returncode == 0, 'no Session delta was created', seconds=10)
         self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', '=delta')
-        self.addCleanup(self.select_window, self.base_window)
+        self.addCleanup(self.s.show, self.base_window)
         names = self.s.tmux('list-sessions', '-F', '#{session_name}').splitlines()
         self.assertNotIn('Delta Notes', names, 'the alias named a tmux Session')
         # The app selects the new Session after the palette closes; a kill before that leaves a modal alert.
@@ -409,12 +402,12 @@ class CommandPalette(unittest.TestCase):
     def test_topic_palette_ranks_other_live_topics_by_visits_then_current_then_dormant_and_empty(self):
         windows = {}
         for name in ['sw-order-older', 'sw-order-recent', 'sw-order-current']:
-            self.addCleanup(remove_topic, self.topics_dir/(name + '.json'))
+            self.addCleanup(self.store.remove, name)
             self.write_topic(name, 'Sw ' + name[3:], self.beta, pinned=name != 'sw-order-recent')
             windows[name] = self.window_of(self.new_session('beta/' + name, self.beta, topic=name))
         dormant, empty = 'sw-order-dormant', 'sw-order-empty-topic'
         for name in [dormant, empty]:
-            self.addCleanup(remove_topic, self.topics_dir/(name + '.json'))
+            self.addCleanup(self.store.remove, name)
         self.write_topic(dormant, 'Sw order dormant', self.beta, pinned=True,
                          sessions=[remembered_session(self.beta, dormant, windows=[dict(directory=str(self.beta), name='shell')])])
         self.write_topic(empty, 'Sw order empty', self.beta)
@@ -469,7 +462,7 @@ class CommandPalette(unittest.TestCase):
         self.write_topic('sw-order-open', 'Sw order open', self.beta)
         self.write_topic('sw-order-settled', 'Sw order settled', self.beta, settled_at='2031-01-01T10:00:00Z')
         for topic_id in ['sw-order-open', 'sw-order-settled']:
-            self.addCleanup(remove_topic, self.topics_dir/(topic_id + '.json'))
+            self.addCleanup(self.store.remove, topic_id)
         outside_sid = self.new_session('sw-order-outside', outside)
         for sid in [self.new_session('beta/sw-order-open', self.beta, topic='sw-order-open'), outside_sid]:
             self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', sid)
@@ -499,7 +492,7 @@ class CommandPalette(unittest.TestCase):
         cards = lambda rs: [key for key in s.ids(rs) if key.startswith('no-topic') and not key.endswith('-more')]
         for topic_id, title, fields in [('sw-slot-open', 'Sw slot open', {}), ('sw-slot-settled', 'Sw slot settled', dict(settled_at='2031-01-01T10:00:00Z'))]:
             self.write_topic(topic_id, title, self.beta, **fields)
-            self.addCleanup(remove_topic, self.topics_dir/(topic_id + '.json'))
+            self.addCleanup(self.store.remove, topic_id)
         topic_sid = self.new_session('beta/sw-slot-open', self.beta, topic='sw-slot-open')
         topic_window = self.window_of(topic_sid)
         sid = self.new_session('sw-slot-outside', outside)
@@ -507,7 +500,7 @@ class CommandPalette(unittest.TestCase):
         other = self.new_session('sw-slot-other', outside)
         for session in [sid, other, topic_sid]:
             self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', session)
-        self.addCleanup(self.select_window, self.base_window)
+        self.addCleanup(self.s.show, self.base_window)
         self.select_window(topic_window)
         rs = s.wait_rows(lambda rs: s.row('topic-window-' + topic_window, rs).get('accessibilityValue') == 'selected'
                          and s.has('settled-topics', rs), 'the Sidebar does not show the Topic Window selected and the Settled group')
@@ -562,7 +555,7 @@ class CommandPalette(unittest.TestCase):
 
     def open_add_session(self, topic):
         self.write_topic(topic, topic, self.beta)
-        self.addCleanup(remove_topic, self.topics_dir/(topic + '.json'))
+        self.addCleanup(self.store.remove, topic)
         sid = self.new_session('beta/' + topic, self.beta, topic=topic)
         self.select_window(self.window_of(sid))
         wait(lambda: self.s.driver('press', 'Add a Session to Topic…')['pressed'], 'Add a Session stays disabled', seconds=10)

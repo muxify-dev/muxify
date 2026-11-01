@@ -46,6 +46,9 @@ final class BrowserTab: NSObject, Identifiable {
     @ObservationIgnored var onTitleChange: ((String, String) -> Void)?
     /// The Browser commands that run on this Tab now (ADR 0058). While one runs, a popup loads in this Tab.
     @ObservationIgnored var agentCommands = 0
+    /// A page Focus asked for while the page was not in a window. A Browser that Focus Browser brings back shows its
+    /// page a layout later, so the page takes Focus when it comes into the window, not never.
+    @ObservationIgnored private var pageFocusWaits = false
     /// When a main-frame navigation last started, committed, finished or failed. A Browser command waits for a
     /// time without one, because a page can go on to another page with JavaScript after its load.
     @ObservationIgnored private(set) var navigationActivity = Date.distantPast
@@ -92,6 +95,27 @@ final class BrowserTab: NSObject, Identifiable {
         urlString = url?.absoluteString ?? ""
         super.init()
         if restored { historyLoads.next = .skipped }
+    }
+
+    /// Gives the page Focus now, or as soon as it is in a window.
+    func focusPage() {
+        guard let window = webView.window else {
+            pageFocusWaits = true
+            return
+        }
+        pageFocusWaits = false
+        guard window.makeFirstResponder(webView) else { return }
+        BrowserPageScripts.focusMainPart(of: webView)
+    }
+
+    /// Called when the page comes into a window: completes a Focus that waited for it.
+    func pageEnteredWindow() {
+        if pageFocusWaits { focusPage() }
+    }
+
+    /// A Focus request for something else, such as the address field, ends one that waited for the page.
+    func cancelWaitingPageFocus() {
+        pageFocusWaits = false
     }
 
     var webView: WKWebView {

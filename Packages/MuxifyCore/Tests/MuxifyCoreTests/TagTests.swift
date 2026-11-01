@@ -28,7 +28,7 @@ final class TagTests: XCTestCase {
     }
 
     private func written(_ id: String) throws -> [String: JSONValue] {
-        try JSONDecoder().decode([String: JSONValue].self, from: Data(contentsOf: paths.topics.appendingPathComponent(id + ".json")))
+        try XCTUnwrap(paths.storedTopicRecord(id))
     }
 
     func testTheRecordKeepsTagsAsASortedArrayReadsTypedFormsAndKeepsUnknownFields() throws {
@@ -48,8 +48,7 @@ final class TagTests: XCTestCase {
     }
 
     func testAWriteKeepsTagEntriesThatAreNotTagsAndATagChangeKeepsThemAfterTheTags() throws {
-        try FileManager.default.createDirectory(at: paths.topics, withIntermediateDirectories: true)
-        try Data(#"{"id":"t","tags":["release","",7,"a b",{"x":1}]}"#.utf8).write(to: paths.topics.appendingPathComponent("t.json"))
+        try paths.seedTopicRecords(entries: [#"{"id":"t","tags":["release","",7,"a b",{"x":1}]}"#])
         let store = TopicStore(paths: paths)
         XCTAssertEqual(try store.read().records.first?.tags, tags("release"))
         let unreadable: [JSONValue] = [.string(""), .integer(7), .string("a b"), .object(["x": .integer(1)])]
@@ -62,8 +61,7 @@ final class TagTests: XCTestCase {
     }
 
     func testAWriteKeepsATagsValueThatIsNotAnArrayUntilATagChangeSetsTags() throws {
-        try FileManager.default.createDirectory(at: paths.topics, withIntermediateDirectories: true)
-        try Data(#"{"id":"t","tags":"backend"}"#.utf8).write(to: paths.topics.appendingPathComponent("t.json"))
+        try paths.seedTopicRecords(entries: [#"{"id":"t","tags":"backend"}"#])
         let store = TopicStore(paths: paths)
         XCTAssertEqual(try store.read().records.first?.tags, [])
         try store.write { try $0.update("t") { $0.title = "Renamed" } }

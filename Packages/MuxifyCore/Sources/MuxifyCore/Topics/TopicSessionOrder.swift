@@ -1,6 +1,6 @@
 import Foundation
 
-public enum SessionOrder: String, CaseIterable, Sendable {
+public enum SessionOrder: String, Codable, CaseIterable, Sendable {
     case oldestFirst = "oldest_first"
     case newestFirst = "newest_first"
 }

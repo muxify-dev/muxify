@@ -3,11 +3,11 @@
 BrowserPanel exposes Submit and history controls so navigation does not take focus.
 """
 
-import json
 import time
 import unittest
 
 from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.topic_records import TopicRecords
 
 SHELL = '/bin/zsh -f'
 
@@ -19,8 +19,7 @@ class PaletteActions(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         cls.project = s.root/'projects/palette'
         cls.project.mkdir(parents=True)
-        cls.topics = s.root/'state/muxify/topics'
-        cls.topics.mkdir(parents=True, exist_ok=True)
+        cls.store = TopicRecords(s.root/'state/muxify')
         (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n'
             'command_palettes:\n  - name: Commands\n    keybinding: cmd+shift+p\n    sources: [commands]\n'
             '  - name: Go to…\n    keybinding: cmd+p\n    sources: [topics, sessions]\n'
@@ -73,7 +72,7 @@ class PaletteActions(unittest.TestCase):
                          'The palette did not keep the typed value')
 
     def records(self):
-        return [json.loads(path.read_text()) for path in self.topics.glob('*.json')]
+        return list(self.store.records().values())
 
     def pane_window(self, pane):
         return self.s.tmux('display-message', '-p', '-t', pane, '#{window_id}')

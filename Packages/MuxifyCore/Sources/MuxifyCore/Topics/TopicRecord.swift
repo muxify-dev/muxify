@@ -1,7 +1,7 @@
 import Foundation
 
 /// Unknown fields remain values, including fields inside remembered Sessions and Windows.
-public enum JSONValue: Codable, Equatable, Sendable {
+public enum JSONValue: Codable, Hashable, Sendable {
     case null, bool(Bool), integer(Int64), unsignedInteger(UInt64), number(Decimal), string(String)
     case array([JSONValue]), object([String: JSONValue])
 

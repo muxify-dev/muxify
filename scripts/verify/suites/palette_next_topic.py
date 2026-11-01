@@ -1,9 +1,9 @@
 """Settle shows and opens the next Topic in Sidebar order."""
 
-import json
 import unittest
 
-from scripts.verify.sandbox import Sandbox, frame, remove_topic, wait
+from scripts.verify.sandbox import Sandbox, frame, wait
+from scripts.verify.topic_records import TopicRecords
 
 SHELL = '/bin/zsh -f'
 
@@ -15,8 +15,7 @@ class PaletteNextTopic(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         cls.project = s.root/'projects/next'
         cls.project.mkdir(parents=True)
-        cls.topics = s.root/'state/muxify/topics'
-        cls.topics.mkdir(parents=True, exist_ok=True)
+        cls.store = TopicRecords(s.root/'state/muxify')
         (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n')
         cls.base = s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', 'base', '-c', str(cls.project), SHELL)
         s.tmux('set-option', '-g', 'detach-on-destroy', 'off')
@@ -34,10 +33,10 @@ class PaletteNextTopic(unittest.TestCase):
         names = [prefix + '-' + str(i) for i in range(1 if placement == 'none' else 3)]
         windows = {}
         for index, name in enumerate(names):
-            (self.topics/(name + '.json')).write_text(json.dumps(dict(
+            self.store.put(dict(
                 id=name, title=name, slug=name, home_project=str(self.project),
-                created_at='2026-01-0%dT00:00:00Z' % (index + 1))))
-            self.addCleanup(remove_topic, self.topics/(name + '.json'))
+                created_at='2026-01-0%dT00:00:00Z' % (index + 1)))
+            self.addCleanup(self.store.remove, name)
             sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name,
                           '-c', str(self.project), SHELL)
             s.tmux('set-option', '-t', sid, '@muxify_topic', name)
@@ -74,7 +73,7 @@ class PaletteNextTopic(unittest.TestCase):
             self.assertTrue(s.has('no-topic-session-' + sid, rs))
             wait(lambda: s.tmux_ok('has-session', '-t', '=' + current).returncode != 0,
                  'Settle did not kill the Session of the Topic')
-        record = json.loads((self.topics/(current + '.json')).read_text())
+        record = self.store.get(current)
         self.assertTrue(record.get('settled_at'), record)
 
     def test_settle_opens_the_topic_below(self):

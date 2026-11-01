@@ -12,7 +12,7 @@ Run from the repo root after `make build`:
 import json
 import unittest
 
-from scripts.verify.sandbox import frame, remove_topic, wait
+from scripts.verify.sandbox import frame, wait
 from scripts.verify.topics_sidebar import TopicsSidebar
 
 
@@ -82,7 +82,7 @@ class TopicsLocksSidebar(TopicsSidebar):
         s.act('press', 'palette-row-new-topic')
         record = wait(lambda: next((r for i, r in self.records().items() if i not in before and r.get('title') == 'Taken place'), None),
                       'no Topic record for the Locked Session')
-        self.addCleanup(remove_topic, self.topics_dir/(record['id'] + '.json'))
+        self.addCleanup(self.store.remove, record['id'])
         self.assertEqual(record.get('order'), 1, json.dumps(record))
         wait(lambda: self.lock_option(sid) == '', 'the Topic made from the Locked Session kept @muxify_lock', seconds=10)
         self.assertEqual(s.tmux('show-options', '-qv', '-t', sid, '@muxify_topic'), record['id'])

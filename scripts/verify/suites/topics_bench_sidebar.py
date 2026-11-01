@@ -6,7 +6,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_bench_sidebar
 """
 
-import json
+import math
 import re
 import time
 import unittest
@@ -16,6 +16,8 @@ from scripts.verify.topics_sidebar import TopicsSidebar
 
 LINE = 'topics-bench-line'
 GUESTS = 'topics-guests-line'
+# The band of the "more above" pill over the top of the Bench area (`EdgePill.height` in UI/TopicsListEdge.swift).
+PILL = 30
 
 
 class TopicsBenchSidebar(TopicsSidebar):
@@ -25,7 +27,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         Topic by its card identifier."""
         self.addCleanup(self.config.write_text, self.config_text)
         # An Open Place that a check leaves would take the In Play place of the next check.
-        self.addCleanup((self.topics_dir/'open-places').unlink, missing_ok=True)
+        self.addCleanup(self.store.set_open_places, [])
         self.config.write_text(self.config_text + 'topics:\n  in_play: 1\n')
         windows = {}
         for order, name in enumerate(['a', 'b', 'c']):
@@ -78,6 +80,30 @@ class TopicsBenchSidebar(TopicsSidebar):
         found = re.search(r'(\d+) more above', self.s.row('topics-more-above', rs).get('accessibilityLabel', ''))
         return int(found.group(1)) if found else None
 
+    def under_pill(self, key, rs):
+        """How far the card's top is from where a card directly under the "more above" pill has its top, or infinity
+        while no pill shows."""
+        if not self.s.has('topics-more-above', rs):
+            return math.inf
+        return self.top(key, rs) - (frame(self.s.row('topics-more-above', rs))[0] - 6)
+
+    def tops_in_pill(self, bench, rs):
+        """The Benched cards whose top is inside the frame of the "more above" pill, which covers it."""
+        bottom, top = frame(self.s.row('topics-more-above', rs))
+        return [key for key in bench if self.s.has(key, rs) and bottom < self.top(key, rs) < top]
+
+    def test_no_benched_card_has_its_top_under_the_more_above_pill_when_the_bench_shows(self):
+        s = self.s
+        windows, bench = self.far_bench('bench-open-pill')
+        z = bench[-1]
+        self.hide_bench()
+        s.show(windows[z])
+        s.wait_rows(lambda rs: self.shown_after_line(rs) == [z], 'the Benched card of the Location does not show under the line')
+        self.show_bench()
+        rs = s.wait_rows(lambda rs: self.more_above(rs) == len(bench) - 1, 'the "more above" pill does not count the cards before z')
+        self.assertEqual(self.tops_in_pill(bench, rs), [], 'the pill covers the top of a Benched card')
+        self.assertAlmostEqual(self.under_pill(z, rs), 0, delta=1, msg='the card of the Location is not directly under the pill')
+
     def test_the_benched_card_of_the_location_keeps_its_place_on_screen_when_the_bench_shows(self):
         s = self.s
         windows, bench = self.far_bench('bench-open-far')
@@ -89,12 +115,17 @@ class TopicsBenchSidebar(TopicsSidebar):
         before = {key: self.top(key, rs) for key in (z, LINE)}
         shown = s.act('press', LINE, watch=[z, LINE], watch_seconds=1)
         rs = s.wait_rows(lambda rs: self.line(rs) == 'Hide Bench', 'the Bench did not show')
-        self.assertAlmostEqual(self.top(z, rs), before[z], delta=1, msg='the card of the Location moved when the Bench showed')
-        for key in (z, LINE):
-            tops = [y + height for _, y, _, height in shown['frames'][key]]
-            self.assertTrue(all(abs(top - before[key]) <= 1 for top in tops),
-                            'a drawn frame showed %s elsewhere: %s, before %s' % (key, tops, before[key]))
-        self.assertEqual(self.more_above(rs), len(bench) - 1, 'the "more above" line does not count the cards before it')
+        # The card moves down by the pill's band, out from under the pill that counts the cards before it, and no more.
+        self.assertAlmostEqual(self.top(z, rs), before[z] - PILL, delta=1,
+                               msg='the card of the Location did not move down by the pill when the Bench showed')
+        self.assertAlmostEqual(self.under_pill(z, rs), 0, delta=1, msg='the card of the Location is not directly under the pill')
+        tops = [y + height for _, y, _, height in shown['frames'][LINE]]
+        self.assertTrue(all(abs(top - before[LINE]) <= 1 for top in tops),
+                        'a drawn frame showed the Bench line elsewhere: %s, before %s' % (tops, before[LINE]))
+        tops = [y + height for _, y, _, height in shown['frames'][z]]
+        self.assertTrue(all(before[z] - PILL - 1 <= top <= before[z] + 1 for top in tops),
+                        'a drawn frame showed %s above its old place or below the pill: %s, before %s' % (z, tops, before[z]))
+        self.assertEqual(self.more_above(rs), len(bench) - 1, 'the "more above" pill does not count the cards before it')
 
     def test_the_bench_shown_on_a_card_in_play_opens_at_its_top(self):
         s = self.s
@@ -105,7 +136,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         self.show_bench()
         rs = s.wait_rows(lambda rs: s.has(bench[0], rs), 'the Bench did not show its first card')
         self.assertAlmostEqual(self.under_line(bench[0], rs), 0, delta=1, msg='the first Benched card is not directly under the line')
-        self.assertIsNone(self.more_above(rs), 'a Bench at its top shows a "more above" line')
+        self.assertIsNone(self.more_above(rs), 'a Bench at its top shows a "more above" pill')
 
     def test_a_click_on_more_above_scrolls_the_nearest_hidden_card_under_the_line(self):
         s = self.s
@@ -115,11 +146,11 @@ class TopicsBenchSidebar(TopicsSidebar):
         s.show(windows[z])
         s.wait_rows(lambda rs: self.shown_after_line(rs) == [z], 'the Benched card of the Location does not show under the line')
         self.show_bench()
-        s.wait_rows(lambda rs: self.more_above(rs) == len(bench) - 1, 'the "more above" line does not count the cards before z')
+        s.wait_rows(lambda rs: self.more_above(rs) == len(bench) - 1, 'the "more above" pill does not count the cards before z')
         s.act('press', 'topics-more-above')
-        rs = s.wait_rows(lambda rs: abs(self.under_line(bench[-2], rs)) <= 1,
-                         'the click did not scroll %s under the line: %s' % (bench[-2], self.under_line(bench[-2], s.rows())))
-        self.assertEqual(self.more_above(rs), len(bench) - 2, 'the line does not count one card less after the click')
+        rs = s.wait_rows(lambda rs: abs(self.under_pill(bench[-2], rs)) <= 1,
+                         'the click did not scroll %s under the pill: %s' % (bench[-2], self.under_pill(bench[-2], s.rows())))
+        self.assertEqual(self.more_above(rs), len(bench) - 2, 'the pill does not count one card less after the click')
 
     def test_a_jump_to_a_benched_card_out_of_view_scrolls_it_under_the_line(self):
         s = self.s
@@ -130,8 +161,8 @@ class TopicsBenchSidebar(TopicsSidebar):
         rs = s.wait_rows(lambda rs: s.has(z, rs) and self.top(z, rs) < frame(s.row('topics-list', rs))[0],
                          'the last Benched card is in view')
         s.show(windows[z])
-        s.wait_rows(lambda rs: abs(self.under_line(z, rs)) <= 1,
-                    'the Jump To did not scroll %s under the line: %s' % (z, self.under_line(z, s.rows())))
+        s.wait_rows(lambda rs: abs(self.under_pill(z, rs)) <= 1,
+                    'the Jump To did not scroll %s under the pill: %s' % (z, self.under_pill(z, s.rows())))
 
     def tops(self, keys, rs):
         return {key: frame(self.s.row(key, rs))[1] for key in keys}
@@ -142,12 +173,11 @@ class TopicsBenchSidebar(TopicsSidebar):
             self.assertAlmostEqual(after[key], before[key], delta=1, msg='%s moved with the Bench: %s, before %s' % (key, after, before))
 
     def no_bench_line(self):
-        """The failure message of a wait for the Bench line: what the Sidebar and the Topics files show instead."""
-        places = self.topics_dir/'open-places'
+        """The failure message of a wait for the Bench line: what the Sidebar and the Topic records show instead."""
         orders = sorted((r.get('order', 0), r['id'], r.get('guest', False)) for r in self.records().values()
                         if not r.get('settled_at'))
-        return ('with topics.in_play: 1, the Sidebar shows no Bench line: rows %s; open records %s; open-places %s'
-                % (self.s.ids(), orders, places.read_text() if places.exists() else None))
+        return ('with topics.in_play: 1, the Sidebar shows no Bench line: rows %s; open records %s; open places %s'
+                % (self.s.ids(), orders, self.store.open_places()))
 
     def line(self, rs):
         return self.s.row(LINE, rs).get('accessibilityLabel')
@@ -264,8 +294,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         too. The dump of a shown Bench lists the block over the Bench in no fixed order, so a check reads this."""
         cards = [(r.get('order', 0), r['id'][len(prefix) + 1:] + ('(G)' if r.get('guest') else ''))
                  for r in self.records().values() if r['id'].startswith(prefix + '-') and not r.get('settled_at')]
-        places = self.topics_dir/'open-places'
-        cards += [(p['order'], '_') for p in (json.loads(places.read_text()) if places.exists() else [])]
+        cards += [(p['order'], '_') for p in self.store.open_places()]
         return ' '.join(name for _, name in sorted(cards))
 
     def act_until(self, key, action, prefix, expected, message):

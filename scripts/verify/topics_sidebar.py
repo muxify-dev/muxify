@@ -7,15 +7,16 @@ reaches the Add Session palette without the row's context menu. New Topic opens 
 to test the empty-Topic view and its Add a Session button.
 """
 
-import json
 import os
 import subprocess
 import time
 import unittest
+from pathlib import Path
 
-from scripts.verify.sandbox import Sandbox, remove_topic, wait
+from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.topic_records import TopicRecords
 
-# The app reads tmux and the Topic files once per second.
+# The app reads tmux and the Topic records once per second.
 REFRESH_LIMIT = 2.0
 SHELL = '/bin/zsh -f'
 
@@ -32,7 +33,7 @@ class TopicsSidebar(unittest.TestCase):
     def setUpClass(cls):
         cls.s = s = Sandbox(cls.__module__.rsplit('.', 1)[-1])
         cls.addClassCleanup(s.teardown)
-        cls.topics_dir = s.root/'state/muxify/topics'
+        cls.store = TopicRecords(s.root/'state/muxify')
         # The sandbox sets XDG_STATE_HOME to state/, so Muxify puts every new Worktree here.
         cls.worktrees = s.root/'state/muxify/worktrees'
         cls.alpha = s.root/'projects/alpha'
@@ -47,7 +48,7 @@ class TopicsSidebar(unittest.TestCase):
         cls.acme = s.root/'projects/acme'
         bin_dir = s.root/'bin'
         zdot_dir = s.root/'zdot'
-        for directory in [cls.topics_dir, cls.alpha, cls.beta, s.root/'codex-home', bin_dir, zdot_dir]:
+        for directory in [cls.alpha, cls.beta, s.root/'codex-home', bin_dir, zdot_dir]:
             directory.mkdir(parents=True, exist_ok=True)
         (zdot_dir/'.zprofile').write_text('export PATH=' + str(bin_dir) + ':/usr/bin:/bin:/usr/sbin:/sbin\n')
         s.app_env['ZDOTDIR'] = str(zdot_dir)
@@ -79,7 +80,7 @@ class TopicsSidebar(unittest.TestCase):
         cls.config.write_text(cls.config_text)
         # A running tmux server at launch, as a user has; no check uses this Session.
         s.tmux('new-session', '-d', '-s', 'base', '-c', str(cls.beta), SHELL)
-        # Checks kill their Sessions and remove their Topic files when they end, so the Topic cards stay
+        # Checks kill their Sessions and remove their Topic records when they end, so the Topic cards stay
         # short enough to show in the Sidebar. A client that end_session cannot move, as the app's control client, then
         # moves to another Session in place of detaching.
         s.tmux('set-option', '-g', 'detach-on-destroy', 'off')
@@ -115,23 +116,17 @@ class TopicsSidebar(unittest.TestCase):
         if sid in self.s.tmux('list-clients', '-F', '#{session_id}').split():
             self.select_window('base:')
             self.s.show(self.s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}'))
+        socket = self.s.tmux('display-message', '-p', '#{socket_path}').strip()
+        self.assertTrue(Path(socket).resolve().is_relative_to(self.s.root.resolve()), socket)
         self.s.tmux_ok('kill-session', '-t', sid)
 
     def write_topic(self, topic_id, title, home, **fields):
-        # A plain write, no temporary file: the way a person or script writes a Topic file by hand.
-        path = self.topics_dir/(topic_id + '.json')
-        self.addCleanup(remove_topic, path)
-        with open(path, 'w') as handle:
-            handle.write(json.dumps(dict(id=topic_id, title=title, slug=topic_id, **fields)))
+        # As a script that changes the records: the file is replaced with one rename under the record lock.
+        self.addCleanup(self.store.remove, topic_id)
+        self.store.put(dict(id=topic_id, title=title, slug=topic_id, **fields))
 
     def records(self):
-        out = {}
-        for path in self.topics_dir.glob('*.json'):
-            try:
-                out[path.stem] = json.loads(path.read_text())
-            except json.JSONDecodeError:
-                pass
-        return out
+        return self.store.records()
 
     def topic_rows(self, rs):
         """Topic header rows in Sidebar order."""
@@ -214,7 +209,7 @@ class TopicsSidebar(unittest.TestCase):
         s.act('press', 'palette-accept')
         record = wait(lambda: [r for i, r in self.records().items() if i not in before and r.get('title') == title],
                       'no new Topic record for %r' % title, seconds=15)[0]
-        self.addCleanup(remove_topic, self.topics_dir/(record['id'] + '.json'))
+        self.addCleanup(self.store.remove, record['id'])
         s.wait_rows(lambda rs: 'Add a Session' in self.describe('palette-breadcrumb', rs),
                     'New Topic did not open Add a Session', seconds=15)
         s.act('press', 'palette-cancel')
@@ -325,8 +320,10 @@ class TopicsSidebar(unittest.TestCase):
         self.s.wait_rows(lambda rs: not self.expanded(key, rs), key + ' did not collapse')
 
     def remove_topics(self, prefix):
-        """Deletes the Topic files with the prefix and waits until their rows are gone, so later checks find their rows in view."""
-        for path in self.topics_dir.glob(prefix + '*.json'):
-            remove_topic(path)
+        """Deletes the Topic records with the prefix and waits until their rows are gone, so later checks find their rows in view."""
+        with self.store.held():
+            for topic_id in self.store.ids():
+                if topic_id.startswith(prefix):
+                    self.store.remove(topic_id)
         self.s.wait_rows(lambda rs: not any(key.startswith('topic-' + prefix) for key in self.s.ids(rs)),
                          'rows of the removed %s* Topics are still shown' % prefix)

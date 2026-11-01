@@ -84,6 +84,25 @@ final class CodexReportsTests: XCTestCase {
         XCTAssertTrue(Agent.runs(in: snapshot.panes[0]))
     }
 
+    func testOptionalReportFailureKeepsTheInventory() throws {
+        let inventory = pane("%1", conversation: first)
+        let snapshot = try Tmux.readSnapshot { arguments in
+            if arguments.first == "run-shell" { throw TmuxError.timedOut }
+            return inventory
+        }
+        XCTAssertTrue(snapshot.serverRunning)
+        XCTAssertEqual(snapshot.panes.map(\.id), ["%1"])
+        XCTAssertEqual(snapshot.panes[0].agentStatus, "")
+    }
+
+    func testReaderAddsReportsToTheInventory() throws {
+        let snapshot = try Tmux.readSnapshot { arguments in
+            arguments.first == "run-shell" ? report(first, status: "working") : pane("%1", conversation: first)
+        }
+        XCTAssertEqual(snapshot.panes[0].agentConversation, first)
+        XCTAssertEqual(snapshot.panes[0].agentStatus, "working")
+    }
+
     func testFinalInventoryReadsOnlyReportsForItsLiveCodexPanes() throws {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let directory = home.appendingPathComponent(".local/state/muxify/codex")

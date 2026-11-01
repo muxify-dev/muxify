@@ -133,7 +133,7 @@ class TopicsGroupsSidebar(TopicsSidebar):
         for number in range(17):
             self.write_topic('page-%02d' % number, 'Page %02d' % number, self.beta, settled_at='2030-01-%02dT00:00:00Z' % (number + 1))
         self.addCleanup(self.collapse, 'settled-topics')
-        # The app reads the Topic files once per quarter second, so one read can see the open Topics and not yet the
+        # The app reads the Topic records once per quarter second, so one read can see the open Topics and not yet the
         # Settled ones. Wait for the Settled header's count before the first reveal, which does not wait.
         self.s.wait_rows(lambda rs: (self.s.has('topic-above-24', rs) or self.s.has('topic-above-00', rs))
                          and '(17)' in self.s.row('settled-topics', rs).get('accessibilityLabel', ''),

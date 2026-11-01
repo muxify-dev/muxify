@@ -8,6 +8,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_cli
 """
 
+import fcntl
 import json
 import os
 import subprocess
@@ -15,6 +16,7 @@ import time
 import unittest
 
 from scripts.verify.sandbox import DEBUG_APP, Sandbox, wait
+from scripts.verify.topic_records import TopicRecords
 
 CLI = DEBUG_APP/'Contents/Resources/bin/muxify'
 
@@ -24,6 +26,7 @@ class TopicsCli(unittest.TestCase):
     def setUpClass(cls):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(s.teardown)
+        cls.store = TopicRecords(s.root/'state/muxify')
         cls.projects = s.root/'projects'
         (s.root/'config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(cls.projects) + '/*\n')
         s.tmux('new-session', '-d', '-s', 'base', '-c', str(s.root))
@@ -40,6 +43,63 @@ class TopicsCli(unittest.TestCase):
         added = self.muxify('topic', 'add-session', str(directory), '--topic', topic_id, pane=pane)
         self.assertEqual(added.returncode, 0, added.stderr)
         return topic_id
+
+    def test_browser_open_appends_before_exit_and_keeps_the_callers_server(self):
+        other = Sandbox('topics_cli_browser_target')
+        self.addCleanup(other.teardown)
+        other.tmux('new-session', '-d', '-s', 'browser-target')
+        pane = other.tmux('display-message', '-p', '#{pane_id}')
+        window = other.tmux('display-message', '-p', '#{window_id}')
+        socket = other.tmux('display-message', '-p', '#{socket_path}')
+        inherited = socket + ',0,0'
+        for url in ['https://first.invalid', 'https://second.invalid']:
+            result = self.muxify('browser', 'open', url, pane=pane, env={'TMUX': inherited})
+            self.assertEqual((result.returncode, result.stdout), (0, ''), result.stderr)
+        self.assertEqual(other.tmux_ok('show-options', '-wqv', '-t', window, '@muxify_open').stdout,
+                         ' https://first.invalid https://second.invalid\n')
+        self.assertEqual(self.s.tmux('show-options', '-wqv', '-t', '@0', '@muxify_open'), '')
+
+    def test_lists_work_without_a_writable_topic_state_directory(self):
+        blocked_state = self.s.root/'blocked-list-state'
+        blocked_state.write_text('not a directory')
+        absent_state = self.s.root/'absent-list-state'
+        for state in [blocked_state, absent_state]:
+            for args in [('agent', 'list', '--json'), ('session', 'list', '--json')]:
+                result = self.muxify(*args, pane='', env={'XDG_STATE_HOME': str(state)})
+                self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(absent_state.exists())
+
+    def test_lists_do_not_wait_for_a_topic_edit(self):
+        pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
+        made = self.muxify('topic', 'new', 'Edit in progress', pane=pane)
+        self.assertEqual(made.returncode, 0, made.stderr)
+        edit_lock = os.open(self.s.root/'state/muxify/topic-edits.lock', os.O_RDONLY | os.O_CREAT, 0o644)
+        self.addCleanup(os.close, edit_lock)
+        fcntl.flock(edit_lock, fcntl.LOCK_EX)
+        for args in [('agent', 'list', '--json'), ('session', 'list', '--json')]:
+            start = time.monotonic()
+            result = self.muxify(*args, pane=pane)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertLess(time.monotonic() - start, 5, f'{" ".join(args)} waited for the edit lock')
+
+    def test_cli_reads_do_not_run_unread_or_the_record_upgrade(self):
+        project = self.projects/'cli-no-rules'
+        project.mkdir(parents=True)
+        pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
+        topic = self.new_topic('No CLI rules', project, pane=pane)
+        agent = self.fake_agent('cli-no-rules/no-cli-rules', 'done')
+        self.s.tmux('set-option', '-p', '-t', agent, '@muxify_agent_seen_status', 'working')
+        records = TopicRecords(self.s.root/'state/muxify')
+        record = records.get(topic)
+        record['snoozed_until'] = '2020-01-01T00:00:00Z'
+        records.put(record)
+        before = records.path.read_bytes()
+        for args in [('agent', 'list', '--json'), ('session', 'list', '--json'), ('topic', 'show', '--topic', topic)]:
+            result = self.muxify(*args, pane=pane)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(records.path.read_bytes(), before)
+        self.assertEqual(self.s.tmux('show-options', '-pqv', '-t', agent, '@muxify_agent_seen_status'), 'working')
+        self.assertEqual(self.s.tmux('show-options', '-pqv', '-t', agent, '@muxify_agent_unread'), '')
 
     def test_help_lists_each_verb_once_and_every_verb_gives_help(self):
         result = self.muxify('--help', pane='')
@@ -65,7 +125,7 @@ class TopicsCli(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
             result = self.muxify('topic', 'forget', '--topic', topic, '--json', pane=pane)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertFalse((self.s.root/'state/muxify/topics'/(topic + '.json')).exists())
+            self.assertIsNone(self.store.get(topic))
             self.assertNotEqual(self.s.tmux_ok('has-session', '-t', '=cli-forget/forget-cli').returncode, 0)
 
     def test_topic_new_outside_tmux_makes_an_empty_topic_that_topic_list_shows(self):
@@ -73,7 +133,7 @@ class TopicsCli(unittest.TestCase):
         made = self.muxify('topic', 'new', 'CLI check', '--json', pane='')
         self.assertEqual(made.returncode, 0, made.stderr)
         topic_id = json.loads(made.stdout)['changed']['topic_id']
-        record = json.loads((self.s.root/'state/muxify/topics'/(topic_id + '.json')).read_text())
+        record = self.store.get(topic_id)
         self.assertEqual((record.get('title'), record.get('sessions', [])), ('CLI check', []), record)
         self.assertEqual(self.s.tmux('list-sessions', '-F', '#{session_id}'), sessions, 'topic new started a Session')
 
@@ -83,14 +143,14 @@ class TopicsCli(unittest.TestCase):
 
     def test_each_old_form_of_topic_new_fails_and_names_the_new_form(self):
         pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
-        records = sorted((self.s.root/'state/muxify/topics').glob('*.json')) if (self.s.root/'state/muxify/topics').exists() else []
+        records = self.store.ids()
         for args, named in [(['topic', 'new'], 'muxify window move --new-topic'),
                             (['topic', 'new', '--pane', pane], 'muxify window move --new-topic'),
                             (['topic', 'new', 'Old form', '--directory', str(self.s.root)], 'muxify topic add-session')]:
             result = self.muxify(*args, pane=pane)
             self.assertEqual(result.returncode, 2, args)
             self.assertIn(named, result.stderr, args)
-        after = sorted((self.s.root/'state/muxify/topics').glob('*.json')) if (self.s.root/'state/muxify/topics').exists() else []
+        after = self.store.ids()
         self.assertEqual(after, records, 'an old form wrote a Topic record')
 
     def test_window_move_new_topic_moves_the_window_into_a_new_titled_topic(self):
@@ -101,7 +161,7 @@ class TopicsCli(unittest.TestCase):
         self.assertEqual(moved.returncode, 0, moved.stderr)
         topic_id = json.loads(moved.stdout)['changed']['topic_id']
         self.assertEqual(self.s.tmux('show-options', '-qv', '-t', window, '@muxify_topic'), topic_id, 'the Window is not in the new Topic')
-        record = json.loads((self.s.root/'state/muxify/topics'/(topic_id + '.json')).read_text())
+        record = self.store.get(topic_id)
         self.assertEqual(record.get('title'), 'Moved here', record)
         self.assertEqual(self.s.tmux('show-options', '-qv', '-t', '=base:', '@muxify_topic'), '', 'the caller Window stays outside')
 
@@ -177,6 +237,13 @@ class TopicsCli(unittest.TestCase):
         self.assertEqual([(e['index'], e['role'], e['text']) for e in lines[1:]],
                          [(0, 'user', 'run the tests'), (3, 'assistant', 'The tests pass.')], read.stdout)
         self.assertIn('2 tool Entries hidden', read.stderr)
+
+        blocked_state = self.s.root/'blocked-conversation-state'
+        blocked_state.write_text('not a directory')
+        read = self.muxify('agent', 'conversation', agent, '--json', pane=pane,
+                           env={'CLAUDE_CONFIG_DIR': str(claude), 'XDG_STATE_HOME': str(blocked_state)})
+        self.assertEqual(read.returncode, 0, read.stderr)
+        self.assertEqual(json.loads(read.stdout.splitlines()[0])['conversation'], 'conv-check')
 
         listed = self.muxify('topic', 'show', '--conversations', pane=agent)
         self.assertEqual(listed.returncode, 0, listed.stderr)
@@ -275,7 +342,7 @@ class TopicsCli(unittest.TestCase):
         self.assertEqual(added.returncode, 0, added.stderr)
         worktree = self.s.root/'state/muxify/worktrees/cli-wt-repo/worktree-check'
         self.assertTrue(worktree.is_dir(), 'add-session --worktree made no Worktree folder at %s' % worktree)
-        record = json.loads((self.s.root/'state/muxify/topics'/(topic_id + '.json')).read_text())
+        record = self.store.get(topic_id)
         session = next((s for s in record.get('sessions', []) if s.get('branch') == 'worktree-check'), None)
         self.assertIsNotNone(session, 'the record remembers no Session on the Topic branch: %r' % record)
         self.assertIs(session.get('worktree_created'), True, session)
@@ -297,7 +364,7 @@ class TopicsCli(unittest.TestCase):
         topic_id = self.new_topic('Reopen check', str(self.projects/'cli-reopen'), pane=pane)
         renamed = self.muxify('topic', 'rename', 'Reopen renamed', '--topic', topic_id, pane=pane)
         self.assertEqual((renamed.returncode, renamed.stdout.strip()), (0, topic_id), renamed.stderr)
-        record = json.loads((self.s.root/'state/muxify/topics'/(topic_id + '.json')).read_text())
+        record = self.store.get(topic_id)
         self.assertEqual(record.get('title'), 'Reopen renamed', record)
 
         for verb in ('reopen', 'start-fresh'):
@@ -380,7 +447,7 @@ class TopicsCli(unittest.TestCase):
         self.assertEqual(added.returncode, 0, added.stderr)
         worktree = self.s.root/'state/muxify/worktrees/cli-incident/hover-titles'
         self.assertEqual(self.git('symbolic-ref', '--short', 'HEAD', cwd=worktree), 'hover-titles')
-        record = json.loads((self.s.root/'state/muxify/topics'/(topic_id + '.json')).read_text())
+        record = self.store.get(topic_id)
         self.assertEqual([(s.get('branch'), s.get('worktree_created'), s.get('base')) for s in record['sessions']],
                          [('hover-titles', True, commit)], record)
 
@@ -464,7 +531,7 @@ class TopicsCli(unittest.TestCase):
         pane = self.s.tmux('display-message', '-p', '-t', '=cli-kill/kill-check:', '#{pane_id}')
         self.s.tmux('respawn-pane', '-k', '-t', pane, str(CLI) + ' session kill')
         wait(lambda: self.s.tmux_ok('has-session', '-t', '=cli-kill/kill-check').returncode != 0, 'session kill from its own Pane left the Session')
-        record = json.loads((self.s.root/'state/muxify/topics'/(topic_id + '.json')).read_text())
+        record = self.store.get(topic_id)
         self.assertEqual((record.get('settled_at'), record.get('sessions', [])), (None, []), 'the Topic is not open and Empty')
 
         (self.projects/'cli-kill-json').mkdir(parents=True)
@@ -544,7 +611,7 @@ class TopicsCli(unittest.TestCase):
         done = self.fake_agent('cli-read/read-check', 'done')
         working = self.fake_agent('cli-read/read-check', 'working')
         other = self.fake_agent('base', 'done')
-        record_unread = lambda: json.loads((self.s.root/'state/muxify/topics'/(topic_id + '.json')).read_text()).get('unread', False)
+        record_unread = lambda: self.store.get(topic_id).get('unread', False)
         agent_unread = lambda pane: self.s.tmux('display-message', '-p', '-t', pane, '#{@muxify_agent_unread}') == '1'
         state = lambda: (record_unread(), agent_unread(done), agent_unread(working), agent_unread(other))
 

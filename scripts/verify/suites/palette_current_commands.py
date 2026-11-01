@@ -5,7 +5,6 @@ accessibility actions for the keys. A press on a row of a check step is a click,
 (UI/CommandPaletteView.swift, UI/PaletteCheck.swift).
 """
 
-import json
 import unittest
 
 from scripts.verify.palette_fixture import PaletteFixture
@@ -20,11 +19,11 @@ class PaletteCurrentCommands(PaletteFixture):
         self.s.act('action', 'palette-search', 'Close')
 
     def current_topic(self, name):
-        """A Topic with a live Session that the client shows; returns its record file."""
+        """A Topic with a live Session that the client shows; returns its id."""
         window = self.topic(name, session=True)
         self.s.wait_rows(lambda rs: self.s.has('topic-' + name, rs), 'Topic did not appear')
         self.select(window)
-        return self.topics/(name + '.json')
+        return name
 
     def test_move_scopes_keep_back_and_cancel_without_tmux_changes(self):
         before = self.s.tmux('list-panes', '-a', '-F', '#{session_id} #{window_id} #{pane_id}')
@@ -34,11 +33,11 @@ class PaletteCurrentCommands(PaletteFixture):
             self.s.wait_rows(lambda rs: self.text('palette-breadcrumb', rs).startswith(scope + ' '), 'Wrong scope for ' + title)
             self.back(title)
         self.assertEqual(self.s.tmux('list-panes', '-a', '-F', '#{session_id} #{window_id} #{pane_id}'), before)
-        self.assertEqual(list(self.topics.glob('*.json')), [])
+        self.assertEqual(self.store.ids(), [])
 
     def test_topic_steps_keep_back_and_cancel_without_writes(self):
-        path = self.current_topic('current-commands')
-        before = path.read_text()
+        topic = self.current_topic('current-commands')
+        original = self.store.get(topic)
         for title, step in [('Add a Session', 'Add a Session'), ('Settle Topic', 'Settle'), ('Forget Topic', 'Forget'),
                             ('Rename Topic', 'Rename')]:
             self.run_command(title)
@@ -47,8 +46,7 @@ class PaletteCurrentCommands(PaletteFixture):
                 # Rename starts with the title in the field, and Back works only in an empty field.
                 self.s.act('set', 'palette-search', '')
             self.back(title)
-        after = json.loads(path.read_text())
-        original = json.loads(before)
+        after = self.store.get(topic)
         for key in ['title', 'settled_at']:
             self.assertEqual(after.get(key), original.get(key), key + ' changed on Cancel')
 
@@ -150,12 +148,12 @@ class PaletteCurrentCommands(PaletteFixture):
         s.act('action', 'palette-search', 'Accept')
         wait(lambda: self.record('note-row').get('note') == 'Ship it after review', 'the Set Topic Note action did not save one line')
 
-    def remembered(self, path):
+    def remembered(self, name):
         """Waits until the app records the Topic's live Session, so that a removal has something to forget."""
-        wait(lambda: json.loads(path.read_text()).get('sessions'), 'the Topic did not remember its Session')
+        wait(lambda: self.record(name).get('sessions'), 'the Topic did not remember its Session')
 
-    def assert_empty_topic(self, name, path, sessions):
-        self.assertEqual(json.loads(path.read_text()).get('sessions'), [], 'the Topic still remembers the Session')
+    def assert_empty_topic(self, name, sessions):
+        self.assertEqual(self.record(name).get('sessions'), [], 'the Topic still remembers the Session')
         card = self.s.wait_rows(lambda rs: 'Empty' in self.s.row('topic-' + name, rs).get('accessibilityValue', ''),
                                 'the Topic card does not show Empty')
         self.assertNotIn('Dormant', self.s.row('topic-' + name, card).get('accessibilityValue', ''))
@@ -164,17 +162,15 @@ class PaletteCurrentCommands(PaletteFixture):
         self.assertEqual(self.s.tmux('list-sessions', '-F', '#{session_name}').split(), sessions, 'going to the Topic made a Session')
 
     def test_remove_session_from_topic_leaves_the_topic_empty_and_the_session_live(self):
-        path = self.current_topic('remove-empty')
-        self.remembered(path)
+        self.remembered(self.current_topic('remove-empty'))
         self.run_command('Remove Session from Topic')
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Remove Session from Topic did not close Commands')
         wait(lambda: self.s.tmux('show-options', '-qv', '-t', 'remove-empty', '@muxify_topic') == '',
              'the Session is still in the Topic')
-        self.assert_empty_topic('remove-empty', path, self.s.tmux('list-sessions', '-F', '#{session_name}').split())
+        self.assert_empty_topic('remove-empty', self.s.tmux('list-sessions', '-F', '#{session_name}').split())
 
     def test_command_return_on_remove_session_from_topic_kills_the_session_after_a_confirm_step(self):
-        path = self.current_topic('remove-kill')
-        self.remembered(path)
+        self.remembered(self.current_topic('remove-kill'))
         self.search('Remove Session from Topic')
         self.s.wait_rows(lambda rs: 'Remove and Kill' in self.text('palette-note', rs),
                          'the note does not show the ⌘↩ variant')
@@ -184,7 +180,7 @@ class PaletteCurrentCommands(PaletteFixture):
         self.assertEqual(self.s.tmux_ok('has-session', '-t', '=remove-kill').returncode, 0, 'the confirm step killed the Session')
         self.s.act('action', 'palette-search', 'Confirm')
         wait(lambda: self.s.tmux_ok('has-session', '-t', '=remove-kill').returncode != 0, 'Remove and Kill did not kill the Session')
-        self.assert_empty_topic('remove-kill', path, self.s.tmux('list-sessions', '-F', '#{session_name}').split())
+        self.assert_empty_topic('remove-kill', self.s.tmux('list-sessions', '-F', '#{session_name}').split())
 
     def test_commands_omit_unavailable_topic_and_tab_actions(self):
         for title in ['Add a Session', 'Settle Topic', 'Move Pane with Active Tab',

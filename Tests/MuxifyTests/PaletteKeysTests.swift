@@ -8,12 +8,12 @@ final class PaletteKeysTests: XCTestCase {
             palette.toggle(config)
             palette.back()
             XCTAssertEqual(palette.current?.name, config.name, "⌫ closed \(config.name), and only ⎋ closes")
-            palette.close(restoringFocus: false)
+            palette.close()
         }
         palette.begin(.text(.renameTopic(TopicRecord(id: "t"))))
         palette.back()
         XCTAssertTrue(palette.isOpen, "⌫ closed an Action that opened at its first step")
-        palette.close(restoringFocus: false)
+        palette.close()
     }
 
     @MainActor func testBackspaceInTheEmptyFieldOfAnActionGoesBackToTheSearchThatStartedIt() {
@@ -24,7 +24,7 @@ final class PaletteKeysTests: XCTestCase {
         palette.back()
         XCTAssertEqual(palette.current?.name, CommandPaletteConfig.commands.name)
         XCTAssertEqual(palette.query, "New Topic")
-        palette.close(restoringFocus: false)
+        palette.close()
     }
 
     @MainActor func testEscapeHidesTheActionsMenuBeforeItClosesThePalette() {

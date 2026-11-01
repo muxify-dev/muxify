@@ -6,10 +6,10 @@ The driver cannot type keys. run_command opens Commands from its View menu item,
 field's accessibility actions for the keys (UI/CommandPaletteView.swift).
 """
 
-import json
 import unittest
 
-from scripts.verify.sandbox import Sandbox, remove_topic, wait
+from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.topic_records import TopicRecords
 
 SHELL = '/bin/zsh -f'
 
@@ -32,8 +32,7 @@ class PaletteFixture(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         cls.project = s.root/'projects/palette'
         cls.project.mkdir(parents=True)
-        cls.topics = s.root/'state/muxify/topics'
-        cls.topics.mkdir(parents=True, exist_ok=True)
+        cls.store = TopicRecords(s.root/'state/muxify')
         cls.config = s.root/'config/muxify/config.yaml'
         cls.config.write_text(cls.config_text())
         cls.base = s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', 'base', '-c', str(cls.project), SHELL)
@@ -52,12 +51,11 @@ class PaletteFixture(unittest.TestCase):
 
     def topic(self, name, order=None, session=False, **fields):
         """A Topic record, and with `session` a live Session in it; returns that Session's Window."""
-        path = self.topics/(name + '.json')
         record = dict(id=name, title=name, slug=name)
         if order is not None:
             record['order'] = order
-        path.write_text(json.dumps(dict(record, **fields)))
-        self.addCleanup(remove_topic, path)
+        self.store.put(dict(record, **fields))
+        self.addCleanup(self.store.remove, name)
         if not session:
             return None
         window = self.s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', name, '-c', str(self.project), SHELL)
@@ -67,10 +65,10 @@ class PaletteFixture(unittest.TestCase):
         return window
 
     def records(self):
-        return [json.loads(path.read_text()) for path in self.topics.glob('*.json')]
+        return list(self.store.records().values())
 
     def record(self, name):
-        return json.loads((self.topics/(name + '.json')).read_text())
+        return self.store.get(name)
 
     def text(self, key, rs):
         row = self.s.row(key, rs)
