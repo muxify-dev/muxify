@@ -430,7 +430,14 @@ enum TestDriver {
         }
         if name == "responder" {
             let classes = NSApp.windows.filter(\.isVisible).compactMap { $0.firstResponder.map { String(describing: type(of: $0)) } }
-            return ["rows": [], "pressed": true, "responders": classes]
+            // A first responder that is a field editor: its frame, the part of it that its field shows, and the
+            // field's frame, all in the field's points. An editor taller than its field draws text the field cuts off.
+            let editors: [[String: String]] = NSApp.windows.filter(\.isVisible).compactMap { window in
+                guard let editor = window.firstResponder as? NSTextView, editor.isFieldEditor else { return nil }
+                return ["frame": NSStringFromRect(editor.frame), "visible": NSStringFromRect(editor.visibleRect),
+                        "field": NSStringFromRect((editor.delegate as? NSTextField)?.frame ?? .zero)]
+            }
+            return ["rows": [], "pressed": true, "responders": classes, "editors": editors]
         }
         let elements = dump()
         for element in elements {
@@ -446,8 +453,13 @@ enum TestDriver {
                     // The element is the field's cell; the field is its control view.
                     let field = object as? NSTextField ?? (object as? NSCell)?.controlView as? NSTextField
                     if let editor = field?.currentEditor() as? NSTextView {
-                        editor.string = text
-                        editor.didChangeText()
+                        if command["paste"] as? Bool == true {
+                            // As ⌘V: the text goes in at the caret, which moves after it.
+                            editor.insertText(text, replacementRange: editor.selectedRange())
+                        } else {
+                            editor.string = text
+                            editor.didChangeText()
+                        }
                     } else {
                         _ = object.perform(Selectors.setValue, with: text)
                         // A hidden field's binding hears only its delegate, as when the user types.
