@@ -2,7 +2,8 @@ import Foundation
 import MuxifyCore
 
 enum CLICommand: Equatable {
-    case help
+    /// The help for the verbs whose words start with `scope`. An empty scope asks for every verb.
+    case help(scope: [String])
     case browserAvailable(pane: String?)
     /// `window` is a Window or a Pane id. With `tab`, the one URL loads in that Tab; without it, each URL opens a Tab.
     case browserOpen(window: String, tab: UUID?, urls: [String], json: Bool)
@@ -18,22 +19,28 @@ enum CLICommand: Equatable {
 
     static var usage: String { CLIVerbs.usage }
 
-    /// A help option before `--` asks for help, on any verb of a noun that the command line knows.
+    /// A help option before `--` asks for help on the verbs that the words before it name. A usage error shows the
+    /// help of the verb that the words name, else of the verbs that they start, so `muxify browser` shows only Browser.
     init(arguments: [String], environment: [String: String] = ProcessInfo.processInfo.environment, now: Date = Date()) throws {
         let args = ArraySlice(arguments)
         let options = args.prefix { $0 != "--" }
+        let scope = CLIVerbs.scope(of: args)
         guard let noun = args.first, !["-h", "--help", "help"].contains(noun) else {
-            guard args.isEmpty else { self = .help; return }
-            throw CLIError.usage
+            guard args.isEmpty else { self = .help(scope: []); return }
+            throw CLIError.usage(for: [])
         }
-        if options.contains(where: { $0 == "-h" || $0 == "--help" }), CLIVerbs.all.contains(where: { $0.words[0] == noun }) {
-            self = .help
+        if options.contains(where: { $0 == "-h" || $0 == "--help" }), !scope.isEmpty {
+            self = .help(scope: scope)
             return
         }
-        guard let (verb, rest) = CLIVerbs.verb(for: args) else { throw CLIError.usage }
-        let parsed = try ParsedArguments(rest, for: verb, environment: environment, now: now)
-        if let form = verb.removed.first(where: { $0.matches(parsed) }) { throw CLIError(form.message(parsed), exitCode: 2) }
-        self = try verb.build(parsed)
+        guard let (verb, rest) = CLIVerbs.verb(for: args) else { throw CLIError.usage(for: scope) }
+        do {
+            let parsed = try ParsedArguments(rest, for: verb, environment: environment, now: now)
+            if let form = verb.removed.first(where: { $0.matches(parsed) }) { throw CLIError(form.message(parsed), exitCode: 2) }
+            self = try verb.build(parsed)
+        } catch let error as CLIError where error.isUsage {
+            throw CLIError.usage(for: verb.words)
+        }
     }
 
     @discardableResult
@@ -44,7 +51,7 @@ enum CLICommand: Equatable {
             let result = try BrowserAvailability.check(pane: pane, using: runner)
             print(result.rawValue)
             return result.exitCode
-        case .help: print(Self.usage)
+        case .help(let scope): print(CLIVerbs.usage(for: scope))
         case .extensionsInstall:
             // Installed links point into the app bundle. Resolve them before
             // locating the installer beside its bundled bin directory.
@@ -117,11 +124,21 @@ enum CLICommand: Equatable {
 struct CLIError: LocalizedError {
     let message: String
     let exitCode: Int32
+    /// The message is help text, which the command line prints without the `muxify: ` prefix.
+    let isUsage: Bool
 
     init(_ message: String, exitCode: Int32 = 1) {
+        self.init(message, exitCode: exitCode, isUsage: false)
+    }
+
+    private init(_ message: String, exitCode: Int32, isUsage: Bool) {
         self.message = message
         self.exitCode = exitCode
+        self.isUsage = isUsage
     }
+
+    /// A usage error that shows the help of the verbs whose words start with `scope`.
+    static func usage(for scope: [String]) -> CLIError { CLIError(CLIVerbs.usage(for: scope), exitCode: 2, isUsage: true) }
 
     /// What the Topic service could not do, then how far it got.
     init(_ failure: TopicFailure) {

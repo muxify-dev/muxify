@@ -51,14 +51,14 @@ final class CLIVerbsTests: XCTestCase {
             XCTAssertEqual(try CLICommand(arguments: arguments, environment: inside), expected, "\(arguments)")
         }
         let errors: [([String], String)] = [
-            (["topic", "rename"], CLIVerbs.usage),
-            (["topic", "rename", " "], CLIVerbs.usage),
+            (["topic", "rename"], CLIVerbs.usage(for: ["topic", "rename"])),
+            (["topic", "rename", " "], CLIVerbs.usage(for: ["topic", "rename"])),
             (["topic", "reopen"], "topic reopen takes the Topic: --topic <id|label>. A Dormant or Settled Topic has no Pane."),
             (["topic", "start-fresh", "--pane", "%3"], "topic start-fresh does not take --pane; name the target with --topic <id|label>"),
-            (["session", "remove-from-topic", "--remove-worktree"], CLIVerbs.usage),
-            (["session", "remove-from-topic", "--window", "@1"], CLIVerbs.usage),
-            (["session", "lock", "--pane", "%3"], CLIVerbs.usage),
-            (["window", "zoom", "extra"], CLIVerbs.usage),
+            (["session", "remove-from-topic", "--remove-worktree"], CLIVerbs.usage(for: ["session", "remove-from-topic"])),
+            (["session", "remove-from-topic", "--window", "@1"], CLIVerbs.usage(for: ["session", "remove-from-topic"])),
+            (["session", "lock", "--pane", "%3"], CLIVerbs.usage(for: ["session", "lock"])),
+            (["window", "zoom", "extra"], CLIVerbs.usage(for: ["window", "zoom"])),
             (["window", "remove-from-topic"],
              "window remove-from-topic takes the destination: --session <name|id> of a No Topic Session, or --new-session"),
             (["window", "remove-from-topic", "--session", "a", "--new-session"],
@@ -181,9 +181,9 @@ final class CLIVerbsTests: XCTestCase {
             (["window", "move", "--before", "@3", "--topic", "Fix"], oneDestination),
             (["window", "move", "--before", "3"], "--before takes a tmux Window id, e.g. @3"),
             (["window", "move", "--after", "%3"], "--after takes a tmux Window id, e.g. @3"),
-            (["window", "move", "--before", "@3", "--session", "notes"], CLIVerbs.usage),
-            (["window", "move", "--before", "@3", "--new-session"], CLIVerbs.usage),
-            (["window", "move", "--before", "@3", "title"], CLIVerbs.usage),
+            (["window", "move", "--before", "@3", "--session", "notes"], CLIVerbs.usage(for: ["window", "move"])),
+            (["window", "move", "--before", "@3", "--new-session"], CLIVerbs.usage(for: ["window", "move"])),
+            (["window", "move", "--before", "@3", "title"], CLIVerbs.usage(for: ["window", "move"])),
         ]
         for (arguments, message) in errors {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in

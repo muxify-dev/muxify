@@ -538,7 +538,7 @@ extension RequestInvocation {
         var isDirectory: ObjCBool = false
         let folder = Folder.local(path)
         guard FileManager.default.fileExists(atPath: folder.real, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw CLIError.usage
+            throw CLIError("no directory '\(path)'", exitCode: 2)
         }
         return folder
     }

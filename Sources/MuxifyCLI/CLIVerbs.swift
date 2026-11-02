@@ -11,24 +11,44 @@ enum CLIVerbs {
             .map { ($0, arguments.dropFirst($0.words.count)) }
     }
 
-    static let usage: String = {
-        let synopses = all.enumerated().map { index, verb in
+    /// The help for every verb.
+    static let usage = usage(for: [])
+
+    /// The help for the verbs whose words start with `scope`: one verb, the verbs of one noun, or all of them.
+    static func usage(for scope: [String]) -> String {
+        let verbs = all.filter { $0.words.starts(with: scope) }
+        let synopses = verbs.enumerated().map { index, verb in
             let lead = (index == 0 ? "usage: " : "       ") + "muxify " + verb.path.rawValue
             let indent = String(repeating: " ", count: lead.count + 1)
             return verb.synopsis.isEmpty ? lead : lead + " " + verb.synopsis.replacingOccurrences(of: "\n", with: "\n" + indent)
         }
         let column = 15
-        let paragraphs = all.map { verb in
+        let paragraphs = verbs.map { verb in
             let lines = verb.help.split(separator: "\n", omittingEmptySubsequences: false)
             let indent = String(repeating: " ", count: column)
             let first = verb.path.rawValue.count < column ? verb.path.rawValue.padding(toLength: column, withPad: " ", startingAt: 0) + lines[0]
                                                   : verb.path.rawValue + "\n" + indent + lines[0]
             return ([first] + lines.dropFirst().map { indent + $0 }).joined(separator: "\n")
         }
-        return (synopses + [""] + paragraphs + [""] + [footer]).joined(separator: "\n")
-    }()
+        var footer: [String] = []
+        if verbs.contains(where: { !$0.targets.isEmpty }) { footer.append(targetFooter) }
+        if verbs.contains(where: { $0.path == .windowMove }) { footer.append(bindingFooter) }
+        return (synopses + [""] + paragraphs + (footer.isEmpty ? [] : [""] + [footer.joined(separator: "\n\n")])).joined(separator: "\n")
+    }
 
-    private static let footer = """
+    /// The words of `arguments` that name verbs: the longest run from the start that begins the words of a verb.
+    /// `browser` names the Browser verbs; `browser open` names one; `unknown` names none, so the help shows them all.
+    static func scope(of arguments: ArraySlice<String>) -> [String] {
+        var scope: [String] = []
+        for word in arguments {
+            let next = scope + [word]
+            guard all.contains(where: { $0.words.starts(with: next) }) else { break }
+            scope = next
+        }
+        return scope
+    }
+
+    private static let targetFooter = """
     A Topic command acts on this Pane, or on the target that you name:
                      --topic <id|label>  an open Topic, e.g. --topic "Fix login"
                      --window <id>       a tmux Window, e.g. --window @12
@@ -36,9 +56,9 @@ enum CLIVerbs {
                      --pane <id>         a tmux Pane, e.g. --pane %3
     A command that changes something prints the id of each Topic that it changes, else the Window or Session it makes or renames.
                      --json              print the full result as one line of JSON
-
-    Optional tmux binding: bind T run-shell 'muxify window move --new-topic --pane #{pane_id} >/dev/null'
     """
+
+    private static let bindingFooter = "Optional tmux binding: bind T run-shell 'muxify window move --new-topic --pane #{pane_id} >/dev/null'"
 
     /// The options of every Browser command that acts on a Tab.
     private static let agentOptions: [CLIOption] = [.value("--window", aliases: ["-w"]), .value("--tab")]

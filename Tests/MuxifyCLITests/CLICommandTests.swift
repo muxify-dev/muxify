@@ -4,22 +4,50 @@ import MuxifyCore
 
 final class CLICommandTests: XCTestCase {
     func testHelpDoesNotNeedTmux() throws {
-        for arguments in [["--help"], ["-h"], ["help"], ["browser", "--help"],
-                          ["browser", "open", "--help"], ["session", "-h"], ["session", "open", "--help"],
-                          ["extensions", "--help"], ["extensions", "install", "--help"]] {
-            XCTAssertEqual(try CLICommand(arguments: arguments, environment: [:]), .help)
+        let cases: [([String], [String])] = [
+            (["--help"], []), (["-h"], []), (["help"], []), (["browser", "--help"], ["browser"]),
+            (["browser", "open", "--help"], ["browser", "open"]), (["session", "-h"], ["session"]),
+            (["session", "open", "--help"], ["session", "open"]), (["extensions", "--help"], ["extensions"]),
+            (["extensions", "install", "--help"], ["extensions", "install"]), (["browser", "unknown", "--help"], ["browser"]),
+        ]
+        for (arguments, scope) in cases {
+            XCTAssertEqual(try CLICommand(arguments: arguments, environment: [:]), .help(scope: scope), "\(arguments)")
         }
     }
 
-    func testIncompleteAndUnknownCommandsReturnUsage() {
-        for arguments in [[], ["unknown"], ["browser"], ["browser", "unknown"], ["browser", "open"],
-                          ["browser", "open", "--window"], ["session"], ["session", "close"], ["session", "open"],
-                          ["extensions"], ["extensions", "unknown"]] {
-            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: [:])) { error in
-                XCTAssertEqual((error as? CLIError)?.exitCode, 2)
-                XCTAssertEqual(error.localizedDescription, CLICommand.usage)
+    func testIncompleteAndUnknownCommandsReturnTheUsageOfWhatTheyName() {
+        let cases: [([String], [String])] = [
+            ([], []), (["unknown"], []), (["browser"], ["browser"]), (["browser", "unknown"], ["browser"]),
+            (["browser", "open"], ["browser", "open"]), (["browser", "open", "--window"], ["browser", "open"]),
+            (["session"], ["session"]), (["session", "close"], ["session"]), (["session", "open"], ["session", "open"]),
+            (["extensions"], ["extensions"]), (["extensions", "unknown"], ["extensions"]),
+        ]
+        for (arguments, scope) in cases {
+            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: [:]), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
+                XCTAssertEqual((error as? CLIError)?.isUsage, true, "\(arguments)")
+                XCTAssertEqual(error.localizedDescription, CLIVerbs.usage(for: scope), "\(arguments)")
             }
         }
+    }
+
+    func testHelpShowsOnlyTheVerbsThatTheWordsName() {
+        let browser = CLIVerbs.usage(for: ["browser"])
+        XCTAssertTrue(browser.hasPrefix("usage: muxify browser open"), browser)
+        XCTAssertTrue(browser.contains("muxify browser available"), browser)
+        XCTAssertFalse(browser.contains("muxify topic"), browser)
+        XCTAssertFalse(browser.contains("Optional tmux binding"), browser)
+
+        let open = CLIVerbs.usage(for: ["browser", "open"])
+        XCTAssertEqual(open.components(separatedBy: "muxify ").count - 1, 1, open)
+
+        let move = CLIVerbs.usage(for: ["window", "move"])
+        XCTAssertTrue(move.contains("--topic <id|label>  an open Topic"), move)
+        XCTAssertTrue(move.contains("Optional tmux binding"), move)
+        XCTAssertFalse(move.contains("muxify window zoom"), move)
+
+        let all = CLIVerbs.usage
+        for verb in CLIVerbs.all { XCTAssertTrue(all.contains("muxify " + verb.path.rawValue), verb.path.rawValue) }
     }
 
     func testBrowserTargetsCallingPaneAndKeepsURLsSeparate() throws {
@@ -298,17 +326,17 @@ final class CLICommandTests: XCTestCase {
         for (arguments, environment, expected) in cases {
             XCTAssertEqual(try CLICommand(arguments: ["window", "move"] + arguments, environment: environment), expected, "\(arguments)")
         }
-        XCTAssertEqual(try CLICommand(arguments: ["window", "move", "--help"], environment: [:]), .help)
+        XCTAssertEqual(try CLICommand(arguments: ["window", "move", "--help"], environment: [:]), .help(scope: ["window", "move"]))
         let oneDestination = "window move takes one destination: --topic <id|label>, --new-topic [\"title\"], --new-window [\"title\"], "
             + "--before <window> or --after <window>"
         let errors: [([String], [String: String], String)] = [
-            (["window"], inside, CLICommand.usage), (["window", "list"], inside, CLICommand.usage),
-            (["window", "move", "--topic"], inside, CLICommand.usage),
+            (["window"], inside, CLIVerbs.usage(for: ["window"])), (["window", "list"], inside, CLIVerbs.usage(for: ["window"])),
+            (["window", "move", "--topic"], inside, CLIVerbs.usage(for: ["window", "move"])),
             (["window", "move", "Fix"], inside, oneDestination),
             (["window", "move"], inside, oneDestination),
             (["window", "move", "--topic", "Fix", "--new-topic"], inside,
              oneDestination),
-            (["window", "move", "--new-topic", "a", "b"], inside, CLICommand.usage),
+            (["window", "move", "--new-topic", "a", "b"], inside, CLIVerbs.usage(for: ["window", "move"])),
             (["window", "move", "--new-window", "--window", "@1"], inside,
              "window move --new-window does not take --window; name the target with --pane <id>"),
             (["window", "move", "--topic", ""], inside, "--topic takes the id or label of an open Topic"),
@@ -333,10 +361,10 @@ final class CLICommandTests: XCTestCase {
                        .request(RequestInvocation(command: .lock(true), target: nil, caller: caller, output: .text, paths: paths)))
         XCTAssertEqual(try CLICommand(arguments: ["session", "unlock", "--session", "my notes", "--json"], environment: outside),
                        .request(RequestInvocation(command: .lock(false), target: .sessionName("my notes"), caller: nil, output: .json, paths: paths)))
-        XCTAssertEqual(try CLICommand(arguments: ["session", "lock", "--help"], environment: [:]), .help)
+        XCTAssertEqual(try CLICommand(arguments: ["session", "lock", "--help"], environment: [:]), .help(scope: ["session", "lock"]))
         let errors: [([String], [String: String], String)] = [
-            (["session", "lock", "notes"], inside, CLICommand.usage),
-            (["session", "lock", "--session"], inside, CLICommand.usage),
+            (["session", "lock", "notes"], inside, CLIVerbs.usage(for: ["session", "lock"])),
+            (["session", "lock", "--session"], inside, CLIVerbs.usage(for: ["session", "lock"])),
             (["session", "lock"], outside, "not inside tmux; name the target with --session <name|id>"),
         ]
         for (arguments, environment, message) in errors {
@@ -363,10 +391,10 @@ final class CLICommandTests: XCTestCase {
         for (arguments, expected) in cases {
             XCTAssertEqual(try CLICommand(arguments: ["agent"] + arguments, environment: environment), expected, "\(arguments)")
         }
-        XCTAssertEqual(try CLICommand(arguments: ["agent", "list", "--help"], environment: [:]), .help)
+        XCTAssertEqual(try CLICommand(arguments: ["agent", "list", "--help"], environment: [:]), .help(scope: ["agent", "list"]))
         let errors: [([String], String)] = [
-            (["agent"], CLICommand.usage), (["agent", "show"], CLICommand.usage), (["agent", "list", "extra"], CLICommand.usage),
-            (["agent", "list", "--topic"], CLICommand.usage), (["agent", "list", "--pane", "%3"], CLICommand.usage),
+            (["agent"], CLIVerbs.usage(for: ["agent"])), (["agent", "show"], CLIVerbs.usage(for: ["agent"])), (["agent", "list", "extra"], CLIVerbs.usage(for: ["agent", "list"])),
+            (["agent", "list", "--topic"], CLIVerbs.usage(for: ["agent", "list"])), (["agent", "list", "--pane", "%3"], CLIVerbs.usage(for: ["agent", "list"])),
             (["agent", "list", "--status", "idle"], "--status takes working, blocked, done or failed"),
             (["agent", "list", "--topic", ""], "--topic takes the id or label of an open Topic"),
         ]
@@ -408,7 +436,7 @@ final class CLICommandTests: XCTestCase {
         }
         XCTAssertEqual(try CLICommand(arguments: ["agent", "conversation", "%12"], environment: environment),
                        .agentConversation(read(.pane(pane))))
-        XCTAssertEqual(try CLICommand(arguments: ["agent", "conversation", "--help"], environment: [:]), .help)
+        XCTAssertEqual(try CLICommand(arguments: ["agent", "conversation", "--help"], environment: [:]), .help(scope: ["agent", "conversation"]))
         let errors: [([String], String)] = [
             ([], "name the conversation with a Pane, --conversation <id> --kind <kind> or --transcript <path>"),
             (["%1", "--transcript", "t.jsonl"], "name the conversation with a Pane, --conversation <id> --kind <kind> or --transcript <path>"),
@@ -429,7 +457,7 @@ final class CLICommandTests: XCTestCase {
             (["%1", "--full", "--max-chars", "9"], "give only one of --max-chars and --full"),
             (["%1", "--info", "--tail", "5"], "--info prints no Entries, so it takes no selection; it takes --json"),
             (["%1", "--since", "soon"], "--since takes a time, e.g. 2h, 30m, 17:30, mon 9am or 2026-10-18T09:00:00Z"),
-            (["%1", "--unknown"], CLICommand.usage),
+            (["%1", "--unknown"], CLIVerbs.usage(for: ["agent", "conversation"])),
         ]
         for (arguments, message) in errors {
             XCTAssertThrowsError(try CLICommand(arguments: ["agent", "conversation"] + arguments, environment: environment), "\(arguments)") { error in
@@ -462,10 +490,10 @@ final class CLICommandTests: XCTestCase {
                           ["topic", "tag", "add", "a", "--directory", "tools"]] {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
                 XCTAssertEqual((error as? CLIError)?.exitCode, 2)
-                XCTAssertEqual(error.localizedDescription, CLICommand.usage, "\(arguments)")
+                XCTAssertEqual(error.localizedDescription, CLIVerbs.usage(for: CLIVerbs.scope(of: arguments[...])), "\(arguments)")
             }
         }
-        XCTAssertEqual(try CLICommand(arguments: ["topic", "new", "--help"], environment: [:]), .help)
+        XCTAssertEqual(try CLICommand(arguments: ["topic", "new", "--help"], environment: [:]), .help(scope: ["topic", "new"]))
     }
 
     func testTopicTargetOptionErrorsNameTheProblem() {
@@ -511,7 +539,7 @@ final class CLICommandTests: XCTestCase {
 
     func testBrowserAvailabilityParsingAndStatus() async throws {
         XCTAssertEqual(try CLICommand(arguments: ["browser", "available"], environment: [:]), .browserAvailable(pane: nil))
-        XCTAssertEqual(try CLICommand(arguments: ["browser", "available", "--help"]), .help)
+        XCTAssertEqual(try CLICommand(arguments: ["browser", "available", "--help"]), .help(scope: ["browser", "available"]))
         XCTAssertThrowsError(try CLICommand(arguments: ["browser", "available", "extra"]))
         let outside = RecordingRunner(results: [])
         let status = try await CLICommand.browserAvailable(pane: nil).execute(using: outside)

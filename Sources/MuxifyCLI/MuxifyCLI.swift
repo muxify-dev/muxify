@@ -12,7 +12,7 @@ public enum CommandLineTool {
             exit(try await command.execute())
         } catch {
             let status = (error as? CLIError)?.exitCode ?? 1
-            let prefix = error.localizedDescription == CLICommand.usage ? "" : "muxify: "
+            let prefix = (error as? CLIError)?.isUsage == true ? "" : "muxify: "
             FileHandle.standardError.write(Data("\(prefix)\(error.localizedDescription)\n".utf8))
             exit(status)
         }
