@@ -64,14 +64,14 @@ final class TopicGroupsTests: XCTestCase {
         XCTAssertEqual(topics.rows.map(\.isPinned), [true, false])
     }
 
-    func testSettledRowsShowNewestFirstWithOutcomeOrDateAndRememberedSessions() {
+    func testSettledRowsShowNewestFirstWithOutcomeAndSettleDateAndRememberedSessions() {
         let records = [settled("older", at: "2026-10-01T10:00:00Z"), settled("newer", at: "2026-10-05T10:00:00Z", outcome: "Shipped")]
         var selection = TopicSelection()
         selection.setTopic(.topic("newer"), open: true)
         let group = model(records, selection: selection).groups.first { $0.kind == .settled }!
         XCTAssertEqual(group.topics.map(\.id), [.topic("newer"), .topic("older")])
-        XCTAssertEqual(group.topics[0].kind, .settled(detail: "Shipped"))
-        XCTAssertEqual(group.topics[1].kind, .settled(detail: settledOn("2026-10-01T10:00:00Z")))
+        XCTAssertEqual(group.topics[0].kind, .settled(outcome: "Shipped", settledDate: date("2026-10-05T10:00:00Z")))
+        XCTAssertEqual(group.topics[1].kind, .settled(outcome: "", settledDate: date("2026-10-01T10:00:00Z")))
         XCTAssertTrue(group.topics[0].isExpanded)
         XCTAssertFalse(group.topics[0].isDormant, "a Settled Topic is not Dormant, it is done")
         let session = group.topics[0].sessions[0]
@@ -137,7 +137,7 @@ final class TopicGroupsTests: XCTestCase {
         XCTAssertNil(state.open, "a Reopen of the Active Topic closes the group")
     }
 
-    private func settledOn(_ stored: String) -> String {
-        ISO8601DateFormatter().date(from: stored)!.formatted(date: .abbreviated, time: .omitted)
+    private func date(_ stored: String) -> Date {
+        ISO8601DateFormatter().date(from: stored)!
     }
 }

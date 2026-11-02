@@ -36,10 +36,14 @@ struct TopicGroupBlock: View {
 
     private var cards: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(group.topics) { topic in
-                TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
-                          showsAllRows: showingAllRows.contains(topic.id),
-                          onShowAllRows: { showingAllRows.insert(topic.id) }, place: .group)
+            TimelineView(EachMidnight()) { context in
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(group.topics) { topic in
+                        TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
+                                  showsAllRows: showingAllRows.contains(topic.id),
+                                  onShowAllRows: { showingAllRows.insert(topic.id) }, place: .group(now: context.date))
+                    }
+                }
             }
             if group.hiddenCount > 0 {
                 Button("Show \(min(group.hiddenCount, TopicGroupsState.pageSize)) more") { store.topicGroups.showMoreSettled() }
@@ -49,6 +53,17 @@ struct TopicGroupBlock: View {
             }
         }
         .padding(6)
+    }
+}
+
+/// Now, then each midnight after it. A Settled card's age counts days, so the cards draw again only when the day
+/// changes; an entry's date is always on the current day, which is all `SettledAge` reads from it.
+private struct EachMidnight: TimelineSchedule {
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> some Sequence<Date> {
+        let calendar = Calendar.autoupdatingCurrent
+        return sequence(first: startDate) {
+            calendar.nextDate(after: $0, matching: DateComponents(hour: 0, minute: 0, second: 0), matchingPolicy: .nextTime)
+        }
     }
 }
 

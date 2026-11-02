@@ -177,6 +177,9 @@ struct CardHeader<Details: View>: View {
     var tags: CardTags? = nil
     /// The Topic Note. Every card shows it whole on its own line, softer on a closed card.
     var note: String? = nil
+    /// A word in the top-right corner, on the title's first line, such as how long ago a Topic was Settled. The
+    /// bottom-right action then goes on a line under the title.
+    var cornerLabel: CardCornerLabel? = nil
     @ViewBuilder var details: () -> Details
     @Environment(\.sidebarTypography) private var typography
     @Environment(\.wrapsCardTitles) private var wrapsTitle
@@ -233,11 +236,13 @@ struct CardHeader<Details: View>: View {
                     if isPinned { PinMark().opacity(markOpacity) } else if isGuest { GuestMark().opacity(markOpacity) }
                     else if isLocked { LockMark().opacity(markOpacity) }
                     if let tagsInTitleLine { CardTagsSlot(tags: tagsInTitleLine) }
+                    // Keeps the title clear of the label, which `cardCornerLabel` shows as its own accessibility element.
+                    if let cornerLabel { CardCornerLabelText(label: cornerLabel).hidden() }
                 }
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { titleLineEnd = $0 }
             }
             .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { titleLineWidth = $0 }
-            .padding(.trailing, !isOpen && summary.isEmpty ? cornerWidth : 0)
+            .padding(.trailing, !isOpen && summary.isEmpty && cornerLabel == nil ? cornerWidth : 0)
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { titleLine = $0 }
             if let rest = titleLines?.rest, !rest.isEmpty {
                 Text(rest).font(typography.font(for: .session)).fixedSize(horizontal: false, vertical: true)
@@ -258,6 +263,9 @@ struct CardHeader<Details: View>: View {
                     .truncationMode(.tail)
                     .padding(.top, 1)
                     .padding(.trailing, cornerWidth)
+            }
+            if cornerLabel != nil, !isOpen, note == nil, !showsSummary {
+                Color.clear.frame(height: CardCorner.actionLineHeight)
             }
         }
         .padding(.leading, 13).padding(.trailing, 10).padding(.top, 7).padding(.bottom, isOpen ? 3 : 7)
@@ -497,9 +505,38 @@ enum CardCorner {
     static let width: CGFloat = 44
     /// The room of Reopen… on a card in the Settled group.
     static let groupWidth: CGFloat = 60
+    /// The line under the title that a closed card with a corner label and no other line adds for its action.
+    static let actionLineHeight: CGFloat = 12
+}
+
+/// The word a card shows in its top-right corner, above its action.
+struct CardCornerLabel {
+    let text: String
+    let accessibilityID: String
+}
+
+private struct CardCornerLabelText: View {
+    let label: CardCornerLabel
+
+    var body: some View {
+        Text(label.text).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+    }
 }
 
 extension View {
+    /// Shows the label that a `CardHeader` keeps room for, centred on the title's first line. Apply it after the
+    /// card's own accessibility identifier, which would otherwise name the label too.
+    func cardCornerLabel(_ label: CardCornerLabel?) -> some View {
+        overlay(alignment: Alignment(horizontal: .trailing, vertical: .titleLine)) {
+            if let label {
+                CardCornerLabelText(label: label)
+                    .padding(.trailing, 10)
+                    .allowsHitTesting(false)
+                    .accessibilityIdentifier(label.accessibilityID)
+            }
+        }
+    }
+
     func cardCorner<Action: View>(@ViewBuilder _ action: () -> Action) -> some View {
         overlay(alignment: .bottomTrailing) { action().padding(.trailing, 10).padding(.bottom, 6) }
     }

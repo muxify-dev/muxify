@@ -610,10 +610,10 @@ private struct TopicItemRow: View {
 }
 
 /// Where a Topic card sits. In the Topics list the card has a Hint, moves by a drag and by Move Up and Move Down, and
-/// offers Settle. In the Settled group it has none of these.
+/// offers Settle. In the Settled group it has none of these, and tells how long ago, seen from `now`, it was Settled.
 enum TopicCardPlace {
     case list(TopicListPlace)
-    case group
+    case group(now: Date)
 }
 
 /// What a card in the Topics list needs to move among the cards with its Pin.
@@ -718,12 +718,19 @@ struct TopicCard: View {
         store.sidebarText(.topic, context: store.sidebarFormatContexts.topics[topic.id])
     }
 
-    /// The outcome or settle date of a Settled Topic.
+    /// The outcome of a Settled Topic.
     private var groupDetail: String? {
         switch topic.kind {
         case .open: return nil
-        case .settled(let detail): return detail.isEmpty ? nil : detail
+        case .settled(let outcome, _): return outcome.isEmpty ? nil : outcome
         }
+    }
+
+    /// How long ago a card in the Settled group was Settled, such as "Yesterday".
+    private var settledAge: CardCornerLabel? {
+        guard case .group(let now) = place, case .settled(_, let settledDate?) = topic.kind, case .topic(let id) = topic.id else { return nil }
+        return CardCornerLabel(text: SettledAge.label(settled: settledDate, now: now, calendar: .autoupdatingCurrent),
+                               accessibilityID: "settled-age-" + id)
     }
 
     private var header: some View {
@@ -731,7 +738,7 @@ struct TopicCard: View {
                    hintTarget: list == nil ? nil : namedTopicID.map { .topic($0) },
                    notes: (topic.isPinned ? ["Pinned"] : []) + (topic.isGuest ? ["Guest"] : []) + (topic.usesRowMarks && topic.isUnread && topic.mark != .unread ? ["unread"] : []) + (groupDetail.map { [$0] } ?? []) + (topic.idleLabel.map { [$0] } ?? []),
                    summary: list == nil ? "" : formatted.summary, cornerWidth: list == nil ? CardCorner.groupWidth : CardCorner.width,
-                   tags: tags, note: topic.note) {
+                   tags: tags, note: topic.note, cornerLabel: settledAge) {
             if list != nil || topic.isExpanded {
                 if list == nil, let detail = groupDetail {
                     Text(detail)
@@ -764,6 +771,7 @@ struct TopicCard: View {
             if let list { listMenu(list) } else { groupActions }
         }
         .cardTagsOverlay(tags, onPress: press)
+        .cardCornerLabel(settledAge)
     }
 
     /// A closed card in a group shows no Tags.
