@@ -118,5 +118,6 @@ struct ParsedArguments {
 }
 
 extension CLIError {
-    static var usage: CLIError { CLIError(CLIVerbs.usage, exitCode: 2) }
+    /// A usage error inside a verb's reader or builder. `CLICommand` shows it with that verb's help.
+    static var usage: CLIError { usage(for: []) }
 }
