@@ -28,6 +28,25 @@ extension EnvironmentService {
         }
     }
 
+    /// Under the edit lock, so it never runs between the read and the write of a Reopen. The Topics are chosen in the
+    /// same transaction that removes them. The answer lists the forgotten Topics, oldest first.
+    func forgetSettled(olderThan days: Int, asOf: Date?, client: String?) -> EnvironmentResponse {
+        var phase = TopicFailure.Phase.nothingChanged
+        do {
+            let records = try store.read().records
+            let snapshot = try server.snapshot()
+            let (forgotten, moved) = try store.write(locks: SessionLock.locks(in: snapshot.windows, records: records)) { transaction in
+                let chosen = SettledAge.settled(olderThan: days, in: transaction.records, now: asOf ?? Date(), calendar: .autoupdatingCurrent)
+                return (chosen, try transaction.forget(chosen.map(\.id)))
+            }
+            phase = .changesStarted
+            try executor.run(moved.map { .tmux($0.command) }, client: client)
+            return .topics(forgotten.map(TopicSummary.init(record:)))
+        } catch {
+            return .failed(failure(error, phase: phase))
+        }
+    }
+
     func edit(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
@@ -73,7 +92,7 @@ extension EnvironmentService {
                 try executor.run(moved.map { .tmux($0.command) }, client: client)
             case .forget(let id):
                 let locks = SessionLock.locks(in: try server.snapshot().windows, records: try store.read().records)
-                let moved = try store.write(locks: locks) { try $0.forget(id) }
+                let moved = try store.write(locks: locks) { try $0.forget([id]) }
                 try executor.run(moved.map { .tmux($0.command) }, client: client)
             case nil: break
             }
@@ -97,7 +116,7 @@ extension EnvironmentService {
         }
         switch request.command {
         case .list, .show, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .benchTopic, .fillOpenPlace,
-             .markRead, .markAllRead, .createWorktree, .removeWorktree, .listWorktrees:
+             .markRead, .markAllRead, .forgetSettled, .createWorktree, .removeWorktree, .listWorktrees:
             throw TopicRequestError.noTarget
         case .create(let title, let tags):
             let tags = Set(tags ?? [])

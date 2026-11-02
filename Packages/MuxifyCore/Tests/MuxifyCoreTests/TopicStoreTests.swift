@@ -45,12 +45,23 @@ final class TopicStoreTests: XCTestCase {
         }
         var remembered = kept
         remembered.sessions = [.object(["repository_path": .string("/sessionPath")])]
-        try store.write { try $0.forget(kept.id) }
+        try store.write { try $0.forget([kept.id]) }
         XCTAssertEqual(try store.read().records.map(\.id), [other.id])
         XCTAssertNil(try paths.storedTopicRecord("kept"))
         XCTAssertThrowsError(try store.write { try $0.apply(TopicRecordChange(before: kept, after: remembered)) })
         XCTAssertThrowsError(try store.write { try $0.update(kept.id) { $0.title = "Stale" } })
         XCTAssertEqual(try store.read().records.map(\.id), [other.id])
+    }
+
+    func testOneForgetRemovesEveryNamedRecordOrNoneWhenOneIsGone() throws {
+        let store = TopicStore(paths: paths)
+        try store.write { transaction in
+            for id in ["a", "b", "c"] { try transaction.create(TopicRecord(id: id, title: id)) }
+        }
+        XCTAssertThrowsError(try store.write { try $0.forget(["a", "gone"]) })
+        XCTAssertEqual(try store.read().records.map(\.id), ["a", "b", "c"], "a forget that names a missing record changed the file")
+        try store.write { try $0.forget(["c", "a"]) }
+        XCTAssertEqual(try store.read().records.map(\.id), ["b"])
     }
 
     private func record(_ id: String, order: Double?) -> TopicRecord {

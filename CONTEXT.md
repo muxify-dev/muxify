@@ -118,6 +118,10 @@ _Avoid_: start anew, reset, new Topic
 To remove a Topic for good, at any time, so that it can never be Reopened. Its live Sessions are killed or kept with no Topic, as in Settle, and the clean Worktrees it made can be removed with it.
 _Avoid_: archive, delete, purge
 
+**Forget Settled Older Than…**:
+A Command that Forgets, in one step, every Settled Topic that was Settled more than a number of days ago. The user types the number; `topics.forget_settled_older_than` gives the first value, 14 when not set. A Topic whose card says "14 days ago" stays and one that says "15 days ago" goes. The Worktrees of these Topics stay. Muxify never runs it by itself.
+_Avoid_: prune, clean up, auto-forget
+
 **Dormant**:
 An open Topic that has no live Sessions but remembers Sessions, for example after a tmux restart. It stays Dormant in the Sidebar until the user goes to it, which Reopens it, or Settles it.
 _Avoid_: inactive, sleeping, suspended

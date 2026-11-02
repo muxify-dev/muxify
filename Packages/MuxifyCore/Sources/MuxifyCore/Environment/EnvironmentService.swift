@@ -73,6 +73,7 @@ public struct EnvironmentService: Sendable {
                         return createWorktree(request, name: name, from: from, start: start, open: open, client: client)
                     case .removeWorktree(let worktree, let kill, let force):
                         return removeWorktree(request, worktree, kill: kill, force: force, client: client)
+                    case .forgetSettled(let days, let asOf): return forgetSettled(olderThan: days, asOf: asOf, client: client)
                     default: return edit(request, client: client)
                     }
                 }
@@ -334,7 +335,7 @@ extension EnvironmentCommand {
             return .records
         case .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename,
              .reopen, .startFresh, .moveSession, .sortSessions, .lock, .unlock, .newWindow, .newSession, .renameSession,
-             .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession, .createWorktree, .removeWorktree: return .edit
+             .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession, .createWorktree, .removeWorktree, .forgetSettled: return .edit
         }
     }
 
@@ -350,7 +351,7 @@ extension EnvironmentCommand {
         case .markAllRead: return false
         case .list, .show, .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename, .reopen, .startFresh,
              .moveSession, .sortSessions, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench,
-             .makeGuest, .benchTopic, .fillOpenPlace:
+             .makeGuest, .benchTopic, .fillOpenPlace, .forgetSettled:
             return true
         }
     }

@@ -11,6 +11,7 @@ extension EnvironmentCommand {
         case .addSession: .verb(.topicAddSession)
         case .settle: .verb(.topicSettle)
         case .forget: .verb(.topicForget)
+        case .forgetSettled: .verb(.topicForgetSettled)
         case .move: .verbs([.windowMove, .windowRemoveFromTopic])
         case .removeFromTopic, .removeAndKill: .verb(.sessionRemoveFromTopic)
         case .rename: .verb(.topicRename)

@@ -591,6 +591,45 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(try sandbox.sessions(), ["main"])
     }
 
+    func testTopicForgetSettledForgetsOnlyTheSettledTopicsOlderThanTheDaysAndKeepsTheirWorktrees() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let config = try String(contentsOf: sandbox.config, encoding: .utf8)
+        try Data(config.replacingOccurrences(of: "topics:\n", with: "topics:\n  forget_settled_older_than: 30\n").utf8).write(to: sandbox.config)
+        let worktree = sandbox.root.appendingPathComponent("work/kept-tree", isDirectory: true)
+        try FileManager.default.createDirectory(at: worktree, withIntermediateDirectories: true)
+        func ago(_ days: Int) -> String { ISO8601DateFormatter().string(from: Date().addingTimeInterval(-Double(days) * 86_400)) }
+        let records: [[String: Any]] = [
+            ["id": "old", "title": "Old", "slug": "old", "settled_at": ago(40),
+             "sessions": [["id": "saved:old", "worktree_path": worktree.path, "directory": worktree.path]]],
+            ["id": "middle", "title": "Middle", "slug": "middle", "settled_at": ago(20)],
+            ["id": "recent", "title": "Recent", "slug": "recent", "settled_at": ago(2)],
+            ["id": "open", "title": "Open", "slug": "open"],
+        ]
+        let file = sandbox.root.appendingPathComponent("state/muxify/topics.json")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: ["open_places": [], "records": records]).write(to: file)
+        let environment = sandbox.cliEnvironment(pane: nil)
+        func ids() throws -> [String] { try sandbox.records().compactMap { $0["id"] as? String }.sorted() }
+
+        let byConfig = try await run(cli, arguments: ["topic", "forget-settled"], environment: environment)
+        XCTAssertEqual(byConfig.status, 0, byConfig.output)
+        XCTAssertEqual(byConfig.stdout, "old\tOld\t\n", "without --older-than, topics.forget_settled_older_than gives 30 days")
+        XCTAssertEqual(try ids(), ["middle", "open", "recent"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: worktree.path), "Forget Settled Older Than… removed a Worktree")
+
+        let byOption = try await run(cli, arguments: ["topic", "forget-settled", "--older-than", "14", "--json"], environment: environment)
+        XCTAssertEqual(byOption.status, 0, byOption.output)
+        let forgotten = try XCTUnwrap(try jsonLine(byOption.stdout)["topics"] as? [[String: Any]])
+        XCTAssertEqual(forgotten.compactMap { $0["id"] as? String }, ["middle"])
+        XCTAssertEqual(try ids(), ["open", "recent"], "an open Topic, and a Topic Settled 2 days ago, stay")
+
+        let none = try await run(cli, arguments: ["topic", "forget-settled", "--older-than", "14"], environment: environment)
+        XCTAssertEqual(none.status, 0, none.output)
+        XCTAssertEqual(none.stdout, "No Settled Topic was Settled more than 14 days ago.\n")
+        XCTAssertEqual(try ids(), ["open", "recent"])
+    }
+
     func testWindowMoveWithAWindowMovesThatWindowAndNotTheCallers() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }

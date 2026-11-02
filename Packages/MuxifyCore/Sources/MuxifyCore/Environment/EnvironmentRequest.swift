@@ -278,6 +278,10 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// Empty `choices` take the default choice for each Session.
     case settle(choices: [TopicSettleSession], outcome: String)
     case forget(choices: [TopicSettleSession], worktrees: [String])
+    /// Forgets every Settled Topic that was Settled more than `olderThan` days before `asOf`, as `SettledAge` counts
+    /// days, with one write of the records. It keeps their Worktrees, and a Settled Topic has no live Session to stop.
+    /// The palette sends the time at which it listed the Topics, so it forgets the set the user reviewed; nil is now.
+    case forgetSettled(olderThan: Int, asOf: Date?)
     /// Moves the target Session, Window or Pane. A Pane in a shared Window leaves the other Panes there.
     case move(to: TopicDestination)
     /// Takes the target's Session out of its Topic. The Topic forgets it, so Reopen does not make it again.
@@ -370,6 +374,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case list, show, create, settle, forget, move, rename, reopen, lock, unlock, tags, note
         case startFresh = "start_fresh"
+        case forgetSettled = "forget_settled"
         case moveSession = "move_session"
         case sortSessions = "sort_sessions"
         case addSession = "add_session"
@@ -413,6 +418,10 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
         case workingCopy = "working_copy"
     }
 
+    private enum ForgetSettledCodingKeys: String, CodingKey {
+        case olderThan = "older_than"
+        case asOf = "as_of"
+    }
     private enum TagsCodingKeys: String, CodingKey { case _0 = "change" }
     private enum NoteCodingKeys: String, CodingKey { case _0 = "text" }
     private enum MoveCardCodingKeys: String, CodingKey { case _0 = "move" }

@@ -11,6 +11,7 @@ struct TopicGroupBlock: View {
     /// The most height the open group's cards take before they scroll.
     let cardsLimit: CGFloat
     @State private var cardsHeight: CGFloat = 0
+    private static let forgetSettled = PaletteCommand.forgetSettledOlderThan.rawValue
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -20,6 +21,11 @@ struct TopicGroupBlock: View {
             }
             .accessibilityIdentifier(group.kind.accessibilityID)
             .accessibilityValue(group.isExpanded ? "expanded" : "collapsed")
+            .contextMenu {
+                Button(Self.forgetSettled) { store.presentForgetSettled() }.disabled(store.changingTopic || store.isRemote)
+            }
+            // The context menu's item, for an e2e check that must not open the menu.
+            .accessibilityAction(named: Self.forgetSettled) { store.presentForgetSettled() }
             if group.isExpanded {
                 Divider()
                 ScrollView {

@@ -13,6 +13,8 @@ struct RequestInvocation: Equatable {
         /// `removeWorktrees` removes each Worktree that the Settle sheet offers to remove, as if each box were selected.
         case settle(removeWorktrees: Bool, killSessions: Bool = false)
         case forget(removeWorktrees: Bool, killSessions: Bool = false)
+        /// Nil takes the Config's `topics.forget_settled_older_than`.
+        case forgetSettled(olderThan: Int?)
         case list
         /// `conversations` also lists the conversation of each Agent that the Topic has or remembers.
         case show(conversations: Bool)
@@ -103,7 +105,7 @@ struct RequestInvocation: Equatable {
             case .markRead(_, .session): return [.session, .window, .pane]
             case .markRead(_, .window): return [.window, .pane]
             case .markRead(_, .pane): return [.pane]
-            case .list, .markAllRead, .chooseInPlay, .createWorktree, .removeWorktree, .listWorktrees: return []
+            case .list, .markAllRead, .chooseInPlay, .forgetSettled, .createWorktree, .removeWorktree, .listWorktrees: return []
             }
         }
 
@@ -121,7 +123,7 @@ struct RequestInvocation: Equatable {
         var findsAllSessionPaths: Bool {
             switch self {
             case .new, .tag, .note, .lock, .pin, .makeGuest, .benchTopic, .fillPlace, .moveCard, .tradeCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
-                 .placeWindow, .zoomPane, .createWorktree, .removeWorktree, .listWorktrees: return false
+                 .forgetSettled, .placeWindow, .zoomPane, .createWorktree, .removeWorktree, .listWorktrees: return false
             default: return !showsTopic
             }
         }
@@ -133,6 +135,7 @@ struct RequestInvocation: Equatable {
             case .addSession: return "topic add-session"
             case .settle: return "topic settle"
             case .forget: return "topic forget"
+            case .forgetSettled: return "topic forget-settled"
             case .list: return "topic list"
             case .show: return "topic show"
             case .open: return "topic open"
@@ -327,6 +330,10 @@ extension RequestInvocation {
             } catch let answer as Answer {
                 response = answer.response
             }
+            if case .forgetSettled(let days) = command, case .topics([]) = response, output == .text {
+                print("No Settled Topic was Settled more than \(days ?? config.topics.forgetSettledOlderThan) days ago.")
+                return
+            }
         }
         if case .topic(let topic) = response {
             switch command {
@@ -437,6 +444,7 @@ extension RequestInvocation {
                   var choices = try? service.forgetChoices(for: target).get() else { return .forget(choices: [], worktrees: []) }
             for index in choices.sessions.indices { choices.sessions[index].disposition = kill ? .kill : .keep }
             return .forget(choices: choices.sessions, worktrees: remove ? choices.worktrees.filter { $0.canRemove(sessions: choices.sessions) }.map(\.id) : [])
+        case .forgetSettled(let days): return .forgetSettled(olderThan: days ?? service.topics.forgetSettledOlderThan, asOf: nil)
         case .settle(let remove, let kill):
             // The palette defaults to Kill behind ⌘↩; the CLI stops a Session only with an explicit flag (ADR 0039).
             // Choices that fail to load leave the defaults, so the request itself reports why the Topic cannot settle.

@@ -95,7 +95,7 @@ final class GuestTests: XCTestCase {
         assertWrittenInOrder(settled)
 
         var forgotten = transaction("payments auth-bug docs + ~scratch(G) | release")
-        try forgotten.forget("payments")
+        try forgotten.forget(["payments"])
         XCTAssertEqual(sidebar(forgotten), "_ auth-bug docs + ~scratch(G) | release", "Forget")
 
         var pinned = transaction("📌notes payments auth-bug docs + | release")

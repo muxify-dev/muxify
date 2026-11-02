@@ -52,4 +52,38 @@ final class SettledAgeTests: XCTestCase {
         XCTAssertEqual(SettledAge.days(from: at(2026, 11, 6, 9, 0), to: now, calendar: calendar), 0)
         XCTAssertEqual(label(at(2026, 11, 6, 9, 0)), "Today")
     }
+
+    private func settled(_ id: String, _ date: Date?) -> TopicRecord {
+        var record = TopicRecord(id: id, title: id)
+        record.settledAt = date.map { ISO8601DateFormatter().string(from: $0) }
+        return record
+    }
+
+    private func forgotten(olderThan days: Int, _ records: [TopicRecord]) -> [String] {
+        SettledAge.settled(olderThan: days, in: records, now: now, calendar: calendar).map(\.id)
+    }
+
+    func testOlderThanFourteenTakesTheCardThatSays15DaysAgoAndKeepsTheOneThatSays14DaysAgo() {
+        let fifteen = at(2026, 10, 20, 23, 59), fourteen = at(2026, 10, 21, 0, 1)
+        XCTAssertEqual(label(fifteen), "15 days ago")
+        XCTAssertEqual(label(fourteen), "14 days ago")
+        XCTAssertEqual(forgotten(olderThan: 14, [settled("fourteen", fourteen), settled("fifteen", fifteen)]), ["fifteen"])
+    }
+
+    func testOlderThanOneKeepsYesterdayAndToday() {
+        let records = [settled("today", at(2026, 11, 4, 0, 5)), settled("yesterday", at(2026, 11, 3, 0, 5)),
+                       settled("two", at(2026, 11, 2, 23, 0))]
+        XCTAssertEqual(forgotten(olderThan: 1, records), ["two"])
+    }
+
+    func testOpenTopicsAndSettleDatesThatAreNoDateAreNeverChosen() {
+        var unreadable = settled("unreadable", nil)
+        unreadable.settledAt = "last spring"
+        XCTAssertEqual(forgotten(olderThan: 1, [settled("open", nil), unreadable]), [])
+    }
+
+    func testTheChosenTopicsComeOldestFirst() {
+        let records = [settled("may", at(2026, 5, 1, 9, 0)), settled("january", at(2026, 1, 1, 9, 0)), settled("march", at(2026, 3, 1, 9, 0))]
+        XCTAssertEqual(forgotten(olderThan: 14, records), ["january", "march", "may"])
+    }
 }

@@ -1258,6 +1258,18 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    func testTopicsForgetSettledOlderThanTakesAWholeNumberOfOneOrMoreAndIsFourteenWhenAbsent() throws {
+        XCTAssertEqual(try load("").topics.forgetSettledOlderThan, 14)
+        XCTAssertEqual(try load("topics:\n  forget_settled_older_than: 30").topics.forgetSettledOlderThan, 30)
+        XCTAssertEqual(try load("topics:\n  forget_settled_older_than: 1").topics.forgetSettledOlderThan, 1)
+        XCTAssertEqual(try load("topics:\n  forget_settled_older_than:").topics.forgetSettledOlderThan, 14)
+        for value in ["0", "-2", "2.5", "two weeks", "true"] {
+            let bad = try load("topics:\n  forget_settled_older_than: " + value)
+            XCTAssertEqual(bad.topics.forgetSettledOlderThan, 14, value)
+            XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "topics.forget_settled_older_than: expected a whole number of 1 or more")], value)
+        }
+    }
+
     func testTopicSessionOrderTakesOldestOrNewestFirstAndReportsAnythingElse() throws {
         XCTAssertEqual(try load("").topics.sessionOrder, .oldestFirst)
         XCTAssertEqual(try load("topics:\n  session_order: newest_first").topics.sessionOrder, .newestFirst)

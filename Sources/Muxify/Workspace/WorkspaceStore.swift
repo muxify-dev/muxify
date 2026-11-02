@@ -606,6 +606,17 @@ final class WorkspaceStore {
         palette.begin(.confirm(PaletteConfirmation(.forget(topic))), keepingHistory: keepingHistory)
     }
 
+    /// Forget Settled Older Than…, with the days of `topics.forget_settled_older_than` in its field.
+    func presentForgetSettled(keepingHistory: Bool = false) {
+        topicWatcher.reload()
+        guard !changingTopic, !isRemote else { return }
+        palette.begin(.text(.forgetSettledDays), text: String(topicConfig.forgetSettledOlderThan), keepingHistory: keepingHistory)
+    }
+
+    func forgetSettled(olderThan days: Int, asOf: Date) {
+        perform(EnvironmentRequest(.forgetSettled(olderThan: days, asOf: asOf)), presenting: .forgetSettled)
+    }
+
     func forgetTopic(_ id: String, choices: [TopicSettleSession], worktrees: [String]) {
         perform(EnvironmentRequest(.forget(choices: choices, worktrees: worktrees), target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id)))
     }
@@ -663,6 +674,8 @@ final class WorkspaceStore {
         case move(source: String, tab: BrowserTab?)
         /// The Location goes to this card, as Go to Topic does.
         case goTo(TopicGroupID)
+        /// Forget Settled Older Than… answers with the Topics it forgot, and the palette closes.
+        case forgetSettled
     }
 
     /// The one path for every Topic edit that the user asks for in the app. The app's unsaved memory goes to disk and to tmux first,
@@ -726,7 +739,9 @@ final class WorkspaceStore {
         changingTopic = false
         let ownsPalette = palette.invocation == invocation
         switch response {
-        case .topics, .topic, .worktrees:
+        case .topics:
+            if case .forgetSettled = presentation, ownsPalette { palette.close() }
+        case .topic, .worktrees:
             break
         case .readChanged:
             // A Read change is not shown until a snapshot after it, so the next change waits for that snapshot.
@@ -760,6 +775,8 @@ final class WorkspaceStore {
             case .goTo(let card):
                 if ownsPalette { palette.close() }
                 goToTopic(card)
+            case .forgetSettled:
+                break
             case .edit, .newTopic, .newSession:
                 if ownsPalette { palette.close() }
                 switch change.shown {
