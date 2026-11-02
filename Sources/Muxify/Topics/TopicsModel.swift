@@ -698,7 +698,7 @@ struct TopicsModel {
         let title = [record.title, record.slug].compactMap { $0 }
             .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "Untitled Topic"
         let outcome = record.outcome?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let settledDate = record.settledAt.flatMap { try? Date.ISO8601FormatStyle().parse($0) }
+        let settledDate = record.settledDate
         let sessions = record.sessions.enumerated().compactMap { index, session -> Session? in
             guard let path = session["directory"]?.string, let savedID = session["id"]?.string else { return nil }
             let identity = TopicSessionID(topic: id, session: savedID)

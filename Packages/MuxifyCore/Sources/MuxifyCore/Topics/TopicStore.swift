@@ -440,10 +440,11 @@ public struct TopicTransaction {
     }
 
     @discardableResult
-    public mutating func forget(_ id: String) throws -> [SessionLockChange] {
-        guard records.contains(where: { $0.id == id }) else { throw Failure.topicUnavailable(id) }
+    public mutating func forget(_ ids: [String]) throws -> [SessionLockChange] {
+        if let missing = ids.first(where: { id in !records.contains { $0.id == id } }) { throw Failure.topicUnavailable(missing) }
         let before = entries
-        records.removeAll { $0.id == id }
+        let forgotten = Set(ids)
+        records.removeAll { forgotten.contains($0.id) }
         return put(TopicListChange([]), from: before)
     }
 

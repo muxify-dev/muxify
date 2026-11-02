@@ -146,6 +146,25 @@ final class CLIVerbsTests: XCTestCase {
         }
     }
 
+    func testTopicForgetSettledTakesWholeDaysOfOneOrMoreAndNoTarget() throws {
+        let outside = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let paths = MuxifyPaths(environment: outside, home: "/home/me")
+        func request(_ days: Int?) -> CLICommand {
+            .request(RequestInvocation(command: .forgetSettled(olderThan: days), target: nil, caller: nil, output: .text, paths: paths))
+        }
+        XCTAssertEqual(try CLICommand(arguments: ["topic", "forget-settled"], environment: outside), request(nil))
+        XCTAssertEqual(try CLICommand(arguments: ["topic", "forget-settled", "--older-than", "1"], environment: outside), request(1))
+        XCTAssertEqual(try CLICommand(arguments: ["topic", "forget-settled", "--older-than", "30"], environment: outside), request(30))
+        for arguments in [["topic", "forget-settled", "--older-than", "0"], ["topic", "forget-settled", "--older-than", "-3"],
+                          ["topic", "forget-settled", "--older-than", "2.5"], ["topic", "forget-settled", "--older-than", "two"],
+                          ["topic", "forget-settled", "--older-than"], ["topic", "forget-settled", "14"],
+                          ["topic", "forget-settled", "--topic", "Fix"]] {
+            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: outside), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
+            }
+        }
+    }
+
     func testTopicNoteSetsTheNoteOrClearsItButNeverBoth() throws {
         let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
         let paths = MuxifyPaths(environment: inside, home: "/home/me")

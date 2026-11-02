@@ -25,6 +25,7 @@ final class TopicWireTests: XCTestCase {
             .renameWindow(name: "w"), .zoomPane, .killWindow, .killSession, .pin, .unpin, .moveCard(.up), .moveCard(.down),
             .moveCard(.before(.topic(.id("fix")))), .moveCard(.after(.lock(session))), .moveCard(.trade(.topic(.id("fix")))), .replaceFromBench(with: .lock(session)),
             .chooseInPlay([.lock(session), .topic(.named("Fix"))]),
+            .forgetSettled(olderThan: 14, asOf: nil), .forgetSettled(olderThan: 14, asOf: Date(timeIntervalSinceReferenceDate: 815_000_000)),
             .moveWindow(to: .before(WindowID(rawValue: "@3")!)), .moveWindow(to: .after(WindowID(rawValue: "@3")!))]
         for command in commands {
             let request = EnvironmentRequest(command, target: .session(session))
@@ -52,6 +53,9 @@ final class TopicWireTests: XCTestCase {
         XCTAssertEqual(try json(EnvironmentCommand.zoomPane), #"{"zoom_pane":{}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.markRead(.unread, scope: .session)), #"{"mark_read":{"change":"unread","scope":"session"}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.markAllRead), #"{"mark_all_read":{}}"#)
+        XCTAssertEqual(try json(EnvironmentCommand.forgetSettled(olderThan: 14, asOf: nil)), #"{"forget_settled":{"older_than":14}}"#)
+        XCTAssertEqual(try json(EnvironmentCommand.forgetSettled(olderThan: 14, asOf: Date(timeIntervalSinceReferenceDate: 815_000_000))),
+            #"{"forget_settled":{"as_of":815000000,"older_than":14}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.note("Bisect")), #"{"note":{"text":"Bisect"}}"#)
         XCTAssertEqual(try json(EnvironmentCommand.note(nil)), #"{"note":{}}"#)
         XCTAssertEqual(try json(EnvironmentResponse.readChanged(TopicReadChange(topicIDs: ["a"], paneIDs: [PaneID(rawValue: "%3")!]))),

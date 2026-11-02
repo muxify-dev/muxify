@@ -25,6 +25,8 @@ enum PaletteText {
     case renameSession(TmuxWindow)
     /// New Worktree: the name of the Worktree from this checkout.
     case worktreeName(SessionChoice)
+    /// Forget Settled Older Than…: a whole number of days. The confirm step lists the Topics it forgets.
+    case forgetSettledDays
 }
 
 @MainActor @Observable
@@ -32,6 +34,8 @@ final class PaletteConfirmation {
     enum Target {
         case settle(TopicRecord)
         case forget(TopicRecord)
+        /// The Settled Topics that were Settled more than `days` days before `asOf`, as the step listed them.
+        case forgetSettled(days: Int, asOf: Date, topics: [TopicRecord])
         case killWindow(TmuxWindow)
         /// The Session of this Window.
         case killSession(TmuxWindow)
@@ -57,7 +61,7 @@ final class PaletteConfirmation {
 
     var requiresCommandReturn: Bool {
         switch target {
-        case .forget, .killWindow, .killSession, .removeAndKill: return true
+        case .forget, .forgetSettled, .killWindow, .killSession, .removeAndKill: return true
         // ↩ removes a Worktree that no Session uses; one that a Session uses goes only with its Sessions, on ⌘↩.
         case .removeWorktree(let worktree): return !worktree.sessions.isEmpty
         case .settle:
@@ -144,6 +148,7 @@ enum PaletteFlow {
         case .text(.renameWindow): "Window name"
         case .text(.renameSession): "Session name"
         case .text(.topicNote): "What were you doing here?"
+        case .text(.forgetSettledDays): "Days"
         case .text(.tags(let field)):
             switch field.mode {
             case .newTopic: "Untitled"
@@ -153,7 +158,7 @@ enum PaletteFlow {
         case .confirm(let draft):
             switch draft.target {
             case .settle: "Outcome note (optional)"
-            case .forget, .killWindow, .killSession, .removeAndKill, .removeWorktree: "Review and confirm"
+            case .forget, .forgetSettled, .killWindow, .killSession, .removeAndKill, .removeWorktree: "Review and confirm"
             }
         }
     }
@@ -208,10 +213,12 @@ extension CommandPalette {
         case .text(.topicNote(let topic)): return "\(topicTitle(topic)) › Topic Note"
         case .text(.renameWindow(let window)): return "\(window.displayTitle) › Rename"
         case .text(.renameSession(let window)): return "\(window.sessionName) › Rename"
+        case .text(.forgetSettledDays): return "Forget Settled Older Than…"
         case .confirm(let draft):
             switch draft.target {
             case .settle(let topic): return "\(topicTitle(topic)) › Settle"
             case .forget(let topic): return "\(topicTitle(topic)) › Forget"
+            case .forgetSettled(let days, _, _): return "Forget Settled Older Than \(days) Days"
             case .killWindow(let window): return "\(window.displayTitle) › Kill Window"
             case .killSession(let window): return "\(window.sessionName) › Kill Session"
             case .removeAndKill(let window): return "\(window.sessionName) › Remove from Topic and Kill"
@@ -265,6 +272,9 @@ extension CommandPalette {
             switch draft.target {
             case .settle(let topic): return nextTopicNote([topic.id])
             case .forget: return "This removes the Topic for good. It cannot be Reopened."
+            case .forgetSettled(_, _, let topics):
+                return "This removes \(topics.count == 1 ? "the Topic" : "these \(topics.count) Topics") for good. "
+                    + "\(topics.count == 1 ? "It" : "They") can never be Reopened. Their Worktrees stay."
             case .killWindow: return "This stops every process in the Window."
             case .killSession: return "This stops every process in the Session."
             case .removeAndKill(let window):
@@ -283,6 +293,14 @@ extension CommandPalette {
         return false
     }
 
+    /// The typed number of days of Forget Settled Older Than…, and the Settled Topics that it forgets as of `now`. Nil
+    /// while the field holds no whole number of 1 or more.
+    var forgetSettledChoice: (days: Int, now: Date, topics: [TopicRecord])? {
+        guard let store, let days = Int(query.trimmingCharacters(in: .whitespaces)), days >= 1 else { return nil }
+        let now = Date()
+        return (days, now, SettledAge.settled(olderThan: days, in: store.topicWatcher.records, now: now, calendar: .autoupdatingCurrent))
+    }
+
     var canAccept: Bool {
         guard store?.changingTopic != true else { return false }
         if case .move(let draft) = flow, draft.resolution == .loading { return false }
@@ -293,6 +311,7 @@ extension CommandPalette {
         switch flow {
         case .text(.renameWindow), .text(.renameSession), .text(.worktreeName): return !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .text(.tags(let field)): return field.text(query).refusedWords.isEmpty
+        case .text(.forgetSettledDays): return forgetSettledChoice?.topics.isEmpty == false
         default: break
         }
         return acceptsText || selected(in: results)?.pick.payload != nil
@@ -346,6 +365,7 @@ extension CommandPalette {
         case .newWorktree: return newWorktreeRows(query: query, rules: store.config.rules(for: .newWorktree))
         case .removeWorktree(let draft): return removeWorktreeRows(draft, query: query, rules: store.config.rules(for: .removeWorktree))
         case .text(.tags(let field)): return tagRows(field, rules: store.config.rules(for: .tags))
+        case .text(.forgetSettledDays): return FuzzyRanker.fixed([forgetSettledRow()])
         case .text: return .empty
         case .confirm(let draft): return confirmationRows(draft)
         }
@@ -375,9 +395,30 @@ extension CommandPalette {
                       pick: .available(PaletteItem(ref: .choice(choice))))
     }
 
+    /// The live row under the field of Forget Settled Older Than…: what the typed days forget, and how many Topics.
+    /// With no Topic to forget it offers no next step.
+    private func forgetSettledRow() -> PickCandidate<PaletteItem> {
+        guard let choice = forgetSettledChoice else {
+            return PickCandidate(id: "forget-settled", kind: .command, title: "Type a whole number of days, 1 or more", pick: .blocked(reason: ""))
+        }
+        guard !choice.topics.isEmpty else {
+            return PickCandidate(id: "forget-settled", kind: .command, title: "No Settled Topic is older than \(choice.days) days",
+                                 pick: .blocked(reason: ""))
+        }
+        return choiceRow("forget-settled", "Settled more than \(choice.days) days ago",
+                         trailing: choice.topics.count == 1 ? "1 Topic" : "\(choice.topics.count) Topics", choice: .accept)
+    }
+
     private func confirmationRows(_ draft: PaletteConfirmation) -> PickList<PaletteItem> {
         guard case .ready(let sessions, let worktrees) = draft.choices else { return .empty }
         if case .removeWorktree(let worktree) = draft.target { return FuzzyRanker.fixed(removeWorktreeConfirmationRows(worktree, draft: draft)) }
+        if case .forgetSettled(_, let now, let topics) = draft.target {
+            return FuzzyRanker.fixed(topics.map { topic in
+                PickCandidate(id: "forget-settled-" + topic.id, kind: .settled, title: topicTitle(topic),
+                              trailing: topic.settledDate.map { SettledAge.label(settled: $0, now: now, calendar: .autoupdatingCurrent) } ?? "",
+                              pick: .available(PaletteItem(ref: .choice(.accept))))
+            })
+        }
         var rows = sessions.flatMap { session in
             let windows = store?.windows.filter { $0.sessionID == session.id } ?? []
             let working = store?.agents.filter { $0.sessionID == session.id && $0.status == .working } ?? []
@@ -450,7 +491,7 @@ extension CommandPalette {
         case .removeAndKill(let window):
             loadRemoveAndKill(window, draft: draft)
             return
-        case .removeWorktree:
+        case .removeWorktree, .forgetSettled:
             // The row of the first step is the review: the confirm step reads nothing more.
             draft.choices = .ready([], [])
             return
@@ -646,6 +687,9 @@ extension CommandPalette {
                 let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !name.isEmpty else { return }
                 begin(.worktreeStart(WorktreeStartDraft(newWorktree: name, choice: choice)), keepingHistory: true)
+            case .forgetSettledDays:
+                guard let choice = forgetSettledChoice, !choice.topics.isEmpty else { return }
+                begin(.confirm(PaletteConfirmation(.forgetSettled(days: choice.days, asOf: choice.now, topics: choice.topics))), keepingHistory: true)
             }
         case (.confirm(let draft), .session(let id)):
             guard case .ready(var sessions, let worktrees) = draft.choices,
@@ -668,6 +712,7 @@ extension CommandPalette {
             case .forget(let topic):
                 let removed = worktrees.filter { draft.removedWorktrees.contains($0.id) && $0.canRemove(sessions: sessions) }.map(\.id)
                 store.forgetTopic(topic.id, choices: sessions, worktrees: removed)
+            case .forgetSettled(let days, let asOf, _): store.forgetSettled(olderThan: days, asOf: asOf)
             case .killWindow(let window): store.kill(window, session: false, reviewed: draft.reviewedPaneIDs ?? [])
             case .killSession(let window): store.kill(window, session: true, reviewed: draft.reviewedPaneIDs ?? [])
             case .removeAndKill(let window):

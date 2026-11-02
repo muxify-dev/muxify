@@ -425,6 +425,23 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertTrue(server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
     }
 
+    func testForgetSettledCountsTheDaysFromTheTimeTheUserReviewed() throws {
+        let calendar = Calendar.autoupdatingCurrent
+        let now = Date()
+        let asOf = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: now))
+        try TopicStore(paths: paths).write { transaction in
+            for (id, days) in [("fifteen", 15), ("sixteen", 16)] {
+                var record = TopicRecord(id: id, title: id)
+                record.settledAt = ISO8601DateFormatter().string(from: try XCTUnwrap(calendar.date(byAdding: .day, value: -days, to: now)))
+                try transaction.create(record)
+            }
+        }
+        let response = service().handle(EnvironmentRequest(.forgetSettled(olderThan: 14, asOf: asOf)))
+        guard case .topics(let forgotten) = response else { return XCTFail("\(response)") }
+        XCTAssertEqual(forgotten.map(\.id), ["sixteen"], "Settled 15 days before asOf: forgotten")
+        XCTAssertEqual(try records().map(\.id), ["fifteen"], "Settled 15 days before now but 14 before asOf: kept")
+    }
+
     func testTopInsertionAndReturningTopicsUseTheConfiguredEndAmongLocks() throws {
         let top = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath], topics: { var topics = Config.Topics(); topics.insertPosition = .top; return topics }())
         _ = try change(top.handle(EnvironmentRequest(.create(title: "First"))))

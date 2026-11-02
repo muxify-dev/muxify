@@ -14,6 +14,7 @@ enum PaletteCommand: String, CaseIterable {
     case settleTopic = "Settle Topic"
     case removeSessionFromTopic = "Remove Session from Topic"
     case forgetTopic = "Forget Topic"
+    case forgetSettledOlderThan = "Forget Settled Older Than…"
     case renameTopic = "Rename Topic"
     case setTopicNote = "Set Topic Note"
     case clearTopicNote = "Clear Topic Note"
@@ -129,6 +130,7 @@ enum PaletteCommand: String, CaseIterable {
         case .settleTopic: .verb(.topicSettle)
         case .removeSessionFromTopic: .verb(.sessionRemoveFromTopic)
         case .forgetTopic: .verb(.topicForget)
+        case .forgetSettledOlderThan: .verb(.topicForgetSettled)
         case .renameTopic: .verb(.topicRename)
         case .setTopicNote, .clearTopicNote: .verb(.topicNote)
         case .renameWindow: .verb(.windowRename)
@@ -196,6 +198,7 @@ extension CommandPalette {
             case .addSession, .settleTopic: return canChangeTopics && hasOpenTopic
             case .editTags: return canChangeTopics && hasOpenTopic && store.topicConfig.tags != nil
             case .forgetTopic, .renameTopic, .setTopicNote: return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
+            case .forgetSettledOlderThan: return canChangeTopics && store.topicWatcher.records.contains { $0.settledAt != nil }
             case .clearTopicNote:
                 return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
                     && store.topicWatcher.records.contains { $0.id == store.activeTopicID && $0.note != nil }
@@ -274,7 +277,7 @@ extension CommandPalette {
         }
         switch command {
         case .newTopic, .movePane, .moveWindow, .moveSession, .movePaneWithTab, .addSession, .settleTopic,
-             .forgetTopic, .renameTopic, .setTopicNote, .renameWindow, .editTags, .chooseInPlay, .replaceFromBench, .clearBrowserHistory,
+             .forgetTopic, .forgetSettledOlderThan, .renameTopic, .setTopicNote, .renameWindow, .editTags, .chooseInPlay, .replaceFromBench, .clearBrowserHistory,
              .newWorktree, .removeWorktree: break
         default: close()
         }
@@ -291,6 +294,7 @@ extension CommandPalette {
         case .settleTopic: store.presentSettleTopic(keepingHistory: true)
         case .removeSessionFromTopic: if let window = store.selectedWindow { store.removeFromTopic(window) }
         case .forgetTopic: if let id = store.activeTopicID { store.presentForgetTopic(id, keepingHistory: true) }
+        case .forgetSettledOlderThan: store.presentForgetSettled(keepingHistory: true)
         case .renameTopic: store.presentRenameTopic(keepingHistory: true)
         case .setTopicNote: store.presentSetTopicNote(keepingHistory: true)
         case .clearTopicNote: if let id = store.activeTopicID { store.setTopicNote(of: id, nil) }

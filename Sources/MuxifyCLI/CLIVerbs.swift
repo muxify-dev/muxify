@@ -452,6 +452,22 @@ enum CLIVerbs {
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .forget(removeWorktrees: parsed.flag("--remove-worktrees"), killSessions: parsed.flag("--kill-sessions"))
         },
+        CLIVerb(path: .topicForgetSettled, synopsis: "[--older-than <days>] [--json]", options: [.value("--older-than"), .flag("--json")],
+                help: """
+                Forgets every Settled Topic that was Settled more than <days> days ago, as
+                Forget Settled Older Than… does. A Topic that you Forget can never be Reopened.
+                Its Worktrees stay. It prints each Topic that it forgot.
+                  --older-than <days>   a whole number, 1 or more. Without it, the number
+                                        that topics.forget_settled_older_than gives,
+                                        else 14.
+                """) { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            let days = try parsed.value("--older-than").map { value -> Int in
+                guard let days = Int(value), days >= 1 else { throw CLIError("--older-than takes a whole number of days, 1 or more", exitCode: 2) }
+                return days
+            }
+            return .request(try RequestInvocation(.forgetSettled(olderThan: days), parsed: parsed))
+        },
         topicVerb(.topicSettle, synopsis: "[--kill-sessions] [--remove-worktrees] \(topicTarget) [--json]",
                   options: [.flag("--kill-sessions"), .flag("--remove-worktrees")],
                   help: """

@@ -1,6 +1,7 @@
 """Topics in the Sidebar: the Settled group, its pages, and when it is open.
 
-A card in a group (TopicCard in UI/SidebarView.swift) gives its context menu's items as accessibility actions.
+A card in a group (TopicCard in UI/SidebarView.swift) gives its context menu's items as accessibility actions, and so does
+the Settled header (UI/TopicGroupBlock.swift).
 
 The fixture and the helpers that several suites use are in scripts/verify/topics_sidebar.py.
 
@@ -8,6 +9,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_groups_sidebar
 """
 
+import datetime
 import json
 import unittest
 
@@ -15,7 +17,19 @@ from scripts.verify.sandbox import frame, wait
 from scripts.verify.topics_sidebar import TopicsSidebar, remembered_session
 
 
+def settled_days_ago(days):
+    moment = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+    return moment.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
 class TopicsGroupsSidebar(TopicsSidebar):
+    FORGET_SETTLED = 'Forget Settled Older Than…'
+
+    def wait_forget_settled_step(self, when):
+        return self.s.wait_rows(lambda rs: self.s.has('palette-row-forget-settled', rs)
+                                and self.s.row('palette-search', rs).get('accessibilityValue', '') == '14',
+                                '%s did not open the step with 14 in its field' % when)
+
     def go_to(self, query):
         def opened():
             if not self.s.has('palette-search'):
@@ -141,6 +155,48 @@ class TopicsGroupsSidebar(TopicsSidebar):
         self.assertIsNotNone(self.records()['click-settled'].get('settled_at'), 'a click on a Settled card changed the record')
         self.assertNotEqual(self.s.tmux_ok('has-session', '-t', '=alpha/click-settled').returncode, 0,
                             'a click on a Settled card Reopened it without the Reopen choice')
+
+    def test_forget_settled_older_than_forgets_the_old_settled_topics_and_keeps_a_new_one(self):
+        s = self.s
+        old = ['forget-old-a', 'forget-old-b']
+        for topic in old:
+            self.write_topic(topic, 'Forget ' + topic[-5:], self.beta, settled_at=settled_days_ago(20))
+        self.write_topic('forget-new', 'Forget new', self.beta, settled_at=settled_days_ago(0))
+        self.expand('settled-topics')
+        s.wait_rows(lambda rs: all(self.grouped('topic-' + t, 'settled-topics', rs) for t in old + ['forget-new']),
+                    'the three Settled Topics are not in the Settled group')
+
+        command = 'palette-row-command-' + self.FORGET_SETTLED
+        def listed():
+            if not s.has('palette-search'):
+                s.driver('press', 'Commands')
+            if not s.has('palette-search'):
+                return False
+            s.act('set', 'palette-search', 'Forget Settled')
+            return self.rows_until(lambda rs: s.has(command, rs), seconds=3)[0] is not None
+        wait(listed, 'Commands does not list %s' % self.FORGET_SETTLED, seconds=20)
+        s.act('press', command)
+        rs = self.wait_forget_settled_step('the Command')
+        self.assertIn('2 Topics', self.describe('palette-row-forget-settled', rs), 'the live row of 14 days')
+
+        s.act('action', 'palette-search', 'Accept')
+        rs = s.wait_rows(lambda rs: all(s.has('palette-row-forget-settled-' + t, rs) for t in old),
+                         'Accept did not show the confirm step with the two old Topics')
+        self.assertFalse(s.has('palette-row-forget-settled-forget-new', rs), 'the confirm step lists the Topic Settled today')
+        s.act('action', 'palette-search', 'Confirm')
+        wait(lambda: not any(t in self.records() for t in old), 'Confirm kept the old Topic records: %s' % sorted(self.records()))
+        rs = s.wait_rows(lambda rs: not any(s.has('topic-' + t, rs) for t in old) and not s.has('palette-search', rs),
+                         'the old cards stay in the Settled group, or the palette stays open')
+        self.assertTrue(self.grouped('topic-forget-new', 'settled-topics', rs), 'the Topic Settled today left the Settled group')
+        self.assertIn('forget-new', self.records(), 'Forget Settled Older Than… forgot the Topic Settled today')
+
+    def test_the_settled_header_action_opens_forget_settled_older_than_with_fourteen_days(self):
+        self.write_topic('forget-header', 'Forget header', self.beta, settled_at=settled_days_ago(20))
+        self.s.wait_rows(lambda rs: self.s.has('settled-topics', rs), 'the Sidebar shows no Settled group')
+        # The header's context menu item, as an accessibility action, so the check opens no menu.
+        self.s.act('action', 'settled-topics', self.FORGET_SETTLED)
+        rs = self.wait_forget_settled_step('the Settled header action')
+        self.assertIn(self.FORGET_SETTLED, self.describe('palette-breadcrumb', rs))
 
     def test_settled_group_below_twenty_five_open_topics_shows_fifteen_newest_then_fifteen_more_and_collapsing_resets(self):
         # The Sidebar builds only the rows it shows. The open Topics push the Settled group and its pages below the

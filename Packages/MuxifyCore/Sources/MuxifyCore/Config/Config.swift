@@ -75,6 +75,8 @@ public struct Config: Equatable {
         /// How many cards that are not Pinned the Sidebar shows In Play; the others are on the Bench. Nil: the Sidebar
         /// shows every card and has no Bench.
         public var inPlay: Int?
+        /// The days that Forget Settled Older Than… offers first. It forgets nothing by itself.
+        public var forgetSettledOlderThan = 14
 
         public init() {}
     }
@@ -460,6 +462,10 @@ public struct Config: Equatable {
         #   # Locked Sessions In Play. The rest wait on the Bench, behind one line
         #   # that shows them. Not set: the Sidebar shows them all.
         #   in_play: 5
+        #   # The number of days that Forget Settled Older Than… offers first.
+        #   # It forgets the Settled Topics that were Settled more days ago.
+        #   # Muxify never forgets a Topic by itself.
+        #   forget_settled_older_than: 14
         #   # The only Tags a Topic can have, in this order. A key is lower case
         #   # letters, digits and -. color is as in ui.agent_colors; a Tag
         #   # without one gets a fixed color from its name. No tags: Tags are off.
@@ -745,6 +751,8 @@ private struct ConfigReader {
                 config.topics.sessionOrder = order
             case "tags": readTags(value)
             case "in_play": config.topics.inPlay = count(value, "topics.in_play", atLeast: 1)
+            case "forget_settled_older_than":
+                if let days = count(value, "topics.forget_settled_older_than", atLeast: 1) { config.topics.forgetSettledOlderThan = days }
             default: problem(at: key, "unknown key \"topics.\(name)\"")
             }
         }
