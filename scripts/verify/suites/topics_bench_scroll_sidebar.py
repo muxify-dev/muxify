@@ -65,8 +65,6 @@ class TopicsBenchScrollSidebar(TopicsSidebar):
             if time.monotonic() > deadline:
                 self.fail('the Topics list did not come to rest in %d s; bodies in the last %.1f s: %s' % (REST_LIMIT, REST, counts))
 
-    # The Topics list keeps the scroll offset as its state, so each scroll frame draws every card again.
-    @unittest.expectedFailure
     def test_a_scroll_of_the_bench_draws_no_benched_card_again(self):
         s = self.s
         bench = self.long_bench('bench-scroll')

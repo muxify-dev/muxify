@@ -34,16 +34,12 @@ struct BenchGeometry: Equatable {
     /// back what they take, and a hidden Bench with one card does not scroll at all.
     func tail(afterCardOfHeight last: CGFloat) -> CGFloat { max(0, areaHeight - spacing - last - spacing - inset) }
 
-    /// Where a Benched card's top stands when it is directly under the line, as a part of the viewport's height: the
-    /// anchor that puts a mark of no height at the card's top there.
-    var underLine: CGFloat { viewportHeight > 0 ? (areaTop + spacing) / viewportHeight : 0 }
-
-    /// Where a Benched card's top stands when it is directly under the "more above" pill, as `underLine` is.
-    var underIndicator: CGFloat { viewportHeight > 0 ? (areaTop + indicatorHeight + spacing) / viewportHeight : 0 }
-
-    /// The anchor that reveals a Benched card: under the line for the first Benched card, under the pill for a card
-    /// with Benched cards before it, because the pill shows while those cards are above the area.
-    func revealAnchor(hasCardsAbove: Bool) -> CGFloat { hasCardsAbove ? underIndicator : underLine }
+    /// The scroll offset that reveals a Benched card whose top is `top` below the top of the list's first item: the
+    /// card stands directly under the line, or under the "more above" pill for a card with Benched cards before it,
+    /// because the pill shows while those cards are above the area.
+    func revealOffset(cardTop top: CGFloat, hasCardsAbove: Bool) -> CGFloat {
+        top + inset - areaTop - spacing - (hasCardsAbove ? indicatorHeight : 0)
+    }
 
     /// The part of the viewport whose edges scroll the list while a lifted card's pointer rests there: from the
     /// block's bottom to the viewport's bottom, or from the viewport's top while the block still scrolls.

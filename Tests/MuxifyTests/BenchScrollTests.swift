@@ -54,21 +54,23 @@ final class BenchScrollTests: XCTestCase {
                           "while the block scrolls, above the viewport it scrolls up")
     }
 
+    /// A card whose top is `top` below the first item stands at `top + inset - offset` in the viewport.
     func testACardScrolledUnderTheLineHasItsTopOneSpacingUnderTheBlock() {
-        XCTAssertEqual(short.underLine * short.viewportHeight, short.areaTop + short.spacing)
+        let offset = short.revealOffset(cardTop: 900, hasCardsAbove: false)
+        XCTAssertEqual(900 + short.inset - offset, short.areaTop + short.spacing)
         let tall = BenchGeometry(topHeight: 700, viewportHeight: 600)
-        XCTAssertEqual(tall.underLine * tall.viewportHeight, 600 - BenchGeometry.leastAreaHeight + tall.spacing,
-                       "under a tall block that stuck")
+        XCTAssertEqual(900 + tall.inset - tall.revealOffset(cardTop: 900, hasCardsAbove: false),
+                       600 - BenchGeometry.leastAreaHeight + tall.spacing, "under a tall block that stuck")
     }
 
     func testACardWithCardsBeforeItIsRevealedUnderTheMoreAbovePill() {
         let geometry = BenchGeometry(topHeight: 200, viewportHeight: 600, indicatorHeight: 30)
-        XCTAssertEqual(geometry.revealAnchor(hasCardsAbove: false) * 600, geometry.areaTop + geometry.spacing,
+        XCTAssertEqual(900 + geometry.inset - geometry.revealOffset(cardTop: 900, hasCardsAbove: false),
+                       geometry.areaTop + geometry.spacing,
                        "the first Benched card goes directly under the line, where no pill shows")
-        XCTAssertEqual(geometry.revealAnchor(hasCardsAbove: true) * 600, geometry.areaTop + 30 + geometry.spacing,
+        XCTAssertEqual(900 + geometry.inset - geometry.revealOffset(cardTop: 900, hasCardsAbove: true),
+                       geometry.areaTop + 30 + geometry.spacing,
                        "a card with cards before it goes under the pill that counts them")
-        XCTAssertEqual(BenchGeometry(topHeight: 200, viewportHeight: 0).revealAnchor(hasCardsAbove: true), 0,
-                       "no viewport, no anchor")
     }
 
     func testTheShownBenchKeepsTheLocationsCardWhereItStood() {
