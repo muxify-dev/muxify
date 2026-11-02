@@ -131,6 +131,9 @@ private struct TopicsSection: View {
     }
 
     private var topicsList: some View {
+        #if DEBUG
+        BodyCount.tick("TopicsList")
+        #endif
         let parts = model.listParts
         let hasBench = parts.bench != nil
         let stick = hasBench ? geometry.stick(at: scrollOffset) : 0
@@ -376,6 +379,9 @@ private struct TopicsListPart: ViewModifier {
     @Binding var benchEnd: CGFloat
 
     func body(content: Content) -> some View {
+        #if DEBUG
+        BodyCount.tick("TopicsListPart")
+        #endif
         let isTop = part.isTop, isFirst = part.isFirst, isLastOfTop = part.isLastOfTop, isLastBenched = part.isLastBenched
         return content
             .environment(\.scrollTopInset, part == .plain || isTop ? 0 : areaTop)
@@ -652,8 +658,11 @@ struct TopicCard: View {
     }
 
     var body: some View {
-        SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, mark: topic.usesRowMarks ? nil : topic.mark,
-                    viewport: list == nil ? Self.groupsViewport : Self.viewport, restingOpacity: restingOpacity) {
+        #if DEBUG
+        BodyCount.tick("TopicCard")
+        #endif
+        return SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, mark: topic.usesRowMarks ? nil : topic.mark,
+                           viewport: list == nil ? Self.groupsViewport : Self.viewport, restingOpacity: restingOpacity) {
             header
         } content: {
             if case .settled = topic.kind {
