@@ -72,48 +72,44 @@ struct StackLayout<ID: Hashable> {
 
     func height(_ slot: StackSlot<ID>) -> CGFloat { heights[slot] ?? 0 }
 
-    /// Where `id` lands after it moved `translation` down from its place in `order`: before the first item above it
-    /// whose middle its top edge passed, after the last item below it whose middle its bottom edge passed, or nil at
-    /// its own place. Each edge leads the way it moves, so a tall item passes a short one as soon as it covers half of it.
+    /// Where `id` lands with the pointer at `probe`, a y in the stack: before the first item above it whose middle the
+    /// probe passed, after the last item below it whose middle the probe passed, or nil at its own place. The probe is
+    /// the pointer, not an edge of the item, so a tall item and a short one land at the same pointer position.
     /// A fixed slot is no place to land, so the item passes it as it passes the gap between two items.
     /// Only the slots in `side` are places to land.
-    func placement(of id: ID, movedBy translation: CGFloat, in order: [StackSlot<ID>],
-                   side: Range<Int>? = nil) -> DropPlacement<ID>? {
+    func placement(of id: ID, at probe: CGFloat, in order: [StackSlot<ID>], side: Range<Int>? = nil) -> DropPlacement<ID>? {
         guard let index = order.firstIndex(of: .item(id)) else { return nil }
         let side = side ?? order.indices
-        let top = top(of: .item(id), in: order) + translation
-        let bottom = top + height(.item(id))
         let middle = { (slot: StackSlot<ID>) in self.top(of: slot, in: order) + self.height(slot) / 2 }
-        if let passed = order[side.lowerBound..<index].first(where: { $0.item != nil && top < middle($0) })?.item {
+        if let passed = order[side.lowerBound..<index].first(where: { $0.item != nil && probe < middle($0) })?.item {
             return .before(passed)
         }
-        if let passed = order[(index + 1)..<side.upperBound].last(where: { $0.item != nil && bottom > middle($0) })?.item {
+        if let passed = order[(index + 1)..<side.upperBound].last(where: { $0.item != nil && probe > middle($0) })?.item {
             return .after(passed)
         }
         return nil
     }
 
-    /// Where `id` lands after it moved `translation` down, in a list that the fixed slots `dividers` split into
-    /// sections. In its own section, it lands as `placement` gives. The edge that faces a divider leads, as in
-    /// `placement`: once it passes the middle of the next divider, the item is across, and there it lands on the
-    /// farthest item whose middle that edge passed, in any section past that divider. So a tall item reaches a short
-    /// item at the end of the list. Without dividers, as `placement`.
-    func landing(of id: ID, movedBy translation: CGFloat, in order: [StackSlot<ID>], dividers: [String]) -> DropLanding<ID>? {
+    /// Where `id` lands with the pointer at `probe`, in a list that the fixed slots `dividers` split into sections. In
+    /// its own section, it lands as `placement` gives. Once the probe passes the middle of the next divider, the item is
+    /// across, and there it trades with the item under the probe, in any section past that divider. In a gap, or past
+    /// the last item, it trades with the nearest item the probe reached; before it reaches one, with none.
+    /// Without dividers, as `placement`.
+    func landing(of id: ID, at probe: CGFloat, in order: [StackSlot<ID>], dividers: [String]) -> DropLanding<ID>? {
         guard let index = order.firstIndex(of: .item(id)) else { return nil }
         let lines = dividers.compactMap { order.firstIndex(of: .fixed($0)) }.sorted()
-        guard !lines.isEmpty else { return placement(of: id, movedBy: translation, in: order).map(DropLanding.place) }
+        guard !lines.isEmpty else { return placement(of: id, at: probe, in: order).map(DropLanding.place) }
         let above = lines.last { $0 < index }, below = lines.first { $0 > index }
-        let top = top(of: .item(id), in: order) + translation
-        let bottom = top + height(.item(id))
-        let middle = { (slot: StackSlot<ID>) in self.top(of: slot, in: order) + self.height(slot) / 2 }
-        if let below, bottom > middle(order[below]) {
-            return .across(trade: order[(below + 1)...].last { $0.item != nil && bottom > middle($0) }?.item)
+        let top = { (slot: StackSlot<ID>) in self.top(of: slot, in: order) }
+        let middle = { (slot: StackSlot<ID>) in top(slot) + self.height(slot) / 2 }
+        if let below, probe > middle(order[below]) {
+            return .across(trade: order[(below + 1)...].last { $0.item != nil && top($0) <= probe }?.item)
         }
-        if let above, top < middle(order[above]) {
-            return .across(trade: order[..<above].first { $0.item != nil && top < middle($0) }?.item)
+        if let above, probe < middle(order[above]) {
+            return .across(trade: order[..<above].first { $0.item != nil && top($0) + self.height($0) >= probe }?.item)
         }
         let side = (above.map { $0 + 1 } ?? 0)..<(below ?? order.count)
-        return placement(of: id, movedBy: translation, in: order, side: side).map(DropLanding.place)
+        return placement(of: id, at: probe, in: order, side: side).map(DropLanding.place)
     }
 
     /// `translation` held so `id` stays within the list, from the top of its first item to the bottom of its last, and
@@ -137,11 +133,12 @@ struct StackLayout<ID: Hashable> {
 }
 
 /// Where an item stands in its scroll view: its height, how far its top is below the visible top (or below a header
-/// that sticks there), and how far its bottom is above the visible bottom.
+/// that sticks there), how far its bottom is above the visible bottom, and its top in the window.
 struct ItemPlace: Equatable {
     var height: CGFloat
     var visibleTop: CGFloat
     var footroom: CGFloat
+    var windowTop: CGFloat
 }
 
 /// The drag of a list's items. A press that moves a few points lifts the item at once, and a press that lets go before
@@ -201,6 +198,8 @@ final class ListDrag<ID: Hashable> {
     @ObservationIgnored private var timer: Task<Void, Never>?
     /// How far the pointer moved since the lift, before `bounded`.
     @ObservationIgnored private var rawTranslation: CGFloat = 0
+    /// How far below the lifted item's top the pointer pressed it.
+    @ObservationIgnored private var grab: CGFloat = 0
 
     /// `spacing` is the room between two items in the list's stack, and `dividers` the fixed slots across which a drop
     /// trades.
@@ -312,12 +311,13 @@ final class ListDrag<ID: Hashable> {
         phase = .pressing(id)
     }
 
-    /// The pressed item moved far enough to be a drag.
-    func lift(_ id: ID) {
+    /// The pressed item moved far enough to be a drag. The press was at `pressedAt` in the window.
+    func lift(_ id: ID, pressedAt: CGFloat) {
         guard phase == .pressing(id) else { return }
         order = lists[id] ?? [.item(id)]
         updateLayout()
         placeShift = 0
+        grab = min(max(pressedAt - (places[id]?.windowTop ?? pressedAt), 0), layout.height(.item(id)))
         fitBounds(of: id)
         translation = 0
         withAnimation(.spring(duration: 0.25, bounce: 0.3)) { phase = .lifted(id) }
@@ -344,7 +344,11 @@ final class ListDrag<ID: Hashable> {
         updateLayout()
         self.translation = layout.bounded(rawTranslation + placeShift, of: id, in: order, headroom: headroom,
                                           footroom: footroom, dividers: dividers)
-        let landing = layout.landing(of: id, movedBy: self.translation, in: order, dividers: dividers)
+        // The pointer, kept on the item where `bounded` stops it: so it reaches no item out of view, and still crosses
+        // a divider that ends the list.
+        let place = layout.top(of: .item(id), in: order), drawn = place + self.translation
+        let probe = min(max(place + grab + rawTranslation + placeShift, drawn), drawn + layout.height(.item(id)))
+        let landing = layout.landing(of: id, at: probe, in: order, dividers: dividers)
         guard landing != self.landing else { return }
         withAnimation(.spring(duration: 0.3, bounce: 0.15)) { self.landing = landing }
         if landing != .across(trade: nil) {
@@ -490,7 +494,7 @@ private struct ListDragHandle<ID: Hashable>: ViewModifier {
         case .pressing(id):
             guard hypot(value.translation.width, value.translation.height) > Self.slop else { return }
             if isEnabled {
-                drag.lift(id)
+                drag.lift(id, pressedAt: value.startLocation.y)
                 drag.follow(id, translation: value.translation.height, pointer: value.location.y)
             } else {
                 cancelled = true
@@ -559,7 +563,8 @@ private struct ListDragItem<ID: Hashable>: ViewModifier {
             .onGeometryChange(for: ItemPlace.self) { proxy in
                 let frame = proxy.frame(in: .scrollView)
                 let footroom = proxy.bounds(of: .scrollView).map { $0.maxY - frame.height } ?? .infinity
-                return ItemPlace(height: frame.height, visibleTop: frame.minY - topInset, footroom: footroom)
+                return ItemPlace(height: frame.height, visibleTop: frame.minY - topInset, footroom: footroom,
+                                 windowTop: proxy.frame(in: .global).minY)
             } action: { drag.measure(id, $0) }
             .onChange(of: shown, initial: true) { _, shown in drag.show(shown, at: id) }
             // The Window or Session it stands for went away while it was lifted.
