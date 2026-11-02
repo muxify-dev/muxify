@@ -36,7 +36,10 @@ struct SidebarCard<Header: View, Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        #if DEBUG
+        BodyCount.tick("SidebarCard")
+        #endif
+        return VStack(alignment: .leading, spacing: 0) {
             header()
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
                 .background {
