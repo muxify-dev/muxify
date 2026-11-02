@@ -2,9 +2,10 @@ import AppKit
 import SwiftUI
 
 /// Scrolls the SwiftUI scroll view that `ScrollDriverView` sits in by points: while a lifted card's pointer rests at an
-/// edge, each tick, with no gesture event to drive it, and by the distance a card moved in a layout, before that layout
-/// is drawn. `ScrollViewReader` scrolls to a view, and only within the content's height of the last layout. It is the
-/// same NSClipView move that the TestDriver's Reveal makes.
+/// edge, each tick, with no gesture event to drive it; by the distance a card moved in a layout, before that layout
+/// is drawn; and to a card that a pill or a Jump To reveals. `ScrollViewReader` scrolls to a view only within the
+/// content's height of the last layout, and it keeps its target armed after the scroll, so the next scroll from
+/// AppKit, such as a wheel's, can glide back to it. It is the same NSClipView move that the TestDriver's Reveal makes.
 @MainActor final class ScrollDriver {
     private weak var scrollView: NSScrollView?
     private weak var document: NSView?
@@ -66,6 +67,20 @@ import SwiftUI
                 self.pending = self.move(by: self.pending)
             }
         }
+    }
+
+    /// Glides the content to `offset` points from its top, within its scroll range, as a click on a pill does.
+    func scroll(to offset: CGFloat) {
+        guard let scrollView, let document = scrollView.documentView else { return }
+        let clip = scrollView.contentView
+        let end = max(0, document.bounds.height - clip.bounds.height)
+        let y = min(max(0, offset), end)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            clip.animator().setBoundsOrigin(NSPoint(x: clip.bounds.origin.x, y: document.isFlipped ? y : end - y))
+        }
+        scrollView.reflectScrolledClipView(clip)
     }
 
     /// Moves the content `delta` points within its scroll range, and returns the part of `delta` it could not move.
