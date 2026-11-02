@@ -170,7 +170,9 @@ struct PaletteCatalog {
         let row = TopicsModel.settledRow(record, sessionPaths: sessionPaths, tags: topics?.tags, expanded: [])
         let outcome = record.outcome?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var settledOn: String?
-        if outcome.isEmpty, case .settled(let detail) = row.kind { settledOn = detail }
+        if outcome.isEmpty, case .settled(_, let settledDate) = row.kind {
+            settledOn = settledDate?.formatted(date: .abbreviated, time: .omitted) ?? record.settledAt
+        }
         return PickCandidate(
             id: row.id.accessibilityID, kind: .settled, symbol: "✓", title: row.title,
             fields: [.typeWord("settled")] + (outcome.isEmpty ? [] : [.detail(outcome)]) + SearchField.tags(row.tags),

@@ -224,8 +224,8 @@ struct TopicsModel {
     struct Row: Identifiable {
         enum Kind: Equatable {
             case open
-            /// `detail` is the outcome, or the settle date when there is none.
-            case settled(detail: String)
+            /// `outcome` is empty when the user gave none. `settledDate` is nil when the record's date does not parse.
+            case settled(outcome: String, settledDate: Date?)
         }
 
         let id: TopicGroupID
@@ -698,7 +698,7 @@ struct TopicsModel {
         let title = [record.title, record.slug].compactMap { $0 }
             .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "Untitled Topic"
         let outcome = record.outcome?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let settledOn = record.settledAt.flatMap { try? Date.ISO8601FormatStyle().parse($0) }?.formatted(date: .abbreviated, time: .omitted)
+        let settledDate = record.settledAt.flatMap { try? Date.ISO8601FormatStyle().parse($0) }
         let sessions = record.sessions.enumerated().compactMap { index, session -> Session? in
             guard let path = session["directory"]?.string, let savedID = session["id"]?.string else { return nil }
             let identity = TopicSessionID(topic: id, session: savedID)
@@ -709,7 +709,7 @@ struct TopicsModel {
             return Session(id: identity, baseName: session["base_name"]?.string ?? session["name"]?.string ?? "Session",
                            contents: .remembered(windows))
         }
-        return Row(id: id, title: title, kind: .settled(detail: outcome.isEmpty ? settledOn ?? record.settledAt ?? "" : outcome),
+        return Row(id: id, title: title, kind: .settled(outcome: outcome, settledDate: settledDate),
                    mark: RowMark(unread: record.isUnread, agent: nil), isPinned: record.isPinned, sessions: sessions, isExpanded: expanded.contains(id),
                    tags: tags?.shown(record.tags) ?? [], note: record.note)
     }

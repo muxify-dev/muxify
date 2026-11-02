@@ -110,6 +110,24 @@ class TopicsGroupsSidebar(TopicsSidebar):
         self.assertIsNotNone(latency, 'Reopen did not return the Topic to the Topics list; Topic rows %s' % self.topic_rows(rs))
         self.assertIsNone(self.records()['group-settled'].get('settled_at'), 'Reopen kept the settle date in the record')
 
+    def test_a_topic_settled_now_shows_today_above_its_reopen_choice(self):
+        s = self.s
+        topic = 'age-today'
+        self.write_topic(topic, 'Age today', self.beta)
+        self.new_session('age-today', self.beta, topic=topic)
+        self.find('settle-topic-' + topic)
+        s.act('press', 'settle-topic-' + topic)
+        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Settle did not open the Settle palette')
+        s.act('press', 'palette-accept')
+        wait(lambda: self.records()[topic].get('settled_at'), 'Settle did not save the settle date')
+        self.expand('settled-topics')
+        age, reopen = 'settled-age-' + topic, 'reopen-topic-' + topic
+        rs = s.wait_rows(lambda rs: s.has(age, rs) and s.has(reopen, rs), 'the Settled card shows no age and Reopen…')
+        shown = json.dumps(s.row(age, rs))
+        self.assertIn('"Today"', shown, 'the age of a Topic Settled now: %s' % shown)
+        self.assertGreaterEqual(frame(s.row(age, rs))[0], frame(s.row(reopen, rs))[1],
+                                'the age %s is not above Reopen… %s' % (s.row(age, rs)['accessibilityFrame'], s.row(reopen, rs)['accessibilityFrame']))
+
     def test_a_click_on_a_closed_settled_card_shows_its_reopen_choice_and_reopens_nothing(self):
         self.write_topic('click-settled', 'Click settled', self.alpha, settled_at='2031-01-02T10:00:00Z',
                          sessions=[remembered_session(self.alpha, 'click-settled', windows=[dict(directory=str(self.alpha), name='shell')])])
