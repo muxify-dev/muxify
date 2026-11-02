@@ -38,8 +38,15 @@ final class CommandPalette {
         if case .move(let draft) = flow { return draft.window }
         return nil
     }
+    /// One line. A paste can bring line breaks, which the field editor lays out as more lines than the
+    /// one-line field shows, so the text and the caret look cut off. Each becomes a space on the next turn
+    /// of the main queue: the TextField takes a value written back only outside the change it reports.
     var query = "" {
         didSet {
+            if query.contains(where: \.isNewline) {
+                let pasted = query, line = String(query.map { $0.isNewline ? " " : $0 })
+                DispatchQueue.main.async { [weak self] in if self?.query == pasted { self?.query = line } }
+            }
             if query != oldValue {
                 selectedID = nil
                 queryRevision += 1

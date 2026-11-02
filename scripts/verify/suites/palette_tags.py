@@ -11,6 +11,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.palette_tags
 """
 
+import re
 import time
 import unittest
 
@@ -154,6 +155,20 @@ class PaletteTags(PaletteFixture):
         self.addCleanup(self.store.remove, made['id'])
         self.assertEqual((made.get('title'), made.get('tags')), ('Ship it', ['docs', 'qa']), made)
         self.s.wait_rows(lambda rs: 'Add a Session' in self.text('palette-breadcrumb', rs), 'New Topic did not go on to Add a Session')
+        self.s.act('action', 'palette-search', 'Close')
+
+    def test_a_pasted_line_break_in_new_topic_becomes_a_space_so_the_field_stays_one_line(self):
+        """A line copied from a terminal ends in a line break. The field editor laid it out as a second line that
+        the one-line field cut off, with the caret on it."""
+        self.new_topic()
+        self.s.act('set', 'palette-search', 'Fix reward drop yyy\n', paste=True)
+        self.s.wait_rows(lambda rs: self.field(rs) == 'Fix reward drop yyy ', 'the line break did not become a space')
+        self.s.act('set', 'palette-search', 'in GS', paste=True)
+        self.s.wait_rows(lambda rs: self.field(rs) == 'Fix reward drop yyy in GS', 'the caret is not at the end of the one line')
+        editors = self.s.driver('responder')['editors']
+        self.assertEqual(len(editors), 1, editors)
+        frame, field = (re.findall(r'-?[\d.]+', editors[0][key]) for key in ('frame', 'field'))
+        self.assertEqual(frame[3], field[3], 'the field editor is taller than its field: %s' % editors)
         self.s.act('action', 'palette-search', 'Close')
 
     def test_edit_tags_opens_with_the_tags_of_the_active_topic_as_chips(self):
