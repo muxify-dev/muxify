@@ -937,6 +937,24 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(snapshot.comparison, GitComparison(base: "master", ahead: 0, behind: 0))
     }
 
+    /// A bare repository's HEAD names a branch, yet it has no files: git checks that branch out in a Worktree all the
+    /// same, and so must the Git View. git names a bare repository in a `.git` folder by the folder above it.
+    func testABranchOnlyABareRepositorysHeadNamesIsCheckedOutNowhere() throws {
+        for (bare, worktree) in [("bare.git", "bare-main"), ("dotgit/.git", "dotgit-main")] {
+            let path = directory.url.appendingPathComponent(worktree).path
+            try run("""
+            cd "$1"
+            mkdir -p "$(dirname "$2")" && git clone -q --bare repo "$2"
+            git -C "$2" worktree add -q "$3" master
+            git -C "$3" checkout -q -b abc
+            """, directory.url.path, bare, path)
+            let snapshot = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, path)).get()
+            XCTAssertEqual(snapshot.head, "abc", bare)
+            XCTAssertNil(snapshot.branches.first { $0.name == "master" }?.worktreePath, bare)
+            XCTAssertNotNil(snapshot.branches.first { $0.name == "abc" }?.worktreePath, bare)
+        }
+    }
+
     func testAFolderOutsideARepositoryIsNotAnError() throws {
         let result = GitRepository.parseSnapshot(try run(GitRepository.snapshotScript, directory.url.path))
         XCTAssertEqual(result, .failure(GitViewError(message: "Not a git repository: \(directory.url.path)")))
