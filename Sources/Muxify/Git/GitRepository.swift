@@ -219,7 +219,7 @@ struct GitBranch: Equatable, Identifiable {
     /// `ahead 1, behind 2`, `gone`, or empty when in sync.
     let track: String
     let date: Date?
-    /// Where the branch is checked out, if anywhere.
+    /// Where the branch is checked out, if anywhere. A bare repository's HEAD is no checkout: it has no files.
     let worktreePath: String?
     /// Commits the branch has that the current one doesn't, and the other
     /// way round.
@@ -306,6 +306,8 @@ enum GitRepository {
     section branches
     g for-each-ref --sort=-committerdate \\
         --format='%(HEAD)%00%(refname:short)%00%(upstream:short)%00%(upstream:track,nobracket)%00%(committerdate:unix)%00%(worktreepath)%00%(objectname)' refs/heads
+    # The bare repository, which %(worktreepath) names for the branch its HEAD names, though it has no files.
+    section bare; g worktree list --porcelain | awk 'NR == 1 { path = substr($0, 10) } NR == 2 { if ($0 == "bare") print path; exit }'
     section remotebranches; g for-each-ref --format='%(refname)' refs/remotes
     section previous; g rev-parse --abbrev-ref '@{-1}' 2>/dev/null
     \(mainRefs)
@@ -914,7 +916,7 @@ enum GitRepository {
         snapshot.behind = status.behind
         // The current branch first, as lazygit lists it.
         let divergence = parseDivergence(sections["divergence"] ?? "")
-        let branches = parseBranches(sections["branches"] ?? "").map { branch in
+        let branches = parseBranches(sections["branches"] ?? "", bareRepository: trimmed(sections["bare"] ?? "")).map { branch in
             var branch = branch
             (branch.ahead, branch.behind) = divergence[branch.name] ?? (0, 0)
             return branch
@@ -1070,7 +1072,8 @@ enum GitRepository {
         return GitComparison(base: String(words[0]), ahead: ahead, behind: behind)
     }
 
-    static func parseBranches(_ output: String) -> [GitBranch] {
+    /// A branch at `bareRepository` is checked out nowhere: as git does, the Git View checks it out in any Worktree.
+    static func parseBranches(_ output: String, bareRepository: String = "") -> [GitBranch] {
         output.split(separator: "\n").compactMap { line in
             let fields = line.components(separatedBy: "\0")
             guard fields.count >= 7, !fields[1].isEmpty else { return nil }
@@ -1078,7 +1081,7 @@ enum GitRepository {
                 name: fields[1], sha: fields[6], isHead: fields[0] == "*",
                 upstream: fields[2].isEmpty ? nil : fields[2], track: fields[3],
                 date: TimeInterval(fields[4]).map(Date.init(timeIntervalSince1970:)),
-                worktreePath: fields[5].isEmpty ? nil : fields[5]
+                worktreePath: fields[5].isEmpty || fields[5] == bareRepository ? nil : fields[5]
             )
         }
     }

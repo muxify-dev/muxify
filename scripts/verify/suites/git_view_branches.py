@@ -7,6 +7,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.git_view_branches
 """
 
+import shutil
 import subprocess
 import time
 
@@ -154,6 +155,33 @@ class GitViewBranches(GitViewFixture):
         self.assertEqual(self.s.tmux('list-sessions', '-F', '#{session_name}'), sessions, 'a Session started without the user')
         self.assertEqual(self.head(), 'main', 'the branch was checked out')
         self.assertTrue(self.is_open(), 'the Git View of the Window that was left closed')
+
+    def test_space_checks_out_the_branch_a_bare_repositorys_head_names_in_its_worktree(self):
+        # The bare repository's HEAD names main, yet it has no files: git and lazygit check main out in its Worktree.
+        root = self.s.root/'bare-checkout'
+        self.addCleanup(shutil.rmtree, root, True)
+        bare, path = root/'repo.git', root/'main'
+        subprocess.run(['/usr/bin/git', 'clone', '-q', '--bare', '-b', 'main', str(self.repo), str(bare)], check=True, capture_output=True)
+        subprocess.run(['/usr/bin/git', '-C', str(bare), 'worktree', 'add', '-q', str(path), 'main'], check=True, capture_output=True)
+        subprocess.run(['/usr/bin/git', '-C', str(path), 'checkout', '-q', '-b', 'bare-x'], check=True, capture_output=True)
+
+        def head():
+            return subprocess.run(['/usr/bin/git', '-C', str(path), 'branch', '--show-current'],
+                                  check=True, capture_output=True, text=True).stdout.strip()
+        self.close_git_view()
+        session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'gv-bare', '-c', str(path), SHELL)
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', session)
+        self.addCleanup(self.back_to_fixture_window)
+        self.s.show(self.s.tmux('display-message', '-p', '-t', session + ':', '#{window_id}'))
+        self.open_git_view()
+        self.go_to('3')
+        # bare-x is a branch of the bare repository only, so the Git View reads its Worktree, not the fixture.
+        self.s.wait_rows(lambda rs: self.s.has('git-row-branch:bare-x', rs), 'the Git View did not read the Worktree of the bare repository')
+        self.select_row('git-row-branch:main')
+        self.key('space')
+        wait(lambda: head() == 'main' or self.s.has('git-menu'), 'space did not check out main', seconds=10)
+        self.assertFalse(self.s.has('git-menu'), 'space asked: %s' % self.menu().get('accessibilityLabel'))
+        self.assertEqual(head(), 'main')
 
     def test_n_asks_for_a_name_and_checks_out_a_new_branch_off_the_selected_one(self):
         self.addCleanup(self.git, 'branch', '-q', '-D', 'n-topic')
