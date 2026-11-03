@@ -43,17 +43,24 @@ class TopicsCli(unittest.TestCase):
         self.assertEqual(added.returncode, 0, added.stderr)
         return topic_id
 
-    def test_help_lists_each_verb_once_and_every_verb_gives_help(self):
+    @staticmethod
+    def help_paths(text):
+        """The verbs that a help text lists, in order, as `topic new`, from its synopsis lines."""
+        synopses = [line[7:] for line in text.splitlines() if line.startswith(('usage: muxify ', '       muxify '))]
+        return [' '.join(word for word in line.split()[1:3] if word[0].isalpha()) for line in synopses]
+
+    def test_help_lists_each_verb_once_and_every_verb_gives_its_own_help(self):
         result = self.muxify('--help', pane='')
         self.assertEqual(result.returncode, 0, result.stderr)
-        synopses = [line[7:] for line in result.stdout.splitlines() if line.startswith(('usage: muxify ', '       muxify '))]
-        paths = [' '.join(word for word in line.split()[1:3] if word[0].isalpha()) for line in synopses]
+        paths = self.help_paths(result.stdout)
         self.assertEqual(len(paths), len(set(paths)), 'a verb is listed twice: %s' % paths)
         for path in ['topic new', 'topic add-session', 'window move', 'session lock', 'agent conversation']:
             self.assertIn(path, paths)
         for path in paths:
             verb = self.muxify(*path.split(), '--help', pane='')
-            self.assertEqual((verb.returncode, verb.stdout), (0, result.stdout), path + ' --help')
+            self.assertEqual((verb.returncode, self.help_paths(verb.stdout)), (0, [path]), path + ' --help')
+            description = verb.stdout.split('\n\n')[1]
+            self.assertIn(description, result.stdout, path + ' --help describes the verb differently from --help')
 
     def test_topic_forget_removes_live_and_settled_topics(self):
         project = self.projects/'cli-forget'
