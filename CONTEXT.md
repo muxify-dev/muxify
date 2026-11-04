@@ -300,7 +300,7 @@ _Avoid_: pending selection, navigation, transition
 
 **Sidebar**:
 The panel on the left of the Muxify window that lists Sessions, Windows and Agents. The Git View's left pane is its List pane, never a sidebar.
-_Avoid_: left sidebar, left panel
+_Avoid_: left sidebar, left panel, collapse other sessions (the Config key `sidebar.session_cards: one` makes a Session card, like a Topic card, the only open one when the Location moves to its Session), toggle Topics/Sessions (say Switch to Topics / Switch to Sessions; Show Sessions stays the View menu's toggle for the Sessions section)
 
 **Focus**:
 Where keyboard input goes in an App Window: the Terminal, the Browser, the Git View or a Command Palette. One of them has Focus at a time, and a keybind for one of them acts only while it has Focus.
