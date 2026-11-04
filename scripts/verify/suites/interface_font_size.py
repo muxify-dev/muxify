@@ -21,6 +21,12 @@ Git View, and a Git View prompt gives them to its field, at every size.
 The Git View's code text does not follow `ui.font_size`: it is the Terminal's `font-size` less one point, and its
 line-number gutter grows with it, wide enough for the diff's widest line number, so a 5-digit number shows whole.
 
+A Command Palette's rows, section headers and search field hold their text in fixed heights that grow by the factor, and
+its width grows too, but never past the App Window less its margins. The list still shows six and a half rows. Its
+keys, its scrolling to the highlighted row and a click choose the row that is drawn there at every size. The driver
+cannot type keys, so a check opens a palette from its View menu item and calls the search field's accessibility actions
+for them (Sources/Muxify/UI/CommandPaletteView.swift).
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.interface_font_size
 """
@@ -28,6 +34,7 @@ Run from the repo root after `make build`:
 import math
 import re
 import subprocess
+import time
 import unittest
 
 from scripts.verify.sandbox import Sandbox, frame, wait
@@ -107,6 +114,18 @@ LONG_FILE_LINES = 10010
 CHANGED_LINE = 10002
 # The Terminal's `font-size` at its default and larger. The Git View's code is a point smaller.
 TERMINAL_SIZES = [13, 18]
+# The Command Palette and its search field. A row of a palette holds its text in 52 points at 12, with nothing above or
+# below it, and the list shows 6.5 rows before it scrolls. The palette is 700 points wide at 12, and never wider than the
+# App Window less 48 (`PaletteMetrics` in Sources/Muxify/UI/PaletteMetrics.swift).
+PALETTE = 'command-palette'
+PALETTE_SEARCH = 'palette-search'
+PALETTE_LIST = 'palette-list'
+PALETTE_ROW = 52
+PALETTE_VISIBLE_ROWS = 6.5
+PALETTE_WIDTH = 700
+PALETTE_MARGIN = 48
+# Dormant Topics, so that Choose In Play, which lists every Topic that is not Pinned, lists more rows than it shows.
+PICK_TOPICS = ['fs-pick-%02d' % n for n in range(10)]
 
 
 def code_line_height(terminal_size):
@@ -826,3 +845,139 @@ class InterfaceFontSize(unittest.TestCase):
         rs = drawn(TERMINAL_SIZES[-1])
         self.assertEqual(measure(rs, TERMINAL_SIZES[-1]), (large_gutter, large_number),
                          'ui.font_size: 18 changed the line-number gutter or its numbers')
+
+    def open_palette(self, name):
+        """Presses the View menu item until the palette shows. SwiftUI rebuilds the menu a moment after the state it
+        reads changes, and a press in that moment can miss."""
+        s = self.s
+
+        def opened():
+            s.driver('press', name)
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                if s.has(PALETTE_SEARCH):
+                    return True
+            return False
+        wait(opened, '%s did not open' % name, seconds=20)
+        self.addCleanup(self.close_palette)
+
+    def close_palette(self):
+        # A palette that the last action closed can still be in the dump, and gone at the Close.
+        if self.s.has(PALETTE_SEARCH):
+            self.s.driver('action', PALETTE_SEARCH, 'Close')
+        self.s.wait_rows(lambda rs: not self.s.has(PALETTE_SEARCH, rs), 'the palette did not close')
+
+    def run_command(self, title):
+        """Opens Commands and presses the row of the Command `title`, as ↩ on it does."""
+        s = self.s
+        self.open_palette('Commands')
+        s.act('focus', PALETTE_SEARCH)
+        s.act('set', PALETTE_SEARCH, title)
+        key = 'palette-row-command-' + title
+        s.wait_rows(lambda rs: s.has(key, rs), 'Commands does not list %s' % title)
+        s.act('press', key)
+
+    def assert_palette_in_app_window(self, rs, size):
+        """The palette is as wide as at 12 times the factor, but never wider than the App Window less its margins, and
+        it is drawn whole inside the App Window."""
+        x, y, w, h = bounds(self.s.row(PALETTE, rs))
+        app_x, app_y, app_w, app_h = self.app_window(rs)
+        self.assertAlmostEqual(w, min(PALETTE_WIDTH * size / 12, app_w - PALETTE_MARGIN), delta=ROUNDING,
+                               msg='the palette is %.0f points wide in an App Window %.0f wide at %s' % (w, app_w, size))
+        self.assertTrue(app_x - ROUNDING <= x and x + w <= app_x + app_w + ROUNDING
+                        and app_y - ROUNDING <= y and y + h <= app_y + app_h + ROUNDING,
+                        'the palette, at %s, leaves the App Window, at %s, at %s'
+                        % ((x, y, w, h), (app_x, app_y, app_w, app_h), size))
+
+    def test_at_18_a_palette_row_and_the_search_field_grow_by_half_the_title_keeps_its_room_and_the_palette_fits_the_app_window(self):
+        s = self.s
+        self.addCleanup(self.write_config, '')
+        row = 'palette-row-topic-fs-size'
+        keys = [PALETTE, PALETTE_SEARCH, row]
+        app_width = self.app_window()[2]
+        # With room for the palette at 18, every width in it grows by the factor, and so does the room for the title.
+        self.assertGreaterEqual(app_width, PALETTE_WIDTH * 1.5 + PALETTE_MARGIN, 'the App Window is too narrow for the check')
+        frames = {}
+        for size in [12, 18]:
+            self.set_size(size)
+            self.open_palette('Go to…')
+            rs = self.settled(keys, 'Go to… does not show the row of fs-size at %s' % size)
+            frames[size] = {key: bounds(s.row(key, rs)) for key in keys}
+            self.assertTrue(s.row(row, rs).get('accessibilityLabel', '').startswith('fs-size'),
+                            'the row of fs-size is labeled %r at %s' % (s.row(row, rs).get('accessibilityLabel'), size))
+            self.assert_palette_in_app_window(rs, size)
+            # The search field shows its text whole in its row.
+            s.act('focus', PALETTE_SEARCH)
+            self.assert_field_has_the_keys('the search field', size)
+            self.close_palette()
+        small, large = frames[12], frames[18]
+        self.assert_text_grows_by_half(row, 0, small[row][3], large[row][3])
+        self.assert_text_grows_by_half(PALETTE_SEARCH, 0, small[PALETTE_SEARCH][3], large[PALETTE_SEARCH][3])
+        self.assert_text_grows_by_half(PALETTE, 0, small[PALETTE][2], large[PALETTE][2], side='wide')
+        # A row's padding and spacing do not grow, so a row 1.5 times as wide gives its title, 1.5 times as wide, at
+        # least the room it shows whole in at 12; and the row's height grows with the title's.
+        self.assertGreaterEqual(large[row][2], 1.5 * small[row][2] - ROUNDING,
+                                'the row of fs-size is %.0f points wide at 12 and %.0f at 18, too narrow for its title'
+                                % (small[row][2], large[row][2]))
+
+    def test_at_12_and_18_the_palettes_keys_scrolling_and_a_click_choose_the_row_drawn_there(self):
+        s = self.s
+        self.addCleanup(self.write_config, '')
+        for order, topic_id in enumerate(PICK_TOPICS):
+            self.store.put(dict(id=topic_id, title=topic_id, slug=topic_id, home_project=str(self.project), order=100 + order))
+            self.addCleanup(self.store.remove, topic_id)
+        rows = lambda rs: [key for key in s.ids(rs) if key.startswith('palette-row-topic-')]
+        value = lambda key, rs: s.row(key, rs).get('accessibilityValue', '')
+        highlighted = lambda rs: next((key for key in rows(rs) if 'selected' in value(key, rs)), None)
+        for size in [12, 18]:
+            self.set_size(size, topics=IN_PLAY)
+            row_height = PALETTE_ROW * size / 12
+
+            def in_view(key, rs):
+                """The row is drawn whole in the list's scroll view, and as tall as a row at this size."""
+                if not s.has(key, rs):
+                    return False
+                bottom, top = frame(s.row(key, rs))
+                list_bottom, list_top = frame(s.row(PALETTE_LIST, rs))
+                return (list_bottom - ROUNDING <= bottom and top <= list_top + ROUNDING
+                        and abs(top - bottom - row_height) <= ROUNDING)
+
+            self.run_command('Choose In Play…')
+            rs = s.wait_rows(lambda rs: s.has(PALETTE_LIST, rs) and highlighted(rs) and in_view(highlighted(rs), rs),
+                             'Choose In Play does not show its highlighted row at %s' % size)
+            # 6.5 rows of the size, and one header, show before the list scrolls.
+            list_bottom, list_top = frame(s.row(PALETTE_LIST, rs))
+            self.assertAlmostEqual(list_top - list_bottom, PALETTE_VISIBLE_ROWS * row_height, delta=ROUNDING,
+                                   msg='the list of %d rows is %.0f points tall at %s'
+                                   % (len(PICK_TOPICS) + 5, list_top - list_bottom, size))
+            # ↓ moves the highlight to the row drawn directly under it, and on past the rows shown at first, scrolling
+            # each one into view.
+            moved = [highlighted(rs)]
+            for step in range(len(PICK_TOPICS) - 1):
+                s.act('action', PALETTE_SEARCH, 'Select Next Row')
+                rs = s.wait_rows(lambda rs: highlighted(rs) not in [None, moved[-1]] and in_view(highlighted(rs), rs),
+                                 lambda: '↓ does not highlight the next row in view after %s at %s' % (moved[-1], size))
+                moved.append(highlighted(rs))
+                if step == 0:
+                    self.assertAlmostEqual(frame(s.row(moved[0], rs))[0], frame(s.row(moved[1], rs))[1], delta=ROUNDING,
+                                           msg='%s is not drawn directly under %s at %s' % (moved[1], moved[0], size))
+            self.assertFalse(in_view(moved[0], rs), 'the list did not scroll from its first rows at %s' % size)
+            # Space checks the highlighted row, the one drawn there.
+            self.assertNotIn('checked', value(moved[-1], rs), '%s starts checked at %s' % (moved[-1], size))
+            s.act('action', PALETTE_SEARCH, 'Space')
+            s.wait_rows(lambda rs: 'checked' in value(moved[-1], rs),
+                        lambda: 'Space does not check the highlighted %s at %s' % (moved[-1], size))
+            # A click in the middle of a row drawn there, once the list stands still, checks that row and highlights
+            # it. A row takes the first click, so the click reaches it in the background.
+            target = moved[-3]
+            frames = []
+
+            def still(rs):
+                frames.append(s.row(target, rs).get('accessibilityFrame'))
+                return frames[-2:] == [frames[-1]] * 2 and in_view(target, rs)
+            rs = s.wait_rows(still, '%s is not in view, standing still, at %s' % (target, size))
+            self.assertNotIn('checked', value(target, rs), '%s starts checked at %s' % (target, size))
+            s.act('click', target)
+            s.wait_rows(lambda rs: 'checked' in value(target, rs) and highlighted(rs) == target,
+                        lambda: 'a click on %s does not check and highlight it at %s: %s' % (target, size, value(target, s.rows())))
+            self.close_palette()

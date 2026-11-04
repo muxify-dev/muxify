@@ -153,4 +153,25 @@ final class InterfaceFontSizeTests: XCTestCase {
         XCTAssertEqual(GitPopupMetrics.fileListHeight(files: 9, size: InterfaceFontSize(18)), 162)
         XCTAssertEqual(GitPopupMetrics.fileListHeight(files: 0, size: InterfaceFontSize(18)), 0)
     }
+
+    func testThePalettesListIsItsRowsAndHeadersUpToSixAndAHalfRowsOfTheGrownHeight() {
+        XCTAssertEqual(PaletteMetrics.rowHeight(InterfaceFontSize()), 52)
+        XCTAssertEqual(PaletteMetrics.headerHeight(InterfaceFontSize()), 24)
+        XCTAssertEqual(PaletteMetrics.rowHeight(InterfaceFontSize(18)), 78)
+        XCTAssertEqual(PaletteMetrics.headerHeight(InterfaceFontSize(18)), 36)
+        XCTAssertEqual(PaletteMetrics.listHeight(rows: 3, headers: 2, size: InterfaceFontSize()), 3 * 52 + 2 * 24)
+        XCTAssertEqual(PaletteMetrics.listHeight(rows: 3, headers: 2, size: InterfaceFontSize(18)), 3 * 78 + 2 * 36)
+        XCTAssertEqual(PaletteMetrics.listHeight(rows: 20, headers: 3, size: InterfaceFontSize()), 338, "6.5 rows, and it scrolls")
+        XCTAssertEqual(PaletteMetrics.listHeight(rows: 20, headers: 3, size: InterfaceFontSize(18)), 507)
+    }
+
+    func testThePaletteIs700PointsAt12AndGrowsByTheFactorButNeverPastTheAppWindowLessItsMargins() {
+        for window in [820.0, 1000, 2000] as [CGFloat] {
+            XCTAssertEqual(PaletteMetrics.width(in: CGSize(width: window, height: 800), size: InterfaceFontSize()), 700, "\(window)")
+        }
+        XCTAssertEqual(PaletteMetrics.width(in: CGSize(width: 600, height: 800), size: InterfaceFontSize()), 552)
+        XCTAssertEqual(PaletteMetrics.width(in: CGSize(width: 2000, height: 800), size: InterfaceFontSize(18)), 1050)
+        XCTAssertEqual(PaletteMetrics.width(in: CGSize(width: 1000, height: 800), size: InterfaceFontSize(18)), 952,
+                       "the App Window less its margins, so the palette stays in it")
+    }
 }

@@ -634,6 +634,19 @@ These follow the size:
   A popup is never wider than the Git View less 48 points, so it stays inside
   the App Window. A menu leaves the keys with the Git View and a prompt gives
   them to its field, at every size.
+- Every Command Palette, in each of its steps: the search field with its icon
+  and Tag chips, the breadcrumb and notes, the section headers, the rows with
+  their titles, details, trailing text, status, Tag chips and icons, the boxes
+  of a check step, the Source buttons, the Actions panel, the key caps, and the
+  footer with its buttons. So do the heights that hold that text: 52 points for
+  a row, 24 for a section header, 62 for the search field's row, 26 for the
+  Source buttons and 30 for a row of the Actions panel, which is 290 points
+  wide. The list still shows six and a half rows before it scrolls. The palette
+  is 700 points wide times the factor, but never wider than the App Window less
+  48 points, and a Pill takes the same width. The footer's buttons are macOS
+  controls, which take the size macOS draws nearest, as the Unified and Split
+  switch does. The keys, the scrolling to the highlighted row, and a click
+  choose the row you see at every size.
 
 The Terminal and the Browser's pages are not changed: set the Terminal's fonts
 in the Ghostty config, and a page's zoom in the Browser. The Git View's code

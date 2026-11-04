@@ -53,6 +53,7 @@ final class Pills {
 struct PillOverlay: View {
     let pills: Pills
     let theme: PaletteTheme
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         GeometryReader { proxy in
@@ -66,7 +67,7 @@ struct PillOverlay: View {
                         .id(pill.id)
                 }
             }
-            .frame(width: SpotlightPalette.width(in: proxy.size))
+            .frame(width: PaletteMetrics.width(in: proxy.size, size: fontSize))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(.bottom, 28)
             .allowsHitTesting(false)

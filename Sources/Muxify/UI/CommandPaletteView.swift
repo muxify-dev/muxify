@@ -19,11 +19,11 @@ struct SpotlightPalette: View {
     @Bindable var palette: CommandPalette
     @FocusState private var focused: Bool
     @Environment(\.agentColors) private var agentColors
+    @Environment(\.interfaceFontSize) private var fontSize
 
-    private let rowHeight: CGFloat = 52
-    private let fieldFont = Font.system(size: 24)
-
-    static func width(in size: CGSize) -> CGFloat { min(700, size.width - 48) }
+    private var rowHeight: CGFloat { PaletteMetrics.rowHeight(fontSize) }
+    private var headerHeight: CGFloat { PaletteMetrics.headerHeight(fontSize) }
+    private var fieldFont: Font { fontSize.font(24) }
 
     var body: some View {
         let theme = palette.theme
@@ -36,7 +36,7 @@ struct SpotlightPalette: View {
                     .onTapGesture { palette.close() }
                 VStack(spacing: 0) {
                     if let breadcrumb = palette.breadcrumb {
-                        Text(breadcrumb).font(.system(size: 13, weight: .medium))
+                        Text(breadcrumb).font(fontSize.font(13, weight: .medium))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 20).padding(.top, 14)
                             .accessibilityIdentifier("palette-breadcrumb")
@@ -49,13 +49,13 @@ struct SpotlightPalette: View {
                         list(results, selected: selected, theme: theme)
                     } else if !palette.query.isEmpty && !palette.acceptsText {
                         Text("No Results")
-                            .font(.system(size: 14))
+                            .font(fontSize.font(14))
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 18)
                     }
                     if let note = palette.stepNote {
-                        Text(note).font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(note).font(fontSize.font(12)).foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 20).padding(.vertical, 8)
                             .accessibilityIdentifier("palette-note")
@@ -63,8 +63,10 @@ struct SpotlightPalette: View {
                     if palette.flow != nil { flowFooter }
                 }
                 .padding(.bottom, results.rows.isEmpty ? 2 : 10)
-                .frame(width: Self.width(in: proxy.size))
+                .frame(width: PaletteMetrics.width(in: proxy.size, size: fontSize))
                 .spotlightGlass(theme)
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("command-palette")
                 .overlayPreferenceValue(SelectedRowBounds.self) { anchor in
                     if palette.showsActions, let anchor, let selected {
                         GeometryReader { panel in
@@ -102,7 +104,7 @@ struct SpotlightPalette: View {
     private func field(_ selected: PickRow<PaletteItem>?) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 22))
+                .font(fontSize.font(22))
                 .foregroundStyle(.secondary)
             ForEach(palette.fieldChips) { chip in
                 FieldChipView(chip: chip, theme: palette.theme)
@@ -134,7 +136,7 @@ struct SpotlightPalette: View {
             }
         }
         .padding(.horizontal, 20)
-        .frame(height: 62)
+        .frame(height: fontSize(62))
     }
 
     private func controlTitle(_ title: String, _ action: PaletteAction) -> String {
@@ -166,7 +168,7 @@ struct SpotlightPalette: View {
             }
             Spacer()
         }
-        .font(.system(size: 12)).padding(.horizontal, 20).padding(.vertical, 6)
+        .font(fontSize.font(12)).controlSize(fontSize.systemControlSize).padding(.horizontal, 20).padding(.vertical, 6)
     }
 
     private var flowFooter: some View {
@@ -181,7 +183,7 @@ struct SpotlightPalette: View {
             .accessibilityIdentifier("palette-accept")
             .disabled(!palette.canAccept)
         }
-        .font(.system(size: 12)).padding(.horizontal, 20).padding(.vertical, 8)
+        .font(fontSize.font(12)).controlSize(fontSize.systemControlSize).padding(.horizontal, 20).padding(.vertical, 8)
     }
 
     /// Spotlight's completion after the caret: the rest of the selected title.
@@ -212,10 +214,10 @@ struct SpotlightPalette: View {
             ForEach(Array(palette.sourceButtons.enumerated()), id: \.element) { offset, source in
                 let isOn = palette.selection.contains(source)
                 Text(source.title)
-                    .font(.system(size: 13))
+                    .font(fontSize.font(13))
                     .foregroundStyle(isOn ? Color.primary : Color.secondary)
                     .padding(.horizontal, 11)
-                    .frame(height: 26)
+                    .frame(height: fontSize(26))
                     .background(Capsule().fill(Color.primary.opacity(isOn ? 0.16 : 0.06)))
                     .contentShape(Capsule())
                     .onTapGesture { palette.toggleSource(source) }
@@ -225,7 +227,7 @@ struct SpotlightPalette: View {
             if selected != nil {
                 HStack(spacing: 5) {
                     Text("Actions")
-                        .font(.system(size: 12))
+                        .font(fontSize.font(12))
                         .foregroundStyle(palette.showsActions ? Color.primary : Color.secondary)
                     if let shortcut = palette.shortcut(for: .showActions) { KeyCap(text: shortcut) }
                 }
@@ -233,21 +235,21 @@ struct SpotlightPalette: View {
                 .onTapGesture { palette.toggleActions(for: selected) }
             }
         }
-        .frame(height: 26)
+        .frame(height: fontSize(26))
         .padding(.horizontal, 20)
         .padding(.vertical, 10)
     }
 
     private func list(_ results: PickList<PaletteItem>, selected: PickRow<PaletteItem>?, theme: PaletteTheme) -> some View {
         let headers = results.sections.filter { $0.title != nil }.count
-        let height = CGFloat(results.rows.count) * rowHeight + CGFloat(headers) * headerHeight
+        let height = PaletteMetrics.listHeight(rows: results.rows.count, headers: headers, size: fontSize)
         return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(results.sections) { section in
                         if let title = section.title {
                             Text(title)
-                                .font(.system(size: 11.5, weight: .semibold))
+                                .font(fontSize.font(11.5, weight: .semibold))
                                 .foregroundStyle(.secondary)
                                 .padding(.horizontal, 12)
                                 .frame(height: headerHeight, alignment: .bottomLeading)
@@ -257,21 +259,21 @@ struct SpotlightPalette: View {
                             self.row(row, isSelected: row.id == selected?.id, theme: theme)
                                 .id(row.id)
                                 .onTapGesture { palette.perform(.jumpTo, on: row) }
+                                // A click reaches the row while the App Window is not key, as on the Sidebar's rows.
+                                .takesFirstClick()
                         }
                     }
                 }
                 .padding(.horizontal, 10)
             }
             .scrollIndicators(.never)
-            // A half row shows there is more.
-            .frame(height: min(height, 6.5 * rowHeight))
+            .frame(height: height)
+            .accessibilityIdentifier("palette-list")
             .onChange(of: selected?.id) { _, id in
                 if let id { proxy.scrollTo(id) }
             }
         }
     }
-
-    private let headerHeight: CGFloat = 24
 
     private func accessibilityLabel(_ row: PickRow<PaletteItem>) -> String {
         let parts: [String] = [row.mark?.rawValue ?? "", row.title.text] + row.tags.map(\.text.text) + [row.detail.text, row.trailing]
@@ -281,12 +283,12 @@ struct SpotlightPalette: View {
     /// The title, then the Topic's Tags as chips. The title is cut off before a chip is.
     private func titleLine(_ row: PickRow<PaletteItem>, theme: PaletteTheme) -> some View {
         HStack(spacing: 6) {
-            Text(row.title.attributed).font(.system(size: 15)).lineLimit(1)
+            Text(row.title.attributed).font(fontSize.font(15)).lineLimit(1)
                 .foregroundStyle(row.isDestructive ? AnyShapeStyle(theme.red) : AnyShapeStyle(.primary))
             ForEach(row.tags, id: \.text.text) { tag in
                 Text(tag.text.attributed)
                     .lineLimit(1)
-                    .chip(color: tag.color?.color ?? theme.magenta, isSelected: false, theme: theme, size: 12, cornerRadius: 5)
+                    .chip(color: tag.color?.color ?? theme.magenta, isSelected: false, theme: theme, size: fontSize(12), cornerRadius: 5)
                     .fixedSize()
             }
         }
@@ -297,22 +299,22 @@ struct SpotlightPalette: View {
         let check = palette.rowCheck(row)
         return HStack(spacing: 12) {
             if let check { CheckBoxView(isChecked: check) }
-            if let item { PaletteIcon(source: .item(item, row.kind), theme: theme) } else { Color.clear.frame(width: 32, height: 32) }
+            if let item { PaletteIcon(source: .item(item, row.kind), theme: theme) } else { Color.clear.frame(width: fontSize(32), height: fontSize(32)) }
             VStack(alignment: .leading, spacing: 1) {
                 titleLine(row, theme: theme)
                 let detail = row.pick.reason.map(Highlighted.plain) ?? row.detail
                 if !detail.text.isEmpty {
-                    Text(detail.attributed).font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(detail.attributed).font(fontSize.font(12.5)).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             Spacer(minLength: 12)
             if let mark = row.mark { RowMarkView(mark: mark) }
             if let item, let status = item.status {
                 Text(item.mark == .agent(.done) ? "Done · Unread" : status.rawValue.capitalized)
-                    .font(.system(size: 12.5))
+                    .font(fontSize.font(12.5))
                     .foregroundStyle(item.mark.map { $0.color(agentColors) } ?? .secondary)
             } else if !row.trailing.isEmpty {
-                Text(row.trailing).font(.system(size: 12.5)).foregroundStyle(.secondary)
+                Text(row.trailing).font(fontSize.font(12.5)).foregroundStyle(.secondary)
             }
         }
         .padding(.horizontal, 12)
@@ -341,22 +343,22 @@ struct SpotlightPalette: View {
         let actions = palette.actions(for: item)
         return VStack(alignment: .leading, spacing: 1) {
             Text(item.title.text)
-                .font(.system(size: 11.5, weight: .semibold))
+                .font(fontSize.font(11.5, weight: .semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
             ForEach(Array(actions.enumerated()), id: \.element) { offset, action in
                 HStack(spacing: 9) {
-                    PaletteIcon(source: .action(action), theme: theme, size: 20)
-                    Text(palette.title(of: action, for: item)).font(.system(size: 13)).lineLimit(1)
+                    PaletteIcon(source: .action(action), theme: theme, designSize: 20)
+                    Text(palette.title(of: action, for: item)).font(fontSize.font(13)).lineLimit(1)
                     Spacer(minLength: 12)
                     if let shortcut = palette.shortcut(for: action) {
-                        Text(shortcut).font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(shortcut).font(fontSize.font(12)).foregroundStyle(.secondary)
                     }
                 }
                 .padding(.horizontal, 6)
-                .frame(height: 30)
+                .frame(height: fontSize(30))
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(Color.primary.opacity(offset == palette.actionIndex ? 0.1 : 0)))
                 .contentShape(Rectangle())
@@ -364,7 +366,8 @@ struct SpotlightPalette: View {
             }
         }
         .padding(6)
-        .frame(width: 290)
+        // At most 580 points at 24, so it fits in a palette in the narrowest App Window, 820 points less the margin.
+        .frame(width: fontSize(290))
         // Nearly opaque: the rows under it would show through as blobs.
         .spotlightGlass(theme, cornerRadius: 16, tint: 0.9)
         .accessibilityElement(children: .contain)
@@ -393,7 +396,11 @@ struct PaletteIcon: View {
 
     let source: Source
     let theme: PaletteTheme
-    var size: CGFloat = 32
+    /// The size at 12. It grows with the Interface font size, as the icon sits beside a row's text.
+    var designSize: CGFloat = 32
+    @Environment(\.interfaceFontSize) private var fontSize
+
+    private var size: CGFloat { fontSize(designSize) }
 
     var body: some View {
         let tile = RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
@@ -484,12 +491,13 @@ struct PaletteIcon: View {
 private struct FieldChipView: View {
     let chip: FieldChip
     let theme: PaletteTheme
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         Text(chip.title).lineLimit(1)
-            .chip(color: chip.color?.color ?? theme.magenta, isSelected: chip.isSelected, theme: theme, size: 17, cornerRadius: 7)
+            .chip(color: chip.color?.color ?? theme.magenta, isSelected: chip.isSelected, theme: theme, size: fontSize(17), cornerRadius: 7)
             // As wide as its text, up to one width for every chip; a cut-off title shows whole on hover.
-            .frame(maxWidth: 180)
+            .frame(maxWidth: fontSize(180))
             .fixedSize()
             .help(chip.title)
             .accessibilityElement(children: .ignore)
@@ -504,6 +512,7 @@ private struct FieldChipView: View {
 /// The box of a check step's row: empty, or a check mark.
 private struct CheckBoxView: View {
     let isChecked: Bool
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 4, style: .continuous)
@@ -511,22 +520,23 @@ private struct CheckBoxView: View {
             if isChecked {
                 shape.fill(Color.accentColor)
                 Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(fontSize.font(10, weight: .bold))
                     .foregroundStyle(.white)
             } else {
                 shape.strokeBorder(Color.secondary.opacity(0.7), lineWidth: 1.5)
             }
         }
-        .frame(width: 16, height: 16)
+        .frame(width: fontSize(16), height: fontSize(16))
     }
 }
 
 private struct KeyCap: View {
     let text: String
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         Text(text)
-            .font(.system(size: 10.5, weight: .medium, design: .rounded))
+            .font(fontSize.font(10.5, weight: .medium, design: .rounded))
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
             .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.08)))
@@ -534,7 +544,8 @@ private struct KeyCap: View {
 }
 
 private extension View {
-    /// The look of a chip, in the search field and after a row's title, so a Tag looks the same in both.
+    /// The look of a chip, in the search field and after a row's title, so a Tag looks the same in both. `size` is its
+    /// font's size, already grown with the Interface font size, and its padding follows it.
     func chip(color: Color, isSelected: Bool, theme: PaletteTheme, size: CGFloat, cornerRadius: CGFloat) -> some View {
         font(.system(size: size, weight: .medium))
             .foregroundStyle(isSelected ? theme.background : color)
