@@ -528,6 +528,11 @@ final class WorkspaceStore {
         refreshSessionPaths()
     }
 
+    /// Start a Session… that Muxify offers by itself, on finding no Session: it never replaces a palette already open.
+    private func offerStartSession() {
+        if !palette.isOpen { presentStartSession() }
+    }
+
     func renameTopic(_ id: String, to title: String) {
         perform(EnvironmentRequest(.rename(title: title), target: .topic(.id(id))))
     }
@@ -1622,7 +1627,7 @@ final class WorkspaceStore {
     private func attach(to target: Target?, intent: Router.IntentID, picksLatestSession: Bool = true) {
         guard let args = target.map({ ["-u", "attach-session", "-t", $0.tmuxTarget] }) ?? (isRemote ? [] : nil) else {
             route(.commandFinished(intent, .failure, lastStartedRead: lastStartedRead))
-            if !palette.isOpen { presentStartSession() }
+            offerStartSession()
             return
         }
         let newSession = startingSession
@@ -1889,7 +1894,7 @@ final class WorkspaceStore {
             case .requestTopic(let group):
                 goToTopic(group)
             case .chooseWhereToStart:
-                if !palette.isOpen { presentStartSession() }
+                offerStartSession()
             case .switchClient(let id, let intent):
                 if let destination = windows.first(where: { $0.id == id.rawValue }).map(Target.init)
                     ?? target.flatMap({ $0.windowID == id.rawValue ? $0 : nil }) {
@@ -3055,7 +3060,7 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
                     if isTransitioning { return }
                     if hasNoSessions {
                         environmentStatus = "No tmux Sessions in \(environmentName)"
-                        if !palette.isOpen { presentStartSession() }
+                        offerStartSession()
                         return
                     }
                 }
