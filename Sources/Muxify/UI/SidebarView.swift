@@ -698,7 +698,8 @@ struct TopicCard: View {
         BodyCount.tick("TopicCard")
         #endif
         return SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, mark: topic.usesRowMarks ? nil : topic.mark,
-                           viewport: list == nil ? Self.groupsViewport : Self.viewport, restingOpacity: restingOpacity) {
+                           viewport: list == nil ? Self.groupsViewport : Self.viewport, restingOpacity: restingOpacity,
+                           identifier: topic.id.accessibilityID) {
             header
         } content: {
             if case .settled = topic.kind {
@@ -706,6 +707,8 @@ struct TopicCard: View {
             } else {
                 sessionList
             }
+        } menu: {
+            if let list { listMenu(list) } else { groupActions }
         }
         .cardCorner { corner.opacity(restingOpacity) }
         .modifier(CardItem(list: list, listID: listID))
@@ -811,9 +814,6 @@ struct TopicCard: View {
         .accessibilityIdentifier(topic.id.accessibilityID)
         .accessibilityActions {
             if let list { listActions(list) } else { groupActions }
-        }
-        .contextMenu {
-            if let list { listMenu(list) } else { groupActions }
         }
         .cardTagsOverlay(tags, onPress: press)
         .cardCornerLabel(settledAge)
@@ -1006,7 +1006,8 @@ private struct LockedCard: View {
     }
 
     var body: some View {
-        SidebarCard(isOpen: row.isExpanded, holdsSelection: holdsSelection, mark: row.mark, viewport: TopicCard.viewport) {
+        SidebarCard(isOpen: row.isExpanded, holdsSelection: holdsSelection, mark: row.mark, viewport: TopicCard.viewport,
+                    identifier: row.id.accessibilityID) {
             header
         } content: {
             CardList(blocks: row.sessions.compactMap { session in
@@ -1019,6 +1020,10 @@ private struct LockedCard: View {
             } row: { item in
                 TopicItemRow(store: store, item: item, titles: titles, isDimmed: false)
             }
+        } menu: {
+            Button("Go to Session") { store.goToTopic(row.id) }
+            Divider()
+            actions
         }
         .listDragItem(id, drag: drag, shown: order, cornerRadius: 9)
     }
@@ -1039,11 +1044,6 @@ private struct LockedCard: View {
         .accessibilityIdentifier(row.id.accessibilityID)
         .accessibilityActions {
             Button("Go to Session") { store.goToTopic(row.id) }
-            actions
-        }
-        .contextMenu {
-            Button("Go to Session") { store.goToTopic(row.id) }
-            Divider()
             actions
         }
     }
@@ -1245,7 +1245,7 @@ private struct SessionCard<Row: View>: View {
         let mark = model.sessionMarks[session.id].map(CardMark.agent)
         let isLocked = model.lockedSessionIDs.contains(session.id)
         SidebarCard(isOpen: isOpen, holdsSelection: holdsSelection, mark: mark,
-                    viewport: viewport) {
+                    viewport: viewport, identifier: identifier) {
             let isGuest = isLocked && store.topicConfig.inPlay != nil
             CardHeader(title: formatted.title, isOpen: isOpen, mark: mark, isLocked: isLocked, isGuest: isGuest, hintTarget: .session(session.id),
                        notes: isGuest ? ["Guest"] : isLocked ? ["Locked"] : [],
@@ -1262,14 +1262,6 @@ private struct SessionCard<Row: View>: View {
                 Button("Go to Session") { store.goToSession(session.id) }
                 lockButton
             }
-            .contextMenu {
-                Button("Go to Session") { store.goToSession(session.id) }
-                if let window = session.windows.first {
-                    Divider()
-                    TopicMembershipMenu(store: store, source: .session(window))
-                }
-                lockButton
-            }
         } content: {
             CardList(blocks: [CardBlock(id: session.id, items: model.sessionChildren[session.id]?.items ?? [])],
                      identifier: identifier, selectedWindowID: store.selectedWindowID,
@@ -1278,6 +1270,13 @@ private struct SessionCard<Row: View>: View {
             } row: { item in
                 row(item)
             }
+        } menu: {
+            Button("Go to Session") { store.goToSession(session.id) }
+            if let window = session.windows.first {
+                Divider()
+                TopicMembershipMenu(store: store, source: .session(window))
+            }
+            lockButton
         }
     }
 

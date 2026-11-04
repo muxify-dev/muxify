@@ -5,16 +5,22 @@ import MuxifyCore
 /// its Window and Pane rows, and its header stays at the top of the list while its rows scroll under it. A spine on the
 /// left edge shows the Agent mark of its Agents. The card that holds the selected Window has a many-coloured border,
 /// which turns once when the selection comes to it from another card, so a closed card still shows where the user is.
-struct SidebarCard<Header: View, Content: View>: View {
+/// A right-click anywhere on the card shows its menu, except on a row or a heading with its own menu.
+struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
     let isOpen: Bool
     let holdsSelection: Bool
     let mark: CardMark?
     /// The coordinate space of the scroll view around the list, in which the open card's header sticks to the top.
     var viewport: String? = nil
     var restingOpacity: Double = 1
+    /// The card's accessibility identifier: `card-` and its header's identifier. The card offers its menu's items as
+    /// accessibility actions, so a check reaches the menu of the space around the rows without opening it.
+    let identifier: String
     @Environment(\.quickSwitchHints) private var hints
     @ViewBuilder var header: () -> Header
     @ViewBuilder var content: () -> Content
+    /// The card's context menu: on its header, its padding, the gaps between its rows and its footer line.
+    @ViewBuilder var menu: () -> CardMenu
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.chromeTheme) private var chromeTheme
@@ -85,10 +91,14 @@ struct SidebarCard<Header: View, Content: View>: View {
             }
             .allowsHitTesting(false)
         }
+        // On the whole card, so the space around the rows has it too. A row or heading with its own menu keeps that one.
+        .contextMenu { menu() }
         .opacity(restingOpacity)
         .cardHints(hints)
         // A container, in which the header's sort priority applies.
         .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("card-" + identifier)
+        .accessibilityActions { menu() }
         .onChange(of: holdsSelection) { _, holds in
             guard holds, !reduceMotion else { return }
             turn = -150
