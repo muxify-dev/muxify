@@ -89,8 +89,8 @@ were doing in the Topic. A Topic without a Note has no `note` key. Set Topic
 Note and Clear Topic Note in the app, and `muxify topic note`, change the field
 through the Topic service. They change only the `note` key, and only for an
 open Topic. The service removes spaces at the two ends, joins lines with one
-space, and removes the key for text with no words. Settle and Reopen keep the
-Note.
+space, and removes the key for text with no words. Settle removes the `note` key, so
+a Reopened Topic starts without a Note.
 
 The store retains unknown JSON fields during writes, including nested fields
 in remembered Sessions and Windows. A write that changes anything replaces

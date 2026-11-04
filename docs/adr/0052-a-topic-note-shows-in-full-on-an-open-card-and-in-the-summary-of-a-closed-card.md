@@ -2,6 +2,8 @@
 
 > **Partly superseded by [ADR-0053](0053-a-closed-card-shows-the-topic-note-on-its-own-softer-line.md):** a closed card no longer shows the Note through its Summary. It shows the Note on its own line, as an open card does, in a softer yellow. The other rules below still apply.
 
+> **Partly superseded by [ADR-0067](0067-settle-clears-the-topic-note.md):** Settle clears the Note, so a Reopened Topic starts without one. Snooze, Zen, Dormant and Reopen still do not change it.
+
 A user who works on many Topics loses track of what they were doing in each one. A Topic Note is one line of text on the Topic's record that tells them. The goal is to see the Note at the moment of a switch: before the user picks a Topic, and when they arrive at it.
 
 - **An open card shows the Note on its own line.** The line is under the title, in yellow, with a ✎, and it wraps so that all of the text shows. The card of the Location is open, and an open card shows no Summary, so the Note needs its own line there.

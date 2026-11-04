@@ -48,6 +48,20 @@ final class BenchTests: XCTestCase {
         XCTAssertEqual(targets.step(.topic, .next, from: .topic("a")), .topic("b"), "Next Topic stops on the Open Place")
     }
 
+    func testTheNextTopicIsTheNextCardThatShowsElseTheFirstInPlayCard() {
+        // In Play: a, b. Bench: c, d.
+        XCTAssertEqual(model(inPlay: 2, at: "a").nextTopic(after: "a"), .topic("b"), "the next In Play card")
+        XCTAssertEqual(model(inPlay: 2, at: "b").nextTopic(after: "b"), .topic("a"),
+                       "the last In Play card goes to the first, not to the hidden Bench")
+        XCTAssertEqual(model(inPlay: 2, benchShown: true, at: "b").nextTopic(after: "b"), .topic("c"),
+                       "a shown Bench shows the next card")
+        XCTAssertEqual(model(inPlay: 2, at: "d").nextTopic(after: "d"), .topic("a"),
+                       "a Benched card under a hidden Bench goes to the first In Play card")
+        let open = model(inPlay: 3, at: "b", openPlaces: [OpenPlace(id: "o", order: 0.5)])
+        XCTAssertEqual(open.nextTopic(after: "b"), .topic("a"), "an Open Place is no Next Topic")
+        XCTAssertEqual(model(inPlay: nil, at: "d").nextTopic(after: "d"), .topic("c"), "without In Play, the nearest card above")
+    }
+
     private func cards(_ model: TopicsModel) -> [QuickSwitchTarget?] {
         QuickSwitchTargets(model: model, sessions: [], windows: [], tabIDs: []).cards
     }
@@ -178,7 +192,7 @@ final class BenchTests: XCTestCase {
         XCTAssertNil(targets.target(for: .card(5)), "past the cards that show, a card key does nothing")
         XCTAssertEqual(targets.step(.topic, .next, from: .topic("b")), .topic("d"), "a Topic step skips the hidden Bench")
         XCTAssertEqual(targets.step(.topic, .next, from: .topic("d")), .topic("pinned"), "and wraps after the cards that show")
-        XCTAssertEqual(hidden.nextTopic(after: "b"), .topic("c"), "the Next Topic after Settle still uses every card")
+        XCTAssertEqual(hidden.nextTopic(after: "b"), .topic("d"), "the Next Topic after Settle is the next card that shows")
         XCTAssertEqual(cards(model(inPlay: 2, benchShown: true, at: "@1")),
                        [.topic("pinned"), .topic("a"), .topic("b"), .topic("c"), .topic("d")])
         let shownAtD = model(inPlay: 2, benchShown: true, at: "d")
