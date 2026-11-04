@@ -65,7 +65,8 @@ you don't trust with access to your agent.
 Choose an Environment in the header to open its App Window, or focus it if
 already open. ⌘N opens another Local App Window. Closing a window leaves tmux
 running; dropped connections reconnect automatically. Muxify remembers the last
-focused Environment and creates `main` in the remote home if no Session exists.
+focused Environment. It starts no Session on the remote machine by itself: see
+[Start a Session](#start-a-session).
 
 The Browser stays local: use reachable URLs, such as Tailscale URLs. There is
 no port forwarding or remote dev-server discovery; Reveal in Finder is disabled.
@@ -149,7 +150,12 @@ starts a No Topic Session in the chosen folder, named after it, as Open as
 Session does. Escape closes the palette and leaves the "No tmux Sessions" page,
 whose **Start a Session…** button opens it again. The `start_session` entry of
 [`pick_lists`](#pick-lists) sets which rows it lists; the home folder row always
-shows. A Remote Environment still creates `main` there.
+shows.
+
+A Remote Environment's App Window does the same when the remote server has no
+Session of yours: the palette lists the remote home folder and the remote
+machine's Session Paths and Worktrees, as Muxify last found them there while
+connected, and ↩ connects again and starts the Session on that machine.
 
 ## Position of new and returning Topics
 

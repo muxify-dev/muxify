@@ -480,15 +480,10 @@ private struct TerminalArea: View {
             } else if store.hasNoSessions {
                 Text(store.serverRunning ? "No tmux Sessions" : "tmux server is not running")
                     .foregroundStyle(.secondary)
-                if store.isRemote {
-                    Button("Reconnect") { store.reattach() }
-                        .keyboardShortcut(.defaultAction)
-                } else {
-                    // Muxify starts no Session by itself: the user chooses the folder of the first one.
-                    Button("Start a Session…") { store.presentStartSession() }
-                        .keyboardShortcut(.defaultAction)
-                        .accessibilityIdentifier("no-sessions-start-session")
-                }
+                // Muxify starts no Session by itself: the user chooses the folder of the first one.
+                Button("Start a Session…") { store.presentStartSession() }
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("no-sessions-start-session")
             } else if store.isRemote, !store.isConnected {
                 Text(store.environmentStatus).foregroundStyle(.secondary)
                 ProgressView().controlSize(.small)

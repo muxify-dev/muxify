@@ -106,12 +106,18 @@ final class RemoteSSH {
         ])
     }
 
-    func terminalCommand(target: String? = nil, createSessionIfNeeded: Bool = true) -> String {
-        terminalInvocation(target: target, createSessionIfNeeded: createSessionIfNeeded).commandLine
+    /// The Session that Start a Session… starts on the remote machine: its name, and its folder there.
+    struct NewSession: Equatable {
+        let name: String
+        let folder: String
     }
 
-    func terminalInvocation(target: String? = nil, createSessionIfNeeded: Bool = true) -> CommandInvocation {
-        let ssh = attachmentInvocation(target: target, createSessionIfNeeded: createSessionIfNeeded)
+    func terminalCommand(target: String? = nil, picksLatestSession: Bool = true, newSession: NewSession? = nil) -> String {
+        terminalInvocation(target: target, picksLatestSession: picksLatestSession, newSession: newSession).commandLine
+    }
+
+    func terminalInvocation(target: String? = nil, picksLatestSession: Bool = true, newSession: NewSession? = nil) -> CommandInvocation {
+        let ssh = attachmentInvocation(target: target, picksLatestSession: picksLatestSession, newSession: newSession)
         // Stream stdout unchanged to the terminal (fd 3). SSH's remote PTY
         // merges remote stderr into stdout, so retain only a bounded tail in
         // memory and save just the nonce-framed final snapshot on exit.
@@ -136,18 +142,24 @@ final class RemoteSSH {
     /// Reads the normal SSH config, including Host aliases and IdentityAgent
     /// (e.g. 1Password). Only our session/socket lifecycle and safety settings
     /// override it; background channels still cannot independently authenticate.
-    func attachmentInvocation(target: String? = nil, createSessionIfNeeded: Bool = true) -> CommandInvocation {
+    func attachmentInvocation(target: String? = nil, picksLatestSession: Bool = true, newSession: NewSession? = nil) -> CommandInvocation {
         CommandInvocation(executable: sshExecutable, arguments: options + [
             "-tt", "-M", "-o", "ControlPersist=no",
-            "--", environment.host, "exec /bin/sh -c " + Tmux.shellQuote(bootstrap(target: target, createSessionIfNeeded: createSessionIfNeeded)),
+            "--", environment.host,
+            "exec /bin/sh -c " + Tmux.shellQuote(bootstrap(target: target, picksLatestSession: picksLatestSession, newSession: newSession)),
         ])
     }
 
     private var snapshotStart: String { "Muxify snapshot \(nonce)" }
     private var snapshotEnd: String { "Muxify snapshot end \(nonce)" }
 
-    func bootstrap(target: String? = nil, createSessionIfNeeded: Bool = true) -> String {
+    /// The connection's script on the remote machine. With no Session of the user's there, it starts none by itself
+    /// (Start a Session… chooses the folder): it reports the empty server and exits, unless `newSession` names the
+    /// Session to go to, or to start in its folder. Without a `target`, `picksLatestSession` attaches to the Session
+    /// with the latest activity, else to the first Window.
+    func bootstrap(target: String? = nil, picksLatestSession: Bool = true, newSession: NewSession? = nil) -> String {
         let targetSetup = target.map { "target=\(Tmux.shellQuote($0))" }
+            ?? (newSession == nil ? nil : "target=\"$new_session\"")
             ?? "target=$(tmux -u show-options -gqv \(Tmux.shellQuote(Tmux.lastWindowOption)) 2>/dev/null)"
         let snapshotCommand = "tmux -u " + Tmux.snapshotArguments.map(Tmux.shellQuote).joined(separator: " ")
         // An unsupported DCS is ignored by the renderer, so the handoff does
@@ -163,6 +175,20 @@ final class RemoteSSH {
                 *"no server running"*|*"no sessions"*|*"error connecting"*"No such file or directory"*)
                     printf '\\033Pmuxify;\\n%s\\n%s\\nempty\\n%s\\n\\033\\\\' \(Tmux.shellQuote(snapshotStart)) "${HOME}\(Tmux.separator)$(uname -n)" \(Tmux.shellQuote(snapshotEnd)) >&2 ;;
             esac
+        fi
+        """
+        let sessionSetup = newSession.map { session in
+            let shape = Tmux.shellQuote("#{session_id}:#{window_id}")
+            return """
+            new_session=$(tmux -u list-windows -t \(Tmux.shellQuote("=" + session.name)) -F \(shape) 2>/dev/null | head -n 1)
+            if [ -z "$new_session" ]; then
+                new_session=$(tmux -u new-session -d -s \(Tmux.shellQuote(session.name)) -c \(Tmux.shellQuote(session.folder)) -P -F \(shape)) || exit $?
+            fi
+            """
+        } ?? """
+        if ! tmux -u list-sessions -f "$user_sessions" -F . 2>/dev/null | grep -q .; then
+        \(reportSnapshot)
+            exit 0
         fi
         """
         // A child owns the tmux client PID recorded in the marker. Its parent
@@ -202,12 +228,10 @@ final class RemoteSSH {
         export TERM COLORTERM=truecolor MUXIFY_TERMINAL=1
         # The Watch Session is Muxify's own: it does not count, and the Terminal never attaches to it.
         user_sessions=\(Tmux.shellQuote(Tmux.userSessionFilter))
-        if ! tmux -u list-sessions -f "$user_sessions" -F . 2>/dev/null | grep -q .; then
-            \(createSessionIfNeeded ? "tmux -u new-session -d -s main -c \"$HOME\" || exit $?" : reportSnapshot + "\n    exit 0")
-        fi
+        \(sessionSetup)
         \(targetSetup)
         if [ -n "$target" ] && ! tmux -u list-panes -t "$target" >/dev/null 2>&1; then target=; fi
-        \(createSessionIfNeeded
+        \(picksLatestSession
             ? "if [ -z \"$target\" ]; then target=$(tmux -u list-sessions -f \"$user_sessions\" -F '#{session_activity} #{session_id}' | sort -rn | head -n 1 | cut -d ' ' -f 2); fi"
             : "if [ -z \"$target\" ]; then target=$(tmux -u list-windows -a -f \"$user_sessions\" -F '#{session_id}:#{window_id}' | head -n 1); fi")
         # Some SSH servers (including OrbStack) omit SSH_TTY despite -tt.

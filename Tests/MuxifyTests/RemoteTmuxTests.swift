@@ -46,7 +46,7 @@ final class RemoteTmuxTests: XCTestCase {
         }
         let terminal = Process()
         terminal.executableURL = URL(fileURLWithPath: "/usr/bin/script")
-        terminal.arguments = ["-q", "/dev/null", "/bin/sh", "-c", ssh.bootstrap()]
+        terminal.arguments = ["-q", "/dev/null", "/bin/sh", "-c", ssh.bootstrap(newSession: .init(name: "main", folder: home.path))]
         terminal.environment = environment
         let log = root.url.appendingPathComponent("terminal.log")
         fm.createFile(atPath: log.path, contents: nil)
@@ -138,7 +138,7 @@ final class RemoteTmuxTests: XCTestCase {
         }
     }
 
-    func testClosingSessionsReportsSurvivorsAndOnlyExplicitReconnectCreatesMain() throws {
+    func testClosingSessionsReportsSurvivorsAndOnlyStartASessionCreatesOne() throws {
         let tmux = try requireTmux()
         let root = try TestDirectory()
         defer { withExtendedLifetime(root) {} }
@@ -189,12 +189,14 @@ final class RemoteTmuxTests: XCTestCase {
             outputs.forEach { try? $0.close() }
             withExtendedLifetime(inputs) {}
         }
-        func connect(target: String? = nil, createSessionIfNeeded: Bool = true) throws -> (RemoteSSH, Process) {
+        func connect(target: String? = nil, picksLatestSession: Bool = true,
+                     newSession: RemoteSSH.NewSession? = nil) throws -> (RemoteSSH, Process) {
             let ssh = try RemoteSSH(environment: RemoteEnvironment(name: "test", host: "unused", username: "unused"),
                                     temporaryDirectory: root.url, sshExecutable: fakeSSH.path)
             let terminal = Process()
             terminal.executableURL = URL(fileURLWithPath: "/usr/bin/script")
-            terminal.arguments = ["-q", "/dev/null", "/bin/sh", "-c", ssh.terminalCommand(target: target, createSessionIfNeeded: createSessionIfNeeded)]
+            terminal.arguments = ["-q", "/dev/null", "/bin/sh", "-c", ssh.terminalCommand(target: target, picksLatestSession: picksLatestSession,
+                                                                                                      newSession: newSession)]
             terminal.environment = environment
             let input = Pipe()
             terminal.standardInput = input
@@ -230,8 +232,17 @@ final class RemoteTmuxTests: XCTestCase {
             terminal.waitUntilExit()
         }
 
-        let (first, firstTerminal) = try connect()
-        let main = try XCTUnwrap(try ready(first).windows.first)
+        let (empty, emptyTerminal) = try connect()
+        try exited(emptyTerminal, owner: empty)
+        XCTAssertEqual(empty.closedSnapshot?.windows.count, 0)
+        XCTAssertThrowsError(try raw(["has-session"]), "The first connection must not create main")
+
+        let project = home.appendingPathComponent("project")
+        try fm.createDirectory(at: project, withIntermediateDirectories: true)
+        let (first, firstTerminal) = try connect(newSession: RemoteSSH.NewSession(name: "project", folder: project.path))
+        let started = try XCTUnwrap(try ready(first).windows.first)
+        XCTAssertEqual(started.sessionName, "project")
+        XCTAssertEqual(URL(fileURLWithPath: started.path).resolvingSymlinksInPath(), project.resolvingSymlinksInPath())
         let otherTarget = try raw(["new-session", "-d", "-s", "other", "-P", "-F", "#{session_id}:#{window_id}", "-c", home.path])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         _ = try raw(["detach-client", "-t", try XCTUnwrap(try ready(first).clients.first { !$0.isControl }?.tty)])
@@ -239,32 +250,42 @@ final class RemoteTmuxTests: XCTestCase {
         XCTAssertEqual(try raw(["show-option", "-sqv", first.markerOption]).trimmingCharacters(in: .newlines), "")
         XCTAssertEqual(first.closedSnapshot?.windows.count, 2, "Intentional detach preserves both Sessions")
 
-        let (second, secondTerminal) = try connect(target: otherTarget, createSessionIfNeeded: false)
+        let (again, againTerminal) = try connect(newSession: RemoteSSH.NewSession(name: "project", folder: home.path))
+        XCTAssertEqual(try ready(again).clients.first { !$0.isControl }?.sessionID, started.sessionID, "A Session of that name is gone to")
+        XCTAssertEqual(try raw(["list-sessions", "-F", "#{session_name}"]).split(separator: "\n").sorted(), ["other", "project"])
+        _ = try raw(["detach-client", "-t", try XCTUnwrap(try ready(again).clients.first { !$0.isControl }?.tty)])
+        try exited(againTerminal, owner: again)
+
+        let (second, secondTerminal) = try connect(target: otherTarget, picksLatestSession: false)
         _ = try ready(second)
         _ = try raw(["kill-pane", "-t", otherTarget])
         try exited(secondTerminal, owner: second)
         let survivors = try XCTUnwrap(second.closedSnapshot)
-        XCTAssertEqual(survivors.windows.map(\.sessionName), ["main"])
+        XCTAssertEqual(survivors.windows.map(\.sessionName), ["project"])
         XCTAssertTrue(survivors.windows.allSatisfy(\.isRemote))
         XCTAssertEqual(survivors.windows.first?.homeDirectory, home.path)
         XCTAssertFalse(try String(contentsOf: second.directory.appendingPathComponent("snapshot"), encoding: .utf8).contains("[exited]"))
 
-        let (last, lastTerminal) = try connect(target: "\(main.sessionID):\(main.id)", createSessionIfNeeded: false)
+        let (last, lastTerminal) = try connect(target: "\(started.sessionID):\(started.id)", picksLatestSession: false)
         _ = try ready(last)
-        _ = try raw(["kill-pane", "-t", main.id])
+        _ = try raw(["kill-pane", "-t", started.id])
         try exited(lastTerminal, owner: last)
         XCTAssertEqual(last.closedSnapshot?.windows.count, 0)
         XCTAssertFalse(last.closedSnapshot?.serverRunning ?? true)
         XCTAssertThrowsError(try raw(["has-session"]))
 
-        let (recovery, recoveryTerminal) = try connect(createSessionIfNeeded: false)
+        let (recovery, recoveryTerminal) = try connect(picksLatestSession: false)
         try exited(recoveryTerminal, owner: recovery)
         XCTAssertEqual(recovery.closedSnapshot?.windows.count, 0)
         XCTAssertThrowsError(try raw(["has-session"]), "Automatic recovery must not recreate main")
 
-        let (reconnected, _) = try connect()
-        let restored = try ready(reconnected)
-        XCTAssertEqual(restored.windows.map(\.sessionName), ["main"])
+        let (reconnect, reconnectTerminal) = try connect()
+        try exited(reconnectTerminal, owner: reconnect)
+        XCTAssertThrowsError(try raw(["has-session"]), "An explicit reconnect must not create main")
+
+        let (restarted, _) = try connect(newSession: RemoteSSH.NewSession(name: "home", folder: home.path))
+        let restored = try ready(restarted)
+        XCTAssertEqual(restored.windows.map(\.sessionName), ["home"])
         XCTAssertEqual(URL(fileURLWithPath: try XCTUnwrap(restored.windows.first?.path)).resolvingSymlinksInPath(), home.resolvingSymlinksInPath())
     }
 
