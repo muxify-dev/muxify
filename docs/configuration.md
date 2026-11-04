@@ -637,7 +637,13 @@ These follow the size:
 
 The Terminal and the Browser's pages are not changed: set the Terminal's fonts
 in the Ghostty config, and a page's zoom in the Browser. The Git View's code
-and diff text follows the Terminal's `font-size`, not `ui.font_size`.
+and diff text, and the gutters that frame it, follow the Terminal's
+`font-size`, not `ui.font_size`. The code is the Terminal's `font-size` less one
+point, and at least 11. The line-number and marker columns, the bands behind
+the line numbers and the `@@` hunk headers grow with the code, and a
+line-number column is as wide as the widest line number the diff shows, and at
+least 4 digits, so a large line number shows whole. The Git View takes a new
+`font-size` when it next draws its diff.
 
 `ui.sidebar.font_size` is gone. A Config that names it shows the problem
 `ui.sidebar.font_size is gone: use ui.font_size`, and its value changes no

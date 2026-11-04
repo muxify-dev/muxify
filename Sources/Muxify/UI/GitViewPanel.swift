@@ -945,26 +945,16 @@ private struct GitDiffPane: View {
     @State private var contentWidth: CGFloat = 0
 
     private static let space = "gitDiff"
+    /// The code's size, which follows the Terminal; so do its gutters and hunk headers (`GitDiffMetrics.swift`).
     private var fontSize: CGFloat { gitView.fontSize }
     /// The Interface font size, for the diff's own text that is not code: its empty state, notes and bars.
     @Environment(\.interfaceFontSize) private var interfaceFontSize
-    private var lineHeight: CGFloat { (fontSize * 1.6).rounded() }
 
     /// Code wraps every `columns` characters, so a character's place on
     /// screen follows from its offset.
     private var metrics: GitView.TextMetrics {
-        // The font's advance for "0", not a typeset string: `size(withAttributes:)` on every redraw threw from inside
-        // CoreText and ended the app when many apps drew at once.
-        let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
-        var zero = UniChar(48)
-        var glyph = CGGlyph(0)
-        CTFontGetGlyphsForCharacters(font as CTFont, &zero, &glyph, 1)
-        let charWidth = font.advancement(forCGGlyph: glyph).width
-        let isSplit = gitView.layout == .split
-        let codeX: CGFloat = isSplit ? 64 : 110
-        let width = contentWidth > 0 ? contentWidth : gitView.diffWidth
-        let room = (isSplit ? (width - 1) / 2 : width) - codeX - 12
-        return GitView.TextMetrics(charWidth: charWidth, lineHeight: lineHeight, columns: max(10, Int(room / charWidth)), codeX: codeX)
+        GitView.TextMetrics(fontSize: fontSize, layout: gitView.layout, width: contentWidth > 0 ? contentWidth : gitView.diffWidth,
+                            widestNumber: gitView.widestLineNumber)
     }
 
     var body: some View {
@@ -1053,7 +1043,7 @@ private struct GitDiffPane: View {
             partBar(group)
         case .hunk(let fileIndex, let hunkIndex):
             if let hunk = gitView.content?.patch.files.first(where: { $0.id == fileIndex })?.hunks[hunkIndex] {
-                hunkHeader(hunk)
+                hunkHeader(hunk, metrics: metrics)
             }
         case .line(let line):
             selectable(row, metrics: metrics) { unifiedLine(line, id: row.id, metrics: metrics) }
@@ -1069,7 +1059,7 @@ private struct GitDiffPane: View {
         case .binary:
             note("Binary file not shown")
         case .wholeFile:
-            bar(symbol: "arrow.up.and.down.text.horizontal", text: "Show the whole file") { gitView.showWholeFile() }
+            bar(symbol: "arrow.up.and.down.text.horizontal", text: "Show the whole file", metrics: metrics) { gitView.showWholeFile() }
         case .endOfFile:
             endOfFile
         case .omitted(let count):
@@ -1170,70 +1160,79 @@ private struct GitDiffPane: View {
 
     // MARK: Lines
 
-    private var codeFont: Font { .system(size: fontSize, design: .monospaced) }
-    private var numberFont: Font { .system(size: fontSize - 1, design: .monospaced) }
+    private func codeFont(_ metrics: GitView.TextMetrics) -> Font { .system(size: metrics.fontSize, design: .monospaced) }
 
     private func unifiedLine(_ line: GitDiffLine, id: Int, metrics: GitView.TextMetrics) -> some View {
-        HStack(alignment: .top, spacing: 0) {
-            number(line.old)
-            number(line.new)
-            marker(line.kind)
-            code(line, metrics: metrics)
+        lineView(line, id: "\(id)", metrics: metrics) {
+            number(line.old, id: "\(id)-old", metrics: metrics)
+            number(line.new, id: "\(id)-new", metrics: metrics)
         }
-        .background {
-            HStack(spacing: 0) {
-                band(line.kind, gutter: true).frame(width: 92)
-                band(line.kind, gutter: false)
-            }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityAddTraits(.isStaticText)
-        .accessibilityIdentifier("git-line-\(id)")
-        .accessibilityLabel(line.text)
-        .accessibilityValue(line.accessibilityValue)
     }
 
     @ViewBuilder
     private func splitSide(_ line: GitDiffLine?, number value: Int?, id: String, metrics: GitView.TextMetrics) -> some View {
         Group {
             if let line {
-                HStack(alignment: .top, spacing: 0) {
-                    number(line.kind == .note ? nil : value)
-                    marker(line.kind)
-                    code(line, metrics: metrics)
+                lineView(line, id: id, metrics: metrics) {
+                    number(line.kind == .note ? nil : value, id: id, metrics: metrics)
                 }
-                .background {
-                    HStack(spacing: 0) {
-                        band(line.kind, gutter: true).frame(width: 46)
-                        band(line.kind, gutter: false)
-                    }
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityAddTraits(.isStaticText)
-                .accessibilityIdentifier("git-line-\(id)")
-                .accessibilityLabel(line.text)
-                .accessibilityValue(line.accessibilityValue)
             } else {
                 palette.fill
             }
         }
-        .frame(maxWidth: .infinity, minHeight: lineHeight, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: metrics.lineHeight, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private func number(_ value: Int?) -> some View {
+    /// A line: its code after the gutter, the line numbers and the marker over it. The line is one element, its code.
+    /// The gutter is another, `git-gutter-<id>`, as wide as its columns, and each number one more, as wide as its text,
+    /// so their frames show in a dump.
+    private func lineView<Numbers: View>(_ line: GitDiffLine, id: String, metrics: GitView.TextMetrics,
+                                         @ViewBuilder numbers: () -> Numbers) -> some View {
+        code(line, metrics: metrics)
+            .padding(.leading, metrics.codeX)
+            .background {
+                HStack(spacing: 0) {
+                    band(line.kind, gutter: true).frame(width: metrics.gutterWidth)
+                    band(line.kind, gutter: false)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isStaticText)
+            .accessibilityIdentifier("git-line-\(id)")
+            .accessibilityLabel(line.text)
+            .accessibilityValue(line.accessibilityValue)
+            .overlay(alignment: .topLeading) {
+                HStack(spacing: 0) {
+                    HStack(spacing: 0, content: numbers)
+                        .background {
+                            // An element of the gutter's own: one that contains the numbers is only as wide as they are.
+                            Color.clear
+                                .accessibilityElement()
+                                .accessibilityIdentifier("git-gutter-\(id)")
+                                .accessibilityLabel("Line numbers")
+                        }
+                    marker(line.kind, metrics: metrics)
+                }
+            }
+    }
+
+    private func number(_ value: Int?, id: String, metrics: GitView.TextMetrics) -> some View {
         Text(value.map(String.init) ?? "")
-            .font(numberFont)
+            .font(.system(size: GitView.TextMetrics.numberSize(metrics.fontSize), design: .monospaced))
             .foregroundStyle(palette.dim)
             .lineLimit(1)
-            .padding(.trailing, 9)
-            .frame(width: 46, height: lineHeight, alignment: .trailing)
+            .accessibilityIdentifier("git-number-\(id)")
+            .accessibilityHidden(value == nil)
+            .padding(.trailing, metrics.numberPadding)
+            .frame(width: metrics.numberWidth, height: metrics.lineHeight, alignment: .trailing)
     }
 
-    private func marker(_ kind: GitDiffLine.Kind) -> some View {
+    private func marker(_ kind: GitDiffLine.Kind, metrics: GitView.TextMetrics) -> some View {
         Text(kind == .added ? "+" : kind == .removed ? "−" : " ")
-            .font(codeFont)
+            .font(codeFont(metrics))
             .foregroundStyle(kind == .added ? palette.color(palette.colors.addedText) : palette.color(palette.colors.removedText))
-            .frame(width: 18, height: lineHeight)
+            .frame(width: metrics.markerWidth, height: metrics.lineHeight)
+            .accessibilityHidden(true)
     }
 
     /// The code, a line of `columns` characters at a time.
@@ -1243,7 +1242,7 @@ private struct GitDiffPane: View {
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(0..<wraps, id: \.self) { wrap in
                 Text(wraps == 1 ? text : Self.slice(text, from: wrap * metrics.columns, count: metrics.columns))
-                    .font(codeFont)
+                    .font(codeFont(metrics))
                     .italic(line.kind == .note)
                     .foregroundStyle(line.kind == .note ? palette.dim : palette.code)
                     .lineLimit(1)
@@ -1276,32 +1275,33 @@ private struct GitDiffPane: View {
     // MARK: Bars
 
     /// `@@ −16,6 +16,7 @@ enum ConfigAction {`; its button shows the
-    /// whole file.
-    private func hunkHeader(_ hunk: GitHunk) -> some View {
+    /// whole file. Its text and its height follow the code; its button is as wide as a unified line's line numbers.
+    private func hunkHeader(_ hunk: GitHunk, metrics: GitView.TextMetrics) -> some View {
         let canExpand = gitView.diffRows.contains { if case .wholeFile = $0.kind { true } else { false } }
+        let font = Font.system(size: GitView.TextMetrics.hunkSize(metrics.fontSize), design: .monospaced)
         return HStack(spacing: 10) {
             Button { gitView.showWholeFile() } label: {
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 12))
+                    .font(.system(size: metrics.fontSize))
                     .foregroundStyle(.tertiary)
                     .opacity(canExpand ? 1 : 0)
-                    .frame(width: 92, height: 30)
+                    .frame(width: 2 * metrics.numberWidth, height: metrics.hunkHeight)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(!canExpand)
             .help("Show the whole file")
             Text(hunk.header.replacingOccurrences(of: "-", with: "−"))
-                .font(.system(size: 11, design: .monospaced))
+                .font(font)
                 .foregroundStyle(.tertiary)
                 .fixedSize()
             Text(hunk.styledContext ?? AttributedString(hunk.context))
-                .font(.system(size: fontSize - 0.5, design: .monospaced))
+                .font(font)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
             Spacer(minLength: 0)
         }
-        .frame(height: 30)
+        .frame(height: metrics.hunkHeight)
         .background(palette.fill)
         .overlay(alignment: .top) { palette.softSeparator.frame(height: 1) }
         .overlay(alignment: .bottom) { palette.softSeparator.frame(height: 1) }
@@ -1321,10 +1321,11 @@ private struct GitDiffPane: View {
         .overlay(alignment: .bottom) { palette.separator.frame(height: 1) }
     }
 
-    private func bar(symbol: String, text: String, action: @escaping () -> Void) -> some View {
+    /// Its symbol stands over the hunk headers' buttons.
+    private func bar(symbol: String, text: String, metrics: GitView.TextMetrics, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: symbol).font(interfaceFontSize.font(12)).frame(width: 92)
+                Image(systemName: symbol).font(interfaceFontSize.font(12)).frame(width: 2 * metrics.numberWidth)
                 Text(text).font(interfaceFontSize.font(12))
                 Spacer(minLength: 0)
             }

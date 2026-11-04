@@ -18,6 +18,9 @@ The Git View's popups, the commit box and a Git View menu, hold their text in fi
 factor too, but never past the Git View, so a popup stays in the App Window. A Git View menu leaves the keys with the
 Git View, and a Git View prompt gives them to its field, at every size.
 
+The Git View's code text does not follow `ui.font_size`: it is the Terminal's `font-size` less one point, and its
+line-number gutter grows with it, wide enough for the diff's widest line number, so a 5-digit number shows whole.
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.interface_font_size
 """
@@ -97,6 +100,19 @@ MENU_CHOICE = 'git-menu-choice-x'
 # The view of the Git View that has the keys: it takes them while a Git View menu shows (`GitKeyCatcher` in
 # Sources/Muxify/UI/GitViewPanel.swift).
 KEY_VIEW = 'KeyView'
+# A file long enough for 5-digit line numbers, changed near its end: its hunk shows the lines 9999 to 10005, with 3
+# lines of context on each side of the change.
+LONG_FILE = 'a-long-file.txt'
+LONG_FILE_LINES = 10010
+CHANGED_LINE = 10002
+# The Terminal's `font-size` at its default and larger. The Git View's code is a point smaller.
+TERMINAL_SIZES = [13, 18]
+
+
+def code_line_height(terminal_size):
+    """A line of the Git View's code at the Terminal's `font-size`: 1.6 times the code's size, which is a point smaller
+    (`GitView.TextMetrics.lineHeight` in Sources/Muxify/UI/GitDiffMetrics.swift)."""
+    return round(1.6 * (terminal_size - 1))
 
 
 def height(row):
@@ -722,3 +738,91 @@ class InterfaceFontSize(unittest.TestCase):
             s.wait_rows(lambda rs: not s.has('git-prompt', rs), 'escape did not close the prompt at %s' % size)
             git_view_has_the_keys('after escape')
             self.assertEqual(self.run_git(repo, 'stash', 'list'), '', 'escape stashed at %s' % size)
+
+    def long_file_git_window(self, name):
+        """The Window of a new Session in a new repository whose LONG_FILE has CHANGED_LINE changed."""
+        window = self.git_window(name, [])
+        repo = self.s.root/'projects'/name
+        lines = ['line %d' % number for number in range(1, LONG_FILE_LINES + 1)]
+        (repo/LONG_FILE).write_text('\n'.join(lines) + '\n')
+        self.run_git(repo, 'add', LONG_FILE)
+        self.run_git(repo, '-c', 'user.name=Verify', '-c', 'user.email=verify@example.test', '-c', 'commit.gpgsign=false',
+                     'commit', '-q', '-m', 'long file')
+        lines[CHANGED_LINE - 1] = 'changed line %d' % CHANGED_LINE
+        (repo/LONG_FILE).write_text('\n'.join(lines) + '\n')
+        return window
+
+    def diff_line(self, number, rs):
+        """The identifier of the context line with this number on both sides, without its `git-line-`."""
+        value = 'kind=context old=%d new=%d' % (number, number)
+        row = next((row for row in rs if row.get('accessibilityIdentifier', '').startswith('git-line-')
+                    and row.get('accessibilityValue') == value), None)
+        return row and row['accessibilityIdentifier'][len('git-line-'):]
+
+    def test_the_git_view_line_number_gutter_follows_the_terminal_font_size_and_shows_a_5_digit_number_whole(self):
+        s = self.s
+        self.addCleanup(self.write_config, '')
+        # The Terminal's `font-size` from a Ghostty config file that the Config names. libghostty reads it after its
+        # default files, so it decides.
+        ghostty = s.root/'config/fs-ghostty.conf'
+        ghostty.write_text('font-size = %d\n' % TERMINAL_SIZES[0])
+        names_ghostty = 'ghostty:\n  config_file: %s\n' % ghostty
+        self.write_config('ui:\n  font_size: 12\n' + names_ghostty)
+        self.open_git_view(self.long_file_git_window('fs-git-gutter'))
+        # The change's row, under the root row of Changes that < selects. ↩ gives its diff the keys.
+        s.wait_rows(lambda rs: s.has(GIT_ROW + LONG_FILE, rs), 'Changes do not list %s' % LONG_FILE)
+        s.act('action', 'git-view', 'shift+comma')
+        s.act('action', 'git-view', 'j')
+        s.wait_rows(lambda rs: self.selected(GIT_ROW + LONG_FILE, rs), 'j does not select %s' % LONG_FILE)
+        s.act('action', 'git-view', 'enter')
+
+        def drawn(terminal_size):
+            """The rows once the diff is drawn at the Terminal's size: the code's lines are that size's height. The Git
+            View takes a new `font-size` when it next draws the diff, as a move of the keys to the list and back does."""
+            def at_size():
+                s.act('action', 'git-view', 'h')
+                s.act('action', 'git-view', 'l')
+                rs = s.rows()
+                line = self.diff_line(9999, rs)
+                return rs if line and height(s.row('git-line-' + line, rs)) == code_line_height(terminal_size) else None
+            return wait(at_size, lambda: 'the diff is not drawn with lines %d points high at the Terminal\'s font-size '
+                        '%d' % (code_line_height(terminal_size), terminal_size), step=.5)
+
+        def measure(rs, terminal_size):
+            """The gutter of the line 10000 and the widths of the numbers 9999 and 10000 in it, on its new side."""
+            four, five = self.diff_line(9999, rs), self.diff_line(10000, rs)
+            gutter = bounds(s.row('git-gutter-' + five, rs))
+            numbers = {}
+            for line, text in [(four, '9999'), (five, '10000')]:
+                number = s.row('git-number-%s-new' % line, rs)
+                self.assertEqual(number.get('accessibilityValue'), text, 'the line %s has another number: %s' % (text, number))
+                numbers[text] = bounds(number)
+            x, _, w, _ = numbers['10000']
+            self.assertTrue(gutter[0] - ROUNDING <= x and x + w <= gutter[0] + gutter[2] + ROUNDING,
+                            'the number 10000, %.0f to %.0f, leaves its gutter, %.0f to %.0f, at the Terminal\'s '
+                            'font-size %d' % (x, x + w, gutter[0], gutter[0] + gutter[2], terminal_size))
+            # Digits are monospaced, so a whole 5-digit number is 5/4 as wide as a whole 4-digit one. A number cut to
+            # fit its column is as wide as the column's room, so the two would be the same width.
+            self.assertAlmostEqual(numbers['10000'][2], 1.25 * numbers['9999'][2], delta=ROUNDING,
+                                   msg='the number 10000 is %.1f points wide and 9999 %.1f at the Terminal\'s font-size '
+                                   '%d: 10000 is cut off' % (numbers['10000'][2], numbers['9999'][2], terminal_size))
+            return gutter[2], numbers['10000'][2]
+
+        widths = {}
+        for terminal_size in TERMINAL_SIZES:
+            ghostty.write_text('font-size = %d\n' % terminal_size)
+            widths[terminal_size] = measure(drawn(terminal_size), terminal_size)
+        (small_gutter, small_number), (large_gutter, large_number) = (widths[size] for size in TERMINAL_SIZES)
+        self.assertGreater(large_gutter, small_gutter + ROUNDING,
+                           'the line-number gutter is %.0f points wide at the Terminal\'s font-size %d and %.0f at %d'
+                           % (small_gutter, TERMINAL_SIZES[0], large_gutter, TERMINAL_SIZES[1]))
+        # The numbers are a point smaller than the code, which is a point smaller than the Terminal.
+        small_font, large_font = (size - 2 for size in TERMINAL_SIZES)
+        self.assertAlmostEqual(large_number, small_number * large_font / small_font, delta=ROUNDING * 2,
+                               msg='the number 10000 is %.1f points wide at the Terminal\'s font-size %d and %.1f at %d'
+                               % (small_number, TERMINAL_SIZES[0], large_number, TERMINAL_SIZES[1]))
+        # `ui.font_size` does not size the code or its gutter.
+        self.set_size(18, extra=names_ghostty)
+        rs = drawn(TERMINAL_SIZES[-1])
+        self.assertEqual(measure(rs, TERMINAL_SIZES[-1]), (large_gutter, large_number),
+                         'ui.font_size: 18 changed the line-number gutter or its numbers')

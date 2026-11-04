@@ -30,6 +30,11 @@ Accessibility identifiers of the Git View:
                              `kind=<context|added|removed|note> old=<number|-> new=<number|->`, then
                              ` marks=<start>..<<end>,...` when it has changed words: their columns in the
                              code as shown, tabs expanded to the next multiple of 4
+    git-gutter-<n>           the line-number gutter of the line git-line-<n> (or -old, -new): its frame spans its
+                             line-number columns
+    git-number-<n>-old       a line's old and new line number in the unified layout, and git-number-<n>-old and
+    git-number-<n>-new       git-number-<n>-new each side's in the split layout; its value is the number, and its
+                             frame is as wide as the number is drawn
     git-write-error          the banner of a failed write or of an `e` that found its file gone; its value is the message
     git-menu                 an open Git View menu, such as Discard changes; its label is its title, and its
                              actions are each choice's key, then enter, escape, j and k
