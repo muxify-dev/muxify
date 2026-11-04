@@ -1326,7 +1326,7 @@ struct WindowRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if hints.windowSlotReserved { Color.clear.frame(width: 10) }
+            if hints.windowSlotReserved { Color.clear.frame(width: fontSize(10)) }
             if let left = content?.left {
                 if !left.isEmpty { customPart(left, side: "left") }
             } else {

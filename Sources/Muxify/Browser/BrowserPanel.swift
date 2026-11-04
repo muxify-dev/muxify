@@ -188,6 +188,7 @@ private struct TabContent: View {
     @State private var edit: AddressEdit?
     @State private var ports: [Int] = []
     @FocusState private var addressFocused: Bool
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         VStack(spacing: 0) {
@@ -198,8 +199,10 @@ private struct TabContent: View {
                 FindBar(finder: tab, placeholder: "Find in Page", identifier: "browser-find",
                         window: { tab.webView.window }, onClose: closeFind)
                     .padding(.horizontal, 10)
-                    .frame(height: 30)
+                    .frame(height: fontSize(30))
                     .background(Color.primary.opacity(0.035))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("browser-find-bar")
                 Divider()
             }
             ZStack {

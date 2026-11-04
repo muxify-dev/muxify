@@ -98,6 +98,31 @@ final class InterfaceFontSizeTests: XCTestCase {
         XCTAssertEqual(InterfaceFontSize(9).systemControlSize, .small)
     }
 
+    func testASmallSystemControlIsSmallAt12AndTakesTheSizeNearestItsGrownHeight() {
+        XCTAssertEqual(InterfaceFontSize().systemControlSize(at: .small), .small)
+        XCTAssertEqual(InterfaceFontSize(13).systemControlSize(at: .small), .small)
+        XCTAssertEqual(InterfaceFontSize(18).systemControlSize(at: .small), .large)
+        XCTAssertEqual(InterfaceFontSize(24).systemControlSize(at: .small), .extraLarge)
+        XCTAssertEqual(InterfaceFontSize().systemControlSize(at: .regular), .regular)
+    }
+
+    func testATextStyleIsItselfAt12AndItsPointSizeTimesTheFactorAt18() {
+        let styles: [(Font.TextStyle, NSFont.TextStyle)] = [
+            (.largeTitle, .largeTitle), (.title, .title1), (.title2, .title2), (.title3, .title3), (.headline, .headline),
+            (.subheadline, .subheadline), (.body, .body), (.callout, .callout), (.footnote, .footnote),
+            (.caption, .caption1), (.caption2, .caption2),
+        ]
+        for (style, appKit) in styles {
+            XCTAssertEqual(style.designFont.size, NSFont.preferredFont(forTextStyle: appKit).pointSize, "\(style)")
+            XCTAssertEqual(InterfaceFontSize().font(style), .system(style), "\(style)")
+        }
+        XCTAssertEqual(InterfaceFontSize().font(.callout, weight: .semibold), .system(.callout, weight: .semibold))
+        XCTAssertEqual(InterfaceFontSize(18).font(.caption), .system(size: 15, weight: .regular))
+        XCTAssertEqual(InterfaceFontSize(18).font(.title2, weight: .semibold), .system(size: 25.5, weight: .semibold))
+        XCTAssertEqual(InterfaceFontSize(18).font(.headline), .system(size: 19.5, weight: .bold))
+        XCTAssertEqual(InterfaceFontSize(18).font(.caption, design: .monospaced), .system(size: 15, weight: .regular, design: .monospaced))
+    }
+
     func testTheGitListsRowsHeadersAndLanesAreTheirDesignSizesAt12AndGrowByTheFactor() {
         XCTAssertEqual(GitListMetrics.rowHeight(InterfaceFontSize()), 24)
         XCTAssertEqual(GitListMetrics.rowHeight(InterfaceFontSize(18)), 36)

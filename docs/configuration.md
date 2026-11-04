@@ -647,6 +647,21 @@ These follow the size:
   controls, which take the size macOS draws nearest, as the Unified and Split
   switch does. The keys, the scrolling to the highlighted row, and a click
   choose the row you see at every size.
+- The overlays over an App Window: a Pill with its title, value and mark, 38
+  points high; the Config problems banner with its title, problems, links and
+  close button, up to 560 points wide; the find bars, Find in Page over the
+  Browser, 30 points high, and Find in Pane over the Terminal, 34 points high
+  and up to 420 wide, with their fields, status and buttons; Hints, the key
+  badges that a held modifier shows and the keys at rest on cards, Window rows
+  and Tabs, a card's key at least 16 points square; hover labels, with their
+  title and detail line; Empty Topic pages and the pages in place of the Terminal, with their
+  title, symbol, caption and buttons; the Reopen choice, up to 760 points wide;
+  and the attachment status. The heights and widths grow by the factor, and a
+  width is only a maximum: in a narrower App Window, or over a narrower
+  Terminal, the overlay takes the width there is. A hover label opens in its
+  own panel, which takes the size of the App Window it labels. The find bars'
+  buttons and an Empty Topic page's buttons are macOS controls, which take the
+  size macOS draws nearest, as the Unified and Split switch does.
 
 The Terminal and the Browser's pages are not changed: set the Terminal's fonts
 in the Ghostty config, and a page's zoom in the Browser. The Git View's code

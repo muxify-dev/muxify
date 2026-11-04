@@ -27,6 +27,11 @@ keys, its scrolling to the highlighted row and a click choose the row that is dr
 cannot type keys, so a check opens a palette from its View menu item and calls the search field's accessibility actions
 for them (Sources/Muxify/UI/CommandPaletteView.swift).
 
+The overlays over an App Window hold their text in fixed heights and widths that grow by the factor too: a Pill, the
+Config problems banner, Find in Pane's bar, a Hint, an Empty Topic page's title and a hover label, whose panel is
+outside the App Window's view tree and takes the size from the row it labels. A width that grows is a maximum, so an
+overlay never leaves the App Window or what it overlays.
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.interface_font_size
 """
@@ -126,6 +131,37 @@ PALETTE_WIDTH = 700
 PALETTE_MARGIN = 48
 # Dormant Topics, so that Choose In Play, which lists every Topic that is not Pinned, lists more rows than it shows.
 PICK_TOPICS = ['fs-pick-%02d' % n for n in range(10)]
+# A Pill holds its title and value in 38 points at 12, with nothing above or below them (`PillView` in
+# Sources/Muxify/UI/Pill.swift). Across it, beside its mark and texts, which grow, it has 8 points before the mark, 8
+# after it, 8 between the title and the value, 2 before the value and 16 after it.
+PILL_HEIGHT = 38
+PILL_SIDES = 8 + 8 + 8 + 2 + 16
+# Mark Read on a Window with nothing Unread explains itself in a Pill (`Pill(readRefusal:in:)` in
+# Sources/Muxify/UI/ReadPills.swift).
+PILL_TITLE = 'Not marked Read'
+PILL_VALUE = 'explanation: Nothing is Unread in this Window'
+# The Config problems banner is at most 560 points wide at 12, and its close button is 18 points square
+# (`ConfigProblemsBanner` in Sources/Muxify/UI/ContentView.swift). It stands 10 points inside the App Window.
+BANNER_WIDTH = 560
+BANNER_MARGIN = 10 + 10
+BANNER_CLOSE = 18
+REMOVED_KEY = 'ui.sidebar.font_size is gone: use ui.font_size'
+# Find in Pane's bar is 34 points high at 12 and at most 420 wide, 10 points inside the Terminal's corner (`findBar` in
+# Sources/Muxify/UI/ContentView.swift).
+FIND_BAR_HEIGHT = 34
+FIND_BAR_WIDTH = 420
+FIND_BAR_MARGIN = 10 + 10
+# A Hint: a card's key at rest is at least 16 points square at 12 (`CardRestKey` in Sources/Muxify/UI/HintView.swift),
+# and the badge that a held modifier shows has 2 points above and below its keys and 5 on each side (`HintBadge`).
+REST_KEY = 16
+BADGE_PADDING = 2 + 2
+BADGE_SIDES = 5 + 5
+# A Topic with no Session and no Home Session Path: going to it shows its Empty Topic page.
+EMPTY_TOPIC = 'fs-empty'
+# A hover label has 4 points above its text and 5 below it, and 7 before and 8 after it (`HoverLabelView` in
+# Sources/Muxify/UI/HoverLabel.swift).
+HOVER_LABEL_PADDING = 4 + 5
+HOVER_LABEL_SIDES = 7 + 8
 
 
 def code_line_height(terminal_size):
@@ -175,6 +211,14 @@ class InterfaceFontSize(unittest.TestCase):
                                 '-c', str(cls.project), SHELL))
         s.launch(LAUNCH_ARGS)
         s.wait_rows(lambda rs: all(s.has('topic-' + topic_id, rs) for topic_id in cls.windows), 'the Topic cards do not show')
+
+    def restart_app(self, args):
+        """Starts the app again, and waits until its Terminal's tmux client is attached and its Topic cards show. Before
+        that, the app drops a request to show a Window."""
+        s = self.s
+        s.restart_app(args)
+        wait(lambda: '0' in s.tmux('list-clients', '-F', '#{client_control_mode}').split(), 'the app attached no client')
+        s.wait_rows(lambda rs: all(s.has('topic-' + topic_id, rs) for topic_id in self.windows), 'the Topic cards do not show')
 
     @classmethod
     def write_config(cls, extra, topics=''):
@@ -427,8 +471,8 @@ class InterfaceFontSize(unittest.TestCase):
         self.addCleanup(self.write_config, '')
         # The Sidebar as wide as a drag can make it, through the width a drag stores. At 24 the header beside it has
         # less room than its controls take with the Git button at its maximum, so that maximum must give way.
-        self.addCleanup(s.restart_app, LAUNCH_ARGS)
-        s.restart_app(LAUNCH_ARGS + ['-sidebarWidth', '10000'])
+        self.addCleanup(self.restart_app, LAUNCH_ARGS)
+        self.restart_app(LAUNCH_ARGS + ['-sidebarWidth', '10000'])
         self.write_config('ui:\n  font_size: 24\n')
         s.show(window)
         # The Sidebar's widest bound, 420 at 12 (`SidebarWidth.designBounds`), at 24.
@@ -981,3 +1025,210 @@ class InterfaceFontSize(unittest.TestCase):
             s.wait_rows(lambda rs: 'checked' in value(target, rs) and highlighted(rs) == target,
                         lambda: 'a click on %s does not check and highlight it at %s: %s' % (target, size, value(target, s.rows())))
             self.close_palette()
+
+    def text(self, key, rs):
+        row = self.s.row(key, rs)
+        return row.get('accessibilityValue') or row.get('accessibilityLabel')
+
+    def mark_read_pill(self, size):
+        """Mark Read, on the shown Window with nothing Unread, shows its explanation Pill. A press while the app is
+        busy does nothing, so it presses until the Pill shows. The Pill lives 3.5 seconds and springs in, so it is
+        measured once its frame stands still."""
+        s = self.s
+        s.wait_rows(lambda rs: not s.has('pill', rs), 'the last Pill did not go at %s' % size, seconds=10)
+
+        def shown():
+            s.driver('press', 'Mark Read')
+            return s.row('pill').get('accessibilityValue') == PILL_VALUE
+        wait(shown, lambda: 'Mark Read showed no explanation Pill at %s: %r' % (size, s.row('pill')), seconds=10)
+        frames = []
+
+        def still(rs):
+            frames.append(s.row('pill', rs).get('accessibilityFrame'))
+            return frames[-1] and frames[-2:] == [frames[-1]] * 2
+        return s.wait_rows(still, 'the Pill did not stand still at %s' % size, seconds=3)
+
+    def test_at_18_a_pill_grows_by_half_shows_its_whole_text_and_fits_the_app_window(self):
+        s = self.s
+        self.addCleanup(self.write_config, '')
+        s.show(self.windows['fs-size'][0])
+        frames = {}
+        for size in [12, 18]:
+            self.set_size(size)
+            rs = self.mark_read_pill(size)
+            frames[size] = bounds(s.row('pill', rs))
+            self.assertEqual(s.row('pill', rs).get('accessibilityLabel'), PILL_TITLE)
+            x, _, w, _ = frames[size]
+            app_x, _, app_w, _ = self.app_window(rs)
+            # The Pill takes the palette's width at most, so in an App Window with room it is narrower than that.
+            self.assertTrue(app_x - ROUNDING <= x and x + w <= app_x + app_w + ROUNDING,
+                            'the Pill, %.0f to %.0f, leaves the App Window, %.0f to %.0f, at %s'
+                            % (x, x + w, app_x, app_x + app_w, size))
+            # It is as wide as its texts, up to the palette's width, so while it is narrower than that it shows its
+            # whole value, which it cuts in the middle only for want of room.
+            self.assertLess(w, min(PALETTE_WIDTH * size / 12, app_w - PALETTE_MARGIN) - ROUNDING,
+                            'the Pill is as wide as it may be at %s, so it may cut its value off' % size)
+        small, large = frames[12], frames[18]
+        self.assertAlmostEqual(small[3], PILL_HEIGHT, delta=ROUNDING, msg='the Pill is not %d points high at 12' % PILL_HEIGHT)
+        self.assert_text_grows_by_half('pill', 0, small[3], large[3])
+        self.assertGreater(large[2] - PILL_SIDES, 1.3 * (small[2] - PILL_SIDES),
+                           'the Pill is %.0f points wide at 12 and %.0f at 18: its texts did not grow' % (small[2], large[2]))
+
+    def test_at_18_the_config_problems_banner_grows_by_half_and_shows_its_whole_title(self):
+        s = self.s
+        self.addCleanup(self.write_config, '')
+        keys = ['config-problems', 'config-problems-title', 'config-problems-close']
+        frames = {}
+        for size in [12, 18]:
+            # A removed key is a problem, which the banner shows.
+            self.set_size(size, extra='  sidebar:\n    font_size: 14\n')
+            rs = self.settled(keys, 'the Config problems banner does not show at %s' % size)
+            self.assertTrue(any(REMOVED_KEY in row.get('accessibilityLabel', '') + row.get('accessibilityValue', '')
+                                for row in rs), 'the banner does not show "%s" at %s' % (REMOVED_KEY, size))
+            frames[size] = {key: bounds(s.row(key, rs)) for key in keys}
+            x, _, w, _ = frames[size]['config-problems']
+            app_x, _, app_w, _ = self.app_window(rs)
+            self.assertAlmostEqual(w, min(BANNER_WIDTH * size / 12, app_w - BANNER_MARGIN), delta=ROUNDING,
+                                   msg='the banner is %.0f points wide in an App Window %.0f wide at %s' % (w, app_w, size))
+            self.assertTrue(app_x - ROUNDING <= x and x + w <= app_x + app_w + ROUNDING,
+                            'the banner leaves the App Window at %s' % size)
+        small, large = frames[12], frames[18]
+        self.assertGreaterEqual(self.app_window()[2], BANNER_WIDTH * 1.5 + BANNER_MARGIN, 'the App Window is too narrow for the check')
+        self.assert_text_grows_by_half('config-problems', 0, small['config-problems'][2], large['config-problems'][2], side='wide')
+        # The title grows on one line, and it ends before the room of the banner's texts ends, 8 points before the close
+        # button, so it shows whole: a title without room wraps there.
+        self.assert_text_grows_by_half('config-problems-title', 0, small['config-problems-title'][3],
+                                       large['config-problems-title'][3])
+        for size, frame_of in frames.items():
+            title_x, _, title_w, _ = frame_of['config-problems-title']
+            self.assertLess(title_x + title_w, frame_of['config-problems-close'][0] - 8 - ROUNDING,
+                            'the banner has no room beside its title at %s, so it wraps or cuts it' % size)
+        for side in [2, 3]:
+            self.assertAlmostEqual(small['config-problems-close'][side], BANNER_CLOSE, delta=ROUNDING)
+            self.assertAlmostEqual(large['config-problems-close'][side], 1.5 * BANNER_CLOSE, delta=ROUNDING,
+                                   msg='the close button did not grow by half: %s' % (large['config-problems-close'],))
+
+    def test_at_18_find_in_panes_bar_grows_by_half_shows_its_whole_status_and_fits_over_the_terminal(self):
+        s = self.s
+        self.addCleanup(self.write_config, '')
+        s.show(self.windows['fs-size'][0])
+        keys = ['terminal-find-bar', 'terminal-find-field', 'terminal-find-status']
+        frames = {}
+        for size in [12, 18]:
+            self.set_size(size)
+            s.act('action', 'terminal-panel', 'Find in Pane')
+            s.wait_rows(lambda rs: s.has('terminal-find-field', rs), 'Find in Pane did not show its bar at %s' % size)
+            self.addCleanup(lambda: s.has('terminal-find-done') and s.act('press', 'terminal-find-done'))
+            s.act('focus', 'terminal-find-field')
+            s.act('set', 'terminal-find-field', 'fs-no-such-text')
+            s.wait_rows(lambda rs: s.row('terminal-find-status', rs).get('accessibilityValue', s.row('terminal-find-status', rs)
+                                                                          .get('accessibilityLabel')) == 'Not found',
+                        'Find in Pane does not say Not found at %s' % size)
+            rs = self.settled(keys, 'the find bar does not show at %s' % size)
+            frames[size] = {key: bounds(s.row(key, rs)) for key in keys}
+            x, y, w, h = frames[size]['terminal-find-bar']
+            term_x, term_y, term_w, term_h = bounds(s.row('terminal-panel', rs))
+            self.assertAlmostEqual(w, min(FIND_BAR_WIDTH * size / 12, term_w - FIND_BAR_MARGIN), delta=ROUNDING,
+                                   msg='the find bar is %.0f points wide over a Terminal %.0f wide at %s' % (w, term_w, size))
+            self.assertTrue(term_x - ROUNDING <= x and x + w <= term_x + term_w + ROUNDING
+                            and term_y - ROUNDING <= y and y + h <= term_y + term_h + ROUNDING,
+                            'the find bar, at %s, leaves the Terminal, at %s, at %s'
+                            % ((x, y, w, h), (term_x, term_y, term_w, term_h), size))
+            # The field shows its text whole.
+            self.assert_field_has_the_keys('the find field', size)
+            s.act('press', 'terminal-find-done')
+            s.wait_rows(lambda rs: not s.has('terminal-find-field', rs), 'Done did not close Find in Pane at %s' % size)
+        small, large = frames[12], frames[18]
+        self.assertGreaterEqual(bounds(s.row('terminal-panel'))[2], FIND_BAR_WIDTH * 1.5 + FIND_BAR_MARGIN,
+                                'the Terminal is too narrow for the check')
+        self.assertAlmostEqual(small['terminal-find-bar'][3], FIND_BAR_HEIGHT, delta=ROUNDING)
+        self.assert_text_grows_by_half('terminal-find-bar', 0, small['terminal-find-bar'][3], large['terminal-find-bar'][3])
+        self.assert_text_grows_by_half('terminal-find-bar', 0, small['terminal-find-bar'][2], large['terminal-find-bar'][2],
+                                       side='wide')
+        # The status grows on one line, as at 12, so it shows whole: a status without room wraps in the bar.
+        self.assert_text_grows_by_half('terminal-find-status', 0, small['terminal-find-status'][3],
+                                       large['terminal-find-status'][3])
+
+    def test_at_18_a_hint_grows_by_half_and_shows_its_whole_key(self):
+        s = self.s
+        self.addCleanup(self.write_config, '')
+        rest = lambda rs: next((key for key in s.ids(rs) if key.startswith('hint-topic-')
+                                and len(s.row(key, rs).get('accessibilityValue') or '') == 1), None)
+        held = lambda key, rs: (s.row(key, rs).get('accessibilityValue') or '').startswith('⌃')
+        keys, badges = {}, {}
+        for size in [12, 18]:
+            self.set_size(size)
+            # A card's key at rest.
+            rs = s.wait_rows(lambda rs: rest(rs), 'no card shows its key at rest at %s' % size)
+            key = rest(rs)
+            rs = self.settled([key], 'the key at rest does not show at %s' % size)
+            keys[size] = bounds(s.row(key, rs))
+            # Holding Control shows the card's badge in its place.
+            s.act('action', 'quick-switch-input', 'Hold Control')
+            self.addCleanup(s.act, 'action', 'quick-switch-input', 'Release modifiers')
+            s.wait_rows(lambda rs: held(key, rs), 'holding Control shows no badge on %s at %s' % (key, size))
+            rs = self.settled([key], 'the badge does not show at %s' % size)
+            badges[size] = bounds(s.row(key, rs))
+            s.act('action', 'quick-switch-input', 'Release modifiers')
+            s.wait_rows(lambda rs: not held(key, rs), 'releasing Control does not hide the badge at %s' % size)
+        for side in [2, 3]:
+            self.assertAlmostEqual(keys[12][side], REST_KEY, delta=ROUNDING, msg='the key at rest is %s at 12' % (keys[12],))
+            self.assertAlmostEqual(keys[18][side], 1.5 * REST_KEY, delta=ROUNDING,
+                                   msg='the key at rest did not grow by half: %s' % (keys[18],))
+        # The badge is as wide as its keys, which it never cuts.
+        self.assert_text_grows_by_half('the badge', BADGE_PADDING, badges[12][3], badges[18][3])
+        self.assertGreater(badges[18][2] - BADGE_SIDES, 1.3 * (badges[12][2] - BADGE_SIDES),
+                           'the badge is %.0f points wide at 12 and %.0f at 18: its keys did not grow'
+                           % (badges[12][2], badges[18][2]))
+
+    def test_at_18_the_empty_topic_pages_title_grows_by_half_and_shows_whole(self):
+        s = self.s
+        self.addCleanup(self.write_config, '')
+        self.store.put(dict(id=EMPTY_TOPIC, title=EMPTY_TOPIC, slug=EMPTY_TOPIC, home_project=None))
+        self.addCleanup(self.store.remove, EMPTY_TOPIC)
+        self.addCleanup(s.show, self.windows['fs-size'][0])
+        s.wait_rows(lambda rs: s.has('topic-' + EMPTY_TOPIC, rs), 'the card of %s does not show' % EMPTY_TOPIC)
+        s.act('action', 'topic-' + EMPTY_TOPIC, 'Go to Topic')
+        frames = {}
+        for size in [12, 18]:
+            self.set_size(size)
+            rs = self.settled(['empty-topic-title'], 'the Empty Topic page does not show at %s' % size)
+            self.assertEqual(self.text('empty-topic-title', rs), EMPTY_TOPIC)
+            frames[size] = bounds(s.row('empty-topic-title', rs))
+            # The page has 24 points of padding on each side, and the title is narrower than the room inside it, so it
+            # shows whole: a title without room wraps there.
+            self.assertLess(frames[size][2], bounds(s.row('terminal-panel', rs))[2] - 24 - 24 - ROUNDING,
+                            'the Empty Topic page has no room beside its title at %s' % size)
+        # The title grows on one line.
+        self.assert_text_grows_by_half('empty-topic-title', 0, frames[12][3], frames[18][3])
+
+    def test_at_18_a_hover_labels_panel_grows_by_half_with_its_detail(self):
+        s = self.s
+        self.addCleanup(self.write_config, '')
+        row = 'pane-' + self.panes[1]
+        s.show(self.windows['fs-panes'][0])
+        self.addCleanup(s.act, 'hover', 'agents-header')
+        frames = {}
+        for size in [12, 18]:
+            self.set_size(size)
+            s.wait_rows(lambda rs: s.has(row, rs), 'the open card does not show its Pane row at %s' % size)
+            s.act('hover', row)
+            rs = s.wait_rows(lambda rs: self.hover_label(rs), 'no hover label on %s at %s' % (row, size), seconds=5)
+            # The Pane's title fits its row, so the label shows only its detail: the Pane's path.
+            self.assertEqual(len(self.hover_label(rs)), 1, 'the hover label shows %s at %s' % (self.hover_label(rs), size))
+            label = bounds(s.row('hover-label', rs))
+            ids = s.ids(rs)
+            detail = bounds(next(r for r in rs[ids.index('hover-label') + 1:] if r.get('accessibilityRole') == 'AXStaticText'))
+            frames[size] = label, detail
+            # The panel is as large as its detail and its padding, which do not cut it.
+            self.assertAlmostEqual(label[2], detail[2] + HOVER_LABEL_SIDES, delta=ROUNDING * 2,
+                                   msg='the hover label, %s, is not its detail, %s, and its padding at %s' % (label, detail, size))
+            self.assertAlmostEqual(label[3], detail[3] + HOVER_LABEL_PADDING, delta=ROUNDING * 2,
+                                   msg='the hover label, %s, is not its detail, %s, and its padding at %s' % (label, detail, size))
+            s.act('hover', 'agents-header')
+            s.wait_rows(lambda rs: not self.hover_label(rs), 'the hover label did not close at %s' % size, seconds=5)
+        (small, small_detail), (large, large_detail) = frames[12], frames[18]
+        self.assert_text_grows_by_half('the hover label\'s detail', 0, small_detail[3], large_detail[3])
+        self.assert_text_grows_by_half('hover-label', HOVER_LABEL_PADDING, small[3], large[3])
+        self.assertGreater(large_detail[2], 1.3 * small_detail[2],
+                           'the hover label\'s detail is %.0f points wide at 12 and %.0f at 18' % (small_detail[2], large_detail[2]))
