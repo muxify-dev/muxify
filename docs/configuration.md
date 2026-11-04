@@ -607,6 +607,19 @@ These follow the size:
   branch and the Environment's name cut, so no control is pushed off the header.
 - The header's height. `ui.header_height` is a length at 12, so the header is
   that height, or the default 30, times the factor (see [Header](#header)).
+- The Git View's lists and bars: the toolbar with its tags and the filter field,
+  the Git View tabs, the list headers and their counts, and the list rows with
+  their file, commit, branch and stash names, hashes, ages, `+`/`−` counts,
+  tags and file icons; the History graph's lanes; and the path bars over the
+  diff. The symbols beside that text grow with it. So do the heights of the
+  toolbar, the filter field, the tabs, the list headers, the rows and the path
+  bars, the width of the filter field and of a graph lane, and the List pane's
+  width bounds of 240 to 380 points. The List pane takes 30% of the Git View
+  between those bounds, but a scaled bound never makes it wider than half the
+  Git View, so the diff keeps its room. The keys, the scrolling to the
+  selection, and a click select the row you see at every size. The Unified and
+  Split switch is a macOS control, which comes in a few sizes: it is regular up
+  to 13, large up to 16, and extra large above.
 
 The Terminal and the Browser's pages are not changed: set the Terminal's fonts
 in the Ghostty config, and a page's zoom in the Browser. The Git View's code

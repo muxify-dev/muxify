@@ -88,4 +88,40 @@ final class InterfaceFontSizeTests: XCTestCase {
         XCTAssertEqual(SidebarWidth.shown(dragged: 100, size: InterfaceFontSize()), 180)
         XCTAssertEqual(SidebarWidth.shown(dragged: 900, size: InterfaceFontSize()), 420)
     }
+
+    func testASystemControlIsRegularAt12AndTakesTheSizeNearestItsGrownHeight() {
+        XCTAssertEqual(InterfaceFontSize().systemControlSize, .regular)
+        XCTAssertEqual(InterfaceFontSize(13).systemControlSize, .regular)
+        XCTAssertEqual(InterfaceFontSize(15).systemControlSize, .large)
+        XCTAssertEqual(InterfaceFontSize(18).systemControlSize, .extraLarge)
+        XCTAssertEqual(InterfaceFontSize(24).systemControlSize, .extraLarge)
+        XCTAssertEqual(InterfaceFontSize(9).systemControlSize, .small)
+    }
+
+    func testTheGitListsRowsHeadersAndLanesAreTheirDesignSizesAt12AndGrowByTheFactor() {
+        XCTAssertEqual(GitListMetrics.rowHeight(InterfaceFontSize()), 24)
+        XCTAssertEqual(GitListMetrics.rowHeight(InterfaceFontSize(18)), 36)
+        // The header, the rows, and the list's 12 points of padding, which do not grow.
+        XCTAssertEqual(GitListMetrics.listHeight(rows: 5, size: InterfaceFontSize()), 36 + 5 * 24 + 12)
+        XCTAssertEqual(GitListMetrics.listHeight(rows: 5, size: InterfaceFontSize(18)), 54 + 5 * 36 + 12)
+        XCTAssertEqual(GitListMetrics.listHeight(rows: 0, size: InterfaceFontSize()), 36 + 24 + 12, "an empty list has room for one row")
+        XCTAssertEqual(InterfaceFontSize(18)(GitListMetrics.designLane), 16.5)
+    }
+
+    func testTheListPaneAt12IsItsShareOfTheGitViewBetween240And380() {
+        let size = InterfaceFontSize()
+        for (gitView, pane) in [(400.0, 240.0), (600, 240), (800, 240), (1000, 300), (1266, 379.8), (2000, 380)] {
+            XCTAssertEqual(GitListMetrics.paneWidth(in: gitView, size: size), pane, accuracy: 0.0001, "\(gitView)")
+        }
+    }
+
+    func testTheListPanesBoundsGrowByTheFactorButNeverPastHalfTheGitView() {
+        let size = InterfaceFontSize(18)
+        XCTAssertEqual(GitListMetrics.paneWidth(in: 760, size: size), 360, "the least width, 240 at 12")
+        XCTAssertEqual(GitListMetrics.paneWidth(in: 1600, size: size), 480, "its share between 360 and 570")
+        XCTAssertEqual(GitListMetrics.paneWidth(in: 3000, size: size), 570, "the most width, 380 at 12")
+        XCTAssertEqual(GitListMetrics.paneWidth(in: 600, size: size), 300, "half the Git View, so the diff keeps its room")
+        XCTAssertEqual(GitListMetrics.paneWidth(in: 400, size: size), 240, "never less than at 12")
+        XCTAssertEqual(GitListMetrics.paneWidth(in: 900, size: InterfaceFontSize(24)), 450)
+    }
 }

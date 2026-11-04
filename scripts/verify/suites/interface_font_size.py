@@ -10,6 +10,10 @@ The App Window header's height, `ui.header_height`, is a length at 12 that grows
 which grow too, still fit in it. A maximum width that grows, such as the Git button's, gives way in a header without
 room for it, so no button leaves the App Window.
 
+The Git View's list rows, list headers, tabs and bars hold their text in fixed heights that grow by the factor, and the
+List pane's width bounds grow too, so a file name keeps its room. Its keys, its scrolling to the selection and a click
+select the row that is drawn there at every size.
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.interface_font_size
 """
@@ -19,7 +23,7 @@ import re
 import subprocess
 import unittest
 
-from scripts.verify.sandbox import Sandbox, frame
+from scripts.verify.sandbox import Sandbox, frame, wait
 from scripts.verify.topic_records import TopicRecords
 
 SHELL = '/bin/zsh -f'
@@ -64,6 +68,15 @@ IN_PLAY = '  in_play: 1\n'
 LAUNCH_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-agentsVisible', 'YES', '-sidebarWorkView', 'Topics']
 # The Git button's maximum width at 12, with its 16 points of padding (`HeaderGitButton`).
 GIT_BUTTON_MAX = 180 + HEADER_BUTTON_SIDES
+# The Git View's width in the Git View checks. Its List pane takes 30% of it, but at least 240 points at 12 and 360 at 18
+# (`GitListMetrics` in Sources/Muxify/UI/GitListMetrics.swift), and at 760 both are less than half of it. So the List
+# pane is at its least width at both sizes, and that grows by the factor.
+GIT_VIEW_WIDTH = 760
+# `GitTabBar` in Sources/Muxify/UI/GitViewPanel.swift has 8 points around its bar and 2 inside it, above and below the tabs.
+TAB_BAR_PADDING = 8 + 8 + 2 + 2
+# A file name that fits in its row in the List pane at 12.
+LONG_NAME = 'a-long-file-name.txt'
+GIT_ROW = 'git-row-change:'
 
 
 def height(row):
@@ -113,9 +126,10 @@ class InterfaceFontSize(unittest.TestCase):
         """The Config with `extra` after the Session Paths, then the FIXTURE, whose `topics` section ends with `topics`."""
         cls.config.write_text('sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n' + extra + FIXTURE + topics)
 
-    def set_size(self, size, topics=''):
-        """Writes `ui.font_size` and waits until the Sidebar has the width of an undragged Sidebar at that size."""
-        self.write_config('ui:\n  font_size: %s\n' % size, topics)
+    def set_size(self, size, topics='', extra=''):
+        """Writes `ui.font_size`, then `extra`, and waits until the Sidebar has the width of an undragged Sidebar at that
+        size."""
+        self.write_config('ui:\n  font_size: %s\n' % size + extra, topics)
         expected = SIDEBAR_WIDTH * size / 12
         return self.s.wait_rows(lambda rs: abs(width(self.s.row('sidebar-panel', rs)) - expected) < 1,
                                 'the Sidebar is not %.0f points wide at ui.font_size: %s' % (expected, size))
@@ -425,3 +439,131 @@ class InterfaceFontSize(unittest.TestCase):
         closed = state(rs)
         rs = self.set_size(18)
         self.assertEqual(state(rs), closed, 'ui.font_size: 18 opened a closed card or changed the Location')
+
+    def git_window(self, name, files):
+        """The Window of a new Session in a new repository with one commit and the untracked `files`."""
+        s = self.s
+        repo = s.root/'projects'/name
+        repo.mkdir(parents=True)
+        for args in [['init', '-q', '-b', 'main'], ['-c', 'user.name=Verify', '-c', 'user.email=verify@example.test',
+                                                    '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'x']]:
+            subprocess.run(['git', '-C', str(repo), *args], env=s.env, check=True, capture_output=True)
+        for file in files:
+            (repo/file).write_text('one\n')
+        sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, '-c', str(repo), SHELL)
+        self.addCleanup(s.tmux_ok, 'kill-session', '-t', sid)
+        return s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
+
+    def open_git_view(self, window):
+        """Shows the Window and opens its Git View on Changes, through the View menu item. SwiftUI rebuilds the menu a
+        moment after the state it reads changes, and a press in that moment can miss."""
+        s = self.s
+        s.show(window)
+        self.addCleanup(s.show, self.windows['fs-size'][0])
+
+        def opened():
+            s.driver('press', 'Show Git View')
+            return s.has('git-view')
+        wait(opened, 'the Git View did not open', seconds=10, step=.3)
+        self.addCleanup(self.close_git_view)
+        rs = s.wait_rows(lambda rs: s.has('git-toolbar', rs), 'the Git View did not read the repository')
+        if s.row('git-tab-changes', rs).get('accessibilityValue') != 'selected':
+            s.act('action', 'git-view', '1')
+
+    def close_git_view(self):
+        if self.s.has('git-view'):
+            self.s.act('action', 'git-view', 'q')
+            wait(lambda: not self.s.has('git-view'), 'the Git View did not close', seconds=10)
+
+    def set_git_view_size(self, size):
+        """`ui.font_size`, with the Git View GIT_VIEW_WIDTH points wide. The toolbar spans the Git View, whose own frame in
+        the dump also takes in what its bars cut off."""
+        app_window = bounds(next(row for row in self.s.rows() if row.get('accessibilityRole') == 'AXWindow'))
+        self.assertGreaterEqual(app_window[2], GIT_VIEW_WIDTH, 'the App Window is too narrow for the Git View checks')
+        self.set_size(size, extra='git_view:\n  width: %.4f%%\n' % (100 * GIT_VIEW_WIDTH / app_window[2]))
+        self.s.wait_rows(lambda rs: abs(width(self.s.row('git-toolbar', rs)) - GIT_VIEW_WIDTH) < 1,
+                         lambda: 'the Git View is %.0f points wide, not %d, at ui.font_size: %s'
+                         % (width(self.s.row('git-toolbar')), GIT_VIEW_WIDTH, size))
+
+    def selected(self, key, rs=None):
+        return 'selected=1' in self.s.row(key, rs).get('accessibilityValue', '')
+
+    def test_at_18_a_git_view_list_row_and_the_tab_bar_grow_by_half_and_a_long_file_name_keeps_its_room(self):
+        self.addCleanup(self.write_config, '')
+        row = GIT_ROW + LONG_NAME
+        keys = [row, 'git-tab-changes', 'git-list-pane', 'git-list-changes', 'git-toolbar']
+        self.open_git_view(self.git_window('fs-git-row', [LONG_NAME]))
+        frames, tab_bars = {}, {}
+        for size in [12, 18]:
+            self.set_git_view_size(size)
+            rs = self.settled(keys, 'the Git View does not show its Changes and its tabs at %s' % size)
+            frames[size] = {key: bounds(self.s.row(key, rs)) for key in keys}
+            # The tab bar is the List pane's bottom, from the bottom of the list's scroll view to the Git View's bottom.
+            tab_bars[size] = frame(self.s.row('git-list-changes', rs))[0] - frame(self.s.row('git-view', rs))[0]
+            self.assertEqual(self.s.row(row, rs).get('accessibilityLabel'), LONG_NAME)
+            self.assertEqual(self.s.row('git-tab-changes', rs).get('accessibilityValue'), 'selected')
+            # The List pane is in the left half of the Git View, which nothing in it pushes wider than it is.
+            git_x, _, git_width, _ = frames[size]['git-toolbar']
+            pane_x, _, pane_width, _ = frames[size]['git-list-pane']
+            self.assertAlmostEqual(git_width, GIT_VIEW_WIDTH, delta=ROUNDING, msg='the Git View is not as wide as set')
+            self.assertTrue(git_x - ROUNDING <= pane_x and pane_x + pane_width <= git_x + git_width / 2 + ROUNDING,
+                            'the List pane, at %.0f to %.0f, is not in the left half of the Git View, at %.0f to %.0f, at %s'
+                            % (pane_x, pane_x + pane_width, git_x, git_x + git_width, size))
+        small, large = frames[12], frames[18]
+        # A row holds its text in 24 points at 12, with nothing above or below it, and a tab in its 24 points.
+        self.assert_text_grows_by_half(row, 0, small[row][3], large[row][3])
+        self.assert_text_grows_by_half('git-tab-changes', 0, small['git-tab-changes'][3], large['git-tab-changes'][3])
+        self.assert_text_grows_by_half('the tab bar', TAB_BAR_PADDING, tab_bars[12], tab_bars[18])
+        # The List pane grows from its least width at 12 to its least width at 18. A row's padding and spacing do not
+        # grow, so a row 1.5 times as wide gives the name, 1.5 times as wide, at least the room it fits in at 12.
+        self.assertAlmostEqual(large['git-list-pane'][2], 1.5 * small['git-list-pane'][2], delta=ROUNDING,
+                               msg='the List pane is %.0f points wide at 12 and %.0f at 18'
+                               % (small['git-list-pane'][2], large['git-list-pane'][2]))
+        self.assertGreaterEqual(large[row][2], 1.5 * small[row][2] - ROUNDING,
+                                'the row of %s is %.0f points wide at 12 and %.0f at 18, too narrow for its name'
+                                % (LONG_NAME, small[row][2], large[row][2]))
+
+    def test_at_12_and_18_the_git_view_keys_scrolling_and_a_click_select_the_row_drawn_there(self):
+        s = self.s
+        self.addCleanup(self.write_config, '')
+        names = ['fs-nav-%02d.txt' % n for n in range(40)]
+        rows = [GIT_ROW + name for name in names]
+        self.open_git_view(self.git_window('fs-git-nav', names))
+        for size in [12, 18]:
+            self.set_git_view_size(size)
+            row_height = 24 * size / 12
+            self.settled([rows[0], 'git-list-changes'], 'the Git View does not show its Changes at %s' % size)
+
+            def in_view(key, rs):
+                """The row is drawn whole in the list's scroll view, and as tall as a row at this size."""
+                if not s.has(key, rs):
+                    return False
+                bottom, top = frame(s.row(key, rs))
+                list_bottom, list_top = frame(s.row('git-list-changes', rs))
+                return (list_bottom - ROUNDING <= bottom and top <= list_top + ROUNDING
+                        and abs(top - bottom - row_height) <= ROUNDING)
+
+            # j from the top moves down, to the row drawn directly under the one before.
+            s.act('action', 'git-view', 'shift+comma')
+            s.act('action', 'git-view', 'j')
+            s.act('action', 'git-view', 'j')
+            rs = s.wait_rows(lambda rs: self.selected(rows[1], rs) and in_view(rows[1], rs),
+                             lambda: 'j from the top does not select %s in view at %s' % (rows[1], size))
+            self.assertAlmostEqual(frame(s.row(rows[0], rs))[0], frame(s.row(rows[1], rs))[1], delta=ROUNDING,
+                                   msg='the rows are not drawn one under the other at %s' % size)
+            # > selects the last row, far below the list's bottom, and scrolls it into view.
+            s.act('action', 'git-view', 'shift+period')
+            rs = s.wait_rows(lambda rs: self.selected(rows[-1], rs) and in_view(rows[-1], rs),
+                             lambda: '> does not scroll the last row into view at %s' % size)
+            # A click in the middle of a row drawn there selects that row, once the list has stopped scrolling. A row takes
+            # the first click (`takesFirstClick` on the rows of `GitListView`), so the click reaches it in the background.
+            target = rows[-4]
+            frames = []
+
+            def still(rs):
+                frames.append(s.row(target, rs).get('accessibilityFrame'))
+                return frames[-2:] == [frames[-1]] * 2 and in_view(target, rs)
+            s.wait_rows(still, '%s is not in view, standing still, above the last row at %s' % (target, size))
+            s.act('click', target)
+            s.wait_rows(lambda rs: self.selected(target, rs) and not self.selected(rows[-1], rs),
+                        lambda: 'a click on %s does not select it at %s' % (target, size))
