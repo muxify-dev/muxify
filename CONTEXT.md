@@ -53,7 +53,7 @@ _Avoid_: terminal search, scrollback search, Find (alone)
 
 **Topic**:
 One thing the user wants to get done, such as "Fix reward drop bug in GS". It groups Sessions without a per-repository or per-folder limit, and it is open or Settled.
-_Avoid_: task, project, workspace, thread
+_Avoid_: task, project, workspace, thread, active Topics (when you mean the open Topics; the Active Topic is the one an App Window shows)
 
 **Topic slug**:
 A Topic's short name used as the suffix of its Sessions' names. It follows Topic renames and stays reserved while the Topic's record exists, including while Settled.
@@ -105,7 +105,7 @@ _Avoid_: close, archive, resolve, complete
 
 **Reopen**:
 To bring a Settled or Dormant Topic back and create its remembered Sessions again, with their Windows, Panes, Tabs and Agents.
-_Avoid_: restore, unsettle, resume
+_Avoid_: restore (also for bringing back every Topic after a restart, which is Reopen done by Muxify at launch; it never Reopens a Settled Topic), unsettle, resume
 
 **Remembered Session**:
 A Topic's saved Session identity, name, launch directory and restoration details, retained so it can be Reopened. Several Remembered Sessions can have the same launch directory.
@@ -124,7 +124,7 @@ A Command that Forgets, in one step, every Settled Topic that was Settled more t
 _Avoid_: prune, clean up, auto-forget
 
 **Dormant**:
-An open Topic that has no live Sessions but remembers Sessions, for example after a tmux restart. It stays Dormant in the Sidebar until the user goes to it, which Reopens it, or Settles it.
+An open Topic that has no live Sessions but remembers Sessions, for example after a tmux restart. It stays Dormant in the Sidebar until the user goes to it, which Reopens it, or Settles it. With `topics.reopen_at_launch`, Muxify Reopens every Dormant Topic by itself when it launches.
 _Avoid_: inactive, sleeping, suspended
 
 **Empty**:

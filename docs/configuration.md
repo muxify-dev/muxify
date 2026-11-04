@@ -174,6 +174,32 @@ A Dormant Topic keeps its place, including when it is Pinned.
 A Topic made from a Locked Session takes that Lock's place.
 An unknown value uses `bottom` and appears in the Config problems banner.
 
+## Reopen Dormant Topics at launch
+
+```yaml
+topics:
+  reopen_at_launch: true
+```
+
+After a computer restart, tmux comes back with none of your Sessions, so every
+open Topic is Dormant until you go to it. With `true`, Muxify Reopens every
+Dormant Topic by itself when it launches: Pinned, In Play, Guests and the Bench.
+It is the same Reopen as going to the Topic, so the remembered Sessions,
+Windows, Panes, Tabs and Agents are created again, one Topic after another.
+Settled Topics stay Settled, Empty Topics create nothing, and a Topic that
+already has a live Session is left as it is. A Topic whose Reopen fails stays
+Dormant, shows the failure as a Reopen does, and the others still Reopen.
+
+It happens once per launch: a tmux restart while Muxify runs leaves the Topics
+Dormant. The App Window does not go to each Topic in turn; it shows what it
+would have shown, and the [Start a Session](#start-a-session) palette does not
+open by itself once a Topic is Reopened. A Remote Environment has no Topics
+(they stay on this Mac), so the key Reopens nothing there.
+
+`false` (the default) keeps the Topics Dormant until you go to them. A value
+that is not a boolean counts as `false` and appears in the Config problems
+banner.
+
 ## Topics In Play
 
 ```yaml

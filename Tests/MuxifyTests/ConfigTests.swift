@@ -1343,6 +1343,18 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    func testTopicsReopenAtLaunchTakesABooleanAndIsFalseWhenAbsentOrWrong() throws {
+        XCTAssertFalse(try load("").topics.reopenAtLaunch)
+        XCTAssertTrue(try load("topics:\n  reopen_at_launch: true").topics.reopenAtLaunch)
+        XCTAssertFalse(try load("topics:\n  reopen_at_launch: false").topics.reopenAtLaunch)
+        XCTAssertTrue(Config.template.contains("#   reopen_at_launch: false"))
+        for value in ["yes please", "1", "\"true\"", "[true]"] {
+            let bad = try load("topics:\n  reopen_at_launch: " + value)
+            XCTAssertFalse(bad.topics.reopenAtLaunch, value)
+            XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "topics.reopen_at_launch: expected a boolean")], value)
+        }
+    }
+
     func testTopicSessionOrderTakesOldestOrNewestFirstAndReportsAnythingElse() throws {
         XCTAssertEqual(try load("").topics.sessionOrder, .oldestFirst)
         XCTAssertEqual(try load("topics:\n  session_order: newest_first").topics.sessionOrder, .newestFirst)

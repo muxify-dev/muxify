@@ -131,7 +131,7 @@ final class WorkspaceStore {
         }
     }
     private var topicEditGeneration = 0
-    @ObservationIgnored private var topicRequests: [EnvironmentRequest] = []
+    @ObservationIgnored private var topicRequests: [(EnvironmentRequest, TopicPresentation)] = []
 
     /// Move for the selected Window's Session, in the Command Palette's view. Nothing happens with Topics off.
     func presentMoveSession(keepingHistory: Bool = false) {
@@ -528,9 +528,10 @@ final class WorkspaceStore {
         refreshSessionPaths()
     }
 
-    /// Start a Session… that Muxify offers by itself, on finding no Session: it never replaces a palette already open.
+    /// Start a Session… that Muxify offers by itself, on finding no Session: it never replaces a palette already open,
+    /// and it waits while Topics Reopen at launch, which make Sessions.
     private func offerStartSession() {
-        if !palette.isOpen { presentStartSession() }
+        if !palette.isOpen, launchReopens.isEmpty { presentStartSession() }
     }
 
     func renameTopic(_ id: String, to title: String) {
@@ -704,14 +705,31 @@ final class WorkspaceStore {
         }
     }
 
-    private func enqueueTopicRequest(_ request: EnvironmentRequest) {
-        topicRequests.append(request)
+    private func enqueueTopicRequest(_ request: EnvironmentRequest, presenting presentation: TopicPresentation = .edit) {
+        topicRequests.append((request, presentation))
         drainTopicRequests()
     }
 
     private func drainTopicRequests() {
         guard !changingTopic, !topicRequests.isEmpty else { return }
-        perform(topicRequests.removeFirst(), onLocalServer: true)
+        let (request, presentation) = topicRequests.removeFirst()
+        perform(request, presenting: presentation, onLocalServer: true)
+    }
+
+    /// The process's one answer per Environment, shared by every App Window.
+    private static var reopenAtLaunch = ReopenAtLaunch()
+    /// The Topics that Reopen at launch has asked for and that have not finished.
+    @ObservationIgnored private var launchReopens: Set<String> = []
+
+    /// `topics.reopen_at_launch`: the first snapshot of this launch Reopens every Dormant open Topic, one after another
+    /// through the Topic request path, as going to each would, without moving the Location. A Remote Environment has
+    /// no Topics: they stay on this Mac (ADR 0062).
+    private func reopenDormantTopicsAtLaunch() {
+        guard !isRemote else { return }
+        let ids = Self.reopenAtLaunch.topics(in: environmentName, enabled: topicConfig.reopenAtLaunch,
+                                             records: topicWatcher.records, windows: windows)
+        launchReopens.formUnion(ids)
+        for id in ids { enqueueTopicRequest(EnvironmentRequest(.reopen, target: .topic(.id(id))), presenting: .reopenedAtLaunch(id)) }
     }
 
     /// How the app shows a finished Topic request.
@@ -729,6 +747,8 @@ final class WorkspaceStore {
         case goTo(TopicGroupID)
         /// Forget Settled Older Than… answers with the Topics it forgot, and the palette closes.
         case forgetSettled
+        /// Reopen at launch: the Location stays. Once the last one finishes, the App Window attaches as at any launch.
+        case reopenedAtLaunch(String)
     }
 
     /// The one path for every Topic edit that the user asks for in the app. The app's unsaved memory goes to disk and to tmux first,
@@ -746,7 +766,9 @@ final class WorkspaceStore {
         let remote = isRemote && !onLocalServer
         // A Remote Environment's client is on the remote server; the local terminal's tty names nothing there, and
         // no client of the Local server shows this App Window.
-        let client = remote ? clientTTY : isRemote ? nil : clientTTY ?? surface?.ttyName
+        var client = remote ? clientTTY : isRemote ? nil : clientTTY ?? surface?.ttyName
+        // Reopen at launch leaves the Location where it is, so no client switches to the Topic.
+        if case .reopenedAtLaunch = presentation { client = nil }
         guard let service = remote ? remoteService() : topicService() else { changingTopic = false; return false }
         let environment = generation
         let invocation = palette.invocation
@@ -760,6 +782,7 @@ final class WorkspaceStore {
             guard let self else { return }
             await self.topicWatcher.reloaded()
             guard self.generation == environment else {
+                if case .reopenedAtLaunch(let id) = presentation { self.launchReopens.remove(id) }
                 self.changingTopic = false
                 self.refresh(attachIfNeeded: true)
                 return
@@ -789,6 +812,11 @@ final class WorkspaceStore {
     }
 
     private func present(_ response: EnvironmentResponse, as presentation: TopicPresentation, invocation: UUID) {
+        var reopenedLast = false
+        if case .reopenedAtLaunch(let id) = presentation {
+            launchReopens.remove(id)
+            reopenedLast = launchReopens.isEmpty
+        }
         changingTopic = false
         let ownsPalette = palette.invocation == invocation
         switch response {
@@ -828,7 +856,7 @@ final class WorkspaceStore {
             case .goTo(let card):
                 if ownsPalette { palette.close() }
                 goToTopic(card)
-            case .forgetSettled:
+            case .forgetSettled, .reopenedAtLaunch:
                 break
             case .edit, .newTopic, .newSession:
                 if ownsPalette { palette.close() }
@@ -855,7 +883,8 @@ final class WorkspaceStore {
         // stopped: an attach there would start the server with a new Session.
         var changed = false
         if case .changed = response { changed = true }
-        refresh(attachIfNeeded: changed && surface == nil)
+        // After the last Reopen at launch, an App Window with no Session offers Start a Session… as it would have.
+        refresh(attachIfNeeded: (changed || reopenedLast) && surface == nil)
     }
 
     /// Writes the remembered Sessions that wait for their write delay, after the writes that already run.
@@ -1518,6 +1547,7 @@ final class WorkspaceStore {
             now < opening.deadline && !snapshot.windows.contains { $0.sessionName == opening.name }
         }
         hasNoSessions = snapshot.windows.isEmpty
+        reopenDormantTopicsAtLaunch()
         let agents = Agent.list(panes: snapshot.panes, windows: snapshot.windows, ordered: false)
         if self.agents != agents { self.agents = agents }
         if panes != snapshot.panes { panes = snapshot.panes }

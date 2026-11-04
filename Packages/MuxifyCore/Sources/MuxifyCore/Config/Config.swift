@@ -77,6 +77,9 @@ public struct Config: Equatable {
         public var inPlay: Int?
         /// The days that Forget Settled Older Than… offers first. It forgets nothing by itself.
         public var forgetSettledOlderThan = 14
+        /// When Muxify launches, it Reopens every Dormant open Topic, once per launch per Environment. False: Dormant
+        /// Topics stay Dormant until the user goes to them.
+        public var reopenAtLaunch = false
 
         public init() {}
     }
@@ -487,6 +490,10 @@ public struct Config: Equatable {
         #   # It forgets the Settled Topics that were Settled more days ago.
         #   # Muxify never forgets a Topic by itself.
         #   forget_settled_older_than: 14
+        #   # true: when Muxify launches, it Reopens every Dormant Topic, as
+        #   # going to it does, for example after a restart. Settled and Empty
+        #   # Topics stay as they are. false: a Topic Reopens when you go to it.
+        #   reopen_at_launch: false
         #   # The only Tags a Topic can have, in this order. A key is lower case
         #   # letters, digits and -. color is as in ui.agent_colors; a Tag
         #   # without one gets a fixed color from its name. No tags: Tags are off.
@@ -774,6 +781,12 @@ private struct ConfigReader {
             case "in_play": config.topics.inPlay = count(value, "topics.in_play", atLeast: 1)
             case "forget_settled_older_than":
                 if let days = count(value, "topics.forget_settled_older_than", atLeast: 1) { config.topics.forgetSettledOlderThan = days }
+            case "reopen_at_launch":
+                guard value.tag == Yams.Tag(.bool), let reopens = value.bool else {
+                    problem(at: value, "topics.reopen_at_launch: expected a boolean")
+                    continue
+                }
+                config.topics.reopenAtLaunch = reopens
             default: problem(at: key, "unknown key \"topics.\(name)\"")
             }
         }
