@@ -1115,7 +1115,10 @@ comes to the front, with R, and after you stage or commit. On this Mac it also
 reads it again as soon as the repository changes, such as after a commit typed
 in a Pane: it watches the working tree and the git directories, waits for the
 changes to settle for a quarter of a second, and reads at most once a second.
-On a Remote Environment, git runs on that machine. Code is sized from the terminal's font
+On a Remote Environment, git runs on that machine, and every 2 seconds the
+Git View checks HEAD, the index's time and the status there over its ssh
+connection, reading the repository again when one changed. It needs only `git`
+and `sh` on that machine and leaves nothing running there. Code is sized from the terminal's font
 size, in the system's monospaced font. Each Window has its own Git View: select
 another Window and it stays open there, as you left it, until you come back; it
 isn't read again meanwhile. A Window whose Git View is open shows its icon in the

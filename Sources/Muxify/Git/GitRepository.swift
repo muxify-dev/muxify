@@ -989,7 +989,7 @@ enum GitRepository {
     }
 
     /// Each section's output by name.
-    fileprivate static func sections(_ output: String) -> [String: String] {
+    static func sections(_ output: String) -> [String: String] {
         var sections: [String: String] = [:]
         for chunk in output.components(separatedBy: "\u{1E}").dropFirst() {
             let parts = chunk.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)

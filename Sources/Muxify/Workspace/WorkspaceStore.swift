@@ -2253,10 +2253,14 @@ final class WorkspaceStore {
         return gitView
     }
 
-    /// What tells a Git View that its repository changed: FSEvents on this Mac. A Remote Environment's Git View
-    /// reads on its timer only.
-    private func makeGitWatcher() -> GitWatcher? {
-        isRemote ? nil : GitFileWatcher()
+    /// What tells a Git View that its repository changed: FSEvents on this Mac, and on a Remote Environment a probe
+    /// every 2 seconds over the owned ssh connection.
+    private func makeGitWatcher() -> GitWatcher {
+        guard isRemote else { return GitFileWatcher() }
+        return GitRemoteProbe { [weak self] script, arguments, completion in
+            guard let self else { return completion(.failure(CancellationError())) }
+            self.runGitScript(script, arguments: arguments, timeout: 5, completion: completion)
+        }
     }
 
     /// The Git View of the Location's Window, once it has opened there; nil

@@ -473,8 +473,8 @@ final class GitView {
     @ObservationIgnored private var fixedOutputs: [String: String] = [:]
     @ObservationIgnored private var refreshTimer: Timer?
     @ObservationIgnored private var activationObserver: Any?
-    /// What reports that the repository changed, so the Git View reads it again at once: FSEvents in the Local
-    /// Environment, set by the store. Without one it reads only on the timer.
+    /// What reports that the repository changed, so the Git View reads it again at once, set by the store: FSEvents
+    /// in the Local Environment, a 2-second probe in a Remote one. Without one it reads only on the timer.
     @ObservationIgnored var watcher: GitWatcher?
     /// How long changes must stop before a read starts, and the least time between two reads' starts, so build
     /// output in an ignored folder cannot flood it.
