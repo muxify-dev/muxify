@@ -43,7 +43,7 @@ import MuxifyCore
                 .disabled(store?.topics.isBenchShown == nil)
             Button(store?.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View") { store?.toggleGitView() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .toggleGitView)?.shortcut)
-                .disabled(store?.selectedWindow == nil)
+                .disabled(store.map { $0.selectedWindow == nil || $0.gitViewRefusal != nil } ?? true)
             Divider()
             // The Command Palettes; their keybindings act in the key monitor.
             ForEach(config.commandPalettes) { palette in

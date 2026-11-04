@@ -1319,6 +1319,7 @@ final class WorkspaceStore {
         browsers.values.forEach { $0.tearDown() }
         browsers.removeAll()
         removeGitViews()
+        repositoryFacts.removeAll()
         consumingOpen.removeAll()
         agentStatuses.removeAll()
         readVisits = AgentReadVisits()
@@ -2258,9 +2259,43 @@ final class WorkspaceStore {
         selectedWindowID.flatMap { gitViews[$0] }
     }
 
+    /// Shows or hides the Location's Git View. On a folder in no repository it opens none, and an Explanation Pill
+    /// says why, in the Git View's own words.
     func toggleGitView() {
         guard let id = selectedWindowID else { return }
+        if let folder = gitViewRefusal {
+            pills.show(Pill(.explanation, title: "Not a git repository", value: folder))
+            return
+        }
         gitView(for: id).toggle()
+    }
+
+    /// Whether each folder of this Environment is in a git repository, as the header's HEAD read last told it.
+    /// A folder no read has told is unknown, and a read that could not tell changes nothing, so a Window switch
+    /// keeps what its folder showed. Cleared with the server state, so each Environment has its own.
+    private(set) var repositoryFacts: [String: Bool] = [:]
+
+    /// True or false once a HEAD read told it; nil while unknown.
+    func isRepository(_ folder: String) -> Bool? {
+        repositoryFacts[folder]
+    }
+
+    func recordHeadRead(_ read: GitHeadRead, of folder: String) {
+        guard let fact = read.isRepository, repositoryFacts[folder] != fact else { return }
+        repositoryFacts[folder] = fact
+    }
+
+    /// The folder, home shown as `~`, when a Git View may not open on it because it is in no repository. Nil while
+    /// that is unknown, and while `open`, so an open Git View can still close.
+    func gitViewRefusal(in folder: String, open: Bool) -> String? {
+        guard !open, isRepository(folder) == false else { return nil }
+        return Paths.tildify(folder, home: homeDirectory)
+    }
+
+    /// `gitViewRefusal(in:open:)` for the Location: the header hides its Git button and the View menu disables
+    /// its item.
+    var gitViewRefusal: String? {
+        selectedWindow.flatMap { gitViewRefusal(in: $0.path, open: currentGitView?.isOpen == true) }
     }
 
     /// For the sidebar's Git View icon.

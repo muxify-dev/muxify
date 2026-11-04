@@ -279,6 +279,52 @@ struct GitStash: Equatable, Identifiable {
     var id: String { sha }
 }
 
+/// What the header's HEAD read found in a folder: the branch or commit it shows, and whether the folder is in a
+/// repository at all. A read that failed or timed out, a folder that is gone, or a machine without git, knows
+/// nothing, so it never says "not a repository".
+enum GitHeadRead: Equatable {
+    /// In a repository, on this branch or short commit; nil when git names neither.
+    case repository(head: String?)
+    /// In no repository: the Git View would only say "Not a git repository".
+    case notRepository
+    case unknown
+
+    /// Takes the folder. Prints a section, `head` with HEAD, or `none` when the folder is in no
+    /// repository, by the same test as the Git View's snapshot; nothing when it cannot tell.
+    static let script = """
+    cd "$1" 2>/dev/null || exit 0
+    command -v git >/dev/null 2>&1 || exit 0
+    git rev-parse --show-toplevel >/dev/null 2>&1 || { printf '\\036none\\n'; exit 0; }
+    printf '\\036head\\n'
+    git symbolic-ref --quiet --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || true
+    """
+
+    init(_ result: Result<String, Error>) {
+        guard case .success(let output) = result else { self = .unknown; return }
+        let sections = GitRepository.sections(output)
+        if sections["none"] != nil {
+            self = .notRepository
+        } else if let head = sections["head"]?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            self = .repository(head: head.isEmpty ? nil : head)
+        } else {
+            self = .unknown
+        }
+    }
+
+    var head: String? {
+        if case .repository(let head) = self { head } else { nil }
+    }
+
+    /// True or false once the read could tell; nil when it could not.
+    var isRepository: Bool? {
+        switch self {
+        case .repository: true
+        case .notRepository: false
+        case .unknown: nil
+        }
+    }
+}
+
 /// The git commands of the Git View, as /bin/sh scripts that run on the
 /// Environment's machine, like Session Paths (ADR 0009).
 enum GitRepository {
@@ -943,7 +989,7 @@ enum GitRepository {
     }
 
     /// Each section's output by name.
-    private static func sections(_ output: String) -> [String: String] {
+    fileprivate static func sections(_ output: String) -> [String: String] {
         var sections: [String: String] = [:]
         for chunk in output.components(separatedBy: "\u{1E}").dropFirst() {
             let parts = chunk.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)

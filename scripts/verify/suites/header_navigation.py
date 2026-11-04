@@ -1,6 +1,7 @@
 """Session identity, Git entry point and adaptive tmux Window navigation in the titlebar."""
 
 import re
+import shlex
 import subprocess
 import unittest
 
@@ -227,12 +228,34 @@ class HeaderNavigation(unittest.TestCase):
         self.assertFalse(self.s.has('header-window-menu', rs), 'dropdown stayed after the list fit inline')
         self.assertEqual(self.s.row('header-window-' + second, rs)['accessibilityValue'], 'selected')
 
-    def test_git_label_clears_when_active_pane_leaves_repository(self):
-        self.wait_head('header-main')
+    def leave_repository(self):
+        """Splits the Window with a Pane outside any repository, which becomes the active Pane."""
         second = self.s.tmux('split-window', '-P', '-F', '#{pane_id}', '-t', self.window,
                              '-c', str(self.s.root), SHELL)
-        self.wait_head('Git')
         self.assertEqual(self.s.tmux('display-message', '-p', '-t', self.window, '#{pane_id}'), second)
+        return second
+
+    def test_git_button_hides_when_active_pane_leaves_repository_and_returns_in_one(self):
+        self.wait_head('header-main')
+        second = self.leave_repository()
+        rs = self.s.wait_rows(lambda rs: not self.s.has('toggle-git-view', rs),
+                              'the Git button stayed for a folder in no repository')
+        self.assertTrue(self.s.has('header-environment-selector', rs), 'the rest of the header went with it')
+        self.s.tmux('send-keys', '-t', second, 'cd ' + shlex.quote(str(self.repo)), 'Enter')
+        self.wait_head('header-main')
+
+    def test_git_button_stays_while_its_git_view_is_open_outside_a_repository(self):
+        self.wait_head('header-main')
+        self.s.act('press', 'toggle-git-view')
+        self.s.wait_rows(lambda rs: self.s.has('git-view', rs), 'the Git button did not open the Git View')
+        self.leave_repository()
+        # The HEAD read has found no repository once the label clears.
+        rs = self.s.wait_rows(lambda rs: self.s.row('toggle-git-view', rs).get('accessibilityLabel') == 'Git',
+                              'the Git button left while its Git View was open')
+        self.assertEqual(self.s.row('toggle-git-view', rs)['accessibilityValue'], 'on')
+        self.s.act('press', 'toggle-git-view')
+        self.s.wait_rows(lambda rs: not self.s.has('git-view', rs) and not self.s.has('toggle-git-view', rs),
+                         'closing the Git View outside a repository did not hide the Git button')
 
 
 def bounds(row):

@@ -3,6 +3,8 @@ import MuxifyCore
 
 /// A lightweight HEAD read, independent of opening the much larger Git View snapshot.
 /// It runs through the Environment connection, so remote paths never read local repositories.
+/// The read also tells the store whether the folder is in a repository; the button hides when it is not, unless this
+/// Window's Git View is open, and the read goes on while it is hidden, so a `cd` into a repository brings it back.
 struct HeaderGitButton: View {
     let store: WorkspaceStore
     let window: TmuxWindow
@@ -12,39 +14,43 @@ struct HeaderGitButton: View {
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
-        HeaderTextButton(isOn: store.currentGitView?.isOpen == true, action: store.toggleGitView) {
-            HStack(spacing: 6) {
-                GitViewIcon(size: fontSize(14))
-                Text(head ?? "Git")
-                    .font(fontSize.font(13))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+        let isOpen = store.currentGitView?.isOpen == true
+        HStack(spacing: 0) {
+            if store.gitViewRefusal(in: window.path, open: isOpen) == nil {
+                HeaderTextButton(isOn: isOpen, action: store.toggleGitView) {
+                    HStack(spacing: 6) {
+                        GitViewIcon(size: fontSize(14))
+                        Text(head ?? "Git")
+                            .font(fontSize.font(13))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    .widthUpTo(fontSize(180))
+                }
+                .help(head.map { "\(help) — \($0)" } ?? help)
+                .accessibilityIdentifier("toggle-git-view")
+                .accessibilityLabel(head ?? "Git")
+                .accessibilityValue(isOpen ? "on" : "off")
+                .padding(.trailing, 8)
             }
-            .widthUpTo(fontSize(180))
-        }
-        .help(head.map { "\(help) — \($0)" } ?? help)
-        .accessibilityIdentifier("toggle-git-view")
-        .accessibilityLabel(head ?? "Git")
-        .accessibilityValue(store.currentGitView?.isOpen == true ? "on" : "off")
-        .task {
-            while !Task.isCancelled {
-                if !reading {
-                    reading = true
-                    store.runGitScript(Self.headScript, arguments: [window.path], timeout: 5) { result in
-                        let value = (try? result.get())?.trimmingCharacters(in: .whitespacesAndNewlines)
-                        head = value.flatMap { $0.isEmpty ? nil : $0 }
-                        reading = false
+            // Always here, so the read runs while the button is hidden.
+            Color.clear.frame(width: 0, height: 0)
+                .task {
+                    while !Task.isCancelled {
+                        if !reading {
+                            reading = true
+                            store.runGitScript(GitHeadRead.script, arguments: [window.path], timeout: 5) { result in
+                                let read = GitHeadRead(result)
+                                head = read.head
+                                store.recordHeadRead(read, of: window.path)
+                                reading = false
+                            }
+                        }
+                        do { try await Task.sleep(for: .seconds(2)) } catch { return }
                     }
                 }
-                do { try await Task.sleep(for: .seconds(2)) } catch { return }
-            }
         }
     }
-
-    private static let headScript = """
-    cd "$1" 2>/dev/null || exit 0
-    git symbolic-ref --quiet --short HEAD 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || true
-    """
 }
 
 /// Text-sized titlebar controls share the icon controls' first-click and hover behavior.

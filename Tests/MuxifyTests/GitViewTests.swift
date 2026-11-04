@@ -960,6 +960,22 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(result, .failure(GitViewError(message: "Not a git repository: \(directory.url.path)")))
     }
 
+    func testTheHeadReadTellsARepositoryFromAFolderInNone() throws {
+        XCTAssertEqual(GitHeadRead(.success(try run(GitHeadRead.script, repository))), .repository(head: "master"))
+        XCTAssertEqual(GitHeadRead(.success(try run(GitHeadRead.script, directory.url.path))), .notRepository)
+        let gone = directory.url.appendingPathComponent("gone").path
+        XCTAssertEqual(GitHeadRead(.success(try run(GitHeadRead.script, gone))), .unknown,
+                       "a folder that is gone is not known to be outside a repository")
+    }
+
+    func testAHeadReadThatFailedOrPrintedNothingKnowsNothing() {
+        XCTAssertEqual(GitHeadRead(.failure(GitViewError(message: "Not connected to Home."))), .unknown)
+        XCTAssertEqual(GitHeadRead(.success("")), .unknown)
+        XCTAssertEqual(GitHeadRead(.success("Last login: today\n")), .unknown)
+        XCTAssertNil(GitHeadRead.unknown.isRepository)
+        XCTAssertEqual(GitHeadRead(.success("\u{1E}head\n\n")), .repository(head: nil))
+    }
+
     private func change(_ path: String, _ groups: String) throws -> GitPatch {
         let parts = GitRepository.parseParts(try run(GitRepository.changeScript, repository, path, "", "3", groups))
         return GitPatch.joined(parts.map { ($0.group, GitPatch.parse($0.patch)) })
@@ -3654,6 +3670,37 @@ final class GitViewKeysTests: XCTestCase {
         changed.root = "/other"
         gitView.apply(changed)
         XCTAssertEqual(gitView.commitSummary, "")
+    }
+
+    func testAFailedHeadReadDoesNotMarkAFolderOutsideARepository() {
+        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"))
+        let folder = store.homeDirectory + "/notes"
+        XCTAssertNil(store.isRepository(folder))
+        store.recordHeadRead(.unknown, of: folder)
+        XCTAssertNil(store.isRepository(folder), "a failed or timed-out read leaves the folder unknown")
+        XCTAssertNil(store.gitViewRefusal(in: folder, open: false), "an unknown folder keeps the Git button")
+
+        store.recordHeadRead(.notRepository, of: folder)
+        XCTAssertEqual(store.isRepository(folder), false)
+        XCTAssertEqual(store.gitViewRefusal(in: folder, open: false), "~/notes")
+        XCTAssertNil(store.gitViewRefusal(in: folder, open: true), "an open Git View can still close")
+        store.recordHeadRead(.unknown, of: folder)
+        XCTAssertEqual(store.isRepository(folder), false, "a failed read keeps what the folder showed")
+
+        store.recordHeadRead(.repository(head: "main"), of: folder)
+        XCTAssertEqual(store.isRepository(folder), true)
+        XCTAssertNil(store.gitViewRefusal(in: folder, open: false))
+        store.recordHeadRead(.unknown, of: folder)
+        XCTAssertEqual(store.isRepository(folder), true)
+        XCTAssertNil(store.isRepository(store.homeDirectory), "each folder has its own fact")
+    }
+
+    func testToggleGitViewWithNoWindowOpensNothingAndSaysNothing() {
+        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"))
+        store.toggleGitView()
+        XCTAssertNil(store.currentGitView)
+        XCTAssertNil(store.pills.shown)
+        XCTAssertNil(store.gitViewRefusal)
     }
 
     func testEachWindowKeepsItsOwnGitView() {

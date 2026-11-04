@@ -180,7 +180,6 @@ private struct HeaderBar: View {
                 HeaderGitButton(store: store, window: window,
                                 help: help(store.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View", .toggleGitView))
                     .id("\(window.sourceID):\(window.path)")
-                    .padding(.trailing, 8)
                     // Before the Window list and the Session name give way, the branch keeps its whole width up to
                     // its maximum; it is cut only when the header has no other room left.
                     .layoutPriority(2)

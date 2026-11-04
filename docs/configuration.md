@@ -730,6 +730,11 @@ the selection's diff:
 | Branches | Local branches, yours first with a check: other worktrees', gone upstreams, and commits ahead of and behind yours | The branch and its latest commits. Clicking a branch, or ↩, goes into its last 300 commits, listed like the History |
 | Stashes | `git stash list` | The stash's changes |
 
+When the current Window's folder is in no repository, the header hides its Git
+button and the View menu's item is disabled; ⌘G opens nothing and says "Not a
+git repository" with the folder. An open Git View stays on its folder when the
+Pane `cd`s out of the repository, and its button stays so you can close it.
+
 Under the History, a branch's commits and the Stashes, the Diff files list the
 selected commit's or stash's files as a tree. ↩, or a click on a file, goes into
 them, and the diff then shows one file, or a folder of them; ⎋ comes back to the
