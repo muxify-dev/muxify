@@ -655,6 +655,19 @@ final class TopicServiceTests: XCTestCase {
         }
     }
 
+    func testTheSidebarDragPutsAnInPlayCardNextToAnOpenPlace() throws {
+        let inPlay = service(inPlay: 3)
+        for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        _ = try change(inPlay.handle(EnvironmentRequest(.benchTopic, target: .topic(.named("B")))))
+        XCTAssertEqual(try topicList(), ["A", "_", "C", "B", "D"])
+        let open = try XCTUnwrap(TopicStore(paths: paths).read().openPlaces.first).id
+
+        _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.after(.openPlace(open))), target: .topic(.named("A")))))
+        XCTAssertEqual(try topicList(), ["_", "A", "C", "B", "D"], "A goes down past the Open Place")
+        _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.before(.openPlace(open))), target: .topic(.named("C")))))
+        XCTAssertEqual(try topicList(), ["C", "_", "A", "B", "D"], "C goes up past it, and the Bench does not change")
+    }
+
     func testARegularCardThatLeavesAPlaceLeavesAnOpenPlaceAndALeavingGuestLeavesNone() throws {
         let inPlay = service(inPlay: 2)
         for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }

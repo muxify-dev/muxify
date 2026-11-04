@@ -343,7 +343,7 @@ final class WorkspaceStore {
         switch card {
         case .topic(let id): return .topic(.id(id))
         case .lock(let sessionID): return SessionID(rawValue: sessionID).map(TopicListRef.lock)
-        case .openPlace: return nil
+        case .openPlace(let id): return .openPlace(id)
         }
     }
 
