@@ -272,6 +272,29 @@ final class TopicOrderTests: XCTestCase {
         }
     }
 
+    @MainActor func testAPressedCardSinksAndAPressReleasedInPlaceIsAClickAtOnce() {
+        let (drag, _) = tradingDrag()
+        drag.press("a")
+        XCTAssertEqual(drag.phase, .pressing("a"))
+        XCTAssertEqual(drag.scale(of: "a", reducesMotion: false), ListDrag<String>.pressScale, "a pressed card sinks")
+        XCTAssertEqual(drag.scale(of: "a", reducesMotion: true), 1, "with Reduce Motion a pressed card keeps its size")
+        XCTAssertEqual(drag.scale(of: "b", reducesMotion: false), 1, "the other cards keep their size")
+        var taps = 0
+        drag.end("a", onTap: { taps += 1 }, onDrop: { _ in XCTFail("a click is no drop") }, onTrade: { _ in })
+        XCTAssertEqual(taps, 1, "let go in place, the press is a click at once")
+        XCTAssertEqual(drag.phase, .idle)
+        XCTAssertEqual(drag.scale(of: "a", reducesMotion: false), 1)
+    }
+
+    @MainActor func testALiftedCardGrowsFromItsPressedSize() {
+        let (drag, _) = tradingDrag()
+        drag.press("a")
+        drag.lift("a", pressedAt: 20)
+        XCTAssertEqual(drag.scale(of: "a", reducesMotion: false), ListDrag<String>.liftScale)
+        drag.follow("a", translation: 120)
+        XCTAssertEqual(drag.scale(of: "a", reducesMotion: false), ListDrag<String>.stepAsideScale, "over a trade target it steps aside")
+    }
+
     @MainActor func testAPointerAboveTheViewLandsOnlyAmongTheCardsInView() {
         let (drag, _) = tradingDrag()
         drag.measure("d", ItemPlace(height: 40, visibleTop: 30, footroom: 1000, windowTop: 0))
