@@ -361,7 +361,8 @@ class Sandbox:
     def act(self, command, target='', text=None, **options):
         """A driver command that must hit its target."""
         result = self.driver(command, target, text, **options)
-        assert result['pressed'], (command, target)
+        assert result['pressed'], '%s %s did not hit its target%s' % (
+            command, target, ': ' + result['error'] if result.get('error') else '')
         return result
 
     def rows(self):

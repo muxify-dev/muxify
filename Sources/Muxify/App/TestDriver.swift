@@ -443,7 +443,15 @@ enum TestDriver {
         let text = command["text"] as? String ?? ""
         var pressed = false
         if name == "snapshot" { return ["rows": [], "pressed": snapshot(of: target, to: text)] }
-        if name == "hover" { return ["rows": [], "pressed": hover(target)] }
+        if name == "hover" {
+            guard let window = window(under: target) else { return ["rows": [], "pressed": false] }
+            // macOS marks a window that others cover whole as not visible, and SwiftUI then sends its views no hover.
+            guard window.occlusionState.contains(.visible) else {
+                return ["rows": [], "pressed": false,
+                        "error": "the App Window is covered whole by other windows, so its views get no hover: uncover a part of it"]
+            }
+            return ["rows": [], "pressed": hover(target)]
+        }
         if name == "scroll" { return ["rows": [], "pressed": scroll(target, fromEnd: command["from_end"] as? Double ?? 0)] }
         if name == "counts" {
             let counts = BodyCount.counts
@@ -658,6 +666,13 @@ enum TestDriver {
     /// entered and a moved event. A SwiftUI window has one tracking area for all its views, and a moved event alone
     /// does not end the hover of the view the pointer left, so the pointer leaves and comes back, and `onHover`
     /// follows.
+    /// The visible window of the app that holds the centre of the element `target`.
+    private static func window(under target: String) -> NSWindow? {
+        guard let screen = (dump().first { $0.row["accessibilityIdentifier"] == target }?.object
+                                .value(forKey: "accessibilityFrame") as? NSValue)?.rectValue else { return nil }
+        return NSApp.windows.first(where: { $0.isVisible && $0.frame.contains(NSPoint(x: screen.midX, y: screen.midY)) })
+    }
+
     private static func hover(_ target: String) -> Bool {
         guard let screen = (dump().first { $0.row["accessibilityIdentifier"] == target }?.object
                                 .value(forKey: "accessibilityFrame") as? NSValue)?.rectValue,
