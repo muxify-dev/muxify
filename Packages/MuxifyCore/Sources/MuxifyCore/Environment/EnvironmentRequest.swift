@@ -215,13 +215,16 @@ public enum CardMove: Codable, Hashable, Sendable {
     private enum TradeCodingKeys: String, CodingKey { case _0 = "card" }
 }
 
-/// A card on the wire: a Topic, or a Locked Session by its tmux id.
+/// A card on the wire: a Topic, a Locked Session by its tmux id, or an Open Place by its id. An Open Place is only an
+/// anchor: the Sidebar drag puts a card before or after it.
 public enum TopicListRef: Codable, Hashable, Sendable {
     case topic(TopicRef)
     case lock(SessionID)
+    case openPlace(String)
 
     private enum TopicCodingKeys: String, CodingKey { case _0 = "ref" }
     private enum LockCodingKeys: String, CodingKey { case _0 = "session" }
+    private enum OpenPlaceCodingKeys: String, CodingKey { case _0 = "id" }
 }
 
 /// Where `move` puts its target.

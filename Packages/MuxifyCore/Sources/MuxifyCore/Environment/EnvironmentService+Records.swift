@@ -246,6 +246,7 @@ extension EnvironmentService {
         switch ref {
         case .topic(let topic): return .topic(try topic.resolve(in: records).id)
         case .lock(let session): return .lock(sessionID: session.rawValue)
+        case .openPlace(let id): return .openPlace(id)
         }
     }
 

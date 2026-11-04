@@ -27,4 +27,4 @@ An Open Place is an entry of the Topics list with an id and an order, as a Locke
 
 - An Open Place keeps a place until the user fills it. With no Guest Topic and no Benched Topic, its step lists nothing.
 - When the user lowers `topics.in_play`, the Open Places past the new last place close at the next write. When they raise it, the Benched cards fill the new places in their order, as before.
-- An Open Place has no card to drag, and it cannot be a target of `topic move`. A card can move past it.
+- An Open Place has no card to drag, and `topic move` cannot name it. A card can move past it, and the Sidebar drag can drop a card next to it.

@@ -267,6 +267,17 @@ class TopicsBenchSidebar(TopicsSidebar):
         s.act('action', 'palette-search', 'Close')
         self.assertIn('Then opens: Bench-next-a', found, 'Settle names a Next Topic other than the first card In Play')
 
+    def test_a_card_in_play_dropped_next_to_an_open_place_moves_past_it(self):
+        s = self.s
+        self.bench_topics('bench-open-drag', in_play=2)
+        self.store.set_open_places([dict(id='bench-open-drag-place', order=0.5)])
+        s.wait_rows(lambda rs: s.has('open-place-2', rs) and s.has('topic-bench-open-drag-a', rs),
+                    'the Sidebar shows no Open Place under a: %s' % s.ids())
+        self.assertEqual(self.layout('bench-open-drag'), 'a _ b c')
+        s.act('drag', 'topic-bench-open-drag-a', 'open-place-2', edge='bottom')
+        wait(lambda: self.layout('bench-open-drag') == '_ a b c',
+             'a card let go under the Open Place did not move past it: %s' % self.layout('bench-open-drag'))
+
     def test_bench_topic_puts_a_card_in_play_on_top_of_the_bench_and_leaves_an_open_place(self):
         # The card's accessibility actions are its context menu (`listActions` in UI/SidebarView.swift).
         s = self.s
