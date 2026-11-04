@@ -278,6 +278,31 @@ class TopicsBenchSidebar(TopicsSidebar):
         wait(lambda: self.layout('bench-open-drag') == '_ a b c',
              'a card let go under the Open Place did not move past it: %s' % self.layout('bench-open-drag'))
 
+    def test_a_card_in_play_follows_the_pointer_past_the_hidden_line_and_the_bench_opens_only_for_the_pointer(self):
+        # The drag presses the card's centre and lets go 8 points under the top of the 20-point line, so the pointer
+        # never passes the line's middle. The Location is the card In Play, so no No Topic card shows under the line,
+        # and the line ends the list: before the fix, the card stopped there and did not follow the pointer.
+        s = self.s
+        windows = self.bench_topics('bench-past-line')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
+        self.hide_bench()
+        a, b = 'topic-bench-past-line-a', 'topic-bench-past-line-b'
+        s.show(windows[a])
+        rs = s.wait_rows(lambda rs: self.cards('bench-past-line', rs) == [a, LINE]
+                         and not any(key.startswith('no-topic') for key in s.ids(rs)),
+                         'the line does not end the list: %s' % s.ids())
+        bottom, top = frame(s.row(a, rs))
+        pointer_travel = (bottom + top) / 2 - (frame(s.row(LINE, rs))[1] - 8)
+        saved = self.layout('bench-past-line')
+        dragged = s.act('drag', a, LINE, inset=8, watch=[a, b], watch_seconds=1)
+        card_travel = bottom - min(y for _, y, _, _ in dragged['frames'][a])
+        self.assertGreater(card_travel, pointer_travel - 2,
+                           'the card stopped at the line: it went %.0f points down, the pointer %.0f' % (card_travel, pointer_travel))
+        self.assertFalse(dragged['frames'].get(b), 'the Bench opened while the pointer was above the line')
+        self.assertEqual(self.line(s.rows()), 'Bench', 'the Bench shows after the drop')
+        time.sleep(1)
+        self.assertEqual(self.layout('bench-past-line'), saved, 'a card let go above the line changed the order')
+
     def test_bench_topic_puts_a_card_in_play_on_top_of_the_bench_and_leaves_an_open_place(self):
         # The card's accessibility actions are its context menu (`listActions` in UI/SidebarView.swift).
         s = self.s
@@ -422,6 +447,37 @@ class TopicsBenchSidebar(TopicsSidebar):
                     'the Bench that the drag opened did not hide again: %s' % self.cards('bench-hidden-drop', s.rows()))
         time.sleep(1)
         self.assertEqual(self.orders('bench-hidden-drop'), saved, 'a card let go on no card changed the order')
+
+    def test_a_card_in_play_dragged_back_above_the_hidden_line_hides_the_bench_before_the_drop(self):
+        # The drag rests under the middle of the line, where the Bench opens (the trade check above proves that), then
+        # holds the card at its own place. The drop hides the Bench too, so the check reads the rows before the drop.
+        s = self.s
+        self.bench_topics('bench-back-up')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
+        self.hide_bench()
+        a, b = 'topic-bench-back-up-a', 'topic-bench-back-up-b'
+        s.wait_rows(lambda rs: self.cards('bench-back-up', rs) == [a, LINE],
+                    'the hidden Bench shows cards: %s' % self.cards('bench-back-up', s.rows()))
+        held = s.act('drag', a, a, via=LINE, edge='bottom', hold=1)['held']
+        self.assertTrue(held, 'the drag gave no rows from before the drop')
+        self.assertFalse(s.has(b, held), 'the Bench that the drag opened still shows with the card back above the line')
+        self.assertEqual(self.line(s.rows()), 'Bench', 'the Bench shows after the drop')
+
+    def test_the_trade_mark_on_the_top_benched_card_shows_whole_under_the_line(self):
+        # The In Play block covers the gap under the line, so a mark that reached past its card's top lost its top border.
+        s = self.s
+        self.bench_topics('bench-mark')
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
+        self.show_bench()
+        a, b = 'topic-bench-mark-a', 'topic-bench-mark-b'
+        s.wait_rows(lambda rs: self.cards('bench-mark', rs)[:3] == [a, LINE, b],
+                    'b is not the top Benched card: %s' % self.cards('bench-mark', s.rows()))
+        held = s.act('drag', a, b, hold=0.5)['held']
+        self.assertTrue(s.has('list-drag-trade-target', held), 'the drag shows no trade mark on b')
+        mark, card, line = (frame(s.row(key, held)) for key in ('list-drag-trade-target', b, LINE))
+        self.assertLessEqual(mark[1], card[1] + 0.5,
+                             'the trade mark reaches %.1f points above its card, under the In Play block' % (mark[1] - card[1]))
+        self.assertLess(mark[1], line[0], 'the trade mark reaches the line')
 
     def test_a_card_in_play_dragged_past_the_hidden_line_opens_the_bench_and_trades_with_a_benched_card(self):
         # The Benched card shows only once the drag opened the Bench, so the drag finds it after it waits on the line.

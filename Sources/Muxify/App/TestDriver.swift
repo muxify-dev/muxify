@@ -170,9 +170,10 @@ enum TestDriver {
     /// `drag` presses the target, moves to the element named by `text` and lets go there: in its upper quarter,
     /// or its lower quarter with the option `edge: "bottom"`. The option `inset` lets go that many points from that edge
     /// of the element in place of its quarter, and `hold` rests there for that many seconds, with no event, before it
-    /// lets go, as a user who holds a card at the edge of a list. With the option `via`, it first moves to the same quarter
-    /// of the element that `via` names, as a user who changes their mind on the way. A destination that does not show yet,
-    /// such as a Benched card that the drag shows, is waited for at `via`. Each tick hands one mouse event to
+    /// lets go, as a user who holds a card at the edge of a list. The result's `held` has the rows just before it lets go,
+    /// what the user sees while the card is still in the hand. With the option `via`, it first moves to the same quarter
+    /// of the element that `via` names, as a user who changes their mind on the way, and rests there. A destination that
+    /// does not show yet, such as a Benched card that the drag shows, is waited for at `via`. Each tick hands one mouse event to
     /// the app, past its event monitors as a real click goes, but never through the window server, so the pointer does
     /// not move. The app stays in the background, so the window is not key: only a gesture that takes the first click
     /// (`takesFirstClick` in SidebarView) follows, and a system drag session would follow the real pointer instead.
@@ -182,11 +183,13 @@ enum TestDriver {
         private var moves: [(type: NSEvent.EventType, point: NSPoint)] = []
         private let modifierFlags: NSEvent.ModifierFlags
         private var pressed = false
-        private var pendingDestination: (identifier: String, bottom: Bool)?
+        /// The destination that the drag goes on to after its rest at `via`; `frame` is nil until the destination shows.
+        private var pendingDestination: (identifier: String, bottom: Bool, frame: NSRect?)?
         private var lastPoint: NSPoint?
         private var inset: CGFloat?
         private var hold: TimeInterval = 0
         private var heldUntil: Date?
+        private var heldRows: [[String: String]]?
         /// When the drag came to `via`. It waits there half a second, so the Bench that it opens comes to rest, and then
         /// until the destination shows, for at most `viaWait` seconds: a busy Mac shows a Benched card late, and a drag
         /// that let go before it showed would let go on the line.
@@ -224,12 +227,13 @@ enum TestDriver {
             self.window = window
             let viaY = via.map { Self.dropY(in: $0, bottom: bottom, inset: inset) }
             var points = [start]
-            for stopY in [viaY, destination.map { Self.dropY(in: $0, bottom: bottom, inset: inset) }].compactMap({ $0 }) {
-                points += Self.leg(from: points.last!, to: stopY)
+            if let stopY = viaY ?? destination.map({ Self.dropY(in: $0, bottom: bottom, inset: inset) }) {
+                points += Self.leg(from: start, to: stopY)
             }
             moves = [(.leftMouseDown, start)] + points.dropFirst().map { (.leftMouseDragged, $0) }
-            if destination == nil {
-                pendingDestination = (identifier, bottom)
+            if via != nil {
+                // The frame from the drag's start: a destination that the drag lifts follows the pointer since.
+                pendingDestination = (identifier, bottom, destination)
             } else {
                 moves.append((.leftMouseUp, points.last!))
             }
@@ -248,7 +252,8 @@ enum TestDriver {
 
         func step() -> [String: Any]? {
             if moves.isEmpty, let pendingDestination, let held = lastPoint {
-                let found = (TestDriver.dump().first { $0.row["accessibilityIdentifier"] == pendingDestination.identifier }?.object)?
+                let found = pendingDestination.frame.map(NSValue.init(rect:))
+                    ?? (TestDriver.dump().first { $0.row["accessibilityIdentifier"] == pendingDestination.identifier }?.object)?
                     .value(forKey: "accessibilityFrame") as? NSValue
                 let arrived = arrivedAtVia ?? Date()
                 arrivedAtVia = arrived
@@ -266,7 +271,12 @@ enum TestDriver {
                 heldUntil = until
                 if Date() < until { return nil }
             }
-            guard let window, !moves.isEmpty else { return ["rows": TestDriver.dump().map(\.row), "pressed": pressed] }
+            if moves.count == 1, moves.first?.type == .leftMouseUp, heldRows == nil {
+                heldRows = TestDriver.dump().map(\.row)
+            }
+            guard let window, !moves.isEmpty else {
+                return ["rows": TestDriver.dump().map(\.row), "pressed": pressed, "held": heldRows ?? []]
+            }
             func event(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent? {
                 NSEvent.mouseEvent(with: type, location: window.convertPoint(fromScreen: point), modifierFlags: modifierFlags,
                                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
@@ -362,10 +372,13 @@ enum TestDriver {
     /// run loop, for `watch_seconds`. A run loop observer that comes after Core Animation's commit sees each layout
     /// that is drawn, so a view that is somewhere else for one frame shows in the answer. It answers `frames`: for each
     /// identifier, its frames (x, y, width, height in screen points) in the order they came, each once until it changes.
+    /// A `drag` or `click` takes many ticks: the frames come from its whole path, and `watch_seconds` count from its end.
     private final class Watch: Steps {
         let nonce: String
         private let watched: [String]
-        private let until: Date
+        private let seconds: TimeInterval
+        private var until: Date
+        private var gesture: Drag?
         private var result: [String: Any] = [:]
         private var objects: [String: NSObject] = [:]
         private var frames: [String: [[Double]]] = [:]
@@ -374,11 +387,16 @@ enum TestDriver {
         init(nonce: String, watched: [String], seconds: Double, command: [String: Any]) {
             self.nonce = nonce
             self.watched = watched
+            self.seconds = seconds
             until = Date().addingTimeInterval(seconds)
             sample()
             var command = command
             command["watch"] = nil
-            result = TestDriver.run(command)
+            if ["drag", "click"].contains(command["command"] as? String) {
+                gesture = Drag(nonce: nonce, command: command)
+            } else {
+                result = TestDriver.run(command)
+            }
             sample()
             // After the commit observer (order 2 000 000), so each sample is the layout of a frame that is drawn.
             let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, 3_000_000) {
@@ -389,6 +407,12 @@ enum TestDriver {
         }
 
         func step() -> [String: Any]? {
+            if let gesture {
+                guard let done = gesture.step() else { return nil }
+                result = done
+                self.gesture = nil
+                until = Date().addingTimeInterval(seconds)
+            }
             guard Date() >= until else { return nil }
             if let observer { CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes) }
             observer = nil

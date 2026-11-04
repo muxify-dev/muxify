@@ -148,7 +148,12 @@ final class TopicOrderTests: XCTestCase {
         let layout = StackLayout(heights: [.item("a"): 40, .item("b"): 40, .fixed("line"): 20], spacing: 6)
         let order: [StackSlot<String>] = [.item("a"), .item("b"), .fixed("line")]
         XCTAssertEqual(layout.bounded(1000, of: "a", in: order), 46, "without a divider it stops at the bottom of the last card")
-        XCTAssertEqual(layout.bounded(1000, of: "a", in: order, dividers: ["line"]), 72, "its bottom reaches the bottom of the line")
+        XCTAssertEqual(layout.bounded(1000, of: "a", in: order, dividers: ["line"]), 72,
+                       "without a known view, its bottom reaches the bottom of the line")
+        XCTAssertEqual(layout.bounded(1000, of: "b", in: order, footroom: 120, dividers: ["line"]), 120,
+                       "in a view, its bottom goes past the line to the bottom of the view")
+        XCTAssertEqual(layout.landing(of: "b", at: 60, in: order, dividers: ["line"]), nil,
+                       "a pointer above the line's middle does not cross it, wherever the card's bottom is")
         XCTAssertEqual(layout.landing(of: "a", at: 112, in: order, dividers: ["line"]), .across(trade: nil),
                        "the pointer, held on a, is at a's bottom, past the line's middle")
     }

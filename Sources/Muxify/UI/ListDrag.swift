@@ -114,8 +114,9 @@ struct StackLayout<ID: Hashable> {
 
     /// `translation` held so `id` stays within the list, from the top of its first item to the bottom of its last, and
     /// moves up no more than `headroom` and down no more than `footroom`. An item that is already past the headroom
-    /// does not move up at all, and one past the footroom does not move down. With a divider in the list, its bottom
-    /// can go down to the end of the last slot, so it can cross a divider that ends the list.
+    /// does not move up at all, and one past the footroom does not move down. With a divider in the list, it can go
+    /// down to the bottom of the view, past a divider that ends the list: the pointer, not the item's bottom edge,
+    /// decides when it crosses. Without a known footroom, its bottom stops at the end of the last slot.
     func bounded(_ translation: CGFloat, of id: ID, in order: [StackSlot<ID>], headroom: CGFloat = .infinity,
                  footroom: CGFloat = .infinity, dividers: [String] = []) -> CGFloat {
         guard let first = order.first(where: { $0.item != nil }), let last = order.last(where: { $0.item != nil }) else {
@@ -125,7 +126,7 @@ struct StackLayout<ID: Hashable> {
         let low = max(self.top(of: first, in: order) - top, -max(headroom, 0))
         var high = max(low, self.top(of: last, in: order) + height(last) - top - height(.item(id)))
         if dividers.contains(where: { order.contains(.fixed($0)) }), let end = order.last {
-            high = max(high, self.top(of: end, in: order) + height(end) - top - height(.item(id)))
+            high = max(high, footroom.isFinite ? footroom : self.top(of: end, in: order) + height(end) - top - height(.item(id)))
         }
         high = max(low, min(high, max(footroom, 0)))
         return min(max(translation, low), high)
@@ -661,10 +662,11 @@ private struct TradeMark: View {
     let cornerRadius: CGFloat
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius + 2, style: .continuous)
+        // Inside the card's frame: the In Play block covers the gap under the Bench line, and would cut a border that
+        // reaches past the top Benched card.
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         shape.fill(Color.tradeMark.opacity(0.1))
             .overlay { shape.strokeBorder(Color.tradeMark, style: StrokeStyle(lineWidth: 2, dash: [5, 4])) }
-            .padding(-2)
             .overlay(alignment: .topTrailing) {
                 Text("⇄ Trade")
                     .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)

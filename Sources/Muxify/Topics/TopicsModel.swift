@@ -276,7 +276,7 @@ struct TopicsModel {
     /// Benched cards that a drag across the Bench line shows for a moment while the Bench is hidden. The user's choice
     /// to show or hide the Bench stays as it is.
     enum BenchPeek: Equatable {
-        /// An In Play card crossed the hidden line: the Bench shows until the drag ends.
+        /// An In Play card crossed the hidden line: the Bench shows until the card goes back above the line or the drag ends.
         case all
         /// The card that a trade sent to the hidden Bench shows under the line, then folds into it.
         case card(TopicGroupID)

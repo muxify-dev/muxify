@@ -149,9 +149,14 @@ private struct TopicsSection: View {
             .coordinateSpace(.named(Self.contentSpace))
             .background { ScrollDriverView(driver: driver) }
             .onOverhangingBottomEdge(of: TopicCard.viewport, upTo: EdgePill.height) { scroll.listEnd = $0 }
-            // An In Play card that crosses a line opens the hidden Bench, so the user sees what it can trade with.
+            // An In Play card that crosses a line opens the hidden Bench, so the user sees what it can trade with. When
+            // it goes back above the line, the Bench hides again. A drop ends the drag in the phase handler below.
             .onChange(of: drag.isAcross) { _, across in
-                guard across, !store.benchShown, store.benchPeek != .all, let dragged = drag.dragged,
+                if !across {
+                    if case .lifted = drag.phase, store.benchPeek == .all { store.benchPeek = nil }
+                    return
+                }
+                guard !store.benchShown, store.benchPeek != .all, let dragged = drag.dragged,
                       model.split(inPlay: store.topicConfig.inPlay ?? 0).inPlay.contains(where: { $0.id.listID == dragged })
                 else { return }
                 store.benchPeek = .all
