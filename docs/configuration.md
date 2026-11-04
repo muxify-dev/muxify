@@ -553,36 +553,59 @@ The Terminal and the Browser each pick the value for their own appearance.
 Changes apply live. An invalid value uses the default and appears in the Config
 problems banner.
 
-## Sidebar typography
+## Interface font size
 
 ```yaml
 ui:
+  font_size: 12
   sidebar:
-    font_size: 12
     font_family: system
 ```
 
-These are the current defaults. `font_size` is a base size in macOS points:
-Window and Agent titles use it directly, while Session names, headings,
-metadata and numeric badges scale proportionally to preserve their existing
-hierarchy and weights. It must be a finite number greater than zero; fractional
-sizes are supported. Session rows grow to accommodate larger text.
+`font_size` is the Interface font size: the size, in macOS points like
+Ghostty's `font-size`, that all of Muxify's own text in an App Window keeps its
+ratio to. It is a number from 9 to 24, and fractions such as `13.5` are
+allowed. The default is 12, and at 12 every surface looks as it was designed.
 
-`font_family` is `system` for the native macOS system font, or an installed macOS
-font family name, such as `Helvetica`. Names are case-insensitive and surrounding
-whitespace is ignored. Use a family name, not a font-file path or an individual
-face/PostScript name. A family without an exact medium or semibold weight uses
-its closest available weight.
+Each text keeps its ratio to 12, so every size grows by `font_size / 12`. At
+18, a Session name that is 14 points at 12 is 21 points, and a Window title
+that is 12 points is 18. The fixed heights and widths that hold text grow by
+the same factor, so larger text has room. Paddings and spacing, logos and app
+icons do not grow.
 
-Both options apply live to text in the Sessions and Agents sections of every
-App Window, without changing selection, expansion or visibility. Symbols,
-logos, status dots, the App Window header and Terminal fonts are unchanged.
-Configure Terminal fonts in the Ghostty config instead.
+These follow the size:
 
-Each option is independent: removing it restores its default, and an invalid
-value uses its default and appears with its line in the Config problems banner
-while valid sibling settings still apply. An unavailable family is also a
-problem and uses `system`. A YAML syntax error keeps the entire last good Config.
+- Sidebar text: Topic and Session card titles, Window rows with their
+  Summaries and custom parts, Agent rows, the Agents heading and the empty
+  states.
+- The Sidebar's width. Its resize bounds of 180 to 420 points and its default
+  width of 260 grow by the factor. A width you dragged stays as you dragged it,
+  and is pulled inside the bounds only when it falls outside them.
+
+The Terminal and the Browser's pages are not changed: set the Terminal's fonts
+in the Ghostty config, and a page's zoom in the Browser. The Git View's code
+and diff text follows the Terminal's `font-size`, not `ui.font_size`.
+
+`ui.sidebar.font_size` is gone. A Config that names it shows the problem
+`ui.sidebar.font_size is gone: use ui.font_size`, and its value changes no
+size. `ui.sidebar.font_family` stays, for Sidebar text only: `system` for the
+native macOS system font, or an installed macOS font family name, such as
+`Helvetica`. Names are case-insensitive and surrounding whitespace is ignored.
+Use a family name, not a font-file path or an individual face/PostScript name.
+A family without an exact medium or semibold weight uses its closest available
+weight. An unavailable family is a problem and uses `system`.
+
+Both options apply live to every App Window, without a change to selection,
+expansion, the Location or what is open. Each is independent: removing it
+restores its default, and an invalid value, such as a `font_size` that is not
+a number or is outside 9 to 24, uses its default and appears with its line in
+the Config problems banner, while valid sibling settings still apply. A YAML
+syntax error keeps the entire last good Config.
+
+`font_size` is a `ui` key, so a Remote Environment's App Window uses the value
+in that machine's Config when it has one, as for every `ui` key (see
+[A Remote Environment's own Config](#a-remote-environments-own-config)). A
+remote Config that leaves `font_size` out gives that App Window 12.
 
 ## Git View
 
@@ -1594,7 +1617,7 @@ Emoji are literal text. Spaces in a Format separate text and icons.
 Icons are allowed only in Window `left` and `right` output, including conditional result branches and loop bodies.
 Conditions, comparisons, truncation, and basename operations accept text only. An icon anywhere in those operands is a Config problem.
 Expanded variable values remain text, even when they contain icon syntax.
-Title and Summary Formats reject icon expressions. Sidebar typography still controls font, size, and color.
+Title and Summary Formats reject icon expressions. The Sidebar still sets their font, size and color: the size from the [Interface font size](#interface-font-size), the font from `ui.sidebar.font_family`.
 The built-in right part shows a Tab badge only when Tabs exist. It shows a Pane badge for every Window in Topics mode, and for multiple Panes in Sessions mode. While one Pane of the Window is Zoomed, the Pane badge is accent-colored on an accent capsule.
 
 | Expression | Result |

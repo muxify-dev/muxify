@@ -7,7 +7,9 @@ import MuxifyCore
 /// their split. With neither, the sidebar stays open but empty.
 struct SidebarView: View {
     let store: WorkspaceStore
-    var typography = SidebarTypography()
+    /// `ui.sidebar.font_family`. The size of Sidebar text comes from the Interface font size.
+    var fontFamily = "system"
+    @Environment(\.interfaceFontSize) private var fontSize
 
     /// The share of the sidebar's height the Agents section gets.
     @AppStorage("sidebarAgentsFraction") private var agentsFraction: Double = 0.35
@@ -16,7 +18,7 @@ struct SidebarView: View {
     var body: some View {
         // A swipe anywhere in the Sidebar switches Topics and Sessions, also over Agents.
         content.sidebarSwipeArea(swipeArea)
-            .environment(\.sidebarTypography, typography)
+            .environment(\.sidebarTypography, SidebarTypography(fontSize: fontSize, fontFamily: fontFamily))
             .environment(\.wrapsCardTitles, store.config.sidebar.wrapsTitles)
     }
 

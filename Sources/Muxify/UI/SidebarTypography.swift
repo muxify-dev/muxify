@@ -6,6 +6,7 @@ extension SidebarTypography {
     enum Role: CaseIterable {
         case session, title, section, location, badge
 
+        /// The size at the Interface font size's design size, 12.
         var defaultSize: CGFloat {
             switch self {
             case .session: return 14
@@ -35,11 +36,8 @@ extension SidebarTypography {
         }
     }
 
-    func size(for role: Role) -> CGFloat {
-        // Form the role ratio first to avoid losing tiny positive base sizes
-        // or overflowing merely from multiplication by the original size.
-        min(CGFloat(fontSize) * (role.defaultSize / 12), .greatestFiniteMagnitude)
-    }
+    /// The role's size at 12, scaled by the Interface font size: at 12 every role keeps its design size.
+    func size(for role: Role) -> CGFloat { fontSize(role.defaultSize) }
 
     func font(for role: Role,
               lookup: (String, Int, CGFloat) -> NSFont? = Self.lookup) -> Font {

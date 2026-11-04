@@ -19,21 +19,21 @@ final class SidebarTypographyTests: XCTestCase {
         }
     }
 
-    func testFractionalAndLargerBaseSizesScaleEveryTextRole() {
-        for size in [12.5, 18.0, 24.0] {
-            let typography = SidebarTypography(fontSize: size)
+    func testFractionalAndLargerInterfaceFontSizesScaleEveryTextRole() {
+        for size in [9.0, 12.5, 13.5, 18.0, 24.0] {
+            let typography = SidebarTypography(fontSize: InterfaceFontSize(size))
             for role in SidebarTypography.Role.allCases {
-                let expected = CGFloat(size) * (role.defaultSize / 12)
+                let expected = role.defaultSize * CGFloat(size / 12)
                 XCTAssertEqual(typography.size(for: role), expected, accuracy: 0.0001)
                 XCTAssertEqual(typography.font(for: role), Font.system(size: expected, weight: role.weight))
             }
         }
     }
 
-    func testExtremePositiveSizesKeepDerivedMetricsPositiveAndFinite() {
-        for size in [Double.leastNonzeroMagnitude, Double.greatestFiniteMagnitude] {
+    func testTheSmallestAndLargestInterfaceFontSizesKeepRoleSizesPositiveAndFinite() {
+        for size in [InterfaceFontSize.range.lowerBound, InterfaceFontSize.range.upperBound] {
             for role in SidebarTypography.Role.allCases {
-                let points = SidebarTypography(fontSize: size).size(for: role)
+                let points = SidebarTypography(fontSize: InterfaceFontSize(size)).size(for: role)
                 XCTAssertGreaterThan(points, 0)
                 XCTAssertTrue(points.isFinite)
             }
@@ -41,7 +41,7 @@ final class SidebarTypographyTests: XCTestCase {
     }
 
     func testFamilyLookupGetsRoleSizeAndWeightAndUsesClosestReturnedFace() {
-        let typography = SidebarTypography(fontSize: 18, fontFamily: "Test Sans")
+        let typography = SidebarTypography(fontSize: InterfaceFontSize(18), fontFamily: "Test Sans")
         for (role, expectedWeight) in [(SidebarTypography.Role.session, 8), (.title, 5), (.section, 8), (.location, 5), (.badge, 6)] {
             // The fake family has only one face: use its returned font rather
             // than switching to system fonts when an exact weight is absent.
@@ -60,7 +60,7 @@ final class SidebarTypographyTests: XCTestCase {
     }
 
     func testFamilyDisappearingAfterConfigReadStillRendersSystemText() {
-        let typography = SidebarTypography(fontSize: 18, fontFamily: "Removed Font")
+        let typography = SidebarTypography(fontSize: InterfaceFontSize(18), fontFamily: "Removed Font")
         for role in SidebarTypography.Role.allCases {
             XCTAssertEqual(typography.font(for: role) { _, _, _ in nil },
                            Font.system(size: typography.size(for: role), weight: role.weight))
@@ -92,5 +92,6 @@ final class SidebarTypographyTests: XCTestCase {
 
     func testEnvironmentDefaultsAreCurrentSidebarTypography() {
         XCTAssertEqual(EnvironmentValues().sidebarTypography, SidebarTypography())
+        XCTAssertEqual(EnvironmentValues().interfaceFontSize, InterfaceFontSize(12))
     }
 }

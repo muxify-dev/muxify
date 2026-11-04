@@ -4,7 +4,8 @@ import MuxifyCore
 struct ContentView: View {
     @Bindable var store: WorkspaceStore
     let configStore: ConfigStore
-    @AppStorage("sidebarWidth") private var sidebarWidth: Double = 260
+    /// The width the user last dragged the Sidebar to; nil until they drag it, so its default follows the Interface font size.
+    @AppStorage("sidebarWidth") private var sidebarWidth: Double?
     /// The Browser's share of the room beside the sidebar, common to all Windows.
     @AppStorage("browserShare") private var browserShare: Double = 0.45
     /// The Terminal's width when it was last shown.
@@ -24,12 +25,14 @@ struct ContentView: View {
             // between Windows with and without a Browser is instant.
             HStack(spacing: 0) {
                 if store.sidebarShown {
-                    SidebarView(store: store, typography: store.config.sidebarTypography)
+                    SidebarView(store: store, fontFamily: store.config.sidebarFontFamily)
                         .frame(width: sidebar)
                         .chrome(theme: store.theme, material: .sidebar)
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("sidebar-panel")
-                    PanelResizeHandle(width: sidebar, range: 180...420, edge: .leading) { sidebarWidth = $0 }
+                    PanelResizeHandle(width: sidebar, range: SidebarWidth.bounds(interfaceFontSize), edge: .leading) {
+                        sidebarWidth = $0
+                    }
                 }
                 // A hidden Terminal stays behind the Browser at its last width,
                 // so tmux does not resize the client and reflow its Panes.
@@ -119,12 +122,17 @@ struct ContentView: View {
         .environment(\.pulses, configStore.config.pulse)
         .environment(\.agentColors, configStore.config.agentColors)
         .environment(\.chromeTheme, store.theme)
-
+        // From this App Window's own Config, its Remote Environment's when that machine has one (ADR 0010).
+        .environment(\.interfaceFontSize, interfaceFontSize)
     }
+
+    private var interfaceFontSize: InterfaceFontSize { store.config.interfaceFontSize }
 
     private var headerHeight: CGFloat { CGFloat(store.config.headerHeight) }
 
-    private var shownSidebarWidth: Double { store.sidebarShown ? clamp(sidebarWidth, 180, 420) : 0 }
+    private var shownSidebarWidth: Double {
+        store.sidebarShown ? SidebarWidth.shown(dragged: sidebarWidth, size: interfaceFontSize) : 0
+    }
 
     private func clamp(_ value: Double, _ low: Double, _ high: Double) -> Double {
         min(max(value, low), high)
