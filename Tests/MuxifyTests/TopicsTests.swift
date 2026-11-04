@@ -88,6 +88,34 @@ final class TopicsTests: XCTestCase {
         XCTAssertNotEqual(TopicGroupID.noTopic, .topic("no-topic"))
     }
 
+    func testSessionCardsOneKeepsOnlyTheLocationsCardOpenUntilTheNextMove() {
+        var cards: Set<String> = ["old"]
+        var location: String?
+        func move(to session: String?, rule: Config.Sidebar.SessionCards) {
+            cards = SessionCardSelection.open(cards, from: location, to: session, rule: rule)
+            location = session
+        }
+        move(to: "a", rule: .one)
+        XCTAssertEqual(cards, ["a"], "moving to a Session leaves only its card open")
+        cards.insert("b")
+        move(to: "a", rule: .one)
+        XCTAssertEqual(cards, ["a", "b"], "a card opened by hand stays open while the Location stays in the Session")
+        cards.remove("a")
+        move(to: "a", rule: .one)
+        XCTAssertEqual(cards, ["b"], "the Location's card closed by hand stays closed while the Location stays")
+        move(to: "c", rule: .one)
+        XCTAssertEqual(cards, ["c"], "the next move closes the cards opened by hand")
+        move(to: nil, rule: .one)
+        XCTAssertEqual(cards, ["c"], "no Location closes nothing")
+    }
+
+    func testSessionCardsAnyOpensTheLocationsCardAndKeepsTheOthers() {
+        XCTAssertEqual(SessionCardSelection.open(["a", "b"], from: "a", to: "c", rule: .any), ["a", "b", "c"])
+        XCTAssertEqual(SessionCardSelection.open(["b"], from: "a", to: "b", rule: .any), ["b"])
+        XCTAssertEqual(SessionCardSelection.open([], from: "a", to: "a", rule: .any), [], "no move opens nothing")
+        XCTAssertEqual(SessionCardSelection.open([], from: nil, to: "a", rule: .any), ["a"])
+    }
+
     func testTheModelOpensTheNewActiveTopicBeforeTheSelectionCatchesUp() {
         let records = [TopicRecord(id: "a"), TopicRecord(id: "b")]
         let windows = [window("@1", session: "$1", topic: "a"), window("@2", session: "$2", topic: "b")]

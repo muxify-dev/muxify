@@ -1635,6 +1635,23 @@ sidebar:
   window_tooltips: truncated
 ```
 
+### Session cards
+
+`sidebar.session_cards` sets which Session cards stay open when the
+Location moves to another Session. It acts on the Session cards of
+Sessions mode and on the No Topic and Locked Session cards of Topics mode, which
+share one list of open cards. Topic cards are not affected: a new Active Topic
+always opens alone.
+
+- `any` (default): the Location's card opens, and every card the user opened stays open.
+- `one`: the Location's card opens alone. A card opened by hand stays open until
+  the Location next moves to another Session.
+
+```yaml
+sidebar:
+  session_cards: one
+```
+
 ### Tags on Topic cards
 
 `sidebar.tag_placement` sets where a Topic card shows its [Tags](#tags):

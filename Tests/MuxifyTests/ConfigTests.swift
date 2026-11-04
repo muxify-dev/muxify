@@ -313,6 +313,22 @@ final class ConfigTests: XCTestCase {
         }
     }
 
+    func testSessionCardsDefaultToAnyAndAcceptOne() throws {
+        XCTAssertEqual(try load("").sidebar.sessionCards, .any)
+        XCTAssertTrue(Config.template.contains("#   session_cards: any"))
+        for (value, expected) in [("one", Config.Sidebar.SessionCards.one), ("any", .any), ("'one'", .one)] {
+            let config = try load("sidebar:\n  session_cards: \(value)")
+            XCTAssertEqual(config.sidebar.sessionCards, expected, value)
+            XCTAssertTrue(config.problems.isEmpty, "\(value): \(config.problems)")
+        }
+        for value in ["all", "true", "null", "1", "[]", "{}"] {
+            let config = try load("sidebar:\n  session_cards: \(value)")
+            XCTAssertEqual(config.sidebar.sessionCards, .any, value)
+            XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 2,
+                message: "sidebar.session_cards: expected one or any")], value)
+        }
+    }
+
     func testSidebarWrongTypesReportProblemsAndKeepDefaults() throws {
         for value in ["1", "null", "[]", "wrong", "\"false\"", "'true'"] {
             let config = try load("sidebar:\n  topics: \(value)\n  sessions: \(value)\n  agents: \(value)\n  panes: \(value)\n  animate_switching: \(value)")

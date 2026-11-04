@@ -50,10 +50,14 @@ struct SidebarView: View {
         .onChange(of: store.selectedWindowID, initial: true) { _, _ in store.updateTopicSelection() }
         .onChange(of: store.topics.activeTopic) { _, _ in store.updateTopicSelection() }
         .onChange(of: store.topics.activeTopicGroup) { _, _ in store.updateTopicSelection() }
-        // Moving to another Session (click, tmux navigation, new Window) opens its card.
-        .onChange(of: store.selectedWindow?.sessionName, initial: true) { _, name in
-            guard let name, !store.openSessionCards.contains(name) else { return }
-            withAnimation(.easeOut(duration: 0.15)) { _ = store.openSessionCards.insert(name) }
+        // Moving to another Session (click, tmux navigation, new Window) opens its card; `session_cards: one`
+        // closes the others. The first call, as the Sidebar appears, is no move: it only opens the Location's card.
+        .onChange(of: store.selectedWindow?.sessionName, initial: true) { previous, name in
+            let moved = previous != name
+            let cards = SessionCardSelection.open(store.openSessionCards, from: moved ? previous : nil, to: name,
+                                                  rule: moved ? store.config.sidebar.sessionCards : .any)
+            guard cards != store.openSessionCards else { return }
+            withAnimation(.easeOut(duration: 0.15)) { store.openSessionCards = cards }
         }
     }
 }

@@ -152,6 +152,21 @@ struct TopicSelection: Equatable {
     }
 }
 
+/// The Session cards' rule, beside `TopicSelection`: what stays open when the Location moves between Sessions.
+/// Sessions mode and the No Topic and Locked Session cards in Topics mode share the one list it acts on.
+enum SessionCardSelection {
+    /// The open Session cards after the Location's Session changes from `previous` to `session`. The Location's
+    /// card opens; with `one` it opens alone. A card opened by hand stays open while the Session stays the same.
+    static func open(_ cards: Set<String>, from previous: String?, to session: String?,
+                     rule: Config.Sidebar.SessionCards) -> Set<String> {
+        guard let session, previous != session else { return cards }
+        switch rule {
+        case .one: return [session]
+        case .any: return cards.union([session])
+        }
+    }
+}
+
 struct TopicsModel {
     /// A Window a Settled Topic's record remembers. Reopen rebuilds it; the row only shows it.
     struct RememberedWindow: Identifiable {

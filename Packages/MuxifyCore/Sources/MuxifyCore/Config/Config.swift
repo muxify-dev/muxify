@@ -107,6 +107,15 @@ public struct Config: Equatable {
         public var wrapsTitles = true
         public var windowTooltips = WindowTooltips.always
         public var tagPlacement = TagPlacement.none
+        public var sessionCards = SessionCards.any
+
+        /// Which Session cards stay open when the Location moves to a Session. Topic cards keep their own rule.
+        public enum SessionCards: String {
+            /// Only the Location's Session card; one opened by hand stays open until the next move.
+            case one
+            /// Every card the user opened, and the Location's.
+            case any
+        }
 
         /// When a Window row opens its hover label, in either Sidebar mode.
         public enum WindowTooltips: String {
@@ -406,6 +415,9 @@ public struct Config: Equatable {
         #     wrap: true
         #   # Window hover labels: off, truncated (only when the title is cut off), or always.
         #   window_tooltips: always
+        #   # Session cards open when the Location moves to their Session: one
+        #   # keeps only that card open, any keeps every card the user opened.
+        #   session_cards: any
         #   # Titles and summaries set plain text. Each Format can have topics/sessions values.
         #   # An empty summary hides its line. An empty title uses its default.
         #   formats:
@@ -982,6 +994,12 @@ private struct ConfigReader {
                     continue
                 }
                 config.sidebar.tagPlacement = placement
+            case "session_cards":
+                guard value.tag == Yams.Tag(.str), let cards = value.string.flatMap(Config.Sidebar.SessionCards.init(rawValue:)) else {
+                    problem(at: value, "sidebar.session_cards: expected one or any")
+                    continue
+                }
+                config.sidebar.sessionCards = cards
             case "agents_scope":
                 config.sidebar.agentsScope = perMode(value, "sidebar.agents_scope", config.sidebar.agentsScope,
                                                      expected: "active, window or all") { node in

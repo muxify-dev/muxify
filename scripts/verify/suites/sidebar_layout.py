@@ -1,5 +1,5 @@
 """Where the Sidebar puts its parts: the Settled group at the bottom of the panel, under the Topics list,
-the Agents section, Pane rows and card title lines that the Config can decide, and the accessibility elements of the
+the Agents section, Pane rows, card title lines and open Session cards that the Config can decide, and the accessibility elements of the
 card lists.
 
 This suite has its own sandbox with few Topics, so the Topics list is shorter than the Sidebar. In the
@@ -118,9 +118,7 @@ class SidebarLayout(unittest.TestCase):
         # A press opens or closes only the card that holds the selected Window; on another card it goes there. Just
         # after launch the app can still move its client back, so the client moves on once the app shows layout-open.
         self.s.wait_shown(self.sessions[0] + ':')
-        for tty in self.s.tmux('list-clients', '-F', '#{client_tty}').split():
-            self.s.tmux('switch-client', '-c', tty, '-t', self.sessions[1] + ':')
-        self.s.wait_shown(self.sessions[1] + ':')
+        self.move_client(self.sessions[1])
         for mode, key in [('topics', 'topic-layout-other'), ('sessions', 'session-' + self.sessions[1])]:
             self.show_view(mode)
             self.write_config('')
@@ -140,6 +138,38 @@ class SidebarLayout(unittest.TestCase):
                                   % (key, wrapped, one_line))
             self.assertEqual(self.s.row(key, rs).get('accessibilityLabel'), 'layout-other' + tail,
                              'the cut title of %s does not keep the whole title for accessibility' % key)
+
+    def move_client(self, sid):
+        for tty in self.s.tmux('list-clients', '-F', '#{client_tty}').split():
+            self.s.tmux('switch-client', '-c', tty, '-t', sid + ':')
+        self.s.wait_shown(sid + ':')
+
+    def test_session_cards_one_keeps_only_the_location_card_open(self):
+        self.addCleanup(self.move_client, self.sessions[0])
+        self.addCleanup(self.write_config, '')
+        self.addCleanup(self.show_view, 'topics')
+        self.show_view('sessions')
+        first, second = ['session-' + sid for sid in self.sessions]
+        def expanded(key, rs):
+            return self.s.row(key, rs).get('accessibilityValue', '').startswith('expanded')
+        # The default `any` keeps every card the Location went to open.
+        self.s.wait_shown(self.sessions[0] + ':')
+        self.move_client(self.sessions[1])
+        self.move_client(self.sessions[0])
+        self.s.wait_rows(lambda rs: expanded(first, rs) and expanded(second, rs),
+                         'with the default session_cards the card of the Session left behind closed')
+        self.write_config('sidebar:\n  session_cards: one\n')
+        self.move_client(self.sessions[1])
+        self.s.wait_rows(lambda rs: expanded(second, rs) and not expanded(first, rs),
+                         'session_cards: one leaves the card of the Session left behind open')
+        # A card opened by hand stays open until the Location moves again.
+        self.s.act('press', second)
+        self.s.wait_rows(lambda rs: not expanded(second, rs), 'a press on the Location\'s card did not close it')
+        self.s.act('press', second)
+        self.s.wait_rows(lambda rs: expanded(second, rs), 'a press on the Location\'s card did not open it again')
+        self.move_client(self.sessions[0])
+        self.s.wait_rows(lambda rs: expanded(first, rs) and not expanded(second, rs),
+                         'session_cards: one leaves the hand-opened card open after a move')
 
     def closed(self, key):
         """The rows once the card's close animation ended: the accessibility value changes at the start of the animation,
