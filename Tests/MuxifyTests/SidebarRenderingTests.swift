@@ -129,7 +129,10 @@ final class SidebarRenderingTests: XCTestCase {
     @MainActor private func render<V: View>(_ view: V, typography: SidebarTypography,
                                            scheme: ColorScheme) throws -> (width: CGFloat, height: CGFloat, ink: Int) {
         _ = NSApplication.shared
+        // The App Window puts the Interface font size into the environment, and the Sidebar's typography takes its base
+        // from that same value.
         let host = NSHostingView(rootView: view.environment(\.sidebarTypography, typography)
+            .environment(\.interfaceFontSize, typography.fontSize)
             .frame(width: 180).background(scheme == .dark ? Color(white: 0.12) : Color.white)
             .environment(\.colorScheme, scheme))
         let size = host.fittingSize

@@ -157,6 +157,9 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.write_topic('card-go', 'Card go', self.beta)
         sid = self.new_session('card-go', self.beta, topic='card-go')
         first, last = self.windows(sid, 2)
+        # The app reads the Topic records apart from tmux. Until it has read this one, the Session is under No Topic,
+        # whose last Window the selection would then become.
+        self.find('topic-card-go')
         self.select_window(last)
         self.wait_selected(last)
         base = s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}')

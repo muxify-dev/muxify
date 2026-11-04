@@ -16,7 +16,7 @@ from scripts.verify.topics_sidebar import TopicsSidebar
 
 LINE = 'topics-bench-line'
 GUESTS = 'topics-guests-line'
-# The band of the "more above" pill over the top of the Bench area (`EdgePill.height` in UI/TopicsListEdge.swift).
+# The band of the "more above" pill at 12 (`EdgePill.designHeight` in UI/TopicsListEdge.swift).
 PILL = 30
 
 

@@ -11,6 +11,7 @@ struct TopicGroupBlock: View {
     /// The most height the open group's cards take before they scroll.
     let cardsLimit: CGFloat
     @State private var cardsHeight: CGFloat = 0
+    @Environment(\.interfaceFontSize) private var fontSize
     private static let forgetSettled = PaletteCommand.forgetSettledOlderThan.rawValue
 
     var body: some View {
@@ -53,8 +54,8 @@ struct TopicGroupBlock: View {
             }
             if group.hiddenCount > 0 {
                 Button("Show \(min(group.hiddenCount, TopicGroupsState.pageSize)) more") { store.topicGroups.showMoreSettled() }
-                    .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
-                    .padding(.leading, 24).frame(height: 24)
+                    .buttonStyle(.plain).font(fontSize.font(12)).foregroundStyle(.secondary)
+                    .padding(.leading, 24).frame(height: fontSize(24))
                     .accessibilityIdentifier("settled-show-more")
             }
         }
@@ -80,18 +81,19 @@ private struct GroupHeader: View {
     let count: Int
     let isExpanded: Bool
     let onToggle: () -> Void
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         Button(action: onToggle) {
             HStack(spacing: 6) {
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 10, weight: .bold)).frame(width: 10)
-                Image(systemName: icon).font(.system(size: 11))
-                Text("\(title) (\(count))").font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    .font(fontSize.font(10, weight: .bold)).frame(width: fontSize(10))
+                Image(systemName: icon).font(fontSize.font(11))
+                Text("\(title) (\(count))").font(fontSize.font(13, weight: .semibold)).lineLimit(1)
                 Spacer(minLength: 4)
             }
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 8).frame(height: 26)
+            .padding(.horizontal, 8).frame(height: fontSize(26))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

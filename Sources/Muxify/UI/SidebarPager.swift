@@ -13,6 +13,7 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
     private let sessions: Sessions
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.sidebarSwipeArea) private var swipeArea
+    @Environment(\.interfaceFontSize) private var fontSize
     @State private var position: CGFloat
     @State private var origin: CGFloat?
     @State private var inputReference = SidebarSwipeInputReference()
@@ -111,7 +112,7 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
     private func viewButton(_ target: SidebarMode) -> some View {
         Button { origin = nil; select(target) } label: {
             Text(target.rawValue)
-                .font(.system(size: 11, weight: .semibold))
+                .font(fontSize.font(11, weight: .semibold))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 4)
                 .contentShape(RoundedRectangle(cornerRadius: 5))

@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import MuxifyCore
 
 /// The Topics list's one scroll offset, split into what the block at its top does and what the Bench under it does.
 /// The block (the Pinned and In Play cards, the Bench line and the opened No Topic Session) sticks to the top of the
@@ -13,14 +14,19 @@ struct BenchGeometry: Equatable {
     var spacing: CGFloat = 6
     /// The content's padding above the block and below the Bench.
     var inset: CGFloat = 4
-    /// The band at the top of the Bench area that the "more above" pill lies in while cards are above the area.
-    var indicatorHeight: CGFloat = EdgePill.height
+    /// The Interface font size, which the "more above" pill and the least Bench area grow with.
+    var fontSize = InterfaceFontSize()
 
+    /// The band at the top of the Bench area that the "more above" pill lies in while cards are above the area.
+    var indicatorHeight: CGFloat { EdgePill.height(fontSize) }
+
+    /// The least Bench area at 12. It holds Benched cards, so it grows with the Interface font size.
+    static let designLeastAreaHeight: CGFloat = 96
     /// The Bench area is never shorter than this while the block sticks.
-    static let leastAreaHeight: CGFloat = 96
+    var leastAreaHeight: CGFloat { fontSize(Self.designLeastAreaHeight) }
 
     /// How far the block scrolls with the content before it sticks: zero unless the block is tall.
-    var slack: CGFloat { max(0, inset + topHeight - (viewportHeight - Self.leastAreaHeight)) }
+    var slack: CGFloat { max(0, inset + topHeight - (viewportHeight - leastAreaHeight)) }
     /// Where the Bench area starts in the viewport once the block sticks: the block's bottom edge.
     var areaTop: CGFloat { inset + topHeight - slack }
     var areaHeight: CGFloat { max(0, viewportHeight - areaTop) }

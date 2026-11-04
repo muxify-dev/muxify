@@ -1,4 +1,5 @@
 import AppKit
+import MuxifyCore
 import SwiftUI
 
 /// Where an item dragged in a list lands: before or after another item of the list.
@@ -660,6 +661,7 @@ extension Color {
 
 private struct TradeMark: View {
     let cornerRadius: CGFloat
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         // Inside the card's frame: the In Play block covers the gap under the Bench line, and would cut a border that
@@ -669,7 +671,7 @@ private struct TradeMark: View {
             .overlay { shape.strokeBorder(Color.tradeMark, style: StrokeStyle(lineWidth: 2, dash: [5, 4])) }
             .overlay(alignment: .topTrailing) {
                 Text("⇄ Trade")
-                    .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                    .font(fontSize.font(10, weight: .bold)).foregroundStyle(.white)
                     .padding(.horizontal, 7).padding(.vertical, 1)
                     .background(Capsule().fill(Color.tradeMark))
                     .padding(.top, 6).padding(.trailing, 8)
@@ -684,13 +686,14 @@ private struct TradeMark: View {
 private struct TradeGhost<Content: View>: View {
     let cornerRadius: CGFloat
     @ViewBuilder let content: Content
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         content
             .opacity(0.45)
             .overlay(alignment: .bottomTrailing) {
                 Text("lands here")
-                    .font(.system(size: 10, weight: .semibold)).foregroundStyle(Color.tradeMark)
+                    .font(fontSize.font(10, weight: .semibold)).foregroundStyle(Color.tradeMark)
                     .padding(.bottom, 4).padding(.trailing, 8)
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))

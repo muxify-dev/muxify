@@ -1,3 +1,4 @@
+import MuxifyCore
 import SwiftUI
 
 /// The Working mark of a row: square pixels light up one step at a time, like a terminal activity glyph.
@@ -32,8 +33,13 @@ struct TerminalActivityGlyph: View {
     let color: Color
 
     @Environment(\.displayScale) private var displayScale
+    /// The glyph sits beside a row's text, so its footprint and blocks grow with the Interface font size.
+    @Environment(\.interfaceFontSize) private var fontSize
 
+    /// A block at 12.
     static let blockSize: CGFloat = 3
+    /// The glyph's footprint at 12.
+    static let footprint: CGFloat = 10
 
     static let cells: [CGPoint] = [
         CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 0), CGPoint(x: 2, y: 0), CGPoint(x: 2, y: 1),
@@ -55,7 +61,7 @@ struct TerminalActivityGlyph: View {
             // retain the 3 pt blocks and half-point gaps.
             let gap = 1 / displayScale
             let availablePixels = min(size.width, size.height) * displayScale - 2
-            let blockSize = min(Self.blockSize, floor(availablePixels / 3) / displayScale)
+            let blockSize = min(fontSize(Self.blockSize), floor(availablePixels / 3) / displayScale)
             let pitch = blockSize + gap
             let extent = 2 * pitch + blockSize
             // Align the entire grid to physical pixels to avoid antialiasing
@@ -76,6 +82,6 @@ struct TerminalActivityGlyph: View {
                 context.fill(Path(block), with: .color(color.opacity(opacity)))
             }
         }
-        .frame(width: 10, height: 10)
+        .frame(width: fontSize(Self.footprint), height: fontSize(Self.footprint))
     }
 }

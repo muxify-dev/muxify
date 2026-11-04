@@ -6,7 +6,13 @@ import MuxifyCore
 /// a Notification is a dot.
 struct AgentMarkView: View {
     let mark: AgentMark
-    var dotSize: CGFloat = 7
+    /// The dot's size; by default `designDotSize` grown with the Interface font size, as it sits beside a row's text.
+    var dotSize: CGFloat? = nil
+
+    /// The dot's size at 12.
+    static let designDotSize: CGFloat = 7
+
+    @Environment(\.interfaceFontSize) private var fontSize
 
     @Environment(\.agentColors) private var colors
     @Environment(\.pulses) private var pulses
@@ -17,6 +23,7 @@ struct AgentMarkView: View {
         if mark == .working {
             TerminalActivityIndicator(moves: pulses && !reduceMotion, color: color)
         } else {
+            let dotSize = dotSize ?? fontSize(Self.designDotSize)
             Circle().fill(color).frame(width: dotSize, height: dotSize)
         }
     }

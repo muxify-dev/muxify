@@ -26,6 +26,7 @@ struct SidebarView: View {
     private var content: some View {
         GeometryReader { proxy in
             let total = proxy.size.height
+            let leastHeight = SectionResizeHandle.minHeight(fontSize)
             // Keep WorkSection's identity when the two modes have different Show Agents choices, so a swipe
             // can finish and both lists keep their scroll positions as the Agents section appears or disappears.
             VStack(spacing: 0) {
@@ -38,7 +39,8 @@ struct SidebarView: View {
                 }
                 if store.agentsVisible {
                     AgentsSection(store: store)
-                        .frame(height: store.sessionsVisible ? SectionResizeHandle.agentsHeight(agentsFraction, total: total) : total)
+                        .frame(height: store.sessionsVisible
+                               ? SectionResizeHandle.agentsHeight(agentsFraction, total: total, minHeight: leastHeight) : total)
                 }
                 if !store.sessionsVisible && !store.agentsVisible {
                     Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -81,6 +83,7 @@ private struct WorkSection: View {
 
 private struct TopicsSection: View {
     @Environment(\.sidebarTypography) private var typography
+    @Environment(\.interfaceFontSize) private var fontSize
     let store: WorkspaceStore
     let model: TopicsModel
     @State private var drag = ListDrag<TopicListID>(spacing: 6, tradesAcross: [TopicsModel.ListItem.guestsLineID,
@@ -104,7 +107,8 @@ private struct TopicsSection: View {
     static let contentInset: CGFloat = 4
 
     private var geometry: BenchGeometry {
-        BenchGeometry(topHeight: topHeight, viewportHeight: viewportHeight, spacing: Self.contentSpacing, inset: Self.contentInset)
+        BenchGeometry(topHeight: topHeight, viewportHeight: viewportHeight, spacing: Self.contentSpacing, inset: Self.contentInset,
+                      fontSize: fontSize)
     }
 
     var body: some View {
@@ -150,7 +154,7 @@ private struct TopicsSection: View {
             }
             .coordinateSpace(.named(Self.contentSpace))
             .background { ScrollDriverView(driver: driver) }
-            .onOverhangingBottomEdge(of: TopicCard.viewport, upTo: EdgePill.height) { scroll.listEnd = $0 }
+            .onOverhangingBottomEdge(of: TopicCard.viewport, upTo: EdgePill.height(fontSize)) { scroll.listEnd = $0 }
             // An In Play card that crosses a line opens the hidden Bench, so the user sees what it can trade with. When
             // it goes back above the line, the Bench hides again. A drop ends the drag in the phase handler below.
             .onChange(of: drag.isAcross) { _, across in
@@ -407,7 +411,7 @@ private struct TopicsListPart: ViewModifier {
             }
             .onGeometryChange(for: CGFloat?.self) { proxy in
                 guard isLastBenched, let visible = proxy.bounds(of: .named(TopicCard.viewport)) else { return nil }
-                return min(max(0, proxy.size.height - visible.maxY), EdgePill.height)
+                return min(max(0, proxy.size.height - visible.maxY), EdgePill.height(geometry.fontSize))
             } action: { if let end = $0 { scroll.benchEnd = end } }
             .background {
                 if isTop {
@@ -439,12 +443,13 @@ private extension View {
 
 private struct EdgeTracker: ViewModifier {
     @Environment(\.scrollTopInset) private var scrollTopInset
+    @Environment(\.interfaceFontSize) private var fontSize
     let id: TopicGroupID
     let scroll: TopicsListScroll
 
     func body(content: Content) -> some View {
         content
-            .onEdgePlace(of: TopicCard.viewport, visibleTop: scrollTopInset, indicatorHeight: EdgePill.height) {
+            .onEdgePlace(of: TopicCard.viewport, visibleTop: scrollTopInset, indicatorHeight: EdgePill.height(fontSize)) {
                 if scroll.places[id] != $0 { scroll.places[id] = $0 }
             }
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TopicsSection.contentSpace)).minY } action: {
@@ -492,8 +497,14 @@ private struct KeepsPlaceWhenBenchShows: ViewModifier {
 
 private extension View {
     /// The look of a Topic's own action (Settle, Reopen): a link, so the row stays quiet.
-    func topicLink() -> some View {
-        buttonStyle(.link).font(.system(size: 11))
+    func topicLink() -> some View { modifier(TopicLink()) }
+}
+
+private struct TopicLink: ViewModifier {
+    @Environment(\.interfaceFontSize) private var fontSize
+
+    func body(content: Content) -> some View {
+        content.buttonStyle(.link).font(fontSize.font(11))
     }
 }
 
@@ -501,6 +512,7 @@ private extension View {
 private struct RememberedSessions: View {
     let store: WorkspaceStore
     let topic: TopicsModel.Row
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         ForEach(topic.sessions) { session in
@@ -508,8 +520,8 @@ private struct RememberedSessions: View {
                 SessionHeading(store: store, topic: topic, session: session)
                 ForEach(windows) { window in
                     HStack(spacing: 6) {
-                        Image(systemName: "clock.arrow.circlepath").font(.system(size: 11)).frame(width: 14)
-                        Text(window.name).font(.system(size: 12)).hoverLabelTitle()
+                        Image(systemName: "clock.arrow.circlepath").font(fontSize.font(11)).frame(width: fontSize(14))
+                        Text(window.name).font(fontSize.font(12)).hoverLabelTitle()
                         Spacer(minLength: 4)
                     }
                     .foregroundStyle(.secondary)
@@ -522,7 +534,7 @@ private struct RememberedSessions: View {
                 }
             }
         }
-        Color.clear.frame(height: 16)
+        Color.clear.frame(height: fontSize(16))
     }
 }
 
@@ -544,6 +556,7 @@ private struct SessionHeading: View {
     let topic: TopicsModel.Row
     let session: TopicsModel.Session
     var ordering: SessionOrdering? = nil
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         line
@@ -566,7 +579,7 @@ private struct SessionHeading: View {
     @ViewBuilder
     private var line: some View {
         let label = HStack(spacing: 6) {
-            Text(session.baseName).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+            Text(session.baseName).font(fontSize.font(11, weight: .semibold)).lineLimit(1)
             Spacer(minLength: 4)
         }
         .foregroundStyle(.secondary)
@@ -658,6 +671,7 @@ struct TopicCard: View {
     let onShowAllRows: () -> Void
     let place: TopicCardPlace
     @State private var sessionDrag = ListDrag<String>(spacing: CardSpacing.block)
+    @Environment(\.interfaceFontSize) private var fontSize
 
     /// The Topic list's scroll view, in which an open card's header sticks to the top.
     static let viewport = "topics-viewport"
@@ -764,14 +778,14 @@ struct TopicCard: View {
         CardHeader(title: formatted.title, isOpen: topic.isExpanded, mark: topic.mark, isPinned: topic.isPinned, isGuest: topic.isGuest,
                    hintTarget: list == nil ? nil : namedTopicID.map { .topic($0) },
                    notes: (topic.isPinned ? ["Pinned"] : []) + (topic.isGuest ? ["Guest"] : []) + (topic.usesRowMarks && topic.isUnread && topic.mark != .unread ? ["unread"] : []) + (groupDetail.map { [$0] } ?? []) + (topic.idleLabel.map { [$0] } ?? []),
-                   summary: list == nil ? "" : formatted.summary, cornerWidth: list == nil ? CardCorner.groupWidth : CardCorner.width,
+                   summary: list == nil ? "" : formatted.summary, cornerWidth: list == nil ? CardCorner.groupWidth(fontSize) : CardCorner.width(fontSize),
                    tags: tags, note: topic.note, cornerLabel: settledAge) {
             if list != nil || topic.isExpanded {
                 if list == nil, let detail = groupDetail {
                     Text(detail)
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .font(fontSize.font(10)).foregroundStyle(.secondary)
                 }
-                if let label = topic.idleLabel { Text(label).font(.system(size: 10)).foregroundStyle(.secondary) }
+                if let label = topic.idleLabel { Text(label).font(fontSize.font(10)).foregroundStyle(.secondary) }
             }
         }
         .overlay(alignment: .leading) {
@@ -1065,14 +1079,18 @@ private struct SectionResizeHandle: View {
     @Binding var fraction: Double
     /// The sidebar's height.
     let total: CGFloat
+    @Environment(\.interfaceFontSize) private var fontSize
+
+    /// The least height of each section at 12. It holds rows of text, so it grows with the Interface font size.
+    static let designMinHeight: CGFloat = 90
 
     /// Neither section gets smaller than this.
-    static let minHeight: CGFloat = 90
+    static func minHeight(_ size: InterfaceFontSize) -> CGFloat { size(designMinHeight) }
 
     @State private var startHeight: CGFloat?
 
     /// The Agents section's height for `fraction`, keeping both sections usable.
-    static func agentsHeight(_ fraction: Double, total: CGFloat) -> CGFloat {
+    static func agentsHeight(_ fraction: Double, total: CGFloat, minHeight: CGFloat) -> CGFloat {
         let high = max(minHeight, total - minHeight)
         return min(max((total * fraction).rounded(), minHeight), high)
     }
@@ -1090,10 +1108,12 @@ private struct SectionResizeHandle: View {
                         DragGesture(minimumDistance: 1, coordinateSpace: .global)
                             .onChanged { value in
                                 guard total > 0 else { return }
-                                let start = startHeight ?? Self.agentsHeight(fraction, total: total)
+                                let least = Self.minHeight(fontSize)
+                                let start = startHeight ?? Self.agentsHeight(fraction, total: total, minHeight: least)
                                 if startHeight == nil { startHeight = start }
                                 // Dragging up grows Agents.
-                                let height = Self.agentsHeight(Double((start - value.translation.height) / total), total: total)
+                                let height = Self.agentsHeight(Double((start - value.translation.height) / total), total: total,
+                                                               minHeight: least)
                                 fraction = Double(height / total)
                             }
                             .onEnded { _ in startHeight = nil }
@@ -1300,6 +1320,7 @@ struct WindowRow: View {
     var topicsView = false
     var usesMainWorkingCopy = false
     @Environment(\.sidebarTypography) private var typography
+    @Environment(\.interfaceFontSize) private var fontSize
 
     @State private var hovering = false
 
@@ -1335,7 +1356,7 @@ struct WindowRow: View {
                     .accessibilityIdentifier("window-bell-\(window.id)")
             }
             if isGitViewOpen {
-                GitViewIcon(size: 11)
+                GitViewIcon(size: fontSize(11))
                     .foregroundStyle(secondaryStyle)
                     .help("Git View open")
                     .accessibilityIdentifier("window-git-view-\(window.id)")
@@ -1346,7 +1367,7 @@ struct WindowRow: View {
                 if tabCount > 0 {
                     HStack(spacing: 2) {
                         Image(systemName: "globe")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(fontSize.font(10, weight: .medium))
                         Text("\(tabCount)")
                             .font(typography.font(for: .badge))
                     }
@@ -1357,7 +1378,7 @@ struct WindowRow: View {
                 if topicsView || window.paneCount > 1 {
                     HStack(spacing: 2) {
                         Image(systemName: "rectangle.split.2x1")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(fontSize.font(10, weight: .medium))
                         Text("\(window.paneCount)")
                             .font(typography.font(for: .badge))
                     }
@@ -1406,7 +1427,7 @@ struct WindowRow: View {
                         .accessibilityIdentifier("window-\(side)-app-icon-\(window.id)-\(index)")
                 case .symbol(let name):
                     Image(systemName: name)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(fontSize.font(10, weight: .medium))
                         .accessibilityIdentifier("window-\(side)-symbol-\(window.id)-\(index)")
                         .accessibilityLabel(name)
                 }
@@ -1432,9 +1453,11 @@ private enum SelectedRow {
 
 /// A terminal bell in a Window. It is not an Agent mark, so it is gray, and no Config changes it.
 private struct BellMark: View {
+    @Environment(\.interfaceFontSize) private var fontSize
+
     var body: some View {
         Image(systemName: "bell.fill")
-            .font(.system(size: 9))
+            .font(fontSize.font(9))
             .foregroundStyle(.secondary)
             .accessibilityLabel("Bell")
     }
@@ -1444,6 +1467,7 @@ private struct BellMark: View {
 private struct PaneRow: View {
     let store: WorkspaceStore
     let row: TopicsModel.PaneRow
+    @Environment(\.interfaceFontSize) private var fontSize
 
     @State private var hovering = false
 
@@ -1462,17 +1486,17 @@ private struct PaneRow: View {
         Button { store.select(row) } label: {
             HStack(spacing: 6) {
                 ZStack {
-                    Color.clear.frame(width: 10, height: 10)
+                    Color.clear.frame(width: fontSize(10), height: fontSize(10))
                     if let mark { AgentMarkView(mark: mark) }
                 }
-                .frame(width: 10, height: 10)
+                .frame(width: fontSize(10), height: fontSize(10))
                 Image(systemName: row.pane.isActive ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
-                    .font(.system(size: 10)).frame(width: 14)
+                    .font(fontSize.font(10)).frame(width: fontSize(14))
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(formatted.title).font(.system(size: 12)).hoverLabelTitle()
+                    Text(formatted.title).font(fontSize.font(12)).hoverLabelTitle()
                     if !formatted.summary.isEmpty {
-                        Text(formatted.summary).font(.system(size: 11)).lineLimit(1).foregroundStyle(.secondary)
+                        Text(formatted.summary).font(fontSize.font(11)).lineLimit(1).foregroundStyle(.secondary)
                     }
                 }
                 Spacer(minLength: 4)

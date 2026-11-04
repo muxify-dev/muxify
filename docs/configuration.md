@@ -575,9 +575,23 @@ icons do not grow.
 
 These follow the size:
 
-- Sidebar text: Topic and Session card titles, Window rows with their
-  Summaries and custom parts, Agent rows, the Agents heading and the empty
-  states.
+- The whole Sidebar. That is every text in it: Topic and Session cards with
+  their titles, Summaries, Topic Notes, the Guest mark, "N more…", a Settled
+  Topic's age and the Settle and Reopen links; the Session headings and the
+  outcome and idle labels of a Topic; Window, Pane and Agent rows with their
+  Summaries and custom parts; remembered Windows; Tag chips and Tag Marks; the
+  Bench and Guests lines, the "N more" pills over the list's edges and Open
+  Places; the Settled group's header and "Show N more"; the Topics/Sessions
+  switch; the drag labels "⇄ Trade" and "lands here"; the Agents heading and
+  the empty states. The symbols beside that text grow with it: card and row
+  icons, chevrons, and the dots of Row marks and Agent marks.
+- The fixed heights and widths in the Sidebar that hold text: the corner of a
+  card, the "N more…" button, the Bench and Guests lines, the edge pills, Open
+  Places, the Settled header and "Show N more", and the least height of the
+  Sessions and Agents sections. The Bench works the same at every size: it
+  scrolls alone under the cards In Play, and when it shows, the card of the
+  Location stays where it was, or moves down only by the height of the "more
+  above" pill, which grows with the size.
 - The Sidebar's width. Its resize bounds of 180 to 420 points and its default
   width of 260 grow by the factor. A width you dragged stays as you dragged it,
   and is pulled inside the bounds only when it falls outside them.
