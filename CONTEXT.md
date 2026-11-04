@@ -113,7 +113,7 @@ _Avoid_: Session Path, Home Session, Home Session Path
 
 **Start Fresh**:
 To bring a Dormant or Settled Topic back with one new Session for each Session it remembers, each with one shell Window. Its remembered Windows, Tabs and Agents are not created again.
-_Avoid_: start anew, reset, new Topic
+_Avoid_: start anew, reset, new Topic, fresh start (when tmux has no Session of the user's, the user chooses where to start)
 
 **Forget**:
 To remove a Topic for good, at any time, so that it can never be Reopened. Its live Sessions are killed or kept with no Topic, as in Settle, and the clean Worktrees it made can be removed with it.

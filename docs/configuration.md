@@ -140,6 +140,17 @@ the Session Path. An alias for a path that is not a Session Path does nothing.
 An entry that cannot apply appears in the Config problems banner. So does the
 removed sections. Muxify reports unknown keys and does not read legacy settings.
 
+### Start a Session
+
+Muxify starts no Session by itself. When the local tmux server has no Session
+of yours, or no server runs, Muxify opens the palette on **Start a Session**
+when it starts: the home folder first, then each Session Path and Worktree. ↩
+starts a No Topic Session in the chosen folder, named after it, as Open as
+Session does. Escape closes the palette and leaves the "No tmux Sessions" page,
+whose **Start a Session…** button opens it again. The `start_session` entry of
+[`pick_lists`](#pick-lists) sets which rows it lists; the home folder row always
+shows. A Remote Environment still creates `main` there.
+
 ## Position of new and returning Topics
 
 ```yaml
@@ -1284,9 +1295,11 @@ pick_lists:
 | `worktree_start` | Add a Session › New Worktree from, and New Worktree's start | `command` |
 | `new_worktree` | New Worktree, the checkout it starts from | `session-path`, `worktree` |
 | `remove_worktree` | Remove Worktree | `muxify-worktree` |
+| `start_session` | [Start a Session](#start-a-session), when tmux has no Session of yours | `session-path`, `worktree` |
 
 A pick list without an entry lists every kind, with the default `tiebreak`. The
-rows that a pick list always shows, such as New Topic in Move to…, ignore `show`.
+rows that a pick list always shows, such as New Topic in Move to… or the home
+folder in Start a Session, ignore `show`.
 These problems apply to one entry: a name that is not in the table, a key other
 than `show` and `tiebreak`, an empty `show`, or a kind that the pick list does
 not have. Muxify shows the problem, and that pick list keeps every kind and the

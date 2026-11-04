@@ -221,6 +221,27 @@ struct PaletteCatalog {
                                 query: FuzzyQuery(query), rules: rules)
     }
 
+    /// Start a Session…: each Session Path and Worktree, and the home folder. A row starts a No Topic Session in its
+    /// folder, named after it, as Open as Session does. The home folder row ignores `show`: it leads on an empty query,
+    /// so ↩ starts there, and follows the matches of a query.
+    func startSessionList(query: String, rules: PickRules) -> PickList<PaletteItem> {
+        let running = Dictionary(windows.map { ($0.sessionName, "session:\($0.sessionID)") }, uniquingKeysWith: { first, _ in first })
+        var names: Set<String> = []
+        let paths = sessionPaths.flatMap(SessionChoice.choices).filter { names.insert($0.name).inserted }
+        let home = folders.folder(homeDirectory)
+        let homeName = SessionPath.named(at: home, in: sessionPaths).name
+        let homeRow = PickCandidate(
+            id: "home-folder", kind: .sessionPath, symbol: "□", title: "Home Folder",
+            fields: [.typeWord("folder"), .detail("~")], trailing: "↩ open", lastVisit: visits.last(.directory(home.real)), unopened: true,
+            pick: .available(PaletteItem(ref: .sessionPath(OpenDirectory(directory: home, name: homeName)), path: home.path)),
+            paste: home.path)
+        let homeSection = PickSectionInput(id: "home", rule: .fixed, candidates: [homeRow])
+        let pathSection = PickSectionInput(id: "session-paths", rule: .ranked(showsWhenEmpty: true),
+                                           candidates: paths.map { pathCandidate($0, shadowedBy: running[$0.name]) })
+        let query = FuzzyQuery(query)
+        return FuzzyRanker.list(query.isEmpty ? [homeSection, pathSection] : [pathSection, homeSection], query: query, rules: rules)
+    }
+
     func destinationList(_ source: TmuxWindow, topic: String?, query: String, rules: PickRules) -> PickList<PaletteItem> {
         var seen: Set<String> = []
         let open = openTopicIDs

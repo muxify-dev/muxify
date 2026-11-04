@@ -349,6 +349,7 @@ final class PaletteCatalogTests: XCTestCase {
                 assertShowsOnlyItsKinds(list) { catalog.destinationList(windows[2], topic: "a", query: "", rules: $0) }
                 assertShowsOnlyItsKinds(list) { catalog.destinationList(windows[0], topic: nil, query: "", rules: $0) }
             // CommandPalette builds these from the WorkspaceStore: testEachPaletteActionList… checks them.
+            case .startSession: assertShowsOnlyItsKinds(list) { catalog.startSessionList(query: "", rules: $0) }
             case .tags, .worktreeStart, .newWorktree, .removeWorktree: break
             }
         }
@@ -383,6 +384,31 @@ final class PaletteCatalogTests: XCTestCase {
             XCTAssertFalse(built.rows.isEmpty, "\(list) has no rows to check")
             XCTAssertEqual(narrowed.palette.flowResults(flow), built, "\(list) makes a ranked row of a kind outside \(list.kinds)")
         }
+    }
+
+    func testStartSessionListsTheHomeFolderFirstThenEachSessionPathAndWorktree() {
+        let forge = SessionPath(path: "/work/forge", name: "forge",
+                                layout: .bareRepository([Worktree(path: "/work/forge/main", branch: "main"),
+                                                         Worktree(path: "/work/trees/forge-fix", branch: "fix")]))
+        let catalog = catalog(records: [], windows: [], sessionPaths: [forge, notes])
+        let list = catalog.startSessionList(query: "", rules: .standard)
+        XCTAssertEqual(list.rows.first?.id, "home-folder", "↩ on an empty query starts in the home folder")
+        XCTAssertEqual(Set(ids(list).dropFirst()), ["session-path:/work/forge/main", "session-path:/work/trees/forge-fix", "session-path:/work/notes"])
+        func target(_ id: String, in list: PickList<PaletteItem>) -> (path: String, name: String)? {
+            guard case .sessionPath(let target)? = list.rows.first(where: { $0.id == id })?.pick.payload?.ref else { return nil }
+            return (target.directory.path, target.name)
+        }
+        XCTAssertEqual(target("home-folder", in: list)?.path, "/home")
+        XCTAssertEqual(target("home-folder", in: list)?.name, "home", "named after its folder")
+        XCTAssertEqual(target("session-path:/work/notes", in: list)?.name, "notes", "the same start as Open as Session")
+        XCTAssertEqual(target("session-path:/work/trees/forge-fix", in: list)?.name, "forge/forge-fix")
+
+        XCTAssertEqual(ids(catalog.startSessionList(query: "notes", rules: .standard)), ["session-path:/work/notes", "home-folder"],
+                       "a query's match comes before the home folder, so ↩ starts the match")
+        let folders = catalog.startSessionList(query: "", rules: PickRules(show: [.sessionPath]))
+        XCTAssertEqual(ids(folders).first, "home-folder")
+        XCTAssertEqual(Set(ids(folders)), ["home-folder", "session-path:/work/forge/main", "session-path:/work/notes"],
+                       "show leaves out the Worktrees, never the home folder")
     }
 
     func testARemoteAppWindowHasNoTopicsSource() {

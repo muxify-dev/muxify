@@ -32,6 +32,9 @@ public enum ActionList: String, CaseIterable {
     case newWorktree = "new_worktree"
     /// Remove Worktree: the Muxify Worktree it removes.
     case removeWorktree = "remove_worktree"
+    /// Start a Session…: the folder of the first Session when the server has none of the user's. Its home folder row is
+    /// fixed, so `show` never hides it.
+    case startSession = "start_session"
 
     /// The kinds its ranked rows can be: `show` may name only these.
     public var kinds: Set<RowKind> {
@@ -43,6 +46,7 @@ public enum ActionList: String, CaseIterable {
         case .worktreeStart: [.command]
         case .newWorktree: [.sessionPath, .worktree]
         case .removeWorktree: [.muxifyWorktree]
+        case .startSession: [.sessionPath, .worktree]
         }
     }
 }

@@ -37,6 +37,9 @@ public struct Router: Equatable {
         case enterRead(WindowID)
         case visit(Location)
         case requestTopic(TopicGroupID)
+        /// The server has no Session of the user's: the user chooses the folder of the first one. Muxify starts none
+        /// by itself.
+        case chooseWhereToStart
     }
 
     public struct Facts {
@@ -248,7 +251,7 @@ public struct Router: Equatable {
         let remembered = facts.rememberedWindow.flatMap { id in
             facts.windows.contains(where: { $0.id == id.rawValue }) ? id : nil
         }
-        guard let target = remembered ?? facts.initialWindow else { return [.attach(nil, intent: makeCommand(nil, readsOnArrival: false))] }
+        guard let target = remembered ?? facts.initialWindow else { return [.chooseWhereToStart] }
         if case .request = intent {
             setLocation(.window(target), facts)
             return [.visit(.window(target)), .attach(target, intent: makeCommand(target, readsOnArrival: false))]

@@ -145,9 +145,14 @@ final class CommandPaletteConfigTests: XCTestCase {
             tiebreak: [visit, length]
           move_session:
             tiebreak: activity
+          start_session:
+            show: [worktree]
+            tiebreak: [visit]
         """)
         XCTAssertEqual(config.problems, [])
         XCTAssertEqual(config.rules(for: .addSession), PickRules(show: [.sessionPath], tiebreak: [.visit, .length]))
+        XCTAssertEqual(config.rules(for: .startSession), PickRules(show: [.worktree], tiebreak: [.visit]))
+        XCTAssertEqual(ActionList.startSession.kinds, [.sessionPath, .worktree])
         XCTAssertEqual(config.rules(for: .moveSession), PickRules(tiebreak: [.activity]))
         XCTAssertEqual(config.rules(for: .move), .standard, "a list with no entry keeps every kind and the standard tiebreak")
         XCTAssertEqual(try load("").rules(for: .addSession), .standard)
@@ -169,16 +174,19 @@ final class CommandPaletteConfigTests: XCTestCase {
             tiebreak: [frecency]
           worktree_start:
             show: [command]
+          start_session:
+            show: [session]
         """)
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 2, message: "unknown pick list \"add_sesion\": expected add_session, move, move_session, "
-                          + "tags, worktree_start, new_worktree or remove_worktree"),
+                          + "tags, worktree_start, new_worktree, remove_worktree or start_session"),
             ConfigProblem(path: root, line: 5, message: "pick_lists.add_session.show: expected session, topic-session, session-path or worktree"),
             ConfigProblem(path: root, line: 8, message: "unknown key \"pick_lists.move.order\""),
             ConfigProblem(path: root, line: 10, message: "pick_lists.tags.show: expected a list of tag"),
             ConfigProblem(path: root, line: 12, message: "pick_lists.move_session.tiebreak: expected open, running, visit, activity or length"),
+            ConfigProblem(path: root, line: 16, message: "pick_lists.start_session.show: expected session-path or worktree"),
         ])
-        for list in [ActionList.addSession, .move, .tags, .moveSession] {
+        for list in [ActionList.addSession, .move, .tags, .moveSession, .startSession] {
             XCTAssertEqual(config.rules(for: list), .standard, "\(list)")
         }
         XCTAssertEqual(config.rules(for: .worktreeStart), PickRules(show: [.command]), "a good entry applies beside bad ones")

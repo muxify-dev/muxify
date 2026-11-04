@@ -514,6 +514,14 @@ final class WorkspaceStore {
         refreshSessionPaths()
     }
 
+    /// Start a Session…: the folders where the first Session can start, when the server has no Session of the user's.
+    /// Muxify starts none by itself; a row starts a No Topic Session there, as Open as Session does.
+    func presentStartSession(keepingHistory: Bool = false) {
+        guard !changingTopic, !isRemote else { return }
+        palette.begin(.startSession, keepingHistory: keepingHistory)
+        refreshSessionPaths()
+    }
+
     func renameTopic(_ id: String, to title: String) {
         perform(EnvironmentRequest(.rename(title: title), target: .topic(.id(id))))
     }
@@ -1599,10 +1607,15 @@ final class WorkspaceStore {
         }
     }
 
-    /// Starts our tmux client on `target`, or a fresh session if there is none.
+    /// Starts our tmux client on `target`. With none, a Remote Environment's connection makes `main`; on this Mac
+    /// the user chooses where the first Session starts.
     private func attach(to target: Target?, intent: Router.IntentID, createSessionIfNeeded: Bool = true) {
-        let args = target.map { ["-u", "attach-session", "-t", $0.tmuxTarget] }
-            ?? ["-u", "new-session", "-A", "-s", "main", "-c", NSHomeDirectory()]
+        guard let args = target.map({ ["-u", "attach-session", "-t", $0.tmuxTarget] })
+            ?? (isRemote ? ["-u", "new-session", "-A", "-s", "main", "-c", NSHomeDirectory()] : nil) else {
+            route(.commandFinished(intent, .failure, lastStartedRead: lastStartedRead))
+            if !palette.isOpen { presentStartSession() }
+            return
+        }
         guard let connection, let command = try? connection.terminalCommand(args, target: target?.tmuxTarget, createSessionIfNeeded: createSessionIfNeeded),
               let view = TerminalSurfaceView(command: command, workingDirectory: isRemote ? nil : target?.path, delegate: self)
         else {
@@ -1633,8 +1646,11 @@ final class WorkspaceStore {
 
     func reattach() {
         if isRemote { reconnectAttempt = 0; transition(to: activeEnvironment); return }
-        let target = (selectedWindow ?? Self.initialWindow(in: windows)).map(Target.init)
-        route(.attach(target.flatMap { WindowID(rawValue: $0.windowID) }), target: target)
+        guard let target = (selectedWindow ?? Self.initialWindow(in: windows)).map(Target.init) else {
+            presentStartSession()
+            return
+        }
+        route(.attach(WindowID(rawValue: target.windowID)), target: target)
     }
 
     func select(_ window: TmuxWindow, onFailure: ((Error) -> Void)? = nil) {
@@ -1860,6 +1876,10 @@ final class WorkspaceStore {
                 readVisits.enter(windowID: id.rawValue)
             case .requestTopic(let group):
                 goToTopic(group)
+            case .chooseWhereToStart:
+                // A Remote Environment's connection still makes `main` there.
+                if isRemote { route(.attach(nil), reconnectIfNeeded: reconnectIfNeeded) }
+                else if !palette.isOpen { presentStartSession() }
             case .switchClient(let id, let intent):
                 if let destination = windows.first(where: { $0.id == id.rawValue }).map(Target.init)
                     ?? target.flatMap({ $0.windowID == id.rawValue ? $0 : nil }) {
