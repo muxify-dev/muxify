@@ -165,8 +165,25 @@ final class ConfigTests: XCTestCase {
         for (action, spellings) in expected {
             XCTAssertEqual(config.keybinds.triggers[action] ?? [], spellings.map(trigger), action.rawValue)
         }
-        XCTAssertNil(config.keybinds.action(for: trigger("alt+cmd+t"), focus: nil), "the old Maximize Terminal default is still bound")
+        XCTAssertEqual(config.keybinds.action(for: trigger("alt+cmd+t"), focus: nil), .toggleSidebarMode,
+                       "the old Maximize Terminal default now switches the Sidebar mode")
         XCTAssertEqual(config.problems, [])
+    }
+
+    func testSidebarModeSwitchDefaultsToOptionCommandTAndCanBeRemappedOrDisabled() throws {
+        let defaults = try load("")
+        XCTAssertEqual(defaults.keybinds.firstTrigger(for: .toggleSidebarMode), trigger("alt+cmd+t"))
+        XCTAssertEqual(defaults.keybinds.action(for: trigger("alt+cmd+t"), focus: .terminal), .toggleSidebarMode)
+        XCTAssertEqual(defaults.keybinds.action(for: trigger("alt+cmd+t"), focus: .browser), .toggleSidebarMode)
+        XCTAssertTrue(Config.template.contains("#   toggle_sidebar_mode: alt+cmd+t"))
+        let remapped = try load("keybindings:\n  toggle_sidebar_mode: [ctrl+cmd+t, shift+cmd+y]")
+        XCTAssertEqual(remapped.keybinds.firstTrigger(for: .toggleSidebarMode), trigger("ctrl+cmd+t"))
+        XCTAssertEqual(remapped.keybinds.action(for: trigger("shift+cmd+y"), focus: nil), .toggleSidebarMode)
+        XCTAssertNil(remapped.keybinds.action(for: trigger("alt+cmd+t"), focus: nil))
+        XCTAssertEqual(remapped.problems, [])
+        let disabled = try load("keybindings:\n  toggle_sidebar_mode: []")
+        XCTAssertNil(disabled.keybinds.firstTrigger(for: .toggleSidebarMode))
+        XCTAssertNil(disabled.keybinds.action(for: trigger("alt+cmd+t"), focus: nil))
     }
 
     func testSettleCanBeBoundAndClearedAndTheRemovedActionsAreUnknown() throws {

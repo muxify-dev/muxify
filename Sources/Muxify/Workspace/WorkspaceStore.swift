@@ -2393,6 +2393,29 @@ final class WorkspaceStore {
         sidebarVisible.toggle()
     }
 
+    /// Why the shown Sidebar mode cannot change, or nil when it can. Reads only the Config, as `shownSidebarMode` does.
+    var sidebarModeSwitchRefusal: String? {
+        if isRemote { return "A Remote App Window shows only Sessions" }
+        let sidebar = configStore.config.sidebar
+        if !sidebar.topics { return "sidebar.topics is off in the Config" }
+        if !sidebar.sessions { return "sidebar.sessions is off in the Config" }
+        return nil
+    }
+
+    /// "Switch to Sessions" while Topics shows, "Switch to Topics" while Sessions shows.
+    var sidebarModeSwitchTitle: String { "Switch to " + (shownSidebarMode == .topics ? SidebarMode.sessions : .topics).rawValue }
+
+    /// Does what the other header button does, and shows a hidden Sidebar in the other mode. When only one mode can
+    /// show, an Explanation Pill says why.
+    func toggleSidebarMode() {
+        if let refusal = sidebarModeSwitchRefusal {
+            pills.show(Pill(.explanation, title: "Not switched", value: refusal))
+            return
+        }
+        sidebarMode = shownSidebarMode == .topics ? .sessions : .topics
+        if !sidebarShown { toggleSidebar() }
+    }
+
     func canToggle(_ side: PanelLayout.Side) -> Bool {
         currentBrowser != nil && panelLayout.canToggle(side)
     }
@@ -2611,6 +2634,7 @@ final class WorkspaceStore {
         case .markUnread: changeRead(.unread, in: currentReadTarget)
         case .markAllRead: changeRead(.read, in: .environment)
         case .toggleSidebar: toggleSidebar()
+        case .toggleSidebarMode: toggleSidebarMode()
         case .toggleBench: toggleBench()
         case .chooseInPlay: presentChooseInPlay()
         case .replaceFromBench: presentReplaceFromBench()

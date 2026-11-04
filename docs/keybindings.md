@@ -35,6 +35,7 @@ listed below.
 | `move_topic_down` | ⌥⌘↓ | Move the card of the Active Topic, or of the current Locked Session, one card down among the cards with its Pin, or into the next In Play section as for Move Topic Up. It does nothing at the bottom, for No Topic, for a Settled Topic, and in Sessions mode |
 | `toggle_pin_topic` | Unbound | Pin the Active Topic, or Unpin it while it is Pinned. It does nothing for a Settled Topic |
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
+| `toggle_sidebar_mode` | ⌥⌘T | Switch the Sidebar between Topics and Sessions, as the other Topics/Sessions button does. A hidden Sidebar shows in the other mode. While only one mode can show (`sidebar.topics` or `sidebar.sessions` is off, or a Remote App Window, which shows only Sessions), it changes nothing and an Explanation Pill says why. The Command and the View menu item are "Switch to Sessions" / "Switch to Topics" |
 | `toggle_bench` | ⇧⌘S | Show or hide the Bench, the Topics after the ones [In Play](configuration.md#topics-in-play). It does nothing while the Topics list has no Bench line |
 | `choose_in_play` | ⇧⌥⌘S | Open Choose In Play: check the cards to put [In Play](configuration.md#topics-in-play), then choose the card for each place. It does nothing without `topics.in_play` |
 | `replace_from_bench` | ⌥⌘S | Open Replace from Bench for the card you are on while it is [In Play](configuration.md#topics-in-play). Choose a Benched card. It takes the place, and your card goes to the end of the Bench. It does nothing without `topics.in_play` |
@@ -210,6 +211,7 @@ keybindings:
   move_topic_down: alt+cmd+down
   toggle_pin_topic: []
   toggle_sidebar: [cmd+s, ctrl+cmd+s]
+  toggle_sidebar_mode: alt+cmd+t
   toggle_bench: shift+cmd+s
   choose_in_play: shift+alt+cmd+s
   replace_from_bench: alt+cmd+s
