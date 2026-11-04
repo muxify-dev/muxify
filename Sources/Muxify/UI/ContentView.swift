@@ -128,7 +128,7 @@ struct ContentView: View {
 
     private var interfaceFontSize: InterfaceFontSize { store.config.interfaceFontSize }
 
-    private var headerHeight: CGFloat { CGFloat(store.config.headerHeight) }
+    private var headerHeight: CGFloat { TitlebarMetrics.headerHeight(store.config) }
 
     private var shownSidebarWidth: Double {
         store.sidebarShown ? SidebarWidth.shown(dragged: sidebarWidth, size: interfaceFontSize) : 0
@@ -147,6 +147,7 @@ private struct HeaderBar: View {
     /// Where the Terminal and Browser start, beside the sidebar.
     let panelsLeading: CGFloat
     private let spacing: CGFloat = 2
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         HStack(spacing: spacing) {
@@ -154,7 +155,7 @@ private struct HeaderBar: View {
                !store.showsEmptyPage {
                 let overSidebar = max(0, panelsLeading - TitlebarMetrics.trafficLightsWidth - spacing)
                 Text(window.sessionName)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(fontSize.font(13, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     // Keep the full name whenever it fits. The Window list can collapse first;
@@ -179,11 +180,15 @@ private struct HeaderBar: View {
                                 help: help(store.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View", .toggleGitView))
                     .id("\(window.sourceID):\(window.path)")
                     .padding(.trailing, 8)
+                    // Before the Window list and the Session name give way, the branch keeps its whole width up to
+                    // its maximum; it is cut only when the header has no other room left.
+                    .layoutPriority(2)
             }
             EnvironmentSelector(environments: store.remoteEnvironments, activeEnvironment: store.activeEnvironment,
                                 isConnected: store.isConnected, hasConnectionError: store.terminalMessage != nil,
                                 status: store.environmentStatus, onSelect: store.selectEnvironment)
                 .accessibilityIdentifier("header-environment-selector")
+                .layoutPriority(2)
             let layout = store.panelLayout
             TitlebarButton(
                 systemName: layout.maximized == nil ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left",
@@ -229,6 +234,8 @@ private struct HeaderBar: View {
                 .frame(height: 1)
         }
         .chrome(theme: store.theme, material: .titlebar)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("header-bar")
     }
 
     private func help(_ title: String, _ action: ConfigAction) -> String {
@@ -487,6 +494,12 @@ private struct TerminalHostRepresentable: NSViewRepresentable {
 enum TitlebarMetrics {
     /// Room to leave on the leading edge for the traffic lights.
     static let trafficLightsWidth: CGFloat = 78
+
+    /// The header's height: `ui.header_height`, a length at size 12, or its default, times the factor of the Interface
+    /// font size (ADR 0067), so the header's controls grow with their text and never clip.
+    static func headerHeight(_ config: Config) -> CGFloat {
+        config.interfaceFontSize(CGFloat(config.headerHeight))
+    }
 }
 
 /// What a side's toggle shows besides on and off while the Window is Maximized.
@@ -507,6 +520,7 @@ struct TitlebarButton<Icon: View>: View {
 
     @State private var hovering = false
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.interfaceFontSize) private var fontSize
 
     init(help: String, isOn: Bool = false, mark: TitlebarButtonMark = .none, action: @escaping () -> Void,
          @ViewBuilder icon: @escaping () -> Icon) {
@@ -520,10 +534,11 @@ struct TitlebarButton<Icon: View>: View {
     var body: some View {
         Button(action: action) {
             icon()
-                .font(.system(size: 13, weight: .regular))
+                .font(fontSize.font(13, weight: .regular))
                 .foregroundStyle(isOn || mark == .maximized ? Color.accentColor : Color.secondary)
                 .opacity(opacity)
-                .frame(width: 28, height: 24)
+                // The button holds its symbol, so it grows with it.
+                .frame(width: fontSize(28), height: fontSize(24))
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(background)

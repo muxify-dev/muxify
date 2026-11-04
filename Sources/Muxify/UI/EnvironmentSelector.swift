@@ -10,6 +10,7 @@ struct EnvironmentSelector: View {
     let hasConnectionError: Bool
     let status: String
     let onSelect: (String?) -> Void
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         Menu {
@@ -28,7 +29,8 @@ struct EnvironmentSelector: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .fixedSize(horizontal: true, vertical: false)
+        // The badge's whole name up to the maximum; cut only when the header has no other room left.
+        .widthUpTo(fontSize(200))
         .accessibilityLabel("Environment")
         .accessibilityValue(activeEnvironment == nil ? "Local" : status)
         .help(status)

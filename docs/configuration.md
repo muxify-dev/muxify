@@ -350,10 +350,13 @@ ui:
       wrap: true
 ```
 
-The height is in macOS points, defaults to 30, and must be a finite number of
-at least 24 so the buttons fit. Changes apply live. Removing the setting restores
-the default; invalid values use the default and appear in the Config problems
-banner. A YAML syntax error keeps the last good Config.
+The height is in macOS points at the Interface font size 12, defaults to 30,
+and must be a finite number of at least 24 so the buttons fit. It grows with
+`ui.font_size`, as the header's text and buttons do: the header is
+`header_height` times `font_size / 12`, so the default is 45 points at 18 (see
+[Interface font size](#interface-font-size)). Changes apply live. Removing the
+setting restores the default; invalid values use the default and appear in the
+Config problems banner. A YAML syntax error keeps the last good Config.
 
 `status_line.enabled` replaces tmux's status-line navigation with the current
 Session name and its Window selector, inline
@@ -595,6 +598,15 @@ These follow the size:
 - The Sidebar's width. Its resize bounds of 180 to 420 points and its default
   width of 260 grow by the factor. A width you dragged stays as you dragged it,
   and is pulled inside the bounds only when it falls outside them.
+- The App Window header: the Session name, the Window selector inline and as a
+  dropdown, the Git button, the Environment badge and the titlebar buttons, with
+  their symbols. Their heights and the most width the Window menu, the Git
+  button and the Environment badge take grow by the factor. While the header has
+  room, each shows its whole text up to that width. In a narrow App Window the
+  Window list and then the Session name give way first, and only then are the
+  branch and the Environment's name cut, so no control is pushed off the header.
+- The header's height. `ui.header_height` is a length at 12, so the header is
+  that height, or the default 30, times the factor (see [Header](#header)).
 
 The Terminal and the Browser's pages are not changed: set the Terminal's fonts
 in the Ghostty config, and a page's zoom in the Browser. The Git View's code

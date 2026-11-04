@@ -66,6 +66,22 @@ final class InterfaceFontSizeTests: XCTestCase {
         }
     }
 
+    func testTheHeaderIsUIHeaderHeightOrItsDefaultTimesTheFactor() throws {
+        func height(_ text: String) throws -> CGFloat {
+            TitlebarMetrics.headerHeight(try Config.load(path: "/cfg/muxify/config.yaml") { _ in text }.get())
+        }
+        XCTAssertEqual(try height(""), 30, "the default at 12 is the header as it was designed")
+        XCTAssertEqual(try height("ui:\n  font_size: 12"), 30)
+        XCTAssertEqual(try height("ui:\n  font_size: 18"), 45, "the default 30 at 18")
+        XCTAssertEqual(try height("ui:\n  header_height: 26"), 26, "ui.header_height is a length at 12")
+        XCTAssertEqual(try height("ui:\n  header_height: 26\n  font_size: 18"), 39)
+        XCTAssertEqual(try height("ui:\n  header_height: 24\n  font_size: 9"), 18, "the least height also scales")
+        // The rule for ui.header_height is unchanged: a value under 24 is a problem, and the default 30 scales.
+        let invalid = try Config.load(path: "/cfg/muxify/config.yaml") { _ in "ui:\n  header_height: 20\n  font_size: 18" }.get()
+        XCTAssertEqual(invalid.problems.map(\.message), ["ui.header_height: expected a finite number of at least 24 points"])
+        XCTAssertEqual(TitlebarMetrics.headerHeight(invalid), 45)
+    }
+
     func testADraggedWidthOutsideTheScaledBoundsIsClampedToThem() {
         XCTAssertEqual(SidebarWidth.shown(dragged: 200, size: InterfaceFontSize(18)), 270, "below 180 × 1.5")
         XCTAssertEqual(SidebarWidth.shown(dragged: 400, size: InterfaceFontSize(9)), 315, "above 420 × 0.75")

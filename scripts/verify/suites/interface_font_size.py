@@ -6,12 +6,17 @@ height less its padding.
 The Bench's geometry follows the edge pill, whose band grows with the size, so the Bench's rules also hold at 18: a
 Benched card stands directly below the Bench line or the "more above" pill, and neither covers it (ADR 0063).
 
+The App Window header's height, `ui.header_height`, is a length at 12 that grows by the same factor, so its buttons,
+which grow too, still fit in it. A maximum width that grows, such as the Git button's, gives way in a header without
+room for it, so no button leaves the App Window.
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.interface_font_size
 """
 
 import math
 import re
+import subprocess
 import unittest
 
 from scripts.verify.sandbox import Sandbox, frame
@@ -43,11 +48,22 @@ ROUNDING = 1
 # The Sidebar's default width at 12, when the user never dragged it: `SidebarWidth.designDefault`.
 SIDEBAR_WIDTH = 260
 WINDOW_NAME = 'font-size-window'
+HEADER = 'header-bar'
+# The header's buttons, which all hold their text or symbol in a fixed height: 24 points at 12 for the Git button, the
+# Window list's buttons and the titlebar buttons (`HeaderTextButton` in Sources/Muxify/UI/HeaderGitButton.swift and
+# `TitlebarButton` in Sources/Muxify/UI/ContentView.swift), and 22 for the Environment badge.
+HEADER_BUTTONS = ['toggle-git-view', 'header-environment-selector', 'toggle-maximize', 'toggle-sidebar',
+                  'toggle-terminal', 'toggle-browser']
+# `HeaderTextButton` has 8 points on each side of its text.
+HEADER_BUTTON_SIDES = 8 + 8
 # Pane rows with a Summary, and Tag chips on their own line. After the part a check writes, so that part keeps its
 # line numbers.
 FIXTURE = ("sidebar:\n  panes: true\n  tag_placement: line\n  formats:\n    pane:\n      summary: 'Pane Summary'\n"
            'topics:\n  tags:\n    work: {color: blue}\n')
 IN_PLAY = '  in_play: 1\n'
+LAUNCH_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-agentsVisible', 'YES', '-sidebarWorkView', 'Topics']
+# The Git button's maximum width at 12, with its 16 points of padding (`HeaderGitButton`).
+GIT_BUTTON_MAX = 180 + HEADER_BUTTON_SIDES
 
 
 def height(row):
@@ -57,6 +73,11 @@ def height(row):
 
 def width(row):
     return float(re.findall(r'-?[\d.]+', row['accessibilityFrame'])[2])
+
+
+def bounds(row):
+    """(x, y, width, height) of a dump row's accessibilityFrame, in screen points."""
+    return tuple(map(float, re.findall(r'-?[\d.]+', row['accessibilityFrame'])))
 
 
 class InterfaceFontSize(unittest.TestCase):
@@ -84,7 +105,7 @@ class InterfaceFontSize(unittest.TestCase):
         cls.panes = s.tmux('list-panes', '-t', cls.windows['fs-panes'][0], '-F', '#{pane_id}').split()
         cls.panes.append(s.tmux('split-window', '-d', '-t', cls.windows['fs-panes'][0], '-P', '-F', '#{pane_id}',
                                 '-c', str(cls.project), SHELL))
-        s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-agentsVisible', 'YES', '-sidebarWorkView', 'Topics'])
+        s.launch(LAUNCH_ARGS)
         s.wait_rows(lambda rs: all(s.has('topic-' + topic_id, rs) for topic_id in cls.windows), 'the Topic cards do not show')
 
     @classmethod
@@ -286,6 +307,78 @@ class InterfaceFontSize(unittest.TestCase):
         if not self.s.has('topics-more-above', rs) or not self.s.has(key, rs):
             return math.inf
         return self.top(key, rs) - (frame(self.s.row('topics-more-above', rs))[0] - SPACING)
+
+    def test_at_18_the_header_and_its_session_name_grow_by_half_and_its_buttons_fit_in_it(self):
+        self.addCleanup(self.write_config, '')
+        window = self.windows['fs-size'][0]
+        selector = 'header-window-' + window
+        buttons = [selector] + HEADER_BUTTONS
+        keys = [HEADER, 'header-session-name'] + buttons
+        self.s.show(window)
+        frames = {}
+        for size in [12, 18]:
+            _, rs = self.heights(keys, size, 'the header does not show the Session name, its Window and its buttons at %s')
+            frames[size] = {key: bounds(self.s.row(key, rs)) for key in keys}
+            self.assertEqual(self.s.row('header-session-name', rs).get('accessibilityValue'), 'fs-size')
+            self.assertFalse(self.s.has('header-window-menu', rs),
+                             'the Window list became a dropdown at %s, though its one Window fits inline' % size)
+            self.assertEqual(self.s.row(selector, rs).get('accessibilityValue'), 'selected')
+            app_window = bounds(next(row for row in rs if row.get('accessibilityRole') == 'AXWindow'))
+            header_x, header_y, header_width, header_height = frames[size][HEADER]
+            for key in ['header-session-name'] + buttons:
+                x, y, w, h = frames[size][key]
+                self.assertTrue(header_y - ROUNDING <= y and y + h <= header_y + header_height + ROUNDING,
+                                '%s, %.0f points tall, does not fit in the %.0f-point header at %s'
+                                % (key, h, header_height, size))
+                self.assertTrue(app_window[0] - ROUNDING <= x and x + w <= app_window[0] + app_window[2] + ROUNDING,
+                                '%s is pushed off the App Window at %s: it is at %.0f to %.0f, the App Window at %.0f '
+                                'to %.0f' % (key, size, x, x + w, app_window[0], app_window[0] + app_window[2]))
+        small, large = frames[12], frames[18]
+        # ui.header_height is a length at 12: its default, 30, is 45 at 18.
+        self.assertAlmostEqual(large[HEADER][3], 1.5 * small[HEADER][3], delta=ROUNDING,
+                               msg='the header is %.0f points tall at 12 and %.0f at 18' % (small[HEADER][3], large[HEADER][3]))
+        self.assert_text_grows_by_half('header-session-name', 0, small['header-session-name'][3],
+                                       large['header-session-name'][3])
+        for key in buttons:
+            self.assert_text_grows_by_half(key, 0, small[key][3], large[key][3])
+        # The Window's title is monospaced and never cut inline, so the whole title is 1.5 times as wide at 18.
+        self.assert_text_grows_by_half(selector, HEADER_BUTTON_SIDES, small[selector][2], large[selector][2], side='wide')
+
+    def test_at_24_beside_the_widest_sidebar_a_long_branch_gives_way_and_no_header_button_leaves_the_app_window(self):
+        s = self.s
+        repo = s.root/'projects/fs-branch'
+        repo.mkdir(parents=True, exist_ok=True)
+        branch = 'fs-branch/' + 'long-' * 30 + 'end'
+        for args in [['init', '-q', '-b', branch], ['-c', 'user.name=Verify', '-c', 'user.email=verify@example.test',
+                                                    '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'x']]:
+            subprocess.run(['git', '-C', str(repo), *args], env=s.env, check=True, capture_output=True)
+        sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'fs-branch', '-c', str(repo), SHELL)
+        self.addCleanup(s.tmux_ok, 'kill-session', '-t', sid)
+        window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
+        self.addCleanup(self.write_config, '')
+        # The Sidebar as wide as a drag can make it, through the width a drag stores. At 24 the header beside it has
+        # less room than its controls take with the Git button at its maximum, so that maximum must give way.
+        self.addCleanup(s.restart_app, LAUNCH_ARGS)
+        s.restart_app(LAUNCH_ARGS + ['-sidebarWidth', '10000'])
+        self.write_config('ui:\n  font_size: 24\n')
+        s.show(window)
+        # The Sidebar's widest bound, 420 at 12 (`SidebarWidth.designBounds`), at 24.
+        widest = 420 * 2
+        rs = s.wait_rows(lambda rs: s.row('toggle-git-view', rs).get('accessibilityLabel') == branch
+                         and abs(width(s.row('sidebar-panel', rs)) - widest) < 1
+                         and abs(height(s.row(HEADER, rs)) - 60) < 1,
+                         'the header does not show the branch beside a %d-point Sidebar at ui.font_size: 24' % widest)
+        rs = self.settled([HEADER, 'toggle-git-view'] + HEADER_BUTTONS, 'the header does not settle at 24')
+        app_window = bounds(next(row for row in rs if row.get('accessibilityRole') == 'AXWindow'))
+        for key in ['header-session-name'] + HEADER_BUTTONS:
+            x, _, w, _ = bounds(s.row(key, rs))
+            self.assertTrue(app_window[0] - ROUNDING <= x and x + w <= app_window[0] + app_window[2] + ROUNDING,
+                            '%s is pushed off the App Window: it is at %.0f to %.0f, the App Window at %.0f to %.0f'
+                            % (key, x, x + w, app_window[0], app_window[0] + app_window[2]))
+        git = width(s.row('toggle-git-view', rs))
+        self.assertLess(git, 2 * GIT_BUTTON_MAX - ROUNDING,
+                        'the Git button keeps its whole maximum of %d points in a header without room for it, so the '
+                        'check tests nothing: it is %.0f points wide' % (2 * GIT_BUTTON_MAX, git))
 
     def test_ui_sidebar_font_size_is_gone_with_a_problem_and_changes_no_size(self):
         self.addCleanup(self.write_config, '')

@@ -157,7 +157,8 @@ public struct Config: Equatable {
     }
 
     public var keybinds = Keybinds.defaults
-    /// Height of the app's header in points; at least 24 to fit its buttons.
+    /// Height of the app's header in points at the Interface font size 12; at least 24 to fit its buttons. The header
+    /// shows it times the factor of `interfaceFontSize` (ADR 0067).
     public var headerHeight: Double = 30
     /// `ui.status_line`: the Session name and Window selector in the header.
     public var statusLine = StatusLine()
@@ -254,7 +255,8 @@ public struct Config: Equatable {
         #   # Terminal and the Browser's pages keep their own. From 9 to 24.
         #   # Changes apply live.
         #   font_size: 12
-        #   # Header height in points (minimum 24). Changes apply live.
+        #   # Header height in points at font_size 12 (minimum 24); it grows
+        #   # with font_size. Changes apply live.
         #   header_height: 30
         #   status_line:
         #     # Show the Session name and Window selector. Git and other controls stay visible.
