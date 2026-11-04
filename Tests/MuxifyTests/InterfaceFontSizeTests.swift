@@ -124,4 +124,33 @@ final class InterfaceFontSizeTests: XCTestCase {
         XCTAssertEqual(GitListMetrics.paneWidth(in: 400, size: size), 240, "never less than at 12")
         XCTAssertEqual(GitListMetrics.paneWidth(in: 900, size: InterfaceFontSize(24)), 450)
     }
+
+    func testAGitViewPopupIsItsDesignWidthAt12AsBeforeAndNeverWiderThanTheGitViewLessItsMargins() {
+        let size = InterfaceFontSize()
+        for design in [GitPopupMetrics.designCommitBoxWidth, GitPopupMetrics.designMenuWidth, GitPopupMetrics.designPromptWidth] {
+            for gitView in [400.0, 700, 1000, 2000] as [CGFloat] {
+                XCTAssertEqual(GitPopupMetrics.width(design, in: gitView, size: size), min(design, gitView - 48), "\(design) in \(gitView)")
+            }
+        }
+    }
+
+    func testAGitViewPopupGrowsByTheFactorWhileTheGitViewHasRoomForIt() {
+        let size = InterfaceFontSize(18)
+        XCTAssertEqual(GitPopupMetrics.width(GitPopupMetrics.designCommitBoxWidth, in: 1000, size: size), 930)
+        XCTAssertEqual(GitPopupMetrics.width(GitPopupMetrics.designMenuWidth, in: 1000, size: size), 690)
+        XCTAssertEqual(GitPopupMetrics.width(GitPopupMetrics.designPromptWidth, in: 1000, size: size), 780)
+        XCTAssertEqual(GitPopupMetrics.width(GitPopupMetrics.designCommitBoxWidth, in: 760, size: size), 712,
+                       "the Git View less its margins, so the commit box stays in the App Window")
+        XCTAssertEqual(GitPopupMetrics.width(GitPopupMetrics.designMenuWidth, in: 600, size: InterfaceFontSize(24)), 552)
+    }
+
+    func testTheCommitBoxsFileListShowsUpToFourAndAHalfRowsOfTheGrownHeight() {
+        XCTAssertEqual(GitPopupMetrics.fileRowHeight(InterfaceFontSize()), 24)
+        XCTAssertEqual(GitPopupMetrics.fileRowHeight(InterfaceFontSize(18)), 36)
+        XCTAssertEqual(GitPopupMetrics.fileListHeight(files: 2, size: InterfaceFontSize()), 48)
+        XCTAssertEqual(GitPopupMetrics.fileListHeight(files: 2, size: InterfaceFontSize(18)), 72)
+        XCTAssertEqual(GitPopupMetrics.fileListHeight(files: 9, size: InterfaceFontSize()), 108, "4.5 rows, and it scrolls")
+        XCTAssertEqual(GitPopupMetrics.fileListHeight(files: 9, size: InterfaceFontSize(18)), 162)
+        XCTAssertEqual(GitPopupMetrics.fileListHeight(files: 0, size: InterfaceFontSize(18)), 0)
+    }
 }

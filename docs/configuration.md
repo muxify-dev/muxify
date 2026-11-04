@@ -620,6 +620,20 @@ These follow the size:
   selection, and a click select the row you see at every size. The Unified and
   Split switch is a macOS control, which comes in a few sizes: it is regular up
   to 13, large up to 16, and extra large above.
+- The Git View's cards, commit box, menus and prompts: the card over a commit,
+  branch, stash, folder or comparison, with its title, body, author, hashes and
+  tags; the commit box with its summary, description, list of staged files,
+  notices, buttons and footer; a Git View menu with its title, its choices and
+  their keys; a Git View prompt with its title, field (also a hidden one),
+  suggestions and footer; the diff's notes and bars; the "Working tree clean"
+  empty state with its symbol; and the banner that says why a stage or commit
+  failed. The symbols beside that text grow with it. So do the heights that
+  hold it, such as the commit box's summary, description, file rows and footer,
+  a menu's choices, the prompt's field and the buttons, and the widths of the
+  popups: 620 points for the commit box, 460 for a menu and 520 for a prompt.
+  A popup is never wider than the Git View less 48 points, so it stays inside
+  the App Window. A menu leaves the keys with the Git View and a prompt gives
+  them to its field, at every size.
 
 The Terminal and the Browser's pages are not changed: set the Terminal's fonts
 in the Ghostty config, and a page's zoom in the Browser. The Git View's code

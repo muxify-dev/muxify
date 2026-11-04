@@ -14,6 +14,10 @@ The Git View's list rows, list headers, tabs and bars hold their text in fixed h
 List pane's width bounds grow too, so a file name keeps its room. Its keys, its scrolling to the selection and a click
 select the row that is drawn there at every size.
 
+The Git View's popups, the commit box and a Git View menu, hold their text in fixed heights and widths that grow by the
+factor too, but never past the Git View, so a popup stays in the App Window. A Git View menu leaves the keys with the
+Git View, and a Git View prompt gives them to its field, at every size.
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.interface_font_size
 """
@@ -77,6 +81,22 @@ TAB_BAR_PADDING = 8 + 8 + 2 + 2
 # A file name that fits in its row in the List pane at 12.
 LONG_NAME = 'a-long-file-name.txt'
 GIT_ROW = 'git-row-change:'
+# The Git View's width in the popup checks. A popup leaves 48 points beside it in the Git View (`GitPopupMetrics` in
+# Sources/Muxify/UI/GitPopupMetrics.swift), so at 1000 the commit box, 620 points wide at 12 and 930 at 18, and a Git
+# View menu, 460 and 690, grow by the factor.
+POPUP_GIT_VIEW_WIDTH = 1000
+STAGED_NAME = 'a-staged-file.txt'
+# The parts of the commit box that grow with their text (`GitCommitBox` in Sources/Muxify/UI/GitViewPanel.swift), each
+# with its padding that does not grow: the summary field, one line of its text; the description editor, in 124 points
+# at 12 with 10 above and 10 below it, so it is 20 points shorter than what grows (a padding of -20); the texts of a
+# staged file's row; the Commit button, 30 points high at 12; and the footer around it, 58.
+COMMIT_PARTS = {'git-commit-summary': 0, 'git-commit-description': -(10 + 10), 'git-commit-file:' + STAGED_NAME: 0,
+                'git-commit-submit': 0, 'git-commit-footer': 0}
+# The Discard menu's first choice, on the root row of Changes: 48 points high at 12, with its note.
+MENU_CHOICE = 'git-menu-choice-x'
+# The view of the Git View that has the keys: it takes them while a Git View menu shows (`GitKeyCatcher` in
+# Sources/Muxify/UI/GitViewPanel.swift).
+KEY_VIEW = 'KeyView'
 
 
 def height(row):
@@ -471,19 +491,26 @@ class InterfaceFontSize(unittest.TestCase):
             s.act('action', 'git-view', '1')
 
     def close_git_view(self):
+        # A popup takes the Git View's keys, q among them, so ⎋ closes it first.
+        if any(self.s.has(popup) for popup in ['git-commit-box', 'git-menu', 'git-prompt']):
+            self.s.act('action', 'git-view', 'escape')
         if self.s.has('git-view'):
             self.s.act('action', 'git-view', 'q')
             wait(lambda: not self.s.has('git-view'), 'the Git View did not close', seconds=10)
 
-    def set_git_view_size(self, size):
-        """`ui.font_size`, with the Git View GIT_VIEW_WIDTH points wide. The toolbar spans the Git View, whose own frame in
-        the dump also takes in what its bars cut off."""
-        app_window = bounds(next(row for row in self.s.rows() if row.get('accessibilityRole') == 'AXWindow'))
-        self.assertGreaterEqual(app_window[2], GIT_VIEW_WIDTH, 'the App Window is too narrow for the Git View checks')
-        self.set_size(size, extra='git_view:\n  width: %.4f%%\n' % (100 * GIT_VIEW_WIDTH / app_window[2]))
-        self.s.wait_rows(lambda rs: abs(width(self.s.row('git-toolbar', rs)) - GIT_VIEW_WIDTH) < 1,
+    def set_git_view_size(self, size, git_view_width=GIT_VIEW_WIDTH):
+        """`ui.font_size`, with the Git View `git_view_width` points wide. The toolbar spans the Git View, whose own frame
+        in the dump also takes in what its bars cut off."""
+        app_window = self.app_window()
+        self.assertGreaterEqual(app_window[2], git_view_width, 'the App Window is too narrow for the Git View checks')
+        self.set_size(size, extra='git_view:\n  width: %.4f%%\n' % (100 * git_view_width / app_window[2]))
+        self.s.wait_rows(lambda rs: abs(width(self.s.row('git-toolbar', rs)) - git_view_width) < 1,
                          lambda: 'the Git View is %.0f points wide, not %d, at ui.font_size: %s'
-                         % (width(self.s.row('git-toolbar')), GIT_VIEW_WIDTH, size))
+                         % (width(self.s.row('git-toolbar')), git_view_width, size))
+
+    def app_window(self, rs=None):
+        """(x, y, width, height) of the App Window."""
+        return bounds(next(row for row in rs or self.s.rows() if row.get('accessibilityRole') == 'AXWindow'))
 
     def selected(self, key, rs=None):
         return 'selected=1' in self.s.row(key, rs).get('accessibilityValue', '')
@@ -567,3 +594,131 @@ class InterfaceFontSize(unittest.TestCase):
             s.act('click', target)
             s.wait_rows(lambda rs: self.selected(target, rs) and not self.selected(rows[-1], rs),
                         lambda: 'a click on %s does not select it at %s' % (target, size))
+
+    def staged_git_window(self, name):
+        """The Window of a new Session in a new repository, with STAGED_NAME staged, and the repository."""
+        window = self.git_window(name, [STAGED_NAME])
+        repo = self.s.root/'projects'/name
+        for args in [['config', 'user.name', 'Verify'], ['config', 'user.email', 'verify@example.test'],
+                     ['config', 'commit.gpgsign', 'false'], ['add', STAGED_NAME]]:
+            self.run_git(repo, *args)
+        return window, repo
+
+    def run_git(self, repo, *args):
+        return subprocess.run(['git', '-C', str(repo), *args], env=self.s.env, check=True, capture_output=True,
+                              text=True).stdout
+
+    def assert_in_app_window(self, key, rs, size):
+        """The element is drawn whole inside the App Window and inside the Git View, whose toolbar spans it."""
+        x, y, w, h = bounds(self.s.row(key, rs))
+        app_x, app_y, app_w, app_h = self.app_window(rs)
+        git_x, _, git_w, _ = bounds(self.s.row('git-toolbar', rs))
+        self.assertTrue(app_x - ROUNDING <= x and x + w <= app_x + app_w + ROUNDING
+                        and app_y - ROUNDING <= y and y + h <= app_y + app_h + ROUNDING,
+                        '%s, at %s, leaves the App Window, at %s, at %s' % (key, (x, y, w, h), (app_x, app_y, app_w, app_h), size))
+        self.assertTrue(git_x - ROUNDING <= x and x + w <= git_x + git_w + ROUNDING,
+                        '%s, %.0f to %.0f, leaves the Git View, %.0f to %.0f, at %s' % (key, x, x + w, git_x, git_x + git_w, size))
+
+    def responder(self):
+        return self.s.driver('responder')
+
+    def assert_field_has_the_keys(self, name, size):
+        """A field has the keys: its field editor is the first responder. And the field shows all of the editor, which
+        it would cut its text off from."""
+        editors = wait(lambda: self.responder()['editors'],
+                       lambda: '%s does not have the keys at %s: %s' % (name, size, self.responder()))
+        self.assertEqual(len(editors), 1, editors)
+        editor, visible = (re.findall(r'-?[\d.]+', editors[0][key]) for key in ('frame', 'visible'))
+        self.assertGreaterEqual(float(visible[3]), float(editor[3]) - ROUNDING,
+                                'the field of %s cuts its text off at %s: %s' % (name, size, editors))
+
+    def open_stash_prompt(self, size):
+        """s in Changes asks for the stash's message, in a prompt whose field has the keys."""
+        s = self.s
+        s.act('action', 'git-view', 's')
+        s.wait_rows(lambda rs: s.has('git-prompt', rs) and s.row('git-prompt', rs).get('accessibilityLabel') == 'Stash changes',
+                    's did not open the Stash changes prompt at %s' % size)
+        self.assert_field_has_the_keys('the prompt field', size)
+
+    def test_at_18_the_commit_box_and_a_git_view_menus_choice_row_grow_by_half_show_their_text_whole_and_fit_the_app_window(self):
+        s = self.s
+        self.addCleanup(self.write_config, '')
+        window, _ = self.staged_git_window('fs-git-popups')
+        self.open_git_view(window)
+        boxes, menus = {}, {}
+        for size in [12, 18]:
+            self.set_git_view_size(size, POPUP_GIT_VIEW_WIDTH)
+            s.wait_rows(lambda rs: s.has(GIT_ROW + STAGED_NAME, rs), 'Changes do not list %s at %s' % (STAGED_NAME, size))
+            s.act('action', 'git-view', 'c')
+            rs = self.settled(['git-commit-box', *COMMIT_PARTS], 'the commit box does not show its parts at %s' % size)
+            boxes[size] = {key: bounds(s.row(key, rs)) for key in ['git-commit-box', *COMMIT_PARTS]}
+            self.assert_in_app_window('git-commit-box', rs, size)
+            # The summary has the keys, and shows its text whole.
+            self.assert_field_has_the_keys('the summary', size)
+            s.act('action', 'git-view', 'escape')
+            s.wait_rows(lambda rs: not s.has('git-commit-box', rs), 'escape did not close the commit box at %s' % size)
+            # d on the root row, where < puts the selection, asks in the Discard menu.
+            s.act('action', 'git-view', 'shift+comma')
+            s.act('action', 'git-view', 'd')
+            rs = self.settled(['git-menu', MENU_CHOICE], 'the Discard menu does not show its choices at %s' % size)
+            menus[size] = {key: bounds(s.row(key, rs)) for key in ['git-menu', MENU_CHOICE]}
+            self.assert_in_app_window('git-menu', rs, size)
+            s.act('action', 'git-menu', 'escape')
+            s.wait_rows(lambda rs: not s.has('git-menu', rs), 'escape did not close the Discard menu at %s' % size)
+        for key, padding in COMMIT_PARTS.items():
+            self.assert_text_grows_by_half(key, padding, boxes[12][key][3], boxes[18][key][3])
+        self.assert_text_grows_by_half(MENU_CHOICE, 0, menus[12][MENU_CHOICE][3], menus[18][MENU_CHOICE][3])
+        # Each popup is 1.5 times as wide, in a Git View with room for it. Its text is 1.5 times as wide, and its padding
+        # does not grow, so a row 1.5 times as wide as at 12 gives its text at least the room it shows whole in at 12:
+        # the menu's choice, and the commit box's rows, which span it less its padding.
+        for frames, popup in [(boxes, 'git-commit-box'), (menus, 'git-menu')]:
+            self.assert_text_grows_by_half(popup, 0, frames[12][popup][2], frames[18][popup][2], side='wide')
+        self.assertGreaterEqual(menus[18][MENU_CHOICE][2], 1.5 * menus[12][MENU_CHOICE][2] - ROUNDING,
+                                '%s is %.0f points wide at 12 and %.0f at 18, too narrow for its text'
+                                % (MENU_CHOICE, menus[12][MENU_CHOICE][2], menus[18][MENU_CHOICE][2]))
+
+    def test_at_12_and_18_a_git_view_menu_and_prompt_keep_the_keys_in_the_git_view_and_enter_and_escape_work(self):
+        s = self.s
+        self.addCleanup(self.write_config, '')
+        window, repo = self.staged_git_window('fs-git-keys')
+        self.open_git_view(window)
+        row = GIT_ROW + STAGED_NAME
+
+        def git_view_has_the_keys(after):
+            wait(lambda: KEY_VIEW in self.responder()['responders'],
+                 lambda: 'the Git View does not have the keys %s at %s: %s' % (after, size, self.responder()['responders']))
+
+        for size in [12, 18]:
+            self.set_git_view_size(size, POPUP_GIT_VIEW_WIDTH)
+            s.wait_rows(lambda rs: s.has(row, rs), 'Changes do not list %s at %s' % (STAGED_NAME, size))
+            git_view_has_the_keys('once it shows')
+            # A Git View menu leaves the keys with the Git View, which gives them to the menu. ⎋ closes it.
+            s.act('action', 'git-view', 'd')
+            s.wait_rows(lambda rs: s.has('git-menu', rs), 'd did not open the Discard menu at %s' % size)
+            self.assertIn(KEY_VIEW, self.responder()['responders'], 'the Discard menu took the keys from the Git View at %s' % size)
+            s.act('action', 'git-menu', 'escape')
+            s.wait_rows(lambda rs: not s.has('git-menu', rs), 'escape did not close the Discard menu at %s' % size)
+            self.assertIn('A  ' + STAGED_NAME, self.run_git(repo, 'status', '--porcelain'), 'escape discarded at %s' % size)
+            # A Git View prompt's field has the keys, and shows its text whole. ↩ submits what it holds, and gives the
+            # keys back to the Git View. ↩ comes before ⎋: a prompt opened again while the last one still fades out, in
+            # its first 0.15 seconds, leaves the keys with the Git View, at every size.
+            message = 'fs-stash-%s' % size
+            self.open_stash_prompt(size)
+            s.act('set', 'git-prompt-field', message)
+            s.wait_rows(lambda rs: s.row('git-prompt-field', rs).get('accessibilityValue') == message,
+                        lambda: 'the prompt field does not hold %r at %s: %r'
+                        % (message, size, s.row('git-prompt-field').get('accessibilityValue')))
+            s.act('action', 'git-prompt', 'enter')
+            s.wait_rows(lambda rs: not s.has('git-prompt', rs), 'enter did not close the prompt at %s' % size)
+            git_view_has_the_keys('after enter')
+            wait(lambda: message in self.run_git(repo, 'stash', 'list'), 'enter did not stash with the message at %s' % size)
+            s.wait_rows(lambda rs: not s.has(row, rs), 'Changes still list the stashed %s at %s' % (STAGED_NAME, size))
+            self.run_git(repo, 'stash', 'pop', '--index')
+            s.act('action', 'git-view', 'shift+r')
+            s.wait_rows(lambda rs: s.has(row, rs), 'Changes do not list %s again at %s' % (STAGED_NAME, size))
+            # ⎋ closes the prompt, stashes nothing, and gives the keys back to the Git View.
+            self.open_stash_prompt(size)
+            s.act('action', 'git-prompt', 'escape')
+            s.wait_rows(lambda rs: not s.has('git-prompt', rs), 'escape did not close the prompt at %s' % size)
+            git_view_has_the_keys('after escape')
+            self.assertEqual(self.run_git(repo, 'stash', 'list'), '', 'escape stashed at %s' % size)

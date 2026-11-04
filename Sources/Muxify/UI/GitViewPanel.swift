@@ -163,19 +163,20 @@ private struct GitNavigator: View {
         VStack(spacing: 10) {
             if let error = gitView.error {
                 Image(systemName: "exclamationmark.triangle")
-                    .font(.system(size: 28, weight: .light))
+                    .font(fontSize.font(28, weight: .light))
                     .foregroundStyle(.tertiary)
                 Text(error)
-                    .font(.system(size: 13))
+                    .font(fontSize.font(13))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .textSelection(.enabled)
                 Button("Close") { gitView.close() }
                     .keyboardShortcut(.cancelAction)
+                    .controlSize(fontSize.systemControlSize)
             } else {
                 ProgressView().controlSize(.small)
                 Text("Reading \(Paths.tildify(gitView.folder, home: gitView.store?.homeDirectory ?? Paths.home))…")
-                    .font(.system(size: 13))
+                    .font(fontSize.font(13))
                     .foregroundStyle(.secondary)
             }
         }
@@ -945,6 +946,8 @@ private struct GitDiffPane: View {
 
     private static let space = "gitDiff"
     private var fontSize: CGFloat { gitView.fontSize }
+    /// The Interface font size, for the diff's own text that is not code: its empty state, notes and bars.
+    @Environment(\.interfaceFontSize) private var interfaceFontSize
     private var lineHeight: CGFloat { (fontSize * 1.6).rounded() }
 
     /// Code wraps every `columns` characters, so a character's place on
@@ -1028,8 +1031,8 @@ private struct GitDiffPane: View {
     private var emptyState: some View {
         VStack(spacing: 8) {
             if gitView.list == .changes, gitView.snapshot?.changes.isEmpty == true {
-                Image(systemName: "checkmark.circle").font(.system(size: 28, weight: .light)).foregroundStyle(.tertiary)
-                Text("Working tree clean").font(.system(size: 13)).foregroundStyle(.secondary)
+                Image(systemName: "checkmark.circle").font(interfaceFontSize.font(28, weight: .light)).foregroundStyle(.tertiary)
+                Text("Working tree clean").font(interfaceFontSize.font(13)).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1073,7 +1076,7 @@ private struct GitDiffPane: View {
             note("\(count) more lines not shown")
         case .message(let text):
             Text(text)
-                .font(.system(size: 13))
+                .font(interfaceFontSize.font(13))
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
                 .padding(18)
@@ -1307,12 +1310,13 @@ private struct GitDiffPane: View {
     /// Above the unstaged and the staged part of a change with both.
     private func partBar(_ group: GitChange.Group) -> some View {
         HStack(spacing: 8) {
-            Circle().fill(group == .staged ? palette.staged : palette.unstaged).frame(width: 7, height: 7)
-            Text("\(group.title) changes").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+            Circle().fill(group == .staged ? palette.staged : palette.unstaged)
+                .frame(width: interfaceFontSize(7), height: interfaceFontSize(7))
+            Text("\(group.title) changes").font(interfaceFontSize.font(12, weight: .semibold)).foregroundStyle(.secondary)
             Spacer(minLength: 0)
         }
         .padding(.leading, 18)
-        .frame(height: 30)
+        .frame(height: interfaceFontSize(30))
         .background(palette.header)
         .overlay(alignment: .bottom) { palette.separator.frame(height: 1) }
     }
@@ -1320,12 +1324,12 @@ private struct GitDiffPane: View {
     private func bar(symbol: String, text: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                Image(systemName: symbol).font(.system(size: 12)).frame(width: 92)
-                Text(text).font(.system(size: 12))
+                Image(systemName: symbol).font(interfaceFontSize.font(12)).frame(width: 92)
+                Text(text).font(interfaceFontSize.font(12))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.secondary)
-            .frame(height: 30)
+            .frame(height: interfaceFontSize(30))
             .background(palette.fill)
             .overlay(alignment: .top) { palette.softSeparator.frame(height: 1) }
             .overlay(alignment: .bottom) { palette.softSeparator.frame(height: 1) }
@@ -1336,7 +1340,7 @@ private struct GitDiffPane: View {
 
     private func note(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 12))
+            .font(interfaceFontSize.font(12))
             .foregroundStyle(.tertiary)
             .padding(.horizontal, 18)
             .padding(.vertical, 12)
@@ -1360,7 +1364,7 @@ private struct GitDiffPane: View {
                 }
             }
         }
-        .font(.system(size: 12))
+        .font(interfaceFontSize.font(12))
         .lineLimit(1)
         .padding(.horizontal, 18)
         .padding(.vertical, 14)
@@ -1490,6 +1494,7 @@ private struct GitCard: View {
     let gitView: GitView
     let content: GitView.Content
     let palette: Palette
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1535,8 +1540,8 @@ private struct GitCard: View {
     private func comparisonCard(_ base: GitView.Item, _ target: GitView.Item?) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Image(systemName: "arrow.left.arrow.right").font(.system(size: 15)).foregroundStyle(.secondary)
-                Text(title).font(.system(size: 17, weight: .semibold)).textSelection(.enabled)
+                Image(systemName: "arrow.left.arrow.right").font(fontSize.font(15)).foregroundStyle(.secondary)
+                Text(title).font(fontSize.font(17, weight: .semibold)).textSelection(.enabled)
             }
             end(base, role: "Base")
             if let target {
@@ -1544,7 +1549,7 @@ private struct GitCard: View {
                 summary
             } else {
                 Text("Select another commit, branch or stash to compare it with. W here, or ⎋, ends the comparison.")
-                    .font(.system(size: 13))
+                    .font(fontSize.font(13))
                     .foregroundStyle(.secondary)
             }
         }
@@ -1553,7 +1558,7 @@ private struct GitCard: View {
     /// One end of a comparison: its name, its commit and what it says.
     private func end(_ item: GitView.Item, role: String) -> some View {
         HStack(spacing: 8) {
-            Text(role).font(.system(size: 12)).foregroundStyle(.tertiary).frame(width: 64, alignment: .leading)
+            Text(role).font(fontSize.font(12)).foregroundStyle(.tertiary).frame(width: fontSize(64), alignment: .leading)
             switch item {
             case .branch(let branch):
                 GitTag(text: branch.name, symbol: "arrow.triangle.branch", style: .tint(palette.colors.green), palette: palette)
@@ -1561,10 +1566,10 @@ private struct GitCard: View {
             case .stash(let stash):
                 GitTag(text: stash.ref, symbol: "archivebox", style: .gray, palette: palette)
                 hashChip(stash.sha)
-                Text(GitNavigatorText.stashTitle(stash.message)).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                Text(GitNavigatorText.stashTitle(stash.message)).font(fontSize.font(13)).foregroundStyle(.secondary).lineLimit(1)
             case .commit(let commit):
                 hashChip(commit.sha)
-                Text(commit.subject).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                Text(commit.subject).font(fontSize.font(13)).foregroundStyle(.secondary).lineLimit(1)
             default:
                 EmptyView()
             }
@@ -1574,24 +1579,24 @@ private struct GitCard: View {
     private func commitCard(_ commit: GitCommit, _ detail: GitCommitDetail?) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(detail?.title ?? commit.subject)
-                .font(.system(size: 17, weight: .semibold))
+                .font(fontSize.font(17, weight: .semibold))
                 .textSelection(.enabled)
             if let body = detail?.body, !body.isEmpty {
                 Text(body)
-                    .font(.system(size: 13))
+                    .font(fontSize.font(13))
                     .foregroundStyle(.secondary)
                     .lineLimit(8)
                     .textSelection(.enabled)
             }
             HStack(spacing: 8) {
                 avatar(commit.initials, name: commit.author)
-                Text(commit.author).font(.system(size: 13, weight: .semibold))
-                Text("committed \(GitNavigatorText.relative(commit.date))").font(.system(size: 13)).foregroundStyle(.secondary)
+                Text(commit.author).font(fontSize.font(13, weight: .semibold))
+                Text("committed \(GitNavigatorText.relative(commit.date))").font(fontSize.font(13)).foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
                 hashChip(commit.sha)
                 if let parents = detail?.parents, !parents.isEmpty {
-                    Text(parents.count == 1 ? "parent" : "parents").font(.system(size: 12)).foregroundStyle(.tertiary)
+                    Text(parents.count == 1 ? "parent" : "parents").font(fontSize.font(12)).foregroundStyle(.tertiary)
                     ForEach(parents, id: \.self) { hashChip($0) }
                 }
                 ForEach(commit.refs + commit.remotes, id: \.self) { ref in
@@ -1612,9 +1617,9 @@ private struct GitCard: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: branch.isHead ? "checkmark" : "arrow.triangle.branch")
-                    .font(.system(size: 15, weight: branch.isHead ? .bold : .regular))
+                    .font(fontSize.font(15, weight: branch.isHead ? .bold : .regular))
                     .foregroundStyle(branch.isHead ? Color.accentColor : Color.secondary)
-                Text(branch.name).font(.system(size: 17, weight: .semibold)).textSelection(.enabled)
+                Text(branch.name).font(fontSize.font(17, weight: .semibold)).textSelection(.enabled)
                 if let upstream = branch.upstream {
                     GitTag(text: upstream, symbol: "cloud", style: branch.isInSync ? .tint(palette.colors.green) : .gray, palette: palette)
                 }
@@ -1623,22 +1628,22 @@ private struct GitCard: View {
                 }
             }
             Text(subtitle(branch))
-                .font(.system(size: 13))
+                .font(fontSize.font(13))
                 .foregroundStyle(.secondary)
             if let error = log?.error {
-                Text(error).font(.system(size: 13)).foregroundStyle(.secondary).textSelection(.enabled)
+                Text(error).font(fontSize.font(13)).foregroundStyle(.secondary).textSelection(.enabled)
             } else if let log {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(log.commits.prefix(12)) { commit in
                         Button { gitView.enter(.branch(branch), selecting: .commit(commit)) } label: {
                             HStack(spacing: 8) {
                                 avatar(commit.initials, name: commit.author, size: 16)
-                                Text(String(commit.sha.prefix(7))).font(.system(size: 11, design: .monospaced)).foregroundStyle(.tertiary)
-                                Text(commit.subject).font(.system(size: 13)).lineLimit(1)
+                                Text(String(commit.sha.prefix(7))).font(fontSize.font(11, design: .monospaced)).foregroundStyle(.tertiary)
+                                Text(commit.subject).font(fontSize.font(13)).lineLimit(1)
                                 Spacer(minLength: 8)
-                                Text(GitRepository.age(of: commit.date)).font(.system(size: 11)).foregroundStyle(.tertiary)
+                                Text(GitRepository.age(of: commit.date)).font(fontSize.font(11)).foregroundStyle(.tertiary)
                             }
-                            .frame(height: 22)
+                            .frame(height: fontSize(22))
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -1647,17 +1652,17 @@ private struct GitCard: View {
             } else {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
-                    Text("Reading its history…").font(.system(size: 13)).foregroundStyle(.secondary)
+                    Text("Reading its history…").font(fontSize.font(13)).foregroundStyle(.secondary)
                 }
-                .frame(height: 22)
+                .frame(height: fontSize(22))
             }
             Button { gitView.enter(.branch(branch)) } label: {
                 HStack(spacing: 6) {
-                    Text("Show its history").font(.system(size: 12, weight: .semibold))
+                    Text("Show its history").font(fontSize.font(12, weight: .semibold))
                     GitKeyCap(text: "↩", palette: palette)
                 }
                 .padding(.horizontal, 10)
-                .frame(height: 26)
+                .frame(height: fontSize(26))
                 .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(palette.fill2))
                 .contentShape(Rectangle())
             }
@@ -1686,12 +1691,12 @@ private struct GitCard: View {
     private func stashCard(_ stash: GitStash) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(GitNavigatorText.stashTitle(stash.message))
-                .font(.system(size: 17, weight: .semibold))
+                .font(fontSize.font(17, weight: .semibold))
                 .textSelection(.enabled)
             HStack(spacing: 8) {
-                Image(systemName: "archivebox").foregroundStyle(.secondary)
-                Text(stash.message.components(separatedBy: ": ").first ?? "").font(.system(size: 13, weight: .semibold))
-                Text("stashed \(GitNavigatorText.relative(stash.date))").font(.system(size: 13)).foregroundStyle(.secondary)
+                Image(systemName: "archivebox").font(fontSize.font(13)).foregroundStyle(.secondary)
+                Text(stash.message.components(separatedBy: ": ").first ?? "").font(fontSize.font(13, weight: .semibold))
+                Text("stashed \(GitNavigatorText.relative(stash.date))").font(fontSize.font(13)).foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
                 GitTag(text: stash.ref, style: .gray, palette: palette)
@@ -1705,12 +1710,12 @@ private struct GitCard: View {
         let staged = changes.filter(\.isStaged).count
         return VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Image(systemName: "folder.fill").font(.system(size: 15)).foregroundStyle(.secondary)
-                Text(path == GitTree.root ? "/" : path + "/").font(.system(size: 17, weight: .semibold)).textSelection(.enabled)
+                Image(systemName: "folder.fill").font(fontSize.font(15)).foregroundStyle(.secondary)
+                Text(path == GitTree.root ? "/" : path + "/").font(fontSize.font(17, weight: .semibold)).textSelection(.enabled)
             }
             Text(verbatim: "\(changes.count) changed file\(changes.count == 1 ? "" : "s") in this folder"
                  + (staged > 0 ? ", \(staged) of them staged" : ""))
-                .font(.system(size: 13))
+                .font(fontSize.font(13))
                 .foregroundStyle(.secondary)
             summary
         }
@@ -1722,7 +1727,7 @@ private struct GitCard: View {
         let total = max(1, patch.additions + patch.deletions)
         let count = Set(patch.files.map(\.path)).count
         return HStack(spacing: 8) {
-            Text(verbatim: "\(count) file\(count == 1 ? "" : "s") changed").font(.system(size: 13)).foregroundStyle(.secondary)
+            Text(verbatim: "\(count) file\(count == 1 ? "" : "s") changed").font(fontSize.font(13)).foregroundStyle(.secondary)
             Text(verbatim: "+\(patch.additions)").foregroundStyle(palette.color(palette.colors.addedText))
             Text(verbatim: "−\(patch.deletions)").foregroundStyle(palette.color(palette.colors.removedText))
             HStack(spacing: 0) {
@@ -1733,25 +1738,27 @@ private struct GitCard: View {
             .background(palette.fill2)
             .clipShape(Capsule())
         }
-        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+        .font(fontSize.font(12, weight: .semibold, design: .monospaced))
     }
 
+    /// A circle `size` points across at 12, with the author's initials in it.
     private func avatar(_ initials: String, name: String, size: CGFloat = 22) -> some View {
-        Circle()
+        let side = fontSize(size)
+        return Circle()
             .fill(palette.color(palette.colors.author(name)).gradient)
-            .frame(width: size, height: size)
-            .overlay(Text(initials).font(.system(size: size * 0.42, weight: .semibold)).foregroundStyle(.white))
+            .frame(width: side, height: side)
+            .overlay(Text(initials).font(.system(size: side * 0.42, weight: .semibold)).foregroundStyle(.white))
     }
 
     /// Copies the full hash.
     private func hashChip(_ sha: String) -> some View {
         Button { gitView.copy(sha, title: "Copied Hash", shown: String(sha.prefix(8))) } label: {
             HStack(spacing: 5) {
-                Text(String(sha.prefix(8))).font(.system(size: 11.5, design: .monospaced))
-                Image(systemName: "doc.on.doc").font(.system(size: 10)).foregroundStyle(.tertiary)
+                Text(String(sha.prefix(8))).font(fontSize.font(11.5, design: .monospaced))
+                Image(systemName: "doc.on.doc").font(fontSize.font(10)).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 7)
-            .frame(height: 20)
+            .frame(height: fontSize(20))
             .background(RoundedRectangle(cornerRadius: 5, style: .continuous).fill(palette.fill2))
             .contentShape(Rectangle())
         }
@@ -1771,10 +1778,9 @@ private struct GitCommitBox: View {
     let palette: Palette
     @FocusState private var field: Field?
     @State private var isShown = false
+    @Environment(\.interfaceFontSize) private var fontSize
 
     private enum Field { case summary, description }
-
-    private static let rowHeight: CGFloat = 24
 
     var body: some View {
         let staged = snapshot.changes.filter { $0.groups.contains(.staged) }
@@ -1786,7 +1792,7 @@ private struct GitCommitBox: View {
                 card(staged: staged)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("git-commit-box")
-                    .frame(width: min(620, proxy.size.width - 48))
+                    .frame(width: GitPopupMetrics.width(GitPopupMetrics.designCommitBoxWidth, in: proxy.size.width, size: fontSize))
                     .padding(.top, max(20, proxy.size.height * 0.1))
                     .scaleEffect(isShown ? 1 : 0.97, anchor: .top)
                     .offset(y: isShown ? 0 : -6)
@@ -1841,17 +1847,17 @@ private struct GitCommitBox: View {
         HStack(spacing: 12) {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Color.accentColor.gradient)
-                .frame(width: 32, height: 32)
-                .overlay(Image(systemName: "checkmark").font(.system(size: 14, weight: .bold)).foregroundStyle(.white))
+                .frame(width: fontSize(32), height: fontSize(32))
+                .overlay(Image(systemName: "checkmark").font(fontSize.font(14, weight: .bold)).foregroundStyle(.white))
             VStack(alignment: .leading, spacing: 3) {
-                Text("Commit").font(.system(size: 15, weight: .semibold))
+                Text("Commit").font(fontSize.font(15, weight: .semibold))
                 HStack(spacing: 5) {
-                    Image(systemName: "arrow.triangle.branch").font(.system(size: 10, weight: .semibold))
+                    Image(systemName: "arrow.triangle.branch").font(fontSize.font(10, weight: .semibold))
                     Text(snapshot.head).fontWeight(.medium).lineLimit(1).truncationMode(.middle)
                     Text(verbatim: "·").foregroundStyle(.tertiary)
                     Text(staged.count == 1 ? "1 staged file" : "\(staged.count) staged files")
                 }
-                .font(.system(size: 12))
+                .font(fontSize.font(12))
                 .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
@@ -1866,28 +1872,30 @@ private struct GitCommitBox: View {
             HStack(spacing: 10) {
                 TextField("", text: $gitView.commitSummary, prompt: Text("Summary").foregroundColor(.secondary))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(fontSize.font(15, weight: .semibold))
                     .focused($field, equals: .summary)
                     .onSubmit { gitView.commit() }
+                    .accessibilityIdentifier("git-commit-summary")
                 if count > 0 {
                     // As lazygit counts it; past 72 it wraps in most tools.
                     Text(verbatim: "\(count)")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(fontSize.font(11, weight: .medium, design: .monospaced))
                         .foregroundStyle(count > 72 ? AnyShapeStyle(palette.color(palette.colors.strong(palette.colors.yellow))) : AnyShapeStyle(.tertiary))
                         .help("Summaries read best in 72 characters or fewer")
                 }
             }
             .padding(.horizontal, 14)
-            .frame(height: 46)
+            .frame(height: fontSize(46))
             palette.softSeparator.frame(height: 1).padding(.horizontal, 14)
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $gitView.commitDescription)
-                    .font(.system(size: 13))
+                    .font(fontSize.font(13))
                     .scrollContentBackground(.hidden)
                     .focused($field, equals: .description)
+                    .accessibilityIdentifier("git-commit-description")
                 if gitView.commitDescription.isEmpty {
                     Text("Description (optional)")
-                        .font(.system(size: 13))
+                        .font(fontSize.font(13))
                         .foregroundStyle(.tertiary)
                         .padding(.leading, 5)
                         .allowsHitTesting(false)
@@ -1895,7 +1903,7 @@ private struct GitCommitBox: View {
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 10)
-            .frame(height: 124)
+            .frame(height: fontSize(124))
         }
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(palette.background))
         .overlay(
@@ -1921,16 +1929,16 @@ private struct GitCommitBox: View {
                 Text(verbatim: "\(files.count)")
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 7)
-                    .frame(height: 17)
+                    .frame(height: fontSize(17))
                     .background(Capsule().fill(palette.fill2))
             }
-            .font(.system(size: 11.5, weight: .semibold))
+            .font(fontSize.font(11.5, weight: .semibold))
             ScrollView(.vertical) {
                 VStack(spacing: 0) {
                     ForEach(files) { change in fileRow(change) }
                 }
             }
-            .frame(height: min(CGFloat(files.count), 4.5) * Self.rowHeight)
+            .frame(height: GitPopupMetrics.fileListHeight(files: files.count, size: fontSize))
             .scrollIndicators(.automatic)
         }
     }
@@ -1943,16 +1951,18 @@ private struct GitCommitBox: View {
                     .foregroundStyle(change.isUntracked || change.isConflict ? palette.unstaged : palette.staged)
                 Text(String(change.worktree)).foregroundStyle(palette.unstaged)
             }
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
-            .frame(width: 16, alignment: .leading)
+            .font(fontSize.font(11, weight: .bold, design: .monospaced))
+            .frame(width: fontSize(16), alignment: .leading)
             GitFileTile(path: change.path, size: 14)
-            Text(change.name).font(.system(size: 12.5)).lineLimit(1)
+            Text(change.name).font(fontSize.font(12.5)).lineLimit(1)
             if !folder.isEmpty {
-                Text(folder).font(.system(size: 11.5)).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
+                Text(folder).font(fontSize.font(11.5)).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
             }
             Spacer(minLength: 0)
         }
-        .frame(height: Self.rowHeight)
+        .frame(height: GitPopupMetrics.fileRowHeight(fontSize))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("git-commit-file:\(change.path)")
     }
 
     /// What's different about this commit: it's on a detached HEAD, or
@@ -1960,10 +1970,10 @@ private struct GitCommitBox: View {
     private func notice(_ text: String, symbol: String, color: NSColor) -> some View {
         let strong = palette.color(palette.colors.strong(color))
         return HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: symbol).font(.system(size: 11.5))
+            Image(systemName: symbol).font(fontSize.font(11.5))
             Text(text).fixedSize(horizontal: false, vertical: true)
         }
-        .font(.system(size: 12, weight: .medium))
+        .font(fontSize.font(12, weight: .medium))
         .foregroundStyle(strong)
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
@@ -1974,16 +1984,16 @@ private struct GitCommitBox: View {
     private func errorCallout(_ error: String) -> some View {
         let red = palette.color(palette.colors.strong(palette.colors.red))
         return HStack(alignment: .top, spacing: 9) {
-            Image(systemName: "xmark.octagon.fill").font(.system(size: 13)).foregroundStyle(red)
+            Image(systemName: "xmark.octagon.fill").font(fontSize.font(13)).foregroundStyle(red)
             VStack(alignment: .leading, spacing: 4) {
-                Text("The commit failed").font(.system(size: 12, weight: .semibold)).foregroundStyle(red)
+                Text("The commit failed").font(fontSize.font(12, weight: .semibold)).foregroundStyle(red)
                 ScrollView(.vertical) {
                     Text(error)
-                        .font(.system(size: 11.5, design: .monospaced))
+                        .font(fontSize.font(11.5, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxHeight: 110)
+                .frame(maxHeight: fontSize(110))
                 .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -1998,16 +2008,17 @@ private struct GitCommitBox: View {
             Spacer(minLength: 0)
             Button { gitView.closeCommit() } label: {
                 HStack(spacing: 6) {
-                    Text("Cancel").font(.system(size: 12.5, weight: .medium))
-                    Text(verbatim: "esc").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.tertiary)
+                    Text("Cancel").font(fontSize.font(12.5, weight: .medium))
+                    Text(verbatim: "esc").font(fontSize.font(10.5, weight: .medium)).foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal, 12)
-                .frame(height: 30)
+                .frame(height: fontSize(30))
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(palette.fill2))
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Close, keeping the message (⎋)")
+            .accessibilityIdentifier("git-commit-cancel")
             Button { gitView.commit() } label: {
                 HStack(spacing: 7) {
                     if gitView.isCommitting {
@@ -2015,13 +2026,13 @@ private struct GitCommitBox: View {
                         Text("Committing…")
                     } else {
                         Text("Commit to \(snapshot.head)").lineLimit(1).truncationMode(.middle)
-                        Text(verbatim: "⌘↩").font(.system(size: 11)).foregroundStyle(.white.opacity(0.7))
+                        Text(verbatim: "⌘↩").font(fontSize.font(11)).foregroundStyle(.white.opacity(0.7))
                     }
                 }
-                .font(.system(size: 12.5, weight: .semibold))
+                .font(fontSize.font(12.5, weight: .semibold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)
-                .frame(height: 30)
+                .frame(height: fontSize(30))
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.accentColor.gradient))
                 .opacity(canCommit || gitView.isCommitting ? 1 : 0.45)
                 .contentShape(Rectangle())
@@ -2029,11 +2040,14 @@ private struct GitCommitBox: View {
             .buttonStyle(.plain)
             .disabled(!canCommit)
             .help("Commit (↩ in the summary, or ⌘↩)")
+            .accessibilityIdentifier("git-commit-submit")
         }
         .padding(.horizontal, 18)
-        .frame(height: 58)
+        .frame(height: fontSize(58))
         .background(Color.primary.opacity(palette.colors.isDark ? 0.03 : 0.025))
         .overlay(alignment: .top) { palette.softSeparator.frame(height: 1) }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("git-commit-footer")
     }
 }
 
@@ -2048,6 +2062,7 @@ private struct GitMenuView: View {
     let palette: Palette
     @State private var isShown = false
     @State private var hovered: String?
+    @Environment(\.interfaceFontSize) private var fontSize
 
     private var red: Color { palette.color(palette.colors.strong(palette.colors.red)) }
 
@@ -2058,7 +2073,7 @@ private struct GitMenuView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { gitView.closeMenu() }
                 card
-                    .frame(width: min(460, proxy.size.width - 48))
+                    .frame(width: GitPopupMetrics.width(GitPopupMetrics.designMenuWidth, in: proxy.size.width, size: fontSize))
                     .padding(.top, max(20, proxy.size.height * 0.16))
                     .scaleEffect(isShown ? 1 : 0.97, anchor: .top)
                     .offset(y: isShown ? 0 : -6)
@@ -2105,15 +2120,15 @@ private struct GitMenuView: View {
         HStack(spacing: 12) {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(menu.isDestructive ? red.gradient : palette.color(palette.colors.strong(palette.colors.blue)).gradient)
-                .frame(width: 30, height: 30)
-                .overlay(Image(systemName: menu.symbol).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white))
+                .frame(width: fontSize(30), height: fontSize(30))
+                .overlay(Image(systemName: menu.symbol).font(fontSize.font(13, weight: .semibold)).foregroundStyle(.white))
             VStack(alignment: .leading, spacing: 3) {
-                Text(menu.title).font(.system(size: 14.5, weight: .semibold))
+                Text(menu.title).font(fontSize.font(14.5, weight: .semibold))
                 if let subject = menu.subject {
                     HStack(spacing: 5) {
                         switch subject {
                         case .folder(let path, let files):
-                            Image(systemName: "folder").font(.system(size: 11))
+                            Image(systemName: "folder").font(fontSize.font(11))
                             Text(path == GitTree.root ? "/" : path).fontWeight(.medium).lineLimit(1).truncationMode(.head)
                             if let files {
                                 Text(verbatim: "·").foregroundStyle(.tertiary)
@@ -2130,7 +2145,7 @@ private struct GitMenuView: View {
                             Text(text).lineLimit(2)
                         }
                     }
-                    .font(.system(size: 12))
+                    .font(fontSize.font(12))
                     .foregroundStyle(.secondary)
                 }
             }
@@ -2143,9 +2158,9 @@ private struct GitMenuView: View {
         VStack(alignment: .leading, spacing: 3) {
             Label(menu.agents.count == 1 ? "An Agent is working here" : "\(menu.agents.count) Agents are working here",
                   systemImage: "exclamationmark.triangle.fill")
-                .font(.system(size: 12, weight: .semibold))
+                .font(fontSize.font(12, weight: .semibold))
             ForEach(menu.agents, id: \.self) { name in
-                Text(name).font(.system(size: 11.5)).lineLimit(1).padding(.leading, 20)
+                Text(name).font(fontSize.font(11.5)).lineLimit(1).padding(.leading, 20)
             }
         }
         .foregroundStyle(red)
@@ -2168,19 +2183,19 @@ private struct GitMenuView: View {
                           palette: palette)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(choice.title)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(fontSize.font(13, weight: .semibold))
                         .foregroundStyle(choice.isDestructive ? red : Color.primary)
                     if let note = choice.note {
-                        Text(note).font(.system(size: 11.5)).foregroundStyle(.secondary)
+                        Text(note).font(fontSize.font(11.5)).foregroundStyle(.secondary)
                     }
                 }
                 Spacer(minLength: 0)
                 if isHighlighted {
-                    Text(verbatim: "↩").font(.system(size: 11)).foregroundStyle(.tertiary)
+                    Text(verbatim: "↩").font(fontSize.font(11)).foregroundStyle(.tertiary)
                 }
             }
             .padding(.horizontal, 10)
-            .frame(height: choice.note == nil ? 36 : 48)
+            .frame(height: fontSize(choice.note == nil ? 36 : 48))
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(isHighlighted ? palette.fill2 : hovered == choice.id && choice.isEnabled ? palette.fill : .clear)
@@ -2199,19 +2214,19 @@ private struct GitMenuView: View {
     private var footer: some View {
         HStack(spacing: 6) {
             if let footnote = menu.footnote {
-                Image(systemName: "exclamationmark.triangle").font(.system(size: 11))
-                Text(footnote).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                Image(systemName: "exclamationmark.triangle").font(fontSize.font(11))
+                Text(footnote).font(fontSize.font(11.5)).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("git-menu-footnote")
             }
             Spacer(minLength: 8)
             Button { gitView.closeMenu() } label: {
                 HStack(spacing: 6) {
-                    Text("Cancel").font(.system(size: 12.5, weight: .medium))
-                    Text(verbatim: "esc").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.tertiary)
+                    Text("Cancel").font(fontSize.font(12.5, weight: .medium))
+                    Text(verbatim: "esc").font(fontSize.font(10.5, weight: .medium)).foregroundStyle(.tertiary)
                 }
                 .foregroundStyle(.primary)
                 .padding(.horizontal, 12)
-                .frame(height: 28)
+                .frame(height: fontSize(28))
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(palette.fill2))
                 .contentShape(Rectangle())
             }
@@ -2222,7 +2237,7 @@ private struct GitMenuView: View {
         .foregroundStyle(.secondary)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .frame(minHeight: 48)
+        .frame(minHeight: fontSize(48))
         .background(Color.primary.opacity(palette.colors.isDark ? 0.03 : 0.025))
         .overlay(alignment: .top) { palette.softSeparator.frame(height: 1) }
     }
@@ -2239,6 +2254,7 @@ private struct GitPromptView: View {
     let palette: Palette
     @FocusState private var isFocused: Bool
     @State private var isShown = false
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         GeometryReader { proxy in
@@ -2247,7 +2263,7 @@ private struct GitPromptView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { gitView.closePrompt() }
                 card
-                    .frame(width: min(520, proxy.size.width - 48))
+                    .frame(width: GitPopupMetrics.width(GitPopupMetrics.designPromptWidth, in: proxy.size.width, size: fontSize))
                     .padding(.top, max(20, proxy.size.height * 0.16))
                     .scaleEffect(isShown ? 1 : 0.97, anchor: .top)
                     .offset(y: isShown ? 0 : -6)
@@ -2307,12 +2323,12 @@ private struct GitPromptView: View {
                 let isChosen = name == chosen
                 Button { gitView.submitSuggestion(name) } label: {
                     HStack(spacing: 8) {
-                        Image(systemName: "arrow.triangle.branch").font(.system(size: 10.5)).foregroundStyle(.secondary)
-                        Text(name).font(.system(size: 12.5)).lineLimit(1)
+                        Image(systemName: "arrow.triangle.branch").font(fontSize.font(10.5)).foregroundStyle(.secondary)
+                        Text(name).font(fontSize.font(12.5)).lineLimit(1)
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, 10)
-                    .frame(height: 26)
+                    .frame(height: fontSize(26))
                     .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(isChosen ? Color.accentColor.opacity(0.22) : .clear))
                     .contentShape(Rectangle())
                 }
@@ -2328,18 +2344,18 @@ private struct GitPromptView: View {
         HStack(spacing: 12) {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(palette.color(palette.colors.strong(palette.colors.blue)).gradient)
-                .frame(width: 30, height: 30)
-                .overlay(Image(systemName: prompt.symbol).font(.system(size: 13, weight: .semibold)).foregroundStyle(.white))
+                .frame(width: fontSize(30), height: fontSize(30))
+                .overlay(Image(systemName: prompt.symbol).font(fontSize.font(13, weight: .semibold)).foregroundStyle(.white))
             VStack(alignment: .leading, spacing: 3) {
-                Text(prompt.title).font(.system(size: 14.5, weight: .semibold))
+                Text(prompt.title).font(fontSize.font(14.5, weight: .semibold))
                 if case .text(let text)? = prompt.subject {
-                    Text(text).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(4)
+                    Text(text).font(fontSize.font(12)).foregroundStyle(.secondary).lineLimit(4)
                 }
             }
             Spacer(minLength: 0)
             if prompt.isSecret {
                 Label("Hidden", systemImage: "lock.fill")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(fontSize.font(11, weight: .medium))
                     .foregroundStyle(.secondary)
                     .help("What you type is hidden")
                     .accessibilityIdentifier("git-prompt-secret")
@@ -2356,11 +2372,11 @@ private struct GitPromptView: View {
             }
         }
         .textFieldStyle(.plain)
-        .font(.system(size: 13.5))
+        .font(fontSize.font(13.5))
         .focused($isFocused)
         .onSubmit { gitView.submitPrompt() }
         .padding(.horizontal, 12)
-        .frame(height: 38)
+        .frame(height: fontSize(38))
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(palette.background))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -2376,12 +2392,12 @@ private struct GitPromptView: View {
             Spacer(minLength: 8)
             Button { gitView.closePrompt() } label: {
                 HStack(spacing: 6) {
-                    Text("Cancel").font(.system(size: 12.5, weight: .medium))
-                    Text(verbatim: "esc").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.tertiary)
+                    Text("Cancel").font(fontSize.font(12.5, weight: .medium))
+                    Text(verbatim: "esc").font(fontSize.font(10.5, weight: .medium)).foregroundStyle(.tertiary)
                 }
                 .foregroundStyle(.primary)
                 .padding(.horizontal, 12)
-                .frame(height: 28)
+                .frame(height: fontSize(28))
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(palette.fill2))
                 .contentShape(Rectangle())
             }
@@ -2390,12 +2406,12 @@ private struct GitPromptView: View {
             .accessibilityIdentifier("git-prompt-cancel")
             Button { gitView.submitPrompt() } label: {
                 HStack(spacing: 6) {
-                    Text(prompt.submitTitle).font(.system(size: 12.5, weight: .semibold))
-                    Text(verbatim: "↩").font(.system(size: 10.5, weight: .medium)).opacity(0.7)
+                    Text(prompt.submitTitle).font(fontSize.font(12.5, weight: .semibold))
+                    Text(verbatim: "↩").font(fontSize.font(10.5, weight: .medium)).opacity(0.7)
                 }
                 .foregroundStyle(.white)
                 .padding(.horizontal, 12)
-                .frame(height: 28)
+                .frame(height: fontSize(28))
                 .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.accentColor))
                 .opacity(canSubmit ? 1 : 0.45)
                 .contentShape(Rectangle())
@@ -2406,7 +2422,7 @@ private struct GitPromptView: View {
             .accessibilityIdentifier("git-prompt-submit")
         }
         .padding(.horizontal, 16)
-        .frame(height: 48)
+        .frame(height: fontSize(48))
         .background(Color.primary.opacity(palette.colors.isDark ? 0.03 : 0.025))
         .overlay(alignment: .top) { palette.softSeparator.frame(height: 1) }
     }
@@ -2417,24 +2433,25 @@ private struct GitWriteErrorBanner: View {
     let gitView: GitView
     let message: String
     let palette: Palette
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         let red = palette.color(palette.colors.strong(palette.colors.red))
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 13)).foregroundStyle(red)
+            Image(systemName: "exclamationmark.triangle.fill").font(fontSize.font(13)).foregroundStyle(red)
             Text(message)
-                .font(.system(size: 12))
+                .font(fontSize.font(12))
                 .lineLimit(6)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityIdentifier("git-write-error")
             Button { gitView.dismissWriteError() } label: {
-                Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary).frame(width: 18, height: 18)
+                Image(systemName: "xmark").font(fontSize.font(10, weight: .bold)).foregroundStyle(.secondary).frame(width: fontSize(18), height: fontSize(18))
             }
             .buttonStyle(.plain)
         }
         .padding(12)
-        .frame(maxWidth: 560)
+        .frame(maxWidth: fontSize(560))
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(palette.header))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(red.opacity(0.5)))
         .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
@@ -2552,12 +2569,13 @@ private struct GitIconButton: View {
 private struct GitKeyCap: View {
     let text: String
     let palette: Palette
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         Text(text)
-            .font(.system(size: 10.5, weight: .semibold))
+            .font(fontSize.font(10.5, weight: .semibold))
             .foregroundStyle(.secondary)
-            .frame(minWidth: 18, minHeight: 17)
+            .frame(minWidth: fontSize(18), minHeight: fontSize(17))
             .background(RoundedRectangle(cornerRadius: 4).fill(palette.fill2))
             .overlay(alignment: .bottom) { palette.separator.frame(height: 1).padding(.horizontal, 2) }
     }
