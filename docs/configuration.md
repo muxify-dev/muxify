@@ -1111,8 +1111,11 @@ problems banner, as does a `services` entry with no `:` or with an unknown
 provider, which is skipped.
 
 The Git View reads the repository when it opens, every 10 seconds, when Muxify
-comes to the front, with R, and after you stage or commit. On a Remote
-Environment, git runs on that machine. Code is sized from the terminal's font
+comes to the front, with R, and after you stage or commit. On this Mac it also
+reads it again as soon as the repository changes, such as after a commit typed
+in a Pane: it watches the working tree and the git directories, waits for the
+changes to settle for a quarter of a second, and reads at most once a second.
+On a Remote Environment, git runs on that machine. Code is sized from the terminal's font
 size, in the system's monospaced font. Each Window has its own Git View: select
 another Window and it stays open there, as you left it, until you come back; it
 isn't read again meanwhile. A Window whose Git View is open shows its icon in the

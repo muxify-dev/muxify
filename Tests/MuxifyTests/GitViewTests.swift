@@ -3720,3 +3720,162 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(store.gitView(for: "@2").tab, .changes)
     }
 }
+
+/// The Git View reads its repository again when its watcher says it changed (ADR "The Git View watches a local
+/// repository and probes a remote one"), driven here through a fake watcher and a fake read.
+@MainActor
+final class GitViewWatchingTests: XCTestCase {
+    private final class FakeWatcher: GitWatcher {
+        private(set) var watched: GitWatchedRepository?
+        /// What the Git View gave it to call, kept after a stop to report late.
+        private(set) var report: (() -> Void)?
+        private(set) var isRunning = false
+
+        func start(_ repository: GitWatchedRepository, changed: @escaping () -> Void) {
+            watched = repository
+            report = changed
+            isRunning = true
+        }
+
+        func stop() {
+            watched = nil
+            isRunning = false
+        }
+
+        func change() { if isRunning { report?() } }
+    }
+
+    private let watcher = FakeWatcher()
+    private var reads = 0
+    /// The read running, ended by calling it.
+    private var finishRead: (() -> Void)?
+    /// Kept, as the store keeps its Git Views: the watcher holds it weakly.
+    private var gitView: GitView?
+
+    private var snapshot: GitSnapshot {
+        var snapshot = GitSnapshot(root: "/repo", repositoryName: "repo", head: "main")
+        snapshot.commonDirectory = "/repo/.git"
+        return snapshot
+    }
+
+    /// A Git View as open and current: watching its repository, with reads counted and held until finished.
+    private func watchingGitView() -> GitView {
+        let gitView = GitView(windowID: "@1")
+        gitView.watcher = watcher
+        gitView.changeTiming = (settle: 0.05, spacing: 0.3)
+        gitView.readAfterChange = { [unowned self] done in
+            reads += 1
+            finishRead = done
+        }
+        gitView.apply(snapshot)
+        gitView.startWatching()
+        self.gitView = gitView
+        return gitView
+    }
+
+    private func spin(_ seconds: TimeInterval) {
+        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    func testItWatchesTheTopFolderAndAnOutsideCommonGitDirectory() {
+        XCTAssertEqual(GitWatchedRepository(snapshot).folders, ["/repo"])
+        XCTAssertEqual(GitWatchedRepository(root: "/work/linked", commonDirectory: "/repo/.git").folders,
+                       ["/work/linked", "/repo/.git"])
+        let gitView = watchingGitView()
+        XCTAssertEqual(watcher.watched, GitWatchedRepository(root: "/repo", commonDirectory: "/repo/.git"))
+        // Another repository read is watched instead.
+        var linked = snapshot
+        linked.root = "/work/linked"
+        gitView.apply(linked)
+        XCTAssertEqual(watcher.watched?.root, "/work/linked")
+    }
+
+    func testAChangeReadsOnceAfterTheChangesSettle() {
+        _ = watchingGitView()
+        watcher.change()
+        XCTAssertEqual(reads, 0, "it reads before the changes settle")
+        spin(0.2)
+        XCTAssertEqual(reads, 1)
+        finishRead?()
+        spin(0.5)
+        XCTAssertEqual(reads, 1, "nothing changed again, yet it read again")
+    }
+
+    func testABurstOfChangesReadsOnce() {
+        _ = watchingGitView()
+        for _ in 0..<5 {
+            watcher.change()
+            spin(0.01)
+        }
+        spin(0.2)
+        XCTAssertEqual(reads, 1)
+        finishRead?()
+        spin(0.5)
+        XCTAssertEqual(reads, 1)
+    }
+
+    func testOneReadRunsAtATimeAndChangesDuringItReadOnceAfterTheSpacing() {
+        watchingGitView().changeTiming = (settle: 0.05, spacing: 0.8)
+        watcher.change()
+        spin(0.15)
+        XCTAssertEqual(reads, 1)
+        watcher.change()
+        watcher.change()
+        spin(0.2)
+        XCTAssertEqual(reads, 1, "a second read started while the first ran")
+        finishRead?()
+        spin(0.05)
+        XCTAssertEqual(reads, 1, "the next read started before the spacing since the last")
+        spin(0.8)
+        XCTAssertEqual(reads, 2, "the changes during the read were not read after it")
+        finishRead?()
+        spin(0.4)
+        XCTAssertEqual(reads, 2)
+    }
+
+    func testTheFileWatcherReportsAFileWrittenInTheRepositoryUntilStopped() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-watch-" + UUID().uuidString)
+            .resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let fileWatcher = GitFileWatcher()
+        var changes = 0
+        fileWatcher.start(GitWatchedRepository(root: folder.path, commonDirectory: folder.path + "/.git")) { changes += 1 }
+        try "one\n".write(to: folder.appendingPathComponent("a.txt"), atomically: false, encoding: .utf8)
+        let deadline = Date().addingTimeInterval(5)
+        while changes == 0, Date() < deadline { spin(0.05) }
+        XCTAssertGreaterThan(changes, 0, "FSEvents reported no change")
+        fileWatcher.stop()
+        spin(0.2)
+        let seen = changes
+        try "two\n".write(to: folder.appendingPathComponent("b.txt"), atomically: false, encoding: .utf8)
+        spin(0.5)
+        XCTAssertEqual(changes, seen, "a stopped watcher reported a change")
+    }
+
+    func testASuspendedOrClosedGitViewWatchesNothingAndIgnoresChanges() {
+        let gitView = watchingGitView()
+        let report = try? XCTUnwrap(watcher.report)
+        watcher.change()
+        gitView.suspend()
+        XCTAssertFalse(watcher.isRunning, "a suspended Git View still watches")
+        // A report that comes late, after the stop, reads nothing either.
+        report?()
+        spin(0.2)
+        XCTAssertEqual(reads, 0, "a change read after the suspend")
+        // Resumed, it watches again; stopped, as on close, it ignores changes again.
+        gitView.startWatching()
+        XCTAssertTrue(watcher.isRunning)
+        gitView.stopWatching()
+        XCTAssertFalse(watcher.isRunning)
+        report?()
+        spin(0.2)
+        XCTAssertEqual(reads, 0)
+        // A Git View that never opened watches nothing.
+        let other = FakeWatcher()
+        let closed = GitView(windowID: "@2")
+        closed.watcher = other
+        closed.apply(snapshot)
+        XCTAssertFalse(other.isRunning, "a Git View that never opened watches")
+    }
+}

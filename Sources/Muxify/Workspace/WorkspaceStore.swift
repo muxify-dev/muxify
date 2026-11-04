@@ -2248,8 +2248,15 @@ final class WorkspaceStore {
         let gitView = GitView(windowID: windowID)
         gitView.store = self
         gitView.copiedStore = copiedCommits
+        gitView.watcher = makeGitWatcher()
         gitViews[windowID] = gitView
         return gitView
+    }
+
+    /// What tells a Git View that its repository changed: FSEvents on this Mac. A Remote Environment's Git View
+    /// reads on its timer only.
+    private func makeGitWatcher() -> GitWatcher? {
+        isRemote ? nil : GitFileWatcher()
     }
 
     /// The Git View of the Location's Window, once it has opened there; nil
