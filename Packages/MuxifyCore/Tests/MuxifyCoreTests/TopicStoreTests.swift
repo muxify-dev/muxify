@@ -454,7 +454,7 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(try shown(store), ["p", "t", "a"], "Reopen brings the Topic back last among the Pinned Topics")
     }
 
-    func testATopicNoteIsSavedAsOneLineAndSurvivesSettleAndReopen() throws {
+    func testATopicNoteIsSavedAsOneLineAndSettleClearsIt() throws {
         let old = try JSONDecoder().decode(TopicRecord.self, from: Data(#"{"id":"t","title":"T","future":{"value":7}}"#.utf8))
         XCTAssertNil(old.note, "a record without a note key has no Note")
         let store = TopicStore(paths: paths)
@@ -472,14 +472,16 @@ final class TopicStoreTests: XCTestCase {
                                      sessionPaths: [], choices: [], outcome: "").edit
         try store.write { try $0.apply(TopicRecordChange(before: topic, after: XCTUnwrap(settle.record))) }
         let settled = try XCTUnwrap(records(store).first)
-        XCTAssertEqual(settled.note, "Repro with seed 4411 then bisect", "Settle keeps the Note")
+        XCTAssertNil(settled.note, "Settle clears the Note")
+        XCTAssertNil(try file()["note"], "the Settled record has no note key")
         XCTAssertThrowsError(try store.write { try $0.setNote(of: "t", "later") }, "a Settled Topic takes no Note change")
 
         let reopen = try TopicReopenPlan(topic: settled, records: try records(store), windows: [], sessionPaths: [],
                                          existingDirectories: []).edit
         try store.write { try $0.apply(TopicRecordChange(before: settled, after: XCTUnwrap(reopen.savedCompletionRecord))) }
-        XCTAssertEqual(try records(store).first?.note, "Repro with seed 4411 then bisect", "a Reopened Topic shows where the user stopped")
+        XCTAssertNil(try records(store).first?.note, "a Reopened Topic starts without a Note")
 
+        try store.write { try $0.setNote(of: "t", "y") }
         try store.write { try $0.setNote(of: "t", " \n\t ") }
         XCTAssertNil(try file()["note"], "text with no words clears the Note, and the record has no note key")
         try store.write { try $0.setNote(of: "t", "x") }

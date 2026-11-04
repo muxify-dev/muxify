@@ -63,6 +63,8 @@ struct TopicSettlePlan {
         var record = topic.remembering(snapshot, order: order) ?? topic
         record.settledAt = ISO8601DateFormatter().string(from: now)
         record.outcome = outcome.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The Note says where the work stopped. Settled work is done, so a Reopened Topic starts without one.
+        record.note = nil
         let defaults = TopicSettleSession.choices(topic: record, snapshot: snapshot, sessionPaths: sessionPaths,
                                                  mergedWorktrees: mergedWorktrees)
         var commands: [TopicPlan.Command] = []

@@ -344,12 +344,22 @@ struct TopicsModel {
 
     /// The open Topics and the Locked Sessions, in one order; `groups` lists the others. No Topic has no row.
     let rows: [Row]
-    /// The Next Topic after `id` leaves the list together with `others`: the nearest row below that stays, else above.
+    /// The Next Topic after `id` leaves the list together with `others`: the nearest card below it that the Sidebar
+    /// shows and that stays. With a Bench line and no such card, the first In Play card that stays, so a Settle in
+    /// In Play does not go to a hidden Bench. Else the nearest row below that stays, else above.
     func nextTopic(after id: String, skipping others: Set<String> = []) -> TopicGroupID {
         guard let index = rows.firstIndex(where: { $0.id == .topic(id) }) else { return .noTopic }
         func stays(_ row: Row) -> Bool {
             if case .topic(let other) = row.id { return other != id && !others.contains(other) }
             return true
+        }
+        let shown = list.compactMap { item -> Row? in
+            if case .card(let row) = item { return row }
+            return nil
+        }
+        if let position = shown.firstIndex(where: { $0.id == .topic(id) }) {
+            if let below = shown[(position + 1)...].first(where: stays) { return below.id }
+            if isBenchShown != nil, let first = shown.first(where: { !$0.isPinned && stays($0) }) { return first.id }
         }
         return rows[(index + 1)...].first(where: stays)?.id ?? rows[..<index].last(where: stays)?.id ?? .noTopic
     }

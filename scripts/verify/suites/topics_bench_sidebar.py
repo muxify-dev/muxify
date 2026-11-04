@@ -21,14 +21,14 @@ PILL = 30
 
 
 class TopicsBenchSidebar(TopicsSidebar):
-    def bench_topics(self, prefix, dormant=0):
-        """Topics <prefix>-a, -b and -c in that order, each with one live Session, and only one In Play. `dormant` more
+    def bench_topics(self, prefix, dormant=0, in_play=1):
+        """Topics <prefix>-a, -b and -c in that order, each with one live Session, and `in_play` of them In Play. `dormant` more
         Topics with no Session, <prefix>-t03 on, make the Bench longer than the Sidebar. Returns the Window of each live
         Topic by its card identifier."""
         self.addCleanup(self.config.write_text, self.config_text)
         # An Open Place that a check leaves would take the In Play place of the next check.
         self.addCleanup(self.store.set_open_places, [])
-        self.config.write_text(self.config_text + 'topics:\n  in_play: 1\n')
+        self.config.write_text(self.config_text + 'topics:\n  in_play: %d\n' % in_play)
         windows = {}
         for order, name in enumerate(['a', 'b', 'c']):
             topic = '%s-%s' % (prefix, name)
@@ -242,6 +242,30 @@ class TopicsBenchSidebar(TopicsSidebar):
         wait(lambda: self.layout('bench-settle') == 'c b',
              'the chosen Topic did not fill the Open Place: %s' % self.layout('bench-settle'))
         s.wait_rows(lambda rs: not s.has('open-place-1', rs), 'the filled Open Place still shows')
+
+    def test_settle_of_the_last_card_in_play_opens_the_first_card_in_play_not_the_hidden_bench(self):
+        s = self.s
+        windows = self.bench_topics('bench-next', in_play=2)
+        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
+        self.hide_bench()
+        s.show(windows['topic-bench-next-b'])
+
+        def note():
+            if s.has('palette-search'):
+                s.act('action', 'palette-search', 'Close')
+            s.driver('press', 'Settle Topic…')
+            # The note says "Checking Sessions and Worktrees…" until Settle has its choices; only then does it name
+            # the Next Topic.
+            def text(rs):
+                row = s.row('palette-note', rs) if s.has('palette-note', rs) else {}
+                return row.get('accessibilityLabel', '') + row.get('accessibilityValue', '')
+            found, rs = self.rows_until(lambda rs: 'Then opens' in text(rs), seconds=5)
+            if found is None or 'Bench-next-b' not in self.describe('palette-breadcrumb', rs):
+                return None
+            return text(rs)
+        found = wait(note, 'Settle did not name a Next Topic for the last card In Play', seconds=20)
+        s.act('action', 'palette-search', 'Close')
+        self.assertIn('Then opens: Bench-next-a', found, 'Settle names a Next Topic other than the first card In Play')
 
     def test_bench_topic_puts_a_card_in_play_on_top_of_the_bench_and_leaves_an_open_place(self):
         # The card's accessibility actions are its context menu (`listActions` in UI/SidebarView.swift).

@@ -343,7 +343,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(noTarget.kind, .noTarget)
     }
 
-    func testATopicNoteChangesOnlyTheNoteOfTheTargetsOpenTopicAndStaysThroughSettle() throws {
+    func testATopicNoteChangesOnlyTheNoteOfTheTargetsOpenTopicAndSettleClearsIt() throws {
         let id = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Fix")))).topicID)
         func current() throws -> TopicRecord { try XCTUnwrap(records().first { $0.id == id }) }
         let before = try current()
@@ -359,11 +359,11 @@ final class TopicServiceTests: XCTestCase {
 
         _ = try change(service().handle(EnvironmentRequest(.note("Bisect from v2"), target: .topic(.id(id)))))
         _ = try change(service().handle(EnvironmentRequest(.settle(choices: [], outcome: ""), target: .topic(.id(id)))))
-        XCTAssertEqual(try current().note, "Bisect from v2", "Settle keeps the Note")
-        let settled = try failure(service().handle(EnvironmentRequest(.note(nil), target: .topic(.id(id)))))
+        XCTAssertNil(try current().note, "Settle clears the Note")
+        let settled = try failure(service().handle(EnvironmentRequest(.note("Later"), target: .topic(.id(id)))))
         XCTAssertEqual(settled.kind, .topicUnavailable)
         XCTAssertEqual(settled.phase, .nothingChanged)
-        XCTAssertEqual(try current().note, "Bisect from v2")
+        XCTAssertNil(try current().note)
         XCTAssertEqual(try failure(service().handle(EnvironmentRequest(.note("x")))).kind, .noTarget)
     }
 
