@@ -125,10 +125,21 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
     private func page<Content: View>(_ content: Content, mode target: SidebarMode, index: CGFloat, width: CGFloat) -> some View {
         content
             .frame(width: width)
-            .scaleEffect(motionEnabled ? 1 - min(1, abs(position - index)) * 0.025 : 1)
+            .scaleEffect(scale(ofPage: index))
             .opacity(motionEnabled ? 1 - min(1, abs(position - index)) * 0.18 : 1)
             .allowsHitTesting(mode == target && origin == nil)
             .accessibilityHidden(mode != target)
+    }
+
+    /// A page shrinks a little as it slides away, and is whole again once it is all out of view. The page that does
+    /// not show must not stay shrunk: its list still scrolls, as the Sessions list does to the selected Window's
+    /// Session, and a scroll view under a scale of 0.975 puts its scroll on a grid of 1.95 pixels a point. SwiftUI's
+    /// animated scrollTo never reaches its target on that grid and starts the scroll again every frame, and AppKit
+    /// leaves a display link behind with many of these starts, until a Space switch freezes the app on them.
+    private func scale(ofPage index: CGFloat) -> CGFloat {
+        let distance = abs(position - index)
+        guard motionEnabled, distance < 1 else { return 1 }
+        return 1 - distance * 0.025
     }
 
     private func rubberBand(_ distance: CGFloat) -> CGFloat {
