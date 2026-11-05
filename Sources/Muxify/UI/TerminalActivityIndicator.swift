@@ -56,9 +56,10 @@ struct TerminalActivityGlyph: View {
     var body: some View {
         Canvas { context, size in
             let head = Self.head(at: phase)
-            // Reserve a physical pixel for each gap. At 1×, use 2 pt blocks so
-            // all eight stay separate within the same 10 pt footprint; at 2×,
-            // retain the 3 pt blocks and half-point gaps.
+            // Reserve a physical pixel for each gap. At 12 and 1×, use 2 pt
+            // blocks so all eight stay separate within the same 10 pt
+            // footprint; at 2×, retain the 3 pt blocks and half-point gaps.
+            // At other sizes the footprint and the 3 pt cap scale by the factor.
             let gap = 1 / displayScale
             let availablePixels = min(size.width, size.height) * displayScale - 2
             let blockSize = min(fontSize(Self.blockSize), floor(availablePixels / 3) / displayScale)

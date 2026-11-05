@@ -462,7 +462,7 @@ class InterfaceFontSize(unittest.TestCase):
             self.assertFalse(self.s.has('header-window-menu', rs),
                              'the Window list became a dropdown at %s, though its one Window fits inline' % size)
             self.assertEqual(self.s.row(selector, rs).get('accessibilityValue'), 'selected')
-            app_window = bounds(next(row for row in rs if row.get('accessibilityRole') == 'AXWindow'))
+            app_window = self.app_window(rs)
             header_x, header_y, header_width, header_height = frames[size][HEADER]
             for key in ['header-session-name'] + buttons:
                 x, y, w, h = frames[size][key]
@@ -508,7 +508,7 @@ class InterfaceFontSize(unittest.TestCase):
                          and abs(height(s.row(HEADER, rs)) - 60) < 1,
                          'the header does not show the branch beside a %d-point Sidebar at ui.font_size: 24' % widest)
         rs = self.settled([HEADER, 'toggle-git-view'] + HEADER_BUTTONS, 'the header does not settle at 24')
-        app_window = bounds(next(row for row in rs if row.get('accessibilityRole') == 'AXWindow'))
+        app_window = self.app_window(rs)
         for key in ['header-session-name'] + HEADER_BUTTONS:
             x, _, w, _ = bounds(s.row(key, rs))
             self.assertTrue(app_window[0] - ROUNDING <= x and x + w <= app_window[0] + app_window[2] + ROUNDING,

@@ -679,7 +679,7 @@ private struct GitListView: View {
             case .change(let change):
                 Color.clear.frame(width: fontSize(12))
                 status(change, onAccent: onAccent)
-                GitFileTile(path: change.path, size: 15)
+                GitFileTile(path: change.path, designSize: 15)
                 Text(change.name)
                     .font(fontSize.font(13))
                     .foregroundStyle(onAccent ? Color.white : change.isStaged ? palette.staged : palette.unstaged)
@@ -695,7 +695,7 @@ private struct GitListView: View {
                     .font(fontSize.font(11.5, weight: .bold, design: .monospaced))
                     .foregroundStyle(onAccent ? Color.white : palette.color(palette.colors.strong(letter.color(palette.colors))))
                     .frame(width: fontSize(12))
-                GitFileTile(path: path, size: 15)
+                GitFileTile(path: path, designSize: 15)
                 Text((path as NSString).lastPathComponent).font(fontSize.font(13)).lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 4)
                 counts(file?.isBinary == true ? nil : file?.additions, file?.deletions, onAccent: onAccent)
@@ -751,7 +751,7 @@ private struct GitListView: View {
     private func copiedMark(_ commit: GitCommit, onAccent: Bool) -> some View {
         if gitView.isCopied(commit) {
             GitTag(text: "copied", symbol: "doc.on.doc", style: .tint(palette.colors.cyan), palette: palette,
-                   height: 16, fontSize: 10, onAccent: onAccent)
+                   designHeight: 16, designFontSize: 10, onAccent: onAccent)
                 .help("Copied: V cherry-picks it onto the branch you're on, C takes it out again")
         }
     }
@@ -761,7 +761,7 @@ private struct GitListView: View {
     private func baseMark(_ item: GitView.Item, onAccent: Bool) -> some View {
         if item.id == gitView.base?.id {
             GitTag(text: "base", symbol: "arrow.left.arrow.right", style: .tint(palette.colors.magenta), palette: palette,
-                   height: 16, fontSize: 10, onAccent: onAccent)
+                   designHeight: 16, designFontSize: 10, onAccent: onAccent)
                 .help("The base: what's selected is compared with it (W)")
         }
     }
@@ -771,14 +771,14 @@ private struct GitListView: View {
     @ViewBuilder
     private func branchTags(_ branch: GitBranch, onAccent: Bool) -> some View {
         if branch.worktreePath != nil, !branch.isHead {
-            GitTag(text: "worktree", symbol: "rectangle.split.2x1", style: .gray, palette: palette, height: 16, fontSize: 10, onAccent: onAccent)
+            GitTag(text: "worktree", symbol: "rectangle.split.2x1", style: .gray, palette: palette, designHeight: 16, designFontSize: 10, onAccent: onAccent)
         }
         if branch.track == "gone" {
-            GitTag(text: "gone", style: .tint(palette.colors.red), palette: palette, height: 16, fontSize: 10, onAccent: onAccent)
+            GitTag(text: "gone", style: .tint(palette.colors.red), palette: palette, designHeight: 16, designFontSize: 10, onAccent: onAccent)
                 .help("Its upstream was deleted")
         }
         if !branch.isHead, branch.ahead > 0 || branch.behind > 0 {
-            GitTag(text: "↑\(branch.ahead) ↓\(branch.behind)", style: .gray, palette: palette, height: 16, fontSize: 10, onAccent: onAccent)
+            GitTag(text: "↑\(branch.ahead) ↓\(branch.behind)", style: .gray, palette: palette, designHeight: 16, designFontSize: 10, onAccent: onAccent)
                 .help("\(branch.ahead) commits ahead of and \(branch.behind) behind the branch you're on")
         }
     }
@@ -791,10 +791,10 @@ private struct GitListView: View {
             + commit.remotes.map { ($0, palette.colors.cyan) }
         if let first = all.first {
             GitTag(text: first.0, symbol: commit.refs.isEmpty && !commit.tags.isEmpty ? "tag" : nil, style: .tint(first.1),
-                   palette: palette, height: 16, fontSize: 10, onAccent: onAccent)
+                   palette: palette, designHeight: 16, designFontSize: 10, onAccent: onAccent)
                 .help((commit.refs + commit.tags + commit.remotes).joined(separator: ", "))
             if all.count > 1 {
-                GitTag(text: "+\(all.count - 1)", style: .gray, palette: palette, height: 16, fontSize: 10, onAccent: onAccent)
+                GitTag(text: "+\(all.count - 1)", style: .gray, palette: palette, designHeight: 16, designFontSize: 10, onAccent: onAccent)
                     .help((commit.refs + commit.tags + commit.remotes).joined(separator: ", "))
             }
         }
@@ -1389,7 +1389,7 @@ private struct GitFileHeader: View {
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
-        GitPathBar(path: header.path, additions: header.additions, deletions: header.deletions, palette: palette, height: 46) {
+        GitPathBar(path: header.path, additions: header.additions, deletions: header.deletions, palette: palette, designHeight: 46) {
             if let kind = GitNavigatorText.kind(of: header.files.first, change: header.change, colors: palette.colors) {
                 GitTag(text: kind.title, style: .tint(kind.color), palette: palette)
             }
@@ -1422,7 +1422,7 @@ private struct GitFileBar: View {
     let palette: Palette
 
     var body: some View {
-        GitPathBar(path: file.path, additions: file.additions, deletions: file.deletions, palette: palette, height: 40) {
+        GitPathBar(path: file.path, additions: file.additions, deletions: file.deletions, palette: palette, designHeight: 40) {
             if let kind = GitNavigatorText.kind(of: file, change: nil, colors: palette.colors) {
                 GitTag(text: kind.title, style: .tint(kind.color), palette: palette)
             }
@@ -1444,7 +1444,7 @@ private struct GitPathBar<Tags: View, Trailing: View>: View {
     let deletions: Int
     let palette: Palette
     /// The bar's height at 12, which grows with its text.
-    let height: CGFloat
+    let designHeight: CGFloat
     @ViewBuilder let tags: Tags
     @ViewBuilder let trailing: Trailing
     @Environment(\.interfaceFontSize) private var fontSize
@@ -1452,7 +1452,7 @@ private struct GitPathBar<Tags: View, Trailing: View>: View {
     var body: some View {
         let folder = (path as NSString).deletingLastPathComponent
         HStack(spacing: 10) {
-            GitFileTile(path: path, size: 14)
+            GitFileTile(path: path, designSize: 14)
             HStack(spacing: 0) {
                 if !folder.isEmpty { Text(folder + "/").foregroundStyle(.secondary) }
                 Text((path as NSString).lastPathComponent).fontWeight(.semibold)
@@ -1467,7 +1467,7 @@ private struct GitPathBar<Tags: View, Trailing: View>: View {
             trailing
         }
         .padding(.horizontal, 14)
-        .frame(height: fontSize(height))
+        .frame(height: fontSize(designHeight))
         // Its tags and counts keep their width, so in a diff too narrow for them, as beside a List pane grown with the
         // Interface font size, the bar is cut at its end instead of pushing the List pane out of the Git View.
         .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
@@ -1638,7 +1638,7 @@ private struct GitCard: View {
                     ForEach(log.commits.prefix(12)) { commit in
                         Button { gitView.enter(.branch(branch), selecting: .commit(commit)) } label: {
                             HStack(spacing: 8) {
-                                avatar(commit.initials, name: commit.author, size: 16)
+                                avatar(commit.initials, name: commit.author, designSize: 16)
                                 Text(String(commit.sha.prefix(7))).font(fontSize.font(11, design: .monospaced)).foregroundStyle(.tertiary)
                                 Text(commit.subject).font(fontSize.font(13)).lineLimit(1)
                                 Spacer(minLength: 8)
@@ -1742,9 +1742,9 @@ private struct GitCard: View {
         .font(fontSize.font(12, weight: .semibold, design: .monospaced))
     }
 
-    /// A circle `size` points across at 12, with the author's initials in it.
-    private func avatar(_ initials: String, name: String, size: CGFloat = 22) -> some View {
-        let side = fontSize(size)
+    /// A circle `designSize` points across at 12, with the author's initials in it.
+    private func avatar(_ initials: String, name: String, designSize: CGFloat = 22) -> some View {
+        let side = fontSize(designSize)
         return Circle()
             .fill(palette.color(palette.colors.author(name)).gradient)
             .frame(width: side, height: side)
@@ -1954,7 +1954,7 @@ private struct GitCommitBox: View {
             }
             .font(fontSize.font(11, weight: .bold, design: .monospaced))
             .frame(width: fontSize(16), alignment: .leading)
-            GitFileTile(path: change.path, size: 14)
+            GitFileTile(path: change.path, designSize: 14)
             Text(change.name).font(fontSize.font(12.5)).lineLimit(1)
             if !folder.isEmpty {
                 Text(folder).font(fontSize.font(11.5)).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.head)
@@ -2136,7 +2136,7 @@ private struct GitMenuView: View {
                                 Text(files == 1 ? "1 file" : "\(files) files")
                             }
                         case .file(let path):
-                            GitFileTile(path: path, size: 13)
+                            GitFileTile(path: path, designSize: 13)
                             Text((path as NSString).lastPathComponent).fontWeight(.medium).lineLimit(1)
                             let folder = (path as NSString).deletingLastPathComponent
                             if !folder.isEmpty {
@@ -2473,20 +2473,20 @@ private struct GitTag: View {
     let style: Style
     let palette: Palette
     /// The tag's height and its text's size at 12, which grow with the Interface font size.
-    var height: CGFloat = 19
-    var fontSize: CGFloat = 11
+    var designHeight: CGFloat = 19
+    var designFontSize: CGFloat = 11
     var onAccent = false
     @Environment(\.interfaceFontSize) private var interfaceFontSize
 
     var body: some View {
         HStack(spacing: 4) {
-            if let symbol { Image(systemName: symbol).font(interfaceFontSize.font(fontSize - 1, weight: .semibold)) }
+            if let symbol { Image(systemName: symbol).font(interfaceFontSize.font(designFontSize - 1, weight: .semibold)) }
             Text(text).lineLimit(1)
         }
-        .font(interfaceFontSize.font(fontSize, weight: .semibold))
+        .font(interfaceFontSize.font(designFontSize, weight: .semibold))
         .foregroundStyle(foreground)
-        .padding(.horizontal, height > 18 ? 8 : 6)
-        .frame(height: interfaceFontSize(height))
+        .padding(.horizontal, designHeight > 18 ? 8 : 6)
+        .frame(height: interfaceFontSize(designHeight))
         .background(Capsule().fill(background))
         .fixedSize()
     }
@@ -2508,16 +2508,16 @@ private struct GitTag: View {
     }
 }
 
-/// A small app-icon-like tile for a file's type, `size` points square at 12. It sits beside the file's name, so it
-/// grows with the Interface font size.
+/// A small app-icon-like tile for a file's type, `designSize` points square at 12. It sits beside the file's name, so
+/// it grows with the Interface font size.
 private struct GitFileTile: View {
     let path: String
-    let size: CGFloat
+    let designSize: CGFloat
     @Environment(\.gitOnAccent) private var onAccent
     @Environment(\.interfaceFontSize) private var interfaceFontSize
 
     var body: some View {
-        let side = interfaceFontSize(size)
+        let side = interfaceFontSize(designSize)
         let (symbol, colors) = Self.look((path as NSString).pathExtension.lowercased())
         if let colors {
             RoundedRectangle(cornerRadius: side * 0.24, style: .continuous)
