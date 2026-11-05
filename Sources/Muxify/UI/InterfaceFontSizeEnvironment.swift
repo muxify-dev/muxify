@@ -60,7 +60,7 @@ private struct InterfaceFontSizeKey: EnvironmentKey {
 
 extension EnvironmentValues {
     /// The Interface font size of the App Window, from its own Config: its Remote Environment's when that machine has
-    /// one (ADR 0010, ADR 0067). The App Window's root sets it, so everything under it reads one value.
+    /// one (ADR 0010, ADR 0068). The App Window's root sets it, so everything under it reads one value.
     var interfaceFontSize: InterfaceFontSize {
         get { self[InterfaceFontSizeKey.self] }
         set { self[InterfaceFontSizeKey.self] = newValue }

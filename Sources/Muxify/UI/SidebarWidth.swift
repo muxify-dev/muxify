@@ -1,7 +1,7 @@
 import CoreGraphics
 import MuxifyCore
 
-/// The Sidebar's width under the Interface font size (ADR 0067). Its resize bounds and its default width scale by the
+/// The Sidebar's width under the Interface font size (ADR 0068). Its resize bounds and its default width scale by the
 /// factor. A width the user dragged stays as dragged, pulled inside the scaled bounds only when it falls outside them.
 enum SidebarWidth {
     /// The resize bounds at 12.

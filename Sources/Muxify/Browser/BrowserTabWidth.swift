@@ -1,7 +1,7 @@
 import CoreGraphics
 import MuxifyCore
 
-/// The width of a Tab in the Browser's tab strip under the Interface font size (ADR 0067). Tabs share the strip like
+/// The width of a Tab in the Browser's tab strip under the Interface font size (ADR 0068). Tabs share the strip like
 /// Chrome's, between a readable least width and a most width; past the least the strip scrolls. A Tab holds its title
 /// in that width, so both bounds grow by the factor, and so does the New Tab button beside the Tabs.
 enum BrowserTabWidth {

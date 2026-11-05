@@ -76,7 +76,7 @@ struct HeaderTextButton<Label: View>: View {
 extension View {
     /// As wide as the view's content, up to `maxWidth`, and narrower only when it is offered less: a header control
     /// keeps its whole text while the header has room, and a maximum that grows with the Interface font size never
-    /// pushes the other controls off a narrow App Window (ADR 0067).
+    /// pushes the other controls off a narrow App Window (ADR 0068).
     func widthUpTo(_ maxWidth: CGFloat) -> some View {
         // The first that fits: the content at its own width up to the maximum, then the content cut to the room left.
         ViewThatFits(in: .horizontal) {

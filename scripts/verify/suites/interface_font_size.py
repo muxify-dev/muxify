@@ -1,5 +1,5 @@
 """The Interface font size, `ui.font_size`: Muxify's own text keeps its ratio to 12, and the fixed sizes that hold it
-grow with it (ADR 0067). Each check rewrites the sandbox Config, at 12 and then at 18, and measures elements in the
+grow with it (ADR 0068). Each check rewrites the sandbox Config, at 12 and then at 18, and measures elements in the
 dump. Paddings and spacing do not scale, so a check compares the part of an element that holds its text: the element's
 height less its padding.
 

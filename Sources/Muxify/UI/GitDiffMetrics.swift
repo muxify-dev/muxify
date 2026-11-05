@@ -1,7 +1,7 @@
 import AppKit
 
 /// The diff's code and the gutters that frame it, from the code font: the Terminal's `font-size` less one point, not
-/// the Interface font size (ADR 0067). Each length is in the code font's units, so nothing clips at a large Terminal
+/// the Interface font size (ADR 0068). Each length is in the code font's units, so nothing clips at a large Terminal
 /// size:
 ///
 /// - a line-number column fits the widest line number the diff shows, and at least 4 digits, in the line numbers' font,

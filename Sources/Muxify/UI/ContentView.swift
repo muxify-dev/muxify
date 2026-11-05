@@ -514,7 +514,7 @@ enum TitlebarMetrics {
     static let trafficLightsWidth: CGFloat = 78
 
     /// The header's height: `ui.header_height`, a length at size 12, or its default, times the factor of the Interface
-    /// font size (ADR 0067), so the header's controls grow with their text and never clip.
+    /// font size (ADR 0068), so the header's controls grow with their text and never clip.
     static func headerHeight(_ config: Config) -> CGFloat {
         config.interfaceFontSize(CGFloat(config.headerHeight))
     }

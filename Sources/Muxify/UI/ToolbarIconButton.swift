@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Browser toolbar control. Its symbol and its square grow with the Interface font size (ADR 0067).
+/// Browser toolbar control. Its symbol and its square grow with the Interface font size (ADR 0068).
 struct ToolbarIconButton: View {
     /// The button's side at 12.
     static let designSide: CGFloat = 26

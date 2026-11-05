@@ -158,7 +158,7 @@ public struct Config: Equatable {
 
     public var keybinds = Keybinds.defaults
     /// Height of the app's header in points at the Interface font size 12; at least 24 to fit its buttons. The header
-    /// shows it times the factor of `interfaceFontSize` (ADR 0067).
+    /// shows it times the factor of `interfaceFontSize` (ADR 0068).
     public var headerHeight: Double = 30
     /// `ui.status_line`: the Session name and Window selector in the header.
     public var statusLine = StatusLine()
@@ -192,7 +192,7 @@ public struct Config: Equatable {
     public var commandPalettes = CommandPaletteConfig.defaults
     /// `pick_lists`: the rules of the Action lists it names.
     public var pickLists: [ActionList: PickRules] = [:]
-    /// `ui.font_size`: the Interface font size, which all of Muxify's own text keeps its ratio to (ADR 0067).
+    /// `ui.font_size`: the Interface font size, which all of Muxify's own text keeps its ratio to (ADR 0068).
     public var interfaceFontSize = InterfaceFontSize()
     /// `ui.sidebar.font_family`: the Sidebar font family, `system` or an installed macOS family.
     public var sidebarFontFamily = "system"

@@ -1,7 +1,7 @@
 import CoreGraphics
 import MuxifyCore
 
-/// The Git View's List pane under the Interface font size (ADR 0067). Its rows, its headers and the History graph hold
+/// The Git View's List pane under the Interface font size (ADR 0068). Its rows, its headers and the History graph hold
 /// text, so their design sizes at 12 grow by the factor; the list's padding does not. The pane's width bounds grow
 /// too, inside the Git View.
 enum GitListMetrics {

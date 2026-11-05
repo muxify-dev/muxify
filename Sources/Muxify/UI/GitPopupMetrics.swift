@@ -1,7 +1,7 @@
 import CoreGraphics
 import MuxifyCore
 
-/// The Git View's popups under the Interface font size (ADR 0067): the commit box, a Git View menu and a Git View
+/// The Git View's popups under the Interface font size (ADR 0068): the commit box, a Git View menu and a Git View
 /// prompt. Their text grows by the factor, and so do the widths and heights that hold it. A popup's width never takes
 /// more than the Git View shows, less its margins, so it never leaves the App Window.
 enum GitPopupMetrics {

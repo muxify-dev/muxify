@@ -1,7 +1,7 @@
 import AppKit
 import XCTest
 
-/// The diff's code gutters follow the code font, the Terminal's `font-size` less one point (ADR 0067).
+/// The diff's code gutters follow the code font, the Terminal's `font-size` less one point (ADR 0068).
 final class GitDiffMetricsTests: XCTestCase {
     private typealias Metrics = GitView.TextMetrics
 

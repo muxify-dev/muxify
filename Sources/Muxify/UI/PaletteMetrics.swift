@@ -1,7 +1,7 @@
 import CoreGraphics
 import MuxifyCore
 
-/// The Command Palette under the Interface font size (ADR 0067). Its rows and section headers hold text in fixed
+/// The Command Palette under the Interface font size (ADR 0068). Its rows and section headers hold text in fixed
 /// heights, and the palette holds it in a fixed width, so their design sizes at 12 grow by the factor. The list still
 /// shows six and a half rows before it scrolls, and the palette never takes more than the App Window shows, less its
 /// margins.

@@ -13,7 +13,7 @@ final class BenchScrollTests: XCTestCase {
     }
 
     /// The edge pill and the least Bench area hold text, so they grow with the Interface font size, and the Bench's
-    /// geometry follows them (ADR 0063, ADR 0067).
+    /// geometry follows them (ADR 0063, ADR 0068).
     func testAtALargerInterfaceFontSizeThePillsBandAndTheLeastBenchAreaGrowByTheFactor() {
         let size = InterfaceFontSize(18)
         XCTAssertEqual(EdgePill.height(size), 45)
