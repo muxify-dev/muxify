@@ -33,7 +33,9 @@ enum CLIVerbs {
         var footer: [String] = []
         if verbs.contains(where: { !$0.targets.isEmpty }) { footer.append(targetFooter) }
         if verbs.contains(where: { $0.path == .windowMove }) { footer.append(bindingFooter) }
-        return (synopses + [""] + paragraphs + (footer.isEmpty ? [] : [""] + [footer.joined(separator: "\n\n")])).joined(separator: "\n")
+        var lines: [String] = synopses + [""] + paragraphs
+        if !footer.isEmpty { lines += ["", footer.joined(separator: "\n\n")] }
+        return lines.joined(separator: "\n")
     }
 
     /// The words of `arguments` that name verbs: the longest run from the start that begins the words of a verb.
