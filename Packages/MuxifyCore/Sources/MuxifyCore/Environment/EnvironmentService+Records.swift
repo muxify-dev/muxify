@@ -137,7 +137,7 @@ extension EnvironmentService {
         }
     }
 
-    /// Bench Topic writes the order of the Topics list, the Topic's Guest mark and the Open Places.
+    /// Bench of a Topic writes the order of the Topics list, the Topic's Guest mark and the Open Places.
     private func bench(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
         inPlayTopicChange(request, client: client) { topic, inPlay in { try $0.bench(topic.id, inPlay: inPlay) } }
     }

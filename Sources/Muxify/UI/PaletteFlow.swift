@@ -334,7 +334,7 @@ extension CommandPalette {
 
     func nextTopicNote(_ ids: [String]) -> String? {
         guard let store, let active = store.activeTopicID, ids.contains(active) else { return nil }
-        let next = store.nextTopic(after: active, skipping: Set(ids))
+        let next = store.topics.nextTopic(after: .topic(active), skipping: Set(ids))
         let title = store.topics.rows.first { $0.id == next }?.title ?? "No Topic"
         return "Then opens: " + title
     }

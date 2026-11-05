@@ -50,16 +50,28 @@ final class BenchTests: XCTestCase {
 
     func testTheNextTopicIsTheNextCardThatShowsElseTheFirstInPlayCard() {
         // In Play: a, b. Bench: c, d.
-        XCTAssertEqual(model(inPlay: 2, at: "a").nextTopic(after: "a"), .topic("b"), "the next In Play card")
-        XCTAssertEqual(model(inPlay: 2, at: "b").nextTopic(after: "b"), .topic("a"),
+        XCTAssertEqual(model(inPlay: 2, at: "a").nextTopic(after: .topic("a")), .topic("b"), "the next In Play card")
+        XCTAssertEqual(model(inPlay: 2, at: "b").nextTopic(after: .topic("b")), .topic("a"),
                        "the last In Play card goes to the first, not to the hidden Bench")
-        XCTAssertEqual(model(inPlay: 2, benchShown: true, at: "b").nextTopic(after: "b"), .topic("c"),
+        XCTAssertEqual(model(inPlay: 2, benchShown: true, at: "b").nextTopic(after: .topic("b")), .topic("c"),
                        "a shown Bench shows the next card")
-        XCTAssertEqual(model(inPlay: 2, at: "d").nextTopic(after: "d"), .topic("a"),
+        XCTAssertEqual(model(inPlay: 2, at: "d").nextTopic(after: .topic("d")), .topic("a"),
                        "a Benched card under a hidden Bench goes to the first In Play card")
         let open = model(inPlay: 3, at: "b", openPlaces: [OpenPlace(id: "o", order: 0.5)])
-        XCTAssertEqual(open.nextTopic(after: "b"), .topic("a"), "an Open Place is no Next Topic")
-        XCTAssertEqual(model(inPlay: nil, at: "d").nextTopic(after: "d"), .topic("c"), "without In Play, the nearest card above")
+        XCTAssertEqual(open.nextTopic(after: .topic("b")), .topic("a"), "an Open Place is no Next Topic")
+        XCTAssertEqual(model(inPlay: 4, at: "d").nextTopic(after: .topic("d")), .topic("a"),
+                       "with an empty Bench and no Bench line, the last In Play card still goes to the first")
+        let pinnedBetween = [topic("a", order: 0), topic("pinned", order: 1, pinned: true), topic("c", order: 2)]
+        XCTAssertEqual(model(inPlay: 1, at: "a", records: pinnedBetween).nextTopic(after: .topic("a")), .topic("c"),
+                       "with no other In Play card, a Benched card, not the Pinned Topic next in the order")
+        XCTAssertEqual(model(inPlay: 1, at: "a", records: Array(pinnedBetween.prefix(2))).nextTopic(after: .topic("a")), .noTopic,
+                       "with only a Pinned Topic left, no Topic")
+        XCTAssertEqual(model(inPlay: nil, at: "d").nextTopic(after: .topic("d")), .topic("c"), "without In Play, the nearest card above")
+        XCTAssertEqual(model(inPlay: 2, at: "@1", windows: [window("1", lock: 5)]).nextTopic(after: .locked("$1")), .topic("a"),
+                       "a Guest Session, the last card that shows, goes to the first In Play card")
+        let onlyInPlay = model(inPlay: 1, at: "a")
+        XCTAssertEqual(onlyInPlay.nextTopic(after: .topic("a")), .topic("b"), "with no other card In Play, a Benched card")
+        XCTAssertFalse(onlyInPlay.shows(.topic("b")), "which Bench does not open, because the Bench hides it")
     }
 
     private func cards(_ model: TopicsModel) -> [QuickSwitchTarget?] {
@@ -192,7 +204,7 @@ final class BenchTests: XCTestCase {
         XCTAssertNil(targets.target(for: .card(5)), "past the cards that show, a card key does nothing")
         XCTAssertEqual(targets.step(.topic, .next, from: .topic("b")), .topic("d"), "a Topic step skips the hidden Bench")
         XCTAssertEqual(targets.step(.topic, .next, from: .topic("d")), .topic("pinned"), "and wraps after the cards that show")
-        XCTAssertEqual(hidden.nextTopic(after: "b"), .topic("d"), "the Next Topic after Settle is the next card that shows")
+        XCTAssertEqual(hidden.nextTopic(after: .topic("b")), .topic("d"), "the Next Topic after Settle is the next card that shows")
         XCTAssertEqual(cards(model(inPlay: 2, benchShown: true, at: "@1")),
                        [.topic("pinned"), .topic("a"), .topic("b"), .topic("c"), .topic("d")])
         let shownAtD = model(inPlay: 2, benchShown: true, at: "d")

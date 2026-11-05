@@ -83,7 +83,7 @@ The Topic of the App Window's Location: the Topic of its Window or of its Empty 
 _Avoid_: current Topic, selected Topic, focused Topic
 
 **Next Topic**:
-The Topic or Locked Session that Muxify opens after the user Settles the Active Topic: the nearest row below it in the Topics list that stays in the list, else the nearest such row above it, else No Topic.
+The Topic or Locked Session that Muxify opens when the card that the user is on leaves the Sidebar by Settle, Forget or Bench: the nearest card below it that the Sidebar shows. With In Play and no such card, the first In Play card, also when the Bench is empty. Else the nearest row below it in the Topics list that stays, else the nearest such row above it, else No Topic. With In Play it is never a Pinned Topic.
 _Avoid_: following Topic, previous Topic, last Topic
 
 **Tag**:
@@ -159,7 +159,7 @@ A No Topic Session that the user Locked. It has a card among the Topics, but it 
 _Avoid_: kept Session, pinned Session, Topic (when you mean the Session)
 
 **Unlock**:
-To end a Lock. The Session stays, as a No Topic Session. With In Play, End Guest of a Session Unlocks it.
+To end a Lock. The Session stays, as a No Topic Session. With In Play, Bench of a Guest Session Unlocks it.
 _Avoid_: unpin, release
 
 **Guest**:
@@ -170,16 +170,12 @@ _Avoid_: visitor, temporary Topic, extra slot, Pin (when you mean a Guest)
 An Action on a Benched Topic or a No Topic Session. The card goes to the end of the Guests, directly above the Bench line, as a Guest. No other card goes to the Bench. For a Session, it is a Lock.
 _Avoid_: put In Play, promote, Lock (when the Config sets In Play)
 
-**End Guest**:
-An Action on a Guest Session. It Unlocks the Session, so its card ends. The Guests get one card shorter, no Benched card moves up, and no Open Place stays. For a Guest Topic, use Bench Topic.
-_Avoid_: demote, Bench Topic (when you mean a Session), Unlock (when the Config sets In Play)
-
-**Bench Topic**:
-An Action on an In Play Topic or a Guest Topic. The Topic goes to the top of the Bench and keeps its Sessions and Agents. From an In Play place it leaves an Open Place there. A Guest Topic loses its Guest mark and leaves no Open Place.
-_Avoid_: End Guest (when you mean a Topic), Snooze, hide, demote
+**Bench (the Action)**:
+The Action that takes a card out of In Play: an In Play Topic, a Guest Topic or a Guest Session. A Topic goes to the top of the Bench and keeps its Sessions and Agents. From an In Play place it leaves an Open Place there. A Guest Topic loses its Guest mark and leaves no Open Place. A Guest Session has no record to wait on the Bench, so Bench Unlocks it: it waits in No Topic, and its card ends. When the user is on the card, the Next Topic opens if the Sidebar shows it.
+_Avoid_: End Guest, Bench Topic, Snooze, hide, demote
 
 **Open Place**:
-An In Play place that no card fills. Settle, Forget, Pin and Bench Topic on a regular In Play card leave an Open Place at its place. No Benched card moves up, and the other places keep their positions. The Open Place stays until the user fills it with a Guest Topic or a Benched Topic, also after Muxify or tmux restarts. The Sidebar shows it as a dashed card.
+An In Play place that no card fills. Settle, Forget, Pin and Bench on a regular In Play card leave an Open Place at its place. No Benched card moves up, and the other places keep their positions. The Open Place stays until the user fills it with a Guest Topic or a Benched Topic, also after Muxify or tmux restarts. The Sidebar shows it as a dashed card.
 _Avoid_: empty slot, hole, gap, free place
 
 **Trade**:

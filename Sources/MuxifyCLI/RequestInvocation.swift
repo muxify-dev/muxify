@@ -55,7 +55,7 @@ struct RequestInvocation: Equatable {
         case pin(Bool)
         /// Make a Guest of the Benched Topic.
         case makeGuest
-        /// Bench Topic: the In Play Topic goes to the top of the Bench.
+        /// Bench of a Topic: the In Play Topic goes to the top of the Bench.
         case benchTopic
         /// The Topic fills the Open Place at this In Play place, counted from 1.
         case fillPlace(Int)

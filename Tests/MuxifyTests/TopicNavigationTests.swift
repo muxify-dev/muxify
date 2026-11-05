@@ -60,9 +60,9 @@ final class TopicNavigationTests: XCTestCase {
         var settled = TopicRecord(id: "settled")
         settled.settledAt = "2026-01-01T00:00:00Z"
         let result = model([a, settled, b], [], TopicSelection())
-        XCTAssertEqual(result.nextTopic(after: "b"), .topic("a"))
-        XCTAssertEqual(result.nextTopic(after: "a"), .topic("b"))
-        XCTAssertEqual(model([a, settled], [], TopicSelection()).nextTopic(after: "a"), .noTopic)
+        XCTAssertEqual(result.nextTopic(after: .topic("b")), .topic("a"))
+        XCTAssertEqual(result.nextTopic(after: .topic("a")), .topic("b"))
+        XCTAssertEqual(model([a, settled], [], TopicSelection()).nextTopic(after: .topic("a")), .noTopic)
     }
 
     func testNextTopicSkipsTheOtherTopicsThatLeaveTheList() {
@@ -72,9 +72,9 @@ final class TopicNavigationTests: XCTestCase {
             return record
         }
         let result = model(records, [], TopicSelection())
-        XCTAssertEqual(result.nextTopic(after: "b", skipping: ["c", "d"]), .topic("e"), "the nearest row below that stays")
-        XCTAssertEqual(result.nextTopic(after: "d", skipping: ["e", "c"]), .topic("b"), "else the nearest row above that stays")
-        XCTAssertEqual(result.nextTopic(after: "a", skipping: ["b", "c", "d", "e"]), .noTopic)
+        XCTAssertEqual(result.nextTopic(after: .topic("b"), skipping: ["c", "d"]), .topic("e"), "the nearest row below that stays")
+        XCTAssertEqual(result.nextTopic(after: .topic("d"), skipping: ["e", "c"]), .topic("b"), "else the nearest row above that stays")
+        XCTAssertEqual(result.nextTopic(after: .topic("a"), skipping: ["b", "c", "d", "e"]), .noTopic)
     }
 
 }

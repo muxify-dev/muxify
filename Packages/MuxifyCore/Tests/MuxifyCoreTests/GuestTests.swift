@@ -115,7 +115,7 @@ final class GuestTests: XCTestCase {
 
         var unlocked = transaction("payments auth-bug docs + ~scratch(G) | release")
         XCTAssertEqual(unlocked.unlock("scratch"), [.end(sessionID: "scratch")])
-        XCTAssertEqual(sidebar(unlocked), "payments auth-bug docs + | release", "End Guest of a Session Unlocks it")
+        XCTAssertEqual(sidebar(unlocked), "payments auth-bug docs + | release", "Bench of a Guest Session Unlocks it")
 
         var pinned = transaction("payments auth-bug docs + infra(G) | release")
         try pinned.pin("infra", true)
@@ -187,7 +187,7 @@ final class GuestTests: XCTestCase {
 
         var guest = transaction("payments auth-bug docs + infra(G) ~scratch(G) | release")
         try guest.bench("infra", inPlay: limit)
-        XCTAssertEqual(sidebar(guest), "payments auth-bug docs + ~scratch(G) | infra release", "as End Guest")
+        XCTAssertEqual(sidebar(guest), "payments auth-bug docs + ~scratch(G) | infra release", "as Bench of a Guest Session")
 
         var benched = transaction("payments auth-bug docs + | release")
         XCTAssertThrowsError(try benched.bench("release", inPlay: limit), "a Benched Topic is not In Play")

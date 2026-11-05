@@ -307,7 +307,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// `topics.in_play` at the end of In Play, where it is a Guest (ADR 0061). A Locked Session stays where it is.
     case lock
     /// Ends the Lock of the target Session. A Session that is not Locked does not change. With `topics.in_play` it is
-    /// End Guest, so the other Guests keep their positions.
+    /// Bench of a Guest Session, so the other Guests keep their positions.
     case unlock
     /// Changes the Tags of the target's open Topic. It changes nothing in tmux.
     case tags(TopicTagChange)
@@ -351,7 +351,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// Make a Guest: the target's Benched Topic goes to the end of the Guests with the Guest mark, and no card goes to
     /// the Bench for it. It needs `topics.in_play`. A Session is a Guest through its Lock, so `lock` makes it one.
     case makeGuest
-    /// Bench Topic: the target's In Play Topic goes to the top of the Bench without a Guest mark. A Topic in an In Play
+    /// Bench of a Topic: the target's In Play Topic goes to the top of the Bench without a Guest mark. A Topic in an In Play
     /// place leaves an Open Place there; a Guest Topic leaves none. It needs `topics.in_play`. `unlock` ends a Guest
     /// Session.
     case benchTopic
