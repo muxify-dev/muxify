@@ -4,10 +4,12 @@ import ObjectiveC
 /// Part of Diagnostics: logs every AppKit animation that starts, with its display link and the state of its
 /// window, and every link that keeps running after its animation let go of it.
 ///
-/// Such links pile up behind a Sidebar list's scroll animations. On a Space switch AppKit updates each one,
-/// so thousands of them freeze the app for seconds. The probe is for finding what leaves them behind; it
-/// reads AppKit's private state, so remove it once that is known. It numbers the animations from launch, so
-/// numbers go on after diagnostics is turned off and on.
+/// Such links piled up behind a Sidebar list's scroll animations. On a Space switch AppKit updates each one,
+/// so thousands of them froze the app for minutes. The probe found what left them behind: the Sessions list
+/// on the Sidebar page that did not show, which SidebarPager kept shrunk, restarted its scroll every frame
+/// (`SidebarPager.scale(ofPage:)`). The `sidebar_pager_scroll` verify suite counts its lines; the probe reads
+/// AppKit's private state, so remove it with another way for that suite to count. It numbers the animations
+/// from launch, so numbers go on after diagnostics is turned off and on.
 enum DisplayLinkProbe {
     private final class Tracked {
         let number: Int
