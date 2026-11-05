@@ -350,10 +350,13 @@ ui:
       wrap: true
 ```
 
-The height is in macOS points, defaults to 30, and must be a finite number of
-at least 24 so the buttons fit. Changes apply live. Removing the setting restores
-the default; invalid values use the default and appear in the Config problems
-banner. A YAML syntax error keeps the last good Config.
+The height is in macOS points at the Interface font size 12, defaults to 30,
+and must be a finite number of at least 24 so the buttons fit. It grows with
+`ui.font_size`, as the header's text and buttons do: the header is
+`header_height` times `font_size / 12`, so the default is 45 points at 18 (see
+[Interface font size](#interface-font-size)). Changes apply live. Removing the
+setting restores the default; invalid values use the default and appear in the
+Config problems banner. A YAML syntax error keeps the last good Config.
 
 `status_line.enabled` replaces tmux's status-line navigation with the current
 Session name and its Window selector, inline
@@ -553,36 +556,155 @@ The Terminal and the Browser each pick the value for their own appearance.
 Changes apply live. An invalid value uses the default and appears in the Config
 problems banner.
 
-## Sidebar typography
+## Interface font size
 
 ```yaml
 ui:
+  font_size: 12
   sidebar:
-    font_size: 12
     font_family: system
 ```
 
-These are the current defaults. `font_size` is a base size in macOS points:
-Window and Agent titles use it directly, while Session names, headings,
-metadata and numeric badges scale proportionally to preserve their existing
-hierarchy and weights. It must be a finite number greater than zero; fractional
-sizes are supported. Session rows grow to accommodate larger text.
+`font_size` is the Interface font size: the size, in macOS points like
+Ghostty's `font-size`, that all of Muxify's own text in an App Window keeps its
+ratio to. It is a number from 9 to 24, and fractions such as `13.5` are
+allowed. The default is 12, and at 12 every surface looks as it was designed.
 
-`font_family` is `system` for the native macOS system font, or an installed macOS
-font family name, such as `Helvetica`. Names are case-insensitive and surrounding
-whitespace is ignored. Use a family name, not a font-file path or an individual
-face/PostScript name. A family without an exact medium or semibold weight uses
-its closest available weight.
+Each text keeps its ratio to 12, so every size grows by `font_size / 12`. At
+18, a Session name that is 14 points at 12 is 21 points, and a Window title
+that is 12 points is 18. The fixed heights and widths that hold text grow by
+the same factor, so larger text has room. Paddings and spacing, logos and app
+icons do not grow.
 
-Both options apply live to text in the Sessions and Agents sections of every
-App Window, without changing selection, expansion or visibility. Symbols,
-logos, status dots, the App Window header and Terminal fonts are unchanged.
-Configure Terminal fonts in the Ghostty config instead.
+These follow the size:
 
-Each option is independent: removing it restores its default, and an invalid
-value uses its default and appears with its line in the Config problems banner
-while valid sibling settings still apply. An unavailable family is also a
-problem and uses `system`. A YAML syntax error keeps the entire last good Config.
+- The whole Sidebar. That is every text in it: Topic and Session cards with
+  their titles, Summaries, Topic Notes, the Guest mark, "N more…", a Settled
+  Topic's age and the Settle and Reopen links; the Session headings and the
+  outcome and idle labels of a Topic; Window, Pane and Agent rows with their
+  Summaries and custom parts; remembered Windows; Tag chips and Tag Marks; the
+  Bench and Guests lines, the "N more" pills over the list's edges and Open
+  Places; the Settled group's header and "Show N more"; the Topics/Sessions
+  switch; the drag labels "⇄ Trade" and "lands here"; the Agents heading and
+  the empty states. The symbols beside that text grow with it: card and row
+  icons, chevrons, and the dots of Row marks and Agent marks.
+- The fixed heights and widths in the Sidebar that hold text: the corner of a
+  card, the "N more…" button, the Bench and Guests lines, the edge pills, Open
+  Places, the Settled header and "Show N more", and the least height of the
+  Sessions and Agents sections. The Bench works the same at every size: it
+  scrolls alone under the cards In Play, and when it shows, the card of the
+  Location stays where it was, or moves down only by the height of the "more
+  above" pill, which grows with the size.
+- The Sidebar's width. Its resize bounds of 180 to 420 points and its default
+  width of 260 grow by the factor. A width you dragged stays as you dragged it,
+  and is pulled inside the bounds only when it falls outside them.
+- The App Window header: the Session name, the Window selector inline and as a
+  dropdown, the Git button, the Environment badge and the titlebar buttons, with
+  their symbols. Their heights and the most width the Window menu, the Git
+  button and the Environment badge take grow by the factor. While the header has
+  room, each shows its whole text up to that width. In a narrow App Window the
+  Window list and then the Session name give way first, and only then are the
+  branch and the Environment's name cut, so no control is pushed off the header.
+- The header's height. `ui.header_height` is a length at 12, so the header is
+  that height, or the default 30, times the factor (see [Header](#header)).
+- The Git View's lists and bars: the toolbar with its tags and the filter field,
+  the Git View tabs, the list headers and their counts, and the list rows with
+  their file, commit, branch and stash names, hashes, ages, `+`/`−` counts,
+  tags and file icons; the History graph's lanes; and the path bars over the
+  diff. The symbols beside that text grow with it. So do the heights of the
+  toolbar, the filter field, the tabs, the list headers, the rows and the path
+  bars, the width of the filter field and of a graph lane, and the List pane's
+  width bounds of 240 to 380 points. The List pane takes 30% of the Git View
+  between those bounds, but a scaled bound never makes it wider than half the
+  Git View, so the diff keeps its room. The keys, the scrolling to the
+  selection, and a click select the row you see at every size. The Unified and
+  Split switch is a macOS control, which comes in a few sizes: it is regular up
+  to 13, large up to 16, and extra large above.
+- The Git View's cards, commit box, menus and prompts: the card over a commit,
+  branch, stash, folder or comparison, with its title, body, author, hashes and
+  tags; the commit box with its summary, description, list of staged files,
+  notices, buttons and footer; a Git View menu with its title, its choices and
+  their keys; a Git View prompt with its title, field (also a hidden one),
+  suggestions and footer; the diff's notes and bars; the "Working tree clean"
+  empty state with its symbol; and the banner that says why a stage or commit
+  failed. The symbols beside that text grow with it. So do the heights that
+  hold it, such as the commit box's summary, description, file rows and footer,
+  a menu's choices, the prompt's field and the buttons, and the widths of the
+  popups: 620 points for the commit box, 460 for a menu and 520 for a prompt.
+  A popup is never wider than the Git View less 48 points, so it stays inside
+  the App Window. A menu leaves the keys with the Git View and a prompt gives
+  them to its field, at every size.
+- Every Command Palette, in each of its steps: the search field with its icon
+  and Tag chips, the breadcrumb and notes, the section headers, the rows with
+  their titles, details, trailing text, status, Tag chips and icons, the boxes
+  of a check step, the Source buttons, the Actions panel, the key caps, and the
+  footer with its buttons. So do the heights that hold that text: 52 points for
+  a row, 24 for a section header, 62 for the search field's row, 26 for the
+  Source buttons and 30 for a row of the Actions panel, which is 290 points
+  wide. The list still shows six and a half rows before it scrolls. The palette
+  is 700 points wide times the factor, but never wider than the App Window less
+  48 points, and a Pill takes the same width. The footer's buttons are macOS
+  controls, which take the size macOS draws nearest, as the Unified and Split
+  switch does. The keys, the scrolling to the highlighted row, and a click
+  choose the row you see at every size.
+- The overlays over an App Window: a Pill with its title, value and mark, 38
+  points high; the Config problems banner with its title, problems, links and
+  close button, up to 560 points wide; the find bars, Find in Page over the
+  Browser, 30 points high, and Find in Pane over the Terminal, 34 points high
+  and up to 420 wide, with their fields, status and buttons; Hints, the key
+  badges that a held modifier shows and the keys at rest on cards, Window rows
+  and Tabs, a card's key at least 16 points square; hover labels, with their
+  title and detail line; Empty Topic pages and the pages in place of the Terminal, with their
+  title, symbol, caption and buttons; the Reopen choice, up to 760 points wide;
+  and the attachment status. The heights and widths grow by the factor, and a
+  width is only a maximum: in a narrower App Window, or over a narrower
+  Terminal, the overlay takes the width there is. A hover label opens in its
+  own panel, which takes the size of the App Window it labels. The find bars'
+  buttons and an Empty Topic page's buttons are macOS controls, which take the
+  size macOS draws nearest, as the Unified and Split switch does.
+- The Browser's chrome: the tab strip with its Tab titles, globe icons, close
+  buttons and New Tab button; the toolbar with its Back, Forward and Reload
+  buttons and its "More" menu button; the address field with its icon; the
+  Suggestions under it; and the Browser's empty state with its symbol, caption
+  and local server buttons. The symbols beside that text grow with it. So do
+  the heights that hold it: 36 points for the tab strip, 26 for a Tab, 40 for
+  the toolbar, 30 for the address field and 26 for a Suggestion, the 26-point
+  squares of the toolbar's buttons and the 16-point close button of a Tab, and
+  a Tab's width bounds of 110 to 220 points. The menu that "More" opens is a
+  macOS menu, which keeps the size macOS gives it.
+
+The Terminal and the Browser's pages are not changed: set the Terminal's fonts
+in the Ghostty config, and a page's zoom in the Browser. A web page keeps its
+own zoom at every `ui.font_size`, so its text and layout, and the width of its
+viewport in CSS pixels, stay as they were. The Git View's code
+and diff text, and the gutters that frame it, follow the Terminal's
+`font-size`, not `ui.font_size`. The code is the Terminal's `font-size` less one
+point, and at least 11. The line-number and marker columns, the bands behind
+the line numbers and the `@@` hunk headers grow with the code, and a
+line-number column is as wide as the widest line number the diff shows, and at
+least 4 digits, so a large line number shows whole. The Git View takes a new
+`font-size` when it next draws its diff.
+
+`ui.sidebar.font_size` is gone. A Config that names it shows the problem
+`ui.sidebar.font_size is gone: use ui.font_size`, and its value changes no
+size. `ui.sidebar.font_family` stays, for Sidebar text only: `system` for the
+native macOS system font, or an installed macOS font family name, such as
+`Helvetica`. Names are case-insensitive and surrounding whitespace is ignored.
+Use a family name, not a font-file path or an individual face/PostScript name.
+A family without an exact medium or semibold weight uses its closest available
+weight. An unavailable family is a problem and uses `system`.
+
+Both options apply live to every App Window, without a change to selection,
+expansion, the Location or what is open. Each is independent: removing it
+restores its default, and an invalid value, such as a `font_size` that is not
+a number or is outside 9 to 24, uses its default and appears with its line in
+the Config problems banner, while valid sibling settings still apply. A YAML
+syntax error keeps the entire last good Config.
+
+`font_size` is a `ui` key, so a Remote Environment's App Window uses the value
+in that machine's Config when it has one, as for every `ui` key (see
+[A Remote Environment's own Config](#a-remote-environments-own-config)). A
+remote Config that leaves `font_size` out gives that App Window 12.
 
 ## Git View
 
@@ -1594,7 +1716,7 @@ Emoji are literal text. Spaces in a Format separate text and icons.
 Icons are allowed only in Window `left` and `right` output, including conditional result branches and loop bodies.
 Conditions, comparisons, truncation, and basename operations accept text only. An icon anywhere in those operands is a Config problem.
 Expanded variable values remain text, even when they contain icon syntax.
-Title and Summary Formats reject icon expressions. Sidebar typography still controls font, size, and color.
+Title and Summary Formats reject icon expressions. The Sidebar still sets their font, size and color: the size from the [Interface font size](#interface-font-size), the font from `ui.sidebar.font_family`.
 The built-in right part shows a Tab badge only when Tabs exist. It shows a Pane badge for every Window in Topics mode, and for multiple Panes in Sessions mode. While one Pane of the Window is Zoomed, the Pane badge is accent-colored on an accent capsule.
 
 | Expression | Result |

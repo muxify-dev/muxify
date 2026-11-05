@@ -7,6 +7,7 @@ struct HeaderWindowSelector: View {
     let store: WorkspaceStore
     let current: TmuxWindow
     @State private var hovering = false
+    @Environment(\.interfaceFontSize) private var fontSize
 
     private var windows: [TmuxWindow] {
         store.windows.filter { $0.sessionID == current.sessionID }.sorted { $0.index < $1.index }
@@ -18,7 +19,7 @@ struct HeaderWindowSelector: View {
                 ForEach(windows) { window in
                     HeaderTextButton(isOn: window.id == current.id, action: { store.select(window) }) {
                         Text(title(window))
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .font(fontSize.font(12, weight: .medium, design: .monospaced))
                             .lineLimit(1)
                     }
                     .help(window.displayTitle)
@@ -47,15 +48,15 @@ struct HeaderWindowSelector: View {
         } label: {
             HStack(spacing: 6) {
                 Text(title(current))
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(fontSize.font(12, weight: .medium, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(fontSize.font(9, weight: .semibold))
             }
             .foregroundStyle(Color.primary)
             .padding(.horizontal, 8)
-            .frame(height: 24)
+            .frame(height: fontSize(24))
             .background {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(Color.accentColor.opacity(hovering ? 0.3 : 0.22))
@@ -64,7 +65,7 @@ struct HeaderWindowSelector: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .frame(maxWidth: 220)
+        .frame(maxWidth: fontSize(220))
         .onHover { hovering = $0 }
         .help("Switch Window")
         .accessibilityIdentifier("header-window-menu")

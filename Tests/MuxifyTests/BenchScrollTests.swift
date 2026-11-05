@@ -1,3 +1,4 @@
+import MuxifyCore
 import XCTest
 
 final class BenchScrollTests: XCTestCase {
@@ -11,9 +12,25 @@ final class BenchScrollTests: XCTestCase {
         XCTAssertEqual(short.stick(at: 120), 120, "the block moves down as far as the content scrolled up")
     }
 
+    /// The edge pill and the least Bench area hold text, so they grow with the Interface font size, and the Bench's
+    /// geometry follows them (ADR 0063, ADR 0068).
+    func testAtALargerInterfaceFontSizeThePillsBandAndTheLeastBenchAreaGrowByTheFactor() {
+        let size = InterfaceFontSize(18)
+        XCTAssertEqual(EdgePill.height(size), 45)
+        let tall = BenchGeometry(topHeight: 700, viewportHeight: 600, fontSize: size)
+        XCTAssertEqual(tall.indicatorHeight, 45, "the band of the \"more above\" pill is the scaled pill")
+        XCTAssertEqual(tall.leastAreaHeight, 144)
+        XCTAssertEqual(tall.areaTop, 600 - 144, "a tall block sticks with the scaled least Bench area under it")
+        XCTAssertEqual(tall.slack, 4 + 700 - (600 - 144))
+        let geometry = BenchGeometry(topHeight: 200, viewportHeight: 600, fontSize: size)
+        XCTAssertEqual(900 + geometry.inset - geometry.revealOffset(cardTop: 900, hasCardsAbove: true),
+                       geometry.areaTop + 45 + geometry.spacing, "a card with cards before it goes under the scaled pill")
+    }
+
     func testATallBlockScrollsFirstUntilTheLeastBenchAreaShows() {
         let tall = BenchGeometry(topHeight: 700, viewportHeight: 600)
-        XCTAssertEqual(tall.areaTop, 600 - BenchGeometry.leastAreaHeight)
+        XCTAssertEqual(tall.leastAreaHeight, BenchGeometry.designLeastAreaHeight, "at 12 the least Bench area is its design height")
+        XCTAssertEqual(tall.areaTop, 600 - tall.leastAreaHeight)
         XCTAssertEqual(tall.slack, 200)
         XCTAssertEqual(tall.stick(at: 150), 0, "through the slack the block scrolls with the content")
         XCTAssertEqual(tall.stick(at: 260), 60)
@@ -60,11 +77,12 @@ final class BenchScrollTests: XCTestCase {
         XCTAssertEqual(900 + short.inset - offset, short.areaTop + short.spacing)
         let tall = BenchGeometry(topHeight: 700, viewportHeight: 600)
         XCTAssertEqual(900 + tall.inset - tall.revealOffset(cardTop: 900, hasCardsAbove: false),
-                       600 - BenchGeometry.leastAreaHeight + tall.spacing, "under a tall block that stuck")
+                       600 - tall.leastAreaHeight + tall.spacing, "under a tall block that stuck")
     }
 
     func testACardWithCardsBeforeItIsRevealedUnderTheMoreAbovePill() {
-        let geometry = BenchGeometry(topHeight: 200, viewportHeight: 600, indicatorHeight: 30)
+        let geometry = BenchGeometry(topHeight: 200, viewportHeight: 600)
+        XCTAssertEqual(geometry.indicatorHeight, 30, "at 12 the band is the edge pill's design height")
         XCTAssertEqual(900 + geometry.inset - geometry.revealOffset(cardTop: 900, hasCardsAbove: false),
                        geometry.areaTop + geometry.spacing,
                        "the first Benched card goes directly under the line, where no pill shows")

@@ -325,9 +325,13 @@ _Avoid_: badge, number, label, Notification (when you mean the key mark)
 The line under the title of a closed Topic or Session card, or under the title of a Window or Pane row. It shows only when its Format gives text.
 _Avoid_: subtitle, details, description, second line
 
-**Sidebar typography**:
-The typography of text in the Sidebar's Sessions and Agents sections, independent of the Terminal's typography and the App Window header.
-_Avoid_: UI font, terminal font (when you mean Sidebar text)
+**Interface font size**:
+The size, in points, that all of Muxify's own text in an App Window keeps its ratio to: everything except the Terminal and the Browser's pages. At 12, text is as designed. Code text in the Git View follows the Terminal's font size instead.
+_Avoid_: UI scale, zoom (Zoom is tmux's), text size, Sidebar font size
+
+**Sidebar font family**:
+The font family of the Sidebar's text, independent of the Terminal's fonts. Its size comes from the Interface font size.
+_Avoid_: UI font, Sidebar typography, terminal font (when you mean Sidebar text)
 
 **Action**:
 Something the user does to one Topic, Session, Window, Pane, Agent or Tab, such as Jump To, Rename, Replace from Bench or Settle. Every Action runs in the palette's view, whichever way the user starts it.

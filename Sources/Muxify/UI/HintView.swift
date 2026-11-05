@@ -11,10 +11,11 @@ private struct HintAnchors: PreferenceKey {
 struct HintBadge: View {
     let target: QuickSwitchTarget
     let triggers: [KeyTrigger]
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         Text(triggers.map(\.symbol).joined(separator: " "))
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .font(fontSize.font(11, weight: .semibold, design: .monospaced))
             .foregroundStyle(.primary)
             .padding(.horizontal, 5).padding(.vertical, 2)
             .background(Color(red: 30 / 255, green: 31 / 255, blue: 35 / 255).opacity(0.9), in: RoundedRectangle(cornerRadius: 5))
@@ -29,10 +30,11 @@ struct HintBadge: View {
 struct HintKey: View {
     let target: QuickSwitchTarget
     let key: String
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         Text(key)
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .font(fontSize.font(10, weight: .medium, design: .monospaced))
             .foregroundStyle(.secondary)
             .fixedSize()
             .allowsHitTesting(false)
@@ -61,17 +63,37 @@ struct CardHintSlot: View {
 struct CardRestKey: View {
     let target: QuickSwitchTarget
     let key: String
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         Text(key)
-            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .font(fontSize.font(10, weight: .semibold, design: .rounded))
             .foregroundStyle(Color.primary.opacity(0.7))
             .padding(.horizontal, 4)
-            .frame(minWidth: 16, minHeight: 16)
+            .frame(minWidth: fontSize(16), minHeight: fontSize(16))
             .background(Capsule().fill(Color.primary.opacity(0.12)))
             .fixedSize()
             .allowsHitTesting(false)
             .accessibilityIdentifier(target.accessibilityID)
+    }
+}
+
+/// A Window row's Hint, in the place the row keeps for it before its icon, as wide as a key.
+private struct WindowHint: View {
+    let target: QuickSwitchTarget
+    let hints: HintPresentation
+    let height: CGFloat
+    @Environment(\.interfaceFontSize) private var fontSize
+
+    var body: some View {
+        Group {
+            if !hints[target].isEmpty {
+                HintBadge(target: target, triggers: hints[target])
+            } else if let key = hints.restKey(for: target) {
+                HintKey(target: target, key: key)
+            }
+        }
+        .frame(width: fontSize(13), height: height, alignment: .topLeading)
     }
 }
 
@@ -89,15 +111,8 @@ extension View {
                     if let anchor = anchors[target] {
                         let rect = proxy[anchor]
                         if case .window = target {
-                            Group {
-                                if !hints[target].isEmpty {
-                                    HintBadge(target: target, triggers: hints[target])
-                                } else if let key = hints.restKey(for: target) {
-                                    HintKey(target: target, key: key)
-                                }
-                            }
-                            .frame(width: 13, height: rect.height, alignment: .topLeading)
-                            .offset(x: rect.minX + 5, y: rect.minY + 5)
+                            WindowHint(target: target, hints: hints, height: rect.height)
+                                .offset(x: rect.minX + 5, y: rect.minY + 5)
                         } else {
                             // The badge ends where the key ends, and grows over the title.
                             Color.clear

@@ -9,7 +9,7 @@ final class SidebarRenderingTests: XCTestCase {
         for scheme in [ColorScheme.light, .dark] {
             for family in ["system", try installedFamily()] {
                 let small = try render(rows(), typography: SidebarTypography(fontFamily: family), scheme: scheme)
-                let large = try render(rows(), typography: SidebarTypography(fontSize: 24, fontFamily: family), scheme: scheme)
+                let large = try render(rows(), typography: SidebarTypography(fontSize: InterfaceFontSize(24), fontFamily: family), scheme: scheme)
                 XCTAssertGreaterThan(large.height, small.height, "Rows must grow rather than vertically clip large text")
                 XCTAssertGreaterThan(small.ink, 0)
                 XCTAssertGreaterThan(large.ink, 0)
@@ -19,10 +19,10 @@ final class SidebarRenderingTests: XCTestCase {
         }
     }
 
-    @MainActor func testCardHeaderGrowsWithTheSidebarFontSize() throws {
+    @MainActor func testCardHeaderGrowsWithTheInterfaceFontSize() throws {
         let header = CardHeader(title: "AgM Session", isOpen: true, mark: nil, summary: "") { EmptyView() }
         let baseline = try render(header, typography: SidebarTypography(), scheme: .light)
-        let large = try render(header, typography: SidebarTypography(fontSize: 24), scheme: .light)
+        let large = try render(header, typography: SidebarTypography(fontSize: InterfaceFontSize(24)), scheme: .light)
         XCTAssertGreaterThan(large.height, baseline.height)
     }
 
@@ -65,22 +65,22 @@ final class SidebarRenderingTests: XCTestCase {
         window.contentView = host
         defer { window.contentView = nil }
         let before = try snapshot(host).ink
-        try "ui:\n  sidebar:\n    font_size: 24\n    font_family: system".write(toFile: path, atomically: true, encoding: .utf8)
+        try "ui:\n  font_size: 24\n  sidebar:\n    font_family: system".write(toFile: path, atomically: true, encoding: .utf8)
         config.reload()
         let larger = try snapshot(host).ink
         XCTAssertGreaterThan(larger, before)
         let family = try installedFamily()
         let quotedFamily = family.replacingOccurrences(of: "'", with: "''")
-        try "ui:\n  sidebar:\n    font_size: 24\n    font_family: '\(quotedFamily)'"
+        try "ui:\n  font_size: 24\n  sidebar:\n    font_family: '\(quotedFamily)'"
             .write(toFile: path, atomically: true, encoding: .utf8)
         config.reload()
         let custom = try snapshot(host).ink
-        XCTAssertEqual(config.config.sidebarTypography.fontFamily, family)
+        XCTAssertEqual(config.config.sidebarFontFamily, family)
         XCTAssertNotEqual(custom, larger, "A family-only edit must update the rendered text")
         try "ui: [".write(toFile: path, atomically: true, encoding: .utf8)
         config.reload()
         XCTAssertEqual(try snapshot(host).ink, custom, "A syntax error must retain the rendered last-good font")
-        try "ui:\n  sidebar:\n    font_size: 24\n    font_family: MuxifyMissingFont-\(UUID().uuidString)"
+        try "ui:\n  font_size: 24\n  sidebar:\n    font_family: MuxifyMissingFont-\(UUID().uuidString)"
             .write(toFile: path, atomically: true, encoding: .utf8)
         config.reload()
         XCTAssertEqual(config.problems.count, 1)
@@ -93,10 +93,15 @@ final class SidebarRenderingTests: XCTestCase {
         withExtendedLifetime(window) {}
     }
 
+    /// The Sidebar as the App Window's root wires it: the Interface font size in the environment, from the App
+    /// Window's own Config.
     private struct ConfiguredSidebar: View {
         let store: WorkspaceStore
         let config: ConfigStore
-        var body: some View { SidebarView(store: store, typography: config.config.sidebarTypography) }
+        var body: some View {
+            SidebarView(store: store, fontFamily: store.config.sidebarFontFamily)
+                .environment(\.interfaceFontSize, store.config.interfaceFontSize)
+        }
     }
 
     @MainActor private func installedFamily() throws -> String {
@@ -124,7 +129,10 @@ final class SidebarRenderingTests: XCTestCase {
     @MainActor private func render<V: View>(_ view: V, typography: SidebarTypography,
                                            scheme: ColorScheme) throws -> (width: CGFloat, height: CGFloat, ink: Int) {
         _ = NSApplication.shared
+        // The App Window puts the Interface font size into the environment, and the Sidebar's typography takes its base
+        // from that same value.
         let host = NSHostingView(rootView: view.environment(\.sidebarTypography, typography)
+            .environment(\.interfaceFontSize, typography.fontSize)
             .frame(width: 180).background(scheme == .dark ? Color(white: 0.12) : Color.white)
             .environment(\.colorScheme, scheme))
         let size = host.fittingSize

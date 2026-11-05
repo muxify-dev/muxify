@@ -59,23 +59,25 @@ struct CardTagsView: View {
 /// circle, so the two do not look alike.
 struct TagMark: View {
     let shown: ShownTag
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         RoundedRectangle(cornerRadius: 2, style: .continuous)
             .fill(shown.definition?.color.color ?? Color.secondary)
             .opacity(shown.definition == nil ? 0.35 : 1)
-            .frame(width: 8, height: 8)
+            .frame(width: fontSize(8), height: fontSize(8))
     }
 }
 
 private struct TagChip: View {
     let text: String
     let shown: ShownTag
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         let color = shown.definition?.color.color ?? Color.secondary
         Text(text)
-            .font(.system(size: 10, weight: .medium))
+            .font(fontSize.font(10, weight: .medium))
             .lineLimit(1)
             .foregroundStyle(color)
             .padding(.horizontal, 5)
@@ -88,10 +90,11 @@ private struct TagChip: View {
 
 private struct MoreTagsChip: View {
     let count: Int
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         Text("+\(count)")
-            .font(.system(size: 10, weight: .medium))
+            .font(fontSize.font(10, weight: .medium))
             .foregroundStyle(.secondary)
             .padding(.horizontal, 4)
             .padding(.vertical, 1)

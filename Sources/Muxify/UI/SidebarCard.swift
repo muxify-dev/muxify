@@ -185,6 +185,7 @@ struct CardHeader<Details: View>: View {
     var cornerLabel: CardCornerLabel? = nil
     @ViewBuilder var details: () -> Details
     @Environment(\.sidebarTypography) private var typography
+    @Environment(\.interfaceFontSize) private var fontSize
     @Environment(\.wrapsCardTitles) private var wrapsTitle
     /// The title line's frame in the header, where a click tool such as Homerow clicks in place of the header's centre.
     @State private var titleLine: CGRect = .zero
@@ -260,7 +261,7 @@ struct CardHeader<Details: View>: View {
             }
             if showsSummary {
                 Text(summary)
-                    .font(.system(size: 11))
+                    .font(fontSize.font(11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -268,7 +269,7 @@ struct CardHeader<Details: View>: View {
                     .padding(.trailing, cornerWidth)
             }
             if cornerLabel != nil, !isOpen, note == nil, !showsSummary {
-                Color.clear.frame(height: CardCorner.actionLineHeight)
+                Color.clear.frame(height: CardCorner.actionLineHeight(fontSize))
             }
         }
         .padding(.leading, 13).padding(.trailing, 10).padding(.top, 7).padding(.bottom, isOpen ? 3 : 7)
@@ -292,6 +293,7 @@ struct CardHeader<Details: View>: View {
 private struct NoteLine: View {
     let note: String
     let isOpen: Bool
+    @Environment(\.interfaceFontSize) private var fontSize
 
     private static let color = Color(nsColor: NSColor(name: nil) {
         $0.isDark ? NSColor(red: 1, green: 0.765, blue: 0.361, alpha: 1) : NSColor(red: 0.698, green: 0.42, blue: 0, alpha: 1)
@@ -302,7 +304,7 @@ private struct NoteLine: View {
             Image(systemName: "pencil")
             Text(note).fixedSize(horizontal: false, vertical: true)
         }
-        .font(.system(size: 11.5))
+        .font(fontSize.font(11.5))
         .foregroundStyle(Self.color.opacity(isOpen ? 1 : 0.6))
         .padding(.top, 1)
     }
@@ -319,22 +321,28 @@ extension VerticalAlignment {
 
 /// The mark after a Pinned Topic's title.
 struct PinMark: View {
+    @Environment(\.interfaceFontSize) private var fontSize
+
     var body: some View {
-        Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(.secondary)
+        Image(systemName: "pin.fill").font(fontSize.font(9)).foregroundStyle(.secondary)
     }
 }
 
 /// The mark after a Guest's title: a card In Play above `topics.in_play`.
 struct GuestMark: View {
+    @Environment(\.interfaceFontSize) private var fontSize
+
     var body: some View {
-        Text("Guest").font(.system(size: 9, weight: .medium)).foregroundStyle(.secondary)
+        Text("Guest").font(fontSize.font(9, weight: .medium)).foregroundStyle(.secondary)
     }
 }
 
 /// The mark after a Locked Session's title.
 struct LockMark: View {
+    @Environment(\.interfaceFontSize) private var fontSize
+
     var body: some View {
-        Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(.secondary)
+        Image(systemName: "lock.fill").font(fontSize.font(9)).foregroundStyle(.secondary)
     }
 }
 
@@ -403,6 +411,7 @@ struct CardList<Heading: View, Row: View>: View {
     @ViewBuilder var row: (TopicsModel.SessionChildren.Item) -> Row
 
     @State private var windowDrag = ListDrag<String>(spacing: CardSpacing.row)
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         let total = blocks.reduce(0) { $0 + $1.items.count }
@@ -438,10 +447,10 @@ struct CardList<Heading: View, Row: View>: View {
         if shown < total {
             Button(action: onShowAll) {
                 Text("\(total - shown) more…")
-                    .font(.system(size: 11))
+                    .font(fontSize.font(11))
                     .foregroundStyle(.secondary)
                     .padding(.leading, 28)
-                    .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: fontSize(20), alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -454,11 +463,11 @@ struct CardList<Heading: View, Row: View>: View {
                         .accessibilityHidden(true)
                 }
             }
-            .padding(.trailing, reservesCorner ? CardCorner.width : 0)
+            .padding(.trailing, reservesCorner ? CardCorner.width(fontSize) : 0)
             .accessibilityIdentifier(identifier + "-more")
             .accessibilityValue(hiddenMark?.rawValue ?? "")
         } else if reservesCorner {
-            Color.clear.frame(height: 16)
+            Color.clear.frame(height: fontSize(16))
         }
     }
 
@@ -502,14 +511,19 @@ struct CardList<Heading: View, Row: View>: View {
 }
 
 /// The one place a card shows its own action, such as Settle: pinned to the bottom-right corner at the same
-/// offsets whether the card is open or closed, so it never moves when the card opens.
+/// offsets whether the card is open or closed, so it never moves when the card opens. Its lengths hold the action's
+/// text, so they grow with the Interface font size from their design sizes at 12.
 enum CardCorner {
-    /// The room the action takes at the end of the summary line or the footer line.
-    static let width: CGFloat = 44
-    /// The room of Reopen… on a card in the Settled group.
-    static let groupWidth: CGFloat = 60
-    /// The line under the title that a closed card with a corner label and no other line adds for its action.
-    static let actionLineHeight: CGFloat = 12
+    /// The room the action takes at the end of the summary line or the footer line, at 12.
+    static let designWidth: CGFloat = 44
+    /// The room of Reopen… on a card in the Settled group, at 12.
+    static let designGroupWidth: CGFloat = 60
+    /// The line under the title that a closed card with a corner label and no other line adds for its action, at 12.
+    static let designActionLineHeight: CGFloat = 12
+
+    static func width(_ size: InterfaceFontSize) -> CGFloat { size(designWidth) }
+    static func groupWidth(_ size: InterfaceFontSize) -> CGFloat { size(designGroupWidth) }
+    static func actionLineHeight(_ size: InterfaceFontSize) -> CGFloat { size(designActionLineHeight) }
 }
 
 /// The word a card shows in its top-right corner, above its action.
@@ -520,9 +534,10 @@ struct CardCornerLabel {
 
 private struct CardCornerLabelText: View {
     let label: CardCornerLabel
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
-        Text(label.text).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+        Text(label.text).font(fontSize.font(11)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
     }
 }
 

@@ -176,14 +176,26 @@ final class GitView {
         case characters(Range<Int>)
     }
 
-    /// Where the code is drawn, for finding the character under the mouse.
+    /// Where the code and its gutters are drawn, for finding the character under the mouse. They all follow the code
+    /// font (`GitDiffMetrics.swift`).
     struct TextMetrics: Equatable {
+        /// The code's size. A diff draws its text at the size of its metrics, so a line drawn again before the metrics
+        /// are takes no new size.
+        let fontSize: CGFloat
         let charWidth: CGFloat
         let lineHeight: CGFloat
         /// Characters a line of code shows before it wraps.
         let columns: Int
+        /// A line-number column, and the room on each side of its number.
+        let numberWidth: CGFloat
+        let numberPadding: CGFloat
+        /// The column of a line's `+` or `−`.
+        let markerWidth: CGFloat
+        /// The line-number columns of a line, which its band colors: two in the unified layout, one a side in the split.
+        let gutterWidth: CGFloat
+
         /// The code's left edge: after the line numbers and the marker.
-        let codeX: CGFloat
+        var codeX: CGFloat { gutterWidth + markerWidth }
     }
 
     /// What of the content the diff pane shows: all of it, or a file or
@@ -394,7 +406,11 @@ final class GitView {
         }
     }
     private(set) var content: Content?
-    private(set) var diffRows: [DiffRow] = []
+    private(set) var diffRows: [DiffRow] = [] {
+        didSet { widestLineNumber = Self.widestLineNumber(in: diffRows) }
+    }
+    /// The widest line number the diff shows, which its line-number columns fit.
+    private(set) var widestLineNumber = 0
     private(set) var fileHeader: FileHeader?
     /// The selection in the diff: where the keys or the mouse are, and the
     /// other end of a range.
@@ -411,7 +427,7 @@ final class GitView {
     /// their ids when the diff changes, and report only a frame that moved.
     @ObservationIgnored var lineFrames: [Int: CGRect] = [:]
     /// How the diff draws its code now.
-    @ObservationIgnored var textMetrics = TextMetrics(charWidth: 7.2, lineHeight: 19, columns: 120, codeX: 110)
+    @ObservationIgnored var textMetrics = TextMetrics(fontSize: 12, layout: .unified, width: 800, widestNumber: 0)
     /// The mouse button went down here, and how many clicks it was.
     @ObservationIgnored private var press: (point: TextPoint, location: CGPoint, inGutter: Bool, clicks: Int)?
 
@@ -1102,7 +1118,7 @@ final class GitView {
         case .scroll(let lines):
             scrollDiff(by: lines)
         case .halfPage(let direction):
-            scrollDiff(by: direction * max(3, Int(diffHeight / (fontSize * 1.6) / 2)))
+            scrollDiff(by: direction * max(3, Int(diffHeight / textMetrics.lineHeight / 2)))
         case .nextHunk, .previousHunk:
             jumpToHunk(forward: command == .nextHunk)
         case .nextFile, .previousFile:
@@ -2982,7 +2998,7 @@ final class GitView {
     /// The first change on screen, as lazygit starts on the first change.
     private func firstLine() -> Int? {
         let lines = diffRows.indices.dropFirst(topIndex).filter { diffRows[$0].isLine }
-        let onScreen = lines.prefix(max(8, Int(diffHeight / (fontSize * 1.6))))
+        let onScreen = lines.prefix(max(8, Int(diffHeight / textMetrics.lineHeight)))
         return onScreen.first { diffRows[$0].isChange } ?? lines.first ?? diffRows.indices.last { diffRows[$0].isLine }
     }
 
@@ -3094,6 +3110,17 @@ final class GitView {
             scrollRow = diffRows[min(keptCursor.top, diffRows.count - 1)].id
         }
         if focus == .diff, cursor == nil { place(firstLine()) }
+    }
+
+    /// The widest line number of `rows`: each side's of a split row, and both of a unified line.
+    static func widestLineNumber(in rows: [DiffRow]) -> Int {
+        rows.reduce(0) { widest, row in
+            switch row.kind {
+            case .line(let line): max(widest, line.old ?? 0, line.new ?? 0)
+            case .pair(let old, let new): max(widest, old?.old ?? 0, new?.new ?? 0)
+            default: widest
+            }
+        }
     }
 
     static func diffRows(for content: Content, layout: Layout, wholeFile: Bool = false, scope: Scope = .all) -> [DiffRow] {

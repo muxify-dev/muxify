@@ -4,7 +4,8 @@ import MuxifyCore
 struct ContentView: View {
     @Bindable var store: WorkspaceStore
     let configStore: ConfigStore
-    @AppStorage("sidebarWidth") private var sidebarWidth: Double = 260
+    /// The width the user last dragged the Sidebar to; nil until they drag it, so its default follows the Interface font size.
+    @AppStorage("sidebarWidth") private var sidebarWidth: Double?
     /// The Browser's share of the room beside the sidebar, common to all Windows.
     @AppStorage("browserShare") private var browserShare: Double = 0.45
     /// The Terminal's width when it was last shown.
@@ -24,12 +25,14 @@ struct ContentView: View {
             // between Windows with and without a Browser is instant.
             HStack(spacing: 0) {
                 if store.sidebarShown {
-                    SidebarView(store: store, typography: store.config.sidebarTypography)
+                    SidebarView(store: store, fontFamily: store.config.sidebarFontFamily)
                         .frame(width: sidebar)
                         .chrome(theme: store.theme, material: .sidebar)
                         .accessibilityElement(children: .contain)
                         .accessibilityIdentifier("sidebar-panel")
-                    PanelResizeHandle(width: sidebar, range: 180...420, edge: .leading) { sidebarWidth = $0 }
+                    PanelResizeHandle(width: sidebar, range: SidebarWidth.bounds(interfaceFontSize), edge: .leading) {
+                        sidebarWidth = $0
+                    }
                 }
                 // A hidden Terminal stays behind the Browser at its last width,
                 // so tmux does not resize the client and reflow its Panes.
@@ -103,7 +106,8 @@ struct ContentView: View {
         .onChange(of: configStore.config.remoteEnvironments) { _, _ in store.reconcileEnvironments() }
         .overlay(alignment: .bottom) {
             if let message = store.attachmentStatus {
-                Text(message).padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                Text(message).font(interfaceFontSize.font(.body))
+                    .padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
                     .padding(16).accessibilityIdentifier("attachment-status")
             }
         }
@@ -119,12 +123,17 @@ struct ContentView: View {
         .environment(\.pulses, configStore.config.pulse)
         .environment(\.agentColors, configStore.config.agentColors)
         .environment(\.chromeTheme, store.theme)
-
+        // From this App Window's own Config, its Remote Environment's when that machine has one (ADR 0010).
+        .environment(\.interfaceFontSize, interfaceFontSize)
     }
 
-    private var headerHeight: CGFloat { CGFloat(store.config.headerHeight) }
+    private var interfaceFontSize: InterfaceFontSize { store.config.interfaceFontSize }
 
-    private var shownSidebarWidth: Double { store.sidebarShown ? clamp(sidebarWidth, 180, 420) : 0 }
+    private var headerHeight: CGFloat { TitlebarMetrics.headerHeight(store.config) }
+
+    private var shownSidebarWidth: Double {
+        store.sidebarShown ? SidebarWidth.shown(dragged: sidebarWidth, size: interfaceFontSize) : 0
+    }
 
     private func clamp(_ value: Double, _ low: Double, _ high: Double) -> Double {
         min(max(value, low), high)
@@ -139,6 +148,7 @@ private struct HeaderBar: View {
     /// Where the Terminal and Browser start, beside the sidebar.
     let panelsLeading: CGFloat
     private let spacing: CGFloat = 2
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         HStack(spacing: spacing) {
@@ -146,7 +156,7 @@ private struct HeaderBar: View {
                !store.showsEmptyPage {
                 let overSidebar = max(0, panelsLeading - TitlebarMetrics.trafficLightsWidth - spacing)
                 Text(window.sessionName)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(fontSize.font(13, weight: .medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     // Keep the full name whenever it fits. The Window list can collapse first;
@@ -171,11 +181,15 @@ private struct HeaderBar: View {
                                 help: help(store.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View", .toggleGitView))
                     .id("\(window.sourceID):\(window.path)")
                     .padding(.trailing, 8)
+                    // Before the Window list and the Session name give way, the branch keeps its whole width up to
+                    // its maximum; it is cut only when the header has no other room left.
+                    .layoutPriority(2)
             }
             EnvironmentSelector(environments: store.remoteEnvironments, activeEnvironment: store.activeEnvironment,
                                 isConnected: store.isConnected, hasConnectionError: store.terminalMessage != nil,
                                 status: store.environmentStatus, onSelect: store.selectEnvironment)
                 .accessibilityIdentifier("header-environment-selector")
+                .layoutPriority(2)
             let layout = store.panelLayout
             TitlebarButton(
                 systemName: layout.maximized == nil ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left",
@@ -221,6 +235,8 @@ private struct HeaderBar: View {
                 .frame(height: 1)
         }
         .chrome(theme: store.theme, material: .titlebar)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("header-bar")
     }
 
     private func help(_ title: String, _ action: ConfigAction) -> String {
@@ -243,6 +259,7 @@ private struct HeaderBar: View {
 private struct ConfigProblemsBanner: View {
     let store: WorkspaceStore
     let configStore: ConfigStore
+    @Environment(\.interfaceFontSize) private var fontSize
 
     private var local: [ConfigProblem] { configStore.problemsDismissed ? [] : configStore.problems }
     private var remote: [ConfigProblem] {
@@ -256,18 +273,20 @@ private struct ConfigProblemsBanner: View {
     private func banner(theme: TerminalTheme?) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
+                .font(fontSize.font(.body))
                 .foregroundStyle(.yellow)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Problems in the Muxify Config")
-                    .font(.callout.weight(.semibold))
+                    .font(fontSize.font(.callout, weight: .semibold))
+                    .accessibilityIdentifier("config-problems-title")
                 if !store.sessionPathWarningsDismissed {
                     ForEach(store.sessionPathWarnings, id: \.self) { warning in
-                        Text(warning).font(.caption).textSelection(.enabled)
+                        Text(warning).font(fontSize.font(.caption)).textSelection(.enabled)
                     }
                 }
                 ForEach(Array((remote + local).enumerated()), id: \.offset) { _, problem in
                     Text("\((problem.path as NSString).abbreviatingWithTildeInPath):\(problem.line): \(problem.message)")
-                        .font(.caption.monospaced())
+                        .font(fontSize.font(.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
@@ -280,7 +299,7 @@ private struct ConfigProblemsBanner: View {
                     }
                 }
                 .buttonStyle(.link)
-                .font(.caption)
+                .font(fontSize.font(.caption))
             }
             Spacer(minLength: 0)
             Button {
@@ -289,16 +308,18 @@ private struct ConfigProblemsBanner: View {
                 store.sessionPathWarningsDismissed = true
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(fontSize.font(10, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 18, height: 18)
+                    .frame(width: fontSize(18), height: fontSize(18))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("Close")
+            .accessibilityIdentifier("config-problems-close")
         }
         .padding(10)
-        .frame(maxWidth: 560)
+        // A maximum, so in a narrower App Window the banner takes the width there is.
+        .frame(maxWidth: fontSize(560))
         .chrome(theme: theme, material: .popover)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
@@ -306,6 +327,8 @@ private struct ConfigProblemsBanner: View {
                 .strokeBorder(Color(nsColor: theme?.separator ?? .separatorColor))
         )
         .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("config-problems")
         .padding(10)
     }
 }
@@ -355,6 +378,7 @@ private struct FocusMarker: View {
 private struct TerminalArea: View {
     let store: WorkspaceStore
     @Environment(\.colorScheme) private var systemColorScheme
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         ZStack {
@@ -363,10 +387,12 @@ private struct TerminalArea: View {
             if let topic = store.topics.emptyTopic { emptyTopic(topic) }
             if store.location == .emptyTopic(.noTopic) {
                 VStack(spacing: 12) {
-                    Text("No Topic").font(.title2)
+                    Text("No Topic").font(fontSize.font(.title2))
                     Text("No Sessions outside Topics").foregroundStyle(.secondary)
                     Button("New Session") { store.newSession() }
                 }
+                .font(fontSize.font(.body))
+                .controlSize(fontSize.systemControlSize)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(nsColor: .windowBackgroundColor))
                 .accessibilityIdentifier("empty-no-topic")
@@ -378,15 +404,18 @@ private struct TerminalArea: View {
         }
     }
 
-    /// Find in Pane floats over the Terminal's top right corner, so the Panes keep their size (ADR 0051).
+    /// Find in Pane floats over the Terminal's top right corner, so the Panes keep their size (ADR 0051). Its width is a
+    /// maximum, so over a narrower Terminal the bar takes the width there is.
     private var findBar: some View {
         FindBar(finder: store.paneFinder, placeholder: "Find in Pane", identifier: "terminal-find",
                 window: { store.terminalHost.window }, onClose: store.closeFindInPane) { _ in store.readFocusedPanel() }
         .padding(.horizontal, 10)
-        .frame(maxWidth: 420)
-        .frame(height: 34)
+        .frame(maxWidth: fontSize(420))
+        .frame(height: fontSize(34))
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
         .shadow(color: .black.opacity(0.2), radius: 4, y: 1)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("terminal-find-bar")
         .padding(10)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
     }
@@ -394,9 +423,9 @@ private struct TerminalArea: View {
     private func emptyTopic(_ topic: TopicsModel.Row) -> some View {
         VStack(spacing: 12) {
             Image(systemName: offersReopen(topic) ? "clock.arrow.circlepath" : "folder.badge.plus")
-                .font(.system(size: 34, weight: .light))
+                .font(fontSize.font(34, weight: .light))
                 .foregroundStyle(.tertiary)
-            Text(topic.title).font(.title2.weight(.semibold))
+            Text(topic.title).font(fontSize.font(.title2, weight: .semibold))
                 .accessibilityIdentifier("empty-topic-title")
             if case .topic(let id) = topic.id {
                 switch (store.reopening(id, .reopen), store.reopening(id, .startFresh)) {
@@ -423,6 +452,8 @@ private struct TerminalArea: View {
                 }
             }
         }
+        .font(fontSize.font(.body))
+        .controlSize(fontSize.systemControlSize)
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: store.theme?.background ?? .windowBackgroundColor))
@@ -439,12 +470,12 @@ private struct TerminalArea: View {
     private var placeholder: some View {
         VStack(spacing: 12) {
             Image(systemName: "terminal")
-                .font(.system(size: 34, weight: .light))
+                .font(fontSize.font(34, weight: .light))
                 .foregroundStyle(.tertiary)
             if let message = store.terminalMessage {
                 Text(message).foregroundStyle(.secondary).textSelection(.enabled)
                 if store.isRemote {
-                    Text(store.environmentStatus).font(.caption).foregroundStyle(.secondary)
+                    Text(store.environmentStatus).font(fontSize.font(.caption)).foregroundStyle(.secondary)
                     Button("Retry Connection") { store.reattach() }
                 }
             } else if store.hasNoSessions {
@@ -461,6 +492,8 @@ private struct TerminalArea: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
+        .font(fontSize.font(.body))
+        .controlSize(fontSize.systemControlSize)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: store.theme?.background ?? .windowBackgroundColor))
         .environment(\.colorScheme, store.theme.map { $0.isDark ? .dark : .light } ?? systemColorScheme)
@@ -479,6 +512,12 @@ private struct TerminalHostRepresentable: NSViewRepresentable {
 enum TitlebarMetrics {
     /// Room to leave on the leading edge for the traffic lights.
     static let trafficLightsWidth: CGFloat = 78
+
+    /// The header's height: `ui.header_height`, a length at size 12, or its default, times the factor of the Interface
+    /// font size (ADR 0068), so the header's controls grow with their text and never clip.
+    static func headerHeight(_ config: Config) -> CGFloat {
+        config.interfaceFontSize(CGFloat(config.headerHeight))
+    }
 }
 
 /// What a side's toggle shows besides on and off while the Window is Maximized.
@@ -499,6 +538,7 @@ struct TitlebarButton<Icon: View>: View {
 
     @State private var hovering = false
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.interfaceFontSize) private var fontSize
 
     init(help: String, isOn: Bool = false, mark: TitlebarButtonMark = .none, action: @escaping () -> Void,
          @ViewBuilder icon: @escaping () -> Icon) {
@@ -512,10 +552,11 @@ struct TitlebarButton<Icon: View>: View {
     var body: some View {
         Button(action: action) {
             icon()
-                .font(.system(size: 13, weight: .regular))
+                .font(fontSize.font(13, weight: .regular))
                 .foregroundStyle(isOn || mark == .maximized ? Color.accentColor : Color.secondary)
                 .opacity(opacity)
-                .frame(width: 28, height: 24)
+                // The button holds its symbol, so it grows with it.
+                .frame(width: fontSize(28), height: fontSize(24))
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(background)

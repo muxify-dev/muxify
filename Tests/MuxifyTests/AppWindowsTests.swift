@@ -478,7 +478,7 @@ final class AppWindowsTests: XCTestCase {
         }
     }
 
-    @MainActor func testSidebarTypographyReloadIsSharedAndDoesNotChangeWindowState() throws {
+    @MainActor func testInterfaceFontSizeReloadIsSharedAndDoesNotChangeWindowState() throws {
         try withWindows { windows, path in
             let localRequest = AppWindowRequest()
             let remoteRequest = AppWindowRequest(environmentName: "Home")
@@ -492,10 +492,12 @@ final class AppWindowsTests: XCTestCase {
             let expansion = defaults.object(forKey: "expandedSessions") as? [String]
             let split = defaults.object(forKey: "sidebarAgentsFraction") as? Double
 
-            try (Self.config + "\nui:\n  sidebar:\n    font_size: 18\n    font_family: system\n")
+            try (Self.config + "\nui:\n  font_size: 18\n  sidebar:\n    font_family: system\n")
                 .write(toFile: path, atomically: true, encoding: .utf8)
             windows.configStore.reload()
-            XCTAssertEqual(windows.configStore.config.sidebarTypography, SidebarTypography(fontSize: 18))
+            XCTAssertEqual(windows.configStore.config.interfaceFontSize, InterfaceFontSize(18))
+            XCTAssertEqual(local.config.interfaceFontSize, InterfaceFontSize(18))
+            XCTAssertEqual(remote.config.interfaceFontSize, InterfaceFontSize(18), "a remote without its own Config uses the local one")
             XCTAssertTrue(local === windows.store(for: localRequest))
             XCTAssertTrue(remote === windows.store(for: remoteRequest))
             XCTAssertEqual(local.selectedWindowID, localState.0)
@@ -512,11 +514,12 @@ final class AppWindowsTests: XCTestCase {
 
             try (Self.config + "\nui: [").write(toFile: path, atomically: true, encoding: .utf8)
             windows.configStore.reload()
-            XCTAssertEqual(windows.configStore.config.sidebarTypography, SidebarTypography(fontSize: 18))
+            XCTAssertEqual(windows.configStore.config.interfaceFontSize, InterfaceFontSize(18))
             XCTAssertEqual(windows.configStore.problems.count, 1)
             try Self.config.write(toFile: path, atomically: true, encoding: .utf8)
             windows.configStore.reload()
-            XCTAssertEqual(windows.configStore.config.sidebarTypography, SidebarTypography())
+            XCTAssertEqual(windows.configStore.config.interfaceFontSize, InterfaceFontSize(12))
+            XCTAssertEqual(local.config.interfaceFontSize, InterfaceFontSize(12))
             XCTAssertEqual(windows.configStore.problems, [])
         }
     }

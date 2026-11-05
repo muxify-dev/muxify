@@ -36,10 +36,12 @@ final class ConfigStore {
     }
 
     func reload() {
+        // Stamped before the files are read, so a save while they are read is a change at the next look.
+        let stamp = stampFiles()
         load()
         problemsDismissed = false
         GhosttyRuntime.shared.reloadConfig(ghosttyConfigFile: config.ghosttyConfigFile)
-        filesStamp = stampFiles()
+        filesStamp = stamp
     }
 
     /// Takes the SessionPaths found for `source`'s `sessions`, unless that section changed while they were found.

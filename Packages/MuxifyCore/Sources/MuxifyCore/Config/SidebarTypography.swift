@@ -1,12 +1,14 @@
 import AppKit
 
-/// Sidebar text keeps its existing hierarchy around a configurable base size.
+/// Sidebar text keeps its existing hierarchy around the Interface font size, in the Sidebar font family.
 /// Symbols, logos and status dots deliberately do not use this typography.
 public struct SidebarTypography: Equatable {
-    public var fontSize: Double = 12
+    /// The base of every role: `ui.font_size`.
+    public var fontSize = InterfaceFontSize()
+    /// `ui.sidebar.font_family`.
     public var fontFamily: String = "system"
 
-    public init(fontSize: Double = 12, fontFamily: String = "system") {
+    public init(fontSize: InterfaceFontSize = InterfaceFontSize(), fontFamily: String = "system") {
         self.fontSize = fontSize
         self.fontFamily = fontFamily
     }

@@ -8,6 +8,7 @@ struct ReopenChoiceView: View {
     let topicID: String
     let reopen: TopicReopening
     let startFresh: TopicReopening
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         VStack(spacing: 16) {
@@ -24,27 +25,30 @@ struct ReopenChoiceView: View {
                     .accessibilityIdentifier("reopen-choice-reopen")
             }
             .disabled(store.changingTopic)
+            .controlSize(fontSize.systemControlSize)
         }
-        .frame(maxWidth: 760)
+        .font(fontSize.font(.body))
+        // A maximum, so in a narrower Terminal the choice takes the width there is.
+        .frame(maxWidth: fontSize(760))
     }
 
     private func column(_ choice: TopicReopening.Choice, _ reopening: TopicReopening, title: String, summary: String) -> some View {
         let id = choice == .reopen ? "reopen" : "start-fresh"
         return VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline)
-            Text(summary).font(.callout).foregroundStyle(.secondary)
+            Text(title).font(fontSize.font(.headline))
+            Text(summary).font(fontSize.font(.callout)).foregroundStyle(.secondary)
             ForEach(reopening.sessions, id: \.name) { session in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text(session.baseName).fontWeight(.semibold)
                         if let branch = session.branch {
-                            Text(branch).font(.caption.monospaced()).foregroundStyle(.secondary)
+                            Text(branch).font(fontSize.font(.caption, design: .monospaced)).foregroundStyle(.secondary)
                         }
                     }
                     Text((session.directory as NSString).abbreviatingWithTildeInPath)
-                        .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+                        .font(fontSize.font(.caption)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
                     if session.createsWorktree {
-                        Text("Creates the Worktree again").font(.caption).foregroundStyle(.orange)
+                        Text("Creates the Worktree again").font(fontSize.font(.caption)).foregroundStyle(.orange)
                     }
                     ForEach(Array(session.windows.enumerated()), id: \.offset) { _, window in
                         windowLine(window, in: session)
@@ -71,6 +75,6 @@ struct ReopenChoiceView: View {
             Text(window.name)
             Text(details.joined(separator: " · ")).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
         }
-        .font(.callout)
+        .font(fontSize.font(.callout))
     }
 }

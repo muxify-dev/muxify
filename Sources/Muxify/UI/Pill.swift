@@ -53,6 +53,7 @@ final class Pills {
 struct PillOverlay: View {
     let pills: Pills
     let theme: PaletteTheme
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         GeometryReader { proxy in
@@ -66,7 +67,7 @@ struct PillOverlay: View {
                         .id(pill.id)
                 }
             }
-            .frame(width: SpotlightPalette.width(in: proxy.size))
+            .frame(width: PaletteMetrics.width(in: proxy.size, size: fontSize))
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(.bottom, 28)
             .allowsHitTesting(false)
@@ -79,6 +80,7 @@ struct PillOverlay: View {
 private struct PillView: View {
     let pill: Pill
     let theme: PaletteTheme
+    @Environment(\.interfaceFontSize) private var fontSize
     @State private var showsCheck = false
     @State private var bounces = 0
 
@@ -91,11 +93,11 @@ private struct PillView: View {
                 case .explanation: mark
                 }
             }
-            .frame(width: 22, height: 22)
+            .frame(width: fontSize(22), height: fontSize(22))
             Text(pill.title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(fontSize.font(13, weight: .semibold))
             Text(pill.value)
-                .font(pill.kind == .confirmation ? .system(size: 12, design: .monospaced) : .system(size: 12))
+                .font(pill.kind == .confirmation ? fontSize.font(12, design: .monospaced) : fontSize.font(12))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -103,8 +105,10 @@ private struct PillView: View {
         }
         .padding(.leading, 8)
         .padding(.trailing, 16)
-        .frame(height: 38)
-        .spotlightGlass(theme, cornerRadius: 19, tint: 0.6)
+        .frame(height: fontSize(38))
+        // The accessibility frame is the whole Pill, not only its mark and texts.
+        .contentShape(.accessibility, RoundedRectangle(cornerRadius: fontSize(19), style: .continuous))
+        .spotlightGlass(theme, cornerRadius: fontSize(19), tint: 0.6)
         .foregroundStyle(.primary)
         .environment(\.colorScheme, theme.colorScheme)
         .accessibilityElement(children: .ignore)
@@ -124,13 +128,13 @@ private struct PillView: View {
 
     private var mark: some View {
         Image(systemName: "exclamationmark")
-            .font(.system(size: 11, weight: .heavy))
+            .font(fontSize.font(11, weight: .heavy))
             .foregroundStyle(.white)
     }
 
     @ViewBuilder private var check: some View {
         let image = Image(systemName: "checkmark")
-            .font(.system(size: 11, weight: .bold))
+            .font(fontSize.font(11, weight: .bold))
             .foregroundStyle(.white)
             .symbolEffect(.bounce, value: bounces)
         if #available(macOS 26.0, *) {

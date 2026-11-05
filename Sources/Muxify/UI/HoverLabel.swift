@@ -1,9 +1,11 @@
 import AppKit
+import MuxifyCore
 import SwiftUI
 
 /// A row's hover label: after the pointer rests on the row, a label opens over it with the row's full title, when the
 /// row cuts it off, and a small second line with more about the row. One label shows at a time, in a borderless panel
-/// that can reach past the Sidebar's edge. It never takes Focus or a click.
+/// that can reach past the Sidebar's edge. It never takes Focus or a click. The panel is outside the App Window's view
+/// tree, so the row passes its Interface font size in, and the label's detail grows with it.
 @MainActor
 final class HoverLabels {
     static let shared = HoverLabels()
@@ -28,12 +30,12 @@ final class HoverLabels {
     private var pending: DispatchWorkItem?
     private var closedAt = Date.distantPast
 
-    func enter(_ anchor: HoverAnchor, detail: String, onlyWhenCutOff: Bool) {
+    func enter(_ anchor: HoverAnchor, detail: String, onlyWhenCutOff: Bool, fontSize: InterfaceFontSize) {
         owner = anchor
         pending?.cancel()
         let show = { [weak self, weak anchor] in
             guard let self, let anchor, self.owner === anchor else { return }
-            self.show(anchor, detail: detail, onlyWhenCutOff: onlyWhenCutOff)
+            self.show(anchor, detail: detail, onlyWhenCutOff: onlyWhenCutOff, fontSize: fontSize)
         }
         if panel.isVisible || Date().timeIntervalSince(closedAt) < Self.coolDown {
             show()
@@ -54,12 +56,13 @@ final class HoverLabels {
         panel.orderOut(nil)
     }
 
-    private func show(_ anchor: HoverAnchor, detail: String, onlyWhenCutOff: Bool) {
+    private func show(_ anchor: HoverAnchor, detail: String, onlyWhenCutOff: Bool, fontSize: InterfaceFontSize) {
         guard let view = anchor.view, let window = view.window else { return }
         let titleFrame = window.convertToScreen(view.convert(view.bounds, to: nil))
         let cutOff = anchor.title != nil && anchor.fullWidth > titleFrame.width + 0.5
         guard cutOff || (!onlyWhenCutOff && !detail.isEmpty) else { return }
-        let content = NSHostingView(rootView: HoverLabelView(title: cutOff ? anchor.title : nil, detail: detail))
+        let content = NSHostingView(rootView: HoverLabelView(title: cutOff ? anchor.title : nil, detail: detail)
+            .environment(\.interfaceFontSize, fontSize))
         let size = content.fittingSize
         panel.contentView = content
         // The label's title sits on the row's title, so the row seems to open up in place.
@@ -89,11 +92,12 @@ private struct HoverLabelView: View {
 
     let title: Text?
     let detail: String
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if let title { title.lineLimit(1) }
-            if !detail.isEmpty { Text(detail).font(.system(size: 10.5)).foregroundStyle(.secondary) }
+            if !detail.isEmpty { Text(detail).font(fontSize.font(10.5)).foregroundStyle(.secondary) }
         }
         .fixedSize()
         .padding(Self.padding)
@@ -145,6 +149,7 @@ private struct HoverLabelModifier: ViewModifier {
 
     @State private var anchor = HoverAnchor()
     @State private var hovering = false
+    @Environment(\.interfaceFontSize) private var fontSize
 
     func body(content: Content) -> some View {
         content
@@ -162,7 +167,9 @@ private struct HoverLabelModifier: ViewModifier {
     }
 
     private func update() {
-        if hovering && enabled { HoverLabels.shared.enter(anchor, detail: detail, onlyWhenCutOff: onlyWhenCutOff) }
+        if hovering && enabled {
+            HoverLabels.shared.enter(anchor, detail: detail, onlyWhenCutOff: onlyWhenCutOff, fontSize: fontSize)
+        }
         else { HoverLabels.shared.leave(anchor) }
     }
 }

@@ -29,9 +29,12 @@ enum RowMark: Equatable {
 
 struct RowMarkView: View {
     let mark: RowMark
-    var dotSize: CGFloat = 7
+    /// The dot's size; by default 7 at 12, grown with the Interface font size, as it sits beside a row's text.
+    var dotSize: CGFloat? = nil
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
+        let dotSize = dotSize ?? fontSize(AgentMarkView.designDotSize)
         switch mark {
         case .unread: Circle().fill(Color.accentColor).frame(width: dotSize, height: dotSize)
         case .agent(let mark): AgentMarkView(mark: mark, dotSize: dotSize)

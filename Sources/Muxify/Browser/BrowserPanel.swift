@@ -70,15 +70,18 @@ private final class ClickTakesFocusView: NSView {
 private struct TabStrip: View {
     let browser: Browser
 
+    @Environment(\.interfaceFontSize) private var fontSize
+
     var body: some View {
         GeometryReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
+                HStack(spacing: BrowserTabWidth.spacing) {
                     ForEach(browser.tabs) { tab in
                         TabItem(
                             tab: tab,
                             isActive: tab.id == browser.activeTabID,
-                            width: tabWidth(available: proxy.size.width),
+                            width: BrowserTabWidth.width(available: proxy.size.width, tabs: browser.tabs.count,
+                                                         size: fontSize),
                             onSelect: {
                                 browser.select(tab)
                                 browser.requestFocus()
@@ -88,21 +91,18 @@ private struct TabStrip: View {
                     }
                     ToolbarIconButton(systemName: "plus", help: "New Tab (⌘T)", action: browser.newTab)
                 }
-                .padding(.horizontal, 8)
+                .padding(.horizontal, BrowserTabWidth.padding)
                 .frame(height: proxy.size.height)
+                // The scroll view reaches up under the title bar, so the strip's accessibility frame is its row: the
+                // Tabs and the New Tab button, as high as the strip.
+                .contentShape(.accessibility, Rectangle())
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("browser-tab-strip")
             }
         }
-        .frame(height: 36)
+        .frame(height: fontSize(36))
         .background(WindowDragArea())
         .background(Color.primary.opacity(0.035))
-    }
-
-    /// Tabs share the strip like Chrome's, between a readable minimum and a
-    /// maximum; past the minimum the strip scrolls.
-    private func tabWidth(available: CGFloat) -> CGFloat {
-        let count = CGFloat(max(browser.tabs.count, 1))
-        let room = available - 16 - 30 - 4 * count
-        return min(220, max(110, room / count))
     }
 }
 
@@ -114,6 +114,7 @@ private struct TabItem: View {
     let onClose: () -> Void
 
     @Environment(\.quickSwitchHints) private var hints
+    @Environment(\.interfaceFontSize) private var fontSize
     @State private var hovering = false
 
     var body: some View {
@@ -125,22 +126,22 @@ private struct TabItem: View {
                     HintKey(target: .tab(tab.id), key: key)
                 } else {
                     Image(systemName: "globe")
-                        .font(.system(size: 10))
+                        .font(fontSize.font(10))
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 14)
+            .frame(width: fontSize(14))
             Text(tab.displayTitle)
-                    .accessibilityIdentifier("browser-tab-title-" + tab.id.uuidString)
-                .font(.system(size: 12))
+                .accessibilityIdentifier("browser-tab-title-" + tab.id.uuidString)
+                .font(fontSize.font(12))
                 .foregroundStyle(isActive ? .primary : .secondary)
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 0)
             Button(action: onClose) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 8, weight: .bold))
-                    .frame(width: 16, height: 16)
+                    .font(fontSize.font(8, weight: .bold))
+                    .frame(width: fontSize(16), height: fontSize(16))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -151,7 +152,7 @@ private struct TabItem: View {
         }
         .padding(.leading, 8)
         .padding(.trailing, 4)
-        .frame(width: width, height: 26)
+        .frame(width: width, height: fontSize(26))
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
                 .fill(background)
@@ -168,6 +169,8 @@ private struct TabItem: View {
                 HintBadge(target: .tab(tab.id), triggers: hints[.tab(tab.id)]).padding(.leading, 4)
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("browser-tab-" + tab.id.uuidString)
     }
 
     private var background: Color {
@@ -188,6 +191,7 @@ private struct TabContent: View {
     @State private var edit: AddressEdit?
     @State private var ports: [Int] = []
     @FocusState private var addressFocused: Bool
+    @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
         VStack(spacing: 0) {
@@ -198,8 +202,10 @@ private struct TabContent: View {
                 FindBar(finder: tab, placeholder: "Find in Page", identifier: "browser-find",
                         window: { tab.webView.window }, onClose: closeFind)
                     .padding(.horizontal, 10)
-                    .frame(height: 30)
+                    .frame(height: fontSize(30))
                     .background(Color.primary.opacity(0.035))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("browser-find-bar")
                 Divider()
             }
             ZStack {
@@ -270,8 +276,8 @@ private struct TabContent: View {
                     .disabled(!browser.layout.canToggle(.browser))
             } label: {
                 Image(systemName: "ellipsis")
-                    .font(.system(size: 13, weight: .medium))
-                    .frame(width: 26, height: 26)
+                    .font(fontSize.font(13, weight: .medium))
+                    .frame(width: fontSize(ToolbarIconButton.designSide), height: fontSize(ToolbarIconButton.designSide))
                     .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
@@ -280,18 +286,22 @@ private struct TabContent: View {
             .help("More")
         }
         .padding(.horizontal, 10)
-        .frame(height: 40)
+        .frame(height: fontSize(40))
+        // The accessibility frame is the whole toolbar, not only its controls.
+        .contentShape(.accessibility, Rectangle())
         .overlay(alignment: .bottom) { progressBar }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("browser-toolbar")
     }
 
     private var addressField: some View {
         HStack(spacing: 6) {
             Image(systemName: addressIcon)
-                .font(.system(size: 11, weight: .medium))
+                .font(fontSize.font(11, weight: .medium))
                 .foregroundStyle(.secondary)
             TextField("Search or enter URL", text: $address)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(fontSize.font(13))
                 .focused($addressFocused)
                 .onSubmit(submit)
                 .onKeyPress(phases: [.down, .repeat], action: listKey)
@@ -301,7 +311,7 @@ private struct TabContent: View {
                 .anchorPreference(key: AddressFieldBounds.self, value: .bounds) { $0 }
         }
         .padding(.horizontal, 10)
-        .frame(height: 30)
+        .frame(height: fontSize(30))
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
                 .fill(Color(nsColor: .textBackgroundColor).opacity(0.8))
@@ -315,6 +325,8 @@ private struct TabContent: View {
         )
         .contentShape(Rectangle())
         .onTapGesture { addressFocused = true }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("browser-address-field")
     }
 
     private var addressIcon: String {
@@ -340,15 +352,15 @@ private struct TabContent: View {
     private var emptyState: some View {
         VStack(spacing: 14) {
             Image(systemName: "globe")
-                .font(.system(size: 34, weight: .light))
+                .font(fontSize.font(34, weight: .light))
                 .foregroundStyle(.tertiary)
             Text("Search or enter a URL")
-                .font(.system(size: 15, weight: .medium))
+                .font(fontSize.font(15, weight: .medium))
                 .foregroundStyle(.secondary)
             if !ports.isEmpty {
                 VStack(spacing: 8) {
                     Text("Listening in this tmux window")
-                        .font(.system(size: 11))
+                        .font(fontSize.font(11))
                         .foregroundStyle(.tertiary)
                     HStack(spacing: 8) {
                         ForEach(ports.prefix(6), id: \.self) { port in
@@ -357,7 +369,7 @@ private struct TabContent: View {
                                 tab.open("http://localhost:\(port)")
                             }
                             .buttonStyle(.bordered)
-                            .controlSize(.small)
+                            .controlSize(fontSize.systemControlSize(at: .small))
                         }
                     }
                 }
@@ -511,19 +523,21 @@ private struct SuggestionRow: View {
     let suggestion: Suggestion
     let isSelected: Bool
 
+    @Environment(\.interfaceFontSize) private var fontSize
+
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 11, weight: .medium))
+                .font(fontSize.font(11, weight: .medium))
                 .foregroundStyle(isSelected ? .white : .secondary)
-                .frame(width: 16)
+                .frame(width: fontSize(16))
             Text(suggestion.title.isEmpty ? suggestion.display : suggestion.title)
-                .font(.system(size: 13))
+                .font(fontSize.font(13))
                 .foregroundStyle(isSelected ? .white : .primary)
                 .lineLimit(1)
             if !suggestion.title.isEmpty, !isSearch {
                 Text(suggestion.display)
-                    .font(.system(size: 12))
+                    .font(fontSize.font(12))
                     .foregroundStyle(isSelected ? .white.opacity(0.8) : .secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -531,7 +545,7 @@ private struct SuggestionRow: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 8)
-        .frame(height: 26)
+        .frame(height: fontSize(26))
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(isSelected ? Color.accentColor : .clear)

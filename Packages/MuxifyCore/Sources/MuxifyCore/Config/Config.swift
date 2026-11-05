@@ -157,7 +157,8 @@ public struct Config: Equatable {
     }
 
     public var keybinds = Keybinds.defaults
-    /// Height of the app's header in points; at least 24 to fit its buttons.
+    /// Height of the app's header in points at the Interface font size 12; at least 24 to fit its buttons. The header
+    /// shows it times the factor of `interfaceFontSize` (ADR 0068).
     public var headerHeight: Double = 30
     /// `ui.status_line`: the Session name and Window selector in the header.
     public var statusLine = StatusLine()
@@ -191,8 +192,10 @@ public struct Config: Equatable {
     public var commandPalettes = CommandPaletteConfig.defaults
     /// `pick_lists`: the rules of the Action lists it names.
     public var pickLists: [ActionList: PickRules] = [:]
-    /// Typography of the Sidebar's Sessions and Agents, not the terminal.
-    public var sidebarTypography = SidebarTypography()
+    /// `ui.font_size`: the Interface font size, which all of Muxify's own text keeps its ratio to (ADR 0068).
+    public var interfaceFontSize = InterfaceFontSize()
+    /// `ui.sidebar.font_family`: the Sidebar font family, `system` or an installed macOS family.
+    public var sidebarFontFamily = "system"
     /// How the Git View opens.
     public var gitView = GitViewConfig()
     /// `worktrees.root_path`: the folder new Muxify Worktrees go in, as `<root>/<repository>/<name>`, on the
@@ -247,7 +250,13 @@ public struct Config: Equatable {
         #   config_file: ~/.config/ghostty/config
         #
         # ui:
-        #   # Header height in points (minimum 24). Changes apply live.
+        #   # The Interface font size: the size in points, like Ghostty's
+        #   # font-size, that all of Muxify's own text keeps its ratio to. The
+        #   # Terminal and the Browser's pages keep their own. From 9 to 24.
+        #   # Changes apply live.
+        #   font_size: 12
+        #   # Header height in points at font_size 12 (minimum 24); it grows
+        #   # with font_size. Changes apply live.
         #   header_height: 30
         #   status_line:
         #     # Show the Session name and Window selector. Git and other controls stay visible.
@@ -282,10 +291,8 @@ public struct Config: Equatable {
         #     match: '#FFD54F'
         #     current: '#FF9600'
         #   sidebar:
-        #     # Positive base size in points; other text scales proportionally.
-        #     # Changes apply live. Invalid values use the defaults below.
-        #     font_size: 12
-        #     # system, or an installed macOS font family (case-insensitive).
+        #     # The font family of Sidebar text: system, or an installed macOS
+        #     # font family (case-insensitive). Changes apply live.
         #     font_family: system
         #
         # git_view:
@@ -1129,6 +1136,13 @@ private struct ConfigReader {
     public mutating func readUI(_ node: Node) {
         for (name, key, value) in entries(of: node, "ui") {
             switch name {
+            case "font_size":
+                guard value.tag == Yams.Tag(.int) || value.tag == Yams.Tag(.float),
+                      let size = value.float, size.isFinite, InterfaceFontSize.range.contains(size) else {
+                    problem(at: value, "ui.font_size: expected a number from 9 to 24 points")
+                    continue
+                }
+                config.interfaceFontSize = InterfaceFontSize(size)
             case "header_height":
                 guard let height = value.float, height.isFinite, height >= 24 else {
                     problem(at: value, "ui.header_height: expected a finite number of at least 24 points")
@@ -1221,12 +1235,8 @@ private struct ConfigReader {
         for (name, key, value) in entries(of: node, "ui.sidebar") {
             switch name {
             case "font_size":
-                guard value.tag == Yams.Tag(.int) || value.tag == Yams.Tag(.float),
-                      let size = value.float, size.isFinite, size > 0 else {
-                    problem(at: value, "ui.sidebar.font_size: expected a finite number greater than zero points")
-                    continue
-                }
-                config.sidebarTypography.fontSize = size
+                // Removed, as a removed keybinding name is: the old value never silently stops working.
+                problem(at: key, "ui.sidebar.font_size is gone: use ui.font_size")
             case "font_family":
                 guard value.tag == Yams.Tag(.str), let name = value.string,
                       !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
@@ -1238,7 +1248,7 @@ private struct ConfigReader {
                     problem(at: value, "ui.sidebar.font_family: font family \"\(name.trimmingCharacters(in: .whitespacesAndNewlines))\" is not installed")
                     continue
                 }
-                config.sidebarTypography.fontFamily = family
+                config.sidebarFontFamily = family
             default:
                 problem(at: key, "unknown key \"ui.sidebar.\(name)\"")
             }

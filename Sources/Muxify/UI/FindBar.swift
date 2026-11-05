@@ -32,16 +32,23 @@ struct FindBar<Target: Finder>: View {
     var onFieldFocus: (Bool) -> Void = { _ in }
 
     @FocusState private var fieldFocused: Bool
+    @Environment(\.interfaceFontSize) private var fontSize
+
+    /// The bar's controls are small at 12, and its field draws its text in the small control font. A system control
+    /// ignores `.font`, but a field draws its text in the font it is given.
+    private static var designControlSize: ControlSize { .small }
+    private static var designFieldFontSize: CGFloat { NSFont.systemFontSize(for: .small) }
 
     var body: some View {
         HStack(spacing: 8) {
             TextField(placeholder, text: $finder.findQuery)
                 .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 260)
+                .font(fontSize.font(Self.designFieldFontSize))
+                .frame(maxWidth: fontSize(260))
                 .focused($fieldFocused)
                 .accessibilityIdentifier(identifier + "-field")
             Text(status)
-                .font(.system(size: 11))
+                .font(fontSize.font(11))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .accessibilityIdentifier(identifier + "-status")
@@ -60,7 +67,7 @@ struct FindBar<Target: Finder>: View {
             Button("Done", action: onClose)
                 .accessibilityIdentifier(identifier + "-done")
         }
-        .controlSize(.small)
+        .controlSize(fontSize.systemControlSize(at: Self.designControlSize))
         .onAppear(perform: consumeFocusRequest)
         .onChange(of: finder.findFieldFocusRequested) { _, _ in consumeFocusRequest() }
         .onChange(of: fieldFocused) { _, focused in
