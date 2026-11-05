@@ -662,9 +662,21 @@ These follow the size:
   own panel, which takes the size of the App Window it labels. The find bars'
   buttons and an Empty Topic page's buttons are macOS controls, which take the
   size macOS draws nearest, as the Unified and Split switch does.
+- The Browser's chrome: the tab strip with its Tab titles, globe icons, close
+  buttons and New Tab button; the toolbar with its Back, Forward and Reload
+  buttons and its "More" menu button; the address field with its icon; the
+  Suggestions under it; and the Browser's empty state with its symbol, caption
+  and local server buttons. The symbols beside that text grow with it. So do
+  the heights that hold it: 36 points for the tab strip, 26 for a Tab, 40 for
+  the toolbar, 30 for the address field and 26 for a Suggestion, the 26-point
+  squares of the toolbar's buttons and the 16-point close button of a Tab, and
+  a Tab's width bounds of 110 to 220 points. The menu that "More" opens is a
+  macOS menu, which keeps the size macOS gives it.
 
 The Terminal and the Browser's pages are not changed: set the Terminal's fonts
-in the Ghostty config, and a page's zoom in the Browser. The Git View's code
+in the Ghostty config, and a page's zoom in the Browser. A web page keeps its
+own zoom at every `ui.font_size`, so its text and layout, and the width of its
+viewport in CSS pixels, stay as they were. The Git View's code
 and diff text, and the gutters that frame it, follow the Terminal's
 `font-size`, not `ui.font_size`. The code is the Terminal's `font-size` less one
 point, and at least 11. The line-number and marker columns, the bands behind

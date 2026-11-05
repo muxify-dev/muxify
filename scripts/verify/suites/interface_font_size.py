@@ -32,6 +32,11 @@ Config problems banner, Find in Pane's bar, a Hint, an Empty Topic page's title 
 outside the App Window's view tree and takes the size from the row it labels. A width that grows is a maximum, so an
 overlay never leaves the App Window or what it overlays.
 
+The Browser's chrome, its tab strip, Tabs, toolbar and address field, holds its text in fixed heights that grow by the
+factor, and a Tab's width bounds grow too, so its title keeps its room. The page inside it keeps its own zoom: its
+viewport is as many CSS pixels wide at every size. The Sidebar's width grows with the size and the Browser takes a share
+of the room beside it, so that check hides the Sidebar, and the Browser is as wide at both sizes.
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.interface_font_size
 """
@@ -162,6 +167,27 @@ EMPTY_TOPIC = 'fs-empty'
 # Sources/Muxify/UI/HoverLabel.swift).
 HOVER_LABEL_PADDING = 4 + 5
 HOVER_LABEL_SIDES = 7 + 8
+# The Browser's chrome at 12, with nothing above or below its text: the tab strip is 36 points high, a Tab 26, the
+# toolbar 40, its buttons 26 square and the address field 30, and a Tab's close button is 16 square (`TabStrip`, `TabItem`
+# and `TabContent` in Sources/Muxify/Browser/BrowserPanel.swift). A Tab is between 110 and 220 points wide at 12
+# (`BrowserTabWidth` in Sources/Muxify/Browser/BrowserTabWidth.swift), and the strip has 16 points of padding, 4 after
+# each Tab and the New Tab button, 26 at 12, beside them.
+BROWSER_CHROME = {'browser-tab-strip': 36, 'browser-tab': 26, 'browser-toolbar': 40, 'browser-back': 26,
+                  'browser-address-field': 30, 'browser-tab-close': 16}
+TAB_WIDTH = 220
+TAB_STRIP_SIDES = 16 + 4 + 4 + 26
+# A Tab's title stands between its icon and its close button, 6 points from each, with a Spacer that takes what the
+# title leaves (`TabItem`), so there is 6 more points of spacing before the close button.
+TAB_TITLE_SPACING = 6 + 6
+BROWSER_TOPIC = 'fs-browser'
+# The page reports its viewport's width in CSS pixels in its title, which the Tab shows. The title is longer than a Tab
+# shows at either size.
+BROWSER_PAGE = """<!doctype html><meta charset="utf-8"><body style="margin: 0">
+<script>
+  const show = () => { document.title = 'fs-page vw=' + innerWidth + ' and a title longer than any Tab shows whole'; };
+  show();
+  setInterval(show, 200);
+</script>"""
 
 
 def code_line_height(terminal_size):
@@ -1232,3 +1258,90 @@ class InterfaceFontSize(unittest.TestCase):
         self.assert_text_grows_by_half('hover-label', HOVER_LABEL_PADDING, small[3], large[3])
         self.assertGreater(large_detail[2], 1.3 * small_detail[2],
                            'the hover label\'s detail is %.0f points wide at 12 and %.0f at 18' % (small_detail[2], large_detail[2]))
+
+    def browser_window(self):
+        """A Window of its own Topic whose Browser shows the fixture page in its only Tab, shown in the app. The Sidebar
+        is hidden until the check ends."""
+        s = self.s
+        page = s.root/'font-size-page.html'
+        page.write_text(BROWSER_PAGE)
+        self.store.put(dict(id=BROWSER_TOPIC, title=BROWSER_TOPIC, slug=BROWSER_TOPIC, home_project=str(self.project)))
+        self.addCleanup(self.store.remove, BROWSER_TOPIC)
+        # One tmux call, so the app never reads the Window without its Browser options.
+        options = [arg for option, value in [('@muxify_tabs', page.as_uri()), ('@muxify_active_tab', '0'),
+                                             ('@muxify_browser', 'on')]
+                   for arg in (';', 'set-option', '-w', '-t', BROWSER_TOPIC + ':', option, value)]
+        s.tmux('new-session', '-d', '-s', BROWSER_TOPIC, '-c', str(self.project), SHELL,
+               ';', 'set-option', '-t', BROWSER_TOPIC, '@muxify_topic', BROWSER_TOPIC, *options)
+        self.addCleanup(s.tmux_ok, 'kill-session', '-t', '=' + BROWSER_TOPIC)
+        self.addCleanup(s.show, self.windows['fs-size'][0])
+        s.show(s.tmux('display-message', '-p', '-t', BROWSER_TOPIC + ':', '#{window_id}'))
+        self.addCleanup(lambda: s.row('toggle-sidebar').get('accessibilityValue') == 'off' and s.act('press', 'toggle-sidebar'))
+        s.act('press', 'toggle-sidebar')
+        s.wait_rows(lambda rs: not s.has('sidebar-panel', rs) and self.page_width(rs) is not None,
+                    lambda: 'the Sidebar does not hide, or the Browser does not show the page: %s' % self.tab_title())
+
+    def tab_title(self, rs=None):
+        rs = rs if rs is not None else self.s.rows()
+        key = next((key for key in self.s.ids(rs) if key.startswith('browser-tab-title-')), None)
+        return key and self.text(key, rs)
+
+    def page_width(self, rs):
+        """The width of the page's viewport in CSS pixels, from its title, None before the page reports it."""
+        found = re.search(r'fs-page vw=(\d+)', self.tab_title(rs) or '')
+        return found and int(found.group(1))
+
+    def test_at_18_the_browsers_tab_strip_tabs_and_address_field_grow_by_half_and_the_page_keeps_its_zoom(self):
+        s = self.s
+        self.addCleanup(self.write_config, '')
+        self.browser_window()
+        tab = next(key for key in s.ids() if key.startswith('browser-tab-title-'))[len('browser-tab-title-'):]
+        named = {key: key + '-' + tab if key in ('browser-tab', 'browser-tab-close') else key for key in BROWSER_CHROME}
+        frames, pages, panels = {}, {}, {}
+        for size in [12, 18]:
+            self.write_config('ui:\n  font_size: %s\n' % size)
+            s.wait_rows(lambda rs: s.has('browser-tab-strip', rs)
+                        and abs(height(s.row('browser-tab-strip', rs)) - 36 * size / 12) <= ROUNDING,
+                        lambda: 'the tab strip is not %.0f points high at %s: %s' % (
+                            36 * size / 12, size, [(r.get('accessibilityIdentifier'), r.get('accessibilityFrame'))
+                                                   for r in s.rows() if 'browser' in r.get('accessibilityIdentifier', '')]))
+            rs = self.settled([*named.values(), 'browser-tab-title-' + tab], 'the Browser does not show at %s' % size)
+            frames[size] = {key: bounds(s.row(name, rs)) for key, name in named.items()}
+            frames[size]['title'] = bounds(s.row('browser-tab-title-' + tab, rs))
+            panels[size] = bounds(s.row('browser-panel', rs))
+            widths = []
+            # The page reports its width every 200 milliseconds, so it is read once it is the same twice.
+            s.wait_rows(lambda rs: widths.append(self.page_width(rs)) or widths[-1] and widths[-2:] == [widths[-1]] * 2,
+                        'the page reports no width at %s: its Tab shows %r' % (size, self.tab_title()))
+            pages[size] = widths[-1]
+            # The Tab takes its most width, and its title the room in it up to its close button: the title is cut there,
+            # so the room it leaves is less than a character, and it shows as much of its text as the Tab has room for.
+            tab_x, _, tab_w, _ = frames[size]['browser-tab']
+            title_x, _, title_w, _ = frames[size]['title']
+            close_x = frames[size]['browser-tab-close'][0]
+            self.assertAlmostEqual(tab_w, TAB_WIDTH * size / 12, delta=ROUNDING,
+                                   msg='the Tab is %.0f points wide at %s' % (tab_w, size))
+            left = close_x - TAB_TITLE_SPACING - (title_x + title_w)
+            self.assertTrue(-ROUNDING <= left < size,
+                            'the title, at %s, leaves %.1f points before the close button, at %.0f, at %s'
+                            % (frames[size]['title'], left, close_x, size))
+            self.assertTrue(tab_x < title_x and title_x + title_w < tab_x + tab_w,
+                            'the title, at %s, leaves its Tab, at %s, at %s' % (frames[size]['title'], frames[size]['browser-tab'], size))
+        small, large = frames[12], frames[18]
+        self.assertGreaterEqual(panels[18][2], TAB_WIDTH * 1.5 + TAB_STRIP_SIDES * 1.5, 'the Browser is too narrow for the check')
+        for key, design in BROWSER_CHROME.items():
+            self.assertAlmostEqual(small[key][3], design, delta=ROUNDING, msg='%s is %s at 12' % (key, small[key],))
+            self.assert_text_grows_by_half(key, 0, small[key][3], large[key][3])
+        for key in ['browser-back', 'browser-tab-close']:
+            self.assert_text_grows_by_half(key, 0, small[key][2], large[key][2], side='wide')
+        # The title's room grows by more than half, as the Tab's padding and spacing do not grow, and its text grows.
+        self.assertGreaterEqual(large['title'][2], 1.5 * small['title'][2],
+                                'the title has %.0f points at 12 and %.0f at 18' % (small['title'][2], large['title'][2]))
+        self.assertGreater(large['title'][3], 1.3 * small['title'][3],
+                           'the title is %.0f points high at 12 and %.0f at 18' % (small['title'][3], large['title'][3]))
+        # The page keeps its own zoom: in a Browser as wide at both sizes, its viewport is as wide, a CSS pixel a point.
+        self.assertAlmostEqual(panels[12][2], panels[18][2], delta=ROUNDING,
+                               msg='the Browser is %.0f points wide at 12 and %.0f at 18' % (panels[12][2], panels[18][2]))
+        self.assertEqual(pages[12], pages[18], 'the page is %s CSS pixels wide at 12 and %s at 18' % (pages[12], pages[18]))
+        self.assertAlmostEqual(pages[12], panels[12][2], delta=ROUNDING,
+                               msg='the page is %s CSS pixels wide in a Browser %.0f points wide' % (pages[12], panels[12][2]))

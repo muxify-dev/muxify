@@ -199,4 +199,16 @@ final class InterfaceFontSizeTests: XCTestCase {
         XCTAssertEqual(PaletteMetrics.width(in: CGSize(width: 1000, height: 800), size: InterfaceFontSize(18)), 952,
                        "the App Window less its margins, so the palette stays in it")
     }
+
+    func testABrowserTabSharesItsStripBetween110And220At12AndBetweenTheGrownBoundsAt18() {
+        XCTAssertEqual(BrowserTabWidth.bounds(InterfaceFontSize()), 110...220)
+        XCTAssertEqual(BrowserTabWidth.bounds(InterfaceFontSize(18)), 165...330)
+        XCTAssertEqual(BrowserTabWidth.width(available: 1000, tabs: 1, size: InterfaceFontSize()), 220)
+        XCTAssertEqual(BrowserTabWidth.width(available: 1000, tabs: 1, size: InterfaceFontSize(18)), 330)
+        // The strip's 16 points of padding and 4 after each Tab do not grow; the New Tab button, 26 and its 4, does.
+        XCTAssertEqual(BrowserTabWidth.width(available: 400, tabs: 2, size: InterfaceFontSize()), (400 - 16 - 30 - 8) / 2)
+        XCTAssertEqual(BrowserTabWidth.width(available: 400, tabs: 2, size: InterfaceFontSize(18)), (400 - 16 - 43 - 8) / 2)
+        XCTAssertEqual(BrowserTabWidth.width(available: 400, tabs: 10, size: InterfaceFontSize()), 110, "the strip scrolls")
+        XCTAssertEqual(BrowserTabWidth.width(available: 400, tabs: 10, size: InterfaceFontSize(18)), 165)
+    }
 }
