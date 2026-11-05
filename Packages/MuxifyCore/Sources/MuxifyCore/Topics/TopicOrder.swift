@@ -304,7 +304,7 @@ public enum TopicOrder {
         case guestSession
         /// Fill an Open Place: the place is not an Open Place, or the card is not a Guest Topic or a Benched Topic.
         case notOpenPlace, cannotFill
-        /// Bench Topic: the Topic is not In Play.
+        /// Bench of a Topic: the Topic is not In Play.
         case notInPlayTopic
 
         public var description: String {
@@ -483,7 +483,7 @@ public enum TopicOrder {
                          from: layout(entries, inPlay: inPlay))
     }
 
-    /// Bench Topic: the In Play Topic goes to the top of the Bench without a Guest mark. A Topic in a place leaves an
+    /// Bench of a Topic: the In Play Topic goes to the top of the Bench without a Guest mark. A Topic in a place leaves an
     /// Open Place there; a Guest Topic leaves none, so the Guests section gets shorter.
     public static func benching(_ id: String, inPlay: Int, in entries: [TopicListEntry]) throws -> TopicListChange {
         guard let entry = sorted(entries).first(where: { $0.id == .topic(id) }) else { throw Failure.sourceUnavailable }

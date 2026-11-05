@@ -262,7 +262,7 @@ final class HintTests: XCTestCase {
         XCTAssertEqual(topics.rows.first { $0.id == .locked("$1") }?.isExpanded, true, "going into a Locked Session opens its card")
         XCTAssertEqual(topics.rows.first { $0.id == .locked("$1") }?.sessions.map(\.id.session), ["$1"])
         XCTAssertNil(topics.openedNoTopicSession, "a Locked Session has its own card, not the No Topic card")
-        XCTAssertEqual(topics.nextTopic(after: "first"), .locked("$1"), "a Locked Session can be the Next Topic")
+        XCTAssertEqual(topics.nextTopic(after: .topic("first")), .locked("$1"), "a Locked Session can be the Next Topic")
     }
 
     func testStepWrapsAndStartsAtAnEndWithoutACurrentTarget() {

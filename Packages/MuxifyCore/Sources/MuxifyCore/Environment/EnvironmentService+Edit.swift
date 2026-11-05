@@ -315,7 +315,7 @@ extension EnvironmentService {
     }
 
     /// Lock and Unlock change only the Session option and, when a Lock renumbers the list, the Topic records. With
-    /// `topics.in_play` they are Make a Guest and End Guest of a Session.
+    /// `topics.in_play` they are Make a Guest and Bench of a Session.
     func changeLock(_ request: EnvironmentRequest, locked: Bool, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {

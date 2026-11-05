@@ -215,7 +215,7 @@ enum CLIVerbs {
         """),
         lock(false, help: """
         Ends the Lock. The Session stays, in No Topic. With topics.in_play in
-        the Config, this is End Guest: the Guests get one card shorter, and
+        the Config, this is Bench of a Guest Session: the Guests get one card shorter, and
         no Open Place stays.
         """),
         CLIVerb(path: .sessionRemoveFromTopic, synopsis: "[--kill [--remove-worktree]] [--session <name|id> | --pane <id>] [--json]",
@@ -612,7 +612,7 @@ enum CLIVerbs {
         },
         topicVerb(.topicBench, synopsis: "\(topicTarget) [--json]",
                   help: """
-                  Puts this Pane's In Play Topic at the top of the Bench, as Bench Topic does.
+                  Puts this Pane's In Play Topic at the top of the Bench, as Bench does.
                   It keeps its Sessions and Agents. A Topic from an In Play place leaves an
                   Open Place there, and no Benched card moves up. A Guest Topic loses its
                   Guest mark and leaves no Open Place. It needs topics.in_play in the Config.

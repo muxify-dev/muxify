@@ -46,8 +46,8 @@ extension CommandPalette {
             case .addSessionToTopic: store.refreshSessionPaths(); begin(.addSession(topic), keepingHistory: true)
             case .pinTopic: close(); store.pinTopic(id, true)
             case .unpinTopic: close(); store.pinTopic(id, false)
-            case .makeGuest: close(); store.setGuest(.topic(id), true)
-            case .benchTopic: close(); store.benchTopic(id)
+            case .makeGuest: close(); store.makeGuest(.topic(id))
+            case .bench: close(); store.bench(.topic(id))
             case .reopenTopic: close(); store.reopenTopic(id, .reopen)
             case .startTopicFresh: close(); store.reopenTopic(id, .startFresh)
             default: break
@@ -78,8 +78,10 @@ extension CommandPalette {
             if let window { begin(.confirm(PaletteConfirmation(.killSession(window))), keepingHistory: true) }
         case .lockSession, .unlockSession:
             if let window { close(); store.setLock(ofSession: window.sessionID, action == .lockSession) }
-        case .makeGuest, .endGuest:
-            if let window { close(); store.setGuest(.session(window.sessionID), action == .makeGuest) }
+        case .makeGuest:
+            if let window { close(); store.makeGuest(.session(window.sessionID)) }
+        case .bench:
+            if let window { close(); store.bench(.session(window.sessionID)) }
         case .newWindow:
             if let window { close(); store.newWindow(beside: window) }
         case .removeFromTopicAndKill:

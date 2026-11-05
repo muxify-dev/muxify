@@ -896,17 +896,17 @@ struct TopicCard: View {
             .disabled(store.changingTopic)
     }
 
-    /// Make a Guest on a Benched Topic, Bench Topic on an In Play Topic, while the Config sets `topics.in_play`.
+    /// Make a Guest on a Benched Topic, Bench on an In Play Topic, while the Config sets `topics.in_play`.
     @ViewBuilder
     private func guestButton(_ id: String) -> some View {
         if store.guestState(of: .topic(id)) == false {
-            Button("Make a Guest") { store.setGuest(.topic(id), true) }
+            Button("Make a Guest") { store.makeGuest(.topic(id)) }
                 .accessibilityIdentifier("make-guest")
                 .disabled(store.changingTopic)
         }
-        if store.canBench(id) {
-            Button("Bench Topic") { store.benchTopic(id) }
-                .accessibilityIdentifier("bench-topic")
+        if store.canBench(.topic(id)) {
+            Button("Bench") { store.bench(.topic(id)) }
+                .accessibilityIdentifier("bench")
                 .disabled(store.changingTopic)
         }
     }
@@ -1045,10 +1045,12 @@ private struct LockedCard: View {
     }
 
     /// The Actions of a Locked Session. It is not a Topic, so it has no Settle, Pin or Forget. With `topics.in_play`
-    /// it is a Guest, and its Unlock is End Guest.
+    /// it is a Guest, and its Unlock is Bench.
     @ViewBuilder
     private var actions: some View {
-        Button(row.isGuest ? "End Guest" : "Unlock Session") { store.setLock(ofSession: sessionID, false) }
+        Button(row.isGuest ? "Bench" : "Unlock Session") {
+            if row.isGuest { store.bench(.session(sessionID)) } else { store.setLock(ofSession: sessionID, false) }
+        }
             .disabled(store.changingTopic)
         if let window {
             Button("Rename Session…") { store.palette.begin(.text(.renameSession(window)), text: window.sessionName) }
@@ -1283,8 +1285,10 @@ private struct SessionCard<Row: View>: View {
     @ViewBuilder
     private var lockButton: some View {
         if let guest = store.guestState(of: .session(session.id)) {
-            Button(guest ? "End Guest" : "Make a Guest") { store.setGuest(.session(session.id), !guest) }
-                .accessibilityIdentifier(guest ? "end-guest" : "make-guest")
+            Button(guest ? "Bench" : "Make a Guest") {
+                if guest { store.bench(.session(session.id)) } else { store.makeGuest(.session(session.id)) }
+            }
+                .accessibilityIdentifier(guest ? "bench" : "make-guest")
                 .disabled(store.changingTopic)
         } else if let locked = store.lockState(ofSession: session.id) {
             Button(locked ? "Unlock Session" : "Lock Session") { store.setLock(ofSession: session.id, !locked) }

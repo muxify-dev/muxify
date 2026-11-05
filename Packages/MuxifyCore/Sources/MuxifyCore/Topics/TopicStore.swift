@@ -468,7 +468,7 @@ public struct TopicTransaction {
         put(try TopicOrder.choosingInPlay(chosen, inPlay: inPlay, in: entries))
     }
 
-    /// Bench Topic: the In Play Topic goes to the top of the Bench. From a place it leaves an Open Place there.
+    /// Bench of a Topic: the In Play Topic goes to the top of the Bench. From a place it leaves an Open Place there.
     @discardableResult
     public mutating func bench(_ id: String, inPlay: Int) throws -> [SessionLockChange] {
         put(try TopicOrder.benching(id, inPlay: inPlay, in: entries))

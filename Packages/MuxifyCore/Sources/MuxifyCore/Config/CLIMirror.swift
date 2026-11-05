@@ -116,8 +116,7 @@ extension PaletteAction {
         case .lockSession: .verb(.sessionLock)
         case .unlockSession: .verb(.sessionUnlock)
         case .makeGuest: .verbs([.topicMakeGuest, .sessionLock])
-        case .endGuest: .verb(.sessionUnlock)
-        case .benchTopic: .verb(.topicBench)
+        case .bench: .verbs([.topicBench, .sessionUnlock])
         case .choosePane, .chooseWindow, .chooseSession: .verb(.windowMove)
         case .toggleIncludeTab: .noMirror("The Tab is the view of one App Window.")
         }

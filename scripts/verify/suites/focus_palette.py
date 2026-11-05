@@ -62,13 +62,13 @@ class FocusPalette(PaletteFixture):
         self.make_a_guest('fp-guest')
         self.assert_focus('TerminalSurfaceView', 'Make a Guest')
 
-    def test_end_guest_keeps_focus_in_the_terminal(self):
-        self.session('fp-end-guest')
-        self.make_a_guest('fp-end-guest')
+    def test_bench_of_a_guest_session_keeps_focus_in_the_terminal(self):
+        self.session('fp-bench-guest')
+        self.make_a_guest('fp-bench-guest')
         self.focus_terminal()
-        self.run_command('End Guest')
-        wait(lambda: not self.lock('fp-end-guest'), 'End Guest did not unlock the Session')
-        self.assert_focus('TerminalSurfaceView', 'End Guest')
+        self.run_command('Bench')
+        wait(lambda: not self.lock('fp-bench-guest'), 'Bench did not unlock the Guest Session')
+        self.assert_focus('TerminalSurfaceView', 'Bench of a Guest Session')
 
     def bench(self, prefix):
         """A Bench to toggle: one In Play Topic and one Benched Topic."""
@@ -94,8 +94,8 @@ class FocusPalette(PaletteFixture):
     def test_bench_topic_keeps_focus_in_the_terminal(self):
         self.shown_topic('fp-bench')
         self.focus_terminal()
-        self.run_command('Bench Topic')
-        self.assert_focus('TerminalSurfaceView', 'Bench Topic')
+        self.run_command('Bench')
+        self.assert_focus('TerminalSurfaceView', 'Bench')
 
     def test_pin_topic_keeps_focus_in_the_terminal(self):
         self.shown_topic('fp-pin')

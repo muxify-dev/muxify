@@ -344,24 +344,27 @@ struct TopicsModel {
 
     /// The open Topics and the Locked Sessions, in one order; `groups` lists the others. No Topic has no row.
     let rows: [Row]
-    /// The Next Topic after `id` leaves the list together with `others`: the nearest card below it that the Sidebar
-    /// shows and that stays. With a Bench line and no such card, the first In Play card that stays, so a Settle in
-    /// In Play does not go to a hidden Bench. Else the nearest row below that stays, else above.
-    func nextTopic(after id: String, skipping others: Set<String> = []) -> TopicGroupID {
-        guard let index = rows.firstIndex(where: { $0.id == .topic(id) }) else { return .noTopic }
+    /// The Next Topic after `card` leaves the list together with the Topics `others`: the nearest card below it that the Sidebar
+    /// shows and that stays. With In Play and no such card, the first In Play card that stays, also when the Bench is
+    /// empty, so a Settle in In Play does not go to a hidden Bench. Else the nearest row below that stays, else above;
+    /// with In Play, never a Pinned Topic, which is not In Play.
+    func nextTopic(after card: TopicGroupID, skipping others: Set<String> = []) -> TopicGroupID {
+        guard let index = rows.firstIndex(where: { $0.id == card }) else { return .noTopic }
         func stays(_ row: Row) -> Bool {
-            if case .topic(let other) = row.id { return other != id && !others.contains(other) }
+            if row.id == card { return false }
+            if case .topic(let other) = row.id { return !others.contains(other) }
             return true
         }
         let shown = list.compactMap { item -> Row? in
             if case .card(let row) = item { return row }
             return nil
         }
-        if let position = shown.firstIndex(where: { $0.id == .topic(id) }) {
+        if let position = shown.firstIndex(where: { $0.id == card }) {
             if let below = shown[(position + 1)...].first(where: stays) { return below.id }
-            if isBenchShown != nil, let first = shown.first(where: { !$0.isPinned && stays($0) }) { return first.id }
+            if showsInPlay, let first = shown.first(where: { !$0.isPinned && stays($0) }) { return first.id }
         }
-        return rows[(index + 1)...].first(where: stays)?.id ?? rows[..<index].last(where: stays)?.id ?? .noTopic
+        let candidate = { (row: Row) in stays(row) && !(showsInPlay && row.isPinned) }
+        return rows[(index + 1)...].first(where: candidate)?.id ?? rows[..<index].last(where: candidate)?.id ?? .noTopic
     }
 
     /// The title of the Topic whose Session this is, among the open and shown Settled Topics. Nil for a
@@ -397,6 +400,11 @@ struct TopicsModel {
     var benchedLocation: TopicGroupID? {
         guard let activeTopic, isBenched(activeTopic) else { return nil }
         return activeTopic
+    }
+
+    /// Whether the Topics list shows the card now: not on a hidden Bench, and not in Sessions mode.
+    func shows(_ card: TopicGroupID) -> Bool {
+        list.contains { $0.cardID == card }
     }
 
     /// Whether the Bench shows; nil while the Topics list has no Bench line.
@@ -480,6 +488,8 @@ struct TopicsModel {
     let mode: SidebarMode
     /// `topics.tags`; nil while Tags are off.
     let tags: ConfigTags?
+    /// The list shows In Play places: `topics.in_play` is set and the Sidebar is in Topics mode.
+    let showsInPlay: Bool
     var showsToggle: Bool { topicsEnabled && sessionsEnabled }
 
     init(records: [TopicRecord], openPlaces: [OpenPlace] = [], windows: [TmuxWindow], config: Config, selection: TopicSelection,
@@ -621,6 +631,7 @@ struct TopicsModel {
         topicSessions = Dictionary((rows.flatMap(\.sessions) + noTopicSessions).map { ($0.id.session, $0) },
                                    uniquingKeysWith: { first, _ in first })
         self.rows = rows
+        showsInPlay = self.mode == .topics && config.topics.inPlay != nil
         list = Self.list(listCards, inPlay: self.mode == .topics ? config.topics.inPlay : nil, benchShown: benchShown,
                          peek: benchPeek, location: active, noTopic: openedNoTopicSession)
         let settled = records.filter { $0.settledAt != nil }

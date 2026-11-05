@@ -156,7 +156,7 @@ final class CommandPalette {
                 if store.topicConfig.tags != nil { actions.append(.editTags) }
                 actions.append(topic.isPinned ? .unpinTopic : .pinTopic)
                 if store.guestState(of: .topic(id)) == false { actions.append(.makeGuest) }
-                if store.canBench(id) { actions.append(.benchTopic) }
+                if store.canBench(.topic(id)) { actions.append(.bench) }
             }
             if topic.settledAt != nil || (!topic.sessions.isEmpty && !store.windows.contains(where: { $0.topicID == id })) {
                 actions += [.reopenTopic, .startTopicFresh]
@@ -167,7 +167,7 @@ final class CommandPalette {
                 actions += [.move]
                 if session.windows.first?.topicID != nil { actions += [.removeFromTopic, .removeFromTopicAndKill] }
             }
-            if let guest = store?.guestState(of: .session(session.id)) { actions += [guest ? .endGuest : .makeGuest] }
+            if let guest = store?.guestState(of: .session(session.id)) { actions += [guest ? .bench : .makeGuest] }
             else if let locked = store?.lockState(ofSession: session.id) { actions += [locked ? .unlockSession : .lockSession] }
             actions += [.newSession, .rename, .newWindow, .killSession]
         case .window(let window):
@@ -231,8 +231,7 @@ final class CommandPalette {
         case .lockSession: return "Lock"
         case .unlockSession: return "Unlock"
         case .makeGuest: return "Make a Guest"
-        case .endGuest: return "End Guest"
-        case .benchTopic: return "Bench Topic"
+        case .bench: return "Bench"
         default: return action.rawValue
         }
     }

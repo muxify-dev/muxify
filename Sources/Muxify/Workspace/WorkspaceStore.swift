@@ -237,10 +237,6 @@ final class WorkspaceStore {
         if let window = EntryWindow.ofSession(windows.filter { $0.sessionID == sessionID }) { select(window) }
     }
 
-    func nextTopic(after id: String, skipping others: Set<String> = []) -> TopicGroupID {
-        topics.nextTopic(after: id, skipping: others)
-    }
-
     func move(_ draft: MoveDraft, to destination: MoveDestination) {
         guard let window = windows.first(where: { $0.id == draft.window.id && $0.sourceID == draft.window.sourceID }) else { return }
         let target: EnvironmentTarget?
@@ -364,15 +360,21 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(locked ? .lock : .unlock, target: .session(id)))
     }
 
-    /// A card that Make a Guest and End Guest act on: a Topic, or a No Topic Session, which is a Guest through its Lock.
+    /// A card that Make a Guest and Bench act on: a Topic, or a No Topic Session, which is a Guest through its Lock.
     enum GuestCard: Equatable {
         case topic(String)
         case session(String)
+
+        var id: TopicGroupID {
+            switch self {
+            case .topic(let id): .topic(id)
+            case .session(let id): .locked(id)
+            }
+        }
     }
 
-    /// Whether the card is a Guest; nil when neither Make a Guest nor End Guest applies to it: the Config does not set
-    /// `topics.in_play`, or the card is a Topic that is not on the Bench. A Guest Topic leaves through Bench Topic, so End
-    /// Guest is only for a Guest Session.
+    /// Whether the card is a Guest; nil when Make a Guest does not apply to it: the Config does not set
+    /// `topics.in_play`, or the card is a Topic that is not on the Bench. A Guest leaves through Bench.
     func guestState(of card: GuestCard) -> Bool? {
         guard let inPlay = topicConfig.inPlay, !isRemote, topics.topicsEnabled else { return nil }
         switch card {
@@ -381,31 +383,52 @@ final class WorkspaceStore {
         }
     }
 
-    /// Bench Topic applies to a Topic In Play: in an In Play place, or a Guest Topic. Not to a Benched or Pinned Topic.
-    func canBench(_ id: String) -> Bool {
+    /// Bench applies to a card In Play: a Topic in an In Play place, a Guest Topic or a Guest Session. Not to a
+    /// Benched or Pinned Topic.
+    func canBench(_ card: GuestCard) -> Bool {
         guard let inPlay = topicConfig.inPlay, !isRemote, topics.topicsEnabled else { return false }
-        return topics.split(inPlay: inPlay).inPlay.contains { $0.id == .topic(id) }
+        switch card {
+        case .topic(let id): return topics.split(inPlay: inPlay).inPlay.contains { $0.id == .topic(id) }
+        case .session: return guestState(of: card) == true
+        }
     }
 
-    /// Bench Topic goes through the Topic service, as `muxify topic bench` does.
-    func benchTopic(_ id: String) {
-        guard canBench(id), !changingTopic else { return }
-        perform(EnvironmentRequest(.benchTopic, target: .topic(.id(id))))
+    /// Bench goes through the Topic service, as `muxify topic bench` and `muxify session unlock` do. A Topic goes to the
+    /// top of the Bench; a Session has no record to wait there, so it leaves its Lock and waits in No Topic. When the
+    /// user is on the card, the Next Topic opens, as after Settle, but only when it shows: the card's Sessions stay, so
+    /// with no other card In Play the user stays on it rather than on another Benched card.
+    func bench(_ card: GuestCard) {
+        guard canBench(card), !changingTopic else { return }
+        let request: EnvironmentRequest
+        switch card {
+        case .topic(let id): request = EnvironmentRequest(.benchTopic, target: .topic(.id(id)))
+        case .session(let id):
+            guard let session = SessionID(rawValue: id) else { return }
+            request = EnvironmentRequest(.unlock, target: .session(session))
+        }
+        if let next = nextCard(leaving: card.id), topics.shows(next) { perform(request, presenting: .goTo(next)) } else { perform(request) }
     }
 
-    /// The card that the Make a Guest and End Guest Commands act on: the Active Topic, else the Session of the Location.
+    /// The card that opens when `card` leaves the Sidebar while the user is on it: the Next Topic. Nil while the user
+    /// is on another card, so that the Location stays.
+    private func nextCard(leaving card: TopicGroupID) -> TopicGroupID? {
+        guard topics.activeTopic == card, topics.rows.contains(where: { $0.id == card }) else { return nil }
+        return topics.nextTopic(after: card)
+    }
+
+    /// The card that the Make a Guest and Bench Commands act on: the Active Topic, else the Session of the Location.
     var currentGuestCard: GuestCard? {
         if let id = activeTopicID { return .topic(id) }
         return selectedWindow.map { .session($0.sessionID) }
     }
 
-    /// Make a Guest and End Guest go through the Topic service, as `muxify topic make-guest` and `muxify session lock`
-    /// do. A Session is a Guest through its Lock.
-    func setGuest(_ card: GuestCard, _ guest: Bool) {
-        guard guestState(of: card) == !guest else { return }
+    /// Make a Guest goes through the Topic service, as `muxify topic make-guest` and `muxify session lock` do. A
+    /// Session is a Guest through its Lock.
+    func makeGuest(_ card: GuestCard) {
+        guard guestState(of: card) == false else { return }
         switch card {
         case .topic(let id): perform(EnvironmentRequest(.makeGuest, target: .topic(.id(id))))
-        case .session(let id): setLock(ofSession: id, guest)
+        case .session(let id): setLock(ofSession: id, true)
         }
     }
 
@@ -618,12 +641,13 @@ final class WorkspaceStore {
     }
 
     func forgetTopic(_ id: String, choices: [TopicSettleSession], worktrees: [String]) {
-        perform(EnvironmentRequest(.forget(choices: choices, worktrees: worktrees), target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id)))
+        perform(EnvironmentRequest(.forget(choices: choices, worktrees: worktrees), target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id)),
+                presenting: .leave(nextCard(leaving: .topic(id))))
     }
 
     func settleTopic(_ id: String, choices: [TopicSettleSession], outcome: String) {
-        let next = activeTopicID == id ? nextTopic(after: id) : nil
-        perform(EnvironmentRequest(.settle(choices: choices, outcome: outcome), target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id)), presenting: .settle(next))
+        perform(EnvironmentRequest(.settle(choices: choices, outcome: outcome), target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id)),
+                presenting: .leave(nextCard(leaving: .topic(id))))
     }
 
     func reopenTopic(_ id: String, _ choice: TopicReopening.Choice) {
@@ -670,7 +694,8 @@ final class WorkspaceStore {
         case newSession(Folder)
         /// A Session or Window that moved shows where it is now; nothing else changes.
         case membership(selecting: String?)
-        case settle(TopicGroupID?)
+        /// Settle and Forget: the Topic's Sessions end or leave it, and the Location goes to the Next Topic, if any.
+        case leave(TopicGroupID?)
         case move(source: String, tab: BrowserTab?)
         /// The Location goes to this card, as Go to Topic does.
         case goTo(TopicGroupID)
@@ -762,7 +787,7 @@ final class WorkspaceStore {
             case .membership(let windowID):
                 if ownsPalette, case .addSession = palette.flow { palette.close() }
                 if let id = windowID.flatMap(WindowID.init(rawValue:)) { route(.result(.window(id), lastStartedRead: lastStartedRead)) }
-            case .settle(let next):
+            case .leave(let next):
                 if ownsPalette { palette.close() }
                 route(.settled(next: next))
             case .move(let source, let tab):

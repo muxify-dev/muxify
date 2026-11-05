@@ -181,15 +181,21 @@ Sidebar then shows every card.
   (Sidebar menu, Command Palette, `muxify topic make-guest`) puts a Benched
   Topic or a No Topic Session at the end of the Guests, and no other card goes
   to the Bench. A Session is a Guest through its Lock: with `in_play`, every
-  Locked Session is a Guest, Make a Guest and End Guest take the place of Lock
+  Locked Session is a Guest, Make a Guest and Bench take the place of Lock
   Session and Unlock Session, and `muxify session lock` and `unlock` make and
   end a Guest Session. When you set `in_play`, each Locked Session goes to the
   end of the Guests. When you remove it, each Guest Session stays a Locked
   Session at its place, and each Guest Topic keeps its mark for the next time.
-- Bench Topic (Sidebar menu, Command Palette, `muxify topic bench`) puts an In
-  Play Topic or a Guest Topic at the top of the Bench. The Topic keeps its
-  Sessions and Agents, and a Guest Topic loses its mark.
-- When a card leaves an In Play place, by Settle, Forget, Pin or Bench Topic,
+- Bench (Sidebar menu, Command Palette) takes a card out of In Play. An In
+  Play Topic or a Guest Topic goes to the top of the Bench, as `muxify topic
+  bench` does. The Topic keeps its Sessions and Agents, and a Guest Topic loses
+  its mark. A Guest Session is Unlocked, as `muxify session unlock` does: it
+  waits in No Topic, because a Session has no record to keep it on the Bench.
+- When you Settle, Forget or Bench the card that you are on, Muxify opens the
+  next card that shows. After the last card that shows, it opens the first In
+  Play card. It never opens a Pinned Topic this way. After Bench, when no
+  other card is In Play, you stay on the Benched card.
+- When a card leaves an In Play place, by Settle, Forget, Pin or Bench,
   its place becomes an Open Place, a dashed card "Open Place". No Benched card
   moves up, and the other places keep their positions. The Topic records keep
   the Open Place (`open_places` in the records file), so it stays after a
@@ -197,7 +203,7 @@ Sidebar then shows every card.
   the Guest Topics, then the Benched Topics. The Topic that you choose takes
   the place, and a Guest loses its mark. `muxify topic fill-place` does the
   same. A Guest Session must become a Topic before it can take a place. When
-  a Guest leaves, by Settle, Pin, Bench Topic, End Guest or the end of its
+  a Guest leaves, by Settle, Pin, Bench or the end of its
   Session, it leaves no Open Place, and the Guests get one card shorter.
 - A drag inside one section reorders the cards there, and the Guest mark stays
   on its card. A drag across the Guests line or the Bench line that you let go
