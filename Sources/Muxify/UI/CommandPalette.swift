@@ -151,11 +151,12 @@ final class CommandPalette {
         case .topic(let id, _):
             guard let store, !store.isRemote, let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return actions }
             if topic.settledAt == nil {
-                actions += [.settleTopic, .addSessionToTopic, .rename, .setTopicNote] + (topic.note == nil ? [] : [.clearTopicNote])
-                    + (store.topicConfig.tags == nil ? [] : [.editTags])
-                    + [topic.isPinned ? .unpinTopic : .pinTopic]
-                    + (store.guestState(of: .topic(id)) == false ? [.makeGuest] : [])
-                    + (store.canBench(id) ? [.benchTopic] : [])
+                actions += [.settleTopic, .addSessionToTopic, .rename, .setTopicNote]
+                if topic.note != nil { actions.append(.clearTopicNote) }
+                if store.topicConfig.tags != nil { actions.append(.editTags) }
+                actions.append(topic.isPinned ? .unpinTopic : .pinTopic)
+                if store.guestState(of: .topic(id)) == false { actions.append(.makeGuest) }
+                if store.canBench(id) { actions.append(.benchTopic) }
             }
             if topic.settledAt != nil || (!topic.sessions.isEmpty && !store.windows.contains(where: { $0.topicID == id })) {
                 actions += [.reopenTopic, .startTopicFresh]
