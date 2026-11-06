@@ -5,9 +5,25 @@ import Foundation
 public enum TopicCards {
     public enum Step: Equatable, Sendable { case up, down }
 
+    /// What one step does, one case for each effect.
     public enum Outcome: Equatable, Sendable {
-        case to(TopicPlacement)
-        /// The card is first (`up`) or last (`down`) among the cards with its Pin.
+        /// The card goes before or after a neighbor in its own section, or among the cards with its Pin.
+        case reorder(TopicPlacement)
+        /// Down from the last place: the card becomes the top Guest and leaves an Open Place.
+        case toGuests
+        /// Up from the top Guest: the card fills the lowest Open Place.
+        case fill(openPlace: String)
+        /// Up from the top Guest, with every place full: the card trades with the card in the last place.
+        case trade(TopicListID)
+        /// Up from the top Guest, with room in the places and no Open Place: the card takes the next place.
+        case takePlace
+        /// Down from the last Guest: a Topic goes to the top of the Bench, and a Guest Session is Unlocked.
+        case bench
+        /// Up from a Benched card that has no card above it to reorder with: it becomes the last Guest.
+        case makeGuest
+        /// The step is not allowed.
+        case refused(TopicOrder.Failure)
+        /// The card is first (`up`) or last (`down`) in its section, or among the cards with its Pin.
         case atEnd
         /// The list has no such card.
         case hidden
@@ -18,14 +34,43 @@ public enum TopicCards {
         TopicOrder.sorted(TopicListEntry.all(records: records, windows: windows, openPlaces: openPlaces))
     }
 
-    /// Where one step puts the card: before the card above it, or after the card below it, among the cards with its Pin.
-    public static func step(_ id: TopicListID, _ step: Step, in cards: [TopicListEntry]) -> Outcome {
+    /// What one step does to the card. With `inPlay`, a card that is not Pinned moves inside its section of the cut
+    /// (`InPlayCut`), and a step past the end of a section goes into the next one. A hidden Bench has no card to reorder
+    /// with below its top, so Up from any Benched card makes a Guest.
+    public static func step(_ id: TopicListID, _ step: Step, in cards: [TopicListEntry], inPlay: Int?,
+                            benchShown: Bool = true) -> Outcome {
         guard let card = cards.first(where: { $0.id == id }) else { return .hidden }
-        let zone = cards.filter { $0.isPinned == card.isPinned }
+        guard let inPlay, !card.isPinned else { return neighbor(of: id, step, in: cards.filter { $0.isPinned == card.isPinned }) }
+        if case .openPlace = card { return .hidden }
+        let cut = TopicOrder.cut(cards, inPlay: inPlay)
+        if cut.places.contains(where: { $0.id == id }) {
+            let outcome = neighbor(of: id, step, in: cut.places)
+            return outcome == .atEnd && step == .down ? .toGuests : outcome
+        }
+        if cut.guests.contains(where: { $0.id == id }) {
+            let outcome = neighbor(of: id, step, in: cut.guests)
+            guard outcome == .atEnd else { return outcome }
+            return step == .down ? .bench : upFromTopGuest(card, cut: cut, inPlay: inPlay)
+        }
+        if cut.bench.contains(where: { $0.id == id }) {
+            let outcome = benchShown ? neighbor(of: id, step, in: cut.bench) : .atEnd
+            return outcome == .atEnd && step == .up ? .makeGuest : outcome
+        }
+        return .hidden
+    }
+
+    private static func upFromTopGuest(_ guest: TopicListEntry, cut: InPlayCut<TopicListEntry>, inPlay: Int) -> Outcome {
+        if case .lock = guest { return .refused(.guestSession) }
+        if let open = cut.places.last(where: { $0.slot == .openPlace }), case .openPlace(let place) = open { return .fill(openPlace: place.id) }
+        if cut.places.count >= inPlay, let last = cut.places.last { return .trade(last.id) }
+        return .takePlace
+    }
+
+    private static func neighbor(of id: TopicListID, _ step: Step, in zone: [TopicListEntry]) -> Outcome {
         guard let index = zone.firstIndex(where: { $0.id == id }) else { return .hidden }
         switch step {
-        case .up: return index > 0 ? .to(.before(zone[index - 1].id)) : .atEnd
-        case .down: return index + 1 < zone.count ? .to(.after(zone[index + 1].id)) : .atEnd
+        case .up: return index > 0 ? .reorder(.before(zone[index - 1].id)) : .atEnd
+        case .down: return index + 1 < zone.count ? .reorder(.after(zone[index + 1].id)) : .atEnd
         }
     }
 }

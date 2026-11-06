@@ -267,7 +267,7 @@ enum CLIVerbs {
                 help: """
                 Moves this Pane's Session one place up or down among the Sessions of its Topic, as
                 Move Up and Move Down do on its row. For a Locked Session, which is in no Topic, it
-                moves its card among the cards that the Topics list shows. At the end it fails.
+                moves its card as Move Topic Up and Down do: see `topic move`. At the end it fails.
                 """) { parsed in
             .request(try RequestInvocation(.moveSession(try upOrDown(parsed) ? .up : .down), parsed: parsed))
         },
@@ -545,6 +545,13 @@ enum CLIVerbs {
                   Moves the card of this Pane's Topic one place up or down among the cards that the
                   Topics list shows now, with the same Pin, as Move Topic Up and Down do. At the end
                   of the cards it fails.
+                  With in_play, a step that passes the Guests line or the Bench line changes the
+                  section of the card, one section for each step. Down from the last In Play place
+                  makes the card the top Guest, and leaves an Open Place. Up from the top Guest
+                  fills the lowest Open Place, or trades with the last place when none is open.
+                  Down from the last Guest is Bench. Up from the top of the Bench is Make a Guest.
+                  A Guest Session cannot take a place, so it has no Up from the top of the Guests.
+                  The command acts as if the Bench shows.
                   With --trade-with, the two cards change places, as a drag across the Guests line
                   or the Bench line does, and no other card moves. Neither card can be Pinned.
                   Each card takes the mark of its new section: a card that comes into the Guests

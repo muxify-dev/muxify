@@ -258,12 +258,12 @@ private struct TopicsSection: View {
                        holdsSelection: topic.id == model.activeTopic,
                        showsAllRows: showingAllRows.contains(topic.id),
                        onShowAllRows: { showingAllRows.insert(topic.id) },
-                       drag: drag, order: order, neighbors: model.neighbors(of: topic.id))
+                       drag: drag, order: order, steps: model.steps(of: topic.id))
         } else {
             TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
                       showsAllRows: showingAllRows.contains(topic.id),
                       onShowAllRows: { showingAllRows.insert(topic.id) },
-                      place: .list(TopicListPlace(drag: drag, order: order, neighbors: model.neighbors(of: topic.id),
+                      place: .list(TopicListPlace(drag: drag, order: order, steps: model.steps(of: topic.id),
                                                   rename: renameTopic)))
         }
     }
@@ -658,7 +658,7 @@ struct TopicListPlace {
     let drag: ListDrag<TopicListID>
     /// The Topic and Locked cards among which it moves, in list order, and the views between them that slide.
     let order: [StackSlot<TopicListID>]
-    let neighbors: CardNeighbors
+    let steps: CardSteps
     let rename: (String) -> Void
 }
 
@@ -833,7 +833,7 @@ struct TopicCard: View {
             Button("Forget Topic…") { store.presentForgetTopic(id) }.disabled(store.changingTopic)
             pinButton(id)
             guestButton(id)
-            CardMoveButtons(store: store, id: .topic(id), neighbors: list.neighbors)
+            CardMoveButtons(store: store, id: .topic(id), steps: list.steps)
             Button("Rename Topic…") {
                 DispatchQueue.main.async { list.rename(id) }
             }
@@ -874,7 +874,7 @@ struct TopicCard: View {
             Divider()
             pinButton(id)
             guestButton(id)
-            CardMoveButtons(store: store, id: .topic(id), neighbors: list.neighbors)
+            CardMoveButtons(store: store, id: .topic(id), steps: list.steps)
         }
     }
 
@@ -969,13 +969,13 @@ private struct CardItem: ViewModifier {
 private struct CardMoveButtons: View {
     let store: WorkspaceStore
     let id: TopicListID
-    let neighbors: CardNeighbors
+    let steps: CardSteps
 
     var body: some View {
         Button("Move Up") { store.moveCard(id, .up) }
-            .disabled(neighbors.above == nil || store.changingTopic)
+            .disabled(!steps.canMove(.up) || store.changingTopic)
         Button("Move Down") { store.moveCard(id, .down) }
-            .disabled(neighbors.below == nil || store.changingTopic)
+            .disabled(!steps.canMove(.down) || store.changingTopic)
     }
 }
 
@@ -992,7 +992,7 @@ private struct LockedCard: View {
     let onShowAllRows: () -> Void
     let drag: ListDrag<TopicListID>
     let order: [StackSlot<TopicListID>]
-    let neighbors: CardNeighbors
+    let steps: CardSteps
 
     private var id: TopicListID { .lock(sessionID: sessionID) }
     private var window: TmuxWindow? { row.sessions.first?.windows.first }
@@ -1060,7 +1060,7 @@ private struct LockedCard: View {
                 .disabled(store.changingTopic)
             Button("Kill Session…", role: .destructive) { store.palette.begin(.confirm(PaletteConfirmation(.killSession(window)))) }
         }
-        CardMoveButtons(store: store, id: id, neighbors: neighbors)
+        CardMoveButtons(store: store, id: id, steps: steps)
     }
 
     /// As on a Topic card: a press on the Active card opens or closes it; on another card it goes there.

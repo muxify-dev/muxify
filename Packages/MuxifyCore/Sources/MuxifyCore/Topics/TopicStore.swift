@@ -458,6 +458,33 @@ public struct TopicTransaction {
         put(try TopicOrder.trading(id, with: other, inPlay: inPlay, in: entries))
     }
 
+    /// Writes what one step of a card does (`TopicCards.step`), with the operation that each effect already has.
+    /// `atEnd` and `hidden` change nothing, and `refused` throws its failure.
+    @discardableResult
+    public mutating func apply(_ outcome: TopicCards.Outcome, to id: TopicListID) throws -> [SessionLockChange] {
+        func topicID() throws -> String {
+            guard case .topic(let topic) = id else { throw TopicOrder.Failure.guestSession }
+            return topic
+        }
+        func limit() throws -> Int {
+            guard let inPlay else { throw TopicOrder.Failure.notInPlay }
+            return inPlay
+        }
+        switch outcome {
+        case .reorder(let placement): return try move(id, to: placement)
+        case .toGuests: return put(try TopicOrder.sendingToGuests(topicID(), inPlay: limit(), in: entries))
+        case .fill(let place): return try fillOpenPlace(place, with: topicID(), inPlay: limit())
+        case .trade(let other): return try trade(id, with: other)
+        case .takePlace: return put(try TopicOrder.takingNextPlace(topicID(), inPlay: limit(), in: entries))
+        case .bench:
+            guard case .lock(let sessionID) = id else { return try bench(topicID(), inPlay: limit()) }
+            return unlock(sessionID)
+        case .makeGuest: return try makeGuest(topicID(), inPlay: limit())
+        case .refused(let failure): throw failure
+        case .atEnd, .hidden: return []
+        }
+    }
+
     @discardableResult
     public mutating func pin(_ id: String, _ pinned: Bool) throws -> [SessionLockChange] {
         put(try TopicOrder.pinning(id, pinned, inPlay: inPlay, in: entries))

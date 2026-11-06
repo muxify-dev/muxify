@@ -31,8 +31,8 @@ listed below.
 | `mark_unread` | ⌘⇧U | Mark the Active Topic Unread, or eligible Agents in the current Session when there is no Active Topic |
 | `mark_all_read` | Unbound | Clear Unread in the Active Environment |
 | `toggle_lock` | Unbound | Lock the current Session, which must be in No Topic, or Unlock it while it is Locked |
-| `move_topic_up` | ⌥⌘↑ | Move the card of the Active Topic, or of the current Locked Session, one card up among the cards with its Pin. It does nothing at the top, for No Topic, for a Settled Topic, and in Sessions mode |
-| `move_topic_down` | ⌥⌘↓ | Move the card of the Active Topic, or of the current Locked Session, one card down among the cards with its Pin. It does nothing at the bottom, for No Topic, for a Settled Topic, and in Sessions mode |
+| `move_topic_up` | ⌥⌘↑ | Move the card of the Active Topic, or of the current Locked Session, one card up among the cards with its Pin. With `topics.in_play`, a step past the Guests line or the Bench line changes the section of the card, one section for each step. It does nothing at the top, for No Topic, for a Settled Topic, and in Sessions mode |
+| `move_topic_down` | ⌥⌘↓ | Move the card of the Active Topic, or of the current Locked Session, one card down among the cards with its Pin, or into the next In Play section as for Move Topic Up. It does nothing at the bottom, for No Topic, for a Settled Topic, and in Sessions mode |
 | `toggle_pin_topic` | Unbound | Pin the Active Topic, or Unpin it while it is Pinned. It does nothing for a Settled Topic |
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
 | `toggle_bench` | ⇧⌘S | Show or hide the Bench, the Topics after the ones [In Play](configuration.md#topics-in-play). It does nothing while the Topics list has no Bench line |
@@ -108,8 +108,8 @@ step to the Commands search.
 Commands also lists Move Topic Up and Move Topic Down, and Pin Topic or Unpin
 Topic. They run at once on the Active Topic, as their keybindings
 do. Move Topic Up and Move Topic Down also move the card of the current Locked
-Session, and appear only when the card can move that way among the cards with
-its Pin.
+Session, and appear only when the card can move that way: among the cards with its Pin, or
+into the next In Play section.
 
 Commands also lists Set Topic Note, and Clear Topic Note while the Active Topic
 has a Topic Note. Set Topic Note opens one field that starts with the current

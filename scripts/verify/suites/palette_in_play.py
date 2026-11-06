@@ -134,6 +134,32 @@ class PaletteInPlay(PaletteFixture):
         self.select(window)
         self.assertTrue(self.absent('Replace from Bench…'), 'Replace from Bench… shows on a Benched card')
 
+    def test_move_topic_down_and_up_cross_the_guests_line_and_the_bench_line_and_keep_the_location(self):
+        s = self.s
+        self.topic('mv-a', order=0, session=True)
+        window = self.topic('mv-b', order=1, session=True)
+        self.topic('mv-c', order=2)
+        self.topic('mv-d', order=3)
+        s.wait_rows(lambda rs: s.has('topic-mv-a', rs), 'the Topics did not appear')
+        self.select(window)
+        guest = lambda: bool(self.record('mv-b').get('guest'))
+
+        self.run_command('Move Topic Down')
+        wait(lambda: guest() and len(self.store.open_places()) == 1,
+             'Down from the last place did not make the Topic the top Guest and leave an Open Place')
+        self.run_command('Move Topic Down')
+        wait(lambda: not guest(), 'Down from the last Guest did not bench the Topic')
+        self.assertEqual(self.order('mv-'), ['mv-a', 'mv-b', 'mv-c', 'mv-d'], 'Bench did not put the Topic at the top of the Bench')
+        self.assertEqual(len(self.store.open_places()), 1, 'Bench of a Guest left no Open Place, and put it back')
+        s.wait_shown(window)
+
+        self.run_command('Move Topic Up')
+        wait(guest, 'Up from the top of the hidden Bench did not make the Topic a Guest')
+        self.run_command('Move Topic Up')
+        wait(lambda: not guest() and not self.store.open_places(), 'Up from the top Guest did not fill the Open Place')
+        self.assertEqual(self.order('mv-'), ['mv-a', 'mv-b', 'mv-c', 'mv-d'])
+        s.wait_shown(window)
+
 
 if __name__ == '__main__':
     unittest.main()
