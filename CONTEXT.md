@@ -182,6 +182,10 @@ _Avoid_: empty slot, hole, gap, free place
 A Sidebar drag that takes a card across the Guests line or the Bench line and lets it go on a card on the other side. The two cards exchange their places in the Topics list, and no other card moves. Each card takes the mark of the section it comes into. A Guest that comes into an In Play place loses its Guest mark, and a card that comes into the Guests gets it. A Guest dropped on an Open Place fills it. A Guest Session cannot take an In Play place.
 _Avoid_: swap, Replace from Bench (when the replaced card does not go to the end of the Bench), exchange
 
+**Move Up / Move Down**:
+A key step of one card in the Topics list: Move Topic Up and Move Topic Down, the Move buttons of a card, and `muxify topic move up|down`. Inside a section it is a reorder. With In Play, a step that would cross the Guests line or the Bench line changes the card's section instead, one section per step. Down from the last place makes the card the top Guest and leaves an Open Place. Up from the top Guest fills the lowest Open Place, or Trades with the last place when no place is open. Down from the last Guest is Bench. Up from the top of the Bench, or from any Benched card while the Bench is hidden, is Make a Guest. The user stays on the card, also on a hidden Bench. The CLI acts as if the Bench shows.
+_Avoid_: shift, nudge, Trade (when you mean a key step)
+
 ### Browser
 
 **Browser**:
