@@ -494,6 +494,25 @@ public enum TopicOrder {
                          from: layout(entries, inPlay: inPlay))
     }
 
+    /// Move Down from the last place: the Topic becomes the top Guest, and an Open Place stays at its place.
+    public static func sendingToGuests(_ id: String, inPlay: Int, in entries: [TopicListEntry]) throws -> TopicListChange {
+        guard let entry = sorted(entries).first(where: { $0.id == .topic(id) }) else { throw Failure.sourceUnavailable }
+        let cut = cut(entries, inPlay: inPlay)
+        guard cut.places.contains(where: { $0.id == entry.id }) else { throw Failure.notInPlayTopic }
+        let places = cut.places.map { $0.id == entry.id ? .openPlace(OpenPlace(order: .nan)) : $0 }
+        return rewriting(places + [entry.guest(true)] + cut.guests + cut.bench, from: layout(entries, inPlay: inPlay))
+    }
+
+    /// Move Up from the top Guest, with room in the places and no Open Place: the Guest Topic takes the next place,
+    /// without its Guest mark.
+    public static func takingNextPlace(_ id: String, inPlay: Int, in entries: [TopicListEntry]) throws -> TopicListChange {
+        guard let entry = sorted(entries).first(where: { $0.id == .topic(id) }) else { throw Failure.sourceUnavailable }
+        let cut = cut(entries, inPlay: inPlay)
+        guard cut.guests.contains(where: { $0.id == entry.id }), cut.places.count < inPlay else { throw Failure.cannotFill }
+        return rewriting(cut.places + [entry.guest(false)] + cut.guests.filter { $0.id != entry.id } + cut.bench,
+                         from: layout(entries, inPlay: inPlay))
+    }
+
     /// Fill an Open Place: a Guest Topic or a Benched Topic takes the place, without a Guest mark. It is a trade with
     /// the Open Place, so no other card moves.
     public static func fillingOpenPlace(_ place: String, with id: String, inPlay: Int, in entries: [TopicListEntry]) throws -> TopicListChange {

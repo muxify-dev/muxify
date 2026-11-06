@@ -18,6 +18,14 @@ extension TopicGroupID {
         case .noTopic: return nil
         }
     }
+
+    init?(_ listID: TopicListID) {
+        switch listID {
+        case .topic(let id): self = .topic(id)
+        case .lock(let sessionID): self = .locked(sessionID)
+        case .openPlace: return nil
+        }
+    }
 }
 
 /// The group row after the open Topics and the No Topic card in Topics mode.
@@ -63,16 +71,22 @@ struct TopicGroupsState: Equatable {
     }
 }
 
-/// The Topic and Locked cards right above and below a card, among those with its Pin.
-struct CardNeighbors: Equatable {
-    let above: TopicListID?
-    let below: TopicListID?
+/// What Move Up and Move Down do to a card, as MuxifyCore decides it for the CLI too (`TopicCards.step`).
+struct CardSteps: Equatable {
+    let up: TopicCards.Outcome
+    let down: TopicCards.Outcome
 
-    /// Where Move Up (`previous`) or Move Down (`next`) puts the card; nil at that end of its cards.
-    func placement(_ direction: StepDirection) -> TopicPlacement? {
-        switch direction {
-        case .previous: return above.map(TopicPlacement.before)
-        case .next: return below.map(TopicPlacement.after)
+    func outcome(_ step: TopicCards.Step) -> TopicCards.Outcome {
+        switch step {
+        case .up: return up
+        case .down: return down
+        }
+    }
+
+    func canMove(_ step: TopicCards.Step) -> Bool {
+        switch outcome(step) {
+        case .reorder, .toGuests, .fill, .trade, .takePlace, .bench, .makeGuest: return true
+        case .refused, .atEnd, .hidden: return false
         }
     }
 }
@@ -417,6 +431,7 @@ struct TopicsModel {
 
     /// The cards of `rows` and the Open Places, as MuxifyCore orders them for the CLI too (`TopicCards`).
     private let cards: [TopicListEntry]
+    private let inPlayInTopicsMode: Int?
     /// The rows and the Open Places, in list order.
     private let listCards: [ListCard]
 
@@ -438,13 +453,15 @@ struct TopicsModel {
         return list.filter { isPinned($0) == isPinned(dragged) }.map(\.dragSlot)
     }
 
-    /// The cards right above and below a card in the Topics list, among those with its Pin. None for a Topic outside it.
-    func neighbors(of id: TopicGroupID) -> CardNeighbors {
-        guard let listID = id.listID else { return CardNeighbors(above: nil, below: nil) }
-        var above: TopicListID?, below: TopicListID?
-        if case .to(.before(let card)) = TopicCards.step(listID, .up, in: cards) { above = card }
-        if case .to(.after(let card)) = TopicCards.step(listID, .down, in: cards) { below = card }
-        return CardNeighbors(above: above, below: below)
+    /// What Move Up and Move Down do to a card of the Topics list, with the Bench as the Sidebar shows it now.
+    func steps(of id: TopicListID) -> CardSteps {
+        let benchShown = isBenchShown == true
+        return CardSteps(up: TopicCards.step(id, .up, in: cards, inPlay: inPlayInTopicsMode, benchShown: benchShown),
+                         down: TopicCards.step(id, .down, in: cards, inPlay: inPlayInTopicsMode, benchShown: benchShown))
+    }
+
+    func steps(of id: TopicGroupID) -> CardSteps {
+        id.listID.map(steps(of:)) ?? CardSteps(up: .hidden, down: .hidden)
     }
 
     /// Every live No Topic Session, Locked or not. The Command Palette reaches each of them.
@@ -505,6 +522,7 @@ struct TopicsModel {
         lockedSessionIDs = lockedIDs
         let cards = TopicCards.order(records: records, windows: windows, openPlaces: openPlaces)
         self.cards = cards
+        inPlayInTopicsMode = self.mode == .topics ? config.topics.inPlay : nil
         let open = cards.records
         let ids = Set(open.map(\.id))
         func groupID(_ window: TmuxWindow) -> TopicGroupID {

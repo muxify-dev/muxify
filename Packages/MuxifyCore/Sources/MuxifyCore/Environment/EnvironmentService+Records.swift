@@ -66,10 +66,12 @@ extension EnvironmentService {
             switch move {
             case .up, .down:
                 let cards = TopicCards.order(records: contents.records, windows: snapshot.windows, openPlaces: contents.openPlaces)
-                switch TopicCards.step(card.id, move == .up ? .up : .down, in: cards) {
-                case .to(let found): change = { try $0.move(card.id, to: found) }
+                let outcome = TopicCards.step(card.id, move == .up ? .up : .down, in: cards, inPlay: topics.inPlay)
+                switch outcome {
                 case .atEnd: throw TopicRequestError.cardAtEnd(card: card.label, up: move == .up, pinned: card.pinned)
                 case .hidden: throw TopicRequestError.cardHidden("\(card.label) has no card in the Topics list.")
+                case .reorder, .toGuests, .fill, .trade, .takePlace, .bench, .makeGuest, .refused:
+                    change = { try $0.apply(outcome, to: card.id) }
                 }
             case .before(let ref):
                 let anchor = try listID(ref, records: contents.records)

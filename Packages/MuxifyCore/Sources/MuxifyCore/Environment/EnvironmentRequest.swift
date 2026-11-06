@@ -202,7 +202,7 @@ public struct WorktreeStartChoice: Equatable, Sendable {
 
 /// One move of a card of the Topics list.
 public enum CardMove: Codable, Hashable, Sendable {
-    /// One card up or down among the cards that the Topics list shows now (`TopicCards`).
+    /// One card up or down among the cards that the Topics list shows now, or into the next In Play section (`TopicCards`).
     case up, down
     /// Next to another card, shown or not, as the Sidebar drag puts it.
     case before(TopicListRef)
@@ -338,7 +338,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// Pins or unpins the target's open Topic. A Topic that already has that Pin does not change.
     case pin
     case unpin
-    /// Moves the card of the target's Topic, or of the target's Locked Session, among the cards with its Pin.
+    /// Moves the card of the target's Topic, or of the target's Locked Session, among the cards with its Pin, or across the In Play lines with `topics.in_play`.
     case moveCard(CardMove)
     /// Choose In Play: the first `topics.in_play` of `cards` fill the In Play places in this order, and the places after
     /// the last of them are Open Places. A Guest Topic that fills a place loses its Guest mark. Of the other cards, the

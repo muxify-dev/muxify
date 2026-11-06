@@ -74,6 +74,39 @@ final class BenchTests: XCTestCase {
         XCTAssertFalse(onlyInPlay.shows(.topic("b")), "which Bench does not open, because the Bench hides it")
     }
 
+    func testMoveUpAndMoveDownEnableAtTheLinesAndTheHiddenBenchEnablesUpFromEveryBenchedCard() {
+        let hidden = model(inPlay: 2)
+        XCTAssertFalse(hidden.steps(of: TopicGroupID.topic("pinned")).canMove(.up), "a Pinned card stays among the Pinned cards")
+        XCTAssertFalse(hidden.steps(of: TopicGroupID.topic("a")).canMove(.up), "the first place has no Up")
+        XCTAssertEqual(hidden.steps(of: TopicGroupID.topic("b")).down, .toGuests, "the last place goes to the Guests")
+        for card in ["c", "d"] {
+            XCTAssertTrue(hidden.steps(of: TopicGroupID.topic(card)).canMove(.up), "Up from the Benched \(card) is Make a Guest")
+            XCTAssertEqual(hidden.steps(of: TopicGroupID.topic(card)).up, .makeGuest)
+            XCTAssertFalse(hidden.steps(of: TopicGroupID.topic(card)).canMove(.down), "no card shows below the Bench")
+        }
+
+        let shown = model(inPlay: 2, benchShown: true)
+        XCTAssertEqual(shown.steps(of: TopicGroupID.topic("c")).up, .makeGuest)
+        XCTAssertEqual(shown.steps(of: TopicGroupID.topic("d")).up, .reorder(.before(.topic("c"))))
+        XCTAssertTrue(shown.steps(of: TopicGroupID.topic("c")).canMove(.down))
+        XCTAssertFalse(shown.steps(of: TopicGroupID.topic("d")).canMove(.down))
+    }
+
+    func testAGuestSessionCannotMoveUpFromTheTopOfTheGuestsAndMovesDownToTheBench() {
+        let topics = model(inPlay: 2, windows: [window("1", lock: 5)])
+        XCTAssertEqual(topics.steps(of: .locked("$1")).up, .refused(.guestSession))
+        XCTAssertFalse(topics.steps(of: .locked("$1")).canMove(.up))
+        XCTAssertEqual(topics.steps(of: .locked("$1")).down, .bench)
+        XCTAssertEqual(topics.steps(of: TopicGroupID.topic("b")).down, .toGuests)
+    }
+
+    func testWithoutInPlayAStepStaysAmongTheCardsWithTheSamePin() {
+        let topics = model(inPlay: nil)
+        XCTAssertEqual(topics.steps(of: TopicGroupID.topic("b")).up, .reorder(.before(.topic("a"))))
+        XCTAssertEqual(topics.steps(of: TopicGroupID.topic("d")).down, .atEnd)
+        XCTAssertFalse(topics.steps(of: TopicGroupID.topic("pinned")).canMove(.up))
+    }
+
     private func cards(_ model: TopicsModel) -> [QuickSwitchTarget?] {
         QuickSwitchTargets(model: model, sessions: [], windows: [], tabIDs: []).cards
     }

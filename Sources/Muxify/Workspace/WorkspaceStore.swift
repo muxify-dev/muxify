@@ -321,9 +321,16 @@ final class WorkspaceStore {
         palette.begin(.fillOpenPlace(place))
     }
 
-    /// Move Up and Move Down: MuxifyCore finds the neighbor among the cards that the Topics list shows.
+    /// Move Up and Move Down: MuxifyCore decides the step (`TopicCards.step`) with the Bench as the Sidebar shows it.
+    /// The service acts as if the Bench shows, so Make a Guest from a hidden Bench goes as its own request.
     func moveCard(_ id: TopicListID, _ step: TopicCards.Step) {
         guard let target = Self.target(of: id) else { return }
+        let outcome = topics.steps(of: id).outcome(step)
+        if outcome == .makeGuest, case .topic(let topic) = id {
+            perform(EnvironmentRequest(.makeGuest, target: .topic(.id(topic))))
+            return
+        }
+        if outcome == .bench, !benchShown, benchPeek != .all, topics.activeTopic?.listID != id { benchPeek = TopicGroupID(id).map(TopicsModel.BenchPeek.card) }
         perform(EnvironmentRequest(.moveCard(step == .up ? .up : .down), target: target))
     }
 
@@ -442,7 +449,7 @@ final class WorkspaceStore {
     /// Topic, and outside Topics mode, where the cards do not show.
     func canMoveActiveCard(_ direction: StepDirection) -> Bool {
         guard !isRemote, !changingTopic, topics.mode == .topics, let active = topics.activeTopic else { return false }
-        return topics.neighbors(of: active).placement(direction) != nil
+        return topics.steps(of: active).canMove(direction == .previous ? .up : .down)
     }
 
     func moveActiveCard(_ direction: StepDirection) {
