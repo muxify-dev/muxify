@@ -63,13 +63,15 @@ enum StepDirection {
 }
 
 enum QuickSwitchTarget: Hashable {
-    /// `locked` is a Locked Session's card in Topics mode, by Session ID.
-    case topic(String), locked(String), session(String), window(String), tab(UUID), terminal
+    /// `locked` is a Locked Session's card in Topics mode, by Session ID. `openPlace` is an Open Place, by its In Play
+    /// place counted from 1: going there asks what fills it.
+    case topic(String), locked(String), openPlace(Int), session(String), window(String), tab(UUID), terminal
 
     var accessibilityID: String {
         switch self {
         case .topic(let id): "hint-topic-" + id
         case .locked(let id): "hint-locked-" + id
+        case .openPlace(let place): "hint-open-place-\(place)"
         case .session(let id): "hint-session-" + id
         case .window(let id): "hint-window-" + id
         case .tab(let id): "hint-tab-" + id.uuidString
@@ -79,9 +81,9 @@ enum QuickSwitchTarget: Hashable {
 }
 
 struct QuickSwitchTargets {
-    /// The targets of Select Card 1 to 9, by number. An Open Place keeps its number with no target, so the cards
-    /// under it keep theirs when a place opens or fills.
-    let cards: [QuickSwitchTarget?]
+    /// The targets of Select Card 1 to 9, by number. An Open Place has a number too, so the cards under it keep theirs
+    /// when a place opens or fills.
+    let cards: [QuickSwitchTarget]
     let windows: [QuickSwitchTarget]
     /// The Windows a Topic Window step goes through: the Active Topic's in Sidebar order in Topics mode, the
     /// Session's in Sessions mode.
@@ -89,11 +91,11 @@ struct QuickSwitchTargets {
     let tabs: [QuickSwitchTarget]
     /// The Sessions a Session step goes through: every Session in Sessions mode, the Active Topic's in Topics mode.
     let sessions: [QuickSwitchTarget]
-    /// The rows of the Topics list, Locked Sessions included, in either Sidebar mode.
+    /// The rows of the Topics list, Locked Sessions included, in either Sidebar mode. A Topic step skips an Open Place.
     let topics: [QuickSwitchTarget]
 
     func target(for selection: QuickSwitchSelection) -> QuickSwitchTarget? {
-        let targets: [QuickSwitchTarget?]
+        let targets: [QuickSwitchTarget]
         let position: Int
         switch selection {
         case .card(let value): targets = cards; position = value
@@ -126,11 +128,11 @@ extension QuickSwitchTargets {
         // No Topic Sessions get no number: the Topics list shows at most one of them, and only while it is open.
         // A Locked Session's card is numbered by its place among the Topics. A hidden Benched card gets no number,
         // and a Topic step skips it, so repeated steps do not go through the whole Bench.
-        let numbered: [QuickSwitchTarget?] = model.list.compactMap { item in
-            if case .openPlace = item { return .some(nil) }
-            return item.cardID?.quickSwitchTarget.map { .some($0) }
+        let numbered: [QuickSwitchTarget] = model.list.compactMap { item in
+            if case .openPlace(_, let place) = item { return .openPlace(place) }
+            return item.cardID?.quickSwitchTarget
         }
-        let cards = numbered.compactMap { $0 }
+        let cards = numbered.filter { if case .openPlace = $0 { return false } else { return true } }
         let allSessions = sessions.map { QuickSwitchTarget.session($0.id) }
         let sessionWindows = windows.map { QuickSwitchTarget.window($0.id) }
         let shown = model.mode == .topics ? Self.sessions(of: model) : nil
@@ -213,6 +215,7 @@ extension WorkspaceStore {
         switch target {
         case .topic(let id): goToTopic(.topic(id))
         case .locked(let id): goToTopic(.locked(id))
+        case .openPlace(let place): presentFillOpenPlace(place)
         case .session(let id): goToSession(id)
         case .window(let id):
             if let window = windows.first(where: { $0.id == id }) { select(window) }

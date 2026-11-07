@@ -175,7 +175,7 @@ The Action that takes a card out of In Play: an In Play Topic, a Guest Topic or 
 _Avoid_: End Guest, Bench Topic, Snooze, hide, demote
 
 **Open Place**:
-An In Play place that no card fills. Settle, Forget, Pin and Bench on a regular In Play card leave an Open Place at its place. No Benched card moves up, and the other places keep their positions. The Open Place stays until the user fills it with a Guest Topic or a Benched Topic, also after Muxify or tmux restarts. The Sidebar shows it as a dashed card.
+An In Play place that no card fills. Settle, Forget, Pin and Bench on a regular In Play card leave an Open Place at its place. No Benched card moves up, and the other places keep their positions. The Open Place stays until the user fills it with a Guest Topic or a Benched Topic, also after Muxify or tmux restarts. The Sidebar shows it as a dashed card with its Hint. A click or the Hint's key asks which Guest Topic or Benched Topic fills it.
 _Avoid_: empty slot, hole, gap, free place
 
 **Trade**:
@@ -318,7 +318,7 @@ tmux showing one Pane of a Window alone, until the user zooms it again. It never
 _Avoid_: Maximize (when you mean a Pane), full screen
 
 **Hint**:
-The key that Muxify shows on a Topic or Session card, a Window row, a Tab or the Terminal while the user holds a modifier alone, such as ⌃2, or at all times on the cards, Window rows and Tabs where the Config turns that on. When it shows at all times, it is the key alone, such as 2. Pressing that key goes to what the Hint is on.
+The key that Muxify shows on a Topic or Session card, an Open Place, a Window row, a Tab or the Terminal while the user holds a modifier alone, such as ⌃2, or at all times on the cards, Window rows and Tabs where the Config turns that on. When it shows at all times, it is the key alone, such as 2. Pressing that key goes to what the Hint is on.
 _Avoid_: badge, number, label, Notification (when you mean the key mark)
 
 **Summary**:

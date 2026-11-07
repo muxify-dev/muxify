@@ -216,7 +216,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         shown = lambda rs: [k for k in s.ids(rs) if k in expected]
         s.wait_rows(lambda rs: shown(rs) == expected, 'the new Topic is not first on the Bench: %s' % shown(s.rows()))
 
-    def test_settling_a_card_in_play_leaves_an_open_place_that_a_click_fills_from_the_bench(self):
+    def test_settling_a_card_in_play_leaves_an_open_place_that_its_hint_key_fills_from_the_bench(self):
         s = self.s
         windows = self.bench_topics('bench-settle')
         s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
@@ -244,9 +244,14 @@ class TopicsBenchSidebar(TopicsSidebar):
              'Settle did not leave an Open Place, or a Benched card moved up: %s' % self.layout('bench-settle'))
         s.wait_rows(lambda rs: s.has('open-place-1', rs), 'the Sidebar shows no Open Place')
 
-        s.act('press', 'open-place-1')
+        # The Open Place keeps its card number, and the Hint shows it. Its Select Card key goes through HintVerification,
+        # as `quick_switch_hints` presses keys, so the check takes no focus.
+        rs = s.wait_rows(lambda rs: s.has('hint-open-place-1', rs), 'the Open Place shows no Hint')
+        key = s.row('hint-open-place-1', rs).get('accessibilityValue')
+        self.assertRegex(key or '', r'^[1-9]$', 'the Open Place Hint is not a card number')
+        s.act('action', 'quick-switch-input', 'Press ⌃' + key)
         s.wait_rows(lambda rs: 'Open Place 1' in self.describe('palette-breadcrumb', rs)
-                    and s.has('palette-row-topic-bench-settle-c', rs), 'a click on the Open Place did not list the Bench')
+                    and s.has('palette-row-topic-bench-settle-c', rs), 'the Open Place key did not list the Bench')
         s.act('press', 'palette-row-topic-bench-settle-c')
         wait(lambda: self.layout('bench-settle') == 'c b',
              'the chosen Topic did not fill the Open Place: %s' % self.layout('bench-settle'))
