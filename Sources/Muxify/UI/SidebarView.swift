@@ -724,7 +724,7 @@ struct TopicCard: View {
             }
     }
 
-    /// The Topic's own action: Settle in the Topics list, Reopen… in a group.
+    /// The Topic's own action: Settle in the Topics list, Reopen in a group, which reopens the Topic at once.
     @ViewBuilder
     private var corner: some View {
         if case .topic(let id) = topic.id {
@@ -735,7 +735,7 @@ struct TopicCard: View {
                     .disabled(store.changingTopic)
                     .accessibilityIdentifier("settle-topic-" + id)
             case (nil, .settled):
-                Button("Reopen…") { store.showEmptyTopic(id) }
+                Button("Reopen") { store.reopenTopic(id, .reopen) }
                     .topicLink()
                     .disabled(store.changingTopic)
                     .accessibilityIdentifier("reopen-topic-" + id)
