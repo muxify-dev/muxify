@@ -98,7 +98,7 @@ class TopicsGroupsSidebar(TopicsSidebar):
         s.wait_rows(lambda rs: not self.expanded('settled-topics', rs),
                     'going to a Topic in the Topics list did not close the Settled group')
 
-    def test_settled_group_lists_settled_topic_with_remembered_windows_and_its_reopen_choice_rebuilds_it(self):
+    def test_settled_group_lists_settled_topic_with_remembered_windows_and_its_reopen_link_rebuilds_it_at_once(self):
         self.write_topic('group-settled', 'Group settled', self.alpha, settled_at='2031-01-01T10:00:00Z', outcome='Shipped proof',
                          sessions=[dict(id='saved', name='alpha/group-settled', base_name='alpha', directory=str(self.alpha), windows=[dict(directory=str(self.alpha), name='shell')])])
         self.expand('settled-topics')
@@ -114,11 +114,10 @@ class TopicsGroupsSidebar(TopicsSidebar):
                          'a remembered row made a live Session')
 
         self.s.act('press', 'reopen-topic-group-settled')
-        rs = self.s.wait_rows(lambda rs: self.s.has('reopen-choice-reopen', rs), 'Reopen… did not show the Reopen choice')
-        self.assertIn('shell', self.describe('reopen-session-alpha', rs), 'the Reopen column does not list the remembered Window')
-        self.assertIsNotNone(self.records()['group-settled'].get('settled_at'), 'the Reopen choice changed the record')
-        self.s.act('press', 'reopen-choice-reopen')
         self.wait_session('alpha/group-settled')
+        self.addCleanup(self.end_session, self.s.tmux('display-message', '-p', '-t', '=alpha/group-settled:', '#{session_id}'))
+        self.assertFalse(self.s.has('reopen-choice-reopen'), 'the Reopen link showed the Reopen choice')
+        self.s.wait_shown('=alpha/group-settled:')
         latency, rs = self.rows_until(lambda rs: self.s.has('topic-group-settled', rs)
                                       and not self.grouped('topic-group-settled', 'settled-topics', rs))
         self.assertIsNotNone(latency, 'Reopen did not return the Topic to the Topics list; Topic rows %s' % self.topic_rows(rs))
@@ -136,11 +135,11 @@ class TopicsGroupsSidebar(TopicsSidebar):
         wait(lambda: self.records()[topic].get('settled_at'), 'Settle did not save the settle date')
         self.expand('settled-topics')
         age, reopen = 'settled-age-' + topic, 'reopen-topic-' + topic
-        rs = s.wait_rows(lambda rs: s.has(age, rs) and s.has(reopen, rs), 'the Settled card shows no age and Reopen…')
+        rs = s.wait_rows(lambda rs: s.has(age, rs) and s.has(reopen, rs), 'the Settled card shows no age and Reopen')
         shown = json.dumps(s.row(age, rs))
         self.assertIn('"Today"', shown, 'the age of a Topic Settled now: %s' % shown)
         self.assertGreaterEqual(frame(s.row(age, rs))[0], frame(s.row(reopen, rs))[1],
-                                'the age %s is not above Reopen… %s' % (s.row(age, rs)['accessibilityFrame'], s.row(reopen, rs)['accessibilityFrame']))
+                                'the age %s is not above Reopen %s' % (s.row(age, rs)['accessibilityFrame'], s.row(reopen, rs)['accessibilityFrame']))
 
     def test_a_click_on_a_closed_settled_card_shows_its_reopen_choice_and_reopens_nothing(self):
         self.write_topic('click-settled', 'Click settled', self.alpha, settled_at='2031-01-02T10:00:00Z',

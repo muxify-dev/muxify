@@ -516,7 +516,7 @@ struct CardList<Heading: View, Row: View>: View {
 enum CardCorner {
     /// The room the action takes at the end of the summary line or the footer line, at 12.
     static let designWidth: CGFloat = 44
-    /// The room of Reopen… on a card in the Settled group, at 12.
+    /// The room of Reopen on a card in the Settled group, at 12.
     static let designGroupWidth: CGFloat = 60
     /// The line under the title that a closed card with a corner label and no other line adds for its action, at 12.
     static let designActionLineHeight: CGFloat = 12
