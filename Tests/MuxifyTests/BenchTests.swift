@@ -38,12 +38,12 @@ final class BenchTests: XCTestCase {
 
     private func shown(_ model: TopicsModel) -> [String] { model.list.map(\.id) }
 
-    func testAnOpenPlaceKeepsItsCardNumberSoTheCardsUnderItKeepTheirs() {
+    func testAnOpenPlaceKeepsItsCardNumberAndItsKeyAsksWhatFillsIt() {
         let open = model(inPlay: 3, at: "@1", openPlaces: [OpenPlace(id: "o", order: 0.5)])
         XCTAssertEqual(shown(open), ["topic-pinned", "topic-a", "open-place-2", "topic-b", "bench-line", "no-topic"])
         let targets = QuickSwitchTargets(model: open, sessions: [], windows: [], tabIDs: [])
-        XCTAssertEqual(targets.cards, [.topic("pinned"), .topic("a"), nil, .topic("b")])
-        XCTAssertNil(targets.target(for: .card(3)), "Select Card 3 goes somewhere from an Open Place")
+        XCTAssertEqual(targets.cards, [.topic("pinned"), .topic("a"), .openPlace(2), .topic("b")])
+        XCTAssertEqual(targets.target(for: .card(3)), .openPlace(2), "Select Card 3 is the Open Place at In Play place 2")
         XCTAssertEqual(targets.target(for: .card(4)), .topic("b"))
         XCTAssertEqual(targets.step(.topic, .next, from: .topic("a")), .topic("b"), "Next Topic stops on the Open Place")
     }
@@ -116,7 +116,7 @@ final class BenchTests: XCTestCase {
         XCTAssertFalse(topics.steps(of: TopicGroupID.topic("pinned")).canMove(.up))
     }
 
-    private func cards(_ model: TopicsModel) -> [QuickSwitchTarget?] {
+    private func cards(_ model: TopicsModel) -> [QuickSwitchTarget] {
         QuickSwitchTargets(model: model, sessions: [], windows: [], tabIDs: []).cards
     }
 

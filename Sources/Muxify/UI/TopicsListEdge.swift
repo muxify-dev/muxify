@@ -69,12 +69,13 @@ struct GuestsLine: View {
     }
 }
 
-/// An In Play place that no card fills. A click asks which Guest Topic or Benched Topic takes it, and a Guest or a
-/// Benched card dropped on it takes it.
+/// An In Play place that no card fills. A click or its Hint's key asks which Guest Topic or Benched Topic takes it, and
+/// a Guest or a Benched card dropped on it takes it.
 struct OpenPlaceCard: View {
     let place: Int
     let action: () -> Void
     @Environment(\.interfaceFontSize) private var fontSize
+    @Environment(\.quickSwitchHints) private var hints
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -82,6 +83,7 @@ struct OpenPlaceCard: View {
             HStack(spacing: 6) {
                 Image(systemName: "plus.circle").font(fontSize.font(11, weight: .semibold))
                 Text("Open Place").font(fontSize.font(12, weight: .medium))
+                CardHintSlot(target: .openPlace(place))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.secondary)
@@ -93,6 +95,9 @@ struct OpenPlaceCard: View {
         .takesFirstClick()
         .accessibilityLabel("Open Place \(place)")
         .accessibilityIdentifier("open-place-\(place)")
+        // Outside the button's element, so the Hint is its own accessibility element, as on a Topic card.
+        .cardHints(hints)
+        .accessibilityElement(children: .contain)
     }
 }
 

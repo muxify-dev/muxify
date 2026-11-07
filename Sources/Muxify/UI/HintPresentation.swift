@@ -23,14 +23,14 @@ struct HintPresentation {
                 target = .terminal
             } else { continue }
             switch target {
-            case .topic, .locked, .session, .window: if !sidebar { continue }
+            case .topic, .locked, .openPlace, .session, .window: if !sidebar { continue }
             case .tab: if !browser { continue }
             case .terminal: if !terminal { continue }
             }
             let surface: Config.Hints.Surface?
             let restModifiers: KeyTrigger.Modifiers
             switch target {
-            case .topic, .locked, .session: surface = config.cards; restModifiers = .control
+            case .topic, .locked, .openPlace, .session: surface = config.cards; restModifiers = .control
             case .window: surface = config.windows; restModifiers = .command
             case .tab: surface = config.tabs; restModifiers = .option
             case .terminal: surface = nil; restModifiers = []
