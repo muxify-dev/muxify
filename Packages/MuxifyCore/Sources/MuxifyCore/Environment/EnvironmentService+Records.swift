@@ -61,15 +61,24 @@ extension EnvironmentService {
         do {
             let contents = try store.read()
             let snapshot = try server.snapshot()
-            let card = try self.card(request.target, caller: request.caller, records: contents.records, snapshot: snapshot, client: client)
+            let stepping = move == .up || move == .down
+            let card = try self.card(request.target, caller: request.caller, records: contents.records, snapshot: snapshot,
+                                     client: client, allowUnlockedSession: stepping)
             let change: (inout TopicTransaction) throws -> [SessionLockChange]
             switch move {
             case .up, .down:
                 let cards = TopicCards.order(records: contents.records, windows: snapshot.windows, openPlaces: contents.openPlaces)
-                let outcome = TopicCards.step(card.id, move == .up ? .up : .down, in: cards, inPlay: topics.inPlay)
+                let step: TopicCards.Step = move == .up ? .up : .down
+                var outcome = TopicCards.step(card.id, step, in: cards, inPlay: topics.inPlay)
+                // A Lock that has no card is the unlocked No Topic Session, which `card` let through for this step.
+                if outcome == .hidden, case .lock = card.id { outcome = TopicCards.stepUnlockedSession(step, inPlay: topics.inPlay) }
                 switch outcome {
                 case .atEnd: throw TopicRequestError.cardAtEnd(card: card.label, up: move == .up, pinned: card.pinned)
-                case .hidden: throw TopicRequestError.cardHidden("\(card.label) has no card in the Topics list.")
+                case .hidden:
+                    if case .lock(let sessionID) = card.id, let window = snapshot.windows.first(where: { $0.sessionID == sessionID }) {
+                        throw TopicRequestError.cardHidden(Self.lockFirst(window))
+                    }
+                    throw TopicRequestError.cardHidden("\(card.label) has no card in the Topics list.")
                 case .reorder, .toGuests, .fill, .trade, .takePlace, .bench, .makeGuest, .refused:
                     change = { try $0.apply(outcome, to: card.id) }
                 }
@@ -252,9 +261,14 @@ extension EnvironmentService {
         }
     }
 
-    /// The card that a request moves: the target's open Topic, else the target's Locked Session.
+    private static func lockFirst(_ session: TmuxWindow) -> String {
+        "The Session \(session.sessionName) has no card in the Topics list. Lock it first: muxify session lock --session \(session.sessionID)."
+    }
+
+    /// The card that a request moves: the target's open Topic, else the target's Locked Session. With
+    /// `allowUnlockedSession`, a Session that is not Locked answers as its own `lock` card, for the step that Locks it.
     private func card(_ target: EnvironmentTarget?, caller: TopicCaller?, records: [TopicRecord], snapshot: TmuxSnapshot,
-                      client: String?) throws -> (id: TopicListID, label: String, pinned: Bool) {
+                      client: String?, allowUnlockedSession: Bool = false) throws -> (id: TopicListID, label: String, pinned: Bool) {
         if case .topic(let ref)? = target {
             let topic = try ref.resolve(in: records)
             return (.topic(topic.id), "The Topic " + TopicSummary(record: topic).label, topic.isPinned)
@@ -264,8 +278,8 @@ extension EnvironmentService {
             return (.topic(topic.id), "The Topic " + TopicSummary(record: topic).label, topic.isPinned)
         }
         guard SessionLock.locks(in: snapshot.windows, records: records).contains(where: { $0.sessionID == window.sessionID }) else {
-            throw TopicRequestError.cardHidden("The Session \(window.sessionName) has no card in the Topics list. Lock it first: "
-                                               + "muxify session lock --session \(window.sessionID).")
+            if allowUnlockedSession { return (.lock(sessionID: window.sessionID), "The Session " + window.sessionName, false) }
+            throw TopicRequestError.cardHidden(Self.lockFirst(window))
         }
         return (.lock(sessionID: window.sessionID), "The Locked Session " + window.sessionName, false)
     }

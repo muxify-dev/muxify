@@ -445,16 +445,18 @@ final class WorkspaceStore {
     }
 
     /// Whether Move Topic Up (`previous`) or Down (`next`) can move the card of the Active Topic or Locked Session, as
-    /// the card's own Move Up and Move Down do. Not at that end of the cards with its Pin, for No Topic, for a Settled
-    /// Topic, and outside Topics mode, where the cards do not show.
+    /// the card's own Move Up and Move Down do. Not at that end of the cards with its Pin, for a Settled
+    /// Topic, and outside Topics mode, where the cards do not show. The opened No Topic Session has Up only, with
+    /// `topics.in_play`: Make a Guest.
     func canMoveActiveCard(_ direction: StepDirection) -> Bool {
         guard !isRemote, !changingTopic, topics.mode == .topics, let active = topics.activeTopic else { return false }
         return topics.steps(of: active).canMove(direction == .previous ? .up : .down)
     }
 
     func moveActiveCard(_ direction: StepDirection) {
-        guard canMoveActiveCard(direction), let id = topics.activeTopic?.listID else { return }
-        moveCard(id, direction == .previous ? .up : .down)
+        guard canMoveActiveCard(direction), let active = topics.activeTopic else { return }
+        let step: TopicCards.Step = direction == .previous ? .up : .down
+        if let id = active.listID { moveCard(id, step) } else if let card = currentGuestCard { makeGuest(card) }
     }
 
     /// The Active Topic when it is open, which Pin Topic and Unpin Topic act on.
