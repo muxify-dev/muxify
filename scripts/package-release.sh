@@ -36,6 +36,7 @@ PY
 
 xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Release -destination "platform=macOS,arch=arm64" \
   -derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages \
+  diagnostic_message_length=0 \
   MARKETING_VERSION="$MARKETING_VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual ENABLE_HARDENED_RUNTIME=NO \
   -quiet build

@@ -7,6 +7,11 @@ INSTALL_DIR ?= /Applications
 # Monitoring grants across rebuilds.
 MUXIFY_SIGN_IDENTITY ?= -
 MUXIFY_DEVELOPMENT_TEAM ?=
+# xcodebuild passes the terminal width to clang as -fmessage-length, and clang
+# puts it in each SDK module's hash. A build after a terminal resize then plans
+# two variants of each module in build/ and fails with "unexpected variant
+# during dependency scanning". A fixed length makes the hash the same.
+XCODEBUILD_SETTINGS := diagnostic_message_length=0
 
 .PHONY: all setup tools project build test test-release verify verify-gate run install release clean
 
@@ -30,13 +35,13 @@ project: setup
 
 build: project
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
-		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
+		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
 
 test: project
 	./scripts/check-folder-paths.sh
 	# xcodebuild gives a test only the variables named TEST_RUNNER_<name>, as <name>.
 	TEST_RUNNER_MUXIFY_REQUIRE_TMUX="$$MUXIFY_REQUIRE_TMUX" xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
-		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages test
+		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) test
 
 test-release:
 	python3 -m unittest discover -s Tests/ReleaseTests -v
@@ -61,7 +66,7 @@ release:
 
 install: project
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Release -destination "platform=macOS,arch=arm64" \
-		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
+		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
 	$(if $(filter -,$(MUXIFY_SIGN_IDENTITY)),./scripts/sign-local.sh "$(RELEASE_APP)")
 	rm -rf "$(INSTALL_DIR)/Muxify.app"
 	cp -R "$(RELEASE_APP)" "$(INSTALL_DIR)/"
