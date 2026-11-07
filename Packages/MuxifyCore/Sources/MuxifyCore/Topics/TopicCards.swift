@@ -19,7 +19,8 @@ public enum TopicCards {
         case takePlace
         /// Down from the last Guest: a Topic goes to the top of the Bench, and a Guest Session is Unlocked.
         case bench
-        /// Up from a Benched card that has no card above it to reorder with: it becomes the last Guest.
+        /// Up from a Benched card that has no card above it to reorder with: it becomes the last Guest. Up from the
+        /// unlocked No Topic Session Locks it, which is the same: it goes to the end of the Guests.
         case makeGuest
         /// The step is not allowed.
         case refused(TopicOrder.Failure)
@@ -57,6 +58,12 @@ public enum TopicCards {
             return outcome == .atEnd && step == .up ? .makeGuest : outcome
         }
         return .hidden
+    }
+
+    /// What one step does to the No Topic Session that is not Locked. It has no card, so only Up with `inPlay` does
+    /// anything: Make a Guest, which is a Lock. Without `inPlay`, Lock Session is the way.
+    public static func stepUnlockedSession(_ step: Step, inPlay: Int?) -> Outcome {
+        inPlay != nil && step == .up ? .makeGuest : .hidden
     }
 
     private static func upFromTopGuest(_ guest: TopicListEntry, cut: InPlayCut<TopicListEntry>, inPlay: Int) -> Outcome {

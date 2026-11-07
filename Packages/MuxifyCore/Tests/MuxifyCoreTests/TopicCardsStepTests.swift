@@ -37,4 +37,11 @@ final class TopicCardsStepTests: XCTestCase {
         XCTAssertEqual(TopicCards.step(.topic("c"), .up, in: cards, inPlay: nil), .reorder(.before(.topic("b"))))
         XCTAssertEqual(TopicCards.step(.topic("e"), .down, in: cards, inPlay: nil), .atEnd)
     }
+
+    func testTheUnlockedNoTopicSessionMakesAGuestOnUpWithInPlayAndHasNoOtherStep() {
+        XCTAssertEqual(TopicCards.stepUnlockedSession(.up, inPlay: places), .makeGuest)
+        XCTAssertEqual(TopicCards.stepUnlockedSession(.down, inPlay: places), .hidden)
+        XCTAssertEqual(TopicCards.stepUnlockedSession(.up, inPlay: nil), .hidden)
+        XCTAssertEqual(TopicCards.stepUnlockedSession(.down, inPlay: nil), .hidden)
+    }
 }

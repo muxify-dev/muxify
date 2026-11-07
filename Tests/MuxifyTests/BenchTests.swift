@@ -92,6 +92,15 @@ final class BenchTests: XCTestCase {
         XCTAssertFalse(shown.steps(of: TopicGroupID.topic("d")).canMove(.down))
     }
 
+    func testTheOpenedNoTopicSessionMovesUpToMakeAGuestOnlyWithInPlay() {
+        let inPlay = model(inPlay: 2, at: "@1")
+        XCTAssertEqual(inPlay.steps(of: TopicGroupID.noTopic).up, .makeGuest)
+        XCTAssertTrue(inPlay.steps(of: TopicGroupID.noTopic).canMove(.up))
+        XCTAssertFalse(inPlay.steps(of: TopicGroupID.noTopic).canMove(.down))
+        XCTAssertFalse(model(inPlay: nil, at: "@1").steps(of: TopicGroupID.noTopic).canMove(.up), "Lock Session is the way without In Play")
+        XCTAssertFalse(model(inPlay: 2, at: "a").steps(of: TopicGroupID.noTopic).canMove(.up), "no Session is opened in No Topic")
+    }
+
     func testAGuestSessionCannotMoveUpFromTheTopOfTheGuestsAndMovesDownToTheBench() {
         let topics = model(inPlay: 2, windows: [window("1", lock: 5)])
         XCTAssertEqual(topics.steps(of: .locked("$1")).up, .refused(.guestSession))

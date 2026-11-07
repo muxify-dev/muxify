@@ -299,7 +299,8 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case startFresh
     /// Puts the target Session before or after another Session of its Topic, or one place up or down. From then on
     /// the Topic keeps its Sessions in the order the user gave them. `up` and `down` on a Locked Session, which is in
-    /// no Topic, move its card, as `moveCard` does.
+    /// no Topic, move its card, as `moveCard` does. With `topics.in_play`, `up` on a Session in no Topic that is not
+    /// Locked Locks it, which makes it a Guest.
     case moveSession(to: TopicSessionPlacement)
     /// The target Topic lists its Sessions by when tmux created them again, in the Config's order.
     case sortSessions

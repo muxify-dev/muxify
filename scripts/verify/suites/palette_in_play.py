@@ -160,6 +160,20 @@ class PaletteInPlay(PaletteFixture):
         self.assertEqual(self.order('mv-'), ['mv-a', 'mv-b', 'mv-c', 'mv-d'])
         s.wait_shown(window)
 
+    def test_move_topic_up_makes_the_opened_no_topic_session_a_guest_and_move_topic_down_is_not_offered(self):
+        s = self.s
+        self.topic('mns-a', order=0)
+        s.wait_rows(lambda rs: s.has('topic-mns-a', rs), 'the Topics did not appear')
+        self.select(self.base)
+        lock = lambda: s.tmux('show-options', '-qv', '-t', 'base', '@muxify_lock').strip()
+        self.addCleanup(s.tmux_ok, 'set-option', '-u', '-t', 'base', '@muxify_lock')
+        self.assertEqual(lock(), '', 'the No Topic Session starts Locked')
+        self.assertTrue(self.absent('Move Topic Down'), 'Move Topic Down shows on the No Topic Session')
+
+        self.run_command('Move Topic Up')
+        wait(lambda: lock() != '', 'Move Topic Up did not Lock the No Topic Session, which makes it a Guest')
+        s.wait_shown(self.base)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -709,6 +709,26 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try failure(move(.up, "A", using: inPlay)).kind, .cardAtEnd, "the first place has no Up")
     }
 
+    func testMoveUpOnAnUnlockedSessionLocksItAsTheLastGuestAndDownRefuses() throws {
+        let wide = service(inPlay: 3)
+        for title in ["A", "B", "C"] { _ = try change(wide.handle(EnvironmentRequest(.create(title: title)))) }
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        let notes = EnvironmentRequest(.moveCard(.down), target: .sessionName("notes"))
+        let down = try failure(wide.handle(notes))
+        XCTAssertEqual(down.kind, .cardHidden)
+        XCTAssertTrue(down.message.contains("Lock it first"), "Down keeps the old answer")
+
+        XCTAssertFalse(server.snapshot().windows.contains { $0.sessionName == "notes" && $0.lockOrder != nil })
+        _ = try change(wide.handle(EnvironmentRequest(.moveSession(to: .up), target: .sessionName("notes"))))
+        XCTAssertEqual(try topicList(), ["A", "B", "C", "lock:notes"], "Up on an unlocked Session is Make a Guest")
+        XCTAssertTrue(server.snapshot().windows.contains { $0.sessionName == "notes" && $0.lockOrder != nil })
+
+        let plain = service()
+        try server.run(["new-session", "-d", "-s", "chores", "-c", sessionPath.folder.path])
+        let refusal = try failure(plain.handle(EnvironmentRequest(.moveCard(.up), target: .sessionName("chores"))))
+        XCTAssertEqual(refusal.kind, .cardHidden, "without in_play, Lock Session is the way")
+    }
+
     func testMoveUpTakesTheNextPlaceWhenThereIsRoomAndRefusesAGuestSession() throws {
         let narrow = service(inPlay: 2)
         for title in ["A", "B", "C"] { _ = try change(narrow.handle(EnvironmentRequest(.create(title: title)))) }

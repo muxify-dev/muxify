@@ -460,8 +460,12 @@ struct TopicsModel {
                          down: TopicCards.step(id, .down, in: cards, inPlay: inPlayInTopicsMode, benchShown: benchShown))
     }
 
+    /// The opened No Topic Session has no card until it is Locked, but Move Up makes it a Guest (`TopicCards.stepUnlockedSession`).
     func steps(of id: TopicGroupID) -> CardSteps {
-        id.listID.map(steps(of:)) ?? CardSteps(up: .hidden, down: .hidden)
+        if let listID = id.listID { return steps(of: listID) }
+        guard id == .noTopic, openedNoTopicSession != nil else { return CardSteps(up: .hidden, down: .hidden) }
+        return CardSteps(up: TopicCards.stepUnlockedSession(.up, inPlay: inPlayInTopicsMode),
+                         down: TopicCards.stepUnlockedSession(.down, inPlay: inPlayInTopicsMode))
     }
 
     /// Every live No Topic Session, Locked or not. The Command Palette reaches each of them.

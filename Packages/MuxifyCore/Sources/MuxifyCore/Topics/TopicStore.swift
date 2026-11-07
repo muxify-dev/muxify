@@ -479,7 +479,9 @@ public struct TopicTransaction {
         case .bench:
             guard case .lock(let sessionID) = id else { return try bench(topicID(), inPlay: limit()) }
             return unlock(sessionID)
-        case .makeGuest: return try makeGuest(topicID(), inPlay: limit())
+        case .makeGuest:
+            guard case .lock(let sessionID) = id else { return try makeGuest(topicID(), inPlay: limit()) }
+            return lock(sessionID)
         case .refused(let failure): throw failure
         case .atEnd, .hidden: return []
         }
