@@ -57,8 +57,8 @@ final class TopicsTests: XCTestCase {
         XCTAssertEqual(model.rows.map(\.title), ["Fix reward", "Untitled 3"])
         XCTAssertEqual(model.rows[0].sessions.map(\.baseName), ["renamed-by-hand", "renamed-by-hand", "renamed-by-hand"])
         XCTAssertEqual(model.rows[0].sessions[0].windows.count, 2)
-        XCTAssertFalse(model.rows[0].isDormant)
-        XCTAssertTrue(model.rows[1].isDormant)
+        XCTAssertNotEqual(model.rows[0].state, .dormant)
+        XCTAssertEqual(model.rows[1].state, .dormant)
         XCTAssertEqual(model.rows[1].idleLabel, "Dormant")
         XCTAssertEqual(model.noTopicSessions.count, 3)
     }

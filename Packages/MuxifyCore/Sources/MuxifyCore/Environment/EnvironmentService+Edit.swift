@@ -41,7 +41,8 @@ extension EnvironmentService {
             }
             phase = .changesStarted
             try executor.run(moved.map { .tmux($0.command) }, client: client)
-            return .topics(forgotten.map(TopicSummary.init(record:)))
+            let labels = TopicLabels(records)
+            return .topics(forgotten.map { TopicSummary(record: $0, labels: labels) })
         } catch {
             return .failed(failure(error, phase: phase))
         }
@@ -115,7 +116,7 @@ extension EnvironmentService {
             return (resolved.source, resolved.snapshot)
         }
         switch request.command {
-        case .list, .show, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .benchTopic, .fillOpenPlace,
+        case .list, .show, .environmentShow, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .benchTopic, .fillOpenPlace,
              .markRead, .markAllRead, .forgetSettled, .createWorktree, .removeWorktree, .listWorktrees:
             throw TopicRequestError.noTarget
         case .create(let title, let tags):
@@ -228,7 +229,8 @@ extension EnvironmentService {
             guard let topic = records.first(where: { $0.id == window.topicID && $0.settledAt == nil }) else {
                 throw TopicEditFailure.sessionUnavailable
             }
-            return Planned(edit: try TopicSessionOrderPlan(moving: window.sessionID, to: placement, topic: topic, windows: snapshot.windows,
+            return Planned(edit: try TopicSessionOrderPlan(moving: window.sessionID, to: placement, topic: topic, labels: TopicLabels(records),
+                                                           windows: snapshot.windows,
                                                            order: topics.sessionOrder).edit)
         case .sortSessions:
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
@@ -240,8 +242,8 @@ extension EnvironmentService {
                 let topic = try ref.resolve(in: records, open: true)
                 switch TmuxObjectPlan.place(in: topic, windows: snapshot.windows, order: topics.sessionOrder) {
                 case .session(let found): window = found
-                case .chooseSession(let sessions): throw TopicRequestError.chooseSession(topic: TopicSummary(record: topic).label, sessions: sessions)
-                case .emptyTopic(let dormant): throw TopicRequestError.topicEmpty(topic: TopicSummary(record: topic).label, id: topic.id, dormant: dormant)
+                case .chooseSession(let sessions): throw TopicRequestError.chooseSession(topic: TopicLabels(records).label(of: topic), sessions: sessions)
+                case .emptyTopic(let dormant): throw TopicRequestError.topicEmpty(topic: TopicLabels(records).label(of: topic), id: topic.id, dormant: dormant)
                 }
             case .session?, .sessionName?:
                 let found = try sessionWindow(request.target, caller: request.caller, snapshot: snapshot, client: client)

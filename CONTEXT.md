@@ -8,6 +8,7 @@ A personal macOS front end for tmux with a Sidebar, Terminal and Browser.
 
 **Environment**:
 The context whose Sessions, Windows, Panes and Agents Muxify presents. Local is the Environment on the machine running Muxify.
+`muxify environment show` lists its Sessions and its Topics list, and also the No Topic Sessions, in `no_topic`, which have no card on the Mac.
 _Avoid_: workspace, project
 
 **Remote Environment**:

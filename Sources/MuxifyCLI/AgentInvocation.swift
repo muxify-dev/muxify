@@ -60,10 +60,11 @@ struct AgentRow: Encodable, Equatable {
     static func list(snapshot: TmuxSnapshot, records: [TopicRecord]) -> [AgentRow] {
         let windows = Dictionary(snapshot.windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let open = Dictionary(records.filter { $0.settledAt == nil }.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let labels = TopicLabels(records)
         return snapshot.panes.compactMap { pane in
             guard let agent = PaneSummary(pane).agent, let window = windows[pane.windowID] else { return nil }
             return AgentRow(paneID: pane.id, windowID: window.id, sessionID: window.sessionID, sessionName: window.sessionName,
-                            agent: agent, topic: window.topicID.flatMap { open[$0] }.map(TopicSummary.init(record:)))
+                            agent: agent, topic: window.topicID.flatMap { open[$0] }.map { TopicSummary(record: $0, labels: labels) })
         }
     }
 

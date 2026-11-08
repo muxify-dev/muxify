@@ -246,7 +246,7 @@ struct TopicsModel {
         let title: String
         let kind: Kind
         /// The Topic Unread mark or its strongest Agent mark.
-        let mark: RowMark?
+        let mark: CardMark?
         /// Agent marks beside the rows of an expanded Active Topic, keyed by Window or replacing Pane ID.
         var agentSpines: [String: AgentMark] = [:]
         var usesRowMarks = false
@@ -256,24 +256,23 @@ struct TopicsModel {
         let isPinned: Bool
         let sessions: [Session]
         let isExpanded: Bool
-        /// The record remembers Sessions that Reopen can make again.
-        var remembersSessions = true
+        /// Nil for a Settled Topic.
+        let state: TopicState?
         /// In Config order, then the Tags the Config no longer defines. A Locked Session has none, and with Tags
         /// off no Topic has any.
         var tags: [ShownTag] = []
         /// The Topic Note from the record. A Locked Session has none.
         var note: String? = nil
-        /// An open Topic with no live Session. The card shows dimmed.
-        var hasNoLiveSession: Bool {
-            if case .settled = kind { return false }
-            return sessions.isEmpty
-        }
         /// True for no Tag, so a missing filter keeps every row.
         func has(_ tag: Tag?) -> Bool { tag.map { tag in tags.contains { $0.tag == tag } } ?? true }
-        /// No live Session, and Reopen makes the remembered ones again.
-        var isDormant: Bool { hasNoLiveSession && remembersSessions }
         /// "Dormant", or "Empty" for an open Topic that remembers no Session and offers Add a Session.
-        var idleLabel: String? { hasNoLiveSession ? (remembersSessions ? "Dormant" : "Empty") : nil }
+        var idleLabel: String? {
+            switch state {
+            case .dormant?: return "Dormant"
+            case .empty?: return "Empty"
+            case .live?, nil: return nil
+            }
+        }
     }
 
     /// A group row and the Topic rows it shows. Absent from `groups` when it holds no Topic.
@@ -304,13 +303,6 @@ struct TopicsModel {
         var row: Row? {
             if case .row(let row) = self { return row }
             return nil
-        }
-
-        var slot: InPlaySlot {
-            switch self {
-            case .row(let row): return row.isGuest ? .guest : .regular
-            case .openPlace: return .openPlace
-            }
         }
     }
 
@@ -432,14 +424,11 @@ struct TopicsModel {
     /// The cards of `rows` and the Open Places, as MuxifyCore orders them for the CLI too (`TopicCards`).
     private let cards: [TopicListEntry]
     private let inPlayInTopicsMode: Int?
-    /// The rows and the Open Places, in list order.
-    private let listCards: [ListCard]
 
-    /// The cards that are not Pinned, cut at the Guests line and the Bench line. It does not follow the Sidebar mode, so
-    /// the In Play Actions work in Sessions mode too.
-    func cut(inPlay: Int) -> InPlayCut<ListCard> {
-        InPlayCut(listCards.filter { !($0.row?.isPinned ?? false) }, limit: inPlay, slot: \.slot)
-    }
+    /// The cards that are not Pinned, cut at the Guests line and the Bench line, as `TopicsList` cuts them; nil while
+    /// the Config does not set `topics.in_play`. It does not follow the Sidebar mode, so the In Play Actions work in
+    /// Sessions mode too.
+    let cut: InPlayCut<ListCard>?
 
     /// The slots of `list` that the item `id` can reach in a drag: the cards with its Pin and, among the cards that are
     /// not Pinned, the Bench line and the opened No Topic Session, which a card passes. A card that crosses the line
@@ -487,6 +476,8 @@ struct TopicsModel {
     }
     /// The title each row shows, by Topic id: open and the Settled Topics on the shown pages.
     let titles: [String: String]
+    /// The name of any Topic, open or Settled, as its card shows it.
+    let labels: TopicLabels
     let visibleAgents: [Agent]
     let agentsScope: AgentsScopeTarget
     /// The line under each listed Agent, by Pane ID: its Topic's title in Topics mode, its Session's name in
@@ -522,27 +513,16 @@ struct TopicsModel {
         sessionsEnabled = config.sidebar.sessions
         tags = config.topics.tags
         self.mode = config.sidebar.shownMode(chosen: mode)
-        let lockedIDs = Set(SessionLock.locks(in: windows, records: records).map(\.sessionID))
-        lockedSessionIDs = lockedIDs
-        let cards = TopicCards.order(records: records, windows: windows, openPlaces: openPlaces)
-        self.cards = cards
+        let marks = AgentMarks(agents, notifications: config.notifications)
+        let topicsList = TopicsList(records: records, openPlaces: openPlaces, windows: windows, marks: marks, topics: config.topics)
+        lockedSessionIDs = topicsList.lockedSessionIDs
+        cards = topicsList.order
         inPlayInTopicsMode = self.mode == .topics ? config.topics.inPlay : nil
-        let open = cards.records
-        let ids = Set(open.map(\.id))
-        func groupID(_ window: TmuxWindow) -> TopicGroupID {
-            if let id = window.topicID, ids.contains(id) { return .topic(id) }
-            if lockedIDs.contains(window.sessionID) { return .locked(window.sessionID) }
-            return .noTopic
-        }
+        let groupID = topicsList.group(of:)
         let windowsByID = Dictionary(windows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let agentsByGroup = Dictionary(grouping: agents, by: { windowsByID[$0.windowID].map(groupID) ?? .noTopic })
-        let agentMarks = Dictionary(agents.compactMap { agent in
-            AgentMark(agent, notifications: config.notifications).map { (agent.paneID, $0) }
-        }, uniquingKeysWith: { first, _ in first })
+        let agentMarks = marks.panes
         self.agentMarks = agentMarks
-        func mark(_ agents: [Agent]) -> AgentMark? { agents.compactMap { agentMarks[$0.paneID] }.max() }
-        sessionMarks = Dictionary(grouping: agents, by: \.sessionID).compactMapValues(mark)
-        let windowMarks = Dictionary(grouping: agents, by: \.windowID).compactMapValues(mark)
+        sessionMarks = marks.sessions
         let panesByWindow = panes.map { Dictionary(grouping: $0, by: \.windowID) }
         let agentsByPane = Dictionary(agents.map { ($0.paneID, $0) }, uniquingKeysWith: { first, _ in first })
         func children(_ windows: [TmuxWindow]) -> SessionChildren {
@@ -566,31 +546,26 @@ struct TopicsModel {
         let active = activeTopic
         let openTopics = selection.openTopics(for: active)
         let grouped = Dictionary(grouping: windows, by: groupID)
-        /// A Topic's Sessions in the Topic's order; the Sessions of No Topic or of a Locked Session in tmux order.
-        func sessions(of id: TopicGroupID, members: [TmuxWindow], record: TopicRecord?) -> [Session] {
-            var seen: Set<String> = []
-            let firsts = members.filter { seen.insert($0.sessionID).inserted }
-            let ordered = record == nil ? firsts : TopicSessionOrder.ordered(firsts, record: record, order: config.topics.sessionOrder) {
-                TopicSessionKey(of: $0)
-            }
-            return ordered.map(\.sessionID).map { sessionID -> Session in
+        /// The Sessions of `members` in the order `sessionIDs` gives, each with its Window and Pane rows.
+        func sessions(of id: TopicGroupID, members: [TmuxWindow], order sessionIDs: [String], record: TopicRecord?) -> [Session] {
+            sessionIDs.map { sessionID -> Session in
                 let windows = members.filter { $0.sessionID == sessionID }
                 let identity = TopicSessionID(topic: id, session: sessionID)
                 return Session(id: identity, baseName: SessionNaming.base(of: windows[0].sessionName, topic: record),
                                contents: .live(children(windows)))
             }
         }
-        func row(_ record: TopicRecord, title: String) -> Row {
-            let id = TopicGroupID.topic(record.id)
-            let agents = agentsByGroup[id] ?? []
-            let sessions = sessions(of: id, members: grouped[id] ?? [], record: record)
+        func row(_ card: TopicsList.Card) -> Row {
+            let id = card.id
+            let sessions = sessions(of: id, members: grouped[id] ?? [], order: card.sessions, record: card.record)
+            let usesRowMarks = id == active && openTopics.contains(id)
             var spines: [String: AgentMark] = [:]
-            if id == active, openTopics.contains(id) {
+            if usesRowMarks {
                 for session in sessions {
                     guard case .live(let children) = session.contents else { continue }
                     for item in children.items {
                         switch item {
-                        case .window(let window): spines[item.id] = windowMarks[window.id]
+                        case .window(let window): spines[item.id] = marks.windows[window.id]
                         case .pane(let row) where !row.isUnderWindowRow:
                             spines[item.id] = agentMarks[row.id]
                         case .pane: break
@@ -598,63 +573,38 @@ struct TopicsModel {
                     }
                 }
             }
-            return Row(id: id, title: title, kind: .open, mark: RowMark(unread: record.isUnread, agent: mark(agents)),
-                       agentSpines: spines, usesRowMarks: id == active && openTopics.contains(id),
-                       isUnread: record.isUnread, isGuest: config.topics.inPlay != nil && record.isGuest && !record.isPinned,
-                       isPinned: record.isPinned, sessions: sessions, isExpanded: openTopics.contains(id),
-                       remembersSessions: !record.sessions.isEmpty, tags: config.topics.tags?.shown(record.tags) ?? [], note: record.note)
+            return Row(id: id, title: card.label, kind: .open, mark: card.mark, agentSpines: spines,
+                       usesRowMarks: usesRowMarks, isUnread: card.record?.isUnread ?? false, isGuest: card.isGuest,
+                       isPinned: card.isPinned, sessions: sessions, isExpanded: openTopics.contains(id), state: card.state, tags: card.tags,
+                       note: card.record?.note)
         }
-        /// A Locked Session's row: one Session, titled by the Session card Formats.
-        func lockedRow(_ lock: SessionLock) -> Row {
-            let id = TopicGroupID.locked(lock.sessionID)
-            let agents = agentsByGroup[id] ?? []
-            let members = grouped[id] ?? []
-            return Row(id: id, title: members.first?.sessionName ?? lock.sessionID, kind: .open, mark: mark(agents).map(RowMark.agent),
-                       isGuest: config.topics.inPlay != nil, isPinned: false,
-                       sessions: sessions(of: id, members: members, record: nil), isExpanded: openTopics.contains(id))
-        }
-        let untitledRecords = open.filter { $0.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true }
-        var numbers: [String: Int] = [:]
-        var usedNumbers: Set<Int> = []
-        for record in untitledRecords.sorted(by: { $0.id < $1.id }) {
-            if let slug = record.slug, slug.hasPrefix("untitled-"), let number = Int(slug.dropFirst(9)), number > 0,
-               usedNumbers.insert(number).inserted {
-                numbers[record.id] = number
-            }
-        }
-        for record in untitledRecords.sorted(by: { $0.id < $1.id }) where numbers[record.id] == nil {
-            var number = 1
-            while usedNumbers.contains(number) { number += 1 }
-            numbers[record.id] = number
-            usedNumbers.insert(number)
-        }
-        let listCards = cards.map { entry -> ListCard in
+        let labels = topicsList.labels
+        self.labels = labels
+        let listCards = topicsList.entries.map { entry -> ListCard in
             switch entry {
-            case .lock(let lock): return .row(lockedRow(lock))
-            case .openPlace(let place): return .openPlace(place.id)
-            case .topic(let record):
-                let title: String
-                if let value = record.title, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { title = value }
-                else {
-                    title = "Untitled \(numbers[record.id] ?? 1)"
-                }
-                return .row(row(record, title: title))
+            case .card(let card): return .row(row(card))
+            case .openPlace(let id): return .openPlace(id)
             }
         }
-        self.listCards = listCards
+        let listCardsByID = Dictionary(zip(topicsList.entries.map(\.id), listCards), uniquingKeysWith: { first, _ in first })
+        let cut = topicsList.inPlay?.cut.compactMap { listCardsByID[$0.id] }
+        self.cut = cut
         let rows = listCards.compactMap(\.row)
-        noTopicSessions = sessions(of: .noTopic, members: windows.filter { window in
+        let outsideTopics = windows.filter { window in
             switch groupID(window) {
             case .topic: return false
             case .locked, .noTopic: return true
             }
-        }, record: nil)
+        }
+        noTopicSessions = sessions(of: .noTopic, members: outsideTopics,
+                                   order: TopicSessionOrder.firstWindows(outsideTopics, record: nil, order: config.topics.sessionOrder).map(\.sessionID),
+                                   record: nil)
         openedNoTopicSession = active == .noTopic ? noTopicSessions.first { $0.id.session == selectedWindow?.sessionID } : nil
         topicSessions = Dictionary((rows.flatMap(\.sessions) + noTopicSessions).map { ($0.id.session, $0) },
                                    uniquingKeysWith: { first, _ in first })
         self.rows = rows
         showsInPlay = self.mode == .topics && config.topics.inPlay != nil
-        list = Self.list(listCards, inPlay: self.mode == .topics ? config.topics.inPlay : nil, benchShown: benchShown,
+        list = Self.list(listCards, cut: self.mode == .topics ? cut : nil, benchShown: benchShown,
                          peek: benchPeek, location: active, noTopic: openedNoTopicSession)
         let settled = records.filter { $0.settledAt != nil }
             .sorted { ($0.settledAt ?? "", $0.id) > ($1.settledAt ?? "", $1.id) }
@@ -662,12 +612,12 @@ struct TopicsModel {
         if let id = pageTopicID, let row = rows.first(where: { $0.id == .topic(id) }) {
             emptyTopic = row
         } else if let id = pageTopicID, let record = settled.first(where: { $0.id == id }) {
-            emptyTopic = Self.settledRow(record, sessionPaths: config.sessionPaths, tags: config.topics.tags, expanded: openTopics)
+            emptyTopic = Self.settledRow(record, labels: labels, sessionPaths: config.sessionPaths, tags: config.topics.tags, expanded: openTopics)
         } else {
             emptyTopic = nil
         }
         let settledRows = settled.prefix(groupsState.settledPages * TopicGroupsState.pageSize)
-            .map { Self.settledRow($0, sessionPaths: config.sessionPaths, tags: config.topics.tags, expanded: openTopics) }
+            .map { Self.settledRow($0, labels: labels, sessionPaths: config.sessionPaths, tags: config.topics.tags, expanded: openTopics) }
         groups = self.mode == .topics ? [
             Group(kind: .settled, topics: settledRows,
                   hiddenCount: settled.count - settledRows.count, isExpanded: groupsState.open == .settled),
@@ -711,15 +661,14 @@ struct TopicsModel {
     /// The Pinned cards, then the In Play places, the Guests line and the Guests, then the Bench line and the Bench
     /// (`InPlayCut`). The Guests line shows only over a Guest. A shown Bench shows each Benched card at its place in the
     /// list. While the Bench is hidden, only the Location's card and the card that `peek` holds show from it. The opened
-    /// No Topic Session shows right under the Bench line and counts toward nothing. Without `inPlay`, every card is in
+    /// No Topic Session shows right under the Bench line and counts toward nothing. Without `cut`, every card is in
     /// list order and no Open Place shows.
-    private static func list(_ cards: [ListCard], inPlay: Int?, benchShown: Bool, peek: BenchPeek?, location: TopicGroupID?,
+    private static func list(_ cards: [ListCard], cut: InPlayCut<ListCard>?, benchShown: Bool, peek: BenchPeek?, location: TopicGroupID?,
                              noTopic: Session?) -> [ListItem] {
         let opened = noTopic.map { [ListItem.noTopicSession($0)] } ?? []
         let rows = cards.compactMap(\.row)
+        guard let cut else { return rows.map(ListItem.card) + opened }
         let pinned = rows.filter(\.isPinned).map(ListItem.card)
-        guard let inPlay else { return rows.map(ListItem.card) + opened }
-        let cut = InPlayCut(cards.filter { !($0.row?.isPinned ?? false) }, limit: inPlay, slot: \.slot)
         let places = cut.places.enumerated().map { index, card -> ListItem in
             switch card {
             case .row(let row): return .card(row)
@@ -736,10 +685,9 @@ struct TopicsModel {
     }
 
     /// A Settled Topic's row, with the Sessions and Windows its record remembers.
-    static func settledRow(_ record: TopicRecord, sessionPaths: [SessionPath], tags: ConfigTags?, expanded: Set<TopicGroupID>) -> Row {
+    static func settledRow(_ record: TopicRecord, labels: TopicLabels, sessionPaths: [SessionPath], tags: ConfigTags?,
+                           expanded: Set<TopicGroupID>) -> Row {
         let id = TopicGroupID.topic(record.id)
-        let title = [record.title, record.slug].compactMap { $0 }
-            .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "Untitled Topic"
         let outcome = record.outcome?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let settledDate = record.settledDate
         let sessions = record.sessions.enumerated().compactMap { index, session -> Session? in
@@ -752,9 +700,9 @@ struct TopicsModel {
             return Session(id: identity, baseName: session["base_name"]?.string ?? session["name"]?.string ?? "Session",
                            contents: .remembered(windows))
         }
-        return Row(id: id, title: title, kind: .settled(outcome: outcome, settledDate: settledDate),
-                   mark: RowMark(unread: record.isUnread, agent: nil), isPinned: record.isPinned, sessions: sessions, isExpanded: expanded.contains(id),
-                   tags: tags?.shown(record.tags) ?? [], note: record.note)
+        return Row(id: id, title: labels.label(of: record), kind: .settled(outcome: outcome, settledDate: settledDate),
+                   mark: CardMark(unread: record.isUnread, agent: nil), isPinned: record.isPinned, sessions: sessions,
+                   isExpanded: expanded.contains(id), state: nil, tags: tags?.shown(record.tags) ?? [], note: record.note)
     }
 
     /// A Window that left its Session's Worktree for the main working copy of the SessionPath.

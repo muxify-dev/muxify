@@ -68,6 +68,7 @@ public enum CLIVerbPath: String, CaseIterable, Sendable {
     case worktreeCreate = "worktree create"
     case worktreeRemove = "worktree remove"
     case worktreeList = "worktree list"
+    case environmentShow = "environment show"
 
     public var words: [String] { rawValue.split(separator: " ").map(String.init) }
 }

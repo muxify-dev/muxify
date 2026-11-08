@@ -155,7 +155,7 @@ final class BenchTests: XCTestCase {
         let topic = model(inPlay: 2, records: records)
         XCTAssertEqual(shown(topic), ["topic-pinned", "topic-a", "topic-b", "guests-line", "topic-d", "bench-line"],
                        "a Guest Topic is In Play, also when the order puts it after a Benched card")
-        XCTAssertEqual(topic.split(inPlay: 2).bench.map(\.id), [.topic("c")])
+        XCTAssertEqual(topic.split?.bench.map(\.id), [.topic("c")])
         XCTAssertFalse(model(inPlay: nil, records: records).rows.contains(where: \.isGuest), "without in_play the mark has no effect")
     }
 

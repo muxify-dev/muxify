@@ -18,13 +18,14 @@ struct SessionListInvocation: Equatable {
     func run() async throws {
         let config = try await ConfigSessions.load(paths.configFile)
         let records = try TopicStore(paths: paths).read().records
+        let labels = TopicLabels(records)
         let windows = TmuxServer.local.snapshot().windows
         var names = Set<String>()
         var rows: [Entry] = []
         for window in windows where names.insert(window.sessionName).inserted {
             rows.append(Entry(id: window.sessionID, name: window.sessionName, label: window.sessionName,
                 directory: window.sessionPath, running: true,
-                topic: records.first { $0.id == window.topicID && $0.settledAt == nil }.map(TopicSummary.init)))
+                topic: records.first { $0.id == window.topicID && $0.settledAt == nil }.map { TopicSummary(record: $0, labels: labels) }))
         }
         for warning in SessionPathDiscovery.warnings(in: config.sessionPaths) {
             FileHandle.standardError.write(Data((warning + "\n").utf8))

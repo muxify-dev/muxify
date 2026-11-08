@@ -81,11 +81,13 @@ public struct Config: Equatable {
         public init() {}
     }
 
-    public struct Notifications: Equatable {
+    public struct Notifications: Equatable, Sendable {
         public var manualRead = false
         public var doneEnabled = true
         public var failedEnabled = true
         public var blockedEnabled = true
+
+        public init() {}
     }
 
     public struct Sidebar: Equatable {

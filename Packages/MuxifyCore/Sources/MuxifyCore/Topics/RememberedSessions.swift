@@ -11,11 +11,8 @@ extension TopicRecord {
         let windows = snapshot.windows.filter { $0.topicID == id }
         let observed = previously.filter { $0.topicID == id }
         guard settledAt == nil, snapshot.serverRunning, !windows.isEmpty || !observed.isEmpty else { return nil }
-        var seen: Set<String> = []
-        let sessionIDs = TopicSessionOrder.ordered(windows.filter { seen.insert($0.sessionID).inserted }, record: self,
-                                                   order: hasManualSessionOrder ? order : .oldestFirst) {
-            TopicSessionKey(of: $0)
-        }.map(\.sessionID)
+        let sessionIDs = TopicSessionOrder.firstWindows(windows, record: self, order: hasManualSessionOrder ? order : .oldestFirst)
+            .map(\.sessionID)
         var remembered = sessionIDs.compactMap { sessionID -> JSONValue? in
             let members = windows.filter { $0.sessionID == sessionID }
             guard let first = members.first else { return nil }

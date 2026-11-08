@@ -3,7 +3,7 @@ import MuxifyCore
 
 /// Every verb of the command line, in the order that `muxify --help` lists them.
 enum CLIVerbs {
-    static let all: [CLIVerb] = browser + session + extensions + topic + window + worktree + agent + read
+    static let all: [CLIVerb] = browser + session + extensions + environment + topic + window + worktree + agent + read
 
     /// The verb that the words name, and the words after it. The longest match wins.
     static func verb(for arguments: ArraySlice<String>) -> (CLIVerb, ArraySlice<String>)? {
@@ -345,6 +345,23 @@ enum CLIVerbs {
                 help: "Installs or updates Extensions for Agents configured under HOME.") { parsed in
             guard parsed.operands.isEmpty else { throw CLIError("extensions install takes no arguments") }
             return .extensionsInstall
+        },
+    ]
+
+    // MARK: - environment
+
+    private static let environment: [CLIVerb] = [
+        CLIVerb(path: .environmentShow, synopsis: "[--json]", options: [.flag("--json")],
+                help: """
+                Shows the Sessions and the Topics list of the Environment, in the order that
+                Muxify shows them: the Sessions in tmux order, then the Pinned Topics, the
+                In Play places, the Guests and the Bench, each with its Sessions, and each
+                No Topic Session. With marks, and the Tags that the Config defines. For a
+                Topic's Windows and Panes, use topic show. It changes nothing.
+                  --json          print the full result as one line of JSON
+                """) { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            return .request(try RequestInvocation(.environmentShow, parsed: parsed))
         },
     ]
 

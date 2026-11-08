@@ -16,6 +16,8 @@ struct RequestInvocation: Equatable {
         /// Nil takes the Config's `topics.forget_settled_older_than`.
         case forgetSettled(olderThan: Int?)
         case list
+        /// Every live Session and the Topics list, as `EnvironmentSnapshot` orders them.
+        case environmentShow
         /// `conversations` also lists the conversation of each Agent that the Topic has or remembers.
         case show(conversations: Bool)
         /// Shows the Topic in Muxify, as Jump To does. It finds the Topic as `topic show` does, then opens its URL.
@@ -105,7 +107,7 @@ struct RequestInvocation: Equatable {
             case .markRead(_, .session): return [.session, .window, .pane]
             case .markRead(_, .window): return [.window, .pane]
             case .markRead(_, .pane): return [.pane]
-            case .list, .markAllRead, .chooseInPlay, .forgetSettled, .createWorktree, .removeWorktree, .listWorktrees: return []
+            case .list, .environmentShow, .markAllRead, .chooseInPlay, .forgetSettled, .createWorktree, .removeWorktree, .listWorktrees: return []
             }
         }
 
@@ -122,7 +124,7 @@ struct RequestInvocation: Equatable {
         /// A Tag change needs no SessionPath, and a command that shows a Topic finds only the SessionPaths of its Sessions.
         var findsAllSessionPaths: Bool {
             switch self {
-            case .new, .tag, .note, .lock, .pin, .makeGuest, .benchTopic, .fillPlace, .moveCard, .tradeCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
+            case .new, .environmentShow, .tag, .note, .lock, .pin, .makeGuest, .benchTopic, .fillPlace, .moveCard, .tradeCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
                  .forgetSettled, .placeWindow, .zoomPane, .createWorktree, .removeWorktree, .listWorktrees: return false
             default: return !showsTopic
             }
@@ -137,6 +139,7 @@ struct RequestInvocation: Equatable {
             case .forget: return "topic forget"
             case .forgetSettled: return "topic forget-settled"
             case .list: return "topic list"
+            case .environmentShow: return "environment show"
             case .show: return "topic show"
             case .open: return "topic open"
             case .exec: return "topic exec"
@@ -318,7 +321,7 @@ extension RequestInvocation {
             let config = try await ConfigSessions.load(paths.configFile, within: command.findsAllSessionPaths ? nil : [])
             func handle() throws -> EnvironmentResponse {
                 let service = EnvironmentService(paths: paths, server: TmuxServer.local, sessionPaths: config.sessionPaths, topics: config.topics,
-                                                 worktreesRoot: config.worktreesRoot)
+                                                 notifications: config.notifications, worktreesRoot: config.worktreesRoot)
                 // No client: no terminal switches to the result, because a command changes what the user sees only
                 // when they ask for it. A new Worktree's Session is shown unless --no-open says not to, and a Remove
                 // that kills the caller's Session moves its terminal first.
@@ -362,7 +365,9 @@ extension RequestInvocation {
         case .json:
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-            print(String(decoding: try encoder.encode(response), as: UTF8.self))
+            // The snapshot is the whole answer of `environment show`, so it prints with no key around it.
+            if case .snapshot(let snapshot) = response { print(String(decoding: try encoder.encode(snapshot), as: UTF8.self)) }
+            else { print(String(decoding: try encoder.encode(response), as: UTF8.self)) }
         case .text:
             switch response {
             case .topics(let topics):
@@ -377,6 +382,7 @@ extension RequestInvocation {
                     print([session.name, session.baseName, session.directory,
                            session.worktree?.branch ?? ""].map(\.oneLineField).joined(separator: "\t"))
                 }
+            case .snapshot(let snapshot): print(snapshot.text, terminator: "")
             // A Worktree change prints what its sync or hooks printed, then the Session it made. A Topic change prints the
             // Topic's id, a change of a Window the Window's id, and a Session rename the full name.
             case .changed(let change) where change.worktreeID != nil:
@@ -463,6 +469,7 @@ extension RequestInvocation {
         case .tag(let change): return .tags(change)
         case .note(let note): return .note(note)
         case .list: return .list
+        case .environmentShow: return .environmentShow
         case .show, .open, .exec, .status, .diff: return .show
         case .rename(let title): return .rename(title: title)
         case .reopen: return .reopen
@@ -516,7 +523,7 @@ extension RequestInvocation {
             guard let window = TmuxServer.local.snapshot().windows.first(where: { $0.sessionID == name || $0.sessionName == name }),
                   let id = SessionID(rawValue: window.sessionID) else { throw CLIError(TopicRequestError.sessionUnavailable(name).description) }
             if let topic = records.first(where: { $0.id == window.topicID && $0.settledAt == nil }) {
-                throw CLIError("The Session \(window.sessionName) is in the Topic \(TopicSummary(record: topic).label). Name a No Topic Session, "
+                throw CLIError("The Session \(window.sessionName) is in the Topic \(TopicLabels(records).label(of: topic)). Name a No Topic Session, "
                                + "or use window move --topic. No changes were made.")
             }
             return .move(to: .session(id))

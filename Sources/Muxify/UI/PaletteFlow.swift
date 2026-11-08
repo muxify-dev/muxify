@@ -325,11 +325,11 @@ extension CommandPalette {
     }
 
     func topicTitle(_ topic: TopicRecord) -> String {
-        store?.topics.titles[topic.id] ?? topic.title ?? topic.slug ?? "Untitled Topic"
+        (store?.topics.labels ?? TopicLabels([topic])).label(of: topic)
     }
 
     func topicTitle(id: String) -> String {
-        store?.topics.titles[id] ?? store?.topicWatcher.records.first { $0.id == id }.map(topicTitle) ?? "Untitled Topic"
+        store?.topicWatcher.records.first { $0.id == id }.map(topicTitle) ?? id
     }
 
     func nextTopicNote(_ ids: [String]) -> String? {

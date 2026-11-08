@@ -73,7 +73,7 @@ final class TopicGroupsTests: XCTestCase {
         XCTAssertEqual(group.topics[0].kind, .settled(outcome: "Shipped", settledDate: date("2026-10-05T10:00:00Z")))
         XCTAssertEqual(group.topics[1].kind, .settled(outcome: "", settledDate: date("2026-10-01T10:00:00Z")))
         XCTAssertTrue(group.topics[0].isExpanded)
-        XCTAssertFalse(group.topics[0].isDormant, "a Settled Topic is not Dormant, it is done")
+        XCTAssertNotEqual(group.topics[0].state, .dormant, "a Settled Topic is not Dormant, it is done")
         let session = group.topics[0].sessions[0]
         XCTAssertEqual(session.baseName, "app/fix-links")
         guard case .remembered(let windows) = session.contents else { return XCTFail("remembered Windows expected") }

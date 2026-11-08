@@ -273,6 +273,9 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     case list
     /// The target's open Topic, with its live Sessions, Windows, Panes and Agents. It changes nothing.
     case show
+    /// Every live Session and the Topics list, in the order that Muxify shows them. It takes no target and changes
+    /// nothing.
+    case environmentShow
     /// An Empty Topic. It starts no Session and reads no target or caller, so it works outside tmux. A Session comes
     /// with `addSession`, and a Pane moves into a new Topic with `move(to: .newTopic)`.
     case create(title: String, tags: [Tag]? = nil)
@@ -377,6 +380,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case list, show, create, settle, forget, move, rename, reopen, lock, unlock, tags, note
+        case environmentShow = "environment_show"
         case startFresh = "start_fresh"
         case forgetSettled = "forget_settled"
         case moveSession = "move_session"
@@ -474,7 +478,6 @@ public struct EnvironmentRequest: Codable, Hashable, Sendable {
 /// An open Topic in a list.
 public struct TopicSummary: Codable, Hashable, Sendable {
     public var id: String
-    /// The title, else the slug, else "Untitled Topic".
     public var label: String
     /// A→Z.
     public var tags: [Tag]
@@ -487,9 +490,8 @@ public struct TopicSummary: Codable, Hashable, Sendable {
         self.pinned = pinned
     }
 
-    public init(record: TopicRecord) {
-        self.init(id: record.id, label: [record.title, record.slug].compactMap { $0 }.first { !$0.isEmpty } ?? "Untitled Topic",
-                  tags: record.tags.sorted(), pinned: record.isPinned)
+    public init(record: TopicRecord, labels: TopicLabels) {
+        self.init(id: record.id, label: labels.label(of: record), tags: record.tags.sorted(), pinned: record.isPinned)
     }
 }
 
@@ -675,13 +677,14 @@ public struct TopicReadChange: Codable, Hashable, Sendable {
 public enum EnvironmentResponse: Codable, Hashable, Sendable {
     case topics([TopicSummary])
     case topic(TopicDetail)
+    case snapshot(EnvironmentSnapshot)
     case changed(TopicChange)
     case readChanged(TopicReadChange)
     case worktrees([MuxifyWorktreeSummary])
     case failed(TopicFailure)
 
     private enum CodingKeys: String, CodingKey {
-        case topics, topic, changed, failed, worktrees
+        case topics, topic, snapshot, changed, failed, worktrees
         case readChanged = "read_changed"
     }
 
@@ -689,6 +692,7 @@ public enum EnvironmentResponse: Codable, Hashable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         if let topics = try values.decodeIfPresent([TopicSummary].self, forKey: .topics) { self = .topics(topics) }
         else if let topic = try values.decodeIfPresent(TopicDetail.self, forKey: .topic) { self = .topic(topic) }
+        else if let snapshot = try values.decodeIfPresent(EnvironmentSnapshot.self, forKey: .snapshot) { self = .snapshot(snapshot) }
         else if let change = try values.decodeIfPresent(TopicChange.self, forKey: .changed) { self = .changed(change) }
         else if let change = try values.decodeIfPresent(TopicReadChange.self, forKey: .readChanged) { self = .readChanged(change) }
         else if let worktrees = try values.decodeIfPresent([MuxifyWorktreeSummary].self, forKey: .worktrees) { self = .worktrees(worktrees) }
@@ -700,6 +704,7 @@ public enum EnvironmentResponse: Codable, Hashable, Sendable {
         switch self {
         case .topics(let topics): try values.encode(topics, forKey: .topics)
         case .topic(let topic): try values.encode(topic, forKey: .topic)
+        case .snapshot(let snapshot): try values.encode(snapshot, forKey: .snapshot)
         case .changed(let change): try values.encode(change, forKey: .changed)
         case .readChanged(let change): try values.encode(change, forKey: .readChanged)
         case .worktrees(let worktrees): try values.encode(worktrees, forKey: .worktrees)

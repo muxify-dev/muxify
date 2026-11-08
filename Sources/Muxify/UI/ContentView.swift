@@ -429,7 +429,7 @@ private struct TerminalArea: View {
                 .accessibilityIdentifier("empty-topic-title")
             if case .topic(let id) = topic.id {
                 switch (store.reopening(id, .reopen), store.reopening(id, .startFresh)) {
-                case (.success(let reopen)?, .success(let startFresh)?) where !reopen.sessions.isEmpty && topic.remembersSessions:
+                case (.success(let reopen)?, .success(let startFresh)?) where !reopen.sessions.isEmpty && topic.state != .empty:
                     ReopenChoiceView(store: store, topicID: id, reopen: reopen, startFresh: startFresh)
                 case (.failure(let error)?, _):
                     Text("This Topic cannot be reopened. \(String(describing: error))")
@@ -463,7 +463,7 @@ private struct TerminalArea: View {
     /// A Settled Topic, or a Dormant one that remembers a Session, offers Reopen; an empty open Topic offers Add a Session.
     private func offersReopen(_ topic: TopicsModel.Row) -> Bool {
         if case .settled = topic.kind { return true }
-        guard topic.remembersSessions, case .topic(let id) = topic.id, case .success(let reopening)? = store.reopening(id, .reopen) else { return false }
+        guard topic.state == .dormant, case .topic(let id) = topic.id, case .success(let reopening)? = store.reopening(id, .reopen) else { return false }
         return !reopening.sessions.isEmpty
     }
 

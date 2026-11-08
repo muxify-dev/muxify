@@ -90,7 +90,7 @@ final class SessionPathAliasTests: XCTestCase {
     }
 
     func testSessionPathListsShowTheAliasAndFindTheRowByAliasOrFolder() {
-        let rows = SessionPathRows.build(sessionPaths: [vault, game], windows: [], records: [], titles: [:])
+        let rows = SessionPathRows.build(sessionPaths: [vault, game], windows: [], records: [])
         func titles(_ query: String) -> [String] { PaletteCatalog(windows: [], agents: []).addSessionList(topic: "target", query: query, rows: rows, rules: .standard).rows.map(\.title.text) }
         XCTAssertEqual(titles(""), ["My Obsidian", "Game Server/main"])
         XCTAssertEqual(titles("obsidian"), ["My Obsidian"])
@@ -109,7 +109,7 @@ final class SessionPathAliasTests: XCTestCase {
         var settled = record
         settled.settledAt = "2026-01-01T00:00:00Z"
         settled.sessions.append(.object(["id": .string("notes"), "name": .string("notes/write"), "base_name": .string("notes"), "directory": .string("/work/vault")]))
-        XCTAssertEqual(TopicsModel.settledRow(settled, sessionPaths: [vault, game], tags: nil, expanded: []).sessions.map(\.baseName),
+        XCTAssertEqual(TopicsModel.settledRow(settled, labels: TopicLabels([settled]), sessionPaths: [vault, game], tags: nil, expanded: []).sessions.map(\.baseName),
                         ["debug", "notes"])
         XCTAssertEqual(SessionNaming.available(vault.name, topic: "write-notes", taken: []), "vault/write-notes")
     }

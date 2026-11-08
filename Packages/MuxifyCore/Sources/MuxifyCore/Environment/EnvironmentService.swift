@@ -10,6 +10,8 @@ public struct EnvironmentService: Sendable {
     public let sessionPaths: [SessionPath]
     /// The Config's `topics`: where a new Session and a new Topic go, and the Tags a request may add.
     public let topics: Config.Topics
+    /// The Config's `notifications`: which Agent marks `environment show` shows.
+    public let notifications: Config.Notifications
     /// False on a Remote Environment: Topic records are local, so a command that reads or writes one fails there.
     public let topicsAvailable: Bool
     /// Runs the Muxify Worktree scripts on the Environment's machine.
@@ -22,19 +24,23 @@ public struct EnvironmentService: Sendable {
     let editLockTimeout: TimeInterval
 
     public init(paths: MuxifyPaths, server: any TmuxRunning = TmuxServer.local, sessionPaths: [SessionPath] = [],
-                topics: Config.Topics = Config.Topics(), topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(),
+                topics: Config.Topics = Config.Topics(), notifications: Config.Notifications = Config.Notifications(),
+                topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(),
                 environmentName: String? = nil, worktreesRoot: String? = nil) {
-        self.init(paths: paths, server: server, sessionPaths: sessionPaths, topics: topics, topicsAvailable: topicsAvailable, scripts: scripts,
-                  environmentName: environmentName, worktreesRoot: worktreesRoot, editLockTimeout: 10)
+        self.init(paths: paths, server: server, sessionPaths: sessionPaths, topics: topics, notifications: notifications,
+                  topicsAvailable: topicsAvailable, scripts: scripts, environmentName: environmentName, worktreesRoot: worktreesRoot,
+                  editLockTimeout: 10)
     }
 
     init(paths: MuxifyPaths, server: any TmuxRunning, sessionPaths: [SessionPath], topics: Config.Topics = Config.Topics(),
+         notifications: Config.Notifications = Config.Notifications(),
          topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(), environmentName: String? = nil, worktreesRoot: String? = nil,
          editLockTimeout: TimeInterval) {
         self.paths = paths
         self.server = server
         self.sessionPaths = sessionPaths
         self.topics = topics
+        self.notifications = notifications
         self.topicsAvailable = topicsAvailable
         self.scripts = scripts
         self.environmentName = environmentName
@@ -55,10 +61,13 @@ public struct EnvironmentService: Sendable {
             return .failed(failure(TopicRequestError.topicsUnavailable, phase: .nothingChanged))
         }
         switch request.command.lane {
-        case .read:
-            if case .list = request.command { return list() }
-            if case .listWorktrees(let all, let from) = request.command { return listWorktrees(request, all: all, from: from, client: client) }
-            return show(request, client: client)
+        case .read(let read):
+            switch read {
+            case .list: return list()
+            case .show: return show(request, client: client)
+            case .environmentShow: return environmentShow()
+            case .listWorktrees(let all, let from): return listWorktrees(request, all: all, from: from, client: client)
+            }
         case .records:
             return changeRecords(request, client: client)
         case .edit:
@@ -154,9 +163,11 @@ public struct EnvironmentService: Sendable {
     func list() -> EnvironmentResponse {
         do {
             // The order of the Topics list: Pinned first, then the order the user gave.
-            let open = try store.read().records.filter { $0.settledAt == nil }
-            return .topics(TopicOrder.sorted(open.map(TopicListEntry.topic)).compactMap { entry in
-                if case .topic(let record) = entry { return TopicSummary(record: record) } else { return nil }
+            let records = try store.read().records
+            let labels = TopicLabels(records)
+            return .topics(TopicOrder.sorted(records.filter { $0.settledAt == nil }.map(TopicListEntry.topic)).compactMap { entry in
+                guard case .topic(let record) = entry else { return nil }
+                return TopicSummary(record: record, labels: labels)
             })
         } catch {
             return .failed(failure(error, phase: .nothingChanged))
@@ -169,7 +180,18 @@ public struct EnvironmentService: Sendable {
             let snapshot = try server.snapshot()
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             let branches = TopicBranches(records: [topic]) { try? String(contentsOfFile: $0, encoding: .utf8) }
-            return .topic(TopicDetail(record: topic, snapshot: snapshot, sessionPaths: sessionPaths, order: topics.sessionOrder, branches: branches))
+            return .topic(TopicDetail(record: topic, label: TopicLabels(records).label(of: topic), snapshot: snapshot,
+                                      sessionPaths: sessionPaths, topics: topics, branches: branches))
+        } catch {
+            return .failed(failure(error, phase: .nothingChanged))
+        }
+    }
+
+    /// One read of the records under the shared record lock, then one tmux snapshot, as `show` does.
+    func environmentShow() -> EnvironmentResponse {
+        do {
+            let contents = try store.read()
+            return .snapshot(EnvironmentSnapshot(contents: contents, tmux: try server.snapshot(), topics: topics, notifications: notifications))
         } catch {
             return .failed(failure(error, phase: .nothingChanged))
         }
@@ -194,7 +216,7 @@ public struct EnvironmentService: Sendable {
         }
         guard let window = found else { throw TopicEditFailure.sourceUnavailable }
         if let topic = records.first(where: { $0.id == window.topicID && $0.settledAt == nil }) {
-            throw TopicRequestError.sessionInTopic(session: window.sessionName, topic: TopicSummary(record: topic).label)
+            throw TopicRequestError.sessionInTopic(session: window.sessionName, topic: TopicLabels(records).label(of: topic))
         }
         return window
     }
@@ -323,14 +345,26 @@ public struct EnvironmentService: Sendable {
 }
 
 extension EnvironmentCommand {
-    enum Lane { case read, records, edit }
+    enum Lane {
+        case read(Read)
+        case records, edit
+    }
+
+    /// The read commands, one case for each answer.
+    enum Read {
+        case list, show, environmentShow
+        case listWorktrees(all: Bool, from: String?)
+    }
 
     /// The locks a command takes. `read`: none. `records`: the record lock only, for one write of record keys and the tmux options that go with it.
     /// `edit`: the edit lock, then read, plan, git, record, tmux, show. A new command does not compile until it
     /// chooses its lane.
     var lane: Lane {
         switch self {
-        case .list, .show, .listWorktrees: return .read
+        case .list: return .read(.list)
+        case .show: return .read(.show)
+        case .environmentShow: return .read(.environmentShow)
+        case .listWorktrees(let all, let from): return .read(.listWorktrees(all: all, from: from))
         case .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .benchTopic, .fillOpenPlace, .markRead, .markAllRead:
             return .records
         case .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename,
@@ -349,7 +383,7 @@ extension EnvironmentCommand {
         // out where there are none.
         case .markRead(_, let scope): return scope == .topic
         case .markAllRead: return false
-        case .list, .show, .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename, .reopen, .startFresh,
+        case .list, .show, .environmentShow, .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename, .reopen, .startFresh,
              .moveSession, .sortSessions, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench,
              .makeGuest, .benchTopic, .fillOpenPlace, .forgetSettled:
             return true
@@ -367,8 +401,8 @@ extension EnvironmentRequest {
 }
 
 extension TopicRef {
-    /// The record this names. `.named` takes an open Topic's id first, then the one open Topic with that slug or title.
-    /// `open` false also finds a Settled Topic.
+    /// The record this names. `.named` takes an open Topic's id first, then the one open Topic with that slug, title or
+    /// label (`TopicLabels`). `open` false also finds a Settled Topic.
     public func resolve(in records: [TopicRecord], open: Bool = true) throws -> TopicRecord {
         let candidates = open ? records.filter { $0.settledAt == nil } : records
         switch self {
@@ -377,7 +411,8 @@ extension TopicRef {
             return topic
         case .named(let value):
             if let exact = candidates.first(where: { $0.id == value }) { return exact }
-            let matches = candidates.filter { $0.slug == value || $0.title == value }
+            let labels = TopicLabels(records)
+            let matches = candidates.filter { $0.slug == value || $0.title == value || labels.label(of: $0) == value }
             guard let only = matches.first else { throw TopicRequestError.topicUnavailable(value) }
             guard matches.count == 1 else { throw TopicRequestError.topicAmbiguous(value) }
             return only

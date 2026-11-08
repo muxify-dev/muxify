@@ -888,7 +888,7 @@ final class TopicServiceTests: XCTestCase {
             #"{"id":"e","title":7}"#, #"{"id":"a","title":"Twin"}"#,
         ])
         XCTAssertEqual(service().handle(EnvironmentRequest(.list)), .topics([
-            TopicSummary(id: "a", label: "Fix"), TopicSummary(id: "b", label: "fix-login"), TopicSummary(id: "c", label: "Untitled Topic"),
+            TopicSummary(id: "a", label: "Fix"), TopicSummary(id: "b", label: "Untitled 1"), TopicSummary(id: "c", label: "Untitled 2"),
         ]))
     }
 

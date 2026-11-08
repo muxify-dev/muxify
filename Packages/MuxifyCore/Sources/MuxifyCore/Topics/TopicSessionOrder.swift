@@ -38,6 +38,14 @@ public enum TopicSessionOrder {
             return a.sessionID < b.sessionID
         }
     }
+
+    /// The first Window of each Session in `windows`, in the Session order of `record`. With no record, in tmux order.
+    public static func firstWindows(_ windows: [TmuxWindow], record: TopicRecord?, order: SessionOrder) -> [TmuxWindow] {
+        var seen: Set<String> = []
+        let firsts = windows.filter { seen.insert($0.sessionID).inserted }
+        guard let record else { return firsts }
+        return ordered(firsts, record: record, order: order, key: TopicSessionKey.init(of:))
+    }
 }
 
 extension TopicRecord {

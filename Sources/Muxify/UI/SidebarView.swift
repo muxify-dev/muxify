@@ -163,7 +163,7 @@ private struct TopicsSection: View {
                     return
                 }
                 guard !store.benchShown, store.benchPeek != .all, let dragged = drag.dragged,
-                      model.split(inPlay: store.topicConfig.inPlay ?? 0).inPlay.contains(where: { $0.id.listID == dragged })
+                      model.split?.inPlay.contains(where: { $0.id.listID == dragged }) == true
                 else { return }
                 store.benchPeek = .all
             }
@@ -686,7 +686,7 @@ struct TopicCard: View {
     /// A closed card in a group is dimmed, as the group is what the user put aside.
     private var restingOpacity: Double {
         if list == nil, !topic.isExpanded { return 0.5 }
-        return topic.hasNoLiveSession ? 0.55 : 1
+        return topic.state == .dormant || topic.state == .empty ? 0.55 : 1
     }
 
     var body: some View {
@@ -850,7 +850,7 @@ struct TopicCard: View {
             .accessibilityIdentifier("go-to-topic")
         if case .topic(let id) = topic.id {
             Divider()
-            if topic.isDormant {
+            if topic.state == .dormant {
                 Button("Reopen") { store.reopenTopic(id, .reopen) }
                     .accessibilityIdentifier("reopen-topic-" + id)
                     .disabled(store.changingTopic)
@@ -1238,7 +1238,7 @@ private struct SessionCard<Row: View>: View {
 
     var body: some View {
         let isOpen = store.openSessionCards.contains(session.name)
-        let mark = model.sessionMarks[session.id].map(RowMark.agent)
+        let mark = model.sessionMarks[session.id].map(CardMark.agent)
         let isLocked = model.lockedSessionIDs.contains(session.id)
         SidebarCard(isOpen: isOpen, holdsSelection: holdsSelection, mark: mark,
                     viewport: viewport) {
