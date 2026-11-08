@@ -1194,6 +1194,12 @@ final class WorkspaceStore {
     private var isTransitioning = false
     @ObservationIgnored private var reconnectWork: DispatchWorkItem?
     @ObservationIgnored private var reconnectAttempt = 0
+    /// The Session of the Terminal's Client at the last read that found it, so its exit can tell a closed Session from a detach.
+    @ObservationIgnored private var clientSessionID: String?
+    /// A read found that Session gone while the server still ran: it ended, and tmux did not stop with it.
+    @ObservationIgnored private var clientSessionEnded = false
+    /// The last read started before a Local Client exited.
+    @ObservationIgnored private var exitedAfterRead: Int?
     @ObservationIgnored private var attachmentTarget: Target?
     @ObservationIgnored private var attachmentReadsOnArrival = false
     @ObservationIgnored private var pendingAttachment: Router.IntentID?
@@ -1208,6 +1214,7 @@ final class WorkspaceStore {
     @ObservationIgnored private let connectionCleanup = ConnectionCleanup()
     @ObservationIgnored var onSelectEnvironment: ((String?) -> Void)?
     @ObservationIgnored var onNewAppWindow: (() -> Void)?
+    @ObservationIgnored var onCloseAppWindow: (() -> Void)?
     @ObservationIgnored var shouldConsumeOpenRequests: (() -> Bool)?
     /// Starts serving Browser commands for the server whose socket it gets, and returns the path to publish.
     @ObservationIgnored var serveBrowserAgent: ((_ tmuxSocket: String) -> String?)?
@@ -1375,6 +1382,9 @@ final class WorkspaceStore {
         agentStatuses.removeAll()
         readVisits = AgentReadVisits()
         readWindowID = nil
+        clientSessionID = nil
+        clientSessionEnded = false
+        exitedAfterRead = nil
         readGeneration += 1
         pendingReads = 0
         pendingReadNavigations.removeAll()
@@ -1565,6 +1575,12 @@ final class WorkspaceStore {
         }
         route(.read(readNumber), facts: facts)
         readWindowID = facts.ownClientWindow?.rawValue
+        if let session = windows.first(where: { $0.id == readWindowID })?.sessionID {
+            clientSessionID = session
+            clientSessionEnded = false
+        } else if let session = clientSessionID, snapshot.serverRunning, !windows.contains(where: { $0.sessionID == session }) {
+            clientSessionEnded = true
+        }
         if isTransitioning { return }
         updateTopicSelection()
         if let unresolvedSelectedWindowID, selectedWindow?.id == unresolvedSelectedWindowID {
@@ -1599,6 +1615,11 @@ final class WorkspaceStore {
             for id in gitViews.keys where !live.contains(id) {
                 gitViews.removeValue(forKey: id)?.close()
             }
+        }
+
+        if let exitedAfterRead, readNumber > exitedAfterRead {
+            self.exitedAfterRead = nil
+            if surface == nil { _ = followEndedSession() }
         }
     }
 
@@ -1676,6 +1697,7 @@ final class WorkspaceStore {
             route(.commandFinished(previous, .failure, lastStartedRead: lastStartedRead))
         }
         pendingAttachment = intent
+        exitedAfterRead = nil
         let oldSurface = surface
         surface = view
         oldSurface?.close()
@@ -3088,6 +3110,7 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
                     apply(snapshot, readNumber: lastStartedRead, attachIfNeeded: false)
                     // apply may have started a recovery on another connection.
                     if isTransitioning { return }
+                    if followEndedSession() { return }
                     if hasNoSessions {
                         environmentStatus = "No tmux Sessions in \(environmentName)"
                         offerStartSession()
@@ -3114,7 +3137,23 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
             }
             return
         }
+        // A read already under way may still list the Session, so only a read that starts after this one decides.
+        exitedAfterRead = lastStartedRead
         refresh()
+    }
+
+    /// After the Terminal's Client exits: when its Session ended with its last Window, not by a detach, opens the
+    /// first Session left, or closes the App Window when none is left. False after a detach, or when tmux stopped.
+    private func followEndedSession() -> Bool {
+        guard clientSessionEnded else { return false }
+        guard let first = windows.first else {
+            onCloseAppWindow?()
+            return true
+        }
+        let next = windows.first { $0.sessionID == first.sessionID && $0.isActive } ?? first
+        reconnectAttempt = 0
+        route(.attach(WindowID(rawValue: next.id)), target: Target(next))
+        return true
     }
 }
 
