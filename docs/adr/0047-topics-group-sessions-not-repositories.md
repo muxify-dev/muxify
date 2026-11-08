@@ -10,7 +10,7 @@ Moving a Window or Pane out of a Topic explicitly chooses a No Topic destination
 
 Add a Session offers running Sessions and Session Paths. Picking a running Session moves it into the Topic; picking a Session Path creates a new member there, even when another member already uses that folder. Creating a new Worktree remains explicit opt-in, never a side effect of grouping Sessions.
 
-Removing membership restores the Session's base name, including Keep during Settle or Forget, with the first available `+x` on collision. Reopen preserves remembered names when available, including existing numeric suffixes, and allocates `+x` when occupied; it never adopts an unrelated Session with the same name.
+Removing membership restores the Session's base name, including Keep during Settle or Forget, with the first available `+x` on collision. A Worktree Session takes its Worktree's launch name instead, as [ADR 0073](0073-a-worktree-session-leaves-its-topic-under-the-worktrees-launch-name.md) amends. Reopen preserves remembered names when available, including existing numeric suffixes, and allocates `+x` when occupied; it never adopts an unrelated Session with the same name.
 
 Keep leaves the original Session's identity intact. If Reopen creates a new Session while that original is still running, the recreated Session gets a fresh identity rather than aliasing the original.
 

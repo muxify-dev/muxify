@@ -39,7 +39,7 @@ public struct TopicMembershipPlan: Sendable {
         let topic = Self.openTopic(of: window, records: records)
         record = topic?.forgetting(window)
         var taken = Set(windows.map(\.sessionName))
-        commands = topic?.detachedCommands(for: window, taken: &taken) ?? []
+        commands = topic?.detachedCommands(for: window, sessionPaths: sessionPaths, taken: &taken) ?? []
     }
 
     init(source: Source, destination: TopicRecord?, records: [TopicRecord], windows: [TmuxWindow], sessionPaths: [SessionPath],
@@ -52,11 +52,16 @@ public struct TopicMembershipPlan: Sendable {
         var saved = destination
         var commands: [TopicPlan.Command] = []
         let taken = Set(windows.filter { $0.sessionID != window.sessionID || !Self.isSession(source) }.map(\.sessionName))
+        func name(in directory: String) -> String {
+            let leaving = destination == nil ? SessionNaming.outsideTopics(base, in: .local(directory), sessionPaths: sessionPaths) : base
+            return SessionNaming.available(leaving, topic: destination?.slug, taken: taken)
+        }
 
         switch source {
         case .session:
             if window.topicID == destination?.id { record = nil; self.commands = []; return }
-            let name = SessionNaming.available(base, topic: destination?.slug, taken: taken)
+            let directory = window.sessionPath.isEmpty ? window.path : window.sessionPath
+            let name = name(in: directory)
             commands.append(.tmux(["rename-session", "-t", window.sessionID, name]))
             commands.append(.tmux(["set-option", "-t", window.sessionID, "@muxify_session_id", window.sessionRecordID]))
             if let destination { commands.append(.tmux(["set-option", "-t", window.sessionID, "@muxify_topic", destination.id])) }
@@ -66,7 +71,7 @@ public struct TopicMembershipPlan: Sendable {
             fields["id"] = .string(window.sessionRecordID)
             fields["name"] = .string(name)
             fields["base_name"] = .string(SessionNaming.base(of: name, topic: destination))
-            fields["directory"] = .string(window.sessionPath.isEmpty ? window.path : window.sessionPath)
+            fields["directory"] = .string(directory)
             saved?.recordingNewSession(fields, order: order)
         case .window, .pane:
             let members = windows.filter { Self.openTopic(of: $0, records: records)?.id == destination?.id && $0.sessionID != window.sessionID }
@@ -81,9 +86,9 @@ public struct TopicMembershipPlan: Sendable {
             let target: String
             if let existing { target = existing.sessionID + ":" }
             else {
-                let name = SessionNaming.available(base, topic: destination?.slug, taken: taken)
-                let id = UUID().uuidString.lowercased()
                 let directory = launchDirectory ?? window.path
+                let name = name(in: directory)
+                let id = UUID().uuidString.lowercased()
                 target = "=" + name + ":"
                 commands.append(.newTopicSession(name: name, directory: directory))
                 commands.append(.tmux(["set-option", "-t", target, "@muxify_session_id", id]))

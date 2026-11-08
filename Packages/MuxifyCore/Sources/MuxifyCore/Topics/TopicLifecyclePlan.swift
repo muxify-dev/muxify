@@ -75,7 +75,7 @@ struct TopicSettlePlan {
             case .kill: commands.append(.tmux(["kill-session", "-t", session.id]))
             case .keep:
                 if let window = snapshot.windows.first(where: { $0.sessionID == session.id }) {
-                    commands += record.detachedCommands(for: window, taken: &taken)
+                    commands += record.detachedCommands(for: window, sessionPaths: sessionPaths, taken: &taken)
                 }
             }
         }
