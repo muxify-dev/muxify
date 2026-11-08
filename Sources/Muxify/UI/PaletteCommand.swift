@@ -37,6 +37,8 @@ enum PaletteCommand: String, CaseIterable {
     case zoomPane = "Zoom Pane"
     case showSidebar = "Show Sidebar"
     case hideSidebar = "Hide Sidebar"
+    case switchToSessions = "Switch to Sessions"
+    case switchToTopics = "Switch to Topics"
     case toggleBench = "Toggle Bench"
     case chooseInPlay = "Choose In Play…"
     case replaceFromBench = "Replace from Bench…"
@@ -104,6 +106,7 @@ enum PaletteCommand: String, CaseIterable {
         case .closeTab: .closeTab
         case .reopenClosedTab: .reopenClosedTab
         case .showSidebar, .hideSidebar: .toggleSidebar
+        case .switchToSessions, .switchToTopics: .toggleSidebarMode
         case .toggleBench: .toggleBench
         case .chooseInPlay: .chooseInPlay
         case .replaceFromBench: .replaceFromBench
@@ -149,7 +152,7 @@ enum PaletteCommand: String, CaseIterable {
         case .removeWorktree: .verb(.worktreeRemove)
         case .zoomPane: .verb(.windowZoom)
         case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser, .showSidebar, .hideSidebar,
-             .showTerminal, .hideTerminal, .showBrowser, .hideBrowser, .nextSession, .previousSession, .nextTopic, .previousTopic,
+             .switchToSessions, .switchToTopics, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser, .nextSession, .previousSession, .nextTopic, .previousTopic,
              .newAppWindow, .toggleBench:
             .noMirror("It changes only the view of one App Window.")
         case .newTab, .closeTab, .reopenClosedTab, .openLocation, .nextTab, .previousTab, .back, .forward, .reloadPage, .copyURL, .developerTools:
@@ -174,7 +177,7 @@ enum PaletteCommand: String, CaseIterable {
     var isLayout: Bool {
         switch self {
         case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser,
-             .showSidebar, .hideSidebar, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser: true
+             .showSidebar, .hideSidebar, .switchToSessions, .switchToTopics, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser: true
         default: false
         }
     }
@@ -234,6 +237,8 @@ extension CommandPalette {
             case .zoomPane, .renameWindow: return store.selectedWindow != nil
             case .showSidebar: return !store.sidebarShown
             case .hideSidebar: return store.sidebarShown
+            case .switchToSessions, .switchToTopics:
+                return store.sidebarModeSwitchRefusal == nil && store.sidebarModeSwitchTitle == command.rawValue
             case .toggleBench: return store.topics.isBenchShown != nil
             case .chooseInPlay: return store.canChooseInPlay
             case .replaceFromBench: return store.canReplaceFromBench
@@ -331,7 +336,7 @@ extension CommandPalette {
         case .developerTools: store.currentBrowser?.activeTab?.showDeveloperTools()
         case .clearBrowserHistory: begin(.clearHistory, keepingHistory: true)
         case .maximize, .restore, .maximizeTerminal, .maximizeBrowser, .focusTerminal, .focusBrowser,
-             .showSidebar, .hideSidebar, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser: break
+             .showSidebar, .hideSidebar, .switchToSessions, .switchToTopics, .showTerminal, .hideTerminal, .showBrowser, .hideBrowser: break
         }
     }
 

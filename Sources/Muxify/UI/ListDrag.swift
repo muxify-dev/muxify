@@ -167,6 +167,10 @@ final class ListDrag<ID: Hashable> {
     /// A lifted item grows by this much around this point.
     static var liftScale: CGFloat { 1.03 }
     static var liftAnchor: UnitPoint { UnitPoint(x: 0.5, y: 0.3) }
+    /// A pressed item sinks to this until it lifts or the press ends, so the handle shows it is ready to drag.
+    static var pressScale: CGFloat { 0.98 }
+    /// A lifted item over a trade target shrinks to this as it steps aside.
+    static var stepAsideScale: CGFloat { 0.94 }
     static var tradeDuration: Double { 0.56 }
 
     private(set) var phase: Phase = .idle
@@ -302,6 +306,19 @@ final class ListDrag<ID: Hashable> {
         let measured = Set(order)
         let heights = heights.filter { measured.contains($0.key) }
         if heights != layout.heights { layout.heights = heights }
+    }
+
+    /// How the item `id` is scaled now: a pressed item sinks, but not with Reduce Motion on, and a lifted item grows, or
+    /// shrinks while it steps aside for a trade.
+    func scale(of id: ID, reducesMotion: Bool) -> CGFloat {
+        switch phase {
+        case .pressing(id):
+            return reducesMotion ? 1 : Self.pressScale
+        case .lifted(id):
+            return tradeTarget != nil ? Self.stepAsideScale : Self.liftScale
+        default:
+            return 1
+        }
     }
 
     func press(_ id: ID) {
@@ -483,6 +500,7 @@ private struct ListDragHandle<ID: Hashable>: ViewModifier {
             .onChanged(changed)
             .onEnded(ended))
             .takesFirstClick()
+            .opensHandOnHover(isEnabled)
             .onChange(of: isPressed) { _, pressed in
                 if !pressed { drag.abandon(id) }
             }
@@ -516,6 +534,27 @@ private struct ListDragHandle<ID: Hashable>: ViewModifier {
     }
 }
 
+/// Before macOS 15, which has no pointer style: the open hand pushed while the pointer is over a draggable handle, as
+/// the Agents divider pushes its resize cursor.
+private struct OpenHandCursor: ViewModifier {
+    let isEnabled: Bool
+    @State private var isHovered = false
+    @State private var pushed = false
+
+    func body(content: Content) -> some View {
+        content
+            .onHover { isHovered = $0 }
+            .onChange(of: isHovered && isEnabled) { _, shows in show(shows) }
+            .onDisappear { show(false) }
+    }
+
+    private func show(_ shows: Bool) {
+        guard shows != pushed else { return }
+        pushed = shows
+        if shows { NSCursor.openHand.push() } else { NSCursor.pop() }
+    }
+}
+
 private struct ListDragItem<ID: Hashable>: ViewModifier {
     let id: ID
     let drag: ListDrag<ID>
@@ -523,8 +562,10 @@ private struct ListDragItem<ID: Hashable>: ViewModifier {
     let cornerRadius: CGFloat
     @Environment(\.chromeTheme) private var chromeTheme
     @Environment(\.dragTopInset) private var topInset
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
+        let isPressed = drag.phase == .pressing(id)
         let isLifted = drag.phase == .lifted(id)
         let path = drag.tradePath(of: id)
         let isRaised = isLifted || path != nil
@@ -537,17 +578,20 @@ private struct ListDragItem<ID: Hashable>: ViewModifier {
         content
             .transformEnvironment(\.isLiftedByDrag) { if isLifted { $0 = true } }
             .background {
-                if isRaised { plate.transition(.opacity) }
+                // Pressed, the item stands on the plate it lifts with, so the press shows before the pointer moves.
+                if isRaised || isPressed { plate.transition(.opacity) }
             }
             .overlay {
                 if isTarget { TradeMark(cornerRadius: cornerRadius).transition(.opacity) }
             }
             .animation(.spring(duration: 0.2), value: isTarget)
-            .scaleEffect(isLifted ? (stepsAside ? 0.94 : ListDrag<ID>.liftScale) : 1, anchor: ListDrag<ID>.liftAnchor)
+            .scaleEffect(drag.scale(of: id, reducesMotion: reduceMotion), anchor: ListDrag<ID>.liftAnchor)
             .opacity(stepsAside ? 0.9 : 1)
             .shadow(color: .black.opacity(isRaised ? 0.4 : 0), radius: isRaised ? 14 : 0, y: isRaised ? 10 : 0)
             .animation(.spring(duration: 0.25, bounce: 0.3), value: isLifted)
             .animation(.spring(duration: 0.25), value: stepsAside)
+            // Outside the lift's spring, which wins when the press becomes a lift.
+            .animation(.easeOut(duration: 0.12), value: isPressed)
             .offset(x: stepsAside ? 34 : 0)
             .offset(y: isLifted ? drag.translation : shift)
             // The lifted item stays under the pointer while the others slide; let go, it glides.
@@ -748,6 +792,16 @@ extension View {
     /// them. `shown` is the list as the stack shows it now.
     func listDragFixed<ID: Hashable>(_ key: String, drag: ListDrag<ID>, shown: [StackSlot<ID>]) -> some View {
         modifier(ListDragFixed(key: key, drag: drag, shown: shown))
+    }
+
+    /// The open hand over a handle that a press can drag, and the system's pointer over one that cannot.
+    @ViewBuilder
+    func opensHandOnHover(_ isEnabled: Bool) -> some View {
+        if #available(macOS 15, *) {
+            pointerStyle(isEnabled ? .grabIdle : nil)
+        } else {
+            modifier(OpenHandCursor(isEnabled: isEnabled))
+        }
     }
 
     /// A press in a window that is not key reaches this view's gestures, so a click or a drag works on the first click.

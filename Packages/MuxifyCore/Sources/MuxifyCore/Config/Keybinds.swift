@@ -53,6 +53,7 @@ public enum ConfigAction: String, KeybindAction {
     case markUnread = "mark_unread"
     case markAllRead = "mark_all_read"
     case toggleSidebar = "toggle_sidebar"
+    case toggleSidebarMode = "toggle_sidebar_mode"
     case toggleBench = "toggle_bench"
     case chooseInPlay = "choose_in_play"
     case replaceFromBench = "replace_from_bench"
@@ -134,6 +135,7 @@ public enum ConfigAction: String, KeybindAction {
         .markUnread: ["cmd+shift+u"],
         .markAllRead: [],
         .toggleSidebar: ["cmd+s", "ctrl+cmd+s"],
+        .toggleSidebarMode: ["alt+cmd+t"],
         .toggleBench: ["shift+cmd+s"],
         .chooseInPlay: ["shift+alt+cmd+s"],
         .replaceFromBench: ["alt+cmd+s"],

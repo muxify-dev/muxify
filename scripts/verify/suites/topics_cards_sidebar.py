@@ -265,6 +265,25 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.assertTrue(s.row('topic-corner-closed', rs).get('accessibilityValue', '').startswith('collapsed'),
                         self.describe('topic-corner-closed', rs))
 
+    def test_the_footer_line_beside_settle_has_the_topics_menu(self):
+        """SidebarCard in UI/SidebarCard.swift puts the card's context menu on the whole card, not only on its header,
+        and gives the card, `card-<header id>`, that menu's items as accessibility actions. So the check reaches the
+        menu of the footer line beside Settle without opening it: the card's frame covers that line, and its action works."""
+        s = self.s
+        topic = 'card-area'
+        self.write_topic(topic, 'Card area', self.beta)
+        sid = self.new_session(topic, self.beta, topic=topic)
+        window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
+        self.open_card('topic-' + topic)
+        keys = ['card-topic-' + topic, 'settle-topic-' + topic, 'topic-window-' + window]
+        rs = s.wait_rows(lambda rs: all(s.has(key, rs) for key in keys), 'the open card misses one of %s' % keys)
+        card, settle, row = (frame(s.row(key, rs)) for key in keys)
+        # frame() is (bottom, top), a larger value higher on screen.
+        self.assertLessEqual(settle[1], row[0] + 1, 'Settle %s is not on the footer line below the row %s' % (settle, row))
+        self.assertLessEqual(card[0], settle[0], 'the card %s does not cover the footer line with Settle %s' % (card, settle))
+        s.act('action', 'card-topic-' + topic, 'Pin Topic')
+        wait(lambda: self.records().get(topic, {}).get('pinned') is True, 'Pin Topic of the card\'s menu did not pin the Topic')
+
     def test_settle_on_a_closed_topic_card_opens_the_settle_palette_and_leaves_the_card_closed(self):
         s = self.s
         self.write_topic('card-settle', 'Card settle', self.beta)

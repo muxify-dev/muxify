@@ -65,7 +65,8 @@ you don't trust with access to your agent.
 Choose an Environment in the header to open its App Window, or focus it if
 already open. ⌘N opens another Local App Window. Closing a window leaves tmux
 running; dropped connections reconnect automatically. Muxify remembers the last
-focused Environment and creates `main` in the remote home if no Session exists.
+focused Environment. It starts no Session on the remote machine by itself: see
+[Start a Session](#start-a-session).
 
 The Browser stays local: use reachable URLs, such as Tailscale URLs. There is
 no port forwarding or remote dev-server discovery; Reveal in Finder is disabled.
@@ -140,6 +141,22 @@ the Session Path. An alias for a path that is not a Session Path does nothing.
 An entry that cannot apply appears in the Config problems banner. So does the
 removed sections. Muxify reports unknown keys and does not read legacy settings.
 
+### Start a Session
+
+Muxify starts no Session by itself. When the local tmux server has no Session
+of yours, or no server runs, Muxify opens the palette on **Start a Session**
+when it starts: the home folder first, then each Session Path and Worktree. ↩
+starts a No Topic Session in the chosen folder, named after it, as Open as
+Session does. Escape closes the palette and leaves the "No tmux Sessions" page,
+whose **Start a Session…** button opens it again. The `start_session` entry of
+[`pick_lists`](#pick-lists) sets which rows it lists; the home folder row always
+shows.
+
+A Remote Environment's App Window does the same when the remote server has no
+Session of yours: the palette lists the remote home folder and the remote
+machine's Session Paths and Worktrees, as Muxify last found them there while
+connected, and ↩ connects again and starts the Session on that machine.
+
 ## Position of new and returning Topics
 
 ```yaml
@@ -156,6 +173,32 @@ to the top of the Bench (see [Topics In Play](#topics-in-play)).
 A Dormant Topic keeps its place, including when it is Pinned.
 A Topic made from a Locked Session takes that Lock's place.
 An unknown value uses `bottom` and appears in the Config problems banner.
+
+## Reopen Dormant Topics at launch
+
+```yaml
+topics:
+  reopen_at_launch: true
+```
+
+After a computer restart, tmux comes back with none of your Sessions, so every
+open Topic is Dormant until you go to it. With `true`, Muxify Reopens every
+Dormant Topic by itself when it launches: Pinned, In Play, Guests and the Bench.
+It is the same Reopen as going to the Topic, so the remembered Sessions,
+Windows, Panes, Tabs and Agents are created again, one Topic after another.
+Settled Topics stay Settled, Empty Topics create nothing, and a Topic that
+already has a live Session is left as it is. A Topic whose Reopen fails stays
+Dormant, shows the failure as a Reopen does, and the others still Reopen.
+
+It happens once per launch: a tmux restart while Muxify runs leaves the Topics
+Dormant. The App Window does not go to each Topic in turn; it shows what it
+would have shown, and the [Start a Session](#start-a-session) palette does not
+open by itself once a Topic is Reopened. A Remote Environment has no Topics
+(they stay on this Mac), so the key Reopens nothing there.
+
+`false` (the default) keeps the Topics Dormant until you go to them. A value
+that is not a boolean counts as `false` and appears in the Config problems
+banner.
 
 ## Topics In Play
 
@@ -730,6 +773,11 @@ the selection's diff:
 | Branches | Local branches, yours first with a check: other worktrees', gone upstreams, and commits ahead of and behind yours | The branch and its latest commits. Clicking a branch, or ↩, goes into its last 300 commits, listed like the History |
 | Stashes | `git stash list` | The stash's changes |
 
+When the current Window's folder is in no repository, the header hides its Git
+button and the View menu's item is disabled; ⌘G opens nothing and says "Not a
+git repository" with the folder. An open Git View stays on its folder when the
+Pane `cd`s out of the repository, and its button stays so you can close it.
+
 Under the History, a branch's commits and the Stashes, the Diff files list the
 selected commit's or stash's files as a tree. ↩, or a click on a file, goes into
 them, and the diff then shows one file, or a folder of them; ⎋ comes back to the
@@ -1106,8 +1154,14 @@ problems banner, as does a `services` entry with no `:` or with an unknown
 provider, which is skipped.
 
 The Git View reads the repository when it opens, every 10 seconds, when Muxify
-comes to the front, with R, and after you stage or commit. On a Remote
-Environment, git runs on that machine. Code is sized from the terminal's font
+comes to the front, with R, and after you stage or commit. On this Mac it also
+reads it again as soon as the repository changes, such as after a commit typed
+in a Pane: it watches the working tree and the git directories, waits for the
+changes to settle for a quarter of a second, and reads at most once a second.
+On a Remote Environment, git runs on that machine, and every 2 seconds the
+Git View checks HEAD, the index's time and the status there over its ssh
+connection, reading the repository again when one changed. It needs only `git`
+and `sh` on that machine and leaves nothing running there. Code is sized from the terminal's font
 size, in the system's monospaced font. Each Window has its own Git View: select
 another Window and it stays open there, as you left it, until you come back; it
 isn't read again meanwhile. A Window whose Git View is open shows its icon in the
@@ -1273,9 +1327,11 @@ pick_lists:
 | `worktree_start` | Add a Session › New Worktree from, and New Worktree's start | `command` |
 | `new_worktree` | New Worktree, the checkout it starts from | `session-path`, `worktree` |
 | `remove_worktree` | Remove Worktree | `muxify-worktree` |
+| `start_session` | [Start a Session](#start-a-session), when tmux has no Session of yours | `session-path`, `worktree` |
 
 A pick list without an entry lists every kind, with the default `tiebreak`. The
-rows that a pick list always shows, such as New Topic in Move to…, ignore `show`.
+rows that a pick list always shows, such as New Topic in Move to… or the home
+folder in Start a Session, ignore `show`.
 These problems apply to one entry: a name that is not in the table, a key other
 than `show` and `tiebreak`, an empty `show`, or a kind that the pick list does
 not have. Muxify shows the problem, and that pick list keeps every kind and the
@@ -1585,7 +1641,17 @@ sidebar:
 
 Switch views with the Topics/Sessions buttons or a two-finger horizontal swipe
 anywhere over the Sidebar, also over Agents. A swipe over the terminal or the
-browser scrolls there and does not switch views. `sidebar.animate_switching` defaults to `true`. Set it to `false`
+browser scrolls there and does not switch views. ⌥⌘T
+([`toggle_sidebar_mode`](keybindings.md#configurable-actions)), the **Switch to
+Sessions** / **Switch to Topics** Command and the View menu item of the same
+name switch views too, as the other button does. While the Sidebar is hidden,
+they show it in the other view. While only one view can show, because
+`sidebar.topics` or `sidebar.sessions` is `false` or the App Window is on a
+Remote Environment, Commands does not offer the switch, the View menu item is
+disabled, and the key shows an Explanation Pill that says why. View > Show
+Sessions still shows or hides the Sessions section.
+
+`sidebar.animate_switching` defaults to `true`. Set it to `false`
 to switch instantly, without the sliding preview, spring, scale or fade. Buttons
 and swipes still work, and both lists keep their scroll positions and opened cards.
 Changes apply live. macOS Reduce Motion also disables these animations.
@@ -1623,6 +1689,23 @@ apply on Config reload, including to a label that is already open.
 ```yaml
 sidebar:
   window_tooltips: truncated
+```
+
+### Session cards
+
+`sidebar.session_cards` sets which Session cards stay open when the
+Location moves to another Session. It acts on the Session cards of
+Sessions mode and on the No Topic and Locked Session cards of Topics mode, which
+share one list of open cards. Topic cards are not affected: a new Active Topic
+always opens alone.
+
+- `any` (default): the Location's card opens, and every card the user opened stays open.
+- `one`: the Location's card opens alone. A card opened by hand stays open until
+  the Location next moves to another Session.
+
+```yaml
+sidebar:
+  session_cards: one
 ```
 
 ### Tags on Topic cards

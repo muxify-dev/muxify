@@ -77,6 +77,9 @@ public struct Config: Equatable {
         public var inPlay: Int?
         /// The days that Forget Settled Older Than… offers first. It forgets nothing by itself.
         public var forgetSettledOlderThan = 14
+        /// When Muxify launches, it Reopens every Dormant open Topic, once per launch per Environment. False: Dormant
+        /// Topics stay Dormant until the user goes to them.
+        public var reopenAtLaunch = false
 
         public init() {}
     }
@@ -107,6 +110,15 @@ public struct Config: Equatable {
         public var wrapsTitles = true
         public var windowTooltips = WindowTooltips.always
         public var tagPlacement = TagPlacement.none
+        public var sessionCards = SessionCards.any
+
+        /// Which Session cards stay open when the Location moves to a Session. Topic cards keep their own rule.
+        public enum SessionCards: String {
+            /// Only the Location's Session card; one opened by hand stays open until the next move.
+            case one
+            /// Every card the user opened, and the Location's.
+            case any
+        }
 
         /// When a Window row opens its hover label, in either Sidebar mode.
         public enum WindowTooltips: String {
@@ -406,6 +418,9 @@ public struct Config: Equatable {
         #     wrap: true
         #   # Window hover labels: off, truncated (only when the title is cut off), or always.
         #   window_tooltips: always
+        #   # Session cards open when the Location moves to their Session: one
+        #   # keeps only that card open, any keeps every card the user opened.
+        #   session_cards: any
         #   # Titles and summaries set plain text. Each Format can have topics/sessions values.
         #   # An empty summary hides its line. An empty title uses its default.
         #   formats:
@@ -475,6 +490,10 @@ public struct Config: Equatable {
         #   # It forgets the Settled Topics that were Settled more days ago.
         #   # Muxify never forgets a Topic by itself.
         #   forget_settled_older_than: 14
+        #   # true: when Muxify launches, it Reopens every Dormant Topic, as
+        #   # going to it does, for example after a restart. Settled and Empty
+        #   # Topics stay as they are. false: a Topic Reopens when you go to it.
+        #   reopen_at_launch: false
         #   # The only Tags a Topic can have, in this order. A key is lower case
         #   # letters, digits and -. color is as in ui.agent_colors; a Tag
         #   # without one gets a fixed color from its name. No tags: Tags are off.
@@ -762,6 +781,12 @@ private struct ConfigReader {
             case "in_play": config.topics.inPlay = count(value, "topics.in_play", atLeast: 1)
             case "forget_settled_older_than":
                 if let days = count(value, "topics.forget_settled_older_than", atLeast: 1) { config.topics.forgetSettledOlderThan = days }
+            case "reopen_at_launch":
+                guard value.tag == Yams.Tag(.bool), let reopens = value.bool else {
+                    problem(at: value, "topics.reopen_at_launch: expected a boolean")
+                    continue
+                }
+                config.topics.reopenAtLaunch = reopens
             default: problem(at: key, "unknown key \"topics.\(name)\"")
             }
         }
@@ -982,6 +1007,12 @@ private struct ConfigReader {
                     continue
                 }
                 config.sidebar.tagPlacement = placement
+            case "session_cards":
+                guard value.tag == Yams.Tag(.str), let cards = value.string.flatMap(Config.Sidebar.SessionCards.init(rawValue:)) else {
+                    problem(at: value, "sidebar.session_cards: expected one or any")
+                    continue
+                }
+                config.sidebar.sessionCards = cards
             case "agents_scope":
                 config.sidebar.agentsScope = perMode(value, "sidebar.agents_scope", config.sidebar.agentsScope,
                                                      expected: "active, window or all") { node in

@@ -312,11 +312,20 @@ final class RouterTests: XCTestCase {
         }
     }
 
-    func testAnEmptyServerCanAttachWithoutAWindowOnlyWhenAllowed() {
+    func testAServerWithNoSessionRoutesToChoosingWhereToStartAndStartsNoSession() {
         var router = Router()
         XCTAssertTrue(router.handle(.read(1), .init(hasTerminal: false)).isEmpty)
-        XCTAssertEqual(router.handle(.read(2), .init(hasTerminal: false, allowAttach: true)), [.attach(nil, intent: 1)])
+        XCTAssertEqual(router.handle(.read(2), .init(hasTerminal: false, allowAttach: true)), [.chooseWhereToStart],
+                       "no attach that would make a Session such as main")
         XCTAssertNil(router.location)
+        XCTAssertNil(router.intent)
+        XCTAssertTrue(router.handle(.read(3), .init(hasTerminal: true, allowAttach: true)).isEmpty, "a Client already shows something")
+    }
+
+    func testAnExplicitAttachWithoutAWindowStillAsksForOne() {
+        var router = Router()
+        XCTAssertEqual(router.handle(.attach(nil), .init(hasTerminal: false)), [.attach(nil, intent: 1)],
+                       "a Remote Environment's connection names no Window")
     }
 
     func testAnEmptyTopicPageDoesNotAttachATerminal() {
@@ -406,7 +415,7 @@ final class RouterTests: XCTestCase {
 
     func testAnUntargetedAttachmentPreservesANewerPageWhenItsClientAppears() throws {
         var router = Router()
-        let effects = router.handle(.read(1), .init(hasTerminal: false, allowAttach: true))
+        let effects = router.handle(.attach(nil), .init(hasTerminal: false))
         let command = try attachmentID(effects)
         XCTAssertNil(router.intent)
         var facts = Router.Facts(windows: [window("@1")], records: [TopicRecord(id: "work")])
@@ -426,7 +435,7 @@ final class RouterTests: XCTestCase {
 
     func testAnUntargetedAttachmentInitializesLocationWhenItsClientAppears() throws {
         var router = Router()
-        let command = try attachmentID(router.handle(.read(1), .init(hasTerminal: false, allowAttach: true)))
+        let command = try attachmentID(router.handle(.attach(nil), .init(hasTerminal: false)))
         let facts = Router.Facts(windows: [window("@1")], ownClientWindow: id("@1"))
         _ = router.handle(.commandFinished(command, .success, lastStartedRead: 2), facts)
         _ = router.handle(.read(2), facts)

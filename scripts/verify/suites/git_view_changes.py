@@ -1,5 +1,6 @@
 """The Git View in Changes: the Discard changes menu and its Agent guard, the reset options, stashing,
-applying, popping and dropping a stash, committing with c, and amending with A.
+applying, popping and dropping a stash, committing with c, amending with A, and reading the repository again by
+itself after a commit typed in a Pane.
 
 The Git View's keys and accessibility identifiers are in git_view_fixture.py.
 
@@ -7,6 +8,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.git_view_changes
 """
 
+import shlex
 import time
 
 from scripts.verify.git_view_fixture import GitViewFixture
@@ -15,10 +17,35 @@ from scripts.verify.sandbox import wait
 
 class GitViewChanges(GitViewFixture):
     def wait_change(self, name, predicate, message):
-        """Reads the repository again with R, as the Git View reads it by itself only every 10 seconds, and waits
-        for the change's row."""
+        """Reads the repository again with R, so the check does not depend on the Git View noticing the change
+        itself, and waits for the change's row."""
         self.key('shift+r')
         return self.s.wait_rows(lambda rs: predicate(self.s.row('git-row-change:' + name, rs)), message, seconds=10)
+
+    def test_a_commit_in_a_pane_takes_the_files_out_of_changes_without_r(self):
+        # The Git View watches the repository, so it reads it again by itself well within the 10 seconds of its
+        # timer. No key is pressed: the file shows in Changes, then leaves them after a commit typed in the Pane.
+        name = 'z-watch-commit.txt'
+        message = 'watched commit'
+        path = self.repo/name
+
+        def clean_up():
+            if self.git('log', '-1', '--format=%s').strip() == message:
+                self.git('reset', '-q', '--soft', 'HEAD~1')
+            self.git('reset', '-q', '--', name)
+            path.unlink(missing_ok=True)
+        self.addCleanup(clean_up)
+        path.write_text('watched\n')
+        self.s.wait_rows(lambda rs: self.s.has('git-row-change:' + name, rs),
+                         'Changes do not list %s without R' % name, seconds=6)
+        # Only this file is committed: staged.txt stays staged for the checks that follow.
+        command = 'cd %s && git add -- %s && git commit -q -m %s -- %s' % (
+            shlex.quote(str(self.repo)), name, shlex.quote(message), name)
+        self.s.tmux('send-keys', '-t', self.window, '-l', command)
+        self.s.tmux('send-keys', '-t', self.window, 'Enter')
+        wait(lambda: self.git('log', '-1', '--format=%s').strip() == message, 'the Pane did not commit', seconds=10)
+        self.s.wait_rows(lambda rs: not self.s.has('git-row-change:' + name, rs),
+                         'the committed file stays in Changes without R', seconds=6)
 
     def test_d_asks_in_the_discard_menu_and_escape_discards_nothing(self):
         # z- puts each new file last in Changes, where select_change's j reaches it.

@@ -166,6 +166,34 @@ final class AppWindowsTests: XCTestCase {
         }
     }
 
+    @MainActor func testSidebarModeSwitchFlipsTheShownModeShowsAHiddenSidebarAndExplainsARemoteAppWindow() throws {
+        try withWindows { windows, _ in
+            let local = windows.store(for: AppWindowRequest())
+            local.sidebarMode = .topics
+            local.sidebarVisible = true
+            XCTAssertNil(local.sidebarModeSwitchRefusal)
+            XCTAssertEqual(local.sidebarModeSwitchTitle, "Switch to Sessions")
+            local.perform(.toggleSidebarMode)
+            XCTAssertEqual(local.shownSidebarMode, .sessions)
+            XCTAssertEqual(local.sidebarModeSwitchTitle, "Switch to Topics")
+            XCTAssertTrue(local.sidebarVisible)
+            local.sidebarVisible = false
+            local.perform(.toggleSidebarMode)
+            XCTAssertEqual(local.shownSidebarMode, .topics)
+            XCTAssertTrue(local.sidebarShown, "the switch shows a hidden Sidebar in the other mode")
+            XCTAssertNil(local.pills.shown)
+
+            let remote = windows.store(for: AppWindowRequest(environmentName: "Home"))
+            XCTAssertEqual(remote.shownSidebarMode, .sessions)
+            XCTAssertNotNil(remote.sidebarModeSwitchRefusal)
+            remote.perform(.toggleSidebarMode)
+            XCTAssertEqual(remote.shownSidebarMode, .sessions)
+            let pill = try XCTUnwrap(remote.pills.shown)
+            XCTAssertEqual(pill.kind, .explanation)
+            XCTAssertEqual(pill.value, remote.sidebarModeSwitchRefusal)
+        }
+    }
+
     @MainActor func testNewAppWindowFromRemoteAlwaysOpensFreshLocalWindows() throws {
         try withWindows { windows, _ in
             let remote = windows.store(for: AppWindowRequest(environmentName: "Home"))
@@ -534,7 +562,7 @@ final class AppWindowsTests: XCTestCase {
     @MainActor private func withWindows(_ body: (AppWindows, String) throws -> Void) throws {
         _ = NSApplication.shared
         let defaults = UserDefaults.standard
-        let keys = ["selectedEnvironment", "sidebarVisible", "sessionsVisible", "agentsVisible", "browserURLs", "browserVisible", "browserWidth"]
+        let keys = ["selectedEnvironment", "sidebarVisible", "sidebarWorkView", "sessionsVisible", "agentsVisible", "browserURLs", "browserVisible", "browserWidth"]
         let saved = keys.map { ($0, defaults.object(forKey: $0)) }
         defer {
             for (key, value) in saved {

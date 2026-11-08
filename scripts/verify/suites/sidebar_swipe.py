@@ -2,12 +2,14 @@
 
 SidebarPager exposes Debug-only accessibility samples while the sandbox's TestDriver runs. They feed
 the real gesture recognizer and release path; no check needs to move the pointer or use the user's tmux server.
+The driver cannot type keys, so the `toggle_sidebar_mode` checks press its View menu item ("Switch to Sessions" /
+"Switch to Topics") without opening the menu, or run its Command from the palette's search field.
 """
 
 import time
 import unittest
 
-from scripts.verify.sandbox import Sandbox
+from scripts.verify.sandbox import Sandbox, wait
 from scripts.verify.topic_records import TopicRecords
 
 
@@ -178,6 +180,71 @@ class SidebarSwipe(unittest.TestCase):
         rs = self.s.wait_rows(lambda rs: self.s.has('topic-swipe', rs) and not self.s.has('sidebar-view-sessions', rs),
                               'the single Topics view kept its mode selector')
         self.assertFalse(self.s.has('sidebar-swipe-input', rs), 'a disabled Sessions view can still be swiped to')
+
+    def press_menu_item(self, title):
+        """The app updates its menu items a moment after a change, so a press can find the item still disabled."""
+        wait(lambda: self.s.driver('press', title)['pressed'], 'the menu item %s stays disabled' % title, seconds=10)
+
+    def test_the_view_menu_item_switches_modes_without_changing_the_window_or_focus(self):
+        before = self.s.tmux('list-clients', '-F', '#{client_tty}|#{window_id}')
+        responder = self.s.driver('responder')['responders']
+        self.press_menu_item('Switch to Sessions')
+        rs = self.wait_mode('sessions')
+        self.assertTrue(self.s.has('session-' + self.session, rs), 'Sessions has no Session card')
+        self.press_menu_item('Switch to Topics')
+        rs = self.wait_mode('topics')
+        self.assertTrue(self.s.has('topic-swipe', rs), 'Topics has no Topic card')
+        self.assertEqual(self.s.tmux('list-clients', '-F', '#{client_tty}|#{window_id}'), before)
+        self.assertEqual(self.s.driver('responder')['responders'], responder)
+
+    def test_the_switch_shows_a_hidden_sidebar_in_the_other_mode(self):
+        def show_sidebar():
+            if not self.s.has('sidebar-view-topics'):
+                self.press_menu_item('Show Sidebar')
+        self.addCleanup(show_sidebar)
+        self.press_menu_item('Hide Sidebar')
+        self.s.wait_rows(lambda rs: not self.s.has('sidebar-view-topics', rs), 'the Sidebar did not hide')
+        self.press_menu_item('Switch to Sessions')
+        rs = self.wait_mode('sessions')
+        self.assertTrue(self.s.has('session-' + self.session, rs), 'the shown Sidebar has no Session card')
+
+    def test_the_switch_command_runs_at_once_from_commands(self):
+        def close_palette():
+            if self.s.has('palette-search'):
+                self.s.act('action', 'palette-search', 'Close')
+        self.addCleanup(close_palette)
+        self.press_menu_item('Commands')
+        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'Commands did not open')
+        self.s.act('focus', 'palette-search')
+        self.s.act('set', 'palette-search', 'Switch to')
+        key = 'palette-row-command-Switch to Sessions'
+        rs = self.s.wait_rows(lambda rs: self.s.has(key, rs), 'Switch to Sessions was missing from Commands')
+        self.assertFalse(self.s.has('palette-row-command-Switch to Topics', rs), 'Topics shows, yet Commands offers Switch to Topics')
+        self.s.act('press', key)
+        self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the Command did not close the palette')
+        self.wait_mode('sessions')
+
+    def test_with_one_mode_off_the_switch_is_not_offered(self):
+        def restore():
+            self.config.write_text('sidebar:\n  agents: false\n')
+            self.s.wait_rows(lambda rs: self.s.has('sidebar-view-topics', rs), 'the two Sidebar views did not return')
+            if self.s.has('palette-search'):
+                self.s.act('action', 'palette-search', 'Close')
+        self.addCleanup(restore)
+        self.config.write_text('sidebar:\n  agents: false\n  sessions: false\n')
+        self.s.wait_rows(lambda rs: self.s.has('topic-swipe', rs) and not self.s.has('sidebar-view-sessions', rs),
+                         'the single Topics view kept its mode selector')
+        time.sleep(1)
+        self.assertFalse(self.s.driver('press', 'Switch to Sessions')['pressed'], 'the View menu item is enabled with Sessions off')
+        self.press_menu_item('Commands')
+        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'Commands did not open')
+        self.s.act('focus', 'palette-search')
+        self.s.act('set', 'palette-search', 'Switch to')
+        time.sleep(1)
+        rs = self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == 'Switch to',
+                              'Commands did not keep the query')
+        self.assertFalse(self.s.has('palette-row-command-Switch to Sessions', rs), 'Commands offers a switch with Sessions off')
+        self.assertFalse(self.s.has('palette-row-command-Switch to Topics', rs), 'Commands offers a switch with Sessions off')
 
     def test_swiping_between_modes_with_different_agents_visibility(self):
         self.addCleanup(self.config.write_text, 'sidebar:\n  agents: false\n')

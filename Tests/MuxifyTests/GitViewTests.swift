@@ -868,6 +868,28 @@ final class GitScriptTests: XCTestCase {
 
     private var repository: String { directory.url.appendingPathComponent("repo").path }
 
+    /// The remote probe reads the same while nothing changes, even a file whose time changed and whose index entry
+    /// `git status` would otherwise rewrite, and reads otherwise after a commit.
+    func testTheRemoteProbeIsStableUntilTheRepositoryChangesAndNeverWritesTheIndex() throws {
+        try run("""
+        cd "$1" && printf 'd\\n' > d.txt && git add d.txt && git commit -q -m d && touch -t 202001010000 d.txt
+        """, repository)
+        func probe() throws -> String? {
+            GitRemoteProbe.value(of: .success(try run(GitRemoteProbe.script, repository)))
+        }
+        let index = { try FileManager.default.attributesOfItem(atPath: self.repository + "/.git/index")[.modificationDate] as? Date }
+        let first = try XCTUnwrap(try probe())
+        XCTAssertTrue(first.contains("refs/heads/master"), first)
+        let indexTime = try index()
+        XCTAssertEqual(try probe(), first, "nothing changed, yet the probe read otherwise")
+        XCTAssertEqual(try index(), indexTime, "the probe wrote the index")
+        try run("cd \"$1\" && git add c.txt && git commit -q -m Second", repository)
+        XCTAssertNotEqual(try probe(), first, "a commit left the probe the same")
+        // A folder in no repository, or one that is gone, reads nothing.
+        XCTAssertNil(GitRemoteProbe.value(of: .success(try run(GitRemoteProbe.script, directory.url.path))))
+        XCTAssertNil(GitRemoteProbe.value(of: .success(try run(GitRemoteProbe.script, directory.url.path + "/gone"))))
+    }
+
     func testThePullRequestLinkScriptPrintsTheUpstreamRemotesUrlAndTheUpstreamBranch() throws {
         try run("""
         cd "$1"
@@ -958,6 +980,22 @@ final class GitScriptTests: XCTestCase {
     func testAFolderOutsideARepositoryIsNotAnError() throws {
         let result = GitRepository.parseSnapshot(try run(GitRepository.snapshotScript, directory.url.path))
         XCTAssertEqual(result, .failure(GitViewError(message: "Not a git repository: \(directory.url.path)")))
+    }
+
+    func testTheHeadReadTellsARepositoryFromAFolderInNone() throws {
+        XCTAssertEqual(GitHeadRead(.success(try run(GitHeadRead.script, repository))), .repository(head: "master"))
+        XCTAssertEqual(GitHeadRead(.success(try run(GitHeadRead.script, directory.url.path))), .notRepository)
+        let gone = directory.url.appendingPathComponent("gone").path
+        XCTAssertEqual(GitHeadRead(.success(try run(GitHeadRead.script, gone))), .unknown,
+                       "a folder that is gone is not known to be outside a repository")
+    }
+
+    func testAHeadReadThatFailedOrPrintedNothingKnowsNothing() {
+        XCTAssertEqual(GitHeadRead(.failure(GitViewError(message: "Not connected to Home."))), .unknown)
+        XCTAssertEqual(GitHeadRead(.success("")), .unknown)
+        XCTAssertEqual(GitHeadRead(.success("Last login: today\n")), .unknown)
+        XCTAssertNil(GitHeadRead.unknown.isRepository)
+        XCTAssertEqual(GitHeadRead(.success("\u{1E}head\n\n")), .repository(head: nil))
     }
 
     private func change(_ path: String, _ groups: String) throws -> GitPatch {
@@ -3656,6 +3694,37 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(gitView.commitSummary, "")
     }
 
+    func testAFailedHeadReadDoesNotMarkAFolderOutsideARepository() {
+        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"))
+        let folder = store.homeDirectory + "/notes"
+        XCTAssertNil(store.isRepository(folder))
+        store.recordHeadRead(.unknown, of: folder)
+        XCTAssertNil(store.isRepository(folder), "a failed or timed-out read leaves the folder unknown")
+        XCTAssertNil(store.gitViewRefusal(in: folder, open: false), "an unknown folder keeps the Git button")
+
+        store.recordHeadRead(.notRepository, of: folder)
+        XCTAssertEqual(store.isRepository(folder), false)
+        XCTAssertEqual(store.gitViewRefusal(in: folder, open: false), "~/notes")
+        XCTAssertNil(store.gitViewRefusal(in: folder, open: true), "an open Git View can still close")
+        store.recordHeadRead(.unknown, of: folder)
+        XCTAssertEqual(store.isRepository(folder), false, "a failed read keeps what the folder showed")
+
+        store.recordHeadRead(.repository(head: "main"), of: folder)
+        XCTAssertEqual(store.isRepository(folder), true)
+        XCTAssertNil(store.gitViewRefusal(in: folder, open: false))
+        store.recordHeadRead(.unknown, of: folder)
+        XCTAssertEqual(store.isRepository(folder), true)
+        XCTAssertNil(store.isRepository(store.homeDirectory), "each folder has its own fact")
+    }
+
+    func testToggleGitViewWithNoWindowOpensNothingAndSaysNothing() {
+        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"))
+        store.toggleGitView()
+        XCTAssertNil(store.currentGitView)
+        XCTAssertNil(store.pills.shown)
+        XCTAssertNil(store.gitViewRefusal)
+    }
+
     func testEachWindowKeepsItsOwnGitView() {
         let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"))
         let first = store.gitView(for: "@1")
@@ -3671,5 +3740,301 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(first.list, .files)
         XCTAssertEqual(first.level.owner?.id, "stash:s1")
         XCTAssertEqual(store.gitView(for: "@2").tab, .changes)
+    }
+}
+
+/// The Git View reads its repository again when its watcher says it changed (ADR "The Git View watches a local
+/// repository and probes a remote one"), driven here through a fake watcher and a fake read.
+@MainActor
+final class GitViewWatchingTests: XCTestCase {
+    private final class FakeWatcher: GitWatcher {
+        private(set) var watched: GitWatchedRepository?
+        /// What the Git View gave it to call, kept after a stop to report late.
+        private(set) var report: (() -> Void)?
+        private(set) var isRunning = false
+
+        func start(_ repository: GitWatchedRepository, changed: @escaping () -> Void) {
+            watched = repository
+            report = changed
+            isRunning = true
+        }
+
+        func stop() {
+            watched = nil
+            isRunning = false
+        }
+
+        func change() { if isRunning { report?() } }
+    }
+
+    private let watcher = FakeWatcher()
+    private var reads = 0
+    /// The read running, ended by calling it.
+    private var finishRead: (() -> Void)?
+    /// Kept, as the store keeps its Git Views: the watcher holds it weakly.
+    private var gitView: GitView?
+
+    private var snapshot: GitSnapshot {
+        var snapshot = GitSnapshot(root: "/repo", repositoryName: "repo", head: "main")
+        snapshot.commonDirectory = "/repo/.git"
+        return snapshot
+    }
+
+    /// A Git View as open and current: watching its repository, with reads counted and held until finished.
+    private func watchingGitView() -> GitView {
+        let gitView = GitView(windowID: "@1")
+        gitView.watcher = watcher
+        gitView.changeTiming = (settle: 0.05, spacing: 0.3)
+        gitView.readAfterChange = { [unowned self] done in
+            reads += 1
+            finishRead = done
+        }
+        gitView.apply(snapshot)
+        gitView.startWatching()
+        self.gitView = gitView
+        return gitView
+    }
+
+    private func spin(_ seconds: TimeInterval) {
+        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    /// Waits for something to happen rather than a fixed time, which a slow machine can overrun.
+    private func spin(until done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(2)
+        while !done(), Date() < deadline { spin(0.01) }
+    }
+
+    func testItWatchesTheTopFolderAndAnOutsideCommonGitDirectory() {
+        XCTAssertEqual(GitWatchedRepository(snapshot).folders, ["/repo"])
+        XCTAssertEqual(GitWatchedRepository(root: "/work/linked", commonDirectory: "/repo/.git").folders,
+                       ["/work/linked", "/repo/.git"])
+        let gitView = watchingGitView()
+        XCTAssertEqual(watcher.watched, GitWatchedRepository(root: "/repo", commonDirectory: "/repo/.git"))
+        // Another repository read is watched instead.
+        var linked = snapshot
+        linked.root = "/work/linked"
+        gitView.apply(linked)
+        XCTAssertEqual(watcher.watched?.root, "/work/linked")
+    }
+
+    func testAChangeReadsOnceAfterTheChangesSettle() {
+        _ = watchingGitView()
+        watcher.change()
+        XCTAssertEqual(reads, 0, "it reads before the changes settle")
+        spin { reads > 0 }
+        XCTAssertEqual(reads, 1)
+        finishRead?()
+        spin(0.5)
+        XCTAssertEqual(reads, 1, "nothing changed again, yet it read again")
+    }
+
+    func testABurstOfChangesReadsOnce() {
+        _ = watchingGitView()
+        // Back to back, so no settle can end inside the burst on a slow machine; each change still restarts it.
+        for _ in 0..<5 { watcher.change() }
+        XCTAssertEqual(reads, 0, "it read before the burst settled")
+        spin { reads > 0 }
+        XCTAssertEqual(reads, 1)
+        finishRead?()
+        spin(0.5)
+        XCTAssertEqual(reads, 1)
+    }
+
+    func testOneReadRunsAtATimeAndChangesDuringItReadOnceAfterTheSpacing() {
+        watchingGitView().changeTiming = (settle: 0.05, spacing: 0.8)
+        watcher.change()
+        spin { reads > 0 }
+        XCTAssertEqual(reads, 1)
+        watcher.change()
+        watcher.change()
+        spin(0.2)
+        XCTAssertEqual(reads, 1, "a second read started while the first ran")
+        finishRead?()
+        spin(0.05)
+        XCTAssertEqual(reads, 1, "the next read started before the spacing since the last")
+        spin { reads > 1 }
+        XCTAssertEqual(reads, 2, "the changes during the read were not read after it")
+        finishRead?()
+        spin(0.4)
+        XCTAssertEqual(reads, 2)
+    }
+
+    func testTheFileWatcherReportsAFileWrittenInTheRepositoryUntilStopped() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-watch-" + UUID().uuidString)
+            .resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let fileWatcher = GitFileWatcher()
+        var changes = 0
+        fileWatcher.start(GitWatchedRepository(root: folder.path, commonDirectory: folder.path + "/.git")) { changes += 1 }
+        try "one\n".write(to: folder.appendingPathComponent("a.txt"), atomically: false, encoding: .utf8)
+        let deadline = Date().addingTimeInterval(5)
+        while changes == 0, Date() < deadline { spin(0.05) }
+        XCTAssertGreaterThan(changes, 0, "FSEvents reported no change")
+        fileWatcher.stop()
+        spin(0.2)
+        let seen = changes
+        try "two\n".write(to: folder.appendingPathComponent("b.txt"), atomically: false, encoding: .utf8)
+        spin(0.5)
+        XCTAssertEqual(changes, seen, "a stopped watcher reported a change")
+    }
+
+    func testASuspendedOrClosedGitViewWatchesNothingAndIgnoresChanges() {
+        let gitView = watchingGitView()
+        let report = try? XCTUnwrap(watcher.report)
+        watcher.change()
+        gitView.suspend()
+        XCTAssertFalse(watcher.isRunning, "a suspended Git View still watches")
+        // A report that comes late, after the stop, reads nothing either.
+        report?()
+        spin(0.2)
+        XCTAssertEqual(reads, 0, "a change read after the suspend")
+        // Resumed, it watches again; stopped, as on close, it ignores changes again.
+        gitView.startWatching()
+        XCTAssertTrue(watcher.isRunning)
+        gitView.stopWatching()
+        XCTAssertFalse(watcher.isRunning)
+        report?()
+        spin(0.2)
+        XCTAssertEqual(reads, 0)
+        // A Git View that never opened watches nothing.
+        let other = FakeWatcher()
+        let closed = GitView(windowID: "@2")
+        closed.watcher = other
+        closed.apply(snapshot)
+        XCTAssertFalse(other.isRunning, "a Git View that never opened watches")
+    }
+}
+
+/// The Remote Environment's probe, driven by fake script output.
+@MainActor
+final class GitRemoteProbeTests: XCTestCase {
+    private struct Failed: Error {}
+
+    /// The probes run, each waiting to be answered.
+    private var calls: [(script: String, arguments: [String], completion: (Result<String, Error>) -> Void)] = []
+    private var changes = 0
+    private var reads = 0
+    private var gitView: GitView?
+
+    private func makeProbe(interval: TimeInterval = 60) -> GitRemoteProbe {
+        GitRemoteProbe(interval: interval) { [unowned self] script, arguments, completion in
+            calls.append((script, arguments, completion))
+        }
+    }
+
+    private func answer(_ output: String) { calls.removeFirst().completion(.success("\u{1E}probe\n" + output)) }
+    private func fail() { calls.removeFirst().completion(.failure(Failed())) }
+    private let repository = GitWatchedRepository(root: "/repo", commonDirectory: "/repo/.git")
+
+    private func spin(_ seconds: TimeInterval) {
+        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+    }
+
+    /// Waits for something to happen rather than a fixed time, which a slow machine can overrun.
+    private func spin(until done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(2)
+        while !done(), Date() < deadline { spin(0.01) }
+    }
+
+    func testUnchangedValuesReportNothingAndAChangedOneReports() {
+        let probe = makeProbe()
+        probe.start(repository) { self.changes += 1 }
+        XCTAssertEqual(calls.count, 1, "it does not probe at once")
+        XCTAssertEqual(calls.first?.script, GitRemoteProbe.script)
+        XCTAssertEqual(calls.first?.arguments, ["/repo"])
+        answer("abc\nrefs/heads/main\n1.0\n42 10\n")
+        XCTAssertEqual(changes, 0, "the first probe only sets what the next ones are compared with")
+        probe.probe()
+        answer("abc\nrefs/heads/main\n1.0\n42 10\n")
+        XCTAssertEqual(changes, 0, "nothing changed, yet it reported a change")
+        // Each of HEAD, the index's time and the status hash is a change.
+        for changed in ["def\nrefs/heads/main\n1.0\n42 10\n", "def\nrefs/heads/main\n2.0\n42 10\n",
+                        "def\nrefs/heads/main\n2.0\n7 0\n"] {
+            let before = changes
+            probe.probe()
+            answer(changed)
+            XCTAssertEqual(changes, before + 1, changed)
+        }
+        probe.stop()
+    }
+
+    func testAFailedProbeReportsNothingAndTheNextComparesWithTheLastRead() {
+        let probe = makeProbe()
+        probe.start(repository) { self.changes += 1 }
+        answer("a\n")
+        probe.probe()
+        fail()
+        probe.probe()
+        calls.removeFirst().completion(.success(""))
+        XCTAssertEqual(changes, 0, "a failed probe reported a change")
+        probe.probe()
+        answer("a\n")
+        XCTAssertEqual(changes, 0)
+        // Changed while the connection was down: the next probe that reads reports it.
+        probe.probe()
+        fail()
+        probe.probe()
+        answer("b\n")
+        XCTAssertEqual(changes, 1)
+        probe.stop()
+    }
+
+    func testOneProbeRunsAtATimeAndAStoppedProbeReportsNothing() {
+        let probe = makeProbe()
+        probe.start(repository) { self.changes += 1 }
+        probe.probe()
+        XCTAssertEqual(calls.count, 1, "a probe started while one ran")
+        answer("a\n")
+        probe.probe()
+        probe.stop()
+        answer("b\n")
+        XCTAssertEqual(changes, 0, "a probe that ended after the stop reported a change")
+        probe.probe()
+        XCTAssertTrue(calls.isEmpty, "a stopped probe probed")
+    }
+
+    func testItProbesOnTheIntervalUntilStopped() {
+        let probe = makeProbe(interval: 0.05)
+        probe.start(repository) { self.changes += 1 }
+        answer("a\n")
+        spin { !calls.isEmpty }
+        XCTAssertEqual(calls.count, 1, "it did not probe on the interval")
+        answer("b\n")
+        XCTAssertEqual(changes, 1)
+        probe.stop()
+        spin(0.2)
+        XCTAssertTrue(calls.isEmpty, "a stopped probe kept probing")
+    }
+
+    func testAnOpenGitViewReadsWhenTheProbeSeesAChangeAndASuspendedOneProbesNothing() {
+        let gitView = GitView(windowID: "@1")
+        self.gitView = gitView
+        let probe = makeProbe()
+        gitView.watcher = probe
+        gitView.changeTiming = (settle: 0.01, spacing: 0.01)
+        gitView.readAfterChange = { [unowned self] done in
+            reads += 1
+            done()
+        }
+        // Closed, it probes nothing.
+        var snapshot = GitSnapshot(root: "/repo", repositoryName: "repo", head: "main")
+        snapshot.commonDirectory = "/repo/.git"
+        gitView.apply(snapshot)
+        XCTAssertTrue(calls.isEmpty, "a Git View that never opened probes")
+        gitView.startWatching()
+        answer("a\n")
+        probe.probe()
+        answer("a\n")
+        spin(0.1)
+        XCTAssertEqual(reads, 0, "an unchanged probe started a read")
+        probe.probe()
+        answer("b\n")
+        spin { reads > 0 }
+        XCTAssertEqual(reads, 1, "a changed probe started no read")
+        gitView.suspend()
+        probe.probe()
+        XCTAssertTrue(calls.isEmpty, "a suspended Git View probes")
     }
 }

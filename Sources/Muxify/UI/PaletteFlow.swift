@@ -119,6 +119,8 @@ enum PaletteFlow {
     case newWorktree
     /// Remove Worktree: the Muxify Worktree it removes. A confirm step comes next.
     case removeWorktree(RemoveWorktreeDraft)
+    /// Start a Session…: the folder of the first Session, when the server has none of the user's.
+    case startSession
     /// Check cards of the Topics list, then go on with them.
     case check(CheckDraft)
     /// Choose In Play: the card for one In Play place.
@@ -144,6 +146,7 @@ enum PaletteFlow {
         case .worktreeStart: "Branch, or a ref to start at"
         case .newWorktree: "Repository or Worktree to start from"
         case .removeWorktree: "Muxify Worktree"
+        case .startSession: "Folder to start a Session in"
         case .text(.worktreeName): "Worktree name"
         case .text(.renameWindow): "Window name"
         case .text(.renameSession): "Session name"
@@ -198,6 +201,7 @@ extension CommandPalette {
             }
         case .newWorktree: return "New Worktree"
         case .removeWorktree: return "Remove Worktree"
+        case .startSession: return "Start a Session"
         case .text(.worktreeName(let choice)): return "New Worktree › \(choice.displayName)"
         case .check(let draft): return "\(draft.action.title) › Check"
         case .order(let draft): return "Choose In Play › Place \(draft.place)"
@@ -254,6 +258,7 @@ extension CommandPalette {
             }
         case .newWorktree: return "Its project's .worktree.json copies files in, and postCreate runs in its new Session."
         case .text(.worktreeName): return "It names the branch, the folder and the Session."
+        case .startSession: return "tmux has no Session. ↩ starts one in No Topic, named after its folder."
         case .removeWorktree(let draft):
             switch draft.rows {
             case .loading: return "Reading the Muxify Worktrees…"
@@ -364,6 +369,7 @@ extension CommandPalette {
         case .worktreeStart(let draft): return worktreeStartRows(draft, rules: store.config.rules(for: .worktreeStart))
         case .newWorktree: return newWorktreeRows(query: query, rules: store.config.rules(for: .newWorktree))
         case .removeWorktree(let draft): return removeWorktreeRows(draft, query: query, rules: store.config.rules(for: .removeWorktree))
+        case .startSession: return catalog?.startSessionList(query: query, rules: store.config.rules(for: .startSession)) ?? .empty
         case .text(.tags(let field)): return tagRows(field, rules: store.config.rules(for: .tags))
         case .text(.forgetSettledDays): return FuzzyRanker.fixed([forgetSettledRow()])
         case .text: return .empty

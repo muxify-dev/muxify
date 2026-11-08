@@ -165,8 +165,25 @@ final class ConfigTests: XCTestCase {
         for (action, spellings) in expected {
             XCTAssertEqual(config.keybinds.triggers[action] ?? [], spellings.map(trigger), action.rawValue)
         }
-        XCTAssertNil(config.keybinds.action(for: trigger("alt+cmd+t"), focus: nil), "the old Maximize Terminal default is still bound")
+        XCTAssertEqual(config.keybinds.action(for: trigger("alt+cmd+t"), focus: nil), .toggleSidebarMode,
+                       "the old Maximize Terminal default now switches the Sidebar mode")
         XCTAssertEqual(config.problems, [])
+    }
+
+    func testSidebarModeSwitchDefaultsToOptionCommandTAndCanBeRemappedOrDisabled() throws {
+        let defaults = try load("")
+        XCTAssertEqual(defaults.keybinds.firstTrigger(for: .toggleSidebarMode), trigger("alt+cmd+t"))
+        XCTAssertEqual(defaults.keybinds.action(for: trigger("alt+cmd+t"), focus: .terminal), .toggleSidebarMode)
+        XCTAssertEqual(defaults.keybinds.action(for: trigger("alt+cmd+t"), focus: .browser), .toggleSidebarMode)
+        XCTAssertTrue(Config.template.contains("#   toggle_sidebar_mode: alt+cmd+t"))
+        let remapped = try load("keybindings:\n  toggle_sidebar_mode: [ctrl+cmd+t, shift+cmd+y]")
+        XCTAssertEqual(remapped.keybinds.firstTrigger(for: .toggleSidebarMode), trigger("ctrl+cmd+t"))
+        XCTAssertEqual(remapped.keybinds.action(for: trigger("shift+cmd+y"), focus: nil), .toggleSidebarMode)
+        XCTAssertNil(remapped.keybinds.action(for: trigger("alt+cmd+t"), focus: nil))
+        XCTAssertEqual(remapped.problems, [])
+        let disabled = try load("keybindings:\n  toggle_sidebar_mode: []")
+        XCTAssertNil(disabled.keybinds.firstTrigger(for: .toggleSidebarMode))
+        XCTAssertNil(disabled.keybinds.action(for: trigger("alt+cmd+t"), focus: nil))
     }
 
     func testSettleCanBeBoundAndClearedAndTheRemovedActionsAreUnknown() throws {
@@ -293,6 +310,22 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(config.sidebar.windowTooltips, .always, value)
             XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 2,
                 message: "sidebar.window_tooltips: expected off, truncated or always")], value)
+        }
+    }
+
+    func testSessionCardsDefaultToAnyAndAcceptOne() throws {
+        XCTAssertEqual(try load("").sidebar.sessionCards, .any)
+        XCTAssertTrue(Config.template.contains("#   session_cards: any"))
+        for (value, expected) in [("one", Config.Sidebar.SessionCards.one), ("any", .any), ("'one'", .one)] {
+            let config = try load("sidebar:\n  session_cards: \(value)")
+            XCTAssertEqual(config.sidebar.sessionCards, expected, value)
+            XCTAssertTrue(config.problems.isEmpty, "\(value): \(config.problems)")
+        }
+        for value in ["all", "true", "null", "1", "[]", "{}"] {
+            let config = try load("sidebar:\n  session_cards: \(value)")
+            XCTAssertEqual(config.sidebar.sessionCards, .any, value)
+            XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 2,
+                message: "sidebar.session_cards: expected one or any")], value)
         }
     }
 
@@ -1307,6 +1340,18 @@ final class ConfigTests: XCTestCase {
             let bad = try load("topics:\n  forget_settled_older_than: " + value)
             XCTAssertEqual(bad.topics.forgetSettledOlderThan, 14, value)
             XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "topics.forget_settled_older_than: expected a whole number of 1 or more")], value)
+        }
+    }
+
+    func testTopicsReopenAtLaunchTakesABooleanAndIsFalseWhenAbsentOrWrong() throws {
+        XCTAssertFalse(try load("").topics.reopenAtLaunch)
+        XCTAssertTrue(try load("topics:\n  reopen_at_launch: true").topics.reopenAtLaunch)
+        XCTAssertFalse(try load("topics:\n  reopen_at_launch: false").topics.reopenAtLaunch)
+        XCTAssertTrue(Config.template.contains("#   reopen_at_launch: false"))
+        for value in ["yes please", "1", "\"true\"", "[true]"] {
+            let bad = try load("topics:\n  reopen_at_launch: " + value)
+            XCTAssertFalse(bad.topics.reopenAtLaunch, value)
+            XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "topics.reopen_at_launch: expected a boolean")], value)
         }
     }
 

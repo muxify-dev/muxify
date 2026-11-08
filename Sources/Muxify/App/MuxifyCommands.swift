@@ -29,6 +29,9 @@ import MuxifyCore
             Button(store?.sidebarShown == true ? "Hide Sidebar" : "Show Sidebar") { store?.toggleSidebar() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .toggleSidebar)?.shortcut)
                 .disabled(store == nil)
+            Button(store?.sidebarModeSwitchTitle ?? "Switch to Sessions") { store?.toggleSidebarMode() }
+                .keyboardShortcut(keybinds.firstTrigger(for: .toggleSidebarMode)?.shortcut)
+                .disabled(store.map { $0.sidebarModeSwitchRefusal != nil } ?? true)
             Toggle("Show Sessions", isOn: Binding(get: { store?.sessionsVisible ?? true }, set: { store?.sessionsVisible = $0 }))
                 .disabled(store == nil)
             Toggle("Show Agents", isOn: Binding(get: { store?.agentsVisible ?? true }, set: { store?.agentsVisible = $0 }))
@@ -40,7 +43,7 @@ import MuxifyCore
                 .disabled(store?.topics.isBenchShown == nil)
             Button(store?.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View") { store?.toggleGitView() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .toggleGitView)?.shortcut)
-                .disabled(store?.selectedWindow == nil)
+                .disabled(store.map { $0.selectedWindow == nil || $0.gitViewRefusal != nil } ?? true)
             Divider()
             // The Command Palettes; their keybindings act in the key monitor.
             ForEach(config.commandPalettes) { palette in

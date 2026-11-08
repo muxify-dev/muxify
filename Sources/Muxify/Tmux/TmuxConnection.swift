@@ -206,8 +206,9 @@ final class TmuxConnection: @unchecked Sendable {
 
     var closedSnapshot: TmuxSnapshot? { remote?.closedSnapshot.map(stamped) }
 
-    func terminalCommand(_ args: [String], target: String? = nil, createSessionIfNeeded: Bool = true) throws -> String {
-        if let remote { return remote.terminalCommand(target: target, createSessionIfNeeded: createSessionIfNeeded) }
+    func terminalCommand(_ args: [String], target: String? = nil, picksLatestSession: Bool = true,
+                         newSession: RemoteSSH.NewSession? = nil) throws -> String {
+        if let remote { return remote.terminalCommand(target: target, picksLatestSession: picksLatestSession, newSession: newSession) }
         return try invocation(args).commandLine
     }
 

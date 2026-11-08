@@ -53,7 +53,7 @@ _Avoid_: terminal search, scrollback search, Find (alone)
 
 **Topic**:
 One thing the user wants to get done, such as "Fix reward drop bug in GS". It groups Sessions without a per-repository or per-folder limit, and it is open or Settled.
-_Avoid_: task, project, workspace, thread
+_Avoid_: task, project, workspace, thread, active Topics (when you mean the open Topics; the Active Topic is the one an App Window shows)
 
 **Topic slug**:
 A Topic's short name used as the suffix of its Sessions' names. It follows Topic renames and stays reserved while the Topic's record exists, including while Settled.
@@ -105,7 +105,7 @@ _Avoid_: close, archive, resolve, complete
 
 **Reopen**:
 To bring a Settled or Dormant Topic back and create its remembered Sessions again, with their Windows, Panes, Tabs and Agents.
-_Avoid_: restore, unsettle, resume
+_Avoid_: restore (also for bringing back every Topic after a restart, which is Reopen done by Muxify at launch; it never Reopens a Settled Topic), unsettle, resume
 
 **Remembered Session**:
 A Topic's saved Session identity, name, launch directory and restoration details, retained so it can be Reopened. Several Remembered Sessions can have the same launch directory.
@@ -113,7 +113,7 @@ _Avoid_: Session Path, Home Session, Home Session Path
 
 **Start Fresh**:
 To bring a Dormant or Settled Topic back with one new Session for each Session it remembers, each with one shell Window. Its remembered Windows, Tabs and Agents are not created again.
-_Avoid_: start anew, reset, new Topic
+_Avoid_: start anew, reset, new Topic, fresh start (when tmux has no Session of the user's, the user chooses where to start)
 
 **Forget**:
 To remove a Topic for good, at any time, so that it can never be Reopened. Its live Sessions are killed or kept with no Topic, as in Settle, and the clean Worktrees it made can be removed with it.
@@ -124,7 +124,7 @@ A Command that Forgets, in one step, every Settled Topic that was Settled more t
 _Avoid_: prune, clean up, auto-forget
 
 **Dormant**:
-An open Topic that has no live Sessions but remembers Sessions, for example after a tmux restart. It stays Dormant in the Sidebar until the user goes to it, which Reopens it, or Settles it.
+An open Topic that has no live Sessions but remembers Sessions, for example after a tmux restart. It stays Dormant in the Sidebar until the user goes to it, which Reopens it, or Settles it. With `topics.reopen_at_launch`, Muxify Reopens every Dormant Topic by itself when it launches.
 _Avoid_: inactive, sleeping, suspended
 
 **Empty**:
@@ -300,7 +300,7 @@ _Avoid_: pending selection, navigation, transition
 
 **Sidebar**:
 The panel on the left of the Muxify window that lists Sessions, Windows and Agents. The Git View's left pane is its List pane, never a sidebar.
-_Avoid_: left sidebar, left panel
+_Avoid_: left sidebar, left panel, collapse other sessions (the Config key `sidebar.session_cards: one` makes a Session card, like a Topic card, the only open one when the Location moves to its Session), toggle Topics/Sessions (say Switch to Topics / Switch to Sessions; Show Sessions stays the View menu's toggle for the Sessions section)
 
 **Focus**:
 Where keyboard input goes in an App Window: the Terminal, the Browser, the Git View or a Command Palette. One of them has Focus at a time, and a keybind for one of them acts only while it has Focus.
@@ -371,7 +371,7 @@ _Avoid_: pick step, chips, mark, multi-select, selection
 ### Git
 
 **Git View**:
-A view of the repository in its Window's folder: its Changes, history, branches and stashes in Git View tabs, with the selected one's diff. From it, the user stages, discards and commits Changes, or lines of them, and runs lazygit's git operations on branches, commits and stashes, such as push, checkout, merge and cherry-pick. A branch goes into its commits, and a selected commit or stash shows its Diff files under them. It opens as a popup over the App Window or in the terminal's place. Each Window has its own, which shows only while that Window is the Location and is kept as it was left meanwhile. An Empty Topic page has none.
+A view of the repository in its Window's folder: its Changes, history, branches and stashes in Git View tabs, with the selected one's diff. From it, the user stages, discards and commits Changes, or lines of them, and runs lazygit's git operations on branches, commits and stashes, such as push, checkout, merge and cherry-pick. A branch goes into its commits, and a selected commit or stash shows its Diff files under them. It opens as a popup over the App Window or in the terminal's place. Each Window has its own, which shows only while that Window is the Location and is kept as it was left meanwhile. It reads the repository again by itself when the repository changes. It does not open in a Window whose folder is in no repository, nor on an Empty Topic page; one already open stays on its folder when the Pane moves out of the repository.
 _Avoid_: lazygit (when you mean ours), git panel, diff viewer
 
 **Git View tab**:

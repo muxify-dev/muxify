@@ -180,7 +180,6 @@ private struct HeaderBar: View {
                 HeaderGitButton(store: store, window: window,
                                 help: help(store.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View", .toggleGitView))
                     .id("\(window.sourceID):\(window.path)")
-                    .padding(.trailing, 8)
                     // Before the Window list and the Session name give way, the branch keeps its whole width up to
                     // its maximum; it is cut only when the header has no other room left.
                     .layoutPriority(2)
@@ -481,8 +480,10 @@ private struct TerminalArea: View {
             } else if store.hasNoSessions {
                 Text(store.serverRunning ? "No tmux Sessions" : "tmux server is not running")
                     .foregroundStyle(.secondary)
-                Button("Reconnect") { store.reattach() }
+                // Muxify starts no Session by itself: the user chooses the folder of the first one.
+                Button("Start a Session…") { store.presentStartSession() }
                     .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("no-sessions-start-session")
             } else if store.isRemote, !store.isConnected {
                 Text(store.environmentStatus).foregroundStyle(.secondary)
                 ProgressView().controlSize(.small)

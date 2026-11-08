@@ -70,7 +70,8 @@ final class WorkspaceStore {
             }
             return
         }
-        guard let connection else { return }
+        // A closed remote master cannot run the look; the last saved one shows.
+        guard let connection, surface != nil else { return }
         let current = generation
         connection.runScriptAsync(SessionPathDiscovery.script, arguments: arguments) { [weak self] result in
             guard let self, self.generation == current else { return }
@@ -130,7 +131,7 @@ final class WorkspaceStore {
         }
     }
     private var topicEditGeneration = 0
-    @ObservationIgnored private var topicRequests: [EnvironmentRequest] = []
+    @ObservationIgnored private var topicRequests: [(EnvironmentRequest, TopicPresentation)] = []
 
     /// Move for the selected Window's Session, in the Command Palette's view. Nothing happens with Topics off.
     func presentMoveSession(keepingHistory: Bool = false) {
@@ -188,6 +189,11 @@ final class WorkspaceStore {
     /// Starts a No Topic Session at `directory` and shows it. The service names it under the edit lock, so a name that
     /// a Session has gets +2. A second press before the snapshot shows the Session does nothing.
     private func startSession(in directory: Folder, named name: String) {
+        // A Remote Environment with no Session has no connection to run the request on: a new one starts the Session.
+        if isRemote, surface == nil {
+            transition(to: activeEnvironment, newSession: RemoteSSH.NewSession(name: name, folder: directory.path))
+            return
+        }
         pendingOpenings[directory] = (name, Date().addingTimeInterval(5))
         perform(EnvironmentRequest(.newSession(sessionPath: directory.path, name: name)), presenting: .newSession(directory))
     }
@@ -514,6 +520,20 @@ final class WorkspaceStore {
         refreshSessionPaths()
     }
 
+    /// Start a Session…: the folders where the first Session can start, when the server has no Session of the user's.
+    /// Muxify starts none by itself; a row starts a No Topic Session there, as Open as Session does.
+    func presentStartSession(keepingHistory: Bool = false) {
+        guard !changingTopic else { return }
+        palette.begin(.startSession, keepingHistory: keepingHistory)
+        refreshSessionPaths()
+    }
+
+    /// Start a Session… that Muxify offers by itself, on finding no Session: it never replaces a palette already open,
+    /// and it waits while Topics Reopen at launch, which make Sessions.
+    private func offerStartSession() {
+        if !palette.isOpen, launchReopens.isEmpty { presentStartSession() }
+    }
+
     func renameTopic(_ id: String, to title: String) {
         perform(EnvironmentRequest(.rename(title: title), target: .topic(.id(id))))
     }
@@ -685,14 +705,31 @@ final class WorkspaceStore {
         }
     }
 
-    private func enqueueTopicRequest(_ request: EnvironmentRequest) {
-        topicRequests.append(request)
+    private func enqueueTopicRequest(_ request: EnvironmentRequest, presenting presentation: TopicPresentation = .edit) {
+        topicRequests.append((request, presentation))
         drainTopicRequests()
     }
 
     private func drainTopicRequests() {
         guard !changingTopic, !topicRequests.isEmpty else { return }
-        perform(topicRequests.removeFirst(), onLocalServer: true)
+        let (request, presentation) = topicRequests.removeFirst()
+        perform(request, presenting: presentation, onLocalServer: true)
+    }
+
+    /// The process's one answer per Environment, shared by every App Window.
+    private static var reopenAtLaunch = ReopenAtLaunch()
+    /// The Topics that Reopen at launch has asked for and that have not finished.
+    @ObservationIgnored private var launchReopens: Set<String> = []
+
+    /// `topics.reopen_at_launch`: the first snapshot of this launch Reopens every Dormant open Topic, one after another
+    /// through the Topic request path, as going to each would, without moving the Location. A Remote Environment has
+    /// no Topics: they stay on this Mac (ADR 0062).
+    private func reopenDormantTopicsAtLaunch() {
+        guard !isRemote else { return }
+        let ids = Self.reopenAtLaunch.topics(in: environmentName, enabled: topicConfig.reopenAtLaunch,
+                                             records: topicWatcher.records, windows: windows)
+        launchReopens.formUnion(ids)
+        for id in ids { enqueueTopicRequest(EnvironmentRequest(.reopen, target: .topic(.id(id))), presenting: .reopenedAtLaunch(id)) }
     }
 
     /// How the app shows a finished Topic request.
@@ -710,6 +747,8 @@ final class WorkspaceStore {
         case goTo(TopicGroupID)
         /// Forget Settled Older Than… answers with the Topics it forgot, and the palette closes.
         case forgetSettled
+        /// Reopen at launch: the Location stays. Once the last one finishes, the App Window attaches as at any launch.
+        case reopenedAtLaunch(String)
     }
 
     /// The one path for every Topic edit that the user asks for in the app. The app's unsaved memory goes to disk and to tmux first,
@@ -727,7 +766,9 @@ final class WorkspaceStore {
         let remote = isRemote && !onLocalServer
         // A Remote Environment's client is on the remote server; the local terminal's tty names nothing there, and
         // no client of the Local server shows this App Window.
-        let client = remote ? clientTTY : isRemote ? nil : clientTTY ?? surface?.ttyName
+        var client = remote ? clientTTY : isRemote ? nil : clientTTY ?? surface?.ttyName
+        // Reopen at launch leaves the Location where it is, so no client switches to the Topic.
+        if case .reopenedAtLaunch = presentation { client = nil }
         guard let service = remote ? remoteService() : topicService() else { changingTopic = false; return false }
         let environment = generation
         let invocation = palette.invocation
@@ -741,6 +782,7 @@ final class WorkspaceStore {
             guard let self else { return }
             await self.topicWatcher.reloaded()
             guard self.generation == environment else {
+                if case .reopenedAtLaunch(let id) = presentation { self.launchReopens.remove(id) }
                 self.changingTopic = false
                 self.refresh(attachIfNeeded: true)
                 return
@@ -770,6 +812,11 @@ final class WorkspaceStore {
     }
 
     private func present(_ response: EnvironmentResponse, as presentation: TopicPresentation, invocation: UUID) {
+        var reopenedLast = false
+        if case .reopenedAtLaunch(let id) = presentation {
+            launchReopens.remove(id)
+            reopenedLast = launchReopens.isEmpty
+        }
         changingTopic = false
         let ownsPalette = palette.invocation == invocation
         switch response {
@@ -809,7 +856,7 @@ final class WorkspaceStore {
             case .goTo(let card):
                 if ownsPalette { palette.close() }
                 goToTopic(card)
-            case .forgetSettled:
+            case .forgetSettled, .reopenedAtLaunch:
                 break
             case .edit, .newTopic, .newSession:
                 if ownsPalette { palette.close() }
@@ -836,7 +883,8 @@ final class WorkspaceStore {
         // stopped: an attach there would start the server with a new Session.
         var changed = false
         if case .changed = response { changed = true }
-        refresh(attachIfNeeded: changed && surface == nil)
+        // After the last Reopen at launch, an App Window with no Session offers Start a Session… as it would have.
+        refresh(attachIfNeeded: (changed || reopenedLast) && surface == nil)
     }
 
     /// Writes the remembered Sessions that wait for their write delay, after the writes that already run.
@@ -1149,7 +1197,9 @@ final class WorkspaceStore {
     @ObservationIgnored private var attachmentTarget: Target?
     @ObservationIgnored private var attachmentReadsOnArrival = false
     @ObservationIgnored private var pendingAttachment: Router.IntentID?
-    @ObservationIgnored private var createSessionIfNeeded = true
+    @ObservationIgnored private var picksLatestSession = true
+    /// Start a Session… on a Remote Environment with no Session: the connection starts it. Used by one attachment.
+    @ObservationIgnored private var startingSession: RemoteSSH.NewSession?
     @ObservationIgnored private var serverID: String?
     @ObservationIgnored private(set) var homeDirectory = NSHomeDirectory()
     /// Where the Remote Environment's Config is, or would be.
@@ -1236,8 +1286,8 @@ final class WorkspaceStore {
 
     /// Reconnect after transport/config changes. Environment clicks instead
     /// open or focus another App Window through the app coordinator.
-    private func transition(to next: RemoteEnvironment?, target: Target? = nil, createSessionIfNeeded: Bool = true,
-                            readsOnArrival: Bool = false) {
+    private func transition(to next: RemoteEnvironment?, target: Target? = nil, picksLatestSession: Bool = true,
+                            newSession: RemoteSSH.NewSession? = nil, readsOnArrival: Bool = false) {
         guard !isShuttingDown else { return }
         receiveHintInput(.reset)
         if next != activeEnvironment {
@@ -1248,7 +1298,8 @@ final class WorkspaceStore {
         activeEnvironment = next
         attachmentTarget = target
         attachmentReadsOnArrival = readsOnArrival
-        self.createSessionIfNeeded = createSessionIfNeeded
+        self.picksLatestSession = picksLatestSession
+        startingSession = newSession
         generation = UUID()
         attachmentStatusID = UUID()
         attachmentStatus = nil
@@ -1319,6 +1370,7 @@ final class WorkspaceStore {
         browsers.values.forEach { $0.tearDown() }
         browsers.removeAll()
         removeGitViews()
+        repositoryFacts.removeAll()
         consumingOpen.removeAll()
         agentStatuses.removeAll()
         readVisits = AgentReadVisits()
@@ -1439,7 +1491,8 @@ final class WorkspaceStore {
                         self.clientTTY = snapshot.ownClientTTY
                         self.homeDirectory = snapshot.homeDirectory ?? self.homeDirectory
                         self.isConnected = true
-                        if connecting { self.loadRemoteConfig() }
+                        // The SessionPaths are looked for too, so Start a Session… lists them once no Session is left.
+                        if connecting { self.loadRemoteConfig { [weak self] in self?.refreshSessionPaths() } }
                         self.environmentStatus = "Connected to \(self.environmentName)"
                         self.reconnectAttempt = 0
                         self.terminalMessage = nil
@@ -1494,6 +1547,7 @@ final class WorkspaceStore {
             now < opening.deadline && !snapshot.windows.contains { $0.sessionName == opening.name }
         }
         hasNoSessions = snapshot.windows.isEmpty
+        reopenDormantTopicsAtLaunch()
         let agents = Agent.list(panes: snapshot.panes, windows: snapshot.windows, ordered: false)
         if self.agents != agents { self.agents = agents }
         if panes != snapshot.panes { panes = snapshot.panes }
@@ -1598,11 +1652,18 @@ final class WorkspaceStore {
         }
     }
 
-    /// Starts our tmux client on `target`, or a fresh session if there is none.
-    private func attach(to target: Target?, intent: Router.IntentID, createSessionIfNeeded: Bool = true) {
-        let args = target.map { ["-u", "attach-session", "-t", $0.tmuxTarget] }
-            ?? ["-u", "new-session", "-A", "-s", "main", "-c", NSHomeDirectory()]
-        guard let connection, let command = try? connection.terminalCommand(args, target: target?.tmuxTarget, createSessionIfNeeded: createSessionIfNeeded),
+    /// Starts our tmux client on `target`. With none on this Mac, the user chooses where the first Session starts; a
+    /// Remote Environment's connection reports a server with no Session and makes none, unless Start a Session… chose one.
+    private func attach(to target: Target?, intent: Router.IntentID, picksLatestSession: Bool = true) {
+        guard let args = target.map({ ["-u", "attach-session", "-t", $0.tmuxTarget] }) ?? (isRemote ? [] : nil) else {
+            route(.commandFinished(intent, .failure, lastStartedRead: lastStartedRead))
+            offerStartSession()
+            return
+        }
+        let newSession = startingSession
+        startingSession = nil
+        guard let connection, let command = try? connection.terminalCommand(args, target: target?.tmuxTarget, picksLatestSession: picksLatestSession,
+                                                                            newSession: newSession),
               let view = TerminalSurfaceView(command: command, workingDirectory: isRemote ? nil : target?.path, delegate: self)
         else {
             terminalMessage = Self.terminalStartFailure
@@ -1632,8 +1693,11 @@ final class WorkspaceStore {
 
     func reattach() {
         if isRemote { reconnectAttempt = 0; transition(to: activeEnvironment); return }
-        let target = (selectedWindow ?? Self.initialWindow(in: windows)).map(Target.init)
-        route(.attach(target.flatMap { WindowID(rawValue: $0.windowID) }), target: target)
+        guard let target = (selectedWindow ?? Self.initialWindow(in: windows)).map(Target.init) else {
+            presentStartSession()
+            return
+        }
+        route(.attach(WindowID(rawValue: target.windowID)), target: target)
     }
 
     func select(_ window: TmuxWindow, onFailure: ((Error) -> Void)? = nil) {
@@ -1859,6 +1923,8 @@ final class WorkspaceStore {
                 readVisits.enter(windowID: id.rawValue)
             case .requestTopic(let group):
                 goToTopic(group)
+            case .chooseWhereToStart:
+                offerStartSession()
             case .switchClient(let id, let intent):
                 if let destination = windows.first(where: { $0.id == id.rawValue }).map(Target.init)
                     ?? target.flatMap({ $0.windowID == id.rawValue ? $0 : nil }) {
@@ -1876,10 +1942,10 @@ final class WorkspaceStore {
                     } else {
                         readsOnArrival = false
                     }
-                    transition(to: activeEnvironment, target: destination, createSessionIfNeeded: false,
+                    transition(to: activeEnvironment, target: destination, picksLatestSession: false,
                                readsOnArrival: readsOnArrival)
                 } else {
-                    attach(to: destination, intent: intent, createSessionIfNeeded: isRemote ? createSessionIfNeeded : true)
+                    attach(to: destination, intent: intent, picksLatestSession: isRemote ? picksLatestSession : true)
                 }
             }
         }
@@ -1901,7 +1967,7 @@ final class WorkspaceStore {
                 } else {
                     readsOnArrival = false
                 }
-                transition(to: activeEnvironment, target: target, createSessionIfNeeded: false,
+                transition(to: activeEnvironment, target: target, picksLatestSession: false,
                            readsOnArrival: readsOnArrival)
             } else {
                 attach(to: target, intent: intent)
@@ -2247,8 +2313,19 @@ final class WorkspaceStore {
         let gitView = GitView(windowID: windowID)
         gitView.store = self
         gitView.copiedStore = copiedCommits
+        gitView.watcher = makeGitWatcher()
         gitViews[windowID] = gitView
         return gitView
+    }
+
+    /// What tells a Git View that its repository changed: FSEvents on this Mac, and on a Remote Environment a probe
+    /// every 2 seconds over the owned ssh connection.
+    private func makeGitWatcher() -> GitWatcher {
+        guard isRemote else { return GitFileWatcher() }
+        return GitRemoteProbe { [weak self] script, arguments, completion in
+            guard let self else { return completion(.failure(CancellationError())) }
+            self.runGitScript(script, arguments: arguments, timeout: 5, completion: completion)
+        }
     }
 
     /// The Git View of the Location's Window, once it has opened there; nil
@@ -2258,9 +2335,43 @@ final class WorkspaceStore {
         selectedWindowID.flatMap { gitViews[$0] }
     }
 
+    /// Shows or hides the Location's Git View. On a folder in no repository it opens none, and an Explanation Pill
+    /// says why, in the Git View's own words.
     func toggleGitView() {
         guard let id = selectedWindowID else { return }
+        if let folder = gitViewRefusal {
+            pills.show(Pill(.explanation, title: "Not a git repository", value: folder))
+            return
+        }
         gitView(for: id).toggle()
+    }
+
+    /// Whether each folder of this Environment is in a git repository, as the header's HEAD read last told it.
+    /// A folder no read has told is unknown, and a read that could not tell changes nothing, so a Window switch
+    /// keeps what its folder showed. Cleared with the server state, so each Environment has its own.
+    private(set) var repositoryFacts: [String: Bool] = [:]
+
+    /// True or false once a HEAD read told it; nil while unknown.
+    func isRepository(_ folder: String) -> Bool? {
+        repositoryFacts[folder]
+    }
+
+    func recordHeadRead(_ read: GitHeadRead, of folder: String) {
+        guard let fact = read.isRepository, repositoryFacts[folder] != fact else { return }
+        repositoryFacts[folder] = fact
+    }
+
+    /// The folder, home shown as `~`, when a Git View may not open on it because it is in no repository. Nil while
+    /// that is unknown, and while `open`, so an open Git View can still close.
+    func gitViewRefusal(in folder: String, open: Bool) -> String? {
+        guard !open, isRepository(folder) == false else { return nil }
+        return Paths.tildify(folder, home: homeDirectory)
+    }
+
+    /// `gitViewRefusal(in:open:)` for the Location: the header hides its Git button and the View menu disables
+    /// its item.
+    var gitViewRefusal: String? {
+        selectedWindow.flatMap { gitViewRefusal(in: $0.path, open: currentGitView?.isOpen == true) }
     }
 
     /// For the sidebar's Git View icon.
@@ -2391,6 +2502,29 @@ final class WorkspaceStore {
     func toggleSidebar() {
         commitMaximize()
         sidebarVisible.toggle()
+    }
+
+    /// Why the shown Sidebar mode cannot change, or nil when it can. Reads only the Config, as `shownSidebarMode` does.
+    var sidebarModeSwitchRefusal: String? {
+        if isRemote { return "A Remote App Window shows only Sessions" }
+        let sidebar = configStore.config.sidebar
+        if !sidebar.topics { return "sidebar.topics is off in the Config" }
+        if !sidebar.sessions { return "sidebar.sessions is off in the Config" }
+        return nil
+    }
+
+    /// "Switch to Sessions" while Topics shows, "Switch to Topics" while Sessions shows.
+    var sidebarModeSwitchTitle: String { "Switch to " + (shownSidebarMode == .topics ? SidebarMode.sessions : .topics).rawValue }
+
+    /// Does what the other header button does, and shows a hidden Sidebar in the other mode. When only one mode can
+    /// show, an Explanation Pill says why.
+    func toggleSidebarMode() {
+        if let refusal = sidebarModeSwitchRefusal {
+            pills.show(Pill(.explanation, title: "Not switched", value: refusal))
+            return
+        }
+        sidebarMode = shownSidebarMode == .topics ? .sessions : .topics
+        if !sidebarShown { toggleSidebar() }
     }
 
     func canToggle(_ side: PanelLayout.Side) -> Bool {
@@ -2611,6 +2745,7 @@ final class WorkspaceStore {
         case .markUnread: changeRead(.unread, in: currentReadTarget)
         case .markAllRead: changeRead(.read, in: .environment)
         case .toggleSidebar: toggleSidebar()
+        case .toggleSidebarMode: toggleSidebarMode()
         case .toggleBench: toggleBench()
         case .chooseInPlay: presentChooseInPlay()
         case .replaceFromBench: presentReplaceFromBench()
@@ -2947,12 +3082,15 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
             if remote.exitStatus == 0 {
                 if let snapshot = connection?.closedSnapshot {
                     terminalMessage = nil
+                    // The remote home, for Start a Session… when no Session is left.
+                    homeDirectory = snapshot.homeDirectory ?? homeDirectory
                     lastStartedRead += 1
                     apply(snapshot, readNumber: lastStartedRead, attachIfNeeded: false)
                     // apply may have started a recovery on another connection.
                     if isTransitioning { return }
                     if hasNoSessions {
                         environmentStatus = "No tmux Sessions in \(environmentName)"
+                        offerStartSession()
                         return
                     }
                 }
@@ -2969,7 +3107,7 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
                 let current = generation
                 let work = DispatchWorkItem { [weak self] in
                     guard let self, self.generation == current else { return }
-                    self.transition(to: self.activeEnvironment, createSessionIfNeeded: false)
+                    self.transition(to: self.activeEnvironment, picksLatestSession: false)
                 }
                 reconnectWork = work
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)

@@ -473,6 +473,25 @@ final class GitView {
     @ObservationIgnored private var fixedOutputs: [String: String] = [:]
     @ObservationIgnored private var refreshTimer: Timer?
     @ObservationIgnored private var activationObserver: Any?
+    /// What reports that the repository changed, so the Git View reads it again at once, set by the store: FSEvents
+    /// in the Local Environment, a 2-second probe in a Remote one. Without one it reads only on the timer.
+    @ObservationIgnored var watcher: GitWatcher?
+    /// How long changes must stop before a read starts, and the least time between two reads' starts, so build
+    /// output in an ignored folder cannot flood it.
+    @ObservationIgnored var changeTiming = (settle: 0.25, spacing: 1.0)
+    /// Reads the repository after a change, then calls back: `refresh`, unless a test, which has no store, sets it.
+    @ObservationIgnored var readAfterChange: ((@escaping () -> Void) -> Void)?
+    /// Between open or resume and close or suspend.
+    @ObservationIgnored private var isWatching = false
+    @ObservationIgnored private var watchedRepository: GitWatchedRepository?
+    /// The read waiting for the changes to settle, or for the spacing since the last one.
+    @ObservationIgnored private var changeWork: DispatchWorkItem?
+    /// When the first change not yet read came.
+    @ObservationIgnored private var changedSince: TimeInterval?
+    @ObservationIgnored private var isReadingChange = false
+    @ObservationIgnored private var lastChangeRead: TimeInterval?
+    /// Counts the stops, so a read that ends after one changes nothing.
+    @ObservationIgnored private var watchGeneration = 0
 
     /// The terminal's size; code is in the system's monospaced font.
     var fontSize: CGFloat { max(11, (GhosttyRuntime.shared.fontSize ?? 13) - 1) }
@@ -584,6 +603,7 @@ final class GitView {
         activationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } }
+        startWatching()
     }
 
     private func stopRefreshing() {
@@ -591,6 +611,77 @@ final class GitView {
         refreshTimer = nil
         if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
         activationObserver = nil
+        stopWatching()
+    }
+
+    // MARK: Watching
+
+    /// Open or resumed: reads again when the repository changes, which the watcher reports. It watches the
+    /// repository read last, or the first one read.
+    func startWatching() {
+        stopWatching()
+        isWatching = true
+        watch(snapshot)
+    }
+
+    /// Closed or suspended: watches nothing, and a read waiting for a change starts no more.
+    func stopWatching() {
+        isWatching = false
+        watchedRepository = nil
+        changeWork?.cancel()
+        changeWork = nil
+        changedSince = nil
+        isReadingChange = false
+        watchGeneration += 1
+        watcher?.stop()
+    }
+
+    /// Watches the repository just read, when it is another one.
+    private func watch(_ snapshot: GitSnapshot?) {
+        guard isWatching, let watcher, let snapshot else { return }
+        let repository = GitWatchedRepository(snapshot)
+        guard repository != watchedRepository else { return }
+        watchedRepository = repository
+        watcher.start(repository) { [weak self] in MainActor.assumeIsolated { self?.repositoryChanged() } }
+    }
+
+    /// Waits for the changes to settle. A steady stream of them, such as a build's output, still reads once each
+    /// spacing.
+    private func repositoryChanged() {
+        guard isWatching else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        let since = changedSince ?? now
+        changedSince = since
+        if changeWork != nil, now - since >= changeTiming.spacing { return }
+        readChange(after: changeTiming.settle)
+    }
+
+    private func readChange(after delay: TimeInterval) {
+        changeWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.readChange() } }
+        changeWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// One read at a time, each starting at least the spacing after the last; changes during a read read again
+    /// after it.
+    private func readChange() {
+        changeWork = nil
+        guard isWatching, changedSince != nil, !isReadingChange else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if let lastChangeRead, now - lastChangeRead < changeTiming.spacing {
+            return readChange(after: changeTiming.spacing - (now - lastChangeRead))
+        }
+        lastChangeRead = now
+        changedSince = nil
+        isReadingChange = true
+        let generation = watchGeneration
+        let done = { [weak self] in
+            guard let self, self.watchGeneration == generation else { return }
+            self.isReadingChange = false
+            if self.changedSince != nil { self.readChange() }
+        }
+        if let readAfterChange { readAfterChange(done) } else { refresh(then: done) }
     }
 
     // MARK: Focus
@@ -3171,14 +3262,17 @@ final class GitView {
 
     // MARK: Loading
 
-    /// Reads the repository again: on opening, with R, every 10 seconds
-    /// and when Muxify comes to the front. Each list keeps its selection.
-    func refresh(showingProgress: Bool = false) {
-        guard isOpen, let store else { return }
+    /// Reads the repository again: on opening, with R, every 10 seconds,
+    /// when Muxify comes to the front and when the repository changes. Each
+    /// list keeps its selection. `done` runs when the read ends, or at once
+    /// when none starts.
+    func refresh(showingProgress: Bool = false, then done: (() -> Void)? = nil) {
+        guard isOpen, let store else { done?(); return }
         snapshotGeneration += 1
         let generation = snapshotGeneration
         if showingProgress { isReading = true }
         store.runGitScript(GitRepository.snapshotScript, arguments: [folder]) { [weak self] result in
+            defer { done?() }
             guard let self, self.isOpen, self.snapshotGeneration == generation else { return }
             self.isReading = false
             switch result.flatMap({ GitRepository.parseSnapshot($0).mapError { $0 as Error } }) {
@@ -3208,6 +3302,7 @@ final class GitView {
         }
         messageRoot = next.root
         if snapshot != next { snapshot = next }
+        watch(next)
         // A branch moved: the comparison follows it. One gone is compared
         // at the commit it was at.
         if let base { self.base = refreshed(base) ?? base }

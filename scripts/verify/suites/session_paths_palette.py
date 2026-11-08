@@ -1,4 +1,5 @@
-"""The Session Paths that a palette lists right after the app starts, before discovery finishes.
+"""The Session Paths that a palette lists right after the app starts, before discovery finishes, and Start a Session
+on a server with no Session of the user's.
 
 The app saves each discovery's output in the state folder. After a restart the palette lists those Session Paths at
 once, and the new discovery replaces them when it finishes. A `git` first in the app's PATH makes discovery slow
@@ -54,6 +55,43 @@ class SessionPathsPalette(unittest.TestCase):
     def search(self, text):
         self.s.act('focus', 'palette-search')
         self.s.act('set', 'palette-search', text)
+
+    def sessions(self):
+        """The Session names on the sandbox server; none when no server runs."""
+        listed = self.s.tmux_ok('list-sessions', '-F', '#{session_name}')
+        return listed.stdout.split() if listed.returncode == 0 else []
+
+    def test_a_server_with_no_session_starts_one_through_start_session(self):
+        """With no Session of the user's, the app starts none, not even `main`. It opens the palette on Start a Session;
+        Cancel leaves the "No tmux Sessions" page, whose Start a Session… button opens the palette again; a row starts
+        a No Topic Session in its folder, named after it. Every step is a press, so the check takes no focus."""
+        socket = self.s.tmux('display-message', '-p', '#{socket_path}')
+        self.assertTrue(os.path.realpath(socket).startswith(os.path.realpath(self.s.root)), socket)
+        self.s.tmux_ok('kill-server')
+        self.s.restart_app(LAUNCH_ARGS)
+
+        home_row = 'palette-row-home-folder'
+        wait(lambda: self.s.has(home_row), 'the palette did not open on Start a Session at launch', seconds=20)
+        self.assertNotIn('main', self.sessions(), 'the app made main')
+        self.s.act('press', 'palette-cancel')
+        wait(lambda: not self.s.has('palette-search'), 'Cancel did not close the palette')
+        self.assertTrue(self.s.has('no-sessions-start-session'), 'the page has no Start a Session… button')
+        time.sleep(1.5)
+        self.assertEqual(self.sessions(), [], 'closing the palette started a Session')
+
+        self.s.act('press', 'no-sessions-start-session')
+        wait(lambda: self.s.has(home_row), 'Start a Session… did not open the palette')
+        def listed():
+            self.search('saved')
+            return self.s.has(self.row(self.saved))
+        wait(listed, 'Start a Session does not list the Session Path', seconds=20)
+        self.s.act('press', self.row(self.saved))
+        wait(lambda: 'saved-repo' in self.sessions(), 'the row started no Session named after its folder: %s' % self.sessions())
+        self.s.wait_shown('saved-repo')
+        path = self.s.tmux('display-message', '-p', '-t', '=saved-repo:', '#{session_path}')
+        self.assertEqual(os.path.realpath(path), os.path.realpath(self.saved))
+        self.assertEqual(self.s.tmux('show-options', '-qv', '-t', '=saved-repo', '@muxify_topic'), '', 'the Session has a Topic')
+        self.assertNotIn('main', self.sessions())
 
     def test_the_last_found_session_paths_show_right_after_a_restart_until_discovery_finishes(self):
         wait(self.cache.exists, 'the first discovery saved no output at %s' % self.cache, seconds=20)

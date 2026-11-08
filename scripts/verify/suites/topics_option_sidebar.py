@@ -217,6 +217,29 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.s.wait_rows(lambda rs: cards(rs) == ['topic-press-lower', 'topic-press-upper'],
                          'the Sidebar does not show the saved order', seconds=5)
 
+    def test_a_press_released_in_place_on_a_card_is_still_a_click(self):
+        # The pressed card sinks and stands on its plate until the pointer moves 4 points; let go before that, the press
+        # is a click at once. TestDriver `click` hands a mouse down and up to the window at the card's centre, so the
+        # pointer, the keys and the front position stay with the user.
+        s = self.s
+        self.write_topic('tap-card', 'Tap card', self.beta, order=-3000001)
+        self.write_topic('tap-card-below', 'Tap card below', self.beta, order=-3000000)
+        sid = self.new_session('tap-card', self.beta, topic='tap-card')
+        window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
+        base = s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}')
+        self.select_window(base)
+        s.wait_shown(base)
+        cards = lambda rs: [k for k in self.topic_rows(rs) if k.startswith('topic-tap-card')]
+        s.wait_rows(lambda rs: len(cards(rs)) == 2, 'no cards for the two Topics')
+        rs = s.reveal('topic-tap-card')
+        self.assertFalse(s.has('topic-window-' + window, rs), 'the card is open before the click')
+        s.act('click', 'topic-tap-card')
+        s.wait_shown(window)
+        rs = s.wait_rows(lambda rs: s.has('topic-window-' + window, rs), 'a press released in place did not open the card')
+        self.assertEqual(cards(rs), ['topic-tap-card', 'topic-tap-card-below'], 'a click moved the card')
+        orders = {i: r.get('order') for i, r in self.records().items() if i.startswith('tap-card')}
+        self.assertLess(orders['tap-card'], orders['tap-card-below'], 'a click changed the saved order: %s' % orders)
+
     def test_move_up_and_move_down_move_the_topic_card_and_save_the_order(self):
         # The card's Move Up and Move Down accessibility actions (TopicCard in UI/SidebarView.swift) move it the way
         # a drop does.
