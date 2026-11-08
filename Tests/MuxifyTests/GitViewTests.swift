@@ -3825,10 +3825,9 @@ final class GitViewWatchingTests: XCTestCase {
 
     func testABurstOfChangesReadsOnce() {
         _ = watchingGitView()
-        for _ in 0..<5 {
-            watcher.change()
-            spin(0.01)
-        }
+        // Back to back, so no settle can end inside the burst on a slow machine; each change still restarts it.
+        for _ in 0..<5 { watcher.change() }
+        XCTAssertEqual(reads, 0, "it read before the burst settled")
         spin(0.2)
         XCTAssertEqual(reads, 1)
         finishRead?()
