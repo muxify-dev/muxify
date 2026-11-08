@@ -477,6 +477,7 @@ private struct TerminalArea: View {
                 if store.isRemote {
                     Text(store.environmentStatus).font(fontSize.font(.caption)).foregroundStyle(.secondary)
                     Button("Retry Connection") { store.reattach() }
+                        .accessibilityIdentifier("retry-connection")
                 }
             } else if store.hasNoSessions {
                 Text(store.serverRunning ? "No tmux Sessions" : "tmux server is not running")

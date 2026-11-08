@@ -58,6 +58,8 @@ final class AppWindows {
         catalog.updateEnvironment(request.id, name: environment?.name)
         store.onSelectEnvironment = { [weak self] name in self?.selectEnvironment(named: name) }
         store.onNewAppWindow = { [weak self] in self?.newWindow() }
+        // The last App Window to close quits the app.
+        store.onCloseAppWindow = { [weak self] in self?.nativeWindows[request.id]?.close() }
         store.shouldConsumeOpenRequests = { [weak self, weak store] in
             guard let self, let store else { return false }
             return self.catalog.window(forEnvironment: store.activeEnvironment?.name)?.id == request.id
