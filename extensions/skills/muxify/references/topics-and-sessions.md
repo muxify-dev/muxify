@@ -2,6 +2,10 @@
 
 A Topic is one thing the user wants to get done. It groups Sessions, and its Sessions can be in different repositories, such as a backend and a client changed for the same fix. Your Session is one of them. Each Session has Windows, and each Window has Panes.
 
+## See every Topic and Session
+
+- `muxify environment show` prints every Session in tmux order and the user's Topics list in the order that Muxify shows it: the Pinned Topics, the In Play places, the Guests and the Bench, then the No Topic Sessions. Each card has its mark, and each Topic has its Note, Tags and state (live, Dormant or Empty). With `--json`, a card names its Sessions by id. It does not give Windows or Panes: use `topic show` for those. Use it to see which Topics are In Play, or which Agent waits for an answer.
+
 ## See the whole Topic
 
 - `muxify topic show` prints the Topic's id, label and Tags, and each live Session's name, folder and branch. With `--json`, also its Windows, Panes and Agents.

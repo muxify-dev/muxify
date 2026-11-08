@@ -27,6 +27,15 @@ final class TopicRefTests: XCTestCase {
         }
     }
 
+    func testANameMatchesTheLabelThatTheCardShows() throws {
+        let records = [record("a1", slug: "untitled-3"), record("b2", title: "")]
+        XCTAssertEqual(try TopicRef.named("Untitled 3").resolve(in: records).id, "a1", "the N of its slug")
+        XCTAssertEqual(try TopicRef.named("Untitled 1").resolve(in: records).id, "b2", "the lowest free N")
+        XCTAssertThrowsError(try TopicRef.named("Untitled 1").resolve(in: records + [record("c3", title: "Untitled 1")])) { error in
+            guard case TopicRequestError.topicAmbiguous("Untitled 1") = error else { return XCTFail("\(error)") }
+        }
+    }
+
     func testASettledTopicIsFoundOnlyWhenTheRequestAllowsIt() throws {
         let records = [record("a1", title: "Old", slug: "old", settled: true), record("b2", title: "Fix", slug: "fix")]
         XCTAssertThrowsError(try TopicRef.named("old").resolve(in: records, open: true)) { error in

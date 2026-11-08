@@ -64,7 +64,7 @@ final class TopicWireTests: XCTestCase {
     }
 
     func testSessionDetailUsesNameBaseAndDirectoryRatherThanRepositoryIdentity() throws {
-        let detail = TopicDetail(id: "a", label: "Fix", title: "Fix", slug: "fix", createdAt: nil,
+        let detail = TopicDetail(id: "a", label: "Fix", title: "Fix", slug: "fix", createdAt: nil, state: .live,
             tags: [], sessions: [.init(id: "$2", name: "debug/fix", baseName: "debug", directory: "/work", worktree: nil, windows: [])])
         let response = EnvironmentResponse.topic(detail)
         let text = try json(response)

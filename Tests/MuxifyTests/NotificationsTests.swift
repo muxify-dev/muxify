@@ -58,6 +58,22 @@ final class NotificationsTests: XCTestCase {
         XCTAssertTrue(model().rows[0].usesRowMarks)
     }
 
+    func testAnExpandedActiveLockedSessionMovesItsMarkOntoItsRowsAsATopicDoes() {
+        var locked = window("@1", topic: nil)
+        locked.lockOrder = 1
+        var second = window("@2", topic: nil)
+        second.lockOrder = 1
+        var selection = TopicSelection()
+        selection.select(windowID: "@1", activeTopic: .locked("$1"))
+        let model = TopicsModel(records: [], windows: [locked, second], config: Config(), selection: selection,
+                                location: .window(WindowID(rawValue: "@1")!),
+                                agents: [agent(.done), agent(.blocked, id: "%2", window: "@2", unread: false)])
+        let row = model.rows.first { $0.id == .locked("$1") }
+        XCTAssertEqual(row?.agentSpines, ["@1": .done, "@2": .blocked])
+        XCTAssertEqual(row?.mark, .agent(.blocked), "The header keeps the strongest mark")
+        XCTAssertEqual(row?.usesRowMarks, true)
+    }
+
     func testReplacingPaneRowsCarryTheirOwnAgentSpines() {
         let panes = ["%1", "%2", "%3"].enumerated().map { index, id in
             TmuxPane(id: id, windowID: "@1", index: index, isActive: index == 0, title: "Pane", path: "/app",

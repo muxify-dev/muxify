@@ -84,7 +84,7 @@ final class WorkspaceStore {
     }
 
     @ObservationIgnored private lazy var sessionPathRowsCache = ObservedCache { [unowned self] in
-        SessionPathRows.build(sessionPaths: sessionPaths, windows: windows, records: topicWatcher.records, titles: topics.titles)
+        SessionPathRows.build(sessionPaths: sessionPaths, windows: windows, records: topicWatcher.records)
     }
 
     var sessionPathRows: [SessionPathRow] { sessionPathRowsCache.value }
@@ -295,16 +295,16 @@ final class WorkspaceStore {
     /// on an Open Place fills it. While the Bench is hidden, the card that goes to the Bench shows under the line until
     /// the Sidebar folds it in.
     func tradeCard(_ id: TopicListID, with other: TopicListID) {
-        guard let inPlay = topicConfig.inPlay else { return }
+        guard let cut = topics.cut else { return }
         if case .openPlace(let place) = other, case .topic(let topic) = id {
-            let places = topics.cut(inPlay: inPlay).places
+            let places = cut.places
             guard let index = places.firstIndex(where: { if case .openPlace(place) = $0 { return true } else { return false } }) else { return }
             return fillOpenPlace(index + 1, with: topic)
         }
         guard let target = Self.target(of: id), let ref = Self.ref(of: other) else { return }
-        let cut = topics.split(inPlay: inPlay)
-        if !benchShown, benchPeek != .all, cut.bench.contains(where: { $0.id.listID == id || $0.id.listID == other }) {
-            let leaving = cut.inPlay.map(\.id).first { $0.listID == id || $0.listID == other }
+        let rows = cut.compactMap(\.row)
+        if !benchShown, benchPeek != .all, rows.bench.contains(where: { $0.id.listID == id || $0.id.listID == other }) {
+            let leaving = rows.inPlay.map(\.id).first { $0.listID == id || $0.listID == other }
             benchPeek = leaving.map(TopicsModel.BenchPeek.card)
         }
         perform(EnvironmentRequest(.moveCard(.trade(ref)), target: target))
@@ -383,19 +383,19 @@ final class WorkspaceStore {
     /// Whether the card is a Guest; nil when Make a Guest does not apply to it: the Config does not set
     /// `topics.in_play`, or the card is a Topic that is not on the Bench. A Guest leaves through Bench.
     func guestState(of card: GuestCard) -> Bool? {
-        guard let inPlay = topicConfig.inPlay, !isRemote, topics.topicsEnabled else { return nil }
+        guard let cut = topics.split, !isRemote, topics.topicsEnabled else { return nil }
         switch card {
         case .session(let id): return lockState(ofSession: id)
-        case .topic(let id): return topics.split(inPlay: inPlay).bench.contains { $0.id == .topic(id) } ? false : nil
+        case .topic(let id): return cut.bench.contains { $0.id == .topic(id) } ? false : nil
         }
     }
 
     /// Bench applies to a card In Play: a Topic in an In Play place, a Guest Topic or a Guest Session. Not to a
     /// Benched or Pinned Topic.
     func canBench(_ card: GuestCard) -> Bool {
-        guard let inPlay = topicConfig.inPlay, !isRemote, topics.topicsEnabled else { return false }
+        guard let cut = topics.split, !isRemote, topics.topicsEnabled else { return false }
         switch card {
-        case .topic(let id): return topics.split(inPlay: inPlay).inPlay.contains { $0.id == .topic(id) }
+        case .topic(let id): return cut.inPlay.contains { $0.id == .topic(id) }
         case .session: return guestState(of: card) == true
         }
     }
@@ -753,15 +753,15 @@ final class WorkspaceStore {
     /// The service on the Local server, with the SessionPaths as git reported them last.
     func topicService() -> EnvironmentService {
         EnvironmentService(paths: topicWatcher.store.paths, server: TmuxServer.app, sessionPaths: sessionPaths, topics: topicConfig,
-                           worktreesRoot: config.worktreesRoot)
+                           notifications: config.notifications, worktreesRoot: config.worktreesRoot)
     }
 
     /// The service on the Remote Environment that the App Window shows. It has no Topics, so it runs only the requests
     /// that need no Topic record. Its Muxify Worktree scripts run over the connection, on that machine (ADR 0062).
     private func remoteService() -> EnvironmentService? {
         guard let connection else { return nil }
-        return EnvironmentService(paths: topicWatcher.store.paths, server: connection, topics: topicConfig, topicsAvailable: false,
-                                  scripts: connection, environmentName: activeEnvironment?.name, worktreesRoot: config.worktreesRoot)
+        return EnvironmentService(paths: topicWatcher.store.paths, server: connection, topics: topicConfig,
+                                  notifications: config.notifications, topicsAvailable: false, scripts: connection, environmentName: activeEnvironment?.name, worktreesRoot: config.worktreesRoot)
     }
 
     /// The service of the Environment that the App Window shows: Local's, or the Remote Environment's.
@@ -775,7 +775,7 @@ final class WorkspaceStore {
         switch response {
         case .topics:
             if case .forgetSettled = presentation, ownsPalette { palette.close() }
-        case .topic, .worktrees:
+        case .topic, .snapshot, .worktrees:
             break
         case .readChanged:
             // A Read change is not shown until a snapshot after it, so the next change waits for that snapshot.
@@ -945,8 +945,8 @@ final class WorkspaceStore {
 
     /// The check step of Choose In Play, with the In Play Topics and the Guest Topics checked.
     func presentChooseInPlay(keepingHistory: Bool = false) {
-        guard canChooseInPlay, let inPlay = topicConfig.inPlay else { return }
-        let topics = self.topics.split(inPlay: inPlay).inPlay.filter { if case .topic = $0.id { return true } else { return false } }
+        guard canChooseInPlay, let inPlay = topicConfig.inPlay, let cut = self.topics.split else { return }
+        let topics = cut.inPlay.filter { if case .topic = $0.id { return true } else { return false } }
         let draft = CheckDraft(action: .chooseInPlay(places: inPlay), checked: Set(topics.map(\.id)))
         palette.begin(.check(draft), keepingHistory: keepingHistory)
     }
@@ -959,8 +959,7 @@ final class WorkspaceStore {
     /// The card of the Location while it is In Play and the Bench has a card for Replace from Bench to put in its place.
     /// In Sessions mode too: In Play is a place in the Topics list, which both modes share.
     private var replaceableCard: TopicGroupID? {
-        guard !isRemote, !changingTopic, topics.topicsEnabled, let inPlay = topicConfig.inPlay, let active = topics.activeTopic else { return nil }
-        let cards = topics.split(inPlay: inPlay)
+        guard !isRemote, !changingTopic, topics.topicsEnabled, let cards = topics.split, let active = topics.activeTopic else { return nil }
         return !cards.bench.isEmpty && cards.inPlay.contains { $0.id == active } ? active : nil
     }
 

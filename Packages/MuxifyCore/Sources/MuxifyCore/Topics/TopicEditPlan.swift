@@ -110,10 +110,9 @@ struct TopicSessionOrderPlan {
 
     /// Moves a live Session before or after another one, or one place up or down, as the Topic lists them now, and
     /// keeps that order.
-    public init(moving sessionID: String, to placement: TopicSessionPlacement, topic: TopicRecord, windows: [TmuxWindow],
-                order: SessionOrder) throws {
-        let key = { (window: TmuxWindow) in TopicSessionKey(of: window) }
-        let shown = TopicSessionOrder.ordered(TopicEditSessions.sessions(in: windows, topic: topic), record: topic, order: order, key: key)
+    public init(moving sessionID: String, to placement: TopicSessionPlacement, topic: TopicRecord, labels: TopicLabels,
+                windows: [TmuxWindow], order: SessionOrder) throws {
+        let shown = TopicSessionOrder.firstWindows(windows.filter { $0.topicID == topic.id }, record: topic, order: order)
         guard let from = shown.firstIndex(where: { $0.sessionID == sessionID }) else { throw TopicEditFailure.sessionUnavailable }
         let moved = shown[from]
         var ordered = shown
@@ -131,7 +130,7 @@ struct TopicSessionOrderPlan {
         case .up, .down:
             to = placement == .up ? from - 1 : from + 1
             guard (0...ordered.count).contains(to) else {
-                throw TopicRequestError.sessionAtEnd(session: moved.sessionName, topic: TopicSummary(record: topic).label, up: placement == .up)
+                throw TopicRequestError.sessionAtEnd(session: moved.sessionName, topic: labels.label(of: topic), up: placement == .up)
             }
         }
         ordered.insert(moved, at: to)

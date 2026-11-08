@@ -27,7 +27,7 @@ struct PaletteItem: Equatable {
     var color: MarkColor?
     /// An Agent's Status, which its row shows as text.
     var status: AgentStatus?
-    var mark: RowMark?
+    var mark: CardMark?
 }
 
 enum MoveDestination: Hashable {
@@ -156,18 +156,19 @@ struct PaletteCatalog {
         let isCurrent = topics?.activeTopic == row.id
         let window = EntryWindow.of(row, lastWindowByGroup: lastWindowByGroup, visits: visits)
         let age = age(.topic(row.id))
-        let trailing = window == nil ? [row.isDormant ? "Reopen" : "Empty", age].compactMap { $0 }.joined(separator: " · ") : isCurrent ? "Active" : age ?? ""
+        let trailing = window == nil ? [row.state == .dormant ? "Reopen" : "Empty", age].compactMap { $0 }.joined(separator: " · ") : isCurrent ? "Active" : age ?? ""
         return PickCandidate(
-            id: row.id.accessibilityID, kind: .topic, symbol: row.hasNoLiveSession ? "◇" : "◆", title: row.title,
+            id: row.id.accessibilityID, kind: .topic, symbol: row.state == .live ? "◆" : "◇", title: row.title,
             fields: topicFields(row, type: row.idleLabel?.lowercased() ?? "topic"),
             note: row.note, trailing: trailing, mark: row.mark,
-            lastVisit: visits.last(.topic(row.id)), isCurrent: isCurrent, unopened: row.hasNoLiveSession,
+            lastVisit: visits.last(.topic(row.id)), isCurrent: isCurrent, unopened: row.state != .live,
             activity: row.sessions.flatMap(\.windows).map(\.sessionActivity).max() ?? 0,
             pick: .available(PaletteItem(ref: .topic(id: id, window: window))))
     }
 
     private func settledCandidate(_ record: TopicRecord) -> PickCandidate<PaletteItem> {
-        let row = TopicsModel.settledRow(record, sessionPaths: sessionPaths, tags: topics?.tags, expanded: [])
+        let row = TopicsModel.settledRow(record, labels: topics?.labels ?? TopicLabels(records), sessionPaths: sessionPaths,
+                                          tags: topics?.tags, expanded: [])
         let outcome = record.outcome?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var settledOn: String?
         if outcome.isEmpty, case .settled(_, let settledDate) = row.kind {
@@ -264,7 +265,7 @@ struct PaletteCatalog {
                 fields: [.typeWord("session"), .detail("\(count) window\(count == 1 ? "" : "s")"),
                          .detail(Paths.tildify(folder, home: homeDirectory))],
                 trailing: isCurrent ? "Current" : age(.session(name: session.name)) ?? "",
-                mark: topics?.sessionMarks[session.id].map(RowMark.agent),
+                mark: topics?.sessionMarks[session.id].map(CardMark.agent),
                 lastVisit: visits.last(.session(name: session.name)), isCurrent: isCurrent, activity: active.sessionActivity,
                 pick: .available(PaletteItem(ref: .session(session), path: folder, target: session.name)),
                 paste: folder)
@@ -305,7 +306,7 @@ struct PaletteCatalog {
                 isCurrent: agent.windowID == selectedWindowID, activity: window?.sessionActivity ?? 0,
                 pick: .available(PaletteItem(ref: .agent(agent), path: path, target: agent.paneID,
                                              logo: agent.kind.rawValue, status: agent.status,
-                                             mark: agentMarks[agent.paneID].map(RowMark.agent))),
+                                             mark: agentMarks[agent.paneID].map(CardMark.agent))),
                 paste: path.isEmpty ? nil : path)
         }
     }
@@ -320,7 +321,7 @@ struct PaletteCatalog {
             guard case .topic(let id) = row.id, scope != .session || id != source.topicID,
                   records.contains(where: { $0.id == id }) else { return nil }
             return PickCandidate(
-                id: row.id.accessibilityID, kind: .topic, symbol: row.hasNoLiveSession ? "◇" : "◆", title: row.title,
+                id: row.id.accessibilityID, kind: .topic, symbol: row.state == .live ? "◆" : "◇", title: row.title,
                 fields: topicFields(row, type: row.idleLabel?.lowercased() ?? "topic"),
                 trailing: age(.topic(row.id)) ?? "", mark: row.mark,
                 lastVisit: visits.last(.topic(row.id)), isPinned: row.isPinned,

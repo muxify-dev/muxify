@@ -225,6 +225,23 @@ final class CLICommandTests: XCTestCase {
         }
     }
 
+    func testEnvironmentShowTakesOnlyJSONAndNoTarget() throws {
+        let environment = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]
+        let paths = MuxifyPaths(environment: environment, home: "/home/me")
+        func show(_ output: RequestInvocation.Output) -> CLICommand {
+            .request(RequestInvocation(command: .environmentShow, target: nil, caller: nil, output: output, paths: paths))
+        }
+        XCTAssertEqual(try CLICommand(arguments: ["environment", "show"], environment: environment), show(.text))
+        XCTAssertEqual(try CLICommand(arguments: ["environment", "show", "--json"], environment: environment), show(.json))
+        XCTAssertEqual(try CLICommand(arguments: ["environment", "--help"], environment: environment), .help(scope: ["environment"]))
+        for arguments in [["environment", "show", "extra"], ["environment", "show", "--topic", "Fix"], ["environment", "show", "--pane", "%3"]] {
+            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: environment), "\(arguments)") { error in
+                XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
+            }
+        }
+        XCTAssertTrue(CLIVerbs.usage(for: ["environment", "show"]).contains("use topic show"), "the help names topic show for Windows and Panes")
+    }
+
     func testTopicCommandsTakeTheCallingPaneAndAtMostOneExplicitTarget() throws {
         let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
         let outside = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]

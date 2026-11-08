@@ -123,7 +123,7 @@ final class RepositorySessionPathTests: XCTestCase {
     }
 
     func testListShowsOneRowPerWorktreeNamedRepoSlashFolderAndNoRowForTheBareFolder() {
-        let rows = SessionPathRows.build(sessionPaths: [gameServer, notes], windows: [], records: [], titles: [:])
+        let rows = SessionPathRows.build(sessionPaths: [gameServer, notes], windows: [], records: [])
         XCTAssertEqual(rows.map(\.choice.name), ["game_server/main", "game_server/release", "notes"])
         XCTAssertEqual(rows.map(\.choice.directory.path), [main.folder.path, release.folder.path, notes.folder.path])
         XCTAssertEqual(PaletteCatalog(windows: [], agents: []).addSessionList(topic: "target", query: "game_server/rel", rows: rows, rules: .standard).rows.map(\.title.text), ["game_server/release"])
@@ -144,11 +144,10 @@ final class RepositorySessionPathTests: XCTestCase {
         let windows = [window("@1", session: "$1", topic: "third", directory: main.folder.path),
                        window("@2", session: "$2", topic: "other", directory: main.folder.path, path: main.folder.path + "/src"),
                        window("@3", session: "$3", topic: "settled", directory: release.folder.path)]
-        let rows = SessionPathRows.build(sessionPaths: [gameServer], windows: windows, records: [other, third, settled],
-                                     titles: ["other": "Fix drops", "third": "Polish UI"])
+        let rows = SessionPathRows.build(sessionPaths: [gameServer], windows: windows, records: [other, third, settled])
         XCTAssertEqual(shown(rows), ["game_server/main | /work/game_server/main · Also in Fix drops, Polish UI | /work/game_server/main",
                                      "game_server/release | /work/game_server/release | /work/game_server/release"])
-        XCTAssertEqual(SessionPathRows.build(sessionPaths: [gameServer], windows: windows, records: [other], titles: [:], addingTo: other).count, 2,
+        XCTAssertEqual(SessionPathRows.build(sessionPaths: [gameServer], windows: windows, records: [other], addingTo: other).count, 2,
                        "Add a Session keeps paths available even when the Topic uses them")
     }
 
@@ -169,7 +168,7 @@ final class RepositorySessionPathTests: XCTestCase {
     }
 
     func testMainCheckoutOfAPlainRepositoryIsAWorktreeTheTopicPicksAndNeverCreated() throws {
-        let rows = SessionPathRows.build(sessionPaths: [app], windows: [], records: [], titles: [:])
+        let rows = SessionPathRows.build(sessionPaths: [app], windows: [], records: [])
         XCTAssertEqual(rows.map(\.choice.name), ["app", "app/feat"], "the main checkout is the SessionPath folder, so it keeps the SessionPath name")
         XCTAssertEqual(rows[0].choice.workingCopy(newWorktree: false), .worktree(path: "/work/app"))
         let plan = try TopicSessionPlan(topic: TopicRecord(id: "fix", title: "Fix", slug: "fix"), sessionPath: app,
@@ -187,14 +186,14 @@ final class RepositorySessionPathTests: XCTestCase {
         let legacyRows = SessionPathRows.build(sessionPaths: [app, notes], windows: [
             window("@1", session: "$1", topic: "legacy", directory: app.folder.path + "/src"),
             window("@2", session: "$2", topic: "notes", directory: notes.folder.path),
-        ], records: [legacy, noteTaker], titles: [:])
+        ], records: [legacy, noteTaker])
         XCTAssertEqual(shown(legacyRows), ["app | /work/app · Also in Legacy owner | /work/app", "app/feat | /trees/app/feat | /trees/app/feat",
                                            "notes | /work/notes · Also in Note taker | /work/notes"])
 
         var current = TopicRecord(id: "current", title: "Main owner")
         current.sessions = [.object(["repository_path": .string(app.folder.path), "worktree_path": .string(app.folder.path), "branch": .string("main")])]
         let currentRows = SessionPathRows.build(sessionPaths: [app], windows: [window("@1", session: "$1", topic: "current", directory: app.folder.path)],
-                                            records: [current], titles: [:])
+                                            records: [current])
         XCTAssertEqual(shown(currentRows), ["app | /work/app · Also in Main owner | /work/app", "app/feat | /trees/app/feat | /trees/app/feat"])
     }
 

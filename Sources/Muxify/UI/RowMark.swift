@@ -1,24 +1,7 @@
 import SwiftUI
 import MuxifyCore
 
-enum RowMark: Equatable {
-    case unread
-    case agent(AgentMark)
-
-    init?(unread: Bool, agent: AgentMark?) {
-        if let agent, agent == .blocked || agent == .failed { self = .agent(agent) }
-        else if unread { self = .unread }
-        else if let agent { self = .agent(agent) }
-        else { return nil }
-    }
-
-    var rawValue: String {
-        switch self {
-        case .unread: return "unread"
-        case .agent(let mark): return mark.rawValue
-        }
-    }
-
+extension CardMark {
     func color(_ colors: AgentColors) -> Color {
         switch self {
         case .unread: return .accentColor
@@ -28,7 +11,7 @@ enum RowMark: Equatable {
 }
 
 struct RowMarkView: View {
-    let mark: RowMark
+    let mark: CardMark
     /// The dot's size; by default 7 at 12, grown with the Interface font size, as it sits beside a row's text.
     var dotSize: CGFloat? = nil
     @Environment(\.interfaceFontSize) private var fontSize
@@ -43,7 +26,7 @@ struct RowMarkView: View {
 }
 
 struct RowMarkSpine: View {
-    let mark: RowMark
+    let mark: CardMark
 
     var body: some View {
         switch mark {

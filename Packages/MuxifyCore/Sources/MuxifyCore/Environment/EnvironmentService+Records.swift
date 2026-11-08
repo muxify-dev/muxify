@@ -271,11 +271,11 @@ extension EnvironmentService {
                       client: String?, allowUnlockedSession: Bool = false) throws -> (id: TopicListID, label: String, pinned: Bool) {
         if case .topic(let ref)? = target {
             let topic = try ref.resolve(in: records)
-            return (.topic(topic.id), "The Topic " + TopicSummary(record: topic).label, topic.isPinned)
+            return (.topic(topic.id), "The Topic " + TopicLabels(records).label(of: topic), topic.isPinned)
         }
         let window = try sessionWindow(target, caller: caller, snapshot: snapshot, client: client)
         if let topic = records.first(where: { $0.id == window.topicID && $0.settledAt == nil }) {
-            return (.topic(topic.id), "The Topic " + TopicSummary(record: topic).label, topic.isPinned)
+            return (.topic(topic.id), "The Topic " + TopicLabels(records).label(of: topic), topic.isPinned)
         }
         guard SessionLock.locks(in: snapshot.windows, records: records).contains(where: { $0.sessionID == window.sessionID }) else {
             if allowUnlockedSession { return (.lock(sessionID: window.sessionID), "The Session " + window.sessionName, false) }

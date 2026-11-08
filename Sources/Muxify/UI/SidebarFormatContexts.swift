@@ -82,7 +82,7 @@ struct SidebarFormatContexts {
             let allPanes = children.flatMap { $0.loops[.panes] ?? [] }
             let values = merged(counts(topicAgents), [
                 .topic_title: topic.title, .topic_note: topic.note ?? "", .topic_pinned_flag: topic.isPinned ? "1" : "0",
-                .topic_dormant_flag: topic.isDormant ? "1" : "0", .session_count: String(children.count),
+                .topic_dormant_flag: topic.state == .dormant ? "1" : "0", .session_count: String(children.count),
                 .window_count: String(allWindows.count), .pane_count: String(allPanes.count),
                 .topic_tags: topicTags(topic.tags), .tag_count: String(topic.tags.count),
             ])

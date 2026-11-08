@@ -43,7 +43,7 @@ final class SessionPathRowsTests: XCTestCase {
 
     func testRowsAreTheChoicesOfEachSessionPathInConfigOrderWithTheirLabels() throws {
         let sessionPaths = try sessionPaths()
-        let rows = SessionPathRows.build(sessionPaths: sessionPaths, windows: [], records: [], titles: [:])
+        let rows = SessionPathRows.build(sessionPaths: sessionPaths, windows: [], records: [])
         XCTAssertEqual(rows.map(\.choice), sessionPaths.flatMap(SessionChoice.choices))
         XCTAssertEqual(rows.map { [$0.choice.directory.path, $0.choice.name, $0.choice.displayName] }, [
             [path("game_server/main"), "game_server/main", "game_server/main"],
@@ -68,8 +68,8 @@ final class SessionPathRowsTests: XCTestCase {
         let windows = [window("@1", session: "$1", topic: "fix", directory: release + "/src"),
                        window("@2", session: "$2", topic: "ui", directory: release),
                        window("@3", session: "$3", topic: "old", directory: release)]
-        let rows = SessionPathRows.build(sessionPaths: sessionPaths, windows: windows, records: [fix, titled, settled], titles: [:])
-        XCTAssertEqual(rows.map(\.alsoIn), [[], [TopicSummary(id: "fix", label: "fix-drops"), TopicSummary(id: "ui", label: "Polish UI")], [], []],
+        let rows = SessionPathRows.build(sessionPaths: sessionPaths, windows: windows, records: [fix, titled, settled])
+        XCTAssertEqual(rows.map(\.alsoIn), [[], [TopicSummary(id: "fix", label: "Untitled 1"), TopicSummary(id: "ui", label: "Polish UI")], [], []],
                        "a Topic with no title has the label topic list gives it; a Settled Topic is in no row")
     }
 

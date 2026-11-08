@@ -56,7 +56,7 @@ final class PaletteCatalogTests: XCTestCase {
         let running = window("@1", session: "a-long-plain-title", directory: "/beta")
         let own = window("@2", session: "alpha/target", directory: "/alpha", topic: "target")
         let paths = [SessionPath(path: "/alpha", name: "alpha"), SessionPath(path: "/beta", name: "beta")]
-        let rows = SessionPathRows.build(sessionPaths: paths, windows: [running, own], records: [], titles: [:])
+        let rows = SessionPathRows.build(sessionPaths: paths, windows: [running, own], records: [])
         let catalog = PaletteCatalog(windows: [running, own], agents: [], sessionPaths: paths, now: now)
         let empty = catalog.addSessionList(topic: "target", query: "", rows: rows, rules: .standard)
         XCTAssertEqual(empty.sections.count, 1)
@@ -72,7 +72,7 @@ final class PaletteCatalogTests: XCTestCase {
         let records = [topic("target", "Target"), topic("other", "Other")]
         let windows = [running, window("@2", session: "own", directory: "/work/game/main", topic: "target"),
                        window("@3", session: "other", directory: "/work/game/main", topic: "other")]
-        let rows = SessionPathRows.build(sessionPaths: [game, notes], windows: windows, records: records, titles: [:])
+        let rows = SessionPathRows.build(sessionPaths: [game, notes], windows: windows, records: records)
         let catalog = PaletteCatalog(windows: [running], agents: [], sessionPaths: [game, notes], now: now)
         let list = catalog.addSessionList(topic: "target", query: "", rows: rows, rules: .standard)
         XCTAssertEqual(Array(list.rows.prefix(2).map(\.id)), ["running-$debug", "/work/game/main"])
@@ -84,7 +84,7 @@ final class PaletteCatalogTests: XCTestCase {
     func testAddSessionBreaksEqualScoresByVisitThenActivityAcrossBothKinds() {
         let path = SessionPath(path: "/work/game", name: "game")
         let running = window("@1", session: "game", directory: "/elsewhere", activity: 100)
-        let rows = SessionPathRows.build(sessionPaths: [path], windows: [], records: [], titles: [:])
+        let rows = SessionPathRows.build(sessionPaths: [path], windows: [], records: [])
         var visits = VisitLog()
         _ = visits.record(running, group: .noTopic, sessionPaths: [path], folders: .local, at: now)
         _ = visits.record(window("@2", session: "visitor", directory: path.folder.path), group: .noTopic,
@@ -101,7 +101,7 @@ final class PaletteCatalogTests: XCTestCase {
 
     func testAddSessionPathsUseLastVisitThenConfigOrderAndMatchDirectory() {
         let paths = ["alpha", "bravo", "charlie", "delta"].map { SessionPath(path: "/" + $0, name: $0) }
-        let rows = SessionPathRows.build(sessionPaths: paths, windows: [], records: [], titles: [:])
+        let rows = SessionPathRows.build(sessionPaths: paths, windows: [], records: [])
         var visits = VisitLog()
         _ = visits.record(window("@1", session: "b", directory: "/bravo"), group: .noTopic, sessionPaths: paths,
                           folders: .local, at: Date(timeIntervalSince1970: 10))
@@ -118,7 +118,7 @@ final class PaletteCatalogTests: XCTestCase {
         catalog.visits = VisitLog()
         XCTAssertEqual(order(""), ["alpha", "bravo", "charlie", "delta"])
         let path = SessionPath(path: "/work/game", name: "game")
-        let directoryRows = SessionPathRows.build(sessionPaths: [path], windows: [], records: [], titles: [:])
+        let directoryRows = SessionPathRows.build(sessionPaths: [path], windows: [], records: [])
         let matched = catalog.addSessionList(topic: "target", query: "work", rows: directoryRows, rules: .standard)
         XCTAssertEqual(matched.rows.first?.detail, Highlighted(text: "/work/game", marks: [1, 2, 3, 4]))
     }
@@ -315,7 +315,7 @@ final class PaletteCatalogTests: XCTestCase {
                                                          Worktree(path: "/work/trees/forge-fix", branch: "fix")]))
         let windows = [window("@1", session: "loose", directory: "/beta"),
                        window("@2", session: "game/other", directory: "/work/game/main", topic: "other")]
-        let rows = SessionPathRows.build(sessionPaths: [forge, notes], windows: [], records: [], titles: [:])
+        let rows = SessionPathRows.build(sessionPaths: [forge, notes], windows: [], records: [])
         let catalog = catalog(records: [topic("other", "Other")], windows: windows, sessionPaths: [forge, notes])
         let all = catalog.addSessionList(topic: "target", query: "", rows: rows, rules: .standard)
         XCTAssertEqual(Set(all.rows.map(\.kind)), [.session, .topicSession, .worktree, .sessionPath], "\(all.rows.map { ($0.id, $0.kind) })")
@@ -338,7 +338,7 @@ final class PaletteCatalogTests: XCTestCase {
                        window("@3", session: "scratch", directory: "/tmp"),
                        window("@4", session: "spare", directory: "/tmp")]
         let catalog = catalog(records: [topic("a", "Alpha"), topic("b", "Beta")], windows: windows)
-        let rows = SessionPathRows.build(sessionPaths: [game, notes], windows: windows, records: [], titles: [:])
+        let rows = SessionPathRows.build(sessionPaths: [game, notes], windows: windows, records: [])
         for list in ActionList.allCases {
             switch list {
             case .addSession: assertShowsOnlyItsKinds(list) { catalog.addSessionList(topic: "b", query: "", rows: rows, rules: $0) }

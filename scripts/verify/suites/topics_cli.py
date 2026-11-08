@@ -145,6 +145,36 @@ class TopicsCli(unittest.TestCase):
         panes = [p for s in topic['sessions'] for w in s['windows'] for p in w['panes']]
         self.assertIn({'kind': 'claude', 'status': 'working', 'unread': False, 'conversation': None}, [p['agent'] for p in panes], shown.stdout)
 
+    def test_environment_show_finds_the_open_place_that_topic_fill_place_fills(self):
+        config = self.s.root/'config-environment-show.yaml'
+        config.write_text('topics:\n  in_play: 2\n')
+        env = {'XDG_STATE_HOME': str(self.s.root/'state-environment-show'), 'MUXIFY_CONFIG': str(config)}
+
+        def run(*args):
+            result = self.muxify(*args, pane='', env=env)
+            self.assertEqual(result.returncode, 0, (args, result.stderr))
+            return result.stdout
+
+        def unpinned():
+            return json.loads(run('environment', 'show', '--json'))['unpinned']
+
+        for title in ('Place first', 'Place second', 'Place third'):
+            run('topic', 'new', title)
+        before = unpinned()
+        self.assertEqual((before['kind'], before['limit'], [c['kind'] for c in before['places']]), ('in_play', 2, ['topic', 'topic']), before)
+        run('topic', 'settle', '--topic', before['places'][0]['topic']['id'])
+
+        after = unpinned()
+        index = next((i for i, card in enumerate(after['places']) if card['kind'] == 'open_place'), None)
+        self.assertEqual(index, 0, 'the Open Place keeps the place of the Settled Topic: %s' % after['places'])
+        self.assertEqual(after['places'][1], before['places'][1], 'the other place does not move')
+        benched = after['bench'][0]['topic']['id']
+        run('topic', 'fill-place', str(index + 1), '--topic', benched)
+
+        filled = unpinned()
+        self.assertEqual([c.get('topic', {}).get('id') for c in filled['places']], [benched, before['places'][1]['topic']['id']], filled)
+        self.assertEqual(filled['bench'], [], filled)
+
     def test_agent_list_shows_an_agent_with_its_status_unread_and_topic(self):
         (self.projects/'cli-agents').mkdir(parents=True)
         pane = self.s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')

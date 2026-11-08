@@ -27,3 +27,21 @@ public enum AgentMark: String, CaseIterable, Comparable, Sendable {
         allCases.firstIndex(of: lhs)! < allCases.firstIndex(of: rhs)!
     }
 }
+
+/// The Agent marks of one set of Agents, by Pane, Window and Session ID. A Window, a Session and a card show the
+/// strongest mark of the Agents in them.
+public struct AgentMarks: Equatable, Sendable {
+    public let panes: [String: AgentMark]
+    public let windows: [String: AgentMark]
+    public let sessions: [String: AgentMark]
+
+    public init(_ agents: [Agent], notifications: Config.Notifications) {
+        let marked = agents.compactMap { agent in AgentMark(agent, notifications: notifications).map { (agent: agent, mark: $0) } }
+        panes = Dictionary(marked.map { ($0.agent.paneID, $0.mark) }, uniquingKeysWith: { first, _ in first })
+        windows = Dictionary(marked.map { ($0.agent.windowID, $0.mark) }, uniquingKeysWith: max)
+        sessions = Dictionary(marked.map { ($0.agent.sessionID, $0.mark) }, uniquingKeysWith: max)
+    }
+
+    /// The Agent mark of a card that holds these Sessions.
+    public func card(sessions ids: [String]) -> AgentMark? { ids.compactMap { sessions[$0] }.max() }
+}

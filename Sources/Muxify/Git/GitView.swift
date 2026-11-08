@@ -2014,7 +2014,7 @@ final class GitView {
         let repository = ([snapshot.repositoryFolder, snapshot.root] + snapshot.branches.compactMap(\.worktreePath))
             .filter { !$0.isEmpty }.map(resolver.folder)
         return TopicBranchHolders.records(remembering: branch.name, in: repository, among: topicRecords).map {
-            store?.topics.titles[$0.id] ?? $0.title ?? $0.slug ?? "Untitled Topic"
+            (store?.topics.labels ?? TopicLabels(topicRecords)).label(of: $0)
         }
     }
 

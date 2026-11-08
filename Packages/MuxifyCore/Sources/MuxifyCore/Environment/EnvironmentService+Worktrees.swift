@@ -103,11 +103,12 @@ extension EnvironmentService {
                 records = records.filter { $0.repository == main }
             }
             let states = try worktrees.states(records.map(\.path))
-            let topicRecords = topicsAvailable ? try store.read().records.filter { $0.settledAt == nil } : []
+            let topicRecords = topicsAvailable ? try store.read().records : []
+            let labels = TopicLabels(topicRecords)
             return .worktrees(zip(records, states).map { record, state in
-                let topic = topicRecords.first { $0.sessions.contains { $0[TopicWorktrees.idKey]?.string == record.id } }
+                let topic = topicRecords.first { $0.settledAt == nil && $0.sessions.contains { $0[TopicWorktrees.idKey]?.string == record.id } }
                 return MuxifyWorktreeSummary(record: record, state: state, sessions: Self.sessions(using: record.path, in: snapshot).map(\.sessionName),
-                                             topic: topic.map { TopicSummary(record: $0).label })
+                                             topic: topic.map(labels.label(of:)))
             })
         } catch {
             return .failed(failure(error, phase: .nothingChanged))

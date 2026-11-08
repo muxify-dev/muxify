@@ -81,10 +81,10 @@ final class CLIIntegrationTests: XCTestCase {
             b-absent\tNo settled field\t
             café\tCrème brûlée\t
             d-tabs\tFix reward flow\r now\t
-            e-empty\tfix-login\t
-            f-both-empty\tUntitled Topic\t
-            g-none\tUntitled Topic\t
-            h-slug-only\tuntitled-3\t
+            e-empty\tUntitled 1\t
+            f-both-empty\tUntitled 2\t
+            g-none\tUntitled 4\t
+            h-slug-only\tUntitled 3\t
             日本\t東京 🚀\t
 
             """.utf8))
@@ -460,6 +460,16 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "notes", "@muxify_lock"]), "", "the Lock of the Guest Session ends")
         XCTAssertEqual(try sandbox.records().filter { $0["guest"] as? Bool == true }.compactMap { $0["title"] as? String }, ["Second"],
                        "the Topic that comes In Play gets the Guest mark")
+    }
+
+    func testEnvironmentShowPrintsTheSnapshotWithNoKeyAroundIt() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        _ = try await newTopic("First", in: sandbox.game, sandbox: sandbox)
+        let shown = try await run(cli, arguments: ["environment", "show", "--json"], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(shown.status, 0, shown.output)
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(shown.stdout.utf8)) as? [String: Any], shown.stdout)
+        XCTAssertEqual(Set(object.keys), ["tags", "sessions", "pinned", "unpinned", "no_topic"], "the snapshot is the whole answer")
     }
 
     func testTopicMakeGuestBenchAndFillPlaceMoveTopicsBetweenTheSections() async throws {

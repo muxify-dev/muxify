@@ -6,6 +6,7 @@ extension EnvironmentCommand {
     var mirror: CLIMirror {
         switch self {
         case .list: .verb(.topicList)
+        case .environmentShow: .verb(.environmentShow)
         case .show: .verbs([.topicOpen, .topicShow, .topicStatus, .topicDiff, .topicExec])
         case .create: .verb(.topicNew)
         case .addSession: .verb(.topicAddSession)
