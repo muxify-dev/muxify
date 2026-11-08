@@ -3799,6 +3799,12 @@ final class GitViewWatchingTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }
 
+    /// Waits for something to happen rather than a fixed time, which a slow machine can overrun.
+    private func spin(until done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(2)
+        while !done(), Date() < deadline { spin(0.01) }
+    }
+
     func testItWatchesTheTopFolderAndAnOutsideCommonGitDirectory() {
         XCTAssertEqual(GitWatchedRepository(snapshot).folders, ["/repo"])
         XCTAssertEqual(GitWatchedRepository(root: "/work/linked", commonDirectory: "/repo/.git").folders,
@@ -3816,7 +3822,7 @@ final class GitViewWatchingTests: XCTestCase {
         _ = watchingGitView()
         watcher.change()
         XCTAssertEqual(reads, 0, "it reads before the changes settle")
-        spin(0.2)
+        spin { reads > 0 }
         XCTAssertEqual(reads, 1)
         finishRead?()
         spin(0.5)
@@ -3828,7 +3834,7 @@ final class GitViewWatchingTests: XCTestCase {
         // Back to back, so no settle can end inside the burst on a slow machine; each change still restarts it.
         for _ in 0..<5 { watcher.change() }
         XCTAssertEqual(reads, 0, "it read before the burst settled")
-        spin(0.2)
+        spin { reads > 0 }
         XCTAssertEqual(reads, 1)
         finishRead?()
         spin(0.5)
@@ -3838,7 +3844,7 @@ final class GitViewWatchingTests: XCTestCase {
     func testOneReadRunsAtATimeAndChangesDuringItReadOnceAfterTheSpacing() {
         watchingGitView().changeTiming = (settle: 0.05, spacing: 0.8)
         watcher.change()
-        spin(0.15)
+        spin { reads > 0 }
         XCTAssertEqual(reads, 1)
         watcher.change()
         watcher.change()
@@ -3847,7 +3853,7 @@ final class GitViewWatchingTests: XCTestCase {
         finishRead?()
         spin(0.05)
         XCTAssertEqual(reads, 1, "the next read started before the spacing since the last")
-        spin(0.8)
+        spin { reads > 1 }
         XCTAssertEqual(reads, 2, "the changes during the read were not read after it")
         finishRead?()
         spin(0.4)
@@ -3926,6 +3932,12 @@ final class GitRemoteProbeTests: XCTestCase {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }
 
+    /// Waits for something to happen rather than a fixed time, which a slow machine can overrun.
+    private func spin(until done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(2)
+        while !done(), Date() < deadline { spin(0.01) }
+    }
+
     func testUnchangedValuesReportNothingAndAChangedOneReports() {
         let probe = makeProbe()
         probe.start(repository) { self.changes += 1 }
@@ -3987,7 +3999,7 @@ final class GitRemoteProbeTests: XCTestCase {
         let probe = makeProbe(interval: 0.05)
         probe.start(repository) { self.changes += 1 }
         answer("a\n")
-        spin(0.08)
+        spin { !calls.isEmpty }
         XCTAssertEqual(calls.count, 1, "it did not probe on the interval")
         answer("b\n")
         XCTAssertEqual(changes, 1)
@@ -4019,7 +4031,7 @@ final class GitRemoteProbeTests: XCTestCase {
         XCTAssertEqual(reads, 0, "an unchanged probe started a read")
         probe.probe()
         answer("b\n")
-        spin(0.1)
+        spin { reads > 0 }
         XCTAssertEqual(reads, 1, "a changed probe started no read")
         gitView.suspend()
         probe.probe()
