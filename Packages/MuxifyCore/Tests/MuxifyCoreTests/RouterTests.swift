@@ -185,50 +185,46 @@ final class RouterTests: XCTestCase {
         }
     }
 
-    func testRecoveryUsesTheNearestEarlierSiblingThenTheNextSibling() {
-        let before = [window("@1"), window("@2"), window("@3"), window("@4")]
-        for (selected, survivors, target) in [("@3", [before[0], before[1], before[3]], "@2"),
-                                              ("@1", [before[1], before[2]], "@2"),
-                                              ("@3", [before[0], before[3]], "@1")] {
-            var router = Router()
-            _ = router.handle(.read(1), .init(windows: before, ownClientWindow: id(selected)))
-            _ = router.handle(.read(2), .init(windows: survivors))
-            XCTAssertEqual(router.location, .window(id(target)))
-        }
-    }
-
-    func testRecoveryKeepsItsSiblingInventoryThroughAProtectedRead() throws {
-        var router = Router()
+    func testAClosedLocationFollowsTheWindowTmuxMovedTheClientToWithoutASwitch() {
         let before = [window("@1"), window("@2"), window("@3")]
-        _ = router.handle(.go(.window(id("@3"))), .init(windows: before))
-        let pending = try windowIntent(router)
-        _ = router.handle(.read(1), .init(windows: [before[0]]))
-        _ = router.handle(.commandFinished(pending.id, .success, lastStartedRead: 1), .init())
-        _ = router.handle(.read(2), .init(windows: [before[0], before[1]]))
-        XCTAssertEqual(router.location, .window(id("@2")))
-    }
-
-    func testRecoveryFallsBackToThePreviousWindowThenTheFirstWindowThenNothing() {
-        let before = [window("@1", sessionID: "$1"), window("@2", sessionID: "$2"), window("@3", sessionID: "$3")]
-        for (survivors, target) in [([before[0], before[1]], Optional(id("@2"))), ([before[0]], Optional(id("@1"))), ([], nil)] {
-            var router = Router()
-            _ = router.handle(.read(1), .init(windows: before, ownClientWindow: id("@2")))
-            _ = router.handle(.read(2), .init(windows: before, ownClientWindow: id("@3")))
-            _ = router.handle(.read(3), .init(windows: survivors))
-            XCTAssertEqual(router.location, target.map(Location.window))
-        }
-    }
-
-    func testAPageAndRepeatedReadsDoNotEraseThePreviousWindow() {
         var router = Router()
-        let before = [window("@1", sessionID: "$1"), window("@2", sessionID: "$2"), window("@3", sessionID: "$3")]
-        _ = router.handle(.read(1), .init(windows: before, ownClientWindow: id("@2")))
-        _ = router.handle(.read(2), .init(windows: before, ownClientWindow: id("@3")))
-        _ = router.handle(.read(3), .init(windows: before, ownClientWindow: id("@3")))
-        _ = router.handle(.go(.emptyTopic(.topic("work"))), .init())
-        _ = router.handle(.result(.window(id("@3")), lastStartedRead: 3), .init(windows: before))
-        _ = router.handle(.read(4), .init(windows: [before[0], before[1]]))
+        _ = router.handle(.read(1), .init(windows: before, ownClientWindow: id("@3")))
+        _ = router.handle(.read(2), .init(windows: before, ownClientWindow: id("@1")))
+        _ = router.handle(.read(3), .init(windows: before, ownClientWindow: id("@2")))
         XCTAssertEqual(router.location, .window(id("@2")))
+        let effects = router.handle(.read(4), .init(windows: [before[0], before[2]], ownClientWindow: id("@1")))
+        XCTAssertEqual(router.location, .window(id("@1")), "tmux's last Window, not @3, the next by index")
+        XCTAssertEqual(effects, [.visit(.window(id("@1"))), .enterRead(id("@1"))])
+        XCTAssertNil(router.intent)
+        XCTAssertTrue(router.handle(.read(5), .init(windows: [before[0], before[2]], ownClientWindow: id("@1"))).isEmpty)
+    }
+
+    func testAClosedLocationClearsAPendingRequestAndFollowsTheClient() {
+        let before = [window("@1"), window("@2"), window("@3")]
+        var router = Router()
+        _ = router.handle(.read(1), .init(windows: before, ownClientWindow: id("@2")))
+        _ = router.handle(.request(.window("@9"), at: Date()), .init(windows: before))
+        let effects = router.handle(.read(2), .init(windows: [before[0], before[2]], ownClientWindow: id("@3"),
+                                                    now: Date().addingTimeInterval(10)))
+        XCTAssertEqual(router.location, .window(id("@3")))
+        XCTAssertEqual(effects, [.visit(.window(id("@3"))), .enterRead(id("@3"))])
+        XCTAssertNil(router.intent)
+    }
+
+    func testAClosedLocationWithoutAClientClearsAndTheAttachPathPicks() throws {
+        let before = [window("@1"), window("@2"), window("@3")]
+        for (remembered, target) in [(Optional(id("@3")), id("@3")), (nil, id("@1"))] {
+            var router = Router()
+            _ = router.handle(.read(1), .init(windows: before, ownClientWindow: id("@3")))
+            _ = router.handle(.read(2), .init(windows: before, ownClientWindow: id("@2")))
+            XCTAssertTrue(router.handle(.read(3), .init(windows: [before[0], before[2]], hasTerminal: false)).isEmpty)
+            XCTAssertNil(router.location)
+            let effects = router.handle(.read(4), .init(windows: [before[0], before[2]], hasTerminal: false,
+                                                        allowAttach: true, rememberedWindow: remembered,
+                                                        initialWindow: id("@1")))
+            XCTAssertEqual(router.location, .window(target))
+            XCTAssertEqual(effects, [.visit(.window(target)), .attach(target, intent: try windowIntent(router).id)])
+        }
     }
 
     func testAWindowOrSessionRequestWaitsUntilTheReadListsItsWindow() {
@@ -486,11 +482,10 @@ final class RouterTests: XCTestCase {
         XCTAssertTrue(router.handle(.commandFinished(second.id, .success, lastStartedRead: 2), facts).isEmpty)
     }
 
-    func testTopicArrivalNextTopicAndRecoveryReadOnArrival() throws {
+    func testTopicArrivalAndNextTopicReadOnArrival() throws {
         let facts = Router.Facts(windows: [window("@2")], records: [TopicRecord(id: "work")],
                                  entryWindows: [.topic("work"): id("@2")])
-        for origin in [Router.Event.go(.emptyTopic(.topic("work"))), .settled(next: .topic("work")),
-                       .result(.window(id("@1")), lastStartedRead: 0)] {
+        for origin in [Router.Event.go(.emptyTopic(.topic("work"))), .settled(next: .topic("work"))] {
             var router = Router()
             _ = router.handle(origin, facts)
             _ = router.handle(.read(1), facts)

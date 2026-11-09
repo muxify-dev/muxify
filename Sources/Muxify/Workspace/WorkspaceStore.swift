@@ -1528,8 +1528,8 @@ final class WorkspaceStore {
         }
     }
 
-    /// Resolve switches against a fresh inventory. A close may also emit a
-    /// Window switch; following it early would lose our previous-Window fallback.
+    /// Resolve switches against a fresh inventory. A close also moves the Client
+    /// to a Window tmux chose; the Router follows it once the read lists it.
     private func handle(_ event: TmuxEvents.Event) {
         refresh()
     }
@@ -2310,10 +2310,10 @@ final class WorkspaceStore {
     /// Runs the Git View's editor command for `file` at `line` in a new Window
     /// right after `windowID`, in `directory`, and goes to it while the
     /// Location is still `windowID`. A move made while git and tmux answered
-    /// is newer, so it wins (ADR 0044). When the editor's Window closes, the
-    /// Router goes to its earlier sibling, the Window with the Git View. On a
-    /// Remote Environment tmux runs the command there, so it edits that
-    /// machine's file.
+    /// is newer, so it wins (ADR 0044). When the editor's Window closes, tmux
+    /// moves the Client to its last Window, the one with the Git View, and the
+    /// Router follows it. On a Remote Environment tmux runs the command there,
+    /// so it edits that machine's file.
     func openInEditor(file: String, line: Int, from windowID: String, in directory: String) {
         let origin = windows.first(where: { $0.id == windowID })
         guard let sessionID = origin?.sessionID ?? selectedWindow?.sessionID else { return }

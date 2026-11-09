@@ -161,8 +161,8 @@ class TopicsWorktreesSidebar(TopicsSidebar):
         s.act('press', key)
         s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Add a Session Path did not take the shared Worktree row', seconds=15)
         self.wait_session(name)
-        # The client is on the new Session. Killing it first would start the App Window's Window recovery,
-        # which can pull the client back while the cleanup moves it to base.
+        # The client is on the new Session. Killing it first would end the Client's Session, and Muxify would attach
+        # to the first Session left (followEndedSession), which can pull the client while the cleanup moves it to base.
         self.addCleanup(self.end_session, s.tmux('display-message', '-p', '-t', '=' + name + ':', '#{session_id}'))
         session_path = s.tmux('display-message', '-p', '-t', '=' + name + ':', '#{session_path}')
         self.assertIn(session_path, (str(self.gamma/'main'), os.path.realpath(self.gamma/'main')), 'Session path')
