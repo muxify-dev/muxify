@@ -278,7 +278,7 @@ writes their new `@muxify_lock` values to tmux.
 Forget removes the Topic's record after it kills or detaches the Topic's live Sessions.
 The Topic cannot be Reopened. Forget applies to open, Dormant and Settled Topics.
 Each live Session uses the same Kill or Keep with no Topic choice as Settle.
-The palette presets every Session to Kill. A request that names no choice for a Session, such as a URL or the CLI without `--kill-sessions`, keeps it. Keeping restores its base name, with `+x` on collision.
+The palette presets every Session to Kill. A request that names no choice for a Session, such as a URL or the CLI without `--kill-sessions`, keeps it. Keeping restores its base name, with `+x` on collision. A Session whose base name is still its Session Path's name, with or without `+x`, takes the launch name of its folder instead, such as `app/fix-login` for a Worktree, because the bare name launches the Session Path's own folder.
 Every Worktree defaults to Keep. Missing `worktree_created` is not permission to delete.
 Cleanup checks all live Sessions and all Panes, not just active Panes, and never deletes branches.
 

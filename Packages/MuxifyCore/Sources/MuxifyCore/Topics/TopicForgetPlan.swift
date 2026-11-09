@@ -60,7 +60,7 @@ struct TopicForgetPlan {
             case .kill: return [.tmux(["kill-session", "-t", session.id])]
             case .keep:
                 guard let window = snapshot.windows.first(where: { $0.sessionID == session.id }) else { return [] }
-                return topic.detachedCommands(for: window, taken: &taken)
+                return topic.detachedCommands(for: window, sessionPaths: sessionPaths, taken: &taken)
             }
         }
         for tree in available.worktrees where tree.canRemove(sessions: sessions) && worktrees.contains(tree.id) {
