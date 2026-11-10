@@ -130,6 +130,8 @@ final class BreathingBarView: NSView {
         animation.values = (0...samples).map { 0.675 + 0.325 * cos(2 * .pi * Double($0) / Double(samples)) }
         animation.duration = Self.period
         animation.repeatCount = .infinity
+        // Begin now, not when the transaction commits, or the bar lags the clock by the wait for the commit.
+        animation.beginTime = bar.convertTime(CACurrentMediaTime(), from: nil)
         animation.timeOffset = Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.period)
         animation.isRemovedOnCompletion = false
         bar.add(animation, forKey: "breathe")

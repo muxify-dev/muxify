@@ -167,6 +167,8 @@ final class MovingTerminalActivityGlyphView: NSView {
     private func step() {
         let count = TerminalActivityGlyph.cells.count
         let period = TerminalActivityIndicator.period
+        // Begin now, not when the transaction commits, or the glyph lags the clock by the wait for the commit.
+        let now = CACurrentMediaTime()
         let offset = TerminalActivityIndicator.phase(at: Date()) * period
         for (index, block) in blocks.enumerated() {
             let values = (0..<count).map { head in TerminalActivityGlyph.opacity(stepsBehindHead: (head - index + count) % count) }
@@ -176,6 +178,7 @@ final class MovingTerminalActivityGlyphView: NSView {
             animation.calculationMode = .discrete
             animation.duration = period
             animation.repeatCount = .infinity
+            animation.beginTime = block.convertTime(now, from: nil)
             animation.timeOffset = offset
             animation.isRemovedOnCompletion = false
             withoutActions { block.opacity = Float(values[0]) }
