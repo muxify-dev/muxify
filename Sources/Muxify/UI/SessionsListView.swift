@@ -82,6 +82,8 @@ final class SessionsListView: NSView {
     private func card(of sessionID: String) -> SessionCardView {
         let card = SessionCardView(sessionID: sessionID)
         card.onPress = { [weak self] in self?.press(sessionID) }
+        // As the tap of the SwiftUI row's drag handle.
+        card.onSelectWindow = { [weak self] window in self?.store.windowRowDrag.select(window) }
         return card
     }
 
@@ -96,7 +98,20 @@ final class SessionsListView: NSView {
                                   mark: model.sessionMarks[session.id].map(CardMark.agent), isLocked: isLocked,
                                   isGuest: isLocked && store.topicConfig.inPlay != nil,
                                   hasBell: session.windows.contains(where: \.hasBell),
-                                  hint: CardHint(.session(session.id), in: environment.hints))
+                                  hint: CardHint(.session(session.id), in: environment.hints),
+                                  rows: isOpen ? rows(of: session) : [])
+    }
+
+    /// The Window rows of the Session's open card, in tmux's order, read from the models as the SwiftUI list reads them.
+    private func rows(of session: SessionGroup) -> [WindowRowContent] {
+        (store.topics.sessionChildren[session.id]?.items ?? []).compactMap { item in
+            guard case .window(let window) = item else { return nil }
+            return WindowRowContent(
+                window: window, formatted: store.sidebarWindowRow(window), isSelected: window.id == store.selectedWindowID,
+                tabCount: store.tabCount(for: window), isGitViewOpen: store.isGitViewOpen(in: window.id),
+                usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
+                    window, record: store.topicWatcher.records.first { $0.id == window.topicID }, sessionPaths: store.sessionPaths))
+        }
     }
 
     /// A press on the header of the Session's card, as the Session is now.

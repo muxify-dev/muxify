@@ -11,9 +11,27 @@ why it stays. A section with no text means no known difference.
 
 ## cards
 
+The fill of the open card is one step of 255 lighter in red and green in the SwiftUI picture: 70, 74, 80 against
+69, 73, 80 on the run's dark theme. One step cannot be seen, but it makes the difference picture mark the whole open
+card, its rows too, and so most of the share of pixels that differ. The AppKit card's fill is a layer with its shadow
+(`CardFillView`), and a layer's shadow shows through a fill that faint: the text colour at 8 % over black at 28 %
+takes the card down about one step. The SwiftUI picture has the value of the fill with no shadow under it. Outside
+the card both pictures show the same pixels, because the shadow there is fainter than one step.
+
+The Window rows match within that step: the tint of the Location's row, the app icons, which differ by at most one
+step where the SVG is drawn, and the titles. The coloured border of the Location's card and the text: as in
+`card-marks`.
+
 ## window-parts
 
+The fill of the open card: as in `cards`. The parts of the row match within that step: the app icon, the title and
+"Main working copy", the bell, the Git View icon, the globe and the Tab count, and the Pane count with the capsule of
+its Zoomed Pane.
+
 ## window-formats
+
+The fill of the open card: as in `cards`. The text, symbol and app icon parts on both sides, the title and the Summary
+match within that step.
 
 ## pane-rows
 

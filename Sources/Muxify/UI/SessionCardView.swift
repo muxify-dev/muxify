@@ -16,6 +16,8 @@ struct SessionCardContent: Equatable {
     /// A Window of the Session has a bell.
     var hasBell = false
     var hint: CardHint?
+    /// The Window rows of an open card, in tmux's order. A closed card has none.
+    var rows: [WindowRowContent] = []
 }
 
 /// The Hint of a card, in the place the header keeps for it after the title.
@@ -33,19 +35,22 @@ struct CardHint: Equatable {
 }
 
 /// A Session card of the AppKit Sessions list (ADR 0074). Closed, it is flat, with only its border; open, it is
-/// raised, with the room for its rows under its header. A spine shows its mark, and the card that holds the
-/// Location's Window has the many-coloured border. It gives the accessibility rows of the SwiftUI card:
-/// `card-session-<id>` for the card, `session-<id>` for its header and the Hint's own row.
+/// raised, with its Window rows under its header. A spine shows its mark, and the card that holds the Location's
+/// Window has the many-coloured border. It gives the accessibility rows of the SwiftUI card: `card-session-<id>` for
+/// the card, the parts of its Window rows, `session-<id>` for its header and the Hint's own row.
 final class SessionCardView: NSView {
     let sessionID: String
     /// A press on the header.
     var onPress: () -> Void = {} {
         didSet { header.onPress = onPress }
     }
+    /// A click on a Window row.
+    var onSelectWindow: (TmuxWindow) -> Void = { _ in }
     private let fill = CardFillView()
     private let header: SessionCardHeaderView
-    /// The room for the rows of an open card.
-    private let rows = FlippedView()
+    /// The rows of an open card. A card that closes keeps them, so they fade where they stand.
+    private let rows = CardRowsView()
+    private var windowRows: [WindowRowView] = []
     private let spine = CardSpineView()
     private let outline = CardOutlineView()
     private let selection = CardSelectionBorderView()
@@ -78,11 +83,14 @@ final class SessionCardView: NSView {
     func show(_ content: SessionCardContent, environment: SessionsListEnvironment) {
         guard content != self.content || environment != self.environment else { return }
         let came = self.content.map { !$0.holdsSelection && content.holdsSelection } ?? false
+        let wasOpen = isOpen
         self.content = content
         self.environment = environment
         header.show(content, environment: environment)
+        if content.isOpen { showRows(content.rows, fades: wasOpen) }
         fill.alphaValue = content.isOpen ? 1 : 0
         rows.alphaValue = content.isOpen ? 1 : 0
+        rows.isOpen = content.isOpen
         spine.show(content.mark, colors: environment.agentColors, moves: environment.pulses && !environment.reduceMotion)
         // The card that holds the Location's Window gives up its plain border for the coloured one.
         outline.isHidden = content.holdsSelection
@@ -92,9 +100,28 @@ final class SessionCardView: NSView {
         if came, !environment.reduceMotion { selection.turn() }
     }
 
-    /// The card's height at `width`: its header, and under the header of an open card the room for its rows.
+    /// Shows a row for each Window, from the top. A row that already showed keeps its view, so its tint fades when
+    /// the Location moves, unless `fades` is false.
+    private func showRows(_ contents: [WindowRowContent], fades: Bool) {
+        var kept = Dictionary(windowRows.map { ($0.windowID, $0) }, uniquingKeysWith: { first, _ in first })
+        windowRows = contents.map { content in
+            let row = kept.removeValue(forKey: content.window.id) ?? WindowRowView(windowID: content.window.id, identifier: "session-window-" + content.window.id)
+            row.onPress = { [weak self] in self?.onSelectWindow(content.window) }
+            row.show(content, environment: environment, fades: fades)
+            return row
+        }
+        if rows.subviews != windowRows { rows.subviews = windowRows }
+    }
+
+    /// The card's height at `width`: its header, and under the header of an open card its rows.
     func height(width: CGFloat) -> CGFloat {
-        header.height(width: width) + (isOpen ? CardRowsPadding.top + CardRowsPadding.bottom : 0)
+        header.height(width: width) + (isOpen ? CardRowsPadding.top + rowsHeight(width: width) + CardRowsPadding.bottom : 0)
+    }
+
+    /// The height of the rows in a card `width` wide, with `CardSpacing.row` between two rows.
+    private func rowsHeight(width: CGFloat) -> CGFloat {
+        let rowWidth = max(0, width - 2 * CardRowsPadding.horizontal)
+        return windowRows.map { $0.height(width: rowWidth) }.reduce(0, +) + CardSpacing.row * CGFloat(max(0, windowRows.count - 1))
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -108,7 +135,12 @@ final class SessionCardView: NSView {
         selection.frame = bounds
         header.frame = NSRect(x: 0, y: 0, width: bounds.width, height: header.height(width: bounds.width))
         rows.frame = NSRect(x: CardRowsPadding.horizontal, y: header.frame.maxY + CardRowsPadding.top,
-                            width: max(0, bounds.width - 2 * CardRowsPadding.horizontal), height: 0)
+                            width: max(0, bounds.width - 2 * CardRowsPadding.horizontal), height: rowsHeight(width: bounds.width))
+        var top: CGFloat = 0
+        for row in windowRows {
+            row.frame = NSRect(x: 0, y: top, width: rows.bounds.width, height: row.height(width: rows.bounds.width))
+            top = row.frame.maxY + CardSpacing.row
+        }
         spine.frame = NSRect(x: CardSpine.leading, y: CardSpine.verticalInset, width: CardSpine.width,
                              height: max(0, bounds.height - 2 * CardSpine.verticalInset))
         // The header keeps the Hint's place, and the card draws the Hint over it.
@@ -117,8 +149,11 @@ final class SessionCardView: NSView {
 
     // MARK: Accessibility
 
-    /// The header, then the Hint, which is a row of its own because the header hides its children.
-    override func accessibilityChildren() -> [Any]? { hint.isHidden ? [header] : [header, hint] }
+    /// The parts of the Window rows of an open card, then the header and the Hint, which is a row of its own because
+    /// the header hides its children. SwiftUI lists the header after the rows, which it draws above them.
+    override func accessibilityChildren() -> [Any]? {
+        (isOpen ? windowRows.flatMap(\.accessibilityParts) : []) + [header] + (hint.isHidden ? [] : [hint])
+    }
 
     override func accessibilityActivationPoint() -> NSPoint { accessibilityFrame().centre }
 
@@ -131,6 +166,15 @@ final class SessionCardView: NSView {
 
 extension NSRect {
     var centre: NSPoint { NSPoint(x: midX, y: midY) }
+}
+
+/// The rows of a card. A closed card's rows take no click.
+private final class CardRowsView: NSView {
+    var isOpen = false
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { isOpen ? super.hitTest(point) : nil }
 }
 
 /// The header of a Session card: the title, after it the place of the card's Hint and the lock or the Guest mark,

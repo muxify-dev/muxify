@@ -17,6 +17,9 @@ keeps the app behind the user's windows: it is a first click while Muxify is not
 AppKit card follows it. The header of the SwiftUI card does not follow the driver's `click`, also before the AppKit
 list existed: a one-off probe on the commit before the AppKit cards showed that. So only the AppKit list gets `click`.
 
+The check of a click on a Window row runs against both lists, because the SwiftUI row takes the first click
+(`takesFirstClick` on its drag handle). A click aims at the middle of the row's first part, its app icon.
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.sessions_list_sidebar
 """
@@ -116,9 +119,10 @@ class SessionsListSidebar(unittest.TestCase):
         self.s.wait_rows(lambda rs: self.card_value(session, rs).startswith(state),
                          lambda: '%s: the value of its header is %r' % (message, self.card_value(session)))
 
-    def location(self):
-        """The Session of the Location: the Session of the app's tmux client that is no control client."""
-        clients = self.s.tmux('list-clients', '-F', '#{client_control_mode} #{session_id}').splitlines()
+    def location(self, what='session_id'):
+        """The Session of the Location, or with `what='window_id'` its Window: the one of the app's tmux client that is
+        no control client."""
+        clients = self.s.tmux('list-clients', '-F', '#{client_control_mode} #{%s}' % what).splitlines()
         return [line.split()[1] for line in clients if line.startswith('0 ')]
 
     def stand_on(self, session, opened):
@@ -242,6 +246,26 @@ class SessionsListSidebar(unittest.TestCase):
                     self.s.wait_shown(self.windows[other])
                     self.assertEqual(self.location(), [other], 'a press on the card of another Session did not go to it')
                     self.assertTrue(self.card_value(home).startswith('expanded'), 'the card that the Location left closed')
+
+    def test_a_click_on_a_window_row_goes_to_its_window(self):
+        session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'list-rows', SHELL)
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', session)
+        first = self.s.tmux('list-windows', '-t', session, '-F', '#{window_id}')
+        second = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', session + ':', SHELL)
+        for version in ('swiftui', 'appkit'):
+            self.show_list(version)
+            self.show_mode('sessions')
+            for start, target in ((first, second), (second, first)):
+                with self.subTest(version=version, target=target):
+                    self.s.show(start)
+                    self.s.wait_shown(start)
+                    if not self.card_value(session).startswith('expanded'):
+                        self.s.act('press', 'session-' + session)
+                    self.s.wait_rows(lambda rs: self.s.has('session-window-' + target, rs),
+                                     'the open card of %s has no row for %s' % (session, target))
+                    self.s.act('click', 'session-window-' + target)
+                    self.s.wait_shown(target)
+                    self.assertEqual(self.location('window_id'), [target], 'a click on its row did not go to the Window')
 
     def test_a_session_that_starts_or_ends_changes_the_cards_of_the_appkit_list(self):
         self.show_list('appkit')

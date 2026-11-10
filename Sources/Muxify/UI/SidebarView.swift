@@ -1327,15 +1327,15 @@ struct WindowRow: View {
     @State private var hovering = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            if hints.windowSlotReserved { Color.clear.frame(width: fontSize(10)) }
+        HStack(spacing: WindowRowMetrics.spacing) {
+            if hints.windowSlotReserved { Color.clear.frame(width: fontSize(WindowRowMetrics.hintRoom)) }
             if let left = content?.left {
                 if !left.isEmpty { customPart(left, side: "left") }
             } else {
-                Logo(name: window.logoName)
+                Logo(name: window.logoName, size: WindowRowMetrics.iconSize)
                     .accessibilityIdentifier("window-left-app-icon-\(window.id)")
             }
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: WindowRowMetrics.lineSpacing) {
                 Text(content?.text.title ?? window.displayTitle)
                     .font(typography.font(for: .title))
                     .hoverLabelTitle()
@@ -1346,69 +1346,69 @@ struct WindowRow: View {
                         .lineLimit(1)
                 }
                 if usesMainWorkingCopy {
-                    Text("Main working copy")
+                    Text(WindowRowText.mainWorkingCopy)
                         .font(typography.font(for: .location))
                         .foregroundStyle(secondaryStyle)
                         .accessibilityIdentifier("main-working-copy-\(window.id)")
                 }
             }
-            Spacer(minLength: 4)
+            Spacer(minLength: WindowRowMetrics.endGap)
             if window.hasBell && !topicsView {
                 BellMark()
                     .accessibilityIdentifier("window-bell-\(window.id)")
             }
             if isGitViewOpen {
-                GitViewIcon(size: fontSize(11))
+                GitViewIcon(size: fontSize(WindowRowMetrics.gitViewIconSize))
                     .foregroundStyle(secondaryStyle)
-                    .help("Git View open")
+                    .help(WindowRowText.gitViewOpen)
                     .accessibilityIdentifier("window-git-view-\(window.id)")
             }
             if let right = content?.right {
                 if !right.isEmpty { customPart(right, side: "right") }
             } else {
                 if tabCount > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "globe")
-                            .font(fontSize.font(10, weight: .medium))
+                    HStack(spacing: WindowRowMetrics.badgeSpacing) {
+                        Image(systemName: WindowRowMetrics.tabSymbol)
+                            .font(fontSize.font(WindowRowMetrics.symbolSize, weight: .medium))
                         Text("\(tabCount)")
                             .font(typography.font(for: .badge))
                     }
                     .foregroundStyle(secondaryStyle)
-                    .help("\(tabCount) browser tab(s)")
+                    .help(WindowRowText.tabs(tabCount))
                     .accessibilityIdentifier("window-right-tabs-\(window.id)")
                 }
                 if topicsView || window.paneCount > 1 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "rectangle.split.2x1")
-                            .font(fontSize.font(10, weight: .medium))
+                    HStack(spacing: WindowRowMetrics.badgeSpacing) {
+                        Image(systemName: WindowRowMetrics.paneSymbol)
+                            .font(fontSize.font(WindowRowMetrics.symbolSize, weight: .medium))
                         Text("\(window.paneCount)")
                             .font(typography.font(for: .badge))
                     }
                     // A Zoomed Pane hides the others, so the badge glows like the Maximized side's toggle.
                     .foregroundStyle(window.isZoomed ? Color.accentColor : secondaryStyle)
-                    .padding(.horizontal, 4)
+                    .padding(.horizontal, WindowRowMetrics.paneCountPadding)
                     .background(
-                        Capsule().fill(Color.accentColor.opacity(window.isZoomed ? 0.2 : 0))
+                        Capsule().fill(Color.accentColor.opacity(window.isZoomed ? WindowRowMetrics.zoomFillOpacity : 0))
                     )
-                    .help(window.isZoomed ? "One Pane is Zoomed. The others are hidden." : "")
+                    .help(window.isZoomed ? WindowRowText.zoomed : "")
                     // The row's own identifier and value replace the badge's, so the row label is where a client reads Zoom.
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(window.isZoomed ? "\(window.paneCount), Zoomed" : "\(window.paneCount)")
+                    .accessibilityLabel(WindowRowText.panes(window.paneCount, isZoomed: window.isZoomed))
                     .accessibilityIdentifier("window-right-panes-\(window.id)")
                 }
             }
         }
         .foregroundStyle(Color.primary)
-        .padding(.leading, 8)
-        .padding(.trailing, 6)
-        .padding(.vertical, 4)
+        .padding(.leading, WindowRowMetrics.leading)
+        .padding(.trailing, WindowRowMetrics.trailing)
+        .padding(.vertical, WindowRowMetrics.vertical)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
+            RoundedRectangle(cornerRadius: WindowRowMetrics.cornerRadius, style: .continuous)
                 .fill(background)
                 .animation(.easeOut(duration: SelectedRow.fade), value: isSelected)
         )
-        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: WindowRowMetrics.cornerRadius, style: .continuous))
         .onHover { hovering = $0 }
         .hintAnchor(.window(window.id))
         .hoverLabel(detail: "\(window.sessionName):\(window.index) — \(window.abbreviatedPath)",
@@ -1425,11 +1425,11 @@ struct WindowRow: View {
                         .lineLimit(1)
                         .accessibilityIdentifier("window-\(side)-text-\(window.id)-\(index)")
                 case .currentAppIcon:
-                    Logo(name: window.logoName)
+                    Logo(name: window.logoName, size: WindowRowMetrics.iconSize)
                         .accessibilityIdentifier("window-\(side)-app-icon-\(window.id)-\(index)")
                 case .symbol(let name):
                     Image(systemName: name)
-                        .font(fontSize.font(10, weight: .medium))
+                        .font(fontSize.font(WindowRowMetrics.symbolSize, weight: .medium))
                         .accessibilityIdentifier("window-\(side)-symbol-\(window.id)-\(index)")
                         .accessibilityLabel(name)
                 }
@@ -1442,15 +1442,12 @@ struct WindowRow: View {
 
     private var background: Color {
         if isSelected { return SelectedRow.fill }
-        return hovering ? Color.primary.opacity(0.07) : .clear
+        return hovering ? Color.primary.opacity(SelectedRow.hoverOpacity) : .clear
     }
 }
 
-/// How the Sidebar marks the selected Window or Pane row: a soft accent tint that fades in, so moving
-/// between Windows does not flash a block of full colour from row to row.
-private enum SelectedRow {
-    static let fill = Color.accentColor.opacity(0.22)
-    static let fade = 0.14
+extension SelectedRow {
+    static let fill = Color.accentColor.opacity(tintOpacity)
 }
 
 /// A terminal bell in a Window. It is not an Agent mark, so it is gray, and no Config changes it.
@@ -1507,7 +1504,7 @@ private struct PaneRow: View {
             .padding(.leading, row.isUnderWindowRow ? 28 : 8).padding(.trailing, 6).padding(.vertical, 3)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(isSelected ? SelectedRow.fill : hovering ? Color.primary.opacity(0.07) : .clear)
+                .fill(isSelected ? SelectedRow.fill : hovering ? Color.primary.opacity(SelectedRow.hoverOpacity) : .clear)
                 .animation(.easeOut(duration: SelectedRow.fade), value: isSelected))
             .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         }
@@ -1629,32 +1626,19 @@ struct Logo: View {
 
     var body: some View {
         Group {
-            if let image = (colorScheme == .dark ? Self.image(name + ".dark") : nil) ?? Self.image(name) ?? Self.image("terminal") {
+            if let image = LogoImages.image(name, dark: colorScheme == .dark) {
                 Image(nsImage: image)
-                    .renderingMode(Self.monochrome.contains(name) ? .template : .original)
+                    .renderingMode(LogoImages.isMonochrome(name) ? .template : .original)
                     .resizable()
                     .interpolation(.high)
                     .aspectRatio(contentMode: .fit)
             } else {
-                Image(systemName: "terminal")
-                    .font(.system(size: size * 11 / 14))
+                Image(systemName: LogoImages.fallbackSymbol)
+                    .font(.system(size: size * LogoImages.fallbackScale))
                     .foregroundStyle(.secondary)
             }
         }
         .foregroundStyle(.primary)
         .frame(width: size, height: size)
-    }
-
-    private static let monochrome: Set<String> = ["pi"]
-    /// Looked up once per name; nil when the bundle has no logo for it.
-    private static var cache: [String: NSImage?] = [:]
-
-    private static func image(_ name: String) -> NSImage? {
-        if let cached = cache[name] { return cached }
-        let url = name.isEmpty ? nil : ["svg", "png"].lazy
-            .compactMap { Bundle.main.url(forResource: name, withExtension: $0) }.first
-        let image = url.flatMap(NSImage.init(contentsOf:))
-        cache[name] = image
-        return image
     }
 }

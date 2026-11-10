@@ -5,6 +5,8 @@ import CoreText
 /// draws, as SwiftUI's primary and secondary styles.
 enum SidebarInk: Equatable {
     case primary, secondary
+    /// The accent colour, as SwiftUI's `Color.accentColor`.
+    case accent
     /// The text colour at an opacity, as `Color.primary.opacity`.
     case faded(Double)
 
@@ -13,6 +15,7 @@ enum SidebarInk: Equatable {
         switch self {
         case .primary: return .labelColor
         case .secondary: return .secondaryLabelColor
+        case .accent: return .controlAccentColor
         case .faded(let opacity): return NSColor.labelColor.faded(opacity)
         }
     }
@@ -163,13 +166,18 @@ final class SidebarLabel: NSView {
 }
 
 /// A system symbol in the AppKit Sessions list (ADR 0074), in the room that SwiftUI's `Image(systemName:)` takes at
-/// a font size.
+/// a font size. As a row of its own to accessibility, its frame is its glyph's, as SwiftUI gives it.
 final class SidebarSymbol: NSView {
-    private let name: String
+    let name: String
     /// The font size of the symbol, in points.
     var pointSize: CGFloat = 0 {
         didSet {
             if pointSize != oldValue { changed() }
+        }
+    }
+    var weight = NSFont.Weight.regular {
+        didSet {
+            if weight != oldValue { changed() }
         }
     }
     var ink = SidebarInk.secondary {
@@ -197,7 +205,7 @@ final class SidebarSymbol: NSView {
 
     private func changed() {
         image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular))
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: pointSize, weight: weight))
         needsDisplay = true
     }
 
@@ -209,6 +217,53 @@ final class SidebarSymbol: NSView {
         let measures = image.alignmentRect
         let added = measures.height + 2 * measures.minY < image.size.height ? 1 - 1 / scale : 0
         return NSSize(width: measures.width.roundedUp(toPixelsOf: scale), height: image.size.height - added)
+    }
+
+    /// Where the glyph stands in the view: the room the symbol takes has some space around it. SwiftUI gives this as
+    /// the frame of the image's accessibility row.
+    var glyphFrame: NSRect {
+        guard let image else { return .zero }
+        let key = "\(name) \(pointSize) \(weight.rawValue) \(scale)"
+        let glyph = Self.glyphs[key] ?? Self.glyph(of: image, scale: scale)
+        Self.glyphs[key] = glyph
+        return glyph.offsetBy(dx: 0, dy: symbolSize.height - image.size.height)
+    }
+
+    /// The glyph's frame in each image that a symbol view drew, from the image's top left corner.
+    private static var glyphs: [String: NSRect] = [:]
+
+    /// The frame of the pixels that the image covers, from its top left corner, at the display's scale.
+    private static func glyph(of image: NSImage, scale: CGFloat) -> NSRect {
+        let width = Int((image.size.width * scale).rounded(.up)), height = Int((image.size.height * scale).rounded(.up))
+        guard width > 0, height > 0,
+              let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8,
+                                            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                            bytesPerRow: width * 4, bitsPerPixel: 32) else { return .zero }
+        // The size in points first: the context then draws a point on `scale` pixels.
+        bitmap.size = image.size
+        guard let context = NSGraphicsContext(bitmapImageRep: bitmap), let pixels = bitmap.bitmapData else { return .zero }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        image.draw(in: NSRect(origin: .zero, size: image.size))
+        NSGraphicsContext.restoreGraphicsState()
+        var left = width, top = height, right = -1, bottom = -1
+        // The bitmap's rows count down from its top.
+        for row in 0..<height {
+            for column in 0..<width where pixels[(row * width + column) * 4 + 3] > 0 {
+                left = min(left, column)
+                right = max(right, column)
+                top = min(top, row)
+                bottom = max(bottom, row)
+            }
+        }
+        guard right >= left else { return .zero }
+        return NSRect(x: CGFloat(left) / scale, y: CGFloat(top) / scale,
+                      width: CGFloat(right - left + 1) / scale, height: CGFloat(bottom - top + 1) / scale)
+    }
+
+    override func accessibilityFrame() -> NSRect {
+        guard let window else { return .zero }
+        return window.convertToScreen(convert(glyphFrame, to: nil))
     }
 
     override func viewDidChangeEffectiveAppearance() {
