@@ -131,7 +131,23 @@ final class WorkspaceStore {
         }
     }
     private var topicEditGeneration = 0
-    @ObservationIgnored private var topicRequests: [(EnvironmentRequest, TopicPresentation)] = []
+    /// What waits for the running Topic change: requests, and key steps that Move Topic Up and Down presses made meanwhile.
+    private enum TopicIntent {
+        case request(EnvironmentRequest, TopicPresentation)
+        case move(GuestCard, TopicCards.Step)
+
+        func isMove(of card: GuestCard) -> Bool {
+            if case .move(card, _) = self { return true }
+            return false
+        }
+    }
+    @ObservationIgnored private var topicRequests: [TopicIntent] = []
+    /// The card whose queued step is running; a failure of it drops that card's other queued steps.
+    @ObservationIgnored private var stepInFlight: GuestCard?
+    /// A Topic change ended and no snapshot after it is applied yet. Locks are tmux options, so until then the model
+    /// can show a Session's Lock as it was before the change, and a queued step waits.
+    @ObservationIgnored private var topicSnapshotPending = false
+    private static let queuedMoveLimit = 4
 
     /// Move for the selected Window's Session, in the Command Palette's view. Nothing happens with Topics off.
     func presentMoveSession(keepingHistory: Bool = false) {
@@ -454,15 +470,40 @@ final class WorkspaceStore {
     /// the card's own Move Up and Move Down do. Not at that end of the cards with its Pin, for a Settled
     /// Topic, and outside Topics mode, where the cards do not show. The opened No Topic Session has Up only, with
     /// `topics.in_play`: Make a Guest.
+    /// While a change runs or waits for its snapshot, a press waits in the queue instead, up to `queuedMoveLimit` for
+    /// the card. The queued step is decided when it runs, so a press at the end of the cards is accepted and then does
+    /// nothing.
     func canMoveActiveCard(_ direction: StepDirection) -> Bool {
-        guard !isRemote, !changingTopic, topics.mode == .topics, let active = topics.activeTopic else { return false }
+        guard !isRemote, topics.mode == .topics, let active = topics.activeTopic else { return false }
+        if changingTopic || topicSnapshotPending {
+            guard let card = currentGuestCard else { return false }
+            return topicRequests.filter { $0.isMove(of: card) }.count < Self.queuedMoveLimit
+        }
         return topics.steps(of: active).canMove(direction == .previous ? .up : .down)
     }
 
     func moveActiveCard(_ direction: StepDirection) {
-        guard canMoveActiveCard(direction), let active = topics.activeTopic else { return }
-        let step: TopicCards.Step = direction == .previous ? .up : .down
-        if let id = active.listID { moveCard(id, step) } else if let card = currentGuestCard { makeGuest(card) }
+        guard canMoveActiveCard(direction), let card = currentGuestCard else { return }
+        topicRequests.append(.move(card, direction == .previous ? .up : .down))
+        drainTopicRequests()
+    }
+
+    /// The step of a queued press, on the model as the last change left it. The card may have moved, left, or reached
+    /// the end of the cards meanwhile: then this step and the card's other queued steps are dropped.
+    private func performQueuedMove(_ card: GuestCard, _ step: TopicCards.Step) {
+        let group: TopicGroupID?
+        switch card {
+        case .topic(let id): group = .topic(id)
+        case .session(let id):
+            group = topics.lockedSessionIDs.contains(id) ? .locked(id) : topics.openedNoTopicSession?.id.session == id ? .noTopic : nil
+        }
+        guard let group, topics.steps(of: group).canMove(step) else {
+            topicRequests.removeAll { $0.isMove(of: card) }
+            return
+        }
+        stepInFlight = card
+        if let id = group.listID { moveCard(id, step) } else { makeGuest(card) }
+        if !changingTopic { stepInFlight = nil }
     }
 
     /// The Active Topic when it is open, which Pin Topic and Unpin Topic act on.
@@ -706,14 +747,22 @@ final class WorkspaceStore {
     }
 
     private func enqueueTopicRequest(_ request: EnvironmentRequest, presenting presentation: TopicPresentation = .edit) {
-        topicRequests.append((request, presentation))
+        topicRequests.append(.request(request, presentation))
         drainTopicRequests()
     }
 
     private func drainTopicRequests() {
-        guard !changingTopic, !topicRequests.isEmpty else { return }
-        let (request, presentation) = topicRequests.removeFirst()
-        perform(request, presenting: presentation, onLocalServer: true)
+        while !changingTopic, let next = topicRequests.first {
+            switch next {
+            case .request(let request, let presentation):
+                topicRequests.removeFirst()
+                perform(request, presenting: presentation, onLocalServer: true)
+            case .move(let card, let step):
+                guard !topicSnapshotPending else { return }
+                topicRequests.removeFirst()
+                performQueuedMove(card, step)
+            }
+        }
     }
 
     /// The process's one answer per Environment, shared by every App Window.
@@ -783,6 +832,7 @@ final class WorkspaceStore {
             await self.topicWatcher.reloaded()
             guard self.generation == environment else {
                 if case .reopenedAtLaunch(let id) = presentation { self.launchReopens.remove(id) }
+                self.stepInFlight = nil
                 self.changingTopic = false
                 self.refresh(attachIfNeeded: true)
                 return
@@ -817,7 +867,10 @@ final class WorkspaceStore {
             launchReopens.remove(id)
             reopenedLast = launchReopens.isEmpty
         }
+        topicSnapshotPending = true
         changingTopic = false
+        let stepped = stepInFlight
+        stepInFlight = nil
         let ownsPalette = palette.invocation == invocation
         switch response {
         case .topics:
@@ -829,6 +882,7 @@ final class WorkspaceStore {
             readGeneration += 1
             readSnapshotPending = true
         case .failed(let failure):
+            if let stepped { topicRequests.removeAll { $0.isMove(of: stepped) } }
             if case .newSession(let directory) = presentation { pendingOpenings[directory] = nil }
             if case .newTopic = presentation, failure.phase == .nothingChanged, ownsPalette {
                 newTopicFailure = "Could not save the Topic. \(failure.message)"
@@ -1562,6 +1616,10 @@ final class WorkspaceStore {
         if self.agents != agents { self.agents = agents }
         if panes != snapshot.panes { panes = snapshot.panes }
         readSnapshotPending = false
+        if topicSnapshotPending {
+            topicSnapshotPending = false
+            DispatchQueue.main.async { [weak self] in self?.drainTopicRequests() }
+        }
         if serverRunning != snapshot.serverRunning { serverRunning = snapshot.serverRunning }
         let ownTTY = clientTTY ?? (isRemote ? nil : surface?.ttyName)
         if !isRemote, surface?.processExited == false {

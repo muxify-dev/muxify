@@ -5,6 +5,7 @@ accessibility actions for the keys. A press on a row of a check step is a click,
 (UI/CommandPaletteView.swift, UI/PaletteCheck.swift).
 """
 
+import time
 import unittest
 
 from scripts.verify.palette_fixture import PaletteFixture
@@ -212,6 +213,38 @@ class PaletteCurrentCommands(PaletteFixture):
         self.assertTrue(self.absent('Move Topic Up'), 'Move Topic Up moves a card that is not Pinned above a Pinned card')
         self.run_command('Move Topic Down')
         wait(lambda: order('move-current') > order('move-upper'), 'Move Topic Down did not move the Active Topic back')
+
+    def press_key(self, symbol):
+        wait(lambda: self.s.driver('action', 'quick-switch-input', 'Press ' + symbol)['pressed'], 'the app offers no Press ' + symbol)
+
+    def cards(self, prefix):
+        return [r['id'] for r in sorted((r for r in self.records() if r['id'].startswith(prefix)), key=lambda r: r.get('order', 0))]
+
+    def test_fast_presses_of_move_topic_up_each_make_one_step(self):
+        for index, name in enumerate(['fast-a', 'fast-b', 'fast-c']):
+            self.topic(name, order=-500 + index)
+        self.current_topic('fast-cur')
+        wait(lambda: self.cards('fast-') == ['fast-a', 'fast-b', 'fast-c', 'fast-cur'], 'the Active Topic did not start last')
+        for _ in range(3):
+            self.press_key('⌥⌘↑')
+        wait(lambda: self.cards('fast-') == ['fast-cur', 'fast-a', 'fast-b', 'fast-c'],
+             'three presses of Move Topic Up, one right after the other, did not move the Active Topic three steps: %s' % self.cards('fast-'))
+
+    def test_fast_presses_of_move_topic_down_past_the_end_stop_silently(self):
+        self.topic('end-a', order=-500)
+        window = self.topic('end-cur', order=-400, session=True)
+        self.topic('end-z', order=-300)
+        self.s.wait_rows(lambda rs: self.s.has('topic-end-cur', rs), 'Topic did not appear')
+        self.select(window)
+        wait(lambda: self.cards('end-') == ['end-a', 'end-cur', 'end-z'], 'the Active Topic did not start in the middle')
+        for _ in range(3):
+            self.press_key('⌥⌘↓')
+        wait(lambda: self.cards('end-') == ['end-a', 'end-z', 'end-cur'], 'Move Topic Down did not move the Active Topic to the end: %s' % self.cards('end-'))
+        time.sleep(2)
+        self.assertEqual(self.cards('end-'), ['end-a', 'end-z', 'end-cur'], 'a press past the end moved a card')
+        self.assertTrue(self.s.driver('dump', timeout=5)['rows'], 'the app stopped answering, as with a failure alert, after presses past the end')
+        self.press_key('⌥⌘↑')
+        wait(lambda: self.cards('end-') == ['end-a', 'end-cur', 'end-z'], 'Move Topic Up did not run after the presses past the end')
 
     def test_pin_topic_flips_to_unpin_topic(self):
         self.current_topic('pin-current')
