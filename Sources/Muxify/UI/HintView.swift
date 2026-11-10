@@ -67,15 +67,28 @@ struct CardRestKey: View {
 
     var body: some View {
         Text(key)
-            .font(fontSize.font(10, weight: .semibold, design: .rounded))
-            .foregroundStyle(Color.primary.opacity(0.7))
-            .padding(.horizontal, 4)
-            .frame(minWidth: fontSize(16), minHeight: fontSize(16))
-            .background(Capsule().fill(Color.primary.opacity(0.12)))
+            .font(fontSize.font(CardRestKeyMetrics.fontSize, weight: .semibold, design: .rounded))
+            .foregroundStyle(Color.primary.opacity(CardRestKeyMetrics.textOpacity))
+            .padding(.horizontal, CardRestKeyMetrics.horizontalPadding)
+            .frame(minWidth: fontSize(CardRestKeyMetrics.minSide), minHeight: fontSize(CardRestKeyMetrics.minSide))
+            .background(Capsule().fill(Color.primary.opacity(CardRestKeyMetrics.fillOpacity)))
             .fixedSize()
             .allowsHitTesting(false)
             .accessibilityIdentifier(target.accessibilityID)
     }
+}
+
+/// The sizes and colours of a card's key at rest, for both versions of the card (ADR 0074). The sizes are at 12, and
+/// grow with the Interface font size.
+enum CardRestKeyMetrics {
+    /// The key is semibold, in the rounded design.
+    static let fontSize: CGFloat = 10
+    static let horizontalPadding: CGFloat = 4
+    /// The capsule is at least this wide and this high.
+    static let minSide: CGFloat = 16
+    /// The key is the text colour at this opacity, and its capsule at `fillOpacity`.
+    static let textOpacity = 0.7
+    static let fillOpacity = 0.12
 }
 
 /// A Window row's Hint, in the place the row keeps for it before its icon, as wide as a key.

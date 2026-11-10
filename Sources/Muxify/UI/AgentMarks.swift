@@ -36,7 +36,7 @@ struct AgentMarkSpine: View {
     @Environment(\.agentColors) private var colors
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 2).fill(colors[mark].color)
+        RoundedRectangle(cornerRadius: CardSpine.cornerRadius).fill(colors[mark].color)
             .breathing(mark == .working)
     }
 }
@@ -83,13 +83,11 @@ private struct Breathing: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.pulses) private var pulses
 
-    private static let period: TimeInterval = 1.6
-
     func body(content: Content) -> some View {
         if isOn, pulses, !reduceMotion {
             // 30 fps is plenty for a slow fade, and Agents can work for hours.
             TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
-                content.opacity(0.675 + 0.325 * cos(2 * .pi * context.date.timeIntervalSinceReferenceDate / Self.period))
+                content.opacity(MarkBreath.opacity(at: context.date.timeIntervalSinceReferenceDate))
             }
         } else {
             content
@@ -99,6 +97,16 @@ private struct Breathing: ViewModifier {
 
 private extension View {
     func breathing(_ isOn: Bool) -> some View { modifier(Breathing(isOn: isOn)) }
+}
+
+/// The fade of a card's Working mark, for both versions of the card (ADR 0074): its opacity at a time on the clock that
+/// every Working mark reads, in seconds since the reference date.
+enum MarkBreath {
+    static let period: TimeInterval = 1.6
+    private static let middle = 0.675
+    private static let swing = 0.325
+
+    static func opacity(at time: TimeInterval) -> Double { middle + swing * cos(2 * .pi * time / period) }
 }
 
 private struct PulsesKey: EnvironmentKey {

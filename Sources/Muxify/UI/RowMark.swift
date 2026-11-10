@@ -30,7 +30,7 @@ struct RowMarkSpine: View {
 
     var body: some View {
         switch mark {
-        case .unread: RoundedRectangle(cornerRadius: 2).fill(Color.accentColor)
+        case .unread: RoundedRectangle(cornerRadius: CardSpine.cornerRadius).fill(Color.accentColor)
         case .agent(let mark): AgentMarkSpine(mark: mark)
         }
     }

@@ -64,24 +64,25 @@ struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
                 .accessibilitySortPriority(1)
             if isOpen {
                 VStack(alignment: .leading, spacing: CardSpacing.row) { content() }
-                    .padding(.horizontal, 4)
-                    .padding(.top, 3)
-                    .padding(.bottom, 5)
+                    .padding(.horizontal, CardRowsPadding.horizontal)
+                    .padding(.top, CardRowsPadding.top)
+                    .padding(.bottom, CardRowsPadding.bottom)
                     // A row dragged up stops at the bottom of the header that sticks to the top, not under it.
                     .environment(\.dragTopInset, stuck > 0 ? max(0, frame.minY + stuck + headerHeight) : 0)
             }
         }
         .background {
             if isOpen {
-                shape.fill(Color.primary.opacity(0.08)).shadow(color: .black.opacity(0.28), radius: 5, y: 2)
+                shape.fill(Color.primary.opacity(CardOutline.openFillOpacity))
+                    .shadow(color: .black.opacity(CardOutline.shadowOpacity), radius: CardOutline.shadowRadius, y: CardOutline.shadowDrop)
             }
         }
         .overlay(alignment: .leading) {
             if let mark {
                 RowMarkSpine(mark: mark)
-                    .frame(width: 3)
-                    .padding(.vertical, 8)
-                    .padding(.leading, 4)
+                    .frame(width: CardSpine.width)
+                    .padding(.vertical, CardSpine.verticalInset)
+                    .padding(.leading, CardSpine.leading)
                     .allowsHitTesting(false)
             }
         }
@@ -103,8 +104,9 @@ struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
         .accessibilityActions { menu() }
         .onChange(of: holdsSelection) { _, holds in
             guard holds, !reduceMotion else { return }
-            turn = -150
-            withAnimation(.timingCurve(0.18, 0.85, 0.25, 1, duration: 0.9)) { turn = 0 }
+            turn = CardSelectionBorder.turnStart
+            let curve = CardSelectionBorder.turnCurve
+            withAnimation(.timingCurve(curve.x1, curve.y1, curve.x2, curve.y2, duration: CardSelectionBorder.turnDuration)) { turn = 0 }
         }
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(viewport ?? "")) } action: { frame in
             guard viewport != nil else { return }
@@ -135,14 +137,11 @@ private struct BalatroBorder: View, Animatable {
         set { angle = newValue }
     }
 
-    private static let colors: [Color] = ([0xfe5f55, 0xfda200, 0xffe066, 0x4bc292, 0x009dff, 0x8e5cff, 0xfe5f55] as [UInt32]).map { hex in
-        let red = Double(hex >> 16 & 0xff), green = Double(hex >> 8 & 0xff), blue = Double(hex & 0xff)
-        return Color(red: red / 255, green: green / 255, blue: blue / 255)
-    }
+    private static let colors: [Color] = CardSelectionBorder.colors.map { Color(red: $0.red, green: $0.green, blue: $0.blue) }
 
     var body: some View {
-        shape.strokeBorder(AngularGradient(colors: Self.colors, center: .center, angle: .degrees(angle)), lineWidth: 2)
-            .saturation(1.15)
+        shape.strokeBorder(AngularGradient(colors: Self.colors, center: .center, angle: .degrees(angle)), lineWidth: CardSelectionBorder.width)
+            .saturation(CardSelectionBorder.saturation)
     }
 }
 
@@ -227,8 +226,8 @@ struct CardHeader<Details: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .titleLine, spacing: 5) {
+        VStack(alignment: .leading, spacing: CardHeaderSpacing.lines) {
+            HStack(alignment: .titleLine, spacing: CardHeaderSpacing.titleLine) {
                 ZStack(alignment: .topLeading) {
                     if let titleLines {
                         Text(titleLines.first).font(typography.font(for: .session)).fixedSize()
@@ -246,7 +245,7 @@ struct CardHeader<Details: View>: View {
                     CardHintSlot(target: hintTarget).onGeometryChange(for: CGFloat.self) { $0.size.width } action: { hintWidth = $0 }
                 }
                 Spacer(minLength: 0)
-                HStack(alignment: .titleLine, spacing: 5) {
+                HStack(alignment: .titleLine, spacing: CardHeaderSpacing.titleLine) {
                     // The Hint badge takes the mark's place while it shows.
                     let markOpacity: Double = hintTarget.map { hints[$0].isEmpty ? 1 : 0 } ?? 1
                     if isPinned { PinMark().opacity(markOpacity) } else if isGuest { GuestMark().opacity(markOpacity) }
@@ -273,11 +272,11 @@ struct CardHeader<Details: View>: View {
             }
             if showsSummary {
                 Text(summary)
-                    .font(fontSize.font(11))
+                    .font(fontSize.font(CardHeaderFont.summary))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .padding(.top, 1)
+                    .padding(.top, CardHeaderSpacing.summaryTop)
                     .padding(.trailing, cornerWidth)
             }
             if cornerLabel != nil, !isOpen, note == nil, !showsSummary {
@@ -337,7 +336,7 @@ struct PinMark: View {
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
-        Image(systemName: "pin.fill").font(fontSize.font(9)).foregroundStyle(.secondary)
+        Image(systemName: "pin.fill").font(fontSize.font(CardHeaderFont.mark)).foregroundStyle(.secondary)
     }
 }
 
@@ -346,7 +345,7 @@ struct GuestMark: View {
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
-        Text("Guest").font(fontSize.font(9, weight: .medium)).foregroundStyle(.secondary)
+        Text(CardHeaderMark.guest).font(fontSize.font(CardHeaderFont.mark, weight: .medium)).foregroundStyle(.secondary)
     }
 }
 
@@ -355,7 +354,7 @@ struct LockMark: View {
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
-        Image(systemName: "lock.fill").font(fontSize.font(9)).foregroundStyle(.secondary)
+        Image(systemName: CardHeaderMark.lock).font(fontSize.font(CardHeaderFont.mark)).foregroundStyle(.secondary)
     }
 }
 
@@ -379,6 +378,39 @@ enum CardOutline {
     static let borderWidth: CGFloat = 1
     /// The plain border is the text colour at this opacity.
     static let borderOpacity = 0.08
+    /// An open card is raised: the text colour at this opacity fills it, over a shadow.
+    static let openFillOpacity = 0.08
+    /// The shadow is black at this opacity, before the fill's own opacity thins it.
+    static let shadowOpacity = 0.28
+    static let shadowRadius: CGFloat = 5
+    /// How far the shadow falls below the card.
+    static let shadowDrop: CGFloat = 2
+}
+
+/// The border of the card that holds the Location's Window, for both versions of the card (ADR 0074): the colours of a
+/// Balatro card's edge around the card, which turn once when the Location comes to it.
+enum CardSelectionBorder {
+    /// The colours around the card, from 3 o'clock clockwise. The last is the first, so the ring closes.
+    static let colors: [(red: Double, green: Double, blue: Double)] =
+        ([0xfe5f55, 0xfda200, 0xffe066, 0x4bc292, 0x009dff, 0x8e5cff, 0xfe5f55] as [UInt32]).map { hex in
+            (Double(hex >> 16 & 0xff) / 255, Double(hex >> 8 & 0xff) / 255, Double(hex & 0xff) / 255)
+        }
+    static let width: CGFloat = 2
+    static let saturation = 1.15
+    /// The turn starts this many degrees back, and ends at 0.
+    static let turnStart: Double = -150
+    static let turnDuration = 0.9
+    /// The control points of the turn's timing curve.
+    static let turnCurve: (x1: Double, y1: Double, x2: Double, y2: Double) = (0.18, 0.85, 0.25, 1)
+}
+
+/// The spine: the bar along a card's left edge that shows its mark, for both versions of the card (ADR 0074).
+enum CardSpine {
+    static let width: CGFloat = 3
+    /// The room above and below the bar.
+    static let verticalInset: CGFloat = 8
+    static let leading: CGFloat = 4
+    static let cornerRadius: CGFloat = 2
 }
 
 /// The room around the lines of a card's header, for both versions of the card (ADR 0074).
@@ -389,6 +421,49 @@ enum CardHeaderPadding {
 
     /// An open card's header ends close to its rows.
     static func bottom(isOpen: Bool) -> CGFloat { isOpen ? 3 : 7 }
+}
+
+/// The room between the parts of a card's header, for both versions of the card (ADR 0074).
+enum CardHeaderSpacing {
+    /// Between two lines: the title, the details and the Summary.
+    static let lines: CGFloat = 2
+    /// Between two parts on the title's first line: the title, the Hint and the marks.
+    static let titleLine: CGFloat = 5
+    /// More room above the Summary.
+    static let summaryTop: CGFloat = 1
+}
+
+/// The sizes of the small text and symbols of a card's header, for both versions of the card (ADR 0074). They are the
+/// sizes at 12, and grow with the Interface font size.
+enum CardHeaderFont {
+    static let summary: CGFloat = 11
+    /// The lock, the pin, the bell and the Guest mark.
+    static let mark: CGFloat = 9
+}
+
+/// The marks of a Session card's header, for both versions of the card (ADR 0074): the word of a Guest, and the
+/// system symbols of a Locked Session and of a bell.
+enum CardHeaderMark {
+    static let guest = "Guest"
+    static let lock = "lock.fill"
+    static let bell = "bell.fill"
+}
+
+/// The room around the rows of an open card, for both versions of the card (ADR 0074).
+enum CardRowsPadding {
+    static let horizontal: CGFloat = 4
+    static let top: CGFloat = 3
+    static let bottom: CGFloat = 5
+}
+
+/// How a card opens and closes, for both versions of the card (ADR 0074): ease-out over this many seconds.
+enum CardMotion {
+    static let openDuration = 0.15
+}
+
+extension Animation {
+    /// The glide of a card that opens or closes.
+    static let cardOpens = Animation.easeOut(duration: CardMotion.openDuration)
 }
 
 /// What a click and a drag on a card's Window row do: a click selects the Window, and a drag moves it,

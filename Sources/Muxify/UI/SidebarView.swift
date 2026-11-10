@@ -57,7 +57,7 @@ struct SidebarView: View {
             let cards = SessionCardSelection.open(store.openSessionCards, from: moved ? previous : nil, to: name,
                                                   rule: moved ? store.config.sidebar.sessionCards : .any)
             guard cards != store.openSessionCards else { return }
-            withAnimation(.easeOut(duration: 0.15)) { store.openSessionCards = cards }
+            withAnimation(.cardOpens) { store.openSessionCards = cards }
         }
     }
 }
@@ -927,13 +927,13 @@ struct TopicCard: View {
     private func press() {
         guard !holdsSelection else { return toggle() }
         store.updateTopicSelection()
-        withAnimation(.easeOut(duration: 0.15)) { store.topicSelection.setTopic(topic.id, open: true) }
+        withAnimation(.cardOpens) { store.topicSelection.setTopic(topic.id, open: true) }
         store.goToTopic(topic.id)
     }
 
     private func toggle() {
         store.updateTopicSelection()
-        withAnimation(.easeOut(duration: 0.15)) { store.topicSelection.setTopic(topic.id, open: !topic.isExpanded) }
+        withAnimation(.cardOpens) { store.topicSelection.setTopic(topic.id, open: !topic.isExpanded) }
     }
 
     private var namedTopicID: String? {
@@ -1078,11 +1078,11 @@ private struct LockedCard: View {
     private func press() {
         guard !holdsSelection else {
             store.updateTopicSelection()
-            withAnimation(.easeOut(duration: 0.15)) { store.topicSelection.setTopic(row.id, open: !row.isExpanded) }
+            withAnimation(.cardOpens) { store.topicSelection.setTopic(row.id, open: !row.isExpanded) }
             return
         }
         store.updateTopicSelection()
-        withAnimation(.easeOut(duration: 0.15)) { store.topicSelection.setTopic(row.id, open: true) }
+        withAnimation(.cardOpens) { store.topicSelection.setTopic(row.id, open: true) }
         store.goToTopic(row.id)
     }
 }
@@ -1261,9 +1261,9 @@ private struct SessionCard<Row: View>: View {
                     BellMark()
                 }
             }
-            .onTapGesture(perform: press)
+            .onTapGesture { press() }
             .takesFirstClick()
-            .accessibilityAction(.default, press)
+            .accessibilityAction(.default) { press() }
             .accessibilityIdentifier(identifier)
             .accessibilityActions {
                 Button("Go to Session") { store.goToSession(session.id) }
@@ -1306,21 +1306,9 @@ private struct SessionCard<Row: View>: View {
         }
     }
 
-    private var holdsSelection: Bool { session.windows.contains { $0.id == store.selectedWindowID } }
+    private var press: SessionCardPress { SessionCardPress(store: store, session: session) }
 
-    /// As on a Topic card: a press on the card of the selected Window's Session opens or closes it; on another card
-    /// it goes to that Session, whose card then opens.
-    private func press() {
-        guard !holdsSelection else { return toggle() }
-        withAnimation(.easeOut(duration: 0.15)) { _ = store.openSessionCards.insert(session.name) }
-        store.goToSession(session.id)
-    }
-
-    private func toggle() {
-        withAnimation(.easeOut(duration: 0.15)) {
-            if store.openSessionCards.remove(session.name) == nil { store.openSessionCards.insert(session.name) }
-        }
-    }
+    private var holdsSelection: Bool { press.holdsSelection }
 }
 
 struct WindowRow: View {
@@ -1470,8 +1458,8 @@ private struct BellMark: View {
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
-        Image(systemName: "bell.fill")
-            .font(fontSize.font(9))
+        Image(systemName: CardHeaderMark.bell)
+            .font(fontSize.font(CardHeaderFont.mark))
             .foregroundStyle(.secondary)
             .accessibilityLabel("Bell")
     }

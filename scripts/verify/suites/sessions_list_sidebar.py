@@ -11,6 +11,12 @@ while Sessions shows, where the swipe pulls the page past its end. The check of 
 `snapshot` of each version in the run directory, `mid-swipe-swiftui.png` and `mid-swipe-appkit.png`, for a person
 to compare.
 
+The checks of a press on a card's header run against both lists. `press` performs the header's default accessibility
+action. `click` sends a mouse down and a mouse up to the App Window, which is not the key window, because the run
+keeps the app behind the user's windows: it is a first click while Muxify is not the front app. The header of the
+AppKit card follows it. The header of the SwiftUI card does not follow the driver's `click`, also before the AppKit
+list existed: a one-off probe on the commit before the AppKit cards showed that. So only the AppKit list gets `click`.
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.sessions_list_sidebar
 """
@@ -24,6 +30,8 @@ from unittest.mock import patch
 from scripts.verify.sandbox import SESSIONS_LIST, SESSIONS_LIST_DEFAULT, Sandbox, alive, sessions_list_option, wait
 
 SHELL = '/bin/zsh -f'
+# How each list's card header is pressed: by its accessibility action, and for the AppKit list by a first click too.
+PRESSES = dict(swiftui=('press',), appkit=('press', 'click'))
 CONFIG = 'sidebar:\n  agents: false\n'
 ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Sessions']
 # What the app shows when nothing sets the user default.
@@ -44,6 +52,8 @@ class SessionsListSidebar(unittest.TestCase):
         cls.config.write_text(CONFIG)
         cls.sessions = [s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, SHELL)
                         for name in ('list-first', 'list-second', 'list-third')]
+        # The one Window of each Session.
+        cls.windows = {session: s.tmux('list-windows', '-t', session, '-F', '#{window_id}') for session in cls.sessions}
         # As every suite launches: with the list that SESSIONS_LIST names, or the app's default.
         s.launch(ARGS)
         cls.argument = sessions_list_option() is not None
@@ -98,6 +108,28 @@ class SessionsListSidebar(unittest.TestCase):
             return self.s.has('sessions-list', rs) and sorted(last) == wanted
         return self.s.wait_rows(shown, lambda: 'the Sessions list shows the cards %s, not %s' % (last, wanted))
 
+    def card_value(self, session, rs=None):
+        return self.s.row('session-' + session, rs).get('accessibilityValue') or ''
+
+    def wait_card(self, session, state, message):
+        """Waits until the header of the Session's card has the state, `expanded` or `collapsed`, as its value."""
+        self.s.wait_rows(lambda rs: self.card_value(session, rs).startswith(state),
+                         lambda: '%s: the value of its header is %r' % (message, self.card_value(session)))
+
+    def location(self):
+        """The Session of the Location: the Session of the app's tmux client that is no control client."""
+        clients = self.s.tmux('list-clients', '-F', '#{client_control_mode} #{session_id}').splitlines()
+        return [line.split()[1] for line in clients if line.startswith('0 ')]
+
+    def stand_on(self, session, opened):
+        """Moves the Location to the Session, and opens or closes its card. Only a press on the card of the
+        Location closes a card."""
+        self.s.show(self.windows[session])
+        self.s.wait_rows(lambda rs: self.card_value(session, rs), 'the card of %s has no state' % session)
+        if self.card_value(session).startswith('expanded') != opened:
+            self.s.act('press', 'session-' + session)
+        self.wait_card(session, 'expanded' if opened else 'collapsed', 'the card of the Location did not get ready')
+
     def wait_mode(self, mode):
         position = '0.000' if mode == 'topics' else '1.000'
         return self.s.wait_rows(lambda rs: self.s.row('sidebar-view-' + mode, rs).get('accessibilityValue') == 'selected'
@@ -139,7 +171,7 @@ class SessionsListSidebar(unittest.TestCase):
         self.assertEqual(self.s.sessions_list(), APP_DEFAULT, 'a launch with no user default shows another Sessions list')
         self.wait_cards()
 
-    def test_with_the_default_true_the_appkit_list_has_a_bare_card_for_each_session(self):
+    def test_with_the_default_true_the_appkit_list_has_a_card_for_each_session(self):
         self.show_list('swiftui')
         self.show_mode('sessions')
         before = self.wait_cards()
@@ -159,8 +191,8 @@ class SessionsListSidebar(unittest.TestCase):
             self.assertEqual(card.get('accessibilityRole'), 'AXGroup', 'the card of %s is no group' % header['accessibilityIdentifier'])
             self.assertEqual(header.get('accessibilityRole'), 'AXButton')
             cards.append(rect(card))
-        # The same insets from the list's edges, and the same gaps between the cards. A bare card is lower than a
-        # SwiftUI card, so the cards under the first one start higher.
+        # The same insets from the list's edges, and the same gaps between the cards. An open card of the AppKit list
+        # can have another height, so only the first card's top is compared.
         top = lambda card: card[1] + card[3]
         self.assert_close([cards[0][0], cards[0][2], top(cards[0])], [swiftui[0][0], swiftui[0][2], top(swiftui[0])],
                           'the first card does not start where the SwiftUI card starts')
@@ -169,6 +201,47 @@ class SessionsListSidebar(unittest.TestCase):
             self.assert_close(gaps, [6] * (len(side) - 1), 'the gaps between the %s cards' % name)
             self.assert_close([card[0] for card in side] + [card[2] for card in side],
                               [side[0][0]] * len(side) + [side[0][2]] * len(side), 'the sides of the %s cards' % name)
+
+    def test_a_press_on_the_card_of_the_location_closes_and_opens_it(self):
+        home, below = self.sessions[0], self.sessions[1]
+        def top(rs=None):
+            return sum(rect(self.s.row('card-session-' + below, rs))[1::2])
+        for version in ('swiftui', 'appkit'):
+            self.show_list(version)
+            self.show_mode('sessions')
+            self.stand_on(home, opened=True)
+            for command in PRESSES[version]:
+                with self.subTest(version=version, command=command):
+                    opened = top(self.wait_cards())
+                    self.s.act(command, 'session-' + home)
+                    self.wait_card(home, 'collapsed', 'a %s on the open card of the Location did not close it' % command)
+                    # A closed card shows its Summary under its title, and the card below stands under it.
+                    self.assertEqual(self.s.row('session-' + home).get('accessibilityHelp'), '1 Window')
+                    closed = self.settled('card-session-' + below)
+                    self.assertNotEqual(closed[1] + closed[3], opened, 'the card below did not move when the card closed')
+                    self.s.act(command, 'session-' + home)
+                    self.wait_card(home, 'expanded', 'a %s on the closed card of the Location did not open it' % command)
+                    self.assertEqual(self.s.row('session-' + home).get('accessibilityHelp'), '', 'an open card has a Summary')
+                    again = self.settled('card-session-' + below)
+                    self.assertEqual(again[1] + again[3], opened, 'the card below did not go back when the card opened')
+                    self.assertEqual(self.location(), [home], 'a press on the card of the Location moved the Location')
+
+    def test_a_press_on_another_card_opens_it_and_goes_to_its_session(self):
+        home, other = self.sessions[0], self.sessions[2]
+        for version in ('swiftui', 'appkit'):
+            self.show_list(version)
+            self.show_mode('sessions')
+            for command in PRESSES[version]:
+                with self.subTest(version=version, command=command):
+                    # The other card is closed, and the Location is not on it.
+                    self.stand_on(other, opened=False)
+                    self.stand_on(home, opened=True)
+                    self.assertTrue(self.card_value(other).startswith('collapsed'), 'the other card did not stay closed')
+                    self.s.act(command, 'session-' + other)
+                    self.wait_card(other, 'expanded', 'a %s on the card of another Session did not open it' % command)
+                    self.s.wait_shown(self.windows[other])
+                    self.assertEqual(self.location(), [other], 'a press on the card of another Session did not go to it')
+                    self.assertTrue(self.card_value(home).startswith('expanded'), 'the card that the Location left closed')
 
     def test_a_session_that_starts_or_ends_changes_the_cards_of_the_appkit_list(self):
         self.show_list('appkit')

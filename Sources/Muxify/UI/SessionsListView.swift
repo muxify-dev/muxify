@@ -48,16 +48,61 @@ final class SessionsListView: NSView {
         // Text follows the lightness of the Ghostty theme, as the SwiftUI Sidebar's colour scheme does.
         let themed = environment.chromeTheme.flatMap { NSAppearance(named: $0.isDark ? .darkAqua : .aqua) }
         if appearance?.name != themed?.name { appearance = themed }
+        show(store.sessions.map { ($0.id, content(of: $0)) })
+    }
+
+    /// Shows a card for each of the Sessions, from the top of the list, with its content. When a card that already
+    /// showed opens or closes, it glides to its new height and the cards below it move with it, with ease-out over
+    /// `CardMotion.openDuration`, as the SwiftUI list animates them.
+    func show(_ sessions: [(id: String, content: SessionCardContent)]) {
         var kept = Dictionary(cards.map { ($0.sessionID, $0) }, uniquingKeysWith: { first, _ in first })
-        cards = store.sessions.map { session in
-            let card = kept.removeValue(forKey: session.id) ?? SessionCardView(sessionID: session.id)
-            card.show(title: store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[session.id]).title,
-                      environment: environment)
-            return card
+        var opens = false
+        let shown: [(card: SessionCardView, content: SessionCardContent)] = sessions.map { session in
+            guard let card = kept.removeValue(forKey: session.id) else { return (card(of: session.id), session.content) }
+            opens = opens || card.isOpen != session.content.isOpen
+            return (card, session.content)
         }
-        // The order of the subviews is the order of the accessibility rows.
-        document.subviews = cards
-        layOut()
+        let change = { [self] in
+            for (card, content) in shown { card.show(content, environment: environment) }
+            let cards = shown.map(\.card)
+            // The order of the subviews is the order of the accessibility rows.
+            if self.cards != cards {
+                self.cards = cards
+                document.subviews = cards
+            }
+            layOut()
+        }
+        if opens, let layer = document.layer {
+            LayerGlide.run(under: layer, duration: CardMotion.openDuration, timing: CAMediaTimingFunction(name: .easeOut), change: change)
+        } else {
+            change()
+        }
+    }
+
+    private func card(of sessionID: String) -> SessionCardView {
+        let card = SessionCardView(sessionID: sessionID)
+        card.onPress = { [weak self] in self?.press(sessionID) }
+        return card
+    }
+
+    /// What the card of the Session shows, read from the models as the SwiftUI card reads it.
+    private func content(of session: SessionGroup) -> SessionCardContent {
+        let model = store.topics
+        let isOpen = store.openSessionCards.contains(session.name)
+        let isLocked = model.lockedSessionIDs.contains(session.id)
+        let formatted = store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[session.id])
+        return SessionCardContent(title: formatted.title, summary: formatted.summary, isOpen: isOpen,
+                                  holdsSelection: SessionCardPress(store: store, session: session).holdsSelection,
+                                  mark: model.sessionMarks[session.id].map(CardMark.agent), isLocked: isLocked,
+                                  isGuest: isLocked && store.topicConfig.inPlay != nil,
+                                  hasBell: session.windows.contains(where: \.hasBell),
+                                  hint: CardHint(.session(session.id), in: environment.hints))
+    }
+
+    /// A press on the header of the Session's card, as the Session is now.
+    private func press(_ sessionID: String) {
+        guard let session = store.sessions.first(where: { $0.id == sessionID }) else { return }
+        SessionCardPress(store: store, session: session)()
     }
 
     private func layOut() {

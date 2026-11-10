@@ -36,6 +36,31 @@ struct SessionsListEnvironment: Equatable {
     var chromeTheme: TerminalTheme?
     var wrapsCardTitles = true
     var reduceMotion = false
+    /// The pixels in a point on the display. A length is whole pixels, as SwiftUI lays its views out.
+    var displayScale: CGFloat = 2
+}
+
+/// A press on the header of a Session card, for both versions of the Sessions list (ADR 0074). As on a Topic card: on
+/// the card of the Location's Session it opens or closes the card; on another card it goes to that Session, whose
+/// card then opens.
+@MainActor struct SessionCardPress {
+    let store: WorkspaceStore
+    let session: SessionGroup
+
+    /// The card holds the Location's Window.
+    var holdsSelection: Bool { session.windows.contains { $0.id == store.selectedWindowID } }
+
+    func callAsFunction() {
+        guard !holdsSelection else { return toggle() }
+        withAnimation(.cardOpens) { _ = store.openSessionCards.insert(session.name) }
+        store.goToSession(session.id)
+    }
+
+    private func toggle() {
+        withAnimation(.cardOpens) {
+            if store.openSessionCards.remove(session.name) == nil { store.openSessionCards.insert(session.name) }
+        }
+    }
 }
 
 /// The AppKit Sessions list as one hosted view in the SwiftUI Sidebar: the Sessions page of the pager, or alone when
@@ -50,11 +75,12 @@ struct SessionsListHost: NSViewRepresentable {
     @Environment(\.chromeTheme) private var chromeTheme
     @Environment(\.wrapsCardTitles) private var wrapsCardTitles
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.displayScale) private var displayScale
 
     private var environment: SessionsListEnvironment {
         SessionsListEnvironment(fontSize: fontSize, typography: typography, hints: hints, agentColors: agentColors,
                                 pulses: pulses, chromeTheme: chromeTheme, wrapsCardTitles: wrapsCardTitles,
-                                reduceMotion: reduceMotion)
+                                reduceMotion: reduceMotion, displayScale: displayScale)
     }
 
     func makeNSView(context: Context) -> SessionsListView {

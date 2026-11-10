@@ -19,6 +19,16 @@ why it stays. A section with no text means no known difference.
 
 ## card-marks
 
+The coloured border of the Location's card differs in colour in the pictures, by up to 7 %, and is the same on
+screen. SwiftUI's `.saturation(1.15)` is a Core Animation filter (`colorSaturate`), and
+`CALayer.render(in:)`, which the driver's `snapshot` uses, leaves filters out. So the SwiftUI picture shows the
+border's colours without the saturation, and the AppKit picture shows them with it, as the screen shows both
+borders. A one-off capture of a SwiftUI window on screen showed how SwiftUI makes the colours: its angular gradient
+mixes two colours in Oklab, and the saturation then works on each colour in sRGB. `CardSelectionBorderView` makes its
+colours the same way, and they match that capture within about 3 of 255 in a channel on average.
+
+The text differs on subpixels only, by less than 1 % in a channel.
+
 ## hints
 
 ## hover
@@ -26,6 +36,8 @@ why it stays. A section with no text means no known difference.
 ## more-rows
 
 ## long-titles
+
+The coloured border of the Location's card and the text: as in `card-marks`.
 
 ## stuck-header
 

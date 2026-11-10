@@ -138,7 +138,7 @@ The run names each row that failed, with the values of both versions. When rows 
 
 **The notes** are `compare-notes.md`: first the cost of the pilot, then one section for each scene. A task that leaves a difference between the two versions in a scene writes it in that scene's section, with the reason. The report shows the section under the scene's pictures.
 
-**What the picture does not show.** The driver's `snapshot` draws the App Window's layers. It is not a capture of the screen. So it does not show a material that the window server blends, such as the blur behind a translucent view: judge that in the running app.
+**What the picture does not show.** The driver's `snapshot` draws the App Window's layers. It is not a capture of the screen. So it does not show a material that the window server blends, such as the blur behind a translucent view, nor a Core Animation filter, such as the one that SwiftUI's `.saturation` adds: judge these in the running app.
 
 **What the user changes in a picture.** The App Window stands on the user's screen, behind the front window, and the picture has all of it: the title bar and the Terminal too. The user can change a picture in three ways:
 

@@ -37,6 +37,12 @@ color from `ui.agent_colors` through the `agentColors` environment value:
 - `AgentMarkSpine` is the 3 pt bar along a card's left edge. The Working mark's
   bar fades in and out.
 
+The AppKit Sessions list (ADR 0074) has no environment. Its spine is
+`CardSpineView` in `UI/SidebarCardChrome.swift`, and it gets the colors,
+`ui.pulse` and Reduce Motion from `SessionsListEnvironment`, which the Sidebar
+fills from the same environment values. Its fade runs on `MarkClock`, which
+keeps the beat of the SwiftUI marks.
+
 `ui.pulse: false` and Reduce Motion keep every Working mark still. The
 `ContentView` sets the environment values once, and the Command Palette is an
 overlay inside it, so the Sidebar and the Palette always agree. A terminal bell
