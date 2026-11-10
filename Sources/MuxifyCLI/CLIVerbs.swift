@@ -449,6 +449,11 @@ enum CLIVerbs {
             guard parsed.operands.count == 1, !parsed.operands[0].allSatisfy(\.isWhitespace) else { throw CLIError.usage }
             return .new(title: parsed.operands[0], tags: try tags(parsed.values("--tag")))
         },
+        CLIVerb(path: .topicSessionPaths, synopsis: "\(topicTarget) [--json]", options: [.flag("--json")],
+                targets: [.topic, .window, .pane],
+                help: "Prints the Add a Session rows and other running Sessions for this Topic.") { parsed in
+            .topicSessionPaths(try TopicSessionPathsInvocation(parsed: parsed))
+        },
         topicVerb(.topicAddSession, synopsis: "<dir> [--worktree [--base <ref> | --branch <name>]] \(topicTarget) [--json]",
                   options: [.flag("--worktree"), .value("--base"), .value("--branch")],
                   help: """
