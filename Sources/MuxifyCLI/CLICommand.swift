@@ -14,6 +14,7 @@ enum CLICommand: Equatable {
     case extensionsInstall
     case request(RequestInvocation)
     case sessionList(SessionListInvocation)
+    case topicSessionPaths(TopicSessionPathsInvocation)
     case agent(AgentInvocation)
     case agentConversation(AgentConversationInvocation)
 
@@ -91,6 +92,7 @@ enum CLICommand: Equatable {
             try Self.open("muxify://select?window=\(Self.percentEncoded(window))", using: runner)
         case .request(let invocation): try await invocation.run()
         case .sessionList(let invocation): try await invocation.run()
+        case .topicSessionPaths(let invocation): try await invocation.run()
         case .agent(let invocation): try await invocation.run()
         case .agentConversation(let invocation): try invocation.run(using: runner)
         }

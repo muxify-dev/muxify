@@ -6,7 +6,7 @@ enum ConfigSessions {
     /// a syntax error stops the command: a plan with no SessionPaths would record wrong locations. A value that
     /// cannot apply only skips itself, so the command goes on and says so on stderr, one line each. `within` limits
     /// the SessionPaths to those that hold one of the folders; nil finds them all.
-    static func load(_ configFile: URL, within folders: [String]? = nil) async throws -> Config {
+    static func load(_ configFile: URL, within folders: [String]? = nil, cache: SessionPathCache? = nil) async throws -> Config {
         let config: Config
         switch Config.load(path: configFile.path, read: { try? String(contentsOfFile: $0, encoding: .utf8) }) {
         case .success(let loaded): config = loaded
@@ -16,7 +16,9 @@ enum ConfigSessions {
             FileHandle.standardError.write(Data("muxify: \(problem.description)\n".utf8))
         }
         var discovered = config
-        discovered.sessionPaths = SessionPathDiscovery.output(for: config.sessionRoots, within: folders).map {
+        let cached = folders == nil && !config.sessionRoots.isEmpty
+            ? cache?.output(for: SessionPathDiscovery.arguments(for: config.sessionRoots)) : nil
+        discovered.sessionPaths = (cached ?? SessionPathDiscovery.output(for: config.sessionRoots, within: folders)).map {
             SessionPathDiscovery.sessionPaths(in: $0, roots: config.sessionRoots, aliases: config.sessionAliases)
         } ?? []
         return discovered

@@ -106,6 +106,16 @@ public struct EnvironmentService: Sendable {
         }
     }
 
+    public func sessionPathChoices(for target: EnvironmentTarget) -> Result<TopicSessionPathChoices, TopicFailure> {
+        do {
+            guard topicsAvailable else { throw TopicRequestError.topicsUnavailable }
+            let records = try store.read().records
+            let snapshot = try server.snapshot()
+            let topic = try openTopic(target, caller: nil, records: records, snapshot: snapshot, client: nil)
+            return .success(TopicSessionPathChoices(topic: topic, records: records, windows: snapshot.windows, sessionPaths: sessionPaths))
+        } catch { return .failure(failure(error, phase: .nothingChanged)) }
+    }
+
     public func forgetChoices(for target: EnvironmentTarget) -> Result<TopicForgetChoices, TopicFailure> {
         do {
             let records = try store.read().records

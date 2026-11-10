@@ -61,6 +61,7 @@ _Avoid_: Session base name, branch name (when you mean the Topic's slug)
 
 **Session Path**:
 A folder offered as a place to start a Session, found through `sessions.paths` or Git's Worktrees. It is a launch folder, not a running Session or a group of Sessions.
+`muxify topic session-paths` reads the Add a Session rows for a Topic. It uses the app's matching discovery cache, else discovers the folders. `in_this_topic` means that a live or Remembered Session uses that exact folder. `also_in` keeps the other open Topics whose live Sessions use the folder or a folder below it.
 _Avoid_: Session Path, workspace, Session (when you mean the folder)
 
 **Worktree**:
