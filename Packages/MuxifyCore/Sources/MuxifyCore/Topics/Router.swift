@@ -81,10 +81,7 @@ public struct Router: Equatable {
     // A switch can still move the Client after a page replaces its Intent.
     private var clientCommands: [IntentID: ClientCommand] = [:]
     private var nextIntentID = 0
-    private var previousWindow: WindowID?
-    private var lastWindow: WindowID?
     private var lastClientWindow: WindowID?
-    private var lastInventory: [TmuxWindow] = []
 
     public init() {}
 
@@ -106,7 +103,7 @@ public struct Router: Equatable {
         case .result(let destination, let lastStartedRead):
             guard let destination else { return [] }
             let from = location
-            setLocation(destination, facts)
+            location = destination
             if case .window(let target) = destination {
                 intent = .window(makeIntent(target, from: from, readsOnArrival: false, finishedBefore: lastStartedRead))
             } else {
@@ -131,7 +128,7 @@ public struct Router: Equatable {
             guard case .window(var pending) = intent, pending.id == id else { return effects }
             switch result {
             case .failure:
-                setLocation(pending.from, facts)
+                location = pending.from
                 intent = nil
             case .success:
                 pending.finishedBefore = lastStartedRead
@@ -158,7 +155,6 @@ public struct Router: Equatable {
         }
         if case .window(let pending) = intent,
            pending.finishedBefore.map({ number <= $0 }) ?? true {
-            rememberInventory(facts)
             return attachIfNeeded(facts)
         }
         if case .topic(let group) = intent {
@@ -172,24 +168,22 @@ public struct Router: Equatable {
             if facts.now > until { intent = nil }
             else { return attachIfNeeded(facts) }
         }
+        // tmux has already moved the Client to a Window of its choosing: follow it, and pick none ourselves.
         if let selected = location?.windowID, !facts.windows.contains(where: { $0.id == selected.rawValue }) {
             intent = nil
-            if let fallback = fallback(in: facts.windows) {
-                return go(.window(fallback), readsOnArrival: true, facts)
+            if let client = facts.ownClientWindow, facts.windows.contains(where: { $0.id == client.rawValue }) {
+                location = .window(client)
+                return [.visit(.window(client)), .enterRead(client)]
             }
             location = nil
-            previousWindow = nil
-            lastWindow = nil
-            lastInventory = []
         }
-        rememberInventory(facts)
         if case .emptyTopic(.topic(let topic)) = location, intent == nil {
             if let target = facts.entryWindows[.topic(topic)] {
                 return go(.window(target), readsOnArrival: true, facts)
             }
             if !facts.records.contains(where: { $0.id == topic }) {
                 let destination = facts.ownClientWindow.map(Location.window)
-                setLocation(destination, facts)
+                location = destination
                 return destination.map { [.visit($0)] } ?? []
             }
         }
@@ -200,7 +194,7 @@ public struct Router: Equatable {
            facts.windows.contains(where: { $0.id == client.rawValue }) {
             let destination = Location.window(client)
             if location != destination {
-                setLocation(destination, facts)
+                location = destination
                 effects.append(.visit(destination))
             }
         }
@@ -209,7 +203,7 @@ public struct Router: Equatable {
 
     private mutating func go(_ destination: Location, readsOnArrival: Bool, _ facts: Facts) -> [Effect] {
         let from = location
-        setLocation(destination, facts)
+        location = destination
         guard case .window(let target) = destination else {
             intent = nil
             return [.visit(destination)]
@@ -253,7 +247,7 @@ public struct Router: Equatable {
         }
         guard let target = remembered ?? facts.initialWindow else { return [.chooseWhereToStart] }
         if case .request = intent {
-            setLocation(.window(target), facts)
+            location = .window(target)
             return [.visit(.window(target)), .attach(target, intent: makeCommand(target, readsOnArrival: false))]
         }
         return go(.window(target), readsOnArrival: false, facts)
@@ -272,34 +266,6 @@ public struct Router: Equatable {
         clientCommands[nextIntentID] = ClientCommand(target: target, readsOnArrival: readsOnArrival,
                                                     finishedBefore: finishedBefore)
         return nextIntentID
-    }
-
-    private mutating func setLocation(_ destination: Location?, _ facts: Facts) {
-        location = destination
-        if let window = destination?.windowID, window != lastWindow {
-            previousWindow = lastWindow
-            lastWindow = window
-        }
-        rememberInventory(facts)
-    }
-
-    private mutating func rememberInventory(_ facts: Facts) {
-        if let selected = location?.windowID, facts.windows.contains(where: { $0.id == selected.rawValue }) {
-            lastInventory = facts.windows
-        }
-    }
-
-    private func fallback(in windows: [TmuxWindow]) -> WindowID? {
-        if let closed = lastInventory.first(where: { $0.id == location?.windowID?.rawValue }) {
-            let siblings = lastInventory.filter { $0.sessionID == closed.sessionID }.map(\.id)
-            if let index = siblings.firstIndex(of: closed.id) {
-                for id in siblings[..<index].reversed() + siblings[(index + 1)...] {
-                    if windows.contains(where: { $0.id == id }), let target = WindowID(rawValue: id) { return target }
-                }
-            }
-        }
-        return windows.first(where: { $0.id == previousWindow?.rawValue }).flatMap { WindowID(rawValue: $0.id) }
-            ?? windows.first.flatMap { WindowID(rawValue: $0.id) }
     }
 }
 

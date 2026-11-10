@@ -802,7 +802,8 @@ Git View, and closing the Git View. When git fails, the diff pane says why.
 
 e opens the file in your editor, in a new tmux Window right after the current
 one, and switches to it; the Git View stays open in the Window you left, as you
-left it. When the editor's Window closes, Muxify goes back to that Window. With
+left it. When the editor's Window closes, tmux returns the Client to its last
+Window, the Git View's, and Muxify follows it. With
 `editor_in_window: false`, e opens no Window and the Git View keeps Focus. In
 the diff, it opens the file of the cursor's line, or of the selection's first
 line, at that line's number in the new file; a removed line opens at the new line
