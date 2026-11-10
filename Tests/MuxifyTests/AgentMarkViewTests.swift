@@ -153,6 +153,87 @@ final class AgentMarkViewTests: XCTestCase {
         }
     }
 
+    /// A SwiftUI clock under a moving mark updates and lays out the whole App Window each tick, so Core Animation
+    /// steps the blocks: each block's layer holds the step animation, each step lights the blocks as the still glyph
+    /// does, and the animation stands where the shared clock does.
+    @MainActor func testAMovingWorkingGlyphStepsInCoreAnimationOnTheSharedClock() throws {
+        let (window, host) = hosted(AgentMarkView(mark: .working))
+        defer { window.contentView = nil }
+        let glyph = try XCTUnwrap(first(MovingTerminalActivityGlyphView.self, in: host))
+        let count = TerminalActivityGlyph.cells.count
+        XCTAssertEqual(glyph.blocks.count, count)
+        let frames = TerminalActivityGlyph.blocks(in: glyph.bounds.size, displayScale: window.backingScaleFactor,
+                                                  maxBlockSize: TerminalActivityGlyph.blockSize)
+        XCTAssertEqual(glyph.blocks.map(\.frame), frames, "the moving blocks sit where the still glyph draws them")
+        for (index, block) in glyph.blocks.enumerated() {
+            let animation = try XCTUnwrap(block.animation(forKey: "step") as? CAKeyframeAnimation)
+            XCTAssertEqual(animation.calculationMode, .discrete)
+            XCTAssertEqual(animation.duration, TerminalActivityIndicator.period)
+            XCTAssertEqual(animation.repeatCount, .infinity)
+            let values = try XCTUnwrap(animation.values as? [Double])
+            XCTAssertEqual(values, (0..<count).map { head in
+                TerminalActivityGlyph.opacity(stepsBehindHead: (head - index + count) % count)
+            }, "block \(index)")
+            assertOnTheSharedClock(animation, of: block, clock: TerminalActivityIndicator.phase(at: Date()) * animation.duration)
+        }
+    }
+
+    @MainActor func testAWorkingSpineBreathesInCoreAnimationOnTheSharedClock() throws {
+        let (window, host) = hosted(AgentMarkSpine(mark: .working).frame(width: 3, height: 20))
+        defer { window.contentView = nil }
+        let spine = try XCTUnwrap(first(BreathingBarView.self, in: host))
+        XCTAssertEqual(spine.bar.frame, spine.bounds)
+        XCTAssertNotNil(spine.bar.backgroundColor)
+        let animation = try XCTUnwrap(spine.bar.animation(forKey: "breathe") as? CAKeyframeAnimation)
+        XCTAssertEqual(animation.duration, BreathingBarView.period)
+        XCTAssertEqual(animation.repeatCount, .infinity)
+        let values = try XCTUnwrap(animation.values as? [Double])
+        XCTAssertEqual(values.first ?? 0, 1, accuracy: 0.0001, "a cycle starts bright")
+        XCTAssertEqual(values.min() ?? 0, 0.35, accuracy: 0.0001, "and dims to 0.35 halfway")
+        assertOnTheSharedClock(animation, of: spine.bar,
+                               clock: Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: animation.duration))
+    }
+
+    @MainActor func testPulseOffLeavesNoCoreAnimationUnderAWorkingMark() {
+        for view in [AnyView(AgentMarkView(mark: .working)), AnyView(AgentMarkSpine(mark: .working).frame(width: 3, height: 20))] {
+            let (window, host) = hosted(view.environment(\.pulses, false))
+            XCTAssertNil(first(MovingTerminalActivityGlyphView.self, in: host))
+            XCTAssertNil(first(BreathingBarView.self, in: host))
+            window.contentView = nil
+        }
+    }
+
+    /// Checks that the animation's own time, the way Core Animation reckons it from `beginTime` and `timeOffset`, is the
+    /// shared clock's point in the cycle. It reads no presentation layer, so it does not wait on the render server.
+    private func assertOnTheSharedClock(_ animation: CAAnimation, of layer: CALayer, clock: TimeInterval,
+                                        file: StaticString = #filePath, line: UInt = #line) {
+        let now = layer.convertTime(CACurrentMediaTime(), from: nil)
+        let period = animation.duration
+        let local = (now - animation.beginTime + animation.timeOffset).truncatingRemainder(dividingBy: period)
+        var drift = abs(local - clock).truncatingRemainder(dividingBy: period)
+        drift = min(drift, period - drift)
+        XCTAssertLessThan(drift, 0.01, "animation at \(local) s of its cycle, clock at \(clock) s", file: file, line: line)
+    }
+
+    /// Hosts the view in a window with Reduce Motion off, whatever the machine running the test has set.
+    @MainActor private func hosted<V: View>(_ view: V) -> (NSWindow, NSView) {
+        _ = NSApplication.shared
+        let host = NSHostingView(rootView: view.environment(\._accessibilityReduceMotion, false).frame(width: 32, height: 24))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 32, height: 24),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.layoutIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        CATransaction.flush()
+        return (window, host)
+    }
+
+    private func first<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
+        view as? T ?? view.subviews.lazy.compactMap { self.first(type, in: $0) }.first
+    }
+
     @MainActor func testNotificationsAreBlueForDoneRedForFailedAndOrangeForBlocked() throws {
         for scheme in [ColorScheme.light, .dark] {
             for spine in [false, true] {

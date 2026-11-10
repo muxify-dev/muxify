@@ -29,15 +29,26 @@ struct AgentMarkView: View {
     }
 }
 
-/// The Agent mark of a card: a bar along its left edge. The Working mark's bar fades in and out.
+/// The Agent mark of a card: a bar along its left edge. The Working mark's bar fades in and out, and stays still with
+/// Reduce Motion or `ui.pulse: false`.
 struct AgentMarkSpine: View {
     let mark: AgentMark
 
     @Environment(\.agentColors) private var colors
+    @Environment(\.pulses) private var pulses
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let cornerRadius: CGFloat = 2
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 2).fill(colors[mark].color)
-            .breathing(mark == .working)
+        let color = colors[mark].color
+        if mark == .working, pulses, !reduceMotion {
+            // The shape stays the view that callers label and identify; the layer on it only shows.
+            RoundedRectangle(cornerRadius: Self.cornerRadius).fill(Color.clear)
+                .overlay { BreathingBar(color: color, cornerRadius: Self.cornerRadius).accessibilityHidden(true) }
+        } else {
+            RoundedRectangle(cornerRadius: Self.cornerRadius).fill(color)
+        }
     }
 }
 
@@ -75,30 +86,56 @@ extension MarkColor.Single {
     }
 }
 
-/// Fades the view in and out on the clock every card's Working mark reads, so they breathe together. It only fades,
-/// never moves, and stays still with Reduce Motion or `ui.pulse: false`.
-private struct Breathing: ViewModifier {
-    let isOn: Bool
+/// The Working mark's bar. Core Animation fades it in and out on the clock every card's Working mark reads, so they
+/// breathe together, and SwiftUI does no work while it fades: see `TerminalActivityIndicator` for why.
+private struct BreathingBar: NSViewRepresentable {
+    let color: Color
+    let cornerRadius: CGFloat
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.pulses) private var pulses
+    func makeNSView(context: Context) -> BreathingBarView { BreathingBarView() }
 
-    private static let period: TimeInterval = 1.6
-
-    func body(content: Content) -> some View {
-        if isOn, pulses, !reduceMotion {
-            // 30 fps is plenty for a slow fade, and Agents can work for hours.
-            TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
-                content.opacity(0.675 + 0.325 * cos(2 * .pi * context.date.timeIntervalSinceReferenceDate / Self.period))
-            }
-        } else {
-            content
-        }
+    func updateNSView(_ view: BreathingBarView, context: Context) {
+        view.bar.cornerRadius = cornerRadius
+        let color = color.resolve(in: context.environment).cgColor
+        if view.bar.backgroundColor != color { withoutActions { view.bar.backgroundColor = color } }
     }
 }
 
-private extension View {
-    func breathing(_ isOn: Bool) -> some View { modifier(Breathing(isOn: isOn)) }
+final class BreathingBarView: NSView {
+    static let period: TimeInterval = 1.6
+    let bar = CALayer()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        layer?.addSublayer(bar)
+        setAccessibilityElement(false)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        withoutActions { bar.frame = bounds }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        // One cycle of 0.675 + 0.325 cos(2π t / period), from the shared clock's point in it.
+        let samples = 32
+        let animation = CAKeyframeAnimation(keyPath: "opacity")
+        animation.values = (0...samples).map { 0.675 + 0.325 * cos(2 * .pi * Double($0) / Double(samples)) }
+        animation.duration = Self.period
+        animation.repeatCount = .infinity
+        // Begin now, not when the transaction commits, or the bar lags the clock by the wait for the commit.
+        animation.beginTime = bar.convertTime(CACurrentMediaTime(), from: nil)
+        animation.timeOffset = Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: Self.period)
+        animation.isRemovedOnCompletion = false
+        bar.add(animation, forKey: "breathe")
+    }
 }
 
 private struct PulsesKey: EnvironmentKey {
