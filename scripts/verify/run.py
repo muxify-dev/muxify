@@ -223,6 +223,23 @@ def run_round(names, round_dir, jobs, seed, timings):
     return suites
 
 
+def prepare_mac():
+    """What every run that launches the app needs from the Mac first: the Accessibility permission, and a display
+    that stays awake. Without the permission it stops the process before anything runs."""
+    # Without the permission every launch fails only at its deadline, so each suite would wait it out.
+    deadline = time.monotonic() + 5
+    while (probe := ax_wake(os.getpid())).returncode == AX_WAKE_NOT_TRUSTED:
+        if time.monotonic() > deadline:
+            sys.exit('nothing ran: ' + probe.stderr.strip())
+        time.sleep(.5)
+
+    # While the display sleeps the apps draw no frames, so hover labels never open and checks that wait for a
+    # frame time out. The assertion ends with this process. -u wakes a display that already sleeps, and held for the
+    # run it keeps a locked screen from turning the display off again: a locked screen does that about ten seconds
+    # after each wake, and -d alone does not stop it.
+    subprocess.Popen(['/usr/bin/caffeinate', '-d', '-i', '-u', '-w', str(os.getpid())])
+
+
 def parse(argv):
     repeat, shuffle, names = 1, False, []
     args = iter(argv)
@@ -252,18 +269,7 @@ def main(argv):
     full = names == every
     counted = full and sessions_list is None
 
-    # Without the permission every launch fails only at its deadline, so each suite would wait it out.
-    deadline = time.monotonic() + 5
-    while (probe := ax_wake(os.getpid())).returncode == AX_WAKE_NOT_TRUSTED:
-        if time.monotonic() > deadline:
-            sys.exit('nothing ran: ' + probe.stderr.strip())
-        time.sleep(.5)
-
-    # While the display sleeps the apps draw no frames, so hover labels never open and checks that wait for a
-    # frame time out. The assertion ends with this process. -u wakes a display that already sleeps, and held for the
-    # run it keeps a locked screen from turning the display off again: a locked screen does that about ten seconds
-    # after each wake, and -d alone does not stop it.
-    subprocess.Popen(['/usr/bin/caffeinate', '-d', '-i', '-u', '-w', str(os.getpid())])
+    prepare_mac()
 
     run_id = new_run_id()
     run_dir = RUNS/run_id

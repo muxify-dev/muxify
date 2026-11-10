@@ -31,7 +31,8 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 DEBUG_APP = REPO/'build/Build/Products/Debug/Muxify.app'
 AX_WAKE_SOURCE = REPO/'scripts/verify/ax_wake.swift'
 # The user allows the accessibility helper in System Settings once. So it lives outside /tmp, which macOS empties,
-# and its name comes from its source, so every worktree with the same source uses the same file.
+# and its name comes from its source, so every worktree with the same source uses the same file. The other Swift
+# helpers of the harness are built into the same folder.
 AX_WAKE_DIR = pathlib.Path.home()/'Library/Application Support/MuxifyVerify'
 # ax_wake exits with this status when macOS does not trust it. Under heavy load macOS can report this for a moment
 # for a helper that the user allowed, so only a status that lasts means the permission is missing.
@@ -56,22 +57,28 @@ SESSIONS_LIST_DEFAULT = 'sessionsListAppKit'
 SESSIONS_LIST_VERSIONS = dict(appkit='YES', swiftui='NO')
 
 
-def ax_wake(pid):
-    """Runs ax_wake.swift against pid, after it builds the helper once."""
-    helper = AX_WAKE_DIR/('ax-wake-%s' % hashlib.sha256(AX_WAKE_SOURCE.read_bytes()).hexdigest()[:12])
+def swift_helper(source, name):
+    """The helper that `swiftc` builds from the Swift file `source`, built once for each version of the source:
+    AX_WAKE_DIR/<name>-<hash of the source>."""
+    helper = AX_WAKE_DIR/('%s-%s' % (name, hashlib.sha256(source.read_bytes()).hexdigest()[:12]))
     if not helper.exists():
         # swiftc signs the binary with its file name. Under the same name, the same source and compiler give the
         # same code signature, so a rebuilt helper keeps its Accessibility permission.
         AX_WAKE_DIR.mkdir(parents=True, exist_ok=True)
         building = pathlib.Path(tempfile.mkdtemp(dir=AX_WAKE_DIR))
         try:
-            built = subprocess.run(['swiftc', '-O', '-o', str(building/'ax-wake'), str(AX_WAKE_SOURCE)],
+            built = subprocess.run(['swiftc', '-O', '-o', str(building/name), str(source)],
                                    capture_output=True, text=True)
-            assert built.returncode == 0, 'swiftc could not build %s:\n%s' % (AX_WAKE_SOURCE, built.stderr)
-            (building/'ax-wake').replace(helper)
+            assert built.returncode == 0, 'swiftc could not build %s:\n%s' % (source, built.stderr)
+            (building/name).replace(helper)
         finally:
             shutil.rmtree(building, ignore_errors=True)
-    return subprocess.run([str(helper), str(pid)], capture_output=True, text=True)
+    return helper
+
+
+def ax_wake(pid):
+    """Runs ax_wake.swift against pid, after it builds the helper once."""
+    return subprocess.run([str(swift_helper(AX_WAKE_SOURCE, 'ax-wake')), str(pid)], capture_output=True, text=True)
 
 
 def new_run_id():

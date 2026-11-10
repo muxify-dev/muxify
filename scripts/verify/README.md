@@ -101,6 +101,63 @@ Checks run while the user works. A check must not take the keyboard focus, the m
 
 Commit a check that must stay true with the feature that it checks. Keep a one-off probe in the run directory. Do not commit it.
 
+## The compare run
+
+While the Sessions list has two versions, the compare run is the check that they are the same (`docs/adr/0074-an-area-leaves-swiftui-for-appkit-only-where-swiftui-caused-bugs.md`). It shows each scene in the SwiftUI list and in the AppKit list, fails when the two differ in what a check can measure, and leaves a report of pictures for a person to judge.
+
+```sh
+make compare                       # every scene
+make compare SCENE=cards           # one scene
+make compare SCENE="cards hints"   # these scenes
+make compare SELF=1                # each scene twice in the SwiftUI list
+```
+
+`make compare` builds the Debug app first. The scenes run one after the other, each in its own Sandbox, and all of them take about three minutes. Without `make`, after `make build`: `python3 -m scripts.verify.compare [--self] [scene ...]`.
+
+The run follows "Do not take focus". It starts the app only through `Sandbox.launch`, and a scene reaches its state only through tmux, the Config and the driver commands of that section.
+
+A scene (`compare_scenes.py`) makes its fixture once. Then the run does this for each version:
+
+1. It starts the app with `-sessionsListAppKit NO` or `YES`, on the same tmux server, state and defaults.
+2. It shows each shot of the scene. A scene has one shot or more, and each shot gives one picture.
+3. It asks the driver which Sessions list shows (`sessions-list`). The shot fails when that is not the version the run asked for.
+4. It waits until nothing moves: until the picture of the App Window and the dump are the same three times in a row.
+5. It keeps the picture (`snapshot`) and the dump.
+
+**The gate** (`compare_gate.py`) reads the two dumps of a shot. It takes the rows that have an identifier and stand inside `sessions-list`, and matches them between the versions by identifier and role. SwiftUI gives a row's identifier to the row's parts, so several rows can share an identifier and a role: among these, the first of one version matches the first of the other, in the order of the dump. The run fails when:
+
+- a row has no match in the other version;
+- a matched pair differs in label, title, value or help;
+- the frames of a matched pair differ by more than half a point on an edge. The gate measures a frame from the top left corner of the App Window.
+
+The run names each row that failed, with the values of both versions. When rows with different identifiers stand in another order in the two dumps, the report says so, and the run does not fail. While Topics shows, the dump has no Sessions list, so such a shot has pictures and no rows. `suites/harness.py` checks the matching on made-up rows, with no app.
+
+**The report** is `build/verify/compare/index.html` in the checkout. For each shot of each scene it shows the two pictures side by side, a picture of their difference, the share of pixels that differ and the box around them, the gate's result with the rows that failed, and the scene's notes. A picture in the report is cut to the Sidebar; click it for the whole App Window. The difference picture shows a pixel that differs in magenta. `build/verify/compare/<scene>/` has the pictures, the dumps as `<shot>-<version>.json`, `result.json` and the app's logs. Nothing deletes the report: a run of some scenes replaces their part, and `make verify` leaves the folder alone. The share of pixels never fails the run, because two layout engines do not put glyphs on the same subpixels.
+
+**`SELF=1`** shows each scene twice in the SwiftUI list. Then every difference is a fault of the run or of the scene, or the user changed a picture (see below), so one pixel that differs fails the run too. Its report is `build/verify/compare/self/index.html`. Run it after you add or change a scene.
+
+**The notes** are `compare-notes.md`: first the cost of the pilot, then one section for each scene. A task that leaves a difference between the two versions in a scene writes it in that scene's section, with the reason. The report shows the section under the scene's pictures.
+
+**What the picture does not show.** The driver's `snapshot` draws the App Window's layers. It is not a capture of the screen. So it does not show a material that the window server blends, such as the blur behind a translucent view: judge that in the running app.
+
+**What the user changes in a picture.** The App Window stands on the user's screen, behind the front window, and the picture has all of it: the title bar and the Terminal too. The user can change a picture in three ways:
+
+- The user's pointer rests on a part of the App Window that shows. The row under it draws its hover colour and opens its hover label.
+- The App Window comes to the front, for example when the user closes the window in front of it. It then draws its title bar buttons in colour.
+- The user's windows cover the App Window whole, or the user works in a full-screen window. The `hover` scene then gets no hover, as the `hover` command does not. The scene waits a minute for a part of the App Window to show, then it fails and says so.
+
+The gate reads rows, so the first two do not fail a run of the two versions. They do fail `SELF=1`, which then says where the pixels differ, as a box in points from the top left corner of the App Window. A box on one row, or on the title bar buttons, is the user's: run that scene again.
+
+**Add a scene**
+
+1. In `compare_scenes.py`, write a class with a `name`, a line `shows` for the report, `fixture(s)` and `shots()`. `fixture` makes the tmux Sessions, the Topic records and the folders in the Sandbox, before the app starts. `shots` gives `(name, arrange)` pairs.
+2. In an arrange, start the app with `view.launch(config(...))`, move the Location with `view.go(window)`, and end with `view.wait(predicate, message)` on the rows that prove the list shows the state. When one version cannot show the state, the wait fails with the message, and the run still takes the picture.
+3. Make each shot start from the same state in both versions. The second version runs after the first, on the same tmux server: set again what an earlier shot changed, such as a bell. Call `view.rest()` before a step that starts from where the list stands, such as a swipe or a hover. `config()` sets `ui.pulse: false`, so a Working mark stands still.
+4. Add the scene to `SCENES`, and a section `## <name>` to `compare-notes.md`.
+5. Run `make compare SELF=1 SCENE=<name>` a few times. It must pass each time, with no pixel that differs.
+
+The run compares two pictures with `picture_diff.swift`. It builds this helper once with `swiftc`, into the folder of `ax-wake` ("Accessibility permission"). The helper needs no permission.
+
 ## Accessibility permission
 
 SwiftUI makes the accessibility tree of an App Window only after an accessibility client outside the app asks for it. Before that, the driver sees an App Window with no elements. So `Sandbox.launch` runs `ax_wake.swift`, which asks the app for its windows, and then waits until the driver sees the elements. `Sandbox.launch` compiles it with `swiftc` into `~/Library/Application Support/MuxifyVerify/ax-wake-<hash>`, once for each version of the source. Every worktree with the same source uses the same file.

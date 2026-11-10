@@ -13,7 +13,7 @@ MUXIFY_DEVELOPMENT_TEAM ?=
 # during dependency scanning". A fixed length makes the hash the same.
 XCODEBUILD_SETTINGS := diagnostic_message_length=0
 
-.PHONY: all setup tools project build test test-release verify verify-gate run install release clean
+.PHONY: all setup tools project build test test-release verify verify-gate compare run install release clean
 
 all: build
 
@@ -59,6 +59,12 @@ verify: build
 # Passes only when the last full make verify passed on this exact tree.
 verify-gate:
 	python3 -m scripts.verify.gate
+
+# Shows each scene in the SwiftUI Sessions list and in the AppKit one, fails when their rows differ, and writes the
+# report build/verify/compare/index.html (scripts/verify/README.md, "The compare run"). SCENE="cards hints" runs
+# these scenes. SELF=1 shows each scene twice in the SwiftUI list, which proves the run itself.
+compare: build
+	python3 -m scripts.verify.compare $(if $(SELF),--self) $(SCENE)
 
 # CONFIG=path/to/config.yaml starts a new copy of the app with that Config, through MUXIFY_CONFIG.
 run: build

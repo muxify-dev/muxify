@@ -748,19 +748,20 @@ enum TestDriver {
     /// Every element of the visible windows, depth first, as the script sees
     /// them. The main menu is not in it: its accessibility children make SwiftUI
     /// update every menu, which takes seconds under load. `press` finds a menu
-    /// item by its title.
+    /// item by its title. A row's `depth` is how many elements stand above it, 0 for a window, so the rows that
+    /// follow a row with a greater depth are the elements inside it.
     private static func dump() -> [(object: NSObject, row: [String: String])] {
-        var objects: [NSObject] = []
+        var objects: [(object: NSObject, depth: Int)] = []
         var seen = Set<ObjectIdentifier>()
-        func collect(_ element: Any?) {
+        func collect(_ element: Any?, depth: Int) {
             guard let object = element as? NSObject, objects.count <= 2000,
                   seen.insert(ObjectIdentifier(object)).inserted else { return }
-            objects.append(object)
-            for child in (value(object, Selectors.children) as? [Any]) ?? [] { collect(child) }
+            objects.append((object, depth))
+            for child in (value(object, Selectors.children) as? [Any]) ?? [] { collect(child, depth: depth + 1) }
         }
-        for window in NSApp.windows where window.isVisible { collect(window) }
-        return objects.map { object in
-            var row: [String: String] = [:]
+        for window in NSApp.windows where window.isVisible { collect(window, depth: 0) }
+        return objects.map { object, depth in
+            var row = ["depth": String(depth)]
             for key in Selectors.rowKeys {
                 if let value = value(object, NSSelectorFromString(key)) { row[key] = String(describing: value) }
             }

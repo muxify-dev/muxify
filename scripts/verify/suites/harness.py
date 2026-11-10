@@ -1,4 +1,5 @@
-"""The sandbox itself: a run that dies leaves nothing behind once the next run starts.
+"""The harness itself: a run that dies leaves nothing behind once the next run starts, the runner keeps its results,
+and the gate of the compare run matches the rows of two dumps.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.harness
@@ -15,8 +16,9 @@ import tempfile
 import textwrap
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+from scripts.verify.compare_gate import judge, list_rows
 from scripts.verify.sandbox import BASE, OWNER, OWNERLESS_GRACE, REPO, Sandbox, alive, new_run_id, wait
 
 NAME = __name__.rsplit('.', 1)[-1]
@@ -289,6 +291,106 @@ class Harness(unittest.TestCase):
         self.addCleanup(Sandbox(NAME).teardown)
         self.assertFalse(old.exists(), 'sweep left the ownerless root %s older than the grace' % old)
         self.assertTrue(young.is_dir(), 'sweep removed the ownerless root %s inside the grace' % young)
+
+
+class CompareGate(unittest.TestCase):
+    """The gate of the compare run (compare_gate.py) on made-up rows, with no app."""
+
+    WINDOW = (100, 200, 1500, 920)
+    LIST = (100, 200, 260, 856)
+
+    def dump(self, *rows):
+        """A dump as the driver gives it: an App Window, a row outside the Sessions list, the list, and `rows` in the
+        list. A row is (identifier, label, frame); a frame is (x, y, width, height) in screen points."""
+        def row(depth, role, frame, **more):
+            return dict(depth=str(depth), accessibilityRole=role, accessibilityFrame='{{%r, %r}, {%r, %r}}' % frame,
+                        **{'accessibility' + key.title(): value for key, value in more.items()})
+        return ([row(0, 'AXWindow', self.WINDOW, title='made up'),
+                 row(1, 'AXButton', (120, 1090, 60, 20), identifier='sidebar-view-sessions', label='Sessions'),
+                 row(1, 'AXScrollArea', self.LIST, identifier='sessions-list')]
+                + [row(2, 'AXButton', frame, identifier=identifier, label=label) for identifier, label, frame in rows]
+                + [row(1, 'AXGroup', (360, 200, 1240, 890), identifier='terminal-panel')])
+
+    def judged(self, first, second):
+        return judge(list_rows(self.dump(*first)), list_rows(self.dump(*second)))
+
+    ALPHA = ('session-$0', 'alpha', (106, 1000, 248, 50))
+    BETA = ('session-$1', 'beta', (106, 944, 248, 50))
+
+    def test_the_same_rows_pass_and_only_the_rows_inside_the_sessions_list_count(self):
+        result = self.judged([self.ALPHA, self.BETA], [self.ALPHA, self.BETA])
+        self.assertEqual(result['failed'], [])
+        self.assertIsNone(result['order'])
+        # The list and its two rows: not the App Window, the row before the list or the row after it.
+        self.assertEqual(result['rows'], [3, 3])
+
+    def test_a_row_with_no_match_fails_and_is_named_with_the_version_that_has_it(self):
+        for first, second, has in (([self.ALPHA, self.BETA], [self.ALPHA], 'first'),
+                                   ([self.ALPHA], [self.ALPHA, self.BETA], 'second')):
+            with self.subTest(has=has):
+                failed = self.judged(first, second)['failed']
+                self.assertEqual([(row['row'], row['what']) for row in failed], [('session-$1 (AXButton)', 'no match')])
+                other = 'second' if has == 'first' else 'first'
+                self.assertIn("label 'beta'", failed[0][has], 'the row is not shown with what it has')
+                self.assertIsNone(failed[0][other], 'the version without the row shows one')
+
+    def test_a_changed_label_fails_with_both_values(self):
+        changed = (self.BETA[0], 'gamma', self.BETA[2])
+        failed = self.judged([self.ALPHA, self.BETA], [self.ALPHA, changed])['failed']
+        self.assertEqual(failed, [dict(row='session-$1 (AXButton)', what='label', first='beta', second='gamma')])
+
+    def test_rows_that_share_an_identifier_match_in_the_order_of_the_dump(self):
+        # SwiftUI gives a row's identifier to the row's parts.
+        icon, title = ('session-window-@1', 'icon', (112, 980, 14, 14)), ('session-window-@1', 'editor', (132, 980, 60, 15))
+        self.assertEqual(self.judged([icon, title], [icon, title])['failed'], [])
+        failed = self.judged([icon, title], [title, icon])['failed']
+        self.assertEqual([(row['row'], row['what']) for row in failed],
+                         [('session-window-@1 (AXButton) #1', 'label'), ('session-window-@1 (AXButton) #1', 'frame'),
+                          ('session-window-@1 (AXButton) #2', 'label'), ('session-window-@1 (AXButton) #2', 'frame')])
+
+    def moved(self, by):
+        """BETA with each edge of its frame in turn `by` points away: (edge, row) pairs."""
+        identifier, label, (x, y, width, height) = self.BETA
+        # Screen points have their origin at the bottom left, so a taller frame from the same y moves the top edge.
+        return [('left', (identifier, label, (x - by, y, width + by, height))),
+                ('right', (identifier, label, (x, y, width + by, height))),
+                ('top', (identifier, label, (x, y, width, height + by))),
+                ('bottom', (identifier, label, (x, y - by, width, height + by)))]
+
+    def test_a_frame_0_4_points_away_passes(self):
+        for edge, row in self.moved(.4):
+            with self.subTest(edge=edge):
+                self.assertEqual(self.judged([self.ALPHA, self.BETA], [self.ALPHA, row])['failed'], [])
+
+    def test_a_frame_0_6_points_away_fails_and_names_the_edge(self):
+        for edge, row in self.moved(.6):
+            with self.subTest(edge=edge):
+                failed = self.judged([self.ALPHA, self.BETA], [self.ALPHA, row])['failed']
+                self.assertEqual([(found['row'], found['what'], found['edges']) for found in failed],
+                                 [('session-$1 (AXButton)', 'frame', [edge])])
+                self.assertNotEqual(failed[0]['first'], failed[0]['second'], 'the two frames read the same')
+
+    def test_an_app_window_in_another_place_on_the_screen_moves_no_row(self):
+        with patch.object(self, 'WINDOW', (300, 100, 1500, 920)), patch.object(self, 'LIST', (300, 100, 260, 856)):
+            there = self.dump(*[(identifier, label, (x + 200, y - 100, width, height))
+                                for identifier, label, (x, y, width, height) in (self.ALPHA, self.BETA)])
+        self.assertEqual(judge(list_rows(self.dump(self.ALPHA, self.BETA)), list_rows(there))['failed'], [])
+
+    def test_rows_in_another_order_are_reported_and_do_not_fail(self):
+        result = self.judged([self.ALPHA, self.BETA], [self.BETA, self.ALPHA])
+        self.assertEqual(result['failed'], [])
+        self.assertEqual(result['order'], dict(
+            first=['sessions-list (AXScrollArea)', 'session-$0 (AXButton)', 'session-$1 (AXButton)'],
+            second=['sessions-list (AXScrollArea)', 'session-$1 (AXButton)', 'session-$0 (AXButton)']))
+
+    def test_a_scene_fails_its_measure_when_the_app_shows_the_other_sessions_list(self):
+        from scripts.verify.compare import Side, View
+
+        sandbox = Mock()
+        sandbox.sessions_list.return_value = 'swiftui'
+        with self.assertRaisesRegex(AssertionError, 'shows the swiftui Sessions list, and the scene asked for the appkit list'):
+            View(sandbox, Side('appkit', 'appkit'), pathlib.Path('/nowhere')).measure('shot')
+        sandbox.act.assert_not_called()
 
 
 if __name__ == '__main__':
