@@ -174,6 +174,25 @@ class PaletteInPlay(PaletteFixture):
         wait(lambda: lock() != '', 'Move Topic Up did not Lock the No Topic Session, which makes it a Guest')
         s.wait_shown(self.base)
 
+    def test_fast_presses_of_move_topic_up_on_the_no_topic_session_make_it_a_guest_and_then_the_top_guest(self):
+        s = self.s
+        self.topic('fns-a', order=0)
+        self.topic('fns-b', order=1)
+        self.topic('fns-g', order=2, guest=True)
+        s.wait_rows(lambda rs: s.has('topic-fns-g', rs), 'the Topics did not appear')
+        self.select(self.base)
+        lock = lambda: s.tmux('show-options', '-qv', '-t', 'base', '@muxify_lock').strip()
+        self.addCleanup(s.tmux_ok, 'set-option', '-u', '-t', 'base', '@muxify_lock')
+        self.assertEqual(lock(), '', 'the No Topic Session starts Locked')
+
+        self.press_key('⌥⌘↑')
+        self.press_key('⌥⌘↑')
+        wait(lambda: lock() != '', 'the first press did not Lock the No Topic Session, which makes it a Guest')
+        wait(lambda: float(lock()) < self.record('fns-g')['order'],
+             'the second press, made while the Lock ran, did not move the Locked Session above the Guest fns-g: '
+             'Lock order %s, Guest order %s' % (lock(), self.record('fns-g')['order']))
+        self.assertEqual(self.order('fns-'), ['fns-a', 'fns-b', 'fns-g'], 'a press moved a card that is not the Session')
+
 
 if __name__ == '__main__':
     unittest.main()

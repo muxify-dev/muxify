@@ -82,6 +82,9 @@ class PaletteFixture(unittest.TestCase):
         self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == title,
                          'Commands did not keep the query')
 
+    def press_key(self, symbol):
+        wait(lambda: self.s.driver('action', 'quick-switch-input', 'Press ' + symbol)['pressed'], 'the app offers no Press ' + symbol)
+
     def run_command(self, title):
         self.search(title)
         key = 'palette-row-command-' + title

@@ -214,9 +214,6 @@ class PaletteCurrentCommands(PaletteFixture):
         self.run_command('Move Topic Down')
         wait(lambda: order('move-current') > order('move-upper'), 'Move Topic Down did not move the Active Topic back')
 
-    def press_key(self, symbol):
-        wait(lambda: self.s.driver('action', 'quick-switch-input', 'Press ' + symbol)['pressed'], 'the app offers no Press ' + symbol)
-
     def cards(self, prefix):
         return [r['id'] for r in sorted((r for r in self.records() if r['id'].startswith(prefix)), key=lambda r: r.get('order', 0))]
 
