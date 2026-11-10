@@ -8,7 +8,9 @@ switch AppKit updates every link, and tens of thousands of them froze the app fo
 
 The check counts the scroll animations in the Diagnostics log: the `animation #` lines of DisplayLinkProbe
 (Diagnostics/DisplayLinkProbe.swift). It fails when it reads no such line, so a change that removes the probe must
-give the check another way to count them.
+give the check another way to count them. The SwiftUI list's scroll is an NSAnimation, which the probe hooks. The
+AppKit list glides its own clip view by the view's animator, which starts no NSAnimation, so the list reports each
+glide to the probe (`DisplayLinkProbe.didStart(glide:in:duration:from:to:)`), which logs it as one more line.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.sidebar_pager_scroll

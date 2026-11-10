@@ -68,6 +68,11 @@ The coloured border of the Location's card and the text: as in `card-marks`.
 
 ## stuck-header
 
+The stuck header matches: its background, the chrome's colour under the faint fill, is 70, 74, 80 in both pictures,
+and its divider is the same two device pixels of 88, 92, 97 in the same rows. The rows that scroll under it stand in
+the same places. The fill of the open card under the header: as in `cards`. The coloured border of the Location's
+card and the text: as in `card-marks`.
+
 ## empty
 
 ## sizes-and-light

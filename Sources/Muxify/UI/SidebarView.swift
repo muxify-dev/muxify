@@ -1171,7 +1171,7 @@ private struct SessionsSection: View {
                 // The list scrolls to the card that holds the Window.
                 .onChange(of: store.selectedWindow?.sessionID) { _, id in
                     guard let id else { return }
-                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
+                    withAnimation(.easeOut(duration: SessionsListScroll.glideDuration)) { proxy.scrollTo(id) }
                 }
             }
         }

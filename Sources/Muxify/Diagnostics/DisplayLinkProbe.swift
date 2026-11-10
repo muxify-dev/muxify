@@ -10,6 +10,10 @@ import ObjectiveC
 /// (`SidebarPager.scale(ofPage:)`). The `sidebar_pager_scroll` verify suite counts its lines; the probe reads
 /// AppKit's private state, so remove it with another way for that suite to count. It numbers the animations
 /// from launch, so numbers go on after diagnostics is turned off and on.
+///
+/// An animation of a view's animator starts no NSAnimation, so the hook does not see it. The AppKit Sessions list
+/// glides its clip view that way, and reports each glide to the probe with `didStart(glide:in:duration:from:to:)`,
+/// which logs it as another animation.
 enum DisplayLinkProbe {
     private final class Tracked {
         let number: Int
@@ -101,6 +105,16 @@ enum DisplayLinkProbe {
             if from == to { line += " zero-distance" }
             window = (ivar(animation, scrollHelperClass, "_delegate") as? NSView)?.window
         }
+        Diagnostics.write(line + " | " + Diagnostics.describe(window))
+    }
+
+    /// Logs a scroll by a view's animator, such as the glide of the AppKit Sessions list to the Location's card, as
+    /// the hook logs an NSAnimation that starts: `name` names it, and `from` and `to` are the clip view's origins.
+    static func didStart(glide name: String, in window: NSWindow?, duration: TimeInterval, from: CGPoint, to: CGPoint) {
+        guard sweepTimer != nil else { return }
+        started += 1
+        var line = "animation #\(started) \(name) duration \(Diagnostics.seconds(duration)) scroll \(text(from)) -> \(text(to))"
+        if from == to { line += " zero-distance" }
         Diagnostics.write(line + " | " + Diagnostics.describe(window))
     }
 

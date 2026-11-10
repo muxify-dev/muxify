@@ -146,7 +146,9 @@ The app then writes to `~/Library/Logs/Muxify/`:
   messages and the errors the system logged for the app; and the app, window,
   Space, screen and sleep changes. Its `animation` and `display link` lines
   follow each AppKit animation and the display links it leaves running:
-  thousands of those links freeze the app on a Space switch. It keeps one
+  thousands of those links freeze the app on a Space switch. The glide of the
+  AppKit Sessions list to the Location's card is an `animation` line too,
+  `SessionsListGlide`, which the list writes itself. It keeps one
   older file, `muxify.1.log`, of up to 20 MB.
 - `freeze-<time>.txt`: a `sample` of every thread, started a second into a
   freeze, and `cpu-<time>.txt`, started after a minute over half a core. The

@@ -38,7 +38,7 @@ struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
     /// the card's last row.
     private var stuck: CGFloat {
         guard isOpen, viewport != nil else { return 0 }
-        return min(max(0, scrollTopInset - frame.minY), max(0, frame.height - headerHeight - 8))
+        return StuckHeader.offset(cardTop: frame.minY, cardHeight: frame.height, headerHeight: headerHeight, inset: scrollTopInset)
     }
 
     var body: some View {
@@ -52,7 +52,7 @@ struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
                     if stuck > 0 {
                         ZStack {
                             Color.clear.chrome(theme: chromeTheme, material: .sidebar)
-                            Color.primary.opacity(0.08)
+                            Color.primary.opacity(StuckHeader.fillOpacity)
                         }
                         .overlay(alignment: .bottom) { Divider() }
                     }
@@ -454,6 +454,25 @@ enum CardRowsPadding {
     static let horizontal: CGFloat = 4
     static let top: CGFloat = 3
     static let bottom: CGFloat = 5
+}
+
+/// The header of an open card that sticks to the top of its list while the card's rows scroll under it, for both
+/// versions of the card (ADR 0074).
+enum StuckHeader {
+    /// The room that the header leaves under it at the card's end: it stops this far above the card's bottom edge.
+    static let gap: CGFloat = 8
+    /// The faint fill over the chrome's background while the header sticks.
+    static let fillOpacity = 0.08
+    /// The divider under the header while it sticks, as high as SwiftUI's `Divider`.
+    static let dividerWidth: CGFloat = 1
+
+    /// How far the header moves down from the card's top. `cardTop` is the card's top edge in the list's viewport,
+    /// and `inset` is where the header sticks in that viewport: 0 for its top, or the bottom of a block that sticks
+    /// there. Zero while the card's top is in view; after that, the distance scrolled past the card's top; and never
+    /// further than the card's height less the header's height and the gap under it.
+    static func offset(cardTop: CGFloat, cardHeight: CGFloat, headerHeight: CGFloat, inset: CGFloat = 0) -> CGFloat {
+        min(max(0, inset - cardTop), max(0, cardHeight - headerHeight - gap))
+    }
 }
 
 /// How a card opens and closes, for both versions of the card (ADR 0074): ease-out over this many seconds.

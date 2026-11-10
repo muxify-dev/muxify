@@ -197,4 +197,79 @@ import XCTest
         }
         XCTAssertNil(try card("$1").layer?.animation(forKey: "glide-position"), "the card above does not move")
     }
+
+    // MARK: The scroll
+
+    /// A list of closed cards in a window 400 points high, with its scroll view.
+    private func list() -> (list: SessionsListView, scroll: NSScrollView, window: NSWindow) {
+        let list = SessionsListView(store: WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml")),
+                                    environment: SessionsListEnvironment())
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 400), styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = list
+        let scroll = list.subviews.compactMap { $0 as? NSScrollView }.first!
+        return (list, scroll, window)
+    }
+
+    private func scroll(_ scroll: NSScrollView, to y: CGFloat) {
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+        scroll.reflectScrolledClipView(scroll.contentView)
+    }
+
+    private let sessions = (1...20).map { "$\($0)" }
+    private let closed = SessionCardContent(title: "atlas", summary: "1 Window")
+
+    func testTheListKeepsItsOffsetInsideTheNewScrollRangeWhenItsContentChangesHeight() {
+        let (list, scrollView, window) = list()
+        defer { window.contentView = nil }
+        let clip = scrollView.contentView
+        list.show(sessions.map { ($0, closed) })
+        scroll(scrollView, to: 300)
+
+        // A card above the rows that show opens, and closes again.
+        var open = closed
+        open.isOpen = true
+        open.moreCount = 3
+        list.show(sessions.map { ($0, $0 == "$1" ? open : closed) })
+        XCTAssertEqual(clip.bounds.minY, 300, "the list moved when a card above opened")
+        list.show(sessions.map { ($0, closed) })
+        XCTAssertEqual(clip.bounds.minY, 300, "the list moved when a card above closed")
+
+        // Sessions end, and the content gets shorter than the offset: the list stands at the end of its new range.
+        list.show(sessions.prefix(8).map { ($0, closed) })
+        let height = scrollView.documentView?.frame.height ?? 0
+        // 8 cards of 50 points, 7 gaps of 6 and the insets of 4.
+        XCTAssertEqual(height, 450)
+        XCTAssertEqual(clip.bounds.minY, height - 400)
+    }
+
+    func testTheHeaderOfAnOpenCardSticksToTheTopWhileItsRowsScrollUnder() throws {
+        let (list, scrollView, window) = list()
+        defer { window.contentView = nil }
+        var open = closed
+        open.isOpen = true
+        open.moreCount = 3
+        list.show(sessions.map { ($0, $0 == "$2" ? open : closed) })
+        let card = try XCTUnwrap(scrollView.documentView?.subviews.compactMap { $0 as? SessionCardView }
+            .first { $0.sessionID == "$2" })
+        let header = try XCTUnwrap(card.subviews.first { $0.accessibilityIdentifier() == "session-$2" })
+        let headerHeight = header.frame.height
+        XCTAssertEqual(card.frame.minY, 60)
+
+        scroll(scrollView, to: 50)
+        XCTAssertEqual(header.frame.minY, 0, "the card's top shows, and its header moved")
+        scroll(scrollView, to: 70)
+        XCTAssertEqual(header.frame.minY, 10, "the header did not stay at the top of the list")
+        scroll(scrollView, to: 300)
+        XCTAssertEqual(header.frame.minY, card.frame.height - headerHeight - StuckHeader.gap, "the header passed the card's last row")
+        XCTAssertEqual(card.accessibilityChildrenInNavigationOrder()?.first as? NSView, header,
+                       "the header is not first for VoiceOver")
+        let above = try XCTUnwrap(card.subviews.firstIndex(of: header))
+        let rows = try XCTUnwrap(card.subviews.firstIndex { $0.subviews.contains { $0.accessibilityIdentifier() == "session-$2-more" } })
+        XCTAssertGreaterThan(above, rows, "the header is not above the rows")
+
+        // A closed card's header stands at its top.
+        list.show(sessions.map { ($0, closed) })
+        XCTAssertEqual(header.frame.minY, 0)
+    }
 }

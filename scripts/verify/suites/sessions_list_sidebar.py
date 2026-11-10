@@ -24,6 +24,12 @@ The checks of a press on a Pane row and on "N more…" press them as the header 
 in both lists, and by a first click too in the AppKit list. A card shows all its rows from a press on its "N more…"
 until the app quits, so each press gets a Session of its own.
 
+The check of the glide to the card of the Location's Session runs against both lists. A press on a card's header
+moves the Location to its Session, and `watch` reads the card's frames in each frame the app draws. The AppKit list
+reports each glide to Diagnostics, which logs it as an animation with its duration
+(`DisplayLinkProbe.didStart(glide:in:duration:from:to:)`), so the check turns Diagnostics on and reads the log. That
+the glide eases out shows in the frames: its first step is longer than its last.
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.sessions_list_sidebar
 """
@@ -337,6 +343,79 @@ class SessionsListSidebar(unittest.TestCase):
                     rs = self.s.wait_rows(lambda rs: shown(rs) == windows and not self.s.has(more, rs),
                                           lambda: 'a %s on "2 more…" did not show all rows: the card lists %s'
                                           % (command, shown(self.s.rows())))
+
+    def glides(self):
+        """The glides of the AppKit list in the Diagnostics log."""
+        log = self.s.root/'logs/muxify.log'
+        return [line for line in (log.read_text(errors='replace') if log.exists() else '').splitlines()
+                if ' SessionsListGlide ' in line]
+
+    def test_the_list_glides_to_the_card_of_the_location_and_stays_for_a_card_that_shows_whole(self):
+        # More Sessions than the Sidebar shows, so the last card is far down the list.
+        sessions = []
+        for number in range(30):
+            name = 'list-glide-%02d' % number
+            sessions.append(self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, SHELL))
+            self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', name)
+        windows = {session: self.s.tmux('list-windows', '-t', session, '-F', '#{window_id}') for session in sessions}
+        def restore():
+            self.config.write_text(CONFIG)
+        self.addCleanup(restore)
+        self.config.write_text(CONFIG + 'diagnostics:\n  enabled: true\n')
+        log = self.s.root/'logs/muxify.log'
+        # A frame counts up from the bottom of the screen: its top edge is its y and its height.
+        def top(frame):
+            return frame[1] + frame[3]
+        def bottom(frame):
+            return frame[1]
+        def card(session, rs=None):
+            return rect(self.s.row('card-session-' + session, rs))
+        for version in ('swiftui', 'appkit'):
+            self.show_list(version)
+            self.show_mode('sessions')
+            with self.subTest(version=version):
+                wait(lambda: re.search(r'(launch|on): pid %d\b' % self.s.pid, log.read_text(errors='replace') if log.exists() else ''),
+                     'Diagnostics did not turn on')
+                # The Location on the first of these Sessions, and the list at its top.
+                self.s.show(windows[sessions[0]])
+                self.s.act('scroll', 'sessions-list', from_end=100000)
+                shown = self.settled('sessions-list')
+                rs = self.wait_cards(self.sessions + sessions)
+                # The card lowest in the list, which is out of view.
+                target = min(sessions, key=lambda session: bottom(card(session, rs)))
+                self.assertLess(top(card(target, rs)), bottom(shown), 'the card of %s shows before the glide' % target)
+                before = len(self.glides())
+
+                frames = self.s.act('press', 'session-' + target, watch=['card-session-' + target],
+                                    watch_seconds=1.5)['frames'].get('card-session-' + target, [])
+                self.s.wait_shown(windows[target])
+                places = [bottom(frame) for frame in frames]
+                self.assertGreater(len(set(places)), 3, 'the list did not glide to the card of %s: it stood at %s' % (target, places))
+                self.assertTrue(bottom(frames[-1]) >= bottom(shown) - .5 and top(frames[-1]) <= top(shown) + .5,
+                                'the card of the Location %s does not show whole in the list %s after the glide' % (frames[-1], shown))
+                if version == 'appkit':
+                    glides = self.glides()[before:]
+                    self.assertEqual(len(glides), 1, 'the list did not glide once: %s' % glides)
+                    self.assertIn('duration 0.150s', glides[0])
+                    # Ease-out: the glide slows down to its end.
+                    steps = [abs(b - a) for a, b in zip(places, places[1:]) if b != a]
+                    self.assertGreater(steps[0], steps[-1], 'the glide did not slow down to its end: it stood at %s' % places)
+
+                # A card that shows whole, the highest one in view: the Location goes to it, and the list does not move.
+                rs = self.s.rows()
+                whole = [session for session in sessions
+                         if session != target and top(card(session, rs)) <= top(shown) + .5]
+                still = max(whole, key=lambda session: top(card(session, rs)))
+                before = len(self.glides())
+                frames = self.s.act('press', 'session-' + still, watch=['card-session-' + still],
+                                    watch_seconds=1)['frames'].get('card-session-' + still, [])
+                self.s.wait_shown(windows[still])
+                self.wait_card(still, 'expanded', 'the card of the Location did not open')
+                self.assertEqual(len(set(top(frame) for frame in frames)), 1,
+                                 'the list moved for the card of %s, which showed whole: %s' % (still, frames))
+                self.assertEqual(top(self.settled('card-session-' + still)), top(frames[0]), 'the list moved after the move')
+                if version == 'appkit':
+                    self.assertEqual(self.glides()[before:], [], 'the list glided for a card that showed whole')
 
     def test_a_session_that_starts_or_ends_changes_the_cards_of_the_appkit_list(self):
         self.show_list('appkit')

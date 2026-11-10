@@ -422,6 +422,9 @@ class StuckHeader:
         view.go(self.windows[-1])
         card, header = 'card-session-' + self.session, 'session-' + self.session
         view.wait(lambda rs: s.has(card, rs) and s.has('sessions-list', rs), 'the list has no card for the Location')
+        # The SwiftUI list scrolls to the card of the Location after the move, and a scroll by the driver before that
+        # glide ends is undone by it.
+        view.rest()
         s.act('scroll', 'sessions-list', by=self.SCROLL, steps=1)
         # The card has left the list at its top, and its header has not.
         def stuck(rs):

@@ -75,6 +75,9 @@ final class SessionCardView: NSView {
     private let hint = CardRestKeyView()
     private var content: SessionCardContent?
     private var environment = SessionsListEnvironment()
+    /// The card's top edge in the list's viewport. The header of an open card sticks to the viewport's top once the
+    /// card's top has scrolled past it.
+    private var viewportTop: CGFloat = 0
 
     init(sessionID: String) {
         self.sessionID = sessionID
@@ -84,8 +87,9 @@ final class SessionCardView: NSView {
         wantsLayer = true
         // The SwiftUI card cuts nothing off.
         clipsToBounds = false
-        // From the back: the fill, the header and the rows, the spine, the border and the Hint.
-        subviews = [fill, header, rows, spine, outline, selection, hint]
+        // From the back: the fill, the rows, the header, which stays above the rows that scroll under it, the spine,
+        // the border and the Hint.
+        subviews = [fill, rows, header, spine, outline, selection, hint]
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityIdentifier("card-session-" + sessionID)
@@ -163,12 +167,30 @@ final class SessionCardView: NSView {
         layOut()
     }
 
+    /// Moves the header of an open card to the top of the list's viewport while the card's rows scroll under it.
+    /// `top` is the card's top edge in the viewport.
+    func stick(cardTop top: CGFloat) {
+        guard top != viewportTop else { return }
+        viewportTop = top
+        placeHeader()
+    }
+
+    /// Puts the header at the top of the card, or as far down as it sticks, and the card's Hint on it.
+    private func placeHeader() {
+        let height = header.height(width: bounds.width)
+        let stuck = isOpen ? StuckHeader.offset(cardTop: viewportTop, cardHeight: bounds.height, headerHeight: height) : 0
+        header.frame = NSRect(x: 0, y: stuck, width: bounds.width, height: height)
+        header.sticks = stuck > 0
+        // The header keeps the Hint's place, and the card draws the Hint over it.
+        hint.frame = header.hintPlace(width: bounds.width)?.offsetBy(dx: 0, dy: stuck) ?? .zero
+    }
+
     private func layOut() {
         fill.frame = bounds
         outline.frame = bounds
         selection.frame = bounds
-        header.frame = NSRect(x: 0, y: 0, width: bounds.width, height: header.height(width: bounds.width))
-        rows.frame = NSRect(x: CardRowsPadding.horizontal, y: header.frame.maxY + CardRowsPadding.top,
+        placeHeader()
+        rows.frame = NSRect(x: CardRowsPadding.horizontal, y: header.height(width: bounds.width) + CardRowsPadding.top,
                             width: max(0, bounds.width - 2 * CardRowsPadding.horizontal), height: rowsHeight(width: bounds.width))
         var top: CGFloat = 0
         for row in listed {
@@ -177,8 +199,6 @@ final class SessionCardView: NSView {
         }
         spine.frame = NSRect(x: CardSpine.leading, y: CardSpine.verticalInset, width: CardSpine.width,
                              height: max(0, bounds.height - 2 * CardSpine.verticalInset))
-        // The header keeps the Hint's place, and the card draws the Hint over it.
-        hint.frame = header.hintPlace(width: bounds.width) ?? .zero
     }
 
     // MARK: Accessibility
@@ -187,6 +207,12 @@ final class SessionCardView: NSView {
     /// because the header hides its children. SwiftUI lists the header after the rows, which it draws above them.
     override func accessibilityChildren() -> [Any]? {
         (isOpen ? listed.flatMap(\.accessibilityParts) : []) + [header] + (hint.isHidden ? [] : [hint])
+    }
+
+    /// VoiceOver reads the header first, then the rows and the Hint, as SwiftUI's sort priority orders the header.
+    override func accessibilityChildrenInNavigationOrder() -> [NSAccessibilityElementProtocol]? {
+        let children = (accessibilityChildren() ?? []).compactMap { $0 as? NSAccessibilityElementProtocol }
+        return [header] + children.filter { $0 !== header }
     }
 
     override func accessibilityActivationPoint() -> NSPoint { accessibilityFrame().centre }
@@ -216,6 +242,8 @@ private final class CardRowsView: NSView {
 /// SwiftUI. To accessibility it is one button, which hides its parts. A press on it works on the first click while
 /// Muxify is not the front app.
 private final class SessionCardHeaderView: SidebarPressView {
+    /// The background of the header while it sticks to the top of the list.
+    private let backdrop = StuckHeaderBackdropView()
     private let title = SidebarLabel()
     private let guest = SidebarLabel()
     private let lock = SidebarSymbol(CardHeaderMark.lock)
@@ -243,7 +271,8 @@ private final class SessionCardHeaderView: SidebarPressView {
         guest.text = CardHeaderMark.guest
         guest.ink = .secondary
         summary.ink = .secondary
-        subviews = [title, guest, lock, bell, summary]
+        backdrop.isHidden = true
+        subviews = [backdrop, title, guest, lock, bell, summary]
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityIdentifier(identifier)
@@ -252,9 +281,15 @@ private final class SessionCardHeaderView: SidebarPressView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
+    /// The header sticks to the top of the list, over the rows that scroll under it.
+    var sticks = false {
+        didSet { backdrop.isHidden = !sticks }
+    }
+
     func show(_ content: SessionCardContent, environment: SessionsListEnvironment) {
         self.content = content
         self.environment = environment
+        backdrop.theme = environment.chromeTheme
         let size = environment.fontSize
         title.text = content.title
         title.font = environment.typography.nsFont(for: .session)
@@ -290,6 +325,7 @@ private final class SessionCardHeaderView: SidebarPressView {
 
     private func layOut() {
         let frames = frames(width: bounds.width)
+        backdrop.frame = bounds
         title.frame = frames.title
         (content.isGuest ? guest : lock).frame = frames.mark
         if showsBell { bell.frame = frames.bell }

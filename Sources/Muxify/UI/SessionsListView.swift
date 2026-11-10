@@ -2,7 +2,9 @@ import AppKit
 import MuxifyCore
 
 /// The Sidebar's Sessions list in AppKit (ADR 0074): a scroll view with one card for each Session, in the order of
-/// the SwiftUI list. Its views lay out by frames, and it reads the store through `ObservedUpdate`.
+/// the SwiftUI list. Its views lay out by frames, and it reads the store through `ObservedUpdate`. It owns its scroll
+/// view: it glides to the card of the Location's Session by moving its own clip view, and the header of an open card
+/// sticks to the top while the card's rows scroll under it.
 final class SessionsListView: NSView {
     private let store: WorkspaceStore
     /// The values from the SwiftUI Sidebar. The list draws again when one changes.
@@ -17,6 +19,8 @@ final class SessionsListView: NSView {
     private var cards: [SessionCardView] = []
     /// The cards whose "N more…" the user pressed, by Session ID. They show all their rows from then on.
     private var showingAllRows: Set<String> = []
+    /// The Session of the Location's Window at the last update. When it changes, the list glides to its card.
+    private var locationSessionID: String?
     private lazy var update = ObservedUpdate { [weak self] in self?.render() }
 
     init(store: WorkspaceStore, environment: SessionsListEnvironment) {
@@ -32,6 +36,11 @@ final class SessionsListView: NSView {
         scrollView.documentView = document
         scrollView.setAccessibilityIdentifier("sessions-list")
         addSubview(scrollView)
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(self, selector: #selector(clipDidMove), name: NSView.boundsDidChangeNotification,
+                                               object: scrollView.contentView)
+        // As SwiftUI's `onChange`, the Location the list starts with is no move.
+        locationSessionID = store.selectedWindow?.sessionID
         update.run()
     }
 
@@ -51,6 +60,43 @@ final class SessionsListView: NSView {
         let themed = environment.chromeTheme.flatMap { NSAppearance(named: $0.isDark ? .darkAqua : .aqua) }
         if appearance?.name != themed?.name { appearance = themed }
         show(store.sessions.map { ($0.id, content(of: $0)) })
+        let location = store.selectedWindow?.sessionID
+        if location != locationSessionID {
+            locationSessionID = location
+            if let location { glide(to: location) }
+        }
+    }
+
+    /// Glides the list so that the card of the Session shows whole, by the least move inside the scroll range, with
+    /// ease-out over `SessionsListScroll.glideDuration`. A card that shows whole does not move the list. The glide
+    /// moves the list's own clip view to a place it can stand at, so nothing moves after it, also while the pager
+    /// scales the list's page.
+    private func glide(to sessionID: String) {
+        guard let card = cards.first(where: { $0.sessionID == sessionID }) else { return }
+        let clip = scrollView.contentView
+        guard clip.bounds.height > 0, let y = SessionsListScroll.offset(
+            showing: card.frame.minY, to: card.frame.maxY, from: clip.bounds.minY, height: clip.bounds.height,
+            end: document.frame.height - clip.bounds.height) else { return }
+        let from = clip.bounds.origin, to = NSPoint(x: from.x, y: y)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = SessionsListScroll.glideDuration
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            clip.animator().setBoundsOrigin(to)
+        }
+        scrollView.reflectScrolledClipView(clip)
+        // The animator starts no NSAnimation, so Diagnostics counts the glide from here (the `sidebar_pager_scroll` suite).
+        DisplayLinkProbe.didStart(glide: "SessionsListGlide", in: window, duration: SessionsListScroll.glideDuration, from: from, to: to)
+    }
+
+    /// The list scrolled: by the user, by a glide, or because its content got shorter than the offset it had.
+    @objc private func clipDidMove() {
+        stickHeaders()
+    }
+
+    /// Gives each card its top edge in the viewport, so the header of an open card sticks to the viewport's top.
+    private func stickHeaders() {
+        let top = scrollView.contentView.bounds.minY
+        for card in cards { card.stick(cardTop: card.frame.minY - top) }
     }
 
     /// Shows a card for each of the Sessions, from the top of the list, with its content. When a card that already
@@ -160,7 +206,10 @@ final class SessionsListView: NSView {
             card.frame = NSRect(x: SessionsListMetrics.horizontalInset, y: top, width: cardWidth, height: card.height(width: cardWidth))
             bottom = card.frame.maxY
         }
+        // The clip view keeps its offset when the content changes height, inside the new scroll range, as the SwiftUI
+        // list does.
         document.setFrameSize(NSSize(width: bounds.width, height: bottom + SessionsListMetrics.verticalInset))
+        stickHeaders()
     }
 }
 

@@ -334,3 +334,89 @@ private struct Oklab {
                 encoded(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s))
     }
 }
+
+/// The background of an open card's header while it sticks to the top of the list, so the rows that scroll under it
+/// do not show through: the chrome's background, as `chrome(theme:material:)` gives it to the Sidebar, a faint fill of
+/// the text colour over it, and a divider under it, as SwiftUI's `Divider` draws one.
+final class StuckHeaderBackdropView: NSView {
+    /// The Ghostty theme of the chrome, nil for the system's Sidebar material.
+    var theme: TerminalTheme? {
+        didSet {
+            guard theme != oldValue else { return }
+            material.isHidden = theme != nil
+            color()
+        }
+    }
+    private let material = NSVisualEffectView()
+    private let tint = StuckHeaderTintView()
+
+    init() {
+        super.init(frame: .zero)
+        layer = CALayer()
+        wantsLayer = true
+        material.material = .sidebar
+        material.blendingMode = .behindWindow
+        material.state = .followsWindowActiveState
+        subviews = [material, tint]
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        material.frame = bounds
+        tint.frame = bounds
+    }
+
+    private func color() {
+        LayerGlide.withoutActions { layer?.backgroundColor = theme?.chrome.cgColor }
+    }
+}
+
+/// The faint fill and the divider of a header that sticks. The divider is a layer under the view's own, along its
+/// bottom edge.
+private final class StuckHeaderTintView: NSView {
+    private let divider = CALayer()
+
+    init() {
+        super.init(frame: .zero)
+        layer = CALayer()
+        wantsLayer = true
+        layer?.addSublayer(divider)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { true }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        LayerGlide.withoutActions { divider.frame = CGRect(x: 0, y: bounds.height - StuckHeader.dividerWidth, width: bounds.width, height: StuckHeader.dividerWidth) }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        color()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        color()
+    }
+
+    /// A layer keeps the colour it got, so it gets the colours again for each appearance.
+    private func color() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            LayerGlide.withoutActions {
+                layer?.backgroundColor = NSColor.labelColor.faded(StuckHeader.fillOpacity).cgColor
+                divider.backgroundColor = NSColor.separatorColor.cgColor
+            }
+        }
+    }
+}
