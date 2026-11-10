@@ -17,7 +17,7 @@ struct RowMarkView: View {
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
-        let dotSize = dotSize ?? fontSize(AgentMarkView.designDotSize)
+        let dotSize = dotSize ?? fontSize(AgentMarkMetrics.dotSize)
         switch mark {
         case .unread: Circle().fill(Color.accentColor).frame(width: dotSize, height: dotSize)
         case .agent(let mark): AgentMarkView(mark: mark, dotSize: dotSize)

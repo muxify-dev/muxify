@@ -7,9 +7,9 @@ final class AgentMarkViewTests: XCTestCase {
     private let gray = AgentColors()[.working].color
 
     func testWorkingPhaseAdvancesAndLoopsOnTheSharedClock() {
-        let period = TerminalActivityIndicator.period
+        let period = WorkingGlyph.period
         for cycles in [0.0, 0.25, 0.92, 1.0, 1.25, 100.25, -0.75] {
-            let phase = TerminalActivityIndicator.phase(at: Date(timeIntervalSinceReferenceDate: cycles * period))
+            let phase = WorkingGlyph.phase(at: Date(timeIntervalSinceReferenceDate: cycles * period))
             XCTAssertEqual(phase, cycles - floor(cycles), accuracy: 0.000001)
             XCTAssertGreaterThanOrEqual(phase, 0)
             XCTAssertLessThan(phase, 1)
@@ -17,7 +17,7 @@ final class AgentMarkViewTests: XCTestCase {
     }
 
     func testPixelCellsFormAThreeByThreeSquareInClockwiseOrder() {
-        let cells = TerminalActivityGlyph.cells
+        let cells = WorkingGlyph.cells
         XCTAssertEqual(cells.count, 8)
         XCTAssertEqual(Set(cells.map(\.x)).count, 3)
         XCTAssertEqual(Set(cells.map(\.y)).count, 3)
@@ -33,13 +33,13 @@ final class AgentMarkViewTests: XCTestCase {
     }
 
     func testSharedClockDoesNotRepeatOrSkipPixelsAtTickBoundaries() {
-        let period = TerminalActivityIndicator.period
-        let count = TerminalActivityGlyph.cells.count
+        let period = WorkingGlyph.period
+        let count = WorkingGlyph.cells.count
         for cycle in [0.0, 10000.0, 700000000.0, -1.0] {
             for step in 0..<(count * 2) {
                 let time = cycle * period + Double(step) * period / Double(count)
-                let phase = TerminalActivityIndicator.phase(at: Date(timeIntervalSinceReferenceDate: time))
-                XCTAssertEqual(TerminalActivityGlyph.head(at: phase), step % count)
+                let phase = WorkingGlyph.phase(at: Date(timeIntervalSinceReferenceDate: time))
+                XCTAssertEqual(WorkingGlyph.head(at: phase), step % count)
             }
         }
     }
@@ -49,7 +49,7 @@ final class AgentMarkViewTests: XCTestCase {
         let host = NSHostingView(rootView: TerminalActivityGlyph(phase: 0, color: gray))
         XCTAssertEqual(host.fittingSize.width, 10)
         XCTAssertEqual(host.fittingSize.height, 10)
-        XCTAssertEqual(TerminalActivityGlyph.blockSize, 3)
+        XCTAssertEqual(WorkingGlyph.blockSize, 3)
     }
 
     @MainActor func testWorkingGlyphIsAGraySquareWithAnEmptyCenterInBothSchemes() throws {
@@ -79,7 +79,7 @@ final class AgentMarkViewTests: XCTestCase {
     }
 
     @MainActor func testPixelsStepAlongThePerimeterRatherThanMovingContinuously() throws {
-        let count = Double(TerminalActivityGlyph.cells.count)
+        let count = Double(WorkingGlyph.cells.count)
         for scheme in [ColorScheme.light, .dark] {
             let first = try render(TerminalActivityGlyph(phase: 0.1 / count, color: gray), scheme: scheme)
             let sameStep = try render(TerminalActivityGlyph(phase: 0.9 / count, color: gray), scheme: scheme)

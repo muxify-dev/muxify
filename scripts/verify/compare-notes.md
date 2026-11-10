@@ -35,6 +35,12 @@ match within that step.
 
 ## pane-rows
 
+The fill of the open card: as in `cards`. The Pane rows match within that step, under a Window row and in its place:
+the Working mark's pixels, which stand on the same device pixels with the same opacities, the Notification dots, the
+split icons, the titles and the tint of the row that stands in for the Location's Window row, with its rounded corners.
+The titles differ on subpixels only, in single pixels at the edge of a glyph. The coloured border of the Location's
+card: as in `card-marks`.
+
 ## card-marks
 
 The coloured border of the Location's card differs in colour in the pictures, by up to 7 %, and is the same on
@@ -52,6 +58,9 @@ The text differs on subpixels only, by less than 1 % in a channel.
 ## hover
 
 ## more-rows
+
+The fill of the open card: as in `cards`. The Window rows and "N more…" match within that step. The coloured border of
+the Location's card: as in `card-marks`.
 
 ## long-titles
 

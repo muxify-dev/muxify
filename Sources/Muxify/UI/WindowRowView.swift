@@ -22,13 +22,10 @@ struct WindowRowContent: Equatable {
 /// The row is no accessibility element. As in SwiftUI, each of its parts is one, with the row's identifier and value,
 /// and the card lists them among its children. A click on the row goes to its Window, also on the first click while
 /// Muxify is not the front app.
-final class WindowRowView: NSView, NSViewToolTipOwner {
+final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
     let windowID: String
-    /// A click on the row.
-    var onPress: () -> Void = {}
     /// The row's identifier, which each of its parts has.
     private let rowIdentifier: String
-    private let fill = RowFillView()
     private let logo = SidebarLogo()
     private let title = SidebarLabel()
     private let summary = SidebarLabel()
@@ -43,8 +40,6 @@ final class WindowRowView: NSView, NSViewToolTipOwner {
     private var right: [NSView] = []
     private var content: WindowRowContent?
     private var environment = SessionsListEnvironment()
-    private var hovering = false
-    private var trackingArea: NSTrackingArea?
     /// The layout of the last width.
     private var arranged: (width: CGFloat, layout: Layout)?
 
@@ -98,8 +93,6 @@ final class WindowRowView: NSView, NSViewToolTipOwner {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    override var isFlipped: Bool { true }
-
     /// Shows the content. The tint fades in or out when the Location comes to the row or leaves it, unless `fades` is
     /// false, as for the rows of a card that opens.
     func show(_ content: WindowRowContent, environment: SessionsListEnvironment, fades: Bool = true) {
@@ -140,10 +133,10 @@ final class WindowRowView: NSView, NSViewToolTipOwner {
         }
         arranged = nil
         layOut()
-        fill.show(fillState, fades: fades && tints)
+        showsLocation = content.isSelected
+        showFill(fades: fades && tints)
     }
 
-    /// The row's height in a card `width` wide.
     func height(width: CGFloat) -> CGFloat { layout(width: width).height }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -276,46 +269,7 @@ final class WindowRowView: NSView, NSViewToolTipOwner {
         }
     }
 
-    // MARK: The tint and the fill
-
-    private var fillState: RowFillView.Fill {
-        content?.isSelected == true ? .tint : hovering ? .hover : .clear
-    }
-
-    /// As `PanelDivider`'s: the row hears the pointer come and go also while Muxify is not the front app.
-    override func updateTrackingAreas() {
-        if let trackingArea { removeTrackingArea(trackingArea) }
-        let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
-        addTrackingArea(area)
-        trackingArea = area
-        super.updateTrackingAreas()
-    }
-
-    override func mouseEntered(with event: NSEvent) {
-        hovering = true
-        fill.show(fillState, fades: false)
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        hovering = false
-        fill.show(fillState, fades: false)
-    }
-
-    // MARK: The click
-
-    /// The row takes every click on it; its parts take none. The point is in the superview's coordinates.
-    override func hitTest(_ point: NSPoint) -> NSView? { frame.contains(point) ? self : nil }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    /// The click ends where the mouse comes up, as a tap in SwiftUI.
-    override func mouseDown(with event: NSEvent) {}
-
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onPress() }
-    }
+    // MARK: The help
 
     func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
         layout(width: bounds.width).help.first { $0.frame.contains(point) }?.text ?? ""
@@ -334,28 +288,25 @@ final class WindowRowView: NSView, NSViewToolTipOwner {
         view.setAccessibilityHelp(help)
         view.setAccessibilityValue(valued ? (content?.isSelected == true ? "selected" : "") : nil)
     }
-
-    #if DEBUG
-    /// The colour the row's fill has now, and the fade of the tint that runs, for the tests.
-    var fillColor: CGColor? { fill.layer?.backgroundColor }
-    var tintFade: CAAnimation? { fill.layer?.animation(forKey: RowFillView.fadeKey) }
-    #endif
 }
 
 /// The fill of a row: clear, the faint fill of a row under the pointer, or the soft tint of the Location's row, in the
-/// row's rounded shape.
+/// row's rounded shape. The shape is a layer under the view's own: the driver's `snapshot` draws the corners of a
+/// view's own layer square.
 final class RowFillView: NSView {
     enum Fill { case clear, hover, tint }
 
     static let fadeKey = "tint"
     private(set) var fill = Fill.clear
+    private let shape = CALayer()
 
     init() {
         super.init(frame: .zero)
         layer = CALayer()
         wantsLayer = true
-        layer?.cornerRadius = WindowRowMetrics.cornerRadius
-        layer?.cornerCurve = .continuous
+        shape.cornerRadius = WindowRowMetrics.cornerRadius
+        shape.cornerCurve = .continuous
+        layer?.addSublayer(shape)
     }
 
     @available(*, unavailable)
@@ -365,18 +316,23 @@ final class RowFillView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        LayerGlide.withoutActions { shape.frame = bounds }
+    }
+
     /// Shows the fill. With `fades`, it fades from where it shows now, with ease-out over `SelectedRow.fade`.
     func show(_ fill: Fill, fades: Bool) {
-        guard fill != self.fill, let layer else { return }
+        guard fill != self.fill else { return }
         self.fill = fill
-        let shown = (layer.presentation() ?? layer).backgroundColor
+        let shown = (shape.presentation() ?? shape).backgroundColor
         color()
-        guard fades else { return layer.removeAnimation(forKey: Self.fadeKey) }
+        guard fades else { return shape.removeAnimation(forKey: Self.fadeKey) }
         let fade = CABasicAnimation(keyPath: "backgroundColor")
         fade.fromValue = shown
         fade.duration = SelectedRow.fade
         fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
-        layer.add(fade, forKey: Self.fadeKey)
+        shape.add(fade, forKey: Self.fadeKey)
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -392,9 +348,15 @@ final class RowFillView: NSView {
             case .hover: NSColor.labelColor.faded(SelectedRow.hoverOpacity)
             case .tint: NSColor.controlAccentColor.faded(SelectedRow.tintOpacity)
             }
-            LayerGlide.withoutActions { layer?.backgroundColor = color?.cgColor }
+            LayerGlide.withoutActions { shape.backgroundColor = color?.cgColor }
         }
     }
+
+    #if DEBUG
+    /// The colour the fill has now, and the fade of the tint that runs, for the tests.
+    var shownColor: CGColor? { shape.backgroundColor }
+    var fade: CAAnimation? { shape.animation(forKey: Self.fadeKey) }
+    #endif
 }
 
 /// The Git View icon of a Window whose Git View is open, as `GitViewIcon` strokes it, in the secondary text colour.
@@ -504,6 +466,14 @@ final class PaneCountView: NSView {
 
     /// The help shows over the badge, and SwiftUI gives the badge's row none.
     override func accessibilityHelp() -> String? { nil }
+
+    /// SwiftUI's frame of the badge: with the capsule of a Zoomed Pane, the capsule; else the symbol's glyph and the
+    /// count, because a capsule that does not show takes no room in it.
+    override func accessibilityFrame() -> NSRect {
+        guard let window else { return .zero }
+        let shown = isZoomed ? bounds : symbol.convert(symbol.glyphFrame, to: self).union(count.frame)
+        return window.convertToScreen(convert(shown, to: nil))
+    }
 
     override func accessibilityChildren() -> [Any]? { [] }
 }

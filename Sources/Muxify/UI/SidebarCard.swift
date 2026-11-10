@@ -553,11 +553,11 @@ struct CardList<Heading: View, Row: View>: View {
         }
         if shown < total {
             Button(action: onShowAll) {
-                Text("\(total - shown) more…")
-                    .font(fontSize.font(11))
+                Text(MoreRowMetrics.text(total - shown))
+                    .font(fontSize.font(MoreRowMetrics.fontSize))
                     .foregroundStyle(.secondary)
-                    .padding(.leading, 28)
-                    .frame(maxWidth: .infinity, minHeight: fontSize(20), alignment: .leading)
+                    .padding(.leading, MoreRowMetrics.leading)
+                    .frame(maxWidth: .infinity, minHeight: fontSize(MoreRowMetrics.minHeight), alignment: .leading)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

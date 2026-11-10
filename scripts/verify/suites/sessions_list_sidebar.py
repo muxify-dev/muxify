@@ -20,6 +20,10 @@ list existed: a one-off probe on the commit before the AppKit cards showed that.
 The check of a click on a Window row runs against both lists, because the SwiftUI row takes the first click
 (`takesFirstClick` on its drag handle). A click aims at the middle of the row's first part, its app icon.
 
+The checks of a press on a Pane row and on "N more…" press them as the header is pressed: by the accessibility action
+in both lists, and by a first click too in the AppKit list. A card shows all its rows from a press on its "N more…"
+until the app quits, so each press gets a Session of its own.
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.sessions_list_sidebar
 """
@@ -266,6 +270,73 @@ class SessionsListSidebar(unittest.TestCase):
                     self.s.act('click', 'session-window-' + target)
                     self.s.wait_shown(target)
                     self.assertEqual(self.location('window_id'), [target], 'a click on its row did not go to the Window')
+
+    def open_card(self, session, window):
+        """Moves the Location to the Window and opens the card of its Session."""
+        self.s.show(window)
+        self.s.wait_shown(window)
+        self.s.wait_rows(lambda rs: self.card_value(session, rs), 'the card of %s has no state' % session)
+        if not self.card_value(session).startswith('expanded'):
+            self.s.act('press', 'session-' + session)
+        self.wait_card(session, 'expanded', 'the card of %s did not open' % session)
+
+    def show_panes(self):
+        def restore():
+            self.config.write_text(CONFIG)
+            self.s.wait_rows(lambda rs: not any(key.startswith('pane-') for key in self.s.ids(rs)), 'the Pane rows stay')
+        self.addCleanup(restore)
+        self.config.write_text(CONFIG + '  panes: true\n')
+
+    def test_a_press_on_a_pane_row_goes_to_its_pane(self):
+        session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'list-panes', SHELL)
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', session)
+        split = self.s.tmux('list-windows', '-t', session, '-F', '#{window_id}')
+        first = self.s.tmux('display-message', '-p', '-t', split, '#{pane_id}')
+        second = self.s.tmux('split-window', '-d', '-P', '-F', '#{pane_id}', '-t', split, SHELL)
+        other = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', session + ':', SHELL)
+        self.show_panes()
+        for version in ('swiftui', 'appkit'):
+            self.show_list(version)
+            self.show_mode('sessions')
+            for command in PRESSES[version]:
+                with self.subTest(version=version, command=command):
+                    # The Location is on the other Window, and the first Pane is the active one of the split Window.
+                    self.s.tmux('select-pane', '-t', first)
+                    self.open_card(session, other)
+                    self.s.wait_rows(lambda rs: self.s.row('pane-' + second, rs).get('accessibilityValue') == '',
+                                     'the card of %s has no row for the Pane %s that is not active' % (session, second))
+                    self.s.act(command, 'pane-' + second)
+                    self.s.wait_shown(split)
+                    wait(lambda: self.s.tmux('display-message', '-p', '-t', split, '#{pane_id}') == second,
+                         'a %s on its row did not make the Pane %s active' % (command, second))
+                    self.assertEqual(self.location('window_id'), [split], 'a %s on its row did not go to the Window of the Pane' % command)
+                    self.s.wait_rows(lambda rs: self.s.row('pane-' + second, rs).get('accessibilityValue') == 'active',
+                                     'the row of the Pane %s does not show it active' % second)
+
+    def test_a_press_on_n_more_shows_all_rows_of_the_card(self):
+        for version in ('swiftui', 'appkit'):
+            self.show_list(version)
+            self.show_mode('sessions')
+            for command in PRESSES[version]:
+                with self.subTest(version=version, command=command):
+                    name = 'list-more-%s-%s' % (version, command)
+                    session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, SHELL)
+                    self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', session)
+                    windows = [self.s.tmux('list-windows', '-t', session, '-F', '#{window_id}')]
+                    windows += [self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', session + ':', SHELL)
+                                for _ in range(6)]
+                    more = 'session-%s-more' % session
+                    shown = lambda rs: [window for window in windows if self.s.has('session-window-' + window, rs)]
+                    # The Location is on the first Window, so the card lists the first five rows and holds two back.
+                    self.open_card(session, windows[0])
+                    rs = self.s.wait_rows(lambda rs: self.s.row(more, rs).get('accessibilityLabel') == '2 more…',
+                                          lambda: 'the card of %s does not end with "2 more…": it has %r'
+                                          % (session, self.s.row(more).get('accessibilityLabel')))
+                    self.assertEqual(shown(rs), windows[:5], 'the card does not list its first five rows')
+                    self.s.act(command, more)
+                    rs = self.s.wait_rows(lambda rs: shown(rs) == windows and not self.s.has(more, rs),
+                                          lambda: 'a %s on "2 more…" did not show all rows: the card lists %s'
+                                          % (command, shown(self.s.rows())))
 
     def test_a_session_that_starts_or_ends_changes_the_cards_of_the_appkit_list(self):
         self.show_list('appkit')

@@ -16,8 +16,17 @@ struct SessionCardContent: Equatable {
     /// A Window of the Session has a bell.
     var hasBell = false
     var hint: CardHint?
-    /// The Window rows of an open card, in tmux's order. A closed card has none.
-    var rows: [WindowRowContent] = []
+    /// The rows an open card lists, in tmux's order: `CardRows.shownCount` of its Window and Pane rows. A closed card
+    /// has none.
+    var rows: [CardRowContent] = []
+    /// The rows an open card holds back, which its "N more…" counts. 0 for none.
+    var moreCount = 0
+}
+
+/// A row of an open Session card: a Window row, or a Pane row under its Window row or in its place.
+enum CardRowContent: Equatable {
+    case window(WindowRowContent)
+    case pane(PaneRowContent)
 }
 
 /// The Hint of a card, in the place the header keeps for it after the title.
@@ -35,9 +44,10 @@ struct CardHint: Equatable {
 }
 
 /// A Session card of the AppKit Sessions list (ADR 0074). Closed, it is flat, with only its border; open, it is
-/// raised, with its Window rows under its header. A spine shows its mark, and the card that holds the Location's
-/// Window has the many-coloured border. It gives the accessibility rows of the SwiftUI card: `card-session-<id>` for
-/// the card, the parts of its Window rows, `session-<id>` for its header and the Hint's own row.
+/// raised, with its Window and Pane rows under its header, and "N more…" after them when it holds rows back. A spine
+/// shows its mark, and the card that holds the Location's Window has the many-coloured border. It gives the
+/// accessibility rows of the SwiftUI card: `card-session-<id>` for the card, the parts of its Window rows, its Pane rows
+/// and "N more…", `session-<id>` for its header and the Hint's own row.
 final class SessionCardView: NSView {
     let sessionID: String
     /// A press on the header.
@@ -46,11 +56,19 @@ final class SessionCardView: NSView {
     }
     /// A click on a Window row.
     var onSelectWindow: (TmuxWindow) -> Void = { _ in }
+    /// A press on a Pane row, with the Pane's ID.
+    var onSelectPane: (String) -> Void = { _ in }
+    /// A press on "N more…".
+    var onShowAllRows: () -> Void = {} {
+        didSet { more.onPress = onShowAllRows }
+    }
     private let fill = CardFillView()
     private let header: SessionCardHeaderView
     /// The rows of an open card. A card that closes keeps them, so they fade where they stand.
     private let rows = CardRowsView()
-    private var windowRows: [WindowRowView] = []
+    /// The Window and Pane rows from the top, and "N more…" after them when it shows.
+    private var listed: [CardRowView] = []
+    private let more: MoreRowView
     private let spine = CardSpineView()
     private let outline = CardOutlineView()
     private let selection = CardSelectionBorderView()
@@ -61,6 +79,7 @@ final class SessionCardView: NSView {
     init(sessionID: String) {
         self.sessionID = sessionID
         header = SessionCardHeaderView(identifier: "session-" + sessionID)
+        more = MoreRowView(identifier: "session-" + sessionID)
         super.init(frame: .zero)
         wantsLayer = true
         // The SwiftUI card cuts nothing off.
@@ -87,7 +106,7 @@ final class SessionCardView: NSView {
         self.content = content
         self.environment = environment
         header.show(content, environment: environment)
-        if content.isOpen { showRows(content.rows, fades: wasOpen) }
+        if content.isOpen { showRows(content.rows, more: content.moreCount, fades: wasOpen) }
         fill.alphaValue = content.isOpen ? 1 : 0
         rows.alphaValue = content.isOpen ? 1 : 0
         rows.isOpen = content.isOpen
@@ -100,17 +119,32 @@ final class SessionCardView: NSView {
         if came, !environment.reduceMotion { selection.turn() }
     }
 
-    /// Shows a row for each Window, from the top. A row that already showed keeps its view, so its tint fades when
-    /// the Location moves, unless `fades` is false.
-    private func showRows(_ contents: [WindowRowContent], fades: Bool) {
-        var kept = Dictionary(windowRows.map { ($0.windowID, $0) }, uniquingKeysWith: { first, _ in first })
-        windowRows = contents.map { content in
-            let row = kept.removeValue(forKey: content.window.id) ?? WindowRowView(windowID: content.window.id, identifier: "session-window-" + content.window.id)
-            row.onPress = { [weak self] in self?.onSelectWindow(content.window) }
-            row.show(content, environment: environment, fades: fades)
-            return row
+    /// Shows a row for each Window and Pane, from the top, and "N more…" after them for `more` rows held back. A row
+    /// that already showed keeps its view, so its tint fades when the Location moves, unless `fades` is false.
+    private func showRows(_ contents: [CardRowContent], more count: Int, fades: Bool) {
+        var windows = Dictionary(listed.compactMap { $0 as? WindowRowView }.map { ($0.windowID, $0) }, uniquingKeysWith: { first, _ in first })
+        var panes = Dictionary(listed.compactMap { $0 as? PaneRowView }.map { ($0.paneID, $0) }, uniquingKeysWith: { first, _ in first })
+        listed = contents.map { content -> CardRowView in
+            switch content {
+            case .window(let content):
+                let row = windows.removeValue(forKey: content.window.id)
+                    ?? WindowRowView(windowID: content.window.id, identifier: "session-window-" + content.window.id)
+                row.onPress = { [weak self] in self?.onSelectWindow(content.window) }
+                row.show(content, environment: environment, fades: fades)
+                return row
+            case .pane(let content):
+                let row = panes.removeValue(forKey: content.paneID) ?? PaneRowView(paneID: content.paneID)
+                row.onPress = { [weak self] in self?.onSelectPane(content.paneID) }
+                row.show(content, environment: environment, fades: fades)
+                return row
+            }
         }
-        if rows.subviews != windowRows { rows.subviews = windowRows }
+        if count > 0 {
+            more.show(count: count, environment: environment)
+            listed.append(more)
+        }
+        let views = listed.map { $0 as NSView }
+        if rows.subviews != views { rows.subviews = views }
     }
 
     /// The card's height at `width`: its header, and under the header of an open card its rows.
@@ -121,7 +155,7 @@ final class SessionCardView: NSView {
     /// The height of the rows in a card `width` wide, with `CardSpacing.row` between two rows.
     private func rowsHeight(width: CGFloat) -> CGFloat {
         let rowWidth = max(0, width - 2 * CardRowsPadding.horizontal)
-        return windowRows.map { $0.height(width: rowWidth) }.reduce(0, +) + CardSpacing.row * CGFloat(max(0, windowRows.count - 1))
+        return listed.map { $0.height(width: rowWidth) }.reduce(0, +) + CardSpacing.row * CGFloat(max(0, listed.count - 1))
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -137,7 +171,7 @@ final class SessionCardView: NSView {
         rows.frame = NSRect(x: CardRowsPadding.horizontal, y: header.frame.maxY + CardRowsPadding.top,
                             width: max(0, bounds.width - 2 * CardRowsPadding.horizontal), height: rowsHeight(width: bounds.width))
         var top: CGFloat = 0
-        for row in windowRows {
+        for row in listed {
             row.frame = NSRect(x: 0, y: top, width: rows.bounds.width, height: row.height(width: rows.bounds.width))
             top = row.frame.maxY + CardSpacing.row
         }
@@ -149,10 +183,10 @@ final class SessionCardView: NSView {
 
     // MARK: Accessibility
 
-    /// The parts of the Window rows of an open card, then the header and the Hint, which is a row of its own because
-    /// the header hides its children. SwiftUI lists the header after the rows, which it draws above them.
+    /// The rows of an open card, each Window row by its parts, then the header and the Hint, which is a row of its own
+    /// because the header hides its children. SwiftUI lists the header after the rows, which it draws above them.
     override func accessibilityChildren() -> [Any]? {
-        (isOpen ? windowRows.flatMap(\.accessibilityParts) : []) + [header] + (hint.isHidden ? [] : [hint])
+        (isOpen ? listed.flatMap(\.accessibilityParts) : []) + [header] + (hint.isHidden ? [] : [hint])
     }
 
     override func accessibilityActivationPoint() -> NSPoint { accessibilityFrame().centre }
@@ -181,8 +215,7 @@ private final class CardRowsView: NSView {
 /// and on a closed card the bell and the Summary under the title. It lays its parts out as `CardHeader` does in
 /// SwiftUI. To accessibility it is one button, which hides its parts. A press on it works on the first click while
 /// Muxify is not the front app.
-private final class SessionCardHeaderView: NSView {
-    var onPress: () -> Void = {}
+private final class SessionCardHeaderView: SidebarPressView {
     private let title = SidebarLabel()
     private let guest = SidebarLabel()
     private let lock = SidebarSymbol(CardHeaderMark.lock)
@@ -218,8 +251,6 @@ private final class SessionCardHeaderView: NSView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    override var isFlipped: Bool { true }
 
     func show(_ content: SessionCardContent, environment: SessionsListEnvironment) {
         self.content = content
@@ -312,23 +343,6 @@ private final class SessionCardHeaderView: NSView {
         return frames
     }
 
-    // MARK: The press
-
-    /// The header takes every click on it; its parts take none. The point is in the card's coordinates.
-    override func hitTest(_ point: NSPoint) -> NSView? { frame.contains(point) ? self : nil }
-
-    /// A press works on the first click while Muxify is not the front app.
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override var mouseDownCanMoveWindow: Bool { false }
-
-    /// The press ends where the mouse comes up, as a tap in SwiftUI.
-    override func mouseDown(with event: NSEvent) {}
-
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onPress() }
-    }
-
     // MARK: Accessibility
 
     override func accessibilityLabel() -> String? { content.title }
@@ -349,11 +363,6 @@ private final class SessionCardHeaderView: NSView {
         guard let window else { return .zero }
         let line = frames(width: bounds.width).titleLine
         return window.convertPoint(toScreen: convert(NSPoint(x: line.midX, y: line.midY), to: nil))
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        onPress()
-        return true
     }
 }
 

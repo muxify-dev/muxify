@@ -1470,10 +1470,7 @@ private struct PaneRow: View {
 
     @State private var hovering = false
 
-    /// With no Window row above it, the active Pane row shows where the user is.
-    private var isSelected: Bool {
-        !row.isUnderWindowRow && row.pane.isActive && row.window.id == store.selectedWindowID
-    }
+    private var isSelected: Bool { row.showsLocation(selectedWindowID: store.selectedWindowID) }
 
     private var formatted: SidebarFormats.Text {
         store.sidebarText(.pane, context: store.sidebarFormatContexts.panes[row.pane.id])
@@ -1483,36 +1480,37 @@ private struct PaneRow: View {
 
     var body: some View {
         Button { store.select(row) } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: PaneRowMetrics.spacing) {
                 ZStack {
-                    Color.clear.frame(width: fontSize(10), height: fontSize(10))
+                    Color.clear.frame(width: fontSize(PaneRowMetrics.markPlace), height: fontSize(PaneRowMetrics.markPlace))
                     if let mark { AgentMarkView(mark: mark) }
                 }
-                .frame(width: fontSize(10), height: fontSize(10))
-                Image(systemName: row.pane.isActive ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
-                    .font(fontSize.font(10)).frame(width: fontSize(14))
+                .frame(width: fontSize(PaneRowMetrics.markPlace), height: fontSize(PaneRowMetrics.markPlace))
+                Image(systemName: row.pane.isActive ? PaneRowMetrics.activeSymbol : PaneRowMetrics.symbol)
+                    .font(fontSize.font(PaneRowMetrics.iconSize)).frame(width: fontSize(PaneRowMetrics.iconRoom))
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(formatted.title).font(fontSize.font(12)).hoverLabelTitle()
+                VStack(alignment: .leading, spacing: PaneRowMetrics.lineSpacing) {
+                    Text(formatted.title).font(fontSize.font(PaneRowMetrics.titleSize)).hoverLabelTitle()
                     if !formatted.summary.isEmpty {
-                        Text(formatted.summary).font(fontSize.font(11)).lineLimit(1).foregroundStyle(.secondary)
+                        Text(formatted.summary).font(fontSize.font(PaneRowMetrics.summarySize)).lineLimit(1).foregroundStyle(.secondary)
                     }
                 }
-                Spacer(minLength: 4)
+                Spacer(minLength: PaneRowMetrics.endGap)
             }
             .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-            .padding(.leading, row.isUnderWindowRow ? 28 : 8).padding(.trailing, 6).padding(.vertical, 3)
+            .padding(.leading, PaneRowMetrics.leading(isUnderWindowRow: row.isUnderWindowRow))
+            .padding(.trailing, PaneRowMetrics.trailing).padding(.vertical, PaneRowMetrics.vertical)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+            .background(RoundedRectangle(cornerRadius: WindowRowMetrics.cornerRadius, style: .continuous)
                 .fill(isSelected ? SelectedRow.fill : hovering ? Color.primary.opacity(SelectedRow.hoverOpacity) : .clear)
                 .animation(.easeOut(duration: SelectedRow.fade), value: isSelected))
-            .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: WindowRowMetrics.cornerRadius, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .hoverLabel(detail: row.pane.path.isEmpty ? row.pane.label : Paths.tildify(row.pane.path))
         .accessibilityIdentifier("pane-" + row.pane.id)
-        .accessibilityValue([row.pane.isActive ? "active" : nil, mark?.rawValue].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityValue(row.accessibilityValue(mark: mark))
     }
 }
 

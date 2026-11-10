@@ -38,10 +38,14 @@ color from `ui.agent_colors` through the `agentColors` environment value:
   bar fades in and out.
 
 The AppKit Sessions list (ADR 0074) has no environment. Its spine is
-`CardSpineView` in `UI/SidebarCardChrome.swift`, and it gets the colors,
+`CardSpineView` in `UI/SidebarCardChrome.swift`, and the mark of its Pane rows
+is `SidebarAgentMark` in `UI/SidebarAgentMark.swift`. They get the colors,
 `ui.pulse` and Reduce Motion from `SessionsListEnvironment`, which the Sidebar
-fills from the same environment values. Its fade runs on `MarkClock`, which
-keeps the beat of the SwiftUI marks.
+fills from the same environment values. The spine's fade and the steps of the
+Working mark run on `MarkClock`, which keeps the beat of the SwiftUI marks.
+`WorkingGlyph` in `UI/AgentMarkMetrics.swift` is the glyph's arithmetic, which
+both versions call: its period, which pixel is the head, and where each pixel
+stands.
 
 `ui.pulse: false` and Reduce Motion keep every Working mark still. The
 `ContentView` sets the environment values once, and the Command Palette is an
