@@ -153,6 +153,78 @@ final class AgentMarkViewTests: XCTestCase {
         }
     }
 
+    /// A SwiftUI clock under a moving mark updates and lays out the whole App Window each tick, so Core Animation
+    /// steps the blocks: each block's layer holds the step animation, and the brightest block is the shared clock's head.
+    @MainActor func testAMovingWorkingGlyphStepsInCoreAnimationOnTheSharedClock() throws {
+        let (window, host) = hosted(AgentMarkView(mark: .working))
+        defer { window.contentView = nil }
+        let glyph = try XCTUnwrap(first(MovingTerminalActivityGlyphView.self, in: host))
+        let count = TerminalActivityGlyph.cells.count
+        XCTAssertEqual(glyph.blocks.count, count)
+        let frames = TerminalActivityGlyph.blocks(in: glyph.bounds.size, displayScale: window.backingScaleFactor,
+                                                  maxBlockSize: TerminalActivityGlyph.blockSize)
+        XCTAssertEqual(glyph.blocks.map(\.frame), frames, "the moving blocks sit where the still glyph draws them")
+        for block in glyph.blocks {
+            let animation = try XCTUnwrap(block.animation(forKey: "step") as? CAKeyframeAnimation)
+            XCTAssertEqual(animation.calculationMode, .discrete)
+            XCTAssertEqual(animation.duration, TerminalActivityIndicator.period)
+            XCTAssertEqual(animation.repeatCount, .infinity)
+        }
+        // Read away from a step boundary, so the head cannot move between the clock read and the layer read.
+        var phase = TerminalActivityIndicator.phase(at: Date()) * Double(count)
+        if phase - floor(phase) > 0.7 {
+            RunLoop.current.run(until: Date().addingTimeInterval(TerminalActivityIndicator.period / Double(count) * 0.4))
+            phase = TerminalActivityIndicator.phase(at: Date()) * Double(count)
+        }
+        let head = TerminalActivityGlyph.head(at: phase / Double(count))
+        let opacities = try glyph.blocks.map { try XCTUnwrap($0.presentation()).opacity }
+        for (index, opacity) in opacities.enumerated() {
+            let expected = TerminalActivityGlyph.opacity(stepsBehindHead: (head - index + count) % count)
+            XCTAssertEqual(Double(opacity), expected, accuracy: 0.001, "block \(index), head \(head): \(opacities)")
+        }
+    }
+
+    @MainActor func testAWorkingSpineBreathesInCoreAnimationOnTheSharedClock() throws {
+        let (window, host) = hosted(AgentMarkSpine(mark: .working).frame(width: 3, height: 20))
+        defer { window.contentView = nil }
+        let spine = try XCTUnwrap(first(BreathingBarView.self, in: host))
+        XCTAssertEqual(spine.bar.frame, spine.bounds)
+        XCTAssertNotNil(spine.bar.backgroundColor)
+        let animation = try XCTUnwrap(spine.bar.animation(forKey: "breathe") as? CAKeyframeAnimation)
+        XCTAssertEqual(animation.duration, BreathingBarView.period)
+        XCTAssertEqual(animation.repeatCount, .infinity)
+        let time = Date().timeIntervalSinceReferenceDate
+        let opacity = Double(try XCTUnwrap(spine.bar.presentation()).opacity)
+        XCTAssertEqual(opacity, 0.675 + 0.325 * cos(2 * .pi * time / BreathingBarView.period), accuracy: 0.03)
+    }
+
+    @MainActor func testPulseOffLeavesNoCoreAnimationUnderAWorkingMark() {
+        for view in [AnyView(AgentMarkView(mark: .working)), AnyView(AgentMarkSpine(mark: .working).frame(width: 3, height: 20))] {
+            let (window, host) = hosted(view.environment(\.pulses, false))
+            XCTAssertNil(first(MovingTerminalActivityGlyphView.self, in: host))
+            XCTAssertNil(first(BreathingBarView.self, in: host))
+            window.contentView = nil
+        }
+    }
+
+    @MainActor private func hosted<V: View>(_ view: V) -> (NSWindow, NSView) {
+        _ = NSApplication.shared
+        let host = NSHostingView(rootView: view.frame(width: 32, height: 24))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 32, height: 24),
+                              styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.layoutIfNeeded()
+        host.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        CATransaction.flush()
+        return (window, host)
+    }
+
+    private func first<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
+        view as? T ?? view.subviews.lazy.compactMap { self.first(type, in: $0) }.first
+    }
+
     @MainActor func testNotificationsAreBlueForDoneRedForFailedAndOrangeForBlocked() throws {
         for scheme in [ColorScheme.light, .dark] {
             for spine in [false, true] {

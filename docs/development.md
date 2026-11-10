@@ -37,6 +37,14 @@ color from `ui.agent_colors` through the `agentColors` environment value:
 - `AgentMarkSpine` is the 3 pt bar along a card's left edge. The Working mark's
   bar fades in and out.
 
+Core Animation moves both Working marks, in layers that SwiftUI places once. Do
+not move a mark that shows for long, such as a Working mark, with a SwiftUI
+clock: `TimelineView`, `repeatForever` or `phaseAnimator`. The App Window is one
+SwiftUI view tree, and each tick of a SwiftUI clock updates and lays out all of
+it: with an Agent at work, the main thread was busy almost all the time, and a
+swipe between Topics and Sessions waited for it. The `working_marks` verify
+suite checks that the app stays idle while Working marks move.
+
 `ui.pulse: false` and Reduce Motion keep every Working mark still. The
 `ContentView` sets the environment values once, and the Command Palette is an
 overlay inside it, so the Sidebar and the Palette always agree. A terminal bell
