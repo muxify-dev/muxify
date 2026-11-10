@@ -158,7 +158,11 @@ class SidebarLayout(unittest.TestCase):
         self.move_client(self.sessions[0])
         self.s.wait_rows(lambda rs: expanded(first, rs) and expanded(second, rs),
                          'with the default session_cards the card of the Session left behind closed')
-        self.write_config('sidebar:\n  session_cards: one\n')
+        # The app reads the Config a moment after the write, and a move before that follows the old rule. The Session
+        # title of the same Config shows that the app has read it.
+        self.write_config("sidebar:\n  session_cards: one\n  formats:\n    session:\n      title: 'one #{session_name}'\n")
+        self.s.wait_rows(lambda rs: self.s.row(first, rs).get('accessibilityLabel', '').startswith('one '),
+                         'the Sidebar did not read the Config with session_cards: one')
         self.move_client(self.sessions[1])
         self.s.wait_rows(lambda rs: expanded(second, rs) and not expanded(first, rs),
                          'session_cards: one leaves the card of the Session left behind open')

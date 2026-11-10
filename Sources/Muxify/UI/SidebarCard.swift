@@ -87,7 +87,9 @@ struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
         }
         .overlay {
             Group {
-                if holdsSelection { BalatroBorder(angle: turn, shape: shape) } else { shape.strokeBorder(Color.primary.opacity(0.08), lineWidth: 1) }
+                if holdsSelection { BalatroBorder(angle: turn, shape: shape) } else {
+                    shape.strokeBorder(Color.primary.opacity(CardOutline.borderOpacity), lineWidth: CardOutline.borderWidth)
+                }
             }
             .allowsHitTesting(false)
         }
@@ -119,7 +121,7 @@ struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
         }
     }
 
-    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: 9, style: .continuous) }
+    private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: CardOutline.cornerRadius, style: .continuous) }
 }
 
 /// The border of the card that holds the selected Window: the colours of a Balatro card's edge, around the card.
@@ -282,7 +284,8 @@ struct CardHeader<Details: View>: View {
                 Color.clear.frame(height: CardCorner.actionLineHeight(fontSize))
             }
         }
-        .padding(.leading, 13).padding(.trailing, 10).padding(.top, 7).padding(.bottom, isOpen ? 3 : 7)
+        .padding(.leading, CardHeaderPadding.leading).padding(.trailing, CardHeaderPadding.trailing)
+        .padding(.top, CardHeaderPadding.top).padding(.bottom, CardHeaderPadding.bottom(isOpen: isOpen))
         .coordinateSpace(.named(Self.space))
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
@@ -367,6 +370,25 @@ struct CardBlock: Identifiable {
 enum CardSpacing {
     static let row: CGFloat = 1
     static let block: CGFloat = 9
+}
+
+/// A card's outline. The SwiftUI card and the AppKit card both read it, so the two cannot drift (ADR 0074).
+enum CardOutline {
+    /// The radius of the card's continuous corners.
+    static let cornerRadius: CGFloat = 9
+    static let borderWidth: CGFloat = 1
+    /// The plain border is the text colour at this opacity.
+    static let borderOpacity = 0.08
+}
+
+/// The room around the lines of a card's header, for both versions of the card (ADR 0074).
+enum CardHeaderPadding {
+    static let leading: CGFloat = 13
+    static let trailing: CGFloat = 10
+    static let top: CGFloat = 7
+
+    /// An open card's header ends close to its rows.
+    static func bottom(isOpen: Bool) -> CGFloat { isOpen ? 3 : 7 }
 }
 
 /// What a click and a drag on a card's Window row do: a click selects the Window, and a drag moves it,

@@ -50,8 +50,11 @@ SUITE ?= $(basename $(notdir $(wildcard scripts/verify/suites/*.py)))
 
 # Runs the suites, then the gate. With SUITE= it is a subset run, which never satisfies the gate.
 # ARGS="--repeat N --shuffle" runs the selection N times, each time in a random check order.
+# SESSIONS_LIST=appkit or SESSIONS_LIST=swiftui makes every suite launch the app with that Sessions list
+# (docs/adr/0074-an-area-leaves-swiftui-for-appkit-only-where-swiftui-caused-bugs.md). Such a run never satisfies
+# the gate either. Without it, a suite gets the app's default.
 verify: build
-	python3 -m scripts.verify.run $(ARGS) $(SUITE)
+	MUXIFY_VERIFY_SESSIONS_LIST=$(SESSIONS_LIST) python3 -m scripts.verify.run $(ARGS) $(SUITE)
 
 # Passes only when the last full make verify passed on this exact tree.
 verify-gate:

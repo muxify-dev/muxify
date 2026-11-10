@@ -18,6 +18,13 @@ To prove a change in the running app, use the e2e harness in `scripts/verify/`. 
 
 Design every new Action or Command as steps in the palette's view: run at once, choose a row, check Topics, type one value, or confirm. Read `docs/adr/0014-every-action-runs-in-the-palettes-view.md` before you add or change one. For an Action on several Topics, use the check step in `Sources/Muxify/UI/PaletteCheck.swift`, and read `docs/adr/0035-a-check-step-checks-topics-for-snooze-and-unsnooze.md`. A sheet or an alert that takes input needs its own ADR first.
 
+## Areas that moved to AppKit
+
+Before you add or change a view in an area that moved from SwiftUI to AppKit, read `docs/adr/0074-an-area-leaves-swiftui-for-appkit-only-where-swiftui-caused-bugs.md`. The first area is the Sidebar's Sessions list.
+
+- Write new view code of a moved area in AppKit, by the four rules of that ADR.
+- While an area has two versions, make each change in both. The Sessions list has two: the user default `sessionsListAppKit` chooses one, and `make verify SESSIONS_LIST=appkit` or `SESSIONS_LIST=swiftui` runs the suites against it.
+
 ## tmux in tests and verification
 
 The default tmux server (socket `${TMUX_TMPDIR:-/tmp}/tmux-<uid>/default`) and any server the user started with `-L` or `-S` are the user's live work. Every test, script and Muxify copy you start talks to a **throwaway server** only. `Sandbox` does this for you. If you must start tmux some other way:

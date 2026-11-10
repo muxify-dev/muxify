@@ -6,7 +6,7 @@ import MuxifyCore
 /// The script writes `command.json` (with a fresh nonce) into the folder
 /// named by MUXIFY_TEST_DRIVER; a timer on the main run loop answers each new
 /// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, hover, snapshot, responder, scroll, stall,
-/// binding, counts, each with the option `reveal` that scrolls the target into view first, and `watch` that reads
+/// binding, counts, sessions-list, each with the option `reveal` that scrolls the target into view first, and `watch` that reads
 /// frames of elements in each drawn frame after it. None of
 /// them activates the app, opens a menu or moves the pointer, so a run never takes focus.
 enum TestDriver {
@@ -479,6 +479,12 @@ enum TestDriver {
                         "field": NSStringFromRect((editor.delegate as? NSTextField)?.frame ?? .zero)]
             }
             return ["rows": [], "pressed": true, "responders": classes, "editors": editors]
+        }
+        // Which Sessions list each visible App Window shows, `appkit` or `swiftui` (ADR 0074).
+        if name == "sessions-list" {
+            let versions = NSApp.windows.filter { $0.isVisible && $0.styleMask.contains(.titled) }
+                .map { SessionsListVersion.shown(in: $0).rawValue }
+            return ["rows": [], "pressed": true, "versions": versions]
         }
         let elements = dump()
         for element in elements {

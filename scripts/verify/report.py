@@ -47,8 +47,9 @@ def tag(status):
 
 def gate_box(summary):
     gate = summary['gate']
-    note = '' if gate['counted'] else (' <span class="muted">This run was a subset, so it cannot pass the gate, and '
-                                       'its exit status ignores the gate.</span>')
+    reason = 'was a subset' if not summary['full'] else 'chose the Sessions list with SESSIONS_LIST'
+    note = '' if gate['counted'] else (' <span class="muted">This run %s, so it cannot pass the gate, and '
+                                       'its exit status ignores the gate.</span>' % reason)
     if not gate['problems']:
         return '<div class="box pass"><b>Gate: passed.</b>%s</div>' % note
     return '<div class="box failed"><b>Gate: FAILED.</b>%s<ul>%s</ul></div>' % (
@@ -136,8 +137,9 @@ def render(summary):
 </body></html>
 ''' % dict(run=esc(summary['run']), style=STYLE, started=esc(summary['started']), seconds=summary['seconds'],
            head=esc(tree['head'][:9]), files=esc(tree.get('files', '')[:12]),
-           selection='Full run of %d suites' % len(summary['rounds'][0]['suites']) if summary['full']
-           else 'Subset of %d suites' % len(summary['rounds'][0]['suites']),
+           selection=('Full run of %d suites' if summary['full'] else 'Subset of %d suites')
+           % len(summary['rounds'][0]['suites'])
+           + (', the %s Sessions list' % esc(summary['sessions_list']) if summary.get('sessions_list') else ''),
            jobs=summary['jobs'], repeat=', %d rounds' % summary['repeat'] if summary['repeat'] > 1 else '',
            seeds=', shuffle seeds %s' % ', '.join(seeds) if seeds else '', gate=gate_box(summary), totals=totals,
            problems=problems, rounds=rounds,

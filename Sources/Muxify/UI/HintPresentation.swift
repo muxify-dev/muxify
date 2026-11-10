@@ -1,7 +1,7 @@
 import SwiftUI
 import MuxifyCore
 
-struct HintPresentation {
+struct HintPresentation: Equatable {
     private var triggers: [QuickSwitchTarget: [KeyTrigger]] = [:]
 
     private var restKeys: [QuickSwitchTarget: String] = [:]

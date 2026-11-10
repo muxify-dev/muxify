@@ -64,6 +64,8 @@ struct SidebarView: View {
 
 private struct WorkSection: View {
     let store: WorkspaceStore
+    /// Which Sessions list shows (ADR 0074). The Sidebar follows a change of the user default while the app runs.
+    @AppStorage(SessionsListVersion.defaultsKey) private var sessionsListAppKit = false
 
     var body: some View {
         let model = store.topics
@@ -73,15 +75,20 @@ private struct WorkSection: View {
                          acceptsGestures: !store.palette.isOpen && store.currentGitView?.isOpen != true) {
                 TopicsSection(store: store, model: model)
             } sessions: {
-                SessionsSection(store: store)
+                sessionsList
             }
         } else if model.mode == .topics {
             TopicsSection(store: store, model: model)
         } else if model.sessionsEnabled {
-            SessionsSection(store: store)
+            sessionsList
         } else {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+
+    @ViewBuilder
+    private var sessionsList: some View {
+        if sessionsListAppKit { SessionsListHost(store: store) } else { SessionsSection(store: store) }
     }
 }
 
@@ -1145,7 +1152,7 @@ private struct SessionsSection: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     // Not lazy, for the same reason as the Topics list.
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: SessionsListMetrics.cardSpacing) {
                         ForEach(store.sessions) { session in
                             SessionCard(store: store, model: model, session: session, identifier: "session-\(session.id)",
                                         viewport: Self.viewport,
@@ -1155,8 +1162,8 @@ private struct SessionsSection: View {
                             }
                         }
                     }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, SessionsListMetrics.horizontalInset)
+                    .padding(.vertical, SessionsListMetrics.verticalInset)
                 }
                 .coordinateSpace(.named(Self.viewport))
                 .scrollIndicators(.never)

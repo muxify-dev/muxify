@@ -6,6 +6,7 @@ The driver cannot type keys, so the `toggle_sidebar_mode` checks press its View 
 "Switch to Topics") without opening the menu, or run its Command from the palette's search field.
 """
 
+import subprocess
 import time
 import unittest
 
@@ -20,6 +21,8 @@ class SidebarSwipe(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         project = s.root/'project'
         project.mkdir()
+        # The header shows its Git View button only in a repository.
+        subprocess.run(['/usr/bin/git', 'init', '-q', '-b', 'main', str(project)], check=True)
         cls.config = s.root/'config/muxify/config.yaml'
         cls.config.write_text('sidebar:\n  agents: false\n')
         store = TopicRecords(s.root/'state/muxify')
