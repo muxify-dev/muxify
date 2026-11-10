@@ -356,8 +356,9 @@ enum CLIVerbs {
                 Shows the Sessions and the Topics list of the Environment, in the order that
                 Muxify shows them: the Sessions in tmux order, then the Pinned Topics, the
                 In Play places, the Guests and the Bench, each with its Sessions, and each
-                No Topic Session. With marks, and the Tags that the Config defines. For a
-                Topic's Windows and Panes, use topic show. It changes nothing.
+                No Topic Session. JSON includes each Session's Windows in tmux index order,
+                with marks, and the Tags that the Config defines. For a Topic's Panes,
+                use topic show. It changes nothing.
                   --json          print the full result as one line of JSON
                 """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }

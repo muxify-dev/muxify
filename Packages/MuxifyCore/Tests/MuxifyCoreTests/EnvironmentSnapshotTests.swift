@@ -3,9 +3,9 @@ import XCTest
 
 final class EnvironmentSnapshotTests: XCTestCase {
     private func window(_ session: String, name: String? = nil, topic: String? = nil, lock: Double? = nil, created: Int = 0,
-                        activity: Int = 0) -> TmuxWindow {
+                        activity: Int = 0, index: Int = 0, active: Bool = true) -> TmuxWindow {
         TmuxWindow(id: "@\(UUID().uuidString.prefix(8))", sessionID: session, sessionName: name ?? "s" + session.dropFirst(),
-                   index: 0, name: "shell", paneTitle: "", path: "/work", command: "zsh", isActive: true, paneCount: 1, hasBell: false,
+                   index: index, name: "shell", paneTitle: "", path: "/work", command: "zsh", isActive: active, paneCount: 1, hasBell: false,
                    sessionActivity: activity, agent: "", storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, lockOrder: lock,
                    sessionCreated: created)
     }
@@ -58,6 +58,57 @@ final class EnvironmentSnapshotTests: XCTestCase {
             if case .topic(let topic, let mark, let sessions) = card, topic.id == id { return (topic, mark, sessions) }
         }
         return nil
+    }
+
+    func testWindowReadsKeepIndexOrderAndShareNotificationRules() throws {
+        let record = topic("a", order: 0)
+        let windows = (0..<6).map { window("$1", topic: record.id, index: $0, active: $0 == 2) }
+        let panes = [
+            TmuxPane(id: "%0", windowID: windows[0].id, command: "claude", agent: "claude", agentStatus: "working", unread: false),
+            TmuxPane(id: "%1", windowID: windows[0].id, command: "claude", agent: "claude", agentStatus: "blocked", unread: false),
+            TmuxPane(id: "%2", windowID: windows[1].id, command: "claude", agent: "claude", agentStatus: "done", unread: true),
+            TmuxPane(id: "%3", windowID: windows[2].id, command: "claude", agent: "claude", agentStatus: "failed", unread: true),
+            TmuxPane(id: "%4", windowID: windows[3].id, command: "claude", agent: "claude", agentStatus: "working", unread: false),
+            TmuxPane(id: "%5", windowID: windows[4].id, command: "claude", agent: "claude", agentStatus: "done", unread: false)
+        ]
+        let loose = window("$2")
+        let tmux = TmuxSnapshot(windows: Array(windows.reversed()) + [loose], clients: [], panes: panes, serverRunning: true)
+        for enabled in [true, false] {
+            var notifications = Config.Notifications()
+            notifications.doneEnabled = enabled
+            notifications.failedEnabled = enabled
+            notifications.blockedEnabled = enabled
+            let shown = EnvironmentSnapshot(contents: TopicContents(records: [record], problems: [], openPlaces: []),
+                                            tmux: tmux, topics: Config.Topics(), notifications: notifications)
+            let detail = TopicDetail(record: record, label: "A", snapshot: tmux, sessionPaths: [], topics: Config.Topics(),
+                                     notifications: notifications, branches: TopicBranches(records: [record]) { _ in nil })
+            let session = try XCTUnwrap(shown.sessions.first { $0.id == "$1" })
+            let detailed = try XCTUnwrap(detail.sessions.first)
+            let expected: [AgentMark?] = enabled ? [.blocked, .done, .failed, .working, nil, nil]
+                                                : [.working, nil, nil, .working, nil, nil]
+            XCTAssertEqual(session.windows.map(\.id), windows.map(\.id))
+            XCTAssertEqual(session.windows.map(\.index), Array(0..<6))
+            XCTAssertEqual(session.windows.map(\.name), windows.map(\.name))
+            XCTAssertEqual(session.windows.map(\.active), [false, false, true, false, false, false])
+            XCTAssertEqual(session.windows.map(\.mark), expected)
+            XCTAssertEqual(detailed.windows.map(\.id), windows.map(\.id))
+            XCTAssertEqual(detailed.windows.map(\.mark), expected)
+            XCTAssertEqual(shown.sessions.first { $0.id == "$2" }?.windows.map(\.id), [loose.id])
+            let data = try JSONEncoder().encode(shown)
+            let json = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let sessions = try XCTUnwrap(json["sessions"] as? [[String: Any]])
+            let encoded = try XCTUnwrap(sessions.first { $0["id"] as? String == "$1" }?["windows"] as? [[String: Any]])
+            XCTAssertEqual(Set(try XCTUnwrap(encoded.first).keys), ["id", "index", "name", "active", "mark"])
+            XCTAssertTrue(encoded[5]["mark"] is NSNull)
+            XCTAssertEqual(encoded[0]["mark"] as? String, enabled ? "blocked" : "working")
+            XCTAssertEqual(try JSONDecoder().decode(EnvironmentSnapshot.self, from: data), shown)
+            let detailData = try JSONEncoder().encode(detail)
+            let detailJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: detailData) as? [String: Any])
+            let detailSessions = try XCTUnwrap(detailJSON["sessions"] as? [[String: Any]])
+            let detailWindows = try XCTUnwrap(detailSessions.first?["windows"] as? [[String: Any]])
+            XCTAssertTrue(detailWindows[5]["mark"] is NSNull)
+            XCTAssertEqual(try JSONDecoder().decode(TopicDetail.self, from: detailData), detail)
+        }
     }
 
     func testWithoutInPlayTheUnpinnedCardsAreOneListWithTheLockedSessionAndNoOpenPlace() {

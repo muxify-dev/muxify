@@ -24,6 +24,16 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
         }
     }
 
+    public struct Window: Codable, Hashable, Sendable {
+        public var id: String
+        public var index: Int
+        public var name: String
+        public var active: Bool
+        @EncodesNull public var mark: AgentMark?
+
+        private enum CodingKeys: String, CodingKey { case id, index, name, active, mark }
+    }
+
     /// One live Session, as Sessions mode shows it.
     public struct Session: Codable, Hashable, Sendable {
         public var id: String
@@ -33,8 +43,9 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
         @EncodesNull public var mark: CardMark?
         /// The open Topic it is in; nil for a No Topic Session, Locked or not.
         @EncodesNull public var topic: String?
+        public var windows: [Window]
 
-        private enum CodingKeys: String, CodingKey { case id, name, activity, mark, topic }
+        private enum CodingKeys: String, CodingKey { case id, name, activity, mark, topic, windows }
     }
 
     /// An open Topic as its card shows it.
@@ -171,7 +182,10 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
         tags = topics.tags?.definitions.map(DefinedTag.init) ?? []
         sessions = firsts.map { window in
             Session(id: window.sessionID, name: window.sessionName, activity: window.sessionActivity,
-                    mark: marks.sessions[window.sessionID].map(CardMark.agent), topic: topic(of: window))
+                    mark: marks.sessions[window.sessionID].map(CardMark.agent), topic: topic(of: window),
+                    windows: tmux.windows.filter { $0.sessionID == window.sessionID }.sorted { $0.index < $1.index }.map { member in
+                        Window(id: member.id, index: member.index, name: member.name, active: member.isActive, mark: marks.windows[member.id])
+                    })
         }
         pinned = list.pinned.map(Card.init)
         if let inPlay = list.inPlay {

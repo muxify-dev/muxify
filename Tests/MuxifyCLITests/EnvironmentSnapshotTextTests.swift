@@ -6,9 +6,9 @@ final class EnvironmentSnapshotTextTests: XCTestCase {
     func testTheTextFormHasASectionForEachPartWithLinesAndNamesTheSessions() throws {
         let json = #"""
         {"tags":[],
-         "sessions":[{"id":"$1","name":"game/fix","activity":10,"mark":"blocked","topic":"a"},
-                     {"id":"$2","name":"notes","activity":20,"mark":null,"topic":null},
-                     {"id":"$3","name":"tools","activity":30,"mark":"working","topic":null}],
+         "sessions":[{"id":"$1","name":"game/fix","activity":10,"mark":"blocked","topic":"a","windows":[]},
+                     {"id":"$2","name":"notes","activity":20,"mark":null,"topic":null,"windows":[]},
+                     {"id":"$3","name":"tools","activity":30,"mark":"working","topic":null,"windows":[]}],
          "pinned":[{"kind":"topic","mark":null,"sessions":[],
                     "topic":{"id":"p","label":"Pinned","note":null,"tags":[],"state":"dormant"}}],
          "unpinned":{"kind":"in_play","limit":2,

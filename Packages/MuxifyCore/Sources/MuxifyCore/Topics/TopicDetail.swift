@@ -24,15 +24,19 @@ public struct TopicDetail: Codable, Hashable, Sendable {
         public var index: Int
         public var name: String
         public var active: Bool
+        @EncodesNull public var mark: AgentMark?
         public var panes: [PaneSummary]
 
-        public init(id: String, index: Int, name: String, active: Bool, panes: [PaneSummary]) {
+        public init(id: String, index: Int, name: String, active: Bool, mark: AgentMark?, panes: [PaneSummary]) {
             self.id = id
             self.index = index
             self.name = name
             self.active = active
+            self.mark = mark
             self.panes = panes
         }
+
+        private enum CodingKeys: String, CodingKey { case id, index, name, active, mark, panes }
     }
 
     public struct Session: Codable, Hashable, Sendable {
@@ -90,11 +94,12 @@ public struct TopicDetail: Codable, Hashable, Sendable {
     /// `branches` reads each Worktree's branch now; a Worktree it cannot read keeps the branch the record remembers.
     /// The Sessions are in the order that the Sidebar shows them.
     public init(record: TopicRecord, label: String, snapshot: TmuxSnapshot, sessionPaths: [SessionPath], topics: Config.Topics,
-                branches: TopicBranches) {
+                notifications: Config.Notifications, branches: TopicBranches) {
+        let marks = AgentMarks(snapshot.agents, notifications: notifications)
         let windows = snapshot.windows.filter { $0.topicID == record.id }
         let sessionIDs = TopicSessionOrder.firstWindows(windows, record: record, order: topics.sessionOrder).map(\.sessionID)
         let sessions = sessionIDs.compactMap { sessionID -> Session? in
-            let members = windows.filter { $0.sessionID == sessionID }
+            let members = windows.filter { $0.sessionID == sessionID }.sorted { $0.index < $1.index }
             guard let first = members.first else { return nil }
             let remembered = record.session(of: first)
             let worktree = remembered?["worktree_path"]?.string.map(Folder.local).map { folder in
@@ -105,7 +110,7 @@ public struct TopicDetail: Codable, Hashable, Sendable {
                            baseName: record.baseName(of: first), directory: first.sessionPath.isEmpty ? first.path : first.sessionPath,
                            worktree: worktree,
                            windows: members.map { window in
-                               Window(id: window.id, index: window.index, name: window.name, active: window.isActive,
+                               Window(id: window.id, index: window.index, name: window.name, active: window.isActive, mark: marks.windows[window.id],
                                       panes: snapshot.panes.filter { $0.windowID == window.id }.map(PaneSummary.init))
                            })
         }
