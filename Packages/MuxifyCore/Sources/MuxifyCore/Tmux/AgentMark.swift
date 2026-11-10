@@ -1,6 +1,6 @@
 /// The Agent mark that a card, a row or a Command Palette result shows: the Working mark, or a Notification of
 /// one Status. Every surface takes its mark from here, so one Agent shows the same mark everywhere.
-public enum AgentMark: String, CaseIterable, Comparable, Sendable {
+public enum AgentMark: String, Codable, CaseIterable, Comparable, Sendable {
     // Weakest first: a group of Agents shows the mark of its strongest member.
     case working, done, failed, blocked
 

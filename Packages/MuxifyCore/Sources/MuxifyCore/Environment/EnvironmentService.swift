@@ -181,7 +181,7 @@ public struct EnvironmentService: Sendable {
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             let branches = TopicBranches(records: [topic]) { try? String(contentsOfFile: $0, encoding: .utf8) }
             return .topic(TopicDetail(record: topic, label: TopicLabels(records).label(of: topic), snapshot: snapshot,
-                                      sessionPaths: sessionPaths, topics: topics, branches: branches))
+                                      sessionPaths: sessionPaths, topics: topics, notifications: notifications, branches: branches))
         } catch {
             return .failed(failure(error, phase: .nothingChanged))
         }
