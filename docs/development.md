@@ -51,6 +51,24 @@ overlay inside it, so the Sidebar and the Palette always agree. A terminal bell
 is not an Agent mark: it is a gray `bell.fill` symbol. None of these rules
 changes the Status or Unread Pane options.
 
+### Sidebar cards on a switch
+
+A switch between Sessions or Topics rebuilds `topics` and the Sidebar Formats
+and moves `selectedWindowID`. Both lists stay mounted, and neither is lazy, so
+anything a switch makes every card do, it does for every card of both lists.
+
+- A card or row does not read `topics`, `sidebarFormatContexts`,
+  `selectedWindowID` or `openSessionCards` in its body. Its list reads them
+  once, into a `SessionCardState`, `TopicCardState` or `SidebarRowState` in
+  `UI/SidebarCardState.swift`, and the card is `Equatable` on those values, so
+  a card whose values did not change does not update. Its actions still call
+  the store.
+- A move of the selection animates only on its own. `SwitchPace` tells the
+  cards' open and close, the scroll to the selected card and the border's turn
+  when the move came in a quick run of switches; then they change at once.
+  Each frame of those animations lays out the cards again, and in a quick run
+  each switch cut the last one's animations short.
+
 ## Build
 
 Requires macOS 14+ on Apple silicon, Xcode 26+, and Homebrew. Running the app

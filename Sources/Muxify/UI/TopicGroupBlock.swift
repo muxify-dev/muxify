@@ -46,9 +46,12 @@ struct TopicGroupBlock: View {
             TimelineView(EachMidnight()) { context in
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(group.topics) { topic in
-                        TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
-                                  showsAllRows: showingAllRows.contains(topic.id),
+                        TopicCard(store: store,
+                                  state: store.topicCardState(topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
+                                                              showsAllRows: showingAllRows.contains(topic.id),
+                                                              showsTags: topic.isExpanded),
                                   onShowAllRows: { showingAllRows.insert(topic.id) }, place: .group(now: context.date))
+                            .equatable()
                     }
                 }
             }

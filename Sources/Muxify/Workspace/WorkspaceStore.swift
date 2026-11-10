@@ -1110,6 +1110,7 @@ final class WorkspaceStore {
         updateTopicSelection()
         let previousID = old?.windowID?.rawValue
         guard selectedWindowID != previousID else { return }
+        SwitchPace.moved()
         // A Window starts in its Terminal, as moveFocusIntoWindow gives it, not in the side the last Window used.
         lastFocus = nil
         paneFinder.close()

@@ -100,7 +100,7 @@ struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
         .accessibilityIdentifier("card-" + identifier)
         .accessibilityActions { menu() }
         .onChange(of: holdsSelection) { _, holds in
-            guard holds, !reduceMotion else { return }
+            guard holds, !reduceMotion, SwitchPace.animates else { return }
             turn = -150
             withAnimation(.timingCurve(0.18, 0.85, 0.25, 1, duration: 0.9)) { turn = 0 }
         }
@@ -123,7 +123,8 @@ struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
 }
 
 /// The border of the card that holds the selected Window: the colours of a Balatro card's edge, around the card.
-/// SwiftUI animates `angle`, so a change of it turns the colours.
+/// SwiftUI animates `angle`, so a change of it turns the colours. Metal draws it: drawn into the layer, the angular
+/// gradient is painted by the CPU on each frame of the turn, which lasts most of a second after each switch.
 private struct BalatroBorder: View, Animatable {
     var angle: Double
     let shape: RoundedRectangle
@@ -141,6 +142,7 @@ private struct BalatroBorder: View, Animatable {
     var body: some View {
         shape.strokeBorder(AngularGradient(colors: Self.colors, center: .center, angle: .degrees(angle)), lineWidth: 2)
             .saturation(1.15)
+            .drawingGroup()
     }
 }
 
