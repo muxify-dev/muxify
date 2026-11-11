@@ -60,11 +60,14 @@ public struct SampleDigest: Equatable, Sendable {
         samples = total.count
         busySamples = busy
         func ranked<Key: Hashable>(_ counts: [Key: Int], top: Int, _ share: (Key, Double) -> Share) -> [Share] {
-            counts.filter { $0.value > 0 }
-                .map { (key: $0.key, count: $0.value) }
-                .sorted { $0.count != $1.count ? $0.count > $1.count : "\($0.key)" < "\($1.key)" }
-                .prefix(top)
-                .map { share($0.key, busy == 0 ? 0 : Double($0.count) * 100 / Double(busy)) }
+            let kept: [(key: Key, value: Int)] = counts.filter { $0.value > 0 }.map { ($0.key, $0.value) }
+            let order: [(key: Key, value: Int)] = kept.sorted(by: Self.isRankedBefore)
+            var shares: [Share] = []
+            for entry in order.prefix(top) {
+                let percent: Double = busy == 0 ? 0 : Double(entry.value) * 100 / Double(busy)
+                shares.append(share(entry.key, percent))
+            }
+            return shares
         }
         libraries = ranked(fold.libraries, top: Self.topLibraries) { Share(name: $0, library: nil, percent: $1) }
         symbols = ranked(fold.symbols, top: Self.topSymbols) { Share(name: $0.symbol, library: $0.library, percent: $1) }
@@ -117,6 +120,12 @@ public struct SampleDigest: Equatable, Sendable {
         let words = text.split(whereSeparator: \.isWhitespace).joined(separator: "_")
             .replacingOccurrences(of: ",", with: ";")
         return words.count > symbolLength ? String(words.prefix(symbolLength - 3)) + "..." : words
+    }
+
+    /// The higher count first; a tie by the key's description.
+    private static func isRankedBefore<Key>(_ a: (key: Key, value: Int), _ b: (key: Key, value: Int)) -> Bool {
+        if a.value != b.value { return a.value > b.value }
+        return String(describing: a.key) < String(describing: b.key)
     }
 
     // MARK: Folding
