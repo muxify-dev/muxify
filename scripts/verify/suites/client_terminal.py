@@ -93,7 +93,8 @@ class ClientTerminal(unittest.TestCase):
         self.assertEqual(pathlib.Path(cli).resolve(), (sandbox.app/'Contents/Resources/bin/muxify').resolve())
         variables = sandbox.root/'bin-variables'
         self.pane_command(pane, 'printf \'%s\\n%s\\n\' "$GHOSTTY_BIN_DIR" "$PATH" > ' + shlex.quote(str(variables)))
-        bin_dir, path = wait(lambda: variables.read_text().splitlines(), 'Pane did not report its PATH')
+        # The shell makes the file before printf writes to it, so a read can find one line of the two.
+        bin_dir, path = wait(lambda: (lines := variables.read_text().splitlines())[1:] and lines, 'Pane did not report its PATH')
         self.assertEqual(pathlib.Path(bin_dir).resolve(), (sandbox.app/'Contents/Resources/bin').resolve())
         app_executables = (sandbox.app/'Contents/MacOS').resolve()
         self.assertNotIn(app_executables, [pathlib.Path(entry).resolve() for entry in path.split(':') if entry], path)

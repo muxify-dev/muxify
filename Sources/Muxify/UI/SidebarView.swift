@@ -64,8 +64,9 @@ struct SidebarView: View {
 
 private struct WorkSection: View {
     let store: WorkspaceStore
-    /// Which Sessions list shows (ADR 0074). The Sidebar follows a change of the user default while the app runs.
-    @AppStorage(SessionsListVersion.defaultsKey) private var sessionsListAppKit = false
+    /// Which Sessions list shows (ADR 0074): the AppKit list unless the user default is false. The Sidebar follows a
+    /// change of the user default while the app runs.
+    @AppStorage(SessionsListVersion.defaultsKey) private var sessionsListAppKit = true
 
     var body: some View {
         let model = store.topics

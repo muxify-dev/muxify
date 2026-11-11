@@ -13,6 +13,7 @@ import unittest
 
 from scripts.verify.sandbox import Sandbox, alive, wait
 
+SHELL = '/bin/zsh -f'
 # tmux 3.7c keeps a control client whose input closes while the server writes
 # notifications to it, and then its server cannot exit. A flood of Window
 # renames across the kill makes that race likely.
@@ -24,13 +25,20 @@ class TmuxEvents(unittest.TestCase):
     def setUpClass(cls):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(s.teardown)
-        # No tmux server at launch: the app starts one with its own Session.
-        s.launch()
+        cls.launch()
+
+    @classmethod
+    def launch(cls):
+        """Starts the app on a server with the Session `main`. The app starts no Session of its own: with no Session it
+        offers Start a Session."""
+        if cls.s.tmux_ok('has-session', '-t', '=main').returncode:
+            cls.s.tmux('new-session', '-d', '-s', 'main', SHELL)
+        cls.s.launch()
 
     def setUp(self):
-        # A check that kills the app leaves the next one without it.
+        # A check that kills the app, or ends the server, leaves the next one without it.
         if not alive(self.s.pid):
-            self.s.launch()
+            self.launch()
 
     def control_clients(self):
         listing = self.s.tmux_ok('list-clients', '-F', '#{client_pid} #{client_control_mode}').stdout.split('\n')

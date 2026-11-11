@@ -25,7 +25,7 @@ make verify SESSIONS_LIST=swiftui
 make verify SESSIONS_LIST=appkit SUITE="sessions_list_sidebar sidebar_swipe"
 ```
 
-Without `SESSIONS_LIST`, a suite gets the app's default. `Sandbox.launch` adds the launch argument `-sessionsListAppKit YES` or `NO` for the option, unless the suite's own arguments set that user default. A run with `SESSIONS_LIST` never satisfies the gate, because it proves nothing about the app's default. For a single check, set `MUXIFY_VERIFY_SESSIONS_LIST=appkit` before `python3 -m unittest`.
+Without `SESSIONS_LIST`, a suite gets the app's default: the AppKit list, which a missing `sessionsListAppKit` means. `Sandbox.launch` adds the launch argument `-sessionsListAppKit YES` or `NO` for the option, unless the suite's own arguments set that user default. A run with `SESSIONS_LIST` never satisfies the gate, because it proves nothing about the app's default. For a single check, set `MUXIFY_VERIFY_SESSIONS_LIST=appkit` before `python3 -m unittest`.
 
 `make verify` runs each suite in its own process, and 10 suites at the same time (`run.py`). Set `MUXIFY_VERIFY_JOBS` to change the number. With all suites at the same time, the Mac starts processes so slowly that checks fail by chance. It writes one line when a suite ends. The full output of a suite goes to `build/verify/<suite>/last-run.log` in the checkout, so runs in two checkouts at the same time do not overwrite each other's logs. When a suite fails, `make verify` also writes that output.
 
@@ -154,7 +154,7 @@ The gate reads rows, so the first two do not fail a run of the two versions. The
 
 1. In `compare_scenes.py`, write a class with a `name`, a line `shows` for the report, `fixture(s)` and `shots()`. `fixture` makes the tmux Sessions, the Topic records and the folders in the Sandbox, before the app starts. `shots` gives `(name, arrange)` pairs.
 2. In an arrange, start the app with `view.launch(config(...))`, move the Location with `view.go(window)`, and end with `view.wait(predicate, message)` on the rows that prove the list shows the state. When one version cannot show the state, the wait fails with the message, and the run still takes the picture.
-3. Make each shot start from the same state in both versions. The second version runs after the first, on the same tmux server: set again what an earlier shot changed, such as a bell. Call `view.rest()` before a step that starts from where the list stands, such as a swipe or a hover. `config()` sets `ui.pulse: false`, so a Working mark stands still.
+3. Make each shot start from the same state in both versions. The second version runs after the first, on the same tmux server: set again what an earlier shot changed, such as a bell. The Terminal shows the Location's Window in the picture, and a shell there can draw its prompt again after a launch that changed its size: start it again with `fresh_shell(s, window)` after the move. Call `view.rest()` before a step that starts from where the list stands, such as a swipe or a hover. `config()` sets `ui.pulse: false`, so a Working mark stands still.
 4. Add the scene to `SCENES`, and a section `## <name>` to `compare-notes.md`.
 5. Run `make compare SELF=1 SCENE=<name>` a few times. It must pass each time, with no pixel that differs.
 

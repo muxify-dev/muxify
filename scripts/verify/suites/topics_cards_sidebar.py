@@ -276,7 +276,13 @@ class TopicsCardsSidebar(TopicsSidebar):
         window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
         self.open_card('topic-' + topic)
         keys = ['card-topic-' + topic, 'settle-topic-' + topic, 'topic-window-' + window]
-        rs = s.wait_rows(lambda rs: all(s.has(key, rs) for key in keys), 'the open card misses one of %s' % keys)
+        # The rows show as the card starts to open, and the card grows to its footer line in its glide. So the frames
+        # count once two dumps in a row have them in one place.
+        frames = []
+        def at_rest(rs):
+            frames.append([s.row(key, rs).get('accessibilityFrame') for key in keys] if all(s.has(key, rs) for key in keys) else None)
+            return len(frames) >= 2 and frames[-1] is not None and frames[-1] == frames[-2]
+        rs = s.wait_rows(at_rest, lambda: 'the open card misses one of %s, or does not come to rest: %s' % (keys, frames[-3:]))
         card, settle, row = (frame(s.row(key, rs)) for key in keys)
         # frame() is (bottom, top), a larger value higher on screen.
         self.assertLessEqual(settle[1], row[0] + 1, 'Settle %s is not on the footer line below the row %s' % (settle, row))

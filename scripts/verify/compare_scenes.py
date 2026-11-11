@@ -91,6 +91,15 @@ def ring(s, window):
          'tmux did not mark the Window %s with a bell' % window, seconds=10)
 
 
+def fresh_shell(s, window):
+    """Starts the shell of the Window's Pane again, in its folder. The Terminal shows the Location's Window in the
+    picture. After a launch that changed the Pane's size, a shell can draw its prompt again on a new line, and the
+    second version runs after more launches than the first. A new shell, at the size the Pane has now, draws one
+    prompt in each version."""
+    folder = s.tmux('display-message', '-p', '-t', window, '#{pane_current_path}')
+    s.tmux('respawn-pane', '-k', '-t', window, '-c', folder, SHELL)
+
+
 def window_rows(key, rows):
     return [row for row in rows if row.get('accessibilityIdentifier') == key]
 
@@ -189,6 +198,7 @@ class WindowParts:
             s.act('press', 'toggle-git-view')
         view.wait(lambda rs: s.row('toggle-git-view', rs).get('accessibilityValue') == 'on', 'the Git View did not open')
         view.go(self.other)
+        fresh_shell(s, self.other)
         ring(s, self.window)
         key = 'session-window-' + self.window
         wanted = ['Main working copy', 'Bell', '2', '2, Zoomed']
@@ -217,6 +227,7 @@ class WindowFormats:
     def window_formats(self, view):
         view.launch(config(sidebar=self.FORMATS))
         view.go(self.windows[0])
+        fresh_shell(view.s, self.windows[0])
         for window, name in zip(self.windows, ('first', 'second')):
             key = 'session-window-' + window
             wanted = ['L ', 'star.fill', 'Window ' + name, 'Summary of ' + name, 'globe', ' R1']

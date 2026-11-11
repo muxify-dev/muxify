@@ -6,7 +6,7 @@ import SwiftUI
 enum SessionsListVersion: String {
     case swiftui, appkit
 
-    /// The user default that chooses the version: true is the AppKit list; missing or false is the SwiftUI list.
+    /// The user default that chooses the version: missing or true is the AppKit list; false is the SwiftUI list.
     /// It is not a Config key, because it goes away with the SwiftUI list.
     static let defaultsKey = "sessionsListAppKit"
 

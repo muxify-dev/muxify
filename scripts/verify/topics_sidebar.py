@@ -243,10 +243,10 @@ class TopicsSidebar(unittest.TestCase):
         for tty in self.s.tmux('list-clients', '-F', '#{client_tty}').split():
             self.s.tmux('switch-client', '-c', tty, '-t', window)
 
-    def agent_session(self, name, topic=None, status='working', unread=False):
-        """A Session whose only Pane runs an Agent; returns (session id, window id, pane id)."""
+    def agent_session(self, name, topic=None, status='working', unread=False, directory=None):
+        """A Session whose only Pane runs an Agent, in `directory` or else beta; returns (session id, window id, pane id)."""
         command = ['new-session', '-d', '-P', '-F', '#{session_id} #{window_id} #{pane_id}',
-                   '-s', name, '-c', str(self.beta), 'sleep 600',
+                   '-s', name, '-c', str(directory or self.beta), 'sleep 600',
                    ';', 'set-option', '-p', '@muxify_agent', 'claude',
                    ';', 'set-option', '-p', '@muxify_agent_status', status]
         if topic:

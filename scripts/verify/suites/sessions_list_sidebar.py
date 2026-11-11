@@ -1,8 +1,8 @@
 """The Sidebar's two Sessions lists: the SwiftUI list, and the AppKit list that replaces it
 (docs/adr/0074-an-area-leaves-swiftui-for-appkit-only-where-swiftui-caused-bugs.md).
 
-The user default `sessionsListAppKit` chooses the list. A check stores it as a user does, with `defaults write` on the
-bundle id of this run's app copy. A launch argument hides the stored value from the app, so a check that stores the
+The user default `sessionsListAppKit` chooses the list: missing or true is the AppKit list, and false is the SwiftUI
+list. A check stores it as a user does, with `defaults write` on the bundle id of this run's app copy. A launch argument hides the stored value from the app, so a check that stores the
 default first starts the app without that argument, also in a run with `SESSIONS_LIST`.
 
 The pager hides the page that its mode does not show from accessibility, so no dump has the Sessions list while a
@@ -55,7 +55,7 @@ PRESSES = dict(swiftui=('press',), appkit=('press', 'click'))
 CONFIG = 'sidebar:\n  agents: false\n'
 ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Sessions']
 # What the app shows when nothing sets the user default.
-APP_DEFAULT = 'swiftui'
+APP_DEFAULT = 'appkit'
 
 
 def rect(row):
@@ -186,10 +186,16 @@ class SessionsListSidebar(unittest.TestCase):
         self.assertTrue(len(first) == len(second) and all(abs(a - b) <= .5 for a, b in zip(first, second)),
                         '%s: %s and %s' % (message, first, second))
 
-    def test_without_the_default_the_sidebar_shows_the_swiftui_list(self):
+    def test_without_the_default_the_sidebar_shows_the_appkit_list(self):
         self.write_default(None)
         self.start()
         self.assertEqual(self.s.sessions_list(), APP_DEFAULT, 'a launch with no user default shows another Sessions list')
+        self.wait_cards()
+
+    def test_with_the_default_false_a_launch_shows_the_swiftui_list(self):
+        self.write_default(False)
+        self.start()
+        self.assertEqual(self.s.sessions_list(), 'swiftui', 'a launch with the user default false shows another Sessions list')
         self.wait_cards()
 
     def test_with_the_default_true_the_appkit_list_has_a_card_for_each_session(self):
@@ -468,7 +474,9 @@ class SessionsListSidebar(unittest.TestCase):
         self.wait_list(APP_DEFAULT)
         self.show_mode('sessions')
         app = self.s.pid
-        for value, version in ((True, 'appkit'), (False, 'swiftui'), (True, 'appkit'), (None, APP_DEFAULT)):
+        # False brings the SwiftUI list back, and a default that goes away brings the AppKit list again.
+        for value, version in ((False, 'swiftui'), (None, APP_DEFAULT), (False, 'swiftui'), (True, 'appkit'),
+                               (False, 'swiftui'), (None, APP_DEFAULT)):
             with self.subTest(default=value):
                 self.store_default(value)
                 self.wait_list(version)

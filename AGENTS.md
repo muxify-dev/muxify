@@ -23,7 +23,9 @@ Design every new Action or Command as steps in the palette's view: run at once, 
 Before you add or change a view in an area that moved from SwiftUI to AppKit, read `docs/adr/0074-an-area-leaves-swiftui-for-appkit-only-where-swiftui-caused-bugs.md`. The first area is the Sidebar's Sessions list.
 
 - Write new view code of a moved area in AppKit, by the four rules of that ADR.
-- While an area has two versions, make each change in both. The Sessions list has two: the user default `sessionsListAppKit` chooses one, and `make verify SESSIONS_LIST=appkit` or `SESSIONS_LIST=swiftui` runs the suites against it.
+- While an area has two versions, make each change in both, and prove it in both. The Sessions list has two: the user default `sessionsListAppKit` chooses one, and a missing value means the AppKit list.
+  - Run the suites against each version: `make verify SESSIONS_LIST=appkit` and `make verify SESSIONS_LIST=swiftui`. Add `SUITE=<suite>` for one suite.
+  - Run the compare run after a change that can move or redraw a part of the list: `make compare`, or `make compare SCENE=<scene>` for one scene. It must pass its gate in every scene. After you add or change a scene, `make compare SELF=1` must report no difference. Read "The compare run" in `scripts/verify/README.md` before you run it or change a scene.
 
 ## tmux in tests and verification
 
