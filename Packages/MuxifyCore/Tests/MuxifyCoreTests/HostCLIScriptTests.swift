@@ -10,6 +10,8 @@ final class HostCLIScriptTests: XCTestCase {
     private var tools: String { root + "/tools" }
     private var assets: String { root + "/assets" }
     private var installed: String { home + "/.local/bin/muxify" }
+    /// The run's stand-in for Muxify.app's own `muxify`, the script's `$2`.
+    private var bundled: String { root + "/Applications/Muxify.app/Contents/Resources/bin/muxify" }
     private var shells: [String] {
         ["/bin/sh", "/bin/dash"].filter(FileManager.default.isExecutableFile(atPath:))
     }
@@ -52,8 +54,14 @@ final class HostCLIScriptTests: XCTestCase {
         try write("#!/bin/sh\necho '\(line)'\n", to: path, mode: 0o755)
     }
 
+    /// Replaces the tools' `uname` with one that names this machine.
+    private func machine(_ os: String, _ arch: String) throws {
+        try FileManager.default.removeItem(atPath: "\(tools)/uname")
+        try write("#!/bin/sh\ncase $1 in -s) echo \(os) ;; -m) echo \(arch) ;; esac\n", to: "\(tools)/uname", mode: 0o755)
+    }
+
     private func run(_ shell: String, bundle: String? = nil, file: StaticString = #filePath, line: UInt = #line) throws -> String {
-        let arguments = ["-c", HostCLI.script, "muxify", "file://\(assets)/", bundle ?? "\(root)/Applications/Muxify.app/Contents/Resources/bin/muxify"]
+        let arguments = ["-c", HostCLI.script, "muxify", "file://\(assets)/", bundle ?? bundled]
         let output = try CommandRunner().run(CommandInvocation(executable: shell, arguments: arguments),
                                              environment: ["HOME": home, "PATH": tools])
         XCTAssertEqual(output.filter { $0 == "\n" }.count, 1, "one result line: \(output)", file: file, line: line)
@@ -122,11 +130,9 @@ final class HostCLIScriptTests: XCTestCase {
     func testOneInsideAMuxifyAppIsSkipped() throws {
         for shell in shells {
             try reset()
-            let bundled = "\(root)/Applications/Muxify.app/Contents/Resources/bin/muxify"
             try? FileManager.default.removeItem(atPath: "\(root)/Applications")
             try executable(printing: "muxify old1234 100", at: bundled)
-            try FileManager.default.removeItem(atPath: "\(tools)/uname")
-            try write("#!/bin/sh\ncase $1 in -s) echo Darwin ;; -m) echo arm64 ;; esac\n", to: "\(tools)/uname", mode: 0o755)
+            try machine("Darwin", "arm64")
             // The bundle path itself, the phone's last step.
             XCTAssertEqual(try run(shell), "skipped: app bundle \(bundled)", shell)
             // Install Command Line Tool's link in ~/.local/bin.
@@ -142,9 +148,8 @@ final class HostCLIScriptTests: XCTestCase {
         for shell in shells {
             try reset()
             // OrbStack mounts the Mac's /Applications in its Linux machines.
-            try executable(printing: "muxify old1234 100", at: "\(root)/Applications/Muxify.app/Contents/Resources/bin/muxify")
-            try FileManager.default.removeItem(atPath: "\(tools)/uname")
-            try write("#!/bin/sh\ncase $1 in -s) echo Linux ;; -m) echo aarch64 ;; esac\n", to: "\(tools)/uname", mode: 0o755)
+            try executable(printing: "muxify old1234 100", at: bundled)
+            try machine("Linux", "aarch64")
             XCTAssertEqual(try run(shell), "installed abc1234 200", shell)
             XCTAssertEqual(try versionLine(installed), published, shell)
         }
@@ -179,8 +184,7 @@ final class HostCLIScriptTests: XCTestCase {
     func testAnUnknownMachineFails() throws {
         for shell in shells {
             try reset()
-            try FileManager.default.removeItem(atPath: "\(tools)/uname")
-            try write("#!/bin/sh\ncase $1 in -s) echo Linux ;; -m) echo riscv64 ;; esac\n", to: "\(tools)/uname", mode: 0o755)
+            try machine("Linux", "riscv64")
             XCTAssertEqual(try run(shell), "failed: no Host CLI for linux riscv64", shell)
             XCTAssertFalse(FileManager.default.fileExists(atPath: installed), shell)
         }
@@ -188,8 +192,7 @@ final class HostCLIScriptTests: XCTestCase {
 
     func testALinuxMachineGetsItsAsset() throws {
         try reset()
-        try FileManager.default.removeItem(atPath: "\(tools)/uname")
-        try write("#!/bin/sh\ncase $1 in -s) echo Linux ;; -m) echo x86_64 ;; esac\n", to: "\(tools)/uname", mode: 0o755)
+        try machine("Linux", "x86_64")
         for other in ["muxify-darwin-arm64", "muxify-linux-aarch64"] {
             try FileManager.default.removeItem(atPath: "\(assets)/\(other)")
         }
