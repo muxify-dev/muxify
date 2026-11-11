@@ -1460,7 +1460,10 @@ front of the path. **Open Config** there opens the remote file in the remote's
 `$VISUAL` or `$EDITOR` in a new tmux Window.
 
 A remote Config can name [Config Overrides](#config-overrides) too. They are
-files on that machine.
+files on that machine: `~/` is the remote home, and a relative path starts at the
+remote Config's folder. Muxify reads them over the same SSH connection each time
+it reads the remote Config, and doesn't watch them. A missing one is skipped,
+and a syntax error in one keeps the last good remote Config.
 
 ## Browser and keybindings
 

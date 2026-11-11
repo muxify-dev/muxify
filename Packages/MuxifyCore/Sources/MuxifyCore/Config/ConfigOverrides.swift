@@ -21,9 +21,12 @@ struct ConfigOverrides {
 
     /// Reads each Config Override through `read` and merges it on top. A
     /// missing Override is skipped; a syntax error in one fails the whole load.
-    static func merge(_ config: Node, path: String, read: (String) -> String?) -> Result<ConfigOverrides, ConfigSyntaxError> {
+    /// A Remote Environment's Config is at `host:path`, and its Override paths
+    /// resolve on that machine.
+    static func merge(_ config: Node, path: String, isRemote: Bool = false,
+                      read: (String) -> String?) -> Result<ConfigOverrides, ConfigSyntaxError> {
         var problems: [ConfigProblem] = []
-        let named = overridePaths(in: config, path: path, problems: &problems)
+        let named = overridePaths(in: config, path: path, isRemote: isRemote, problems: &problems)
         var root = config
         var files = [path]
         var anchors: [Anchor] = []
@@ -62,7 +65,8 @@ struct ConfigOverrides {
     }
 
     /// `override`: one path or a list of them. A bad entry is a problem and is skipped.
-    private static func overridePaths(in config: Node, path: String, problems: inout [ConfigProblem]) -> [String] {
+    private static func overridePaths(in config: Node, path: String, isRemote: Bool,
+                                      problems: inout [ConfigProblem]) -> [String] {
         guard let value = config.mapping?["override"], value.null == nil else { return [] }
         let directory = (path as NSString).deletingLastPathComponent
         let entries = value.sequence.map(Array.init) ?? [value]
@@ -73,8 +77,19 @@ struct ConfigOverrides {
                                               message: "override: expected a path or a list of paths"))
                 return nil
             }
-            return ConfigFileSet.resolve(text, relativeTo: directory)
+            return isRemote ? remote(text, configPath: path) : ConfigFileSet.resolve(text, relativeTo: directory)
         }
+    }
+
+    /// An Override path of the remote Config at `host:path`, as `host:path` on
+    /// that machine. `~/` stays for the remote shell to expand with the remote
+    /// home, and a relative path starts at the remote Config's folder.
+    private static func remote(_ value: String, configPath: String) -> String {
+        let starts = [":~", ":/"].compactMap { configPath.range(of: $0)?.lowerBound }
+        let split = starts.min()
+        let host = split.map { String(configPath[...$0]) } ?? ""
+        let file = split.map { String(configPath[configPath.index(after: $0)...]) } ?? configPath
+        return host + ConfigFileSet.resolveOnRemote(value, relativeTo: (file as NSString).deletingLastPathComponent)
     }
 
     /// A mapping merges key by key; anything else on top replaces what is below

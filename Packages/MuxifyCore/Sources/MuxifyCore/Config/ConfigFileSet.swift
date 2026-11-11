@@ -31,6 +31,15 @@ public struct ConfigFileSet {
         return standardized((directory as NSString).appendingPathComponent(value))
     }
 
+    /// `resolve` for a path on a Remote Environment's machine: `~/` stays for
+    /// the remote shell to expand with the remote home, never this Mac's.
+    public static func resolveOnRemote(_ value: String, relativeTo directory: String) -> String {
+        let path = value.hasPrefix("~/") || value.hasPrefix("/") ? value : (directory as NSString).appendingPathComponent(value)
+        guard path == "~" || path.hasPrefix("~/") else { return standardized(path) }
+        let rest = standardized("/" + String(path.dropFirst(2)))
+        return rest == "/" ? "~" : "~" + rest
+    }
+
     /// The paths of the `config-file = <path>` lines. A value may be in
     /// double quotes, and a leading `?` marks an optional file.
     private static func includes(in text: String) -> [String] {

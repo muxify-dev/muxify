@@ -231,8 +231,9 @@ public struct Config: Equatable {
     /// Reads the Config at `path`, with the Config Overrides it names merged on
     /// top (ADR 0075). A missing file gives the defaults. A value that cannot
     /// apply is skipped and recorded in `problems`; a syntax error in any of the
-    /// files fails the whole read. A Remote Environment's Config skips the
-    /// sections about the app itself (ADR 0010).
+    /// files fails the whole read. A Remote Environment's Config is at
+    /// `host:path`, skips the sections about the app itself (ADR 0010), and its
+    /// Override paths resolve on that machine as `host:path`.
     public static func load(path: String, isRemote: Bool = false,
                      fontFamilies: @escaping () -> [String] = { SidebarTypography.fontFamilies },
                      read: (String) -> String?) -> Result<Config, ConfigSyntaxError> {
@@ -245,7 +246,7 @@ public struct Config: Equatable {
         }
         guard let root else { return .success(Config()) }
         return withoutActuallyEscaping(read) { read in
-            ConfigOverrides.merge(root, path: path, read: read).map { overrides in
+            ConfigOverrides.merge(root, path: path, isRemote: isRemote, read: read).map { overrides in
                 var reader = ConfigReader(overrides: overrides, isRemote: isRemote, read: read, fontFamilies: fontFamilies)
                 reader.readSections(overrides.root)
                 return reader.config
