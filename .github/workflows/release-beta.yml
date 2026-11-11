@@ -62,6 +62,24 @@ jobs:
           MUXIFY_REQUIRE_TMUX: '1'
         run: make test
 
+      - name: Build the Host CLI for macOS
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          make host-cli-darwin
+          # The publish job runs on Linux and cannot run this binary, so it checks this line.
+          build/host-cli/muxify-darwin-arm64 --version > build/host-cli/muxify-darwin-arm64.printed
+
+      - name: Upload the Host CLI for macOS
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: host-cli-darwin
+          path: |
+            build/host-cli/muxify-darwin-arm64
+            build/host-cli/muxify-darwin-arm64.printed
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Build and package ad-hoc-signed beta
         if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
         env:
@@ -76,6 +94,106 @@ jobs:
           path: build/releases/${{ env.RELEASE_TAG }}/
           if-no-files-found: error
           retention-days: 7
+
+  test-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Test the CLI and MuxifyCore on Linux
+        run: make test-linux
+
+  host-cli-linux:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the Host CLI for Linux
+        run: make host-cli-linux
+
+      - name: Upload the Host CLI for Linux
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: host-cli-linux
+          path: |
+            build/host-cli/muxify-linux-aarch64
+            build/host-cli/muxify-linux-x86_64
+            build/host-cli/version
+          if-no-files-found: error
+          retention-days: 7
+
+  # Republishes the rolling prerelease cli-latest, from which the app installs the Host CLI
+  # (.cook/tasks/host-cli/adrs/the-app-installs-the-host-cli-from-a-rolling-github-prerelease.md).
+  publish-cli:
+    needs: [build, test-linux, host-cli-linux]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: cli-latest
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: cli-latest
+      RELEASE_TITLE: Muxify CLI (latest master)
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: host-cli-*
+          path: dist
+          merge-multiple: true
+
+      - name: Check that every binary prints the version line
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-user-static >/dev/null
+          chmod +x dist/muxify-linux-*
+          expected="$(cat dist/version)"
+          read -r name sha time <<<"$expected"
+          [[ "$name" = muxify && "$GITHUB_SHA" = "$sha"* && "$time" =~ ^[0-9]+$ ]] \
+            || { echo "::error::version '$expected' does not name commit $GITHUB_SHA"; exit 1; }
+          check() {
+            local asset="$1" printed="$2"
+            [ "$printed" = "$expected" ] \
+              || { echo "::error::$asset --version printed '$printed', not '$expected'"; exit 1; }
+            echo "$asset: $printed"
+          }
+          check muxify-linux-x86_64 "$(dist/muxify-linux-x86_64 --version)"
+          check muxify-linux-aarch64 "$(qemu-aarch64-static dist/muxify-linux-aarch64 --version)"
+          check muxify-darwin-arm64 "$(cat dist/muxify-darwin-arm64.printed)"
+
+      - name: Move the cli-latest tag to this commit
+        run: |
+          if gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+
+      - name: Publish the cli-latest prerelease
+        run: |
+          notes="The muxify CLI built from ${GITHUB_SHA}. Muxify installs it on a Remote Environment; it is replaced on every push to master."
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --prerelease --latest=false --title "$RELEASE_TITLE" --notes "$notes"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --prerelease --latest=false \
+              --title "$RELEASE_TITLE" --notes "$notes"
+          fi
+          # The binaries go first and version last, so a Host that reads the new version finds the new binaries.
+          gh release upload "$RELEASE_TAG" --clobber \
+            dist/muxify-linux-aarch64 dist/muxify-linux-x86_64 dist/muxify-darwin-arm64
+          gh release upload "$RELEASE_TAG" --clobber dist/version
 
   publish:
     needs: build

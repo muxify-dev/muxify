@@ -13,7 +13,7 @@ MUXIFY_DEVELOPMENT_TEAM ?=
 # during dependency scanning". A fixed length makes the hash the same.
 XCODEBUILD_SETTINGS := diagnostic_message_length=0
 
-.PHONY: all setup tools project build test test-linux test-release verify verify-gate run install release host-cli clean
+.PHONY: all setup tools project build test test-linux test-release verify verify-gate run install release host-cli host-cli-linux host-cli-darwin clean
 
 all: build
 
@@ -67,9 +67,16 @@ run: build
 	$(if $(CONFIG),open -n --env "MUXIFY_CONFIG=$(if $(filter ~%,$(CONFIG)),$(CONFIG),$(abspath $(CONFIG)))" $(APP),open $(APP))
 
 # The Host CLI assets in build/host-cli: static Linux binaries built in Docker (scripts/host-cli-version.env pins it),
-# a release Mac binary, and the version line that all three print.
+# a release Mac binary, and the version line that all three print. CI builds each part on its own runner:
+# host-cli-linux needs only Docker, host-cli-darwin only the Mac's Swift.
 host-cli:
 	./scripts/build-host-cli.sh
+
+host-cli-linux:
+	./scripts/build-host-cli.sh linux
+
+host-cli-darwin:
+	./scripts/build-host-cli.sh darwin
 
 release:
 	BUILD_NUMBER="$(or $(BUILD_NUMBER),1)" ./scripts/package-release.sh "$(TAG)"
