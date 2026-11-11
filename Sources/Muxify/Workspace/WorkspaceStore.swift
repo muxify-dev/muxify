@@ -1605,6 +1605,10 @@ final class WorkspaceStore {
             homeDirectory = snapshot.homeDirectory ?? NSHomeDirectory()
         }
         serverID = snapshot.serverID
+        if !isRemote {
+            // The server ID is `#{pid}:#{start_time}`.
+            ProcessGroupSources.setLocalTmuxServer(snapshot.serverRunning ? snapshot.serverID.flatMap { pid_t($0.prefix { $0 != ":" }) } : nil)
+        }
         if serverRunning, !snapshot.serverRunning {
             browsers.values.forEach { $0.tearDown() }
             browsers.removeAll()

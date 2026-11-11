@@ -107,24 +107,27 @@ public struct MovingState: Equatable, Sendable {
 }
 
 /// The `minute` record: the app's CPU (average and peak per-second, in % of one core), the main thread's busy
-/// share (% of the minute), its memory (phys footprint, MB), threads and open files, the user's input and what
-/// was moving.
+/// share (% of the minute), its memory (phys footprint, MB), the same CPU and memory figures for each process group
+/// that could be read, the app's threads and open files, the user's input and what was moving.
 public struct MinuteRecord: Equatable, Sendable {
     public var cpuAverage: Double
     public var cpuPeak: Double
     public var mainBusy: Double
     public var memoryMB: Double
+    /// Only the groups that could be read: a group left out is not a zero.
+    public var groups: [ProcessGroup: GroupFigures]
     public var threads: Int
     public var openFiles: Int
     public var input: InputCounts
     public var moving: MovingState
 
-    public init(cpuAverage: Double, cpuPeak: Double, mainBusy: Double, memoryMB: Double, threads: Int, openFiles: Int,
-                input: InputCounts, moving: MovingState) {
+    public init(cpuAverage: Double, cpuPeak: Double, mainBusy: Double, memoryMB: Double, groups: [ProcessGroup: GroupFigures] = [:],
+                threads: Int, openFiles: Int, input: InputCounts, moving: MovingState) {
         self.cpuAverage = cpuAverage
         self.cpuPeak = cpuPeak
         self.mainBusy = mainBusy
         self.memoryMB = memoryMB
+        self.groups = groups
         self.threads = threads
         self.openFiles = openFiles
         self.input = input
@@ -132,11 +135,18 @@ public struct MinuteRecord: Equatable, Sendable {
     }
 
     public var record: DiagnosticsRecord {
-        DiagnosticsRecord(.minute, [
+        var fields: [(String, String)] = [
             ("cpu.app.avg", Self.decimal(cpuAverage)), ("cpu.app.peak", Self.decimal(cpuPeak)),
-            ("main.busy", Self.decimal(mainBusy)), ("mem.app", String(format: "%.0f", memoryMB)),
-            ("threads", String(threads)), ("open_files", String(openFiles)), ("input", input.value),
-        ] + moving.fields)
+            ("main.busy", Self.decimal(mainBusy)), ("mem.app", Self.megabytes(memoryMB)),
+        ]
+        for group in ProcessGroup.allCases {
+            guard let figures = groups[group] else { continue }
+            fields += [("cpu.\(group.rawValue).avg", Self.decimal(figures.cpuAverage)),
+                       ("cpu.\(group.rawValue).peak", Self.decimal(figures.cpuPeak)),
+                       ("mem.\(group.rawValue)", Self.megabytes(figures.memoryMB))]
+        }
+        fields += [("threads", String(threads)), ("open_files", String(openFiles)), ("input", input.value)]
+        return DiagnosticsRecord(.minute, fields + moving.fields)
     }
 
     /// Nil unless `record` is a `minute` record with every field.
@@ -147,25 +157,38 @@ public struct MinuteRecord: Equatable, Sendable {
               let threads = record["threads"].flatMap(Int.init), let files = record["open_files"].flatMap(Int.init),
               let input = record["input"].flatMap(InputCounts.init(value:)), let moving = MovingState(record)
         else { return nil }
-        self.init(cpuAverage: average, cpuPeak: peak, mainBusy: busy, memoryMB: memory, threads: threads, openFiles: files,
-                  input: input, moving: moving)
+        var groups: [ProcessGroup: GroupFigures] = [:]
+        for group in ProcessGroup.allCases {
+            let values = ["cpu.\(group.rawValue).avg", "cpu.\(group.rawValue).peak", "mem.\(group.rawValue)"].map { record[$0] }
+            guard values.contains(where: { $0 != nil }) else { continue }
+            let numbers = values.compactMap { $0.flatMap(Double.init) }
+            // Part of a group, or a figure that is not a number.
+            guard numbers.count == 3 else { return nil }
+            groups[group] = GroupFigures(cpuAverage: numbers[0], cpuPeak: numbers[1], memoryMB: numbers[2])
+        }
+        self.init(cpuAverage: average, cpuPeak: peak, mainBusy: busy, memoryMB: memory, groups: groups, threads: threads,
+                  openFiles: files, input: input, moving: moving)
     }
 
     private static func decimal(_ value: Double) -> String { String(format: "%.1f", value) }
+    private static func megabytes(_ value: Double) -> String { String(format: "%.0f", value) }
 }
 
 /// One minute of per-second readings of the app: the CPU it used and the main run loop's awake time, both
-/// running totals in seconds, against the system uptime.
+/// running totals in seconds, against the system uptime, and each process group's CPU since the last reading.
 public struct MinuteAggregate: Sendable {
     public struct Reading: Equatable, Sendable {
         public var uptime: TimeInterval
         public var cpu: TimeInterval
         public var mainAwake: TimeInterval
+        /// The groups read this second; `ProcessGroupsMeter` makes them.
+        public var groups: [ProcessGroup: GroupUsage]
 
-        public init(uptime: TimeInterval, cpu: TimeInterval, mainAwake: TimeInterval) {
+        public init(uptime: TimeInterval, cpu: TimeInterval, mainAwake: TimeInterval, groups: [ProcessGroup: GroupUsage] = [:]) {
             self.uptime = uptime
             self.cpu = cpu
             self.mainAwake = mainAwake
+            self.groups = groups
         }
     }
 
@@ -173,6 +196,7 @@ public struct MinuteAggregate: Sendable {
     public private(set) var last: Reading
     /// The highest per-second CPU so far, in % of one core.
     public private(set) var cpuPeak = 0.0
+    public private(set) var groups: [ProcessGroup: GroupMinute] = [:]
 
     public init(start: Reading) {
         self.start = start
@@ -187,6 +211,7 @@ public struct MinuteAggregate: Sendable {
         let seconds = reading.uptime - last.uptime
         guard seconds > 0 else { return }
         cpuPeak = max(cpuPeak, (reading.cpu - last.cpu) / seconds * 100)
+        for (group, usage) in reading.groups { groups[group, default: GroupMinute()].add(usage, over: seconds) }
         last = reading
     }
 
@@ -201,7 +226,7 @@ public struct MinuteAggregate: Sendable {
     }
 
     public func record(memoryMB: Double, threads: Int, openFiles: Int, input: InputCounts, moving: MovingState) -> MinuteRecord {
-        MinuteRecord(cpuAverage: cpuAverage, cpuPeak: cpuPeak, mainBusy: mainBusy, memoryMB: memoryMB, threads: threads,
-                     openFiles: openFiles, input: input, moving: moving)
+        MinuteRecord(cpuAverage: cpuAverage, cpuPeak: cpuPeak, mainBusy: mainBusy, memoryMB: memoryMB,
+                     groups: groups.compactMapValues(\.figures), threads: threads, openFiles: openFiles, input: input, moving: moving)
     }
 }

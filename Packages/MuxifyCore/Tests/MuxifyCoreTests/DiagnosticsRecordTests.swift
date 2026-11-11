@@ -61,6 +61,59 @@ final class DiagnosticsRecordTests: XCTestCase {
         XCTAssertNil(MinuteRecord(DiagnosticsRecord(.burst, minute().record.fields.map { ($0.key, $0.value) })))
     }
 
+    // MARK: Process groups
+
+    func testEachGroupThatWasReadIsWrittenAfterTheAppsMemory() throws {
+        var record = minute()
+        record.groups = [.commands: GroupFigures(cpuAverage: 3.5, cpuPeak: 61.0, memoryMB: 24),
+                         .webkit: GroupFigures(cpuAverage: 12.0, cpuPeak: 40.5, memoryMB: 380),
+                         .tmux: GroupFigures(cpuAverage: 0.5, cpuPeak: 2.0, memoryMB: 9)]
+        let line = record.record.line(at: date)
+        XCTAssertTrue(line.contains(" mem.app=512 cpu.commands.avg=3.5 cpu.commands.peak=61.0 mem.commands=24 "
+            + "cpu.webkit.avg=12.0 cpu.webkit.peak=40.5 mem.webkit=380 cpu.tmux.avg=0.5 cpu.tmux.peak=2.0 mem.tmux=9 threads=31 "), line)
+        let parsed = try XCTUnwrap(DiagnosticsRecord.parse(line))
+        XCTAssertEqual(MinuteRecord(parsed.record), record)
+    }
+
+    func testAGroupThatCouldNotBeReadIsLeftOutNotZero() throws {
+        var record = minute()
+        record.groups = [.commands: GroupFigures(cpuAverage: 1.0, cpuPeak: 4.0, memoryMB: 0)]
+        let parsed = try XCTUnwrap(DiagnosticsRecord.parse(record.record.line(at: date))).record
+        XCTAssertEqual(parsed["mem.commands"], "0")
+        for key in ["cpu.webkit.avg", "cpu.webkit.peak", "mem.webkit", "cpu.tmux.avg", "cpu.tmux.peak", "mem.tmux"] {
+            XCTAssertNil(parsed[key], key)
+        }
+        XCTAssertEqual(MinuteRecord(parsed)?.groups, record.groups)
+
+        // A group with a figure missing, or not a number, is not a minute record.
+        var fields = parsed.fields.map { ($0.key, $0.value) }
+        fields.append(("cpu.tmux.avg", "1.0"))
+        XCTAssertNil(MinuteRecord(DiagnosticsRecord(.minute, fields)))
+        fields += [("cpu.tmux.peak", "x"), ("mem.tmux", "3")]
+        XCTAssertNil(MinuteRecord(DiagnosticsRecord(.minute, fields)))
+    }
+
+    func testTheMinuteAveragesAGroupOverTheSecondsItWasRead() {
+        var reading = MinuteAggregate.Reading(uptime: 1000, cpu: 50, mainAwake: 10)
+        var minute = MinuteAggregate(start: reading)
+        for second in 0..<60 {
+            reading.uptime += 1
+            // The tmux server is read for the last 20 seconds only; the Browser is never open.
+            reading.groups = [.commands: GroupUsage(cpu: second == 30 ? 0.8 : 0.02, footprint: 10 * 1_048_576)]
+            if second >= 40 { reading.groups[.tmux] = GroupUsage(cpu: 0.01, footprint: 6 * 1_048_576) }
+            minute.add(reading)
+        }
+        let record = minute.record(memoryMB: 300, threads: 20, openFiles: 40, input: InputCounts(), moving: MovingState())
+        let commands = try? XCTUnwrap(record.groups[.commands])
+        XCTAssertEqual(commands?.cpuPeak ?? 0, 80, accuracy: 0.001)
+        XCTAssertEqual(commands?.cpuAverage ?? 0, (59 * 2 + 80) / 60, accuracy: 0.001)
+        XCTAssertEqual(commands?.memoryMB, 10)
+        XCTAssertEqual(record.groups[.tmux]?.cpuAverage ?? 0, 1, accuracy: 0.001)
+        XCTAssertEqual(record.groups[.tmux]?.memoryMB, 6)
+        XCTAssertNil(record.groups[.webkit])
+        XCTAssertNil(record.record["cpu.webkit.avg"])
+    }
+
     // MARK: The minute
 
     private func aggregate(cpuPerSecond: [Double]) -> MinuteAggregate {

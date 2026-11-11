@@ -200,8 +200,31 @@ The app then writes to `~/Library/Logs/Muxify/`:
     once a second, so a short spike shows in the peak.
   - `main.busy`: the share of the minute, in %, that the main run loop was
     awake, from after-waiting to before-waiting.
-  - `mem.app`: the app's memory (phys footprint) in MB; `threads`;
-    `open_files`.
+  - `mem.app`: the app's memory (phys footprint) in MB.
+  - `cpu.<group>.avg`, `cpu.<group>.peak` and `mem.<group>` for each of
+    the other process groups, in the same units as the app's. The app is
+    the first of the four groups; the others are:
+    - `commands`: the processes the app starts, such as git, tmux and ssh.
+      Children that exited come from the children's rusage total, and live
+      children, such as `ssh` and the `tmux -C` control clients, from a
+      read of each one. `sample`, Diagnostics' own sampler, is in neither,
+      so taking a sample does not look like load. `mem.commands` is the
+      live children's memory.
+    - `webkit`: the Browser's WebContent processes, one for each loaded
+      page, found through the web view's process identifier, which the app
+      reads once a minute. It is a lower bound: a page can have more
+      processes than the one it names, and a new page's process counts
+      from the minute after it starts.
+    - `tmux`: the Local tmux server. It serves all of its clients, Muxify's
+      and any other, such as a terminal attached outside Muxify, so its
+      load is not all Muxify's.
+
+    A group whose read fails is left out of the record, never written as
+    zero: no Browser page, no Local server, or a process another user owns.
+    The app reads each group's CPU once a second, off the main thread, and
+    its memory at the end of the minute. The average is over the seconds
+    the group was read.
+  - `threads`; `open_files`.
   - `input`: `idle`, or
     `keys:N,clicks:N,scrolls:N,sidebar_switches:N,palette_opens:N`: the key
     presses, clicks and scroll events the app received, and the Sidebar mode

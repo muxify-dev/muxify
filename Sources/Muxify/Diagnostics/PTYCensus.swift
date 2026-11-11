@@ -76,7 +76,7 @@ struct PTYCensus: Equatable {
         return path == "/dev/ptmx"
     }
 
-    private static func name(of pid: pid_t) -> String {
+    static func name(of pid: pid_t) -> String {
         var buffer = [CChar](repeating: 0, count: 2 * Int(MAXCOMLEN) + 1)
         guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return "?" }
         return String(cString: buffer)

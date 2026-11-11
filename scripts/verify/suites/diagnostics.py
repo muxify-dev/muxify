@@ -18,6 +18,8 @@ class Diagnostics(unittest.TestCase):
         cls.config = s.root/'config/muxify/config.yaml'
         cls.config.write_text(CONFIG % 'true')
         cls.logs = s.root/'logs'
+        # A Session keeps the Sandbox's tmux server running, for the minute record's tmux group.
+        s.tmux('new-session', '-d', '-s', 'diagnostics', '/bin/sh')
         s.launch()
 
     def log_text(self):
@@ -44,6 +46,22 @@ class Diagnostics(unittest.TestCase):
         self.assertEqual('topics', fields['sidebar'], line)
         self.assertGreaterEqual(float(fields['cpu.app.peak']), float(fields['cpu.app.avg']), line)
         self.assertNotIn(' resources: ', self.log_text(), 'the app still writes the resources line')
+
+    def test_a_minute_record_gives_the_sandbox_tmux_servers_cpu_and_memory(self):
+        # The Sandbox's server is the app's only Local server, so it is the one the tmux group reads. The group
+        # counts from its second read after the first snapshot names the server, well inside the first minute.
+        server = int(self.s.tmux('display', '-p', '-t', 'diagnostics', '#{pid}'))
+        def with_tmux():
+            return [line for line in self.log_text().splitlines()
+                    if re.match(r'\S+ \S+ minute ', line) and ' cpu.tmux.avg=' in line]
+        line = wait(with_tmux, 'no minute record with cpu.tmux for server %d in %s' % (server, self.logs), 150)[0]
+        fields = dict(word.split('=', 1) for word in line.split(' ')[3:])
+        for key in ['cpu.tmux.avg', 'cpu.tmux.peak', 'mem.tmux']:
+            self.assertGreaterEqual(float(fields[key]), 0, line)
+        self.assertGreater(float(fields['mem.tmux']), 0, line)
+        self.assertGreaterEqual(float(fields['cpu.tmux.peak']), float(fields['cpu.tmux.avg']), line)
+        # The app's commands, such as its tmux control client, are read too.
+        self.assertIn('cpu.commands.avg', fields, line)
 
     def test_muxify_message_reaches_the_log(self):
         wait(lambda: 'unknown key "sessions.diagnostics_probe"' in self.log_text(), 'no Config problem in the log', 10)

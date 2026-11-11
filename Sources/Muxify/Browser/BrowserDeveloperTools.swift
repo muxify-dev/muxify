@@ -29,6 +29,16 @@ enum BrowserDeveloperTools {
         inspector.perform(selector)
     }
 
+    /// The page's WebContent process, from the private `_webProcessIdentifier`. Nil before the page has a process,
+    /// or when the OS no longer has the selector.
+    static func webProcessIdentifier(of webView: NSObject) -> pid_t? {
+        let selector = NSSelectorFromString("_webProcessIdentifier")
+        guard webView.responds(to: selector) else { return nil }
+        typealias Getter = @convention(c) (AnyObject, Selector) -> pid_t
+        let pid = unsafeBitCast(webView.method(for: selector), to: Getter.self)(webView, selector)
+        return pid > 0 ? pid : nil
+    }
+
     private static func inspector(for webView: NSObject) -> NSObject? {
         let selector = NSSelectorFromString("_inspector")
         guard webView.responds(to: selector) else { return nil }

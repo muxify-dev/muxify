@@ -2,15 +2,16 @@ import Foundation
 import MuxifyCore
 import OSLog
 
-/// Reads the app's CPU each second, and each minute writes a `minute` record: the average and peak per-second CPU,
-/// the main thread's busy share, memory, threads and open files, the user's input and what was moving. Then it
-/// copies the errors the system logged for the app. A minute over half a core also samples the process, at most
+/// Reads the app's CPU and its process groups' (`ProcessGroupsMeter`) each second, and each minute writes a `minute`
+/// record: the average and peak per-second CPU, the main thread's busy share, memory, each group's figures, threads
+/// and open files, the user's input and what was moving. Then it copies the errors the system logged for the app. A minute over half a core also samples the process, at most
 /// every ten minutes.
 enum ResourceMonitor {
     private static let queue = DispatchQueue(label: "dev.muxify.resource-monitor", qos: .utility)
     private static let busyCPU = 50.0
     private static let minuteLength: TimeInterval = 60
     private static var timer: DispatchSourceTimer?
+    private static var groups = ProcessGroupsMeter()
     private static var minute = MinuteAggregate(start: reading())
     private static var lastCPUSample = -TimeInterval.infinity
     private static var systemLogRead = Date()
@@ -19,6 +20,7 @@ enum ResourceMonitor {
         guard timer == nil else { return }
         // The first minute counts from now, and the system log from now: not from before diagnostics was off.
         queue.async {
+            groups = ProcessGroupsMeter()
             minute = MinuteAggregate(start: reading())
             systemLogRead = Date()
         }
@@ -34,7 +36,7 @@ enum ResourceMonitor {
         timer = nil
     }
 
-    /// One `getrusage` a second; the rest once a minute.
+    /// One `getrusage` and one read of the process groups a second; the rest once a minute.
     private static func tick() {
         let now = reading()
         minute.add(now)
@@ -46,6 +48,8 @@ enum ResourceMonitor {
         // What was moving is the main thread's state, read there once a minute.
         DispatchQueue.main.async {
             let moving = MainActor.assumeIsolated { Diagnostics.movingState() }
+            // The web views' processes, for the next minute's reads.
+            ProcessGroupSources.setWebProcesses(MainActor.assumeIsolated { BrowserTab.webProcesses() })
             let record = ended.record(memoryMB: memory, threads: threads, openFiles: files, input: input, moving: moving)
             Diagnostics.write(record.record)
         }
@@ -58,7 +62,9 @@ enum ResourceMonitor {
 
     private static func reading() -> MinuteAggregate.Reading {
         let uptime = ProcessInfo.processInfo.systemUptime
-        return MinuteAggregate.Reading(uptime: uptime, cpu: cpuTime(), mainAwake: FreezeWatch.mainAwake(at: uptime))
+        let sources = ProcessGroupSources.current
+        return MinuteAggregate.Reading(uptime: uptime, cpu: cpuTime(), mainAwake: FreezeWatch.mainAwake(at: uptime),
+                                       groups: groups.read(KernelProcessTable(), webkit: sources.webkit, tmux: sources.tmux))
     }
 
     /// The errors and faults the system logged for this process since the last read, each kind once.
@@ -90,8 +96,7 @@ enum ResourceMonitor {
     private static func cpuTime() -> TimeInterval {
         var usage = rusage()
         getrusage(RUSAGE_SELF, &usage)
-        func seconds(_ time: timeval) -> TimeInterval { TimeInterval(time.tv_sec) + TimeInterval(time.tv_usec) / 1_000_000 }
-        return seconds(usage.ru_utime) + seconds(usage.ru_stime)
+        return ProcessGroupSources.cpuSeconds(usage)
     }
 
     /// The memory Activity Monitor shows for the app.
