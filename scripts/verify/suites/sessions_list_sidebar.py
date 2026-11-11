@@ -34,6 +34,9 @@ reports each glide to Diagnostics, which logs it as an animation with its durati
 (`DisplayLinkProbe.didStart(glide:in:duration:from:to:)`), so the check turns Diagnostics on and reads the log. That
 the glide eases out shows in the frames: its first step is longer than its last.
 
+The check of a change of `ui.font_size` runs against both lists. It rewrites the Config while the app runs, waits for
+a closed card to grow, and reads that the open cards, the selected Window row and the Location stay as they were.
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.sessions_list_sidebar
 """
@@ -539,21 +542,47 @@ class SessionsListSidebar(unittest.TestCase):
                 self.sample('Cancel current swipe')
                 self.wait_mode('topics')
 
-    def test_the_appkit_list_draws_again_when_the_interface_font_size_changes(self):
-        """The Interface font size is one of the values that the SwiftUI Sidebar hands to the AppKit list."""
+    def test_a_change_of_the_interface_font_size_draws_the_list_again_and_keeps_its_open_cards_and_selected_row(self):
+        """The Interface font size is one of the values that the SwiftUI Sidebar hands to the AppKit list. A change of
+        `ui.font_size` in the Config applies at once, and changes nothing that is open or selected (ADR 0068)."""
+        home, other, closed = self.sessions
         def height(rs):
-            card = self.s.row('card-session-' + self.sessions[0], rs)
+            card = self.s.row('card-session-' + closed, rs)
             return rect(card)[3] if card else None
-        self.show_list('appkit')
-        self.show_mode('sessions')
-        before = height(self.wait_cards())
+        def state(rs):
+            """The open state of each card, and the selected Window rows."""
+            cards = {session: self.card_value(session, rs).split(',')[0] for session in self.sessions}
+            selected = sorted({row['accessibilityIdentifier'] for row in rs if row.get('accessibilityValue') == 'selected'
+                               and row.get('accessibilityIdentifier', '').startswith('session-window-')})
+            return cards, selected
+        designed = []
         def restore():
             self.config.write_text(CONFIG)
-            self.s.wait_rows(lambda rs: height(rs) == before, 'the cards did not go back to their height at 12')
+            if designed:
+                self.s.wait_rows(lambda rs: height(rs) == designed[0], 'the cards did not go back to their height at 12')
         self.addCleanup(restore)
-        self.config.write_text(CONFIG + 'ui:\n  font_size: 18\n')
-        self.s.wait_rows(lambda rs: (height(rs) or 0) > before + 5,
-                         lambda: 'a card is %s points high at ui.font_size: 18, and %s at 12' % (height(self.s.rows()), before))
+        for version in ('swiftui', 'appkit'):
+            with self.subTest(version=version):
+                self.show_list(version)
+                self.show_mode('sessions')
+                # Two cards open, one of them the Location's, and one closed.
+                self.stand_on(closed, opened=False)
+                self.stand_on(other, opened=True)
+                self.stand_on(home, opened=True)
+                rs = self.wait_cards()
+                shown = state(rs)
+                self.assertEqual(shown, ({home: 'expanded', other: 'expanded', closed: 'collapsed'},
+                                         ['session-window-' + self.windows[home]]), 'the list did not get ready')
+                designed[:] = [height(rs)]
+                self.config.write_text(CONFIG + 'ui:\n  font_size: 18\n')
+                rs = self.s.wait_rows(lambda rs: (height(rs) or 0) > designed[0] + 5,
+                                      lambda: 'a card is %s points high at ui.font_size: 18, and %s at 12'
+                                      % (height(self.s.rows()), designed[0]))
+                self.assertEqual(state(rs), shown, 'ui.font_size: 18 changed the open cards or the selected row')
+                self.config.write_text(CONFIG)
+                rs = self.s.wait_rows(lambda rs: height(rs) == designed[0], 'the cards did not go back to their height at 12')
+                self.assertEqual(state(rs), shown, 'ui.font_size: 12 changed the open cards or the selected row')
+                self.assertEqual(self.location(), [home], 'a change of ui.font_size moved the Location')
 
     def test_the_appkit_list_stands_alone_when_topics_are_off(self):
         def restore():

@@ -90,6 +90,27 @@ card and the text: as in `card-marks`.
 
 ## empty
 
+"No windows" and "No tmux server" stand in the same place in both pictures, in the middle of the list, on one line,
+in the font of a Window row's title and the secondary text colour. The text differs on subpixels only, in single
+pixels at the edge of a glyph.
+
+The SwiftUI list showed the text one or two letters to a line, in a column 12 points wide: its scroll view took the
+width of its content, and with no card that was the two insets. Its content now takes the width of the list, which it
+already had with any card, so the empty state there has the room of the whole list, as in the AppKit list.
+
 ## sizes-and-light
+
+At 18 and 24 the cards, the Window rows and their parts stand in the same places and match within one step of 255,
+as at 12: the titles, the Summaries, "Main working copy", the symbols and counts, and the keys at rest of the cards.
+The app icons keep their size, as paddings do. The fill of the open card at 18 and 24: as in `cards`. Its coloured
+border: as in `card-marks`.
+
+In the light theme the fill of the open card is 4 steps of 255 darker in the AppKit picture: 213, 213, 212 against
+217, 217, 217, and the tint of the Location's Window row under it 3 steps. The cause is the one in `cards`: the
+picture of the SwiftUI list has no shadow of the open card at all, also outside the card, where the AppKit picture
+has one step of it. The driver's `snapshot` leaves SwiftUI's shadow out. On a light ground the shadow shows through
+the fill of 8 % by 4 steps, and on the run's dark ground by 1. A one-off capture of the screen, of a SwiftUI card and
+a `CardFillView` card side by side, showed the same pixels for both: 216, 216, 215 in the light appearance and 72,
+75, 82 in the dark one. The closed cards, the borders, the text and the logos match within one step.
 
 ## mid-swipe

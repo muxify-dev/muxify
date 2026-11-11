@@ -15,6 +15,9 @@ final class SessionsListView: NSView {
     }
     private let scrollView = NSScrollView()
     private let document = FlippedView()
+    /// "No windows" or "No tmux server" in the middle of the list while tmux has no Window. It stands over the scroll
+    /// view, after it among the accessibility rows, as the SwiftUI list's overlay does.
+    private let emptyState = SidebarLabel()
     /// The cards from the top of the list.
     private var cards: [SessionCardView] = []
     /// The cards whose "N more…" the user pressed, by Session ID. They show all their rows from then on.
@@ -36,6 +39,11 @@ final class SessionsListView: NSView {
         scrollView.documentView = document
         scrollView.setAccessibilityIdentifier("sessions-list")
         addSubview(scrollView)
+        emptyState.ink = .secondary
+        // Wraps where it does not fit, as SwiftUI's `Text` does.
+        emptyState.wraps = true
+        emptyState.setAccessibilityRole(.staticText)
+        addSubview(emptyState)
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(clipDidMove), name: NSView.boundsDidChangeNotification,
                                                object: scrollView.contentView)
@@ -59,6 +67,13 @@ final class SessionsListView: NSView {
         // Text follows the lightness of the Ghostty theme, as the SwiftUI Sidebar's colour scheme does.
         let themed = environment.chromeTheme.flatMap { NSAppearance(named: $0.isDark ? .darkAqua : .aqua) }
         if appearance?.name != themed?.name { appearance = themed }
+        let empty = SessionsListEmptyState.text(store)
+        emptyState.text = empty ?? ""
+        emptyState.font = environment.typography.nsFont(for: SessionsListEmptyState.role)
+        emptyState.scale = environment.displayScale
+        emptyState.isHidden = empty == nil
+        emptyState.setAccessibilityElement(empty != nil)
+        emptyState.setAccessibilityValue(empty)
         show(store.sessions.map { ($0.id, content(of: $0)) })
         let location = store.selectedWindow?.sessionID
         if location != locationSessionID {
@@ -211,6 +226,10 @@ final class SessionsListView: NSView {
 
     private func layOut() {
         scrollView.frame = bounds
+        // In the middle, on the nearest pixel, where SwiftUI draws the text of its overlay.
+        let empty = emptyState.fit(width: bounds.width), scale = environment.displayScale
+        emptyState.frame = NSRect(origin: NSPoint(x: ((bounds.width - empty.width) / 2).rounded(toPixelsOf: scale),
+                                                  y: ((bounds.height - empty.height) / 2).rounded(toPixelsOf: scale)), size: empty)
         let cardWidth = max(0, bounds.width - 2 * SessionsListMetrics.horizontalInset)
         var bottom = SessionsListMetrics.verticalInset
         for (index, card) in cards.enumerated() {

@@ -449,7 +449,8 @@ class InterfaceFontSize(unittest.TestCase):
 
     def test_at_18_the_header_and_its_session_name_grow_by_half_and_its_buttons_fit_in_it(self):
         self.addCleanup(self.write_config, '')
-        window = self.windows['fs-size'][0]
+        # The header shows its Git button only for a folder in a repository.
+        window = self.git_window('fs-header', [], window_name=WINDOW_NAME)
         selector = 'header-window-' + window
         buttons = [selector] + HEADER_BUTTONS
         keys = [HEADER, 'header-session-name'] + buttons
@@ -458,7 +459,7 @@ class InterfaceFontSize(unittest.TestCase):
         for size in [12, 18]:
             _, rs = self.heights(keys, size, 'the header does not show the Session name, its Window and its buttons at %s')
             frames[size] = {key: bounds(self.s.row(key, rs)) for key in keys}
-            self.assertEqual(self.s.row('header-session-name', rs).get('accessibilityValue'), 'fs-size')
+            self.assertEqual(self.s.row('header-session-name', rs).get('accessibilityValue'), 'fs-header')
             self.assertFalse(self.s.has('header-window-menu', rs),
                              'the Window list became a dropdown at %s, though its one Window fits inline' % size)
             self.assertEqual(self.s.row(selector, rs).get('accessibilityValue'), 'selected')
@@ -565,8 +566,9 @@ class InterfaceFontSize(unittest.TestCase):
         rs = self.set_size(18)
         self.assertEqual(state(rs), closed, 'ui.font_size: 18 opened a closed card or changed the Location')
 
-    def git_window(self, name, files):
-        """The Window of a new Session in a new repository with one commit and the untracked `files`."""
+    def git_window(self, name, files, window_name=None):
+        """The Window of a new Session in a new repository with one commit and the untracked `files`, named
+        `window_name` when one is given."""
         s = self.s
         repo = s.root/'projects'/name
         repo.mkdir(parents=True)
@@ -575,7 +577,8 @@ class InterfaceFontSize(unittest.TestCase):
             subprocess.run(['git', '-C', str(repo), *args], env=s.env, check=True, capture_output=True)
         for file in files:
             (repo/file).write_text('one\n')
-        sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, '-c', str(repo), SHELL)
+        sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, *(['-n', window_name] if window_name else []),
+                     '-c', str(repo), SHELL)
         self.addCleanup(s.tmux_ok, 'kill-session', '-t', sid)
         return s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
 

@@ -354,4 +354,103 @@ import XCTest
             XCTAssertNil(child("hint-window-@1", of: card), "a closed card shows the Hint of a Window row")
         }
     }
+
+    // MARK: The empty state, the Sidebar font family and the theme
+
+    /// The labels under `view` that show `text`.
+    private func labels(_ text: String, in view: NSView) -> [SidebarLabel] {
+        ((view as? SidebarLabel).flatMap { $0.text == text ? [$0] : nil } ?? []) + view.subviews.flatMap { labels(text, in: $0) }
+    }
+
+    private func rgb(_ color: CGColor?) throws -> [CGFloat] {
+        let color = try XCTUnwrap(color?.converted(to: CGColorSpace(name: CGColorSpace.sRGB)!, intent: .defaultIntent, options: nil))
+        return (color.components ?? []).prefix(3).map { ($0 * 255).rounded() }
+    }
+
+    func testWithNoWindowTheListSaysSoInItsMiddleInTheFontOfAWindowRowsTitle() throws {
+        let (list, _, window) = list()
+        defer { window.contentView = nil }
+        var environment = SessionsListEnvironment()
+        environment.typography = SidebarTypography(fontSize: InterfaceFontSize(18))
+        list.environment = environment
+
+        let label = try XCTUnwrap(labels("No windows", in: list).first, "a store with no Window does not say so")
+        XCTAssertEqual(label.font, environment.typography.nsFont(for: .title))
+        XCTAssertEqual(label.ink, .secondary)
+        XCTAssertEqual(label.accessibilityRole(), .staticText)
+        XCTAssertEqual(label.accessibilityValue() as? String, "No windows")
+        XCTAssertEqual(label.frame.midX, 130, accuracy: 0.5)
+        XCTAssertEqual(label.frame.midY, 200, accuracy: 0.5)
+        XCTAssertEqual(label.frame.height, label.lineHeight, "the text does not show on one line")
+    }
+
+    func testTheTitlesOfACardAndOfItsWindowRowsFollowTheSidebarFontFamily() throws {
+        let family = "Helvetica Neue"
+        var environment = SessionsListEnvironment()
+        environment.typography = SidebarTypography(fontSize: InterfaceFontSize(18), fontFamily: family)
+        var row = windowRow
+        row.isSelected = true
+        let card = card(SessionCardContent(title: "atlas", isOpen: true, holdsSelection: true, rows: [.window(row)]),
+                        environment: environment)
+        card.frame = NSRect(x: 0, y: 0, width: 248, height: card.height(width: 248))
+
+        for (text, role) in [("atlas", SidebarTypography.Role.session), ("editor", .title)] {
+            let label = try XCTUnwrap(labels(text, in: card).first, text)
+            XCTAssertEqual(label.font.familyName, family, text)
+            // The font of the SwiftUI list's text: `font(for:)` looks the family up as `nsFont(for:)` does, for the
+            // nearest weight it has.
+            XCTAssertEqual(label.font, environment.typography.nsFont(for: role), text)
+            XCTAssertEqual(label.font.pointSize, environment.typography.size(for: role), text)
+        }
+    }
+
+    func testTheListTakesTheLightnessOfTheGhosttyThemeAndFollowsAChange() throws {
+        let (list, _, window) = list()
+        defer { window.contentView = nil }
+        window.appearance = NSAppearance(named: .aqua)
+        let dark = TerminalTheme(background: NSColor(srgbRed: 0.1, green: 0.1, blue: 0.12, alpha: 1), foreground: .white)
+        let light = TerminalTheme(background: NSColor(srgbRed: 0.96, green: 0.96, blue: 0.95, alpha: 1), foreground: .black)
+        let label = try XCTUnwrap(labels("No windows", in: list).first)
+        var environment = SessionsListEnvironment()
+        for (theme, isDark) in [(dark, true), (light, false), (dark, true)] {
+            environment.chromeTheme = theme
+            list.environment = environment
+            XCTAssertEqual(label.effectiveAppearance.isDark, isDark, "the list does not follow a change to a \(isDark ? "dark" : "light") theme")
+        }
+        // Without a theme, the list takes the system's appearance, which the App Window has.
+        environment.chromeTheme = nil
+        list.environment = environment
+        XCTAssertFalse(label.effectiveAppearance.isDark)
+        window.appearance = NSAppearance(named: .darkAqua)
+        XCTAssertTrue(label.effectiveAppearance.isDark, "the list does not follow the system appearance")
+    }
+
+    func testTheFillAndTheAgentColoursOfACardFollowAChangeOfTheAppearance() throws {
+        let (list, _, window) = list()
+        defer { window.contentView = nil }
+        var environment = SessionsListEnvironment()
+        environment.agentColors.working = .pair(light: .rgb(red: 255, green: 0, blue: 0), dark: .rgb(red: 0, green: 0, blue: 255))
+        list.environment = environment
+        list.show([("$1", SessionCardContent(title: "atlas", isOpen: true, mark: .agent(.working)))])
+        func find(_ view: NSView) -> SessionCardView? { (view as? SessionCardView) ?? view.subviews.lazy.compactMap(find).first }
+        let card = try XCTUnwrap(find(list))
+        let fill = try XCTUnwrap(card.subviews.compactMap { $0 as? CardFillView }.first?.layer?.sublayers?.first)
+        let spine = try XCTUnwrap(card.subviews.compactMap { $0 as? CardSpineView }.first?.layer?.sublayers?.first)
+
+        window.appearance = NSAppearance(named: .aqua)
+        XCTAssertEqual(try rgb(spine.backgroundColor), [255, 0, 0], "the light appearance shows the light colour of the pair")
+        XCTAssertEqual(try rgb(fill.backgroundColor), [0, 0, 0], "the light appearance fills the card with dark text's colour")
+        window.appearance = NSAppearance(named: .darkAqua)
+        XCTAssertEqual(try rgb(spine.backgroundColor), [0, 0, 255], "the dark appearance shows the dark colour of the pair")
+        XCTAssertEqual(try rgb(fill.backgroundColor), [255, 255, 255], "the dark appearance fills the card with light text's colour")
+    }
+}
+
+extension TerminalTheme {
+    /// A theme of two colours, as a Ghostty config with only `background` and `foreground` gives it.
+    init(background: NSColor, foreground: NSColor) {
+        self.background = background
+        self.foreground = foreground
+        ansi = []
+    }
 }

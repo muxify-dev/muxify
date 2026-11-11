@@ -1162,6 +1162,9 @@ private struct SessionsSection: View {
                             }
                         }
                     }
+                    // As wide as the list also with no card: a scroll view takes the width of its content, and with
+                    // none it was 12 points wide, so the empty state wrapped after each letter.
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, SessionsListMetrics.horizontalInset)
                     .padding(.vertical, SessionsListMetrics.verticalInset)
                 }
@@ -1176,9 +1179,9 @@ private struct SessionsSection: View {
             }
         }
         .overlay {
-            if store.windows.isEmpty {
-                Text(store.serverRunning ? "No windows" : "No tmux server")
-                    .font(typography.font(for: .title))
+            if let empty = SessionsListEmptyState.text(store) {
+                Text(empty)
+                    .font(typography.font(for: SessionsListEmptyState.role))
                     .foregroundStyle(.secondary)
             }
         }

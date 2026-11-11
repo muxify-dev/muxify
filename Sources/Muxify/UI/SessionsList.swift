@@ -40,6 +40,18 @@ struct SessionsListEnvironment: Equatable {
     var displayScale: CGFloat = 2
 }
 
+/// What the Sessions list says in its middle while tmux has no Window, for both versions of the list (ADR 0074): in the
+/// font of a Window row's title, in the secondary text colour.
+@MainActor enum SessionsListEmptyState {
+    static let role = SidebarTypography.Role.title
+
+    /// "No windows" while the tmux server runs, "No tmux server" when it does not. Nil while tmux has a Window.
+    static func text(_ store: WorkspaceStore) -> String? {
+        guard store.windows.isEmpty else { return nil }
+        return store.serverRunning ? "No windows" : "No tmux server"
+    }
+}
+
 /// A press on the header of a Session card, for both versions of the Sessions list (ADR 0074). As on a Topic card: on
 /// the card of the Location's Session it opens or closes the card; on another card it goes to that Session, whose
 /// card then opens.
