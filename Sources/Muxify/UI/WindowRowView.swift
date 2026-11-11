@@ -24,8 +24,8 @@ struct WindowRowContent: Equatable {
 /// label shows the full title when the row cuts it off, and the Window's place and path, as `tooltips` says.
 ///
 /// The row is no accessibility element. As in SwiftUI, each of its parts is one, with the row's identifier and value,
-/// and the card lists them among its children. A click on the row goes to its Window, also on the first click while
-/// Muxify is not the front app.
+/// and the card lists them among its children. A click on the row goes to its Window, and a press that moves drags it
+/// through its card's `SessionCardDrag`, also on the first click while Muxify is not the front app.
 final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
     let windowID: String
     /// The row's identifier, which each of its parts has.
@@ -48,6 +48,15 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
     private var arranged: (width: CGFloat, layout: Layout)?
     /// The row's context menu, as the list reads it for the Window.
     var menuItems: () -> SidebarMenu? = { nil }
+    /// The drag of its card's Window rows, which a press on the row starts, and through which a click goes to the
+    /// Window. Without one, a click goes to the Window where the mouse comes up.
+    weak var drag: SessionCardDrag?
+    /// A press that moves lifts the row: the pointer is the open hand over it.
+    var isDraggable = false {
+        didSet {
+            if isDraggable != oldValue { window?.invalidateCursorRects(for: self) }
+        }
+    }
 
     /// Where the row's parts stand in a row of one width, from the left, and the help of each badge that has one.
     private struct Layout {
@@ -278,6 +287,25 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
                 return symbol
             }
         }
+    }
+
+    // MARK: The press and the drag
+
+    override func resetCursorRects() {
+        if isDraggable { addCursorRect(bounds, cursor: .openHand) }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        drag?.press(windowID, at: event.locationInWindow)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        drag?.drag(windowID, to: event.locationInWindow)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let drag else { return super.mouseUp(with: event) }
+        drag.release(windowID, onTap: onPress)
     }
 
     // MARK: The menu

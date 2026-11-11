@@ -35,6 +35,8 @@ struct PaneRowContent: Equatable {
     var accessibilityValue = ""
     /// The detail line of the hover label: `TopicsModel.PaneRow.hoverDetail`.
     var hoverDetail = ""
+    /// The Pane's Window, under whose row a row under its Window row stands, and moves with it in a drag.
+    var windowID = ""
 }
 
 /// A Pane row of the AppKit Sessions list (ADR 0074): `PaneRow` in SwiftUI. From the left: the place of the Agent mark,

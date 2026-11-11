@@ -132,6 +132,8 @@ final class SessionsListView: NSView {
         card.onPress = { [weak self] in self?.press(sessionID) }
         // As the tap of the SwiftUI row's drag handle.
         card.onSelectWindow = { [weak self] window in self?.store.windowRowDrag.select(window) }
+        // As the drop of the SwiftUI row's drag handle.
+        card.onMoveWindow = { [weak self] window, placement in self?.store.windowRowDrag.move(window, placement) }
         card.onSelectPane = { [weak self] paneID in self?.selectPane(paneID, of: sessionID) }
         card.onShowAllRows = { [weak self] in self?.showAllRows(of: sessionID) }
         card.menuItems = { [weak self] in self?.menu(of: sessionID, SessionsListMenus.card) }
@@ -158,7 +160,7 @@ final class SessionsListView: NSView {
                                   isGuest: isLocked && store.topicConfig.inPlay != nil,
                                   hasBell: session.windows.contains(where: \.hasBell),
                                   hint: CardHint(.session(session.id), in: environment.hints),
-                                  rows: rows.shown, moreCount: rows.held)
+                                  rows: rows.shown, moreCount: rows.held, movesWindows: store.windowRowDrag.isEnabled)
     }
 
     /// The rows that the Session's open card lists, in tmux's order, and the number it holds back, read from the models
@@ -183,7 +185,8 @@ final class SessionsListView: NSView {
             return .pane(PaneRowContent(paneID: row.pane.id, text: store.sidebarText(.pane, context: store.sidebarFormatContexts.panes[row.pane.id]),
                                         isActive: row.pane.isActive, isUnderWindowRow: row.isUnderWindowRow,
                                         showsLocation: row.showsLocation(selectedWindowID: store.selectedWindowID), mark: mark,
-                                        accessibilityValue: row.accessibilityValue(mark: mark), hoverDetail: row.hoverDetail))
+                                        accessibilityValue: row.accessibilityValue(mark: mark), hoverDetail: row.hoverDetail,
+                                        windowID: row.window.id))
         }
     }
 

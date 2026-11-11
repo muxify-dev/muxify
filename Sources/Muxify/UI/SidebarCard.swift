@@ -627,7 +627,7 @@ struct CardList<Heading: View, Row: View>: View {
                             }
                         }
                     }
-                    .listDragItem(window.id, drag: windowDrag, shown: windowIDs, cornerRadius: 6)
+                    .listDragItem(window.id, drag: windowDrag, shown: windowIDs, cornerRadius: WindowRowMetrics.cornerRadius)
                 } else {
                     ForEach(unit.items) { markedRow($0) }
                 }

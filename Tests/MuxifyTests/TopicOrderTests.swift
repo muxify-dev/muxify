@@ -166,6 +166,35 @@ final class TopicOrderTests: XCTestCase {
         XCTAssertEqual(layout.bounded(-30, of: "b", in: order, footroom: -15), -30, "it still goes up")
     }
 
+    func testALiftedCardFollowsWithinItsBoundsAndLandsWithThePointerKeptOnIt() {
+        // a at 0–40, b at 46–146, c at 152–192.
+        let layout = StackLayout(heights: [.item("a"): 40, .item("b"): 100, .item("c"): 40], spacing: 6)
+        let order: [StackSlot<String>] = [.item("a"), .item("b"), .item("c")]
+        let near = layout.follow("a", moved: 50, grab: 20, in: order)
+        XCTAssertEqual(near.translation, 50)
+        XCTAssertNil(near.landing, "the pointer at 70 has not passed b's middle at 96")
+        let past = layout.follow("a", moved: 80, grab: 20, in: order)
+        XCTAssertEqual(past.landing, .place(.after("b")), "the pointer at 100 passed b's middle")
+        let far = layout.follow("a", moved: 1000, grab: 20, in: order)
+        XCTAssertEqual(far.translation, 152, "a stops at the bottom of c")
+        XCTAssertEqual(far.landing, .place(.after("c")), "the pointer, kept on a, passed c's middle")
+        let held = layout.follow("c", moved: -1000, grab: 20, in: order, headroom: 70)
+        XCTAssertEqual(held.translation, -70, "c stops at the top of the view")
+        XCTAssertEqual(held.landing, .place(.before("b")),
+                       "the pointer, kept on c's top at 82, is above b's middle at 96, not on a out of view")
+    }
+
+    func testTheItemsShiftToTheirPlacesInTheNewOrder() {
+        let layout = StackLayout(heights: [.item("a"): 40, .item("b"): 100, .item("c"): 40], spacing: 6)
+        let order: [StackSlot<String>] = [.item("a"), .item("b"), .item("c")]
+        XCTAssertEqual(layout.shift(of: .item("b"), moving: "a", to: .after("b"), in: order), -46, "b moves up into a's place")
+        XCTAssertEqual(layout.shift(of: .item("a"), moving: "a", to: .after("b"), in: order), 106, "a lands under b")
+        XCTAssertEqual(layout.shift(of: .item("c"), moving: "a", to: .after("b"), in: order), 0, "c stays")
+        XCTAssertEqual(ListLift.room(visibleTop: 30, footroom: 50, height: 100).headroom, 30 - 0.03 * 0.3 * 100, accuracy: 0.0001,
+                       "grown by the lift, the item's top stands higher than its place")
+        XCTAssertEqual(ListLift.room(visibleTop: 30, footroom: 50, height: 100, scale: 1).footroom, 50, "an item that does not grow")
+    }
+
     func testTheCardsAfterTheLastFixedSlotStandWhereTheirAreaScrolledThem() {
         var layout = StackLayout(heights: [.item("a"): 40, .item("b"): 40, .fixed("line"): 20, .item("c"): 40, .item("d"): 40],
                                  spacing: 6)

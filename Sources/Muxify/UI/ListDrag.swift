@@ -132,6 +132,23 @@ struct StackLayout<ID: Hashable> {
         high = max(low, min(high, max(footroom, 0)))
         return min(max(translation, low), high)
     }
+
+    /// Where the lifted `id` shows and where it lands, with the pointer `moved` down from where it pressed the item,
+    /// `grab` below the item's top: `bounded` holds how far the item moves, and the pointer, kept on the item where
+    /// `bounded` stops it, gives the landing. So the item reaches no item out of view, and still crosses a divider
+    /// that ends the list.
+    func follow(_ id: ID, moved: CGFloat, grab: CGFloat, in order: [StackSlot<ID>], headroom: CGFloat = .infinity,
+                footroom: CGFloat = .infinity, dividers: [String] = []) -> (translation: CGFloat, landing: DropLanding<ID>?) {
+        let translation = bounded(moved, of: id, in: order, headroom: headroom, footroom: footroom, dividers: dividers)
+        let place = top(of: .item(id), in: order), drawn = place + translation
+        let probe = min(max(place + grab + moved, drawn), drawn + height(.item(id)))
+        return (translation, landing(of: id, at: probe, in: order, dividers: dividers))
+    }
+
+    /// How far `slot` moves from its place in `shown` to its place once `id` moves to `placement`.
+    func shift(of slot: StackSlot<ID>, moving id: ID, to placement: DropPlacement<ID>, in shown: [StackSlot<ID>]) -> CGFloat {
+        top(of: slot, in: placement.placing(id, in: shown)) - top(of: slot, in: shown)
+    }
 }
 
 /// Where an item stands in its scroll view: its height, how far its top is below the visible top (or below a header
@@ -141,6 +158,60 @@ struct ItemPlace: Equatable {
     var visibleTop: CGFloat
     var footroom: CGFloat
     var windowTop: CGFloat
+}
+
+/// The look and the motion of an item that a list's drag presses and lifts, for the SwiftUI drag and the AppKit drag
+/// of a Window row (ADR 0074), so the two cannot drift.
+enum ListLift {
+    /// A spring as SwiftUI's `spring(duration:bounce:)` names it.
+    struct Spring: Equatable {
+        let duration: Double
+        let bounce: Double
+
+        var animation: Animation { .spring(duration: duration, bounce: bounce) }
+    }
+
+    /// How far the pointer moves before a press is a drag; a press that moves less is still a click.
+    static let slop: CGFloat = 4
+    /// A pressed item sinks to this, with ease-out over `pressDuration`, until it lifts or the press ends.
+    static let pressScale: CGFloat = 0.98
+    static let pressDuration = 0.12
+    /// A lifted item grows by this much around `anchor`, a point of its size, on the spring `lift`.
+    static let scale: CGFloat = 1.03
+    static let anchor = CGPoint(x: 0.5, y: 0.3)
+    static let lift = Spring(duration: 0.25, bounce: 0.3)
+    /// The items make room for the placeholder, and a dropped item glides into it, on this spring.
+    static let land = Spring(duration: 0.3, bounce: 0.15)
+    /// A press that moved on an item that cannot move ends on this spring.
+    static let cancel = Spring(duration: 0.25, bounce: 0)
+    /// A lifted item goes back to its place on this spring: when its view goes away, or when the list did not show
+    /// its new order in time.
+    static let back = Spring(duration: 0.3, bounce: 0)
+    /// How long a dropped item waits for the list to show the new order before the list goes back to the order it shows.
+    static let settleLimit: Duration = .seconds(3)
+
+    /// The shadow of a lifted item: black at this opacity, with this radius, this far below the item.
+    static let shadowOpacity = 0.4
+    static let shadowRadius: CGFloat = 14
+    static let shadowDrop: CGFloat = 10
+    /// The plate a pressed or lifted item stands on: the chrome's background under the text colour at
+    /// `plateFillOpacity`, in a border of the text colour at `plateBorderOpacity`.
+    static let plateFillOpacity = 0.1
+    static let plateBorderOpacity = 0.14
+    static let plateBorderWidth: CGFloat = 1
+    /// The placeholder where a lifted item would land: the accent colour at `slotFillOpacity`, in a dashed border of
+    /// it at `slotBorderOpacity`.
+    static let slotFillOpacity = 0.08
+    static let slotBorderOpacity = 0.55
+    static let slotBorderWidth: CGFloat = 1.5
+    static let slotDash: [CGFloat] = [5, 4]
+
+    /// How far a lifted item may move up before its top leaves the visible part of its scroll view, and down before
+    /// its bottom does, from how far its top is below the visible top and its bottom above the visible bottom. Grown by
+    /// `scale` around `anchor`, its top stands a little higher than its place and its bottom a little lower.
+    static func room(visibleTop: CGFloat, footroom: CGFloat, height: CGFloat, scale: CGFloat = scale) -> (headroom: CGFloat, footroom: CGFloat) {
+        (visibleTop - (scale - 1) * anchor.y * height, footroom - (scale - 1) * (1 - anchor.y) * height)
+    }
 }
 
 /// The drag of a list's items. A press that moves a few points lifts the item at once, and a press that lets go before
@@ -163,12 +234,12 @@ final class ListDrag<ID: Hashable> {
     }
 
     /// How long a dropped item waits for the list to show the new order before the list goes back to the order it shows.
-    private static var settleLimit: Duration { .seconds(3) }
+    private static var settleLimit: Duration { ListLift.settleLimit }
     /// A lifted item grows by this much around this point.
-    static var liftScale: CGFloat { 1.03 }
-    static var liftAnchor: UnitPoint { UnitPoint(x: 0.5, y: 0.3) }
+    static var liftScale: CGFloat { ListLift.scale }
+    static var liftAnchor: UnitPoint { UnitPoint(x: ListLift.anchor.x, y: ListLift.anchor.y) }
     /// A pressed item sinks to this until it lifts or the press ends, so the handle shows it is ready to drag.
-    static var pressScale: CGFloat { 0.98 }
+    static var pressScale: CGFloat { ListLift.pressScale }
     /// A lifted item over a trade target shrinks to this as it steps aside.
     static var stepAsideScale: CGFloat { 0.94 }
     static var tradeDuration: Double { 0.56 }
@@ -241,7 +312,7 @@ final class ListDrag<ID: Hashable> {
     /// that the dragged item's placement makes. Zero once the stack shows that order.
     func shift(of slot: StackSlot<ID>, in shown: [StackSlot<ID>]) -> CGFloat {
         guard let dragged, let placement, shown.contains(.item(dragged)) else { return 0 }
-        return layout.top(of: slot, in: placement.placing(dragged, in: shown)) - layout.top(of: slot, in: shown)
+        return layout.shift(of: slot, moving: dragged, to: placement, in: shown)
     }
 
     /// How far below its own place the trade target shows the item that would land in the lifted item's place.
@@ -339,16 +410,16 @@ final class ListDrag<ID: Hashable> {
         grab = min(max(pressedAt - (places[id]?.windowTop ?? pressedAt), 0), layout.height(.item(id)))
         fitBounds(of: id)
         translation = 0
-        withAnimation(.spring(duration: 0.25, bounce: 0.3)) { phase = .lifted(id) }
+        withAnimation(ListLift.lift.animation) { phase = .lifted(id) }
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         NSCursor.closedHand.push()
     }
 
     /// Grown by the lift, the item's top stands a little higher than its place and its bottom a little lower.
     private func fitBounds(of id: ID) {
-        let place = places[id], height = layout.height(.item(id))
-        headroom = (place?.visibleTop ?? .infinity) - (Self.liftScale - 1) * Self.liftAnchor.y * height
-        footroom = (place?.footroom ?? .infinity) - (Self.liftScale - 1) * (1 - Self.liftAnchor.y) * height
+        let place = places[id]
+        (headroom, footroom) = ListLift.room(visibleTop: place?.visibleTop ?? .infinity, footroom: place?.footroom ?? .infinity,
+                                             height: layout.height(.item(id)))
     }
 
     /// The lifted item moved `translation` down with the pointer, which is at `pointer` in the window.
@@ -361,15 +432,11 @@ final class ListDrag<ID: Hashable> {
 
     private func land(_ id: ID) {
         updateLayout()
-        self.translation = layout.bounded(rawTranslation + placeShift, of: id, in: order, headroom: headroom,
-                                          footroom: footroom, dividers: dividers)
-        // The pointer, kept on the item where `bounded` stops it: so it reaches no item out of view, and still crosses
-        // a divider that ends the list.
-        let place = layout.top(of: .item(id), in: order), drawn = place + self.translation
-        let probe = min(max(place + grab + rawTranslation + placeShift, drawn), drawn + layout.height(.item(id)))
-        let landing = layout.landing(of: id, at: probe, in: order, dividers: dividers)
+        let (translation, landing) = layout.follow(id, moved: rawTranslation + placeShift, grab: grab, in: order,
+                                                   headroom: headroom, footroom: footroom, dividers: dividers)
+        self.translation = translation
         guard landing != self.landing else { return }
-        withAnimation(.spring(duration: 0.3, bounce: 0.15)) { self.landing = landing }
+        withAnimation(ListLift.land.animation) { self.landing = landing }
         if landing != .across(trade: nil) {
             NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
         }
@@ -393,7 +460,7 @@ final class ListDrag<ID: Hashable> {
     func cancel() {
         timer?.cancel()
         pointer = nil
-        withAnimation(.spring(duration: 0.25)) { phase = .idle }
+        withAnimation(ListLift.cancel.animation) { phase = .idle }
     }
 
     /// The press on `id` ended: a click if the item did not lift. A lifted item glides to where it lands, and `onDrop`
@@ -414,7 +481,7 @@ final class ListDrag<ID: Hashable> {
             }
             let placement = placement
             if placement == nil { landing = nil }
-            withAnimation(.spring(duration: 0.3, bounce: 0.15)) {
+            withAnimation(ListLift.land.animation) {
                 phase = .settling(id)
             } completion: { [weak self] in
                 guard let self, phase == .settling(id) else { return }
@@ -452,7 +519,7 @@ final class ListDrag<ID: Hashable> {
         timer = Task { [weak self] in
             try? await Task.sleep(for: Self.settleLimit)
             guard let self, !Task.isCancelled, dragged == id else { return }
-            withAnimation(.spring(duration: 0.3)) {
+            withAnimation(ListLift.back.animation) {
                 self.phase = .idle
                 self.landing = nil
                 self.tradeProgress = 0
@@ -468,7 +535,7 @@ final class ListDrag<ID: Hashable> {
         case .lifted(id):
             NSCursor.pop()
             pointer = nil
-            withAnimation(.spring(duration: 0.3)) {
+            withAnimation(ListLift.back.animation) {
                 phase = .idle
                 landing = nil
             }
@@ -491,7 +558,7 @@ private struct ListDragHandle<ID: Hashable>: ViewModifier {
     @GestureState private var isPressed = false
 
     /// How far the pointer moves before the press is a drag; a press that moves less is still a click.
-    private static var slop: CGFloat { 4 }
+    private static var slop: CGFloat { ListLift.slop }
 
     func body(content: Content) -> some View {
         // Before the gestures inside, such as a Window row's Button, which then keeps only its accessibility press.
@@ -587,11 +654,12 @@ private struct ListDragItem<ID: Hashable>: ViewModifier {
             .animation(.spring(duration: 0.2), value: isTarget)
             .scaleEffect(drag.scale(of: id, reducesMotion: reduceMotion), anchor: ListDrag<ID>.liftAnchor)
             .opacity(stepsAside ? 0.9 : 1)
-            .shadow(color: .black.opacity(isRaised ? 0.4 : 0), radius: isRaised ? 14 : 0, y: isRaised ? 10 : 0)
-            .animation(.spring(duration: 0.25, bounce: 0.3), value: isLifted)
+            .shadow(color: .black.opacity(isRaised ? ListLift.shadowOpacity : 0), radius: isRaised ? ListLift.shadowRadius : 0,
+                    y: isRaised ? ListLift.shadowDrop : 0)
+            .animation(ListLift.lift.animation, value: isLifted)
             .animation(.spring(duration: 0.25), value: stepsAside)
             // Outside the lift's spring, which wins when the press becomes a lift.
-            .animation(.easeOut(duration: 0.12), value: isPressed)
+            .animation(.easeOut(duration: ListLift.pressDuration), value: isPressed)
             .offset(x: stepsAside ? 34 : 0)
             .offset(y: isLifted ? drag.translation : shift)
             // The lifted item stays under the pointer while the others slide; let go, it glides.
@@ -624,10 +692,10 @@ private struct ListDragItem<ID: Hashable>: ViewModifier {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         return ZStack {
             Color.clear.chrome(theme: chromeTheme, material: .sidebar)
-            Color.primary.opacity(0.1)
+            Color.primary.opacity(ListLift.plateFillOpacity)
         }
         .clipShape(shape)
-        .overlay { shape.strokeBorder(Color.primary.opacity(0.14), lineWidth: 1) }
+        .overlay { shape.strokeBorder(Color.primary.opacity(ListLift.plateBorderOpacity), lineWidth: ListLift.plateBorderWidth) }
     }
 }
 
@@ -693,8 +761,9 @@ private struct DropSlot: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         let color = trades ? Color.tradeMark : Color.accentColor
-        shape.fill(color.opacity(0.08))
-            .overlay { shape.strokeBorder(color.opacity(0.55), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])) }
+        shape.fill(color.opacity(ListLift.slotFillOpacity))
+            .overlay { shape.strokeBorder(color.opacity(ListLift.slotBorderOpacity),
+                                          style: StrokeStyle(lineWidth: ListLift.slotBorderWidth, dash: ListLift.slotDash)) }
             .allowsHitTesting(false)
     }
 }
