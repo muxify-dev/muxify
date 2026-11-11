@@ -147,13 +147,13 @@ public struct MinuteRecord: Equatable, Sendable {
 
     public var record: DiagnosticsRecord {
         var fields: [(String, String)] = [
-            ("cpu.app.avg", Self.decimal(cpuAverage)), ("cpu.app.peak", Self.decimal(cpuPeak)),
-            ("main.busy", Self.decimal(mainBusy)), ("mem.app", Self.megabytes(memoryMB)),
+            ("cpu.app.avg", DiagnosticsRecord.decimal(cpuAverage)), ("cpu.app.peak", DiagnosticsRecord.decimal(cpuPeak)),
+            ("main.busy", DiagnosticsRecord.decimal(mainBusy)), ("mem.app", Self.megabytes(memoryMB)),
         ]
         for group in ProcessGroup.allCases {
             guard let figures = groups[group] else { continue }
-            fields += [("cpu.\(group.rawValue).avg", Self.decimal(figures.cpuAverage)),
-                       ("cpu.\(group.rawValue).peak", Self.decimal(figures.cpuPeak)),
+            fields += [("cpu.\(group.rawValue).avg", DiagnosticsRecord.decimal(figures.cpuAverage)),
+                       ("cpu.\(group.rawValue).peak", DiagnosticsRecord.decimal(figures.cpuPeak)),
                        ("mem.\(group.rawValue)", Self.megabytes(figures.memoryMB))]
         }
         fields += [("threads", String(threads)), ("open_files", String(openFiles)), ("input", input.value), ("bodies", bodies.value)]
@@ -182,7 +182,6 @@ public struct MinuteRecord: Equatable, Sendable {
                   openFiles: files, input: input, bodies: bodies, moving: moving)
     }
 
-    private static func decimal(_ value: Double) -> String { String(format: "%.1f", value) }
     private static func megabytes(_ value: Double) -> String { String(format: "%.0f", value) }
 }
 

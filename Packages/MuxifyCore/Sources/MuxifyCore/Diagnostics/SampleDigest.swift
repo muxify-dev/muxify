@@ -82,12 +82,12 @@ public struct SampleDigest: Equatable, Sendable {
         func pairs(_ shares: [Share]) -> String {
             shares.isEmpty ? "none" : DiagnosticsRecord.pairs(shares.map { share in
                 let name = share.library == nil ? Self.short(share.name) : "\(Self.short(share.name))@\(share.library!)"
-                return (name, Self.decimal(share.percent))
+                return (name, DiagnosticsRecord.decimal(share.percent))
             })
         }
         return [
-            DiagnosticsRecord(.digest, [("sample", file), ("samples", String(samples)), ("busy", Self.decimal(busy)),
-                                        ("libraries", pairs(libraries))]),
+            DiagnosticsRecord(.digest, [("sample", file), ("samples", String(samples)),
+                                        ("busy", DiagnosticsRecord.decimal(busy)), ("libraries", pairs(libraries))]),
             DiagnosticsRecord(.digest, [("sample", file), ("symbols", pairs(symbols))]),
             DiagnosticsRecord(.digest, [("sample", file), ("frames", pairs(frames))]),
         ]
@@ -236,8 +236,6 @@ public struct SampleDigest: Equatable, Sendable {
         }
         return nil
     }
-
-    private static func decimal(_ value: Double) -> String { String(format: "%.1f", value) }
 }
 
 /// Which raw sample files the Diagnostics folder keeps: the `freeze-`, `burst-` and leftover `cpu-` files of the

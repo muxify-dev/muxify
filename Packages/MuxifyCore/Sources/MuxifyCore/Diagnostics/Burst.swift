@@ -74,9 +74,9 @@ public struct BurstRecord: Equatable, Sendable {
 
     public var record: DiagnosticsRecord {
         var fields: [(String, String)] = [
-            ("start", Self.startFormatter().string(from: start)), ("length", Self.decimal(length)),
-            ("cpu.avg", Self.decimal(cpuAverage)), ("cpu.peak", Self.decimal(cpuPeak)),
-            ("main.busy.peak", Self.decimal(mainBusyPeak)), ("input", input.value), ("bodies", bodies.value),
+            ("start", Self.startFormatter().string(from: start)), ("length", DiagnosticsRecord.decimal(length)),
+            ("cpu.avg", DiagnosticsRecord.decimal(cpuAverage)), ("cpu.peak", DiagnosticsRecord.decimal(cpuPeak)),
+            ("main.busy.peak", DiagnosticsRecord.decimal(mainBusyPeak)), ("input", input.value), ("bodies", bodies.value),
         ]
         fields += moving.fields
         fields.append(("samples", samples.isEmpty ? "none" : DiagnosticsRecord.list(samples)))
@@ -104,8 +104,6 @@ public struct BurstRecord: Equatable, Sendable {
         formatter.dateFormat = startFormat
         return formatter
     }
-
-    private static func decimal(_ value: Double) -> String { String(format: "%.1f", value) }
 }
 
 /// Finds each Burst in the app's per-second CPU. A Burst starts when the app is at or over `cpuThreshold` for

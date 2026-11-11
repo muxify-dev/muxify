@@ -75,6 +75,9 @@ public struct DiagnosticsRecord: Equatable, Sendable {
         return (date, String(parts[2]))
     }
 
+    /// A figure with one decimal, as the records write CPU, lengths and shares: `42.5`.
+    static func decimal(_ value: Double) -> String { String(format: "%.1f", value) }
+
     // MARK: Lists
 
     /// `a,b,c`.
