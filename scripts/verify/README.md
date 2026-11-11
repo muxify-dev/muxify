@@ -79,7 +79,8 @@ When a driver command times out, read `logs/app.log` and `driver/stall-<n>.txt` 
 Checks run while the user works. A check must not take the keyboard focus, the mouse or the front position from the user.
 
 - `Sandbox.launch` starts the app in the background through LaunchServices (`open -g`). Do not start the app in a different way.
-- Use the driver commands: `dump`, `press`, `set`, `focus`, `action`, `click`, `drag`, `hover`, `snapshot`, `responder`, `scroll`, `stall`, `binding`, `counts` and `sessions-list`. `action` performs a named accessibility action of an element: `sandbox.act('action', '<identifier>', '<action name>')`.
+- Use the driver commands: `dump`, `press`, `set`, `focus`, `action`, `actions`, `click`, `drag`, `hover`, `snapshot`, `responder`, `scroll`, `stall`, `binding`, `counts` and `sessions-list`. `action` performs a named accessibility action of an element: `sandbox.act('action', '<identifier>', '<action name>')`.
+- `actions` answers the names of the named accessibility actions of each element with the identifier, in the order of the dump and in the order each element gives them: `sandbox.actions('<identifier>')` gives a list for each element, such as `[['Lock Session', 'Go to Session']]`, and an empty list when no element has the identifier. Use it to check which items a context menu offers, where the menu gives its items as named actions. A dump row has no named actions, because a dump reads up to 2000 elements. SwiftUI gives the Buttons of `.accessibilityActions` from the last to the first.
 - `hover` puts the pointer on an element for the app's hover tracking, without moving the real pointer: `sandbox.act('hover', '<identifier>')`. A later `hover` on another element moves it there. When other windows cover the App Window whole, macOS marks it as not visible and SwiftUI sends its views no hover, so `hover` fails and says so: uncover a part of the App Window, for example make a window in front smaller.
 - `snapshot` draws the App Window into a PNG, without a screen capture, so it needs no screen recording permission: `sandbox.act('snapshot', '<identifier>', '<path>.png')` keeps only that element, and an empty identifier keeps the whole App Window. Use it for a picture of a visual change; a check asserts on the dump, not on pixels.
 - `set` replaces the text of a field: `sandbox.act('set', '<identifier>', '<text>')`. `paste=True` puts the text in at the caret and moves the caret after it, as ⌘V does: `sandbox.act('set', 'palette-search', 'a line\n', paste=True)`.
@@ -95,7 +96,7 @@ Checks run while the user works. A check must not take the keyboard focus, the m
 - `watch=['<identifier>', …]` on any driver command reads the frames of these elements after each frame that the app draws, for `watch_seconds` (1 by default) after the command. The result has `frames`: for each identifier, its frames `[x, y, width, height]` in screen points, in order, each once until it changes. Use it to check that a view never shows in a wrong place, also for one frame: `sandbox.act('press', '<identifier>', watch=['<card>'])`.
 - The Sidebar lists build only the rows they show, so a row far down is not in a dump. `sandbox.reveal('<identifier>')` scrolls the row to the top of its list, without the mouse or the keyboard, and returns the rows; every driver command takes the same `reveal=True` option.
 - The driver has no command that types keys or opens a context menu, because these take the keyboard and the mouse. Do not add one.
-- If a behavior is only available through a context menu, give the view an accessibility action with `.accessibilityActions` or an identifier. Then use `action` or `press`. In the suite, write which view you changed and why. Example: `topicMembershipActions` in `UI/TopicMembershipMenu.swift`.
+- If a behavior is only available through a context menu, give the view an accessibility action with `.accessibilityActions` or an identifier. Then use `action` or `press`. In the suite, write which view you changed and why. Example: `topicMembershipActions` in `UI/TopicMembershipMenu.swift`. In the AppKit Sessions list, one `SidebarMenu` (`UI/SidebarMenu.swift`) gives a view both its menu and its named actions.
 
 ## What to keep
 
@@ -128,7 +129,8 @@ A scene (`compare_scenes.py`) makes its fixture once. Then the run does this for
 
 - a row has no match in the other version;
 - a matched pair differs in label, title, value or help;
-- the frames of a matched pair differ by more than half a point on an edge. The gate measures a frame from the top left corner of the App Window.
+- the frames of a matched pair differ by more than half a point on an edge. The gate measures a frame from the top left corner of the App Window;
+- the named actions of an element that the shot names differ in their names or their order. A dump has no named actions, so an arrange names the identifiers whose named actions the shot reads, with `view.read_actions('<identifier>', …)`, and the run reads them with `actions`. The `cards` scene reads them for a card, its header and a Window row. `build/verify/compare/<scene>/<shot>-<version>-actions.json` has them.
 
 The run names each row that failed, with the values of both versions. When rows with different identifiers stand in another order in the two dumps, the report says so, and the run does not fail. While Topics shows, the dump has no Sessions list, so such a shot has pictures and no rows. `suites/harness.py` checks the matching on made-up rows, with no app.
 

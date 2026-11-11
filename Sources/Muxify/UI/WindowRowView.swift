@@ -46,6 +46,8 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
     private var environment = SessionsListEnvironment()
     /// The layout of the last width.
     private var arranged: (width: CGFloat, layout: Layout)?
+    /// The row's context menu, as the list reads it for the Window.
+    var menuItems: () -> SidebarMenu? = { nil }
 
     /// Where the row's parts stand in a row of one width, from the left, and the help of each badge that has one.
     private struct Layout {
@@ -277,6 +279,12 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
             }
         }
     }
+
+    // MARK: The menu
+
+    /// A right-click on the row shows the row's menu, in place of the card's. As in SwiftUI, the menu gives the row's
+    /// parts no named accessibility actions.
+    override func menu(for event: NSEvent) -> NSMenu? { menuItems()?.contextMenu() }
 
     // MARK: The help
 

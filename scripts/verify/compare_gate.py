@@ -9,7 +9,8 @@ by identifier and role. SwiftUI gives a row's identifier to the row's parts, so 
 and one role: among these, the first of one version matches the first of the other, in the order of the dump.
 
 The gate fails when a row has no match, when a matched pair differs in label, title, value or help, or when their
-frames differ by more than TOLERANCE points on an edge. A missing label and an empty label are different values, as
+frames differ by more than TOLERANCE points on an edge. A dump has no named actions, so a shot reads them for the
+elements it names, and `judge_actions` fails when their names or their order differ. A missing label and an empty label are different values, as
 they are in the dump. A difference in the order of rows with different identifiers does not fail the gate; `judge`
 reports it. suites/harness.py checks the matching on made-up rows.
 """
@@ -130,3 +131,19 @@ def judge(first, second):
     places = order(first, theirs), order(second, ours)
     return dict(rows=[len(first), len(second)], failed=failed,
                 order=None if places[0] == places[1] else dict(first=places[0], second=places[1]))
+
+
+def judge_actions(first, second):
+    """Compares the named accessibility actions of two versions. Each is a dict that a shot's measure gives: for each
+    identifier, a list with the names of each element's named actions, in the order of the dump (None or {} for a
+    shot that reads none). Returns one failed dict for each identifier whose names, or their order, differ in the two
+    versions, as `judge` gives a failed row: `row`, `what` and the two values `first` and `second`."""
+    first, second = first or {}, second or {}
+
+    def shown(found):
+        if found is None:
+            return None
+        return ' '.join('[%s]' % ', '.join(names) for names in found) if found else 'no element'
+
+    return [dict(row=key, what='named actions', first=shown(first.get(key)), second=shown(second.get(key)))
+            for key in list(first) + [key for key in second if key not in first] if first.get(key) != second.get(key)]

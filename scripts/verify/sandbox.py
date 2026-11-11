@@ -402,6 +402,11 @@ class Sandbox:
         assert len(versions) == 1, 'the driver sees %d App Windows: %s' % (len(versions), versions)
         return versions[0]
 
+    def actions(self, key):
+        """The names of the named accessibility actions of each element with the identifier, in the order of the dump:
+        a list for each element, such as [['Go to Session', 'Lock Session']]. Empty when no element has it."""
+        return self.driver('actions', key)['actions']
+
     def reveal(self, key):
         """Scrolls the row with the identifier to the top of its list and returns the rows. A lazy list builds only
         the rows it shows, so a row far down is not in a dump until the list has scrolled to it."""

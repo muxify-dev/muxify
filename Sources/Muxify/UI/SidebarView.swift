@@ -1201,37 +1201,10 @@ private struct SessionsSection: View {
             )
                 .accessibilityIdentifier("session-window-\(window.id)")
                 .accessibilityValue(window.id == store.selectedWindowID ? "selected" : "")
-                .contextMenu { menu(for: window) }
+                .contextMenu { SidebarMenuButtons(SessionsListMenus.window(window, store: store)) }
         case .pane(let row):
             PaneRow(store: store, row: row)
         }
-    }
-
-    @ViewBuilder
-    private func menu(for window: TmuxWindow) -> some View {
-        TopicMembershipMenu(store: store, source: .window(window))
-        Divider()
-        Button("Rename Window…") { rename(window) }
-        Button("New Window in \(window.sessionName)") { store.newWindow(beside: window) }
-        Divider()
-        Button("Copy Path") {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(window.path, forType: .string)
-        }
-        Button("Reveal in Finder") {
-            NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: window.path)
-        }
-        .disabled(store.isRemote)
-        Divider()
-        Button("Kill Window…", role: .destructive) { confirmKill(window) }
-    }
-
-    private func rename(_ window: TmuxWindow) {
-        store.palette.begin(.text(.renameWindow(window)), text: window.name)
-    }
-
-    private func confirmKill(_ window: TmuxWindow) {
-        store.palette.begin(.confirm(PaletteConfirmation(.killWindow(window))))
     }
 }
 
@@ -1265,10 +1238,7 @@ private struct SessionCard<Row: View>: View {
             .takesFirstClick()
             .accessibilityAction(.default) { press() }
             .accessibilityIdentifier(identifier)
-            .accessibilityActions {
-                Button("Go to Session") { store.goToSession(session.id) }
-                lockButton
-            }
+            .accessibilityActions { SidebarMenuButtons(SessionsListMenus.header(session, store: store)) }
         } content: {
             CardList(blocks: [CardBlock(id: session.id, items: model.sessionChildren[session.id]?.items ?? [])],
                      identifier: identifier, selectedWindowID: store.selectedWindowID,
@@ -1278,32 +1248,12 @@ private struct SessionCard<Row: View>: View {
                 row(item)
             }
         } menu: {
-            Button("Go to Session") { store.goToSession(session.id) }
-            if let window = session.windows.first {
-                Divider()
-                TopicMembershipMenu(store: store, source: .session(window))
-            }
-            lockButton
+            SidebarMenuButtons(SessionsListMenus.card(session, store: store))
         }
     }
 
     private var formatted: SidebarFormats.Text {
         store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[session.id])
-    }
-
-    /// Only a No Topic Session of a Local App Window can be Locked. With `topics.in_play`, a Lock is a Guest.
-    @ViewBuilder
-    private var lockButton: some View {
-        if let guest = store.guestState(of: .session(session.id)) {
-            Button(guest ? "Bench" : "Make a Guest") {
-                if guest { store.bench(.session(session.id)) } else { store.makeGuest(.session(session.id)) }
-            }
-                .accessibilityIdentifier(guest ? "bench" : "make-guest")
-                .disabled(store.changingTopic)
-        } else if let locked = store.lockState(ofSession: session.id) {
-            Button(locked ? "Unlock Session" : "Lock Session") { store.setLock(ofSession: session.id, !locked) }
-                .disabled(store.changingTopic)
-        }
     }
 
     private var press: SessionCardPress { SessionCardPress(store: store, session: session) }

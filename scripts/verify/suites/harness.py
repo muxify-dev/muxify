@@ -18,7 +18,7 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-from scripts.verify.compare_gate import judge, list_rows
+from scripts.verify.compare_gate import judge, judge_actions, list_rows
 from scripts.verify.sandbox import BASE, OWNER, OWNERLESS_GRACE, REPO, Sandbox, alive, new_run_id, wait
 
 NAME = __name__.rsplit('.', 1)[-1]
@@ -382,6 +382,21 @@ class CompareGate(unittest.TestCase):
         self.assertEqual(result['order'], dict(
             first=['sessions-list (AXScrollArea)', 'session-$0 (AXButton)', 'session-$1 (AXButton)'],
             second=['sessions-list (AXScrollArea)', 'session-$1 (AXButton)', 'session-$0 (AXButton)']))
+
+    def test_the_same_named_actions_pass_and_other_names_or_another_order_fail_with_both_values(self):
+        card = ['Go to Session', 'Move to Topic…', 'Lock Session']
+        same = {'card-session-$1': [card], 'session-window-@1': [[], []]}
+        self.assertEqual(judge_actions(same, dict(same)), [])
+        self.assertEqual(judge_actions(None, {}), [], 'a shot that reads no named actions fails')
+        for name, other in (('order', card[::-1]), ('names', card[:2])):
+            with self.subTest(differ=name):
+                failed = judge_actions(same, {**same, 'card-session-$1': [other]})
+                self.assertEqual(failed, [dict(row='card-session-$1', what='named actions',
+                                               first='[Go to Session, Move to Topic…, Lock Session]',
+                                               second='[%s]' % ', '.join(other))])
+        failed = judge_actions(same, {'card-session-$1': [card], 'session-window-@1': []})
+        self.assertEqual([(row['row'], row['first'], row['second']) for row in failed],
+                         [('session-window-@1', '[] []', 'no element')])
 
     def test_a_scene_fails_its_measure_when_the_app_shows_the_other_sessions_list(self):
         from scripts.verify.compare import Side, View

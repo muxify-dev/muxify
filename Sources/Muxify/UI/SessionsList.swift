@@ -63,6 +63,67 @@ struct SessionsListEnvironment: Equatable {
     }
 }
 
+/// The context menus of the Sessions list and the named accessibility actions they give, for both versions of the list
+/// (ADR 0074). Each item starts what it names; Rename Window…, the Move items and the two Kill items open their step in
+/// the palette's view (ADR 0014).
+@MainActor enum SessionsListMenus {
+    /// The menu of a Session card, which is also the card's named actions: Go to Session, the Topic membership items
+    /// for a Session, and the lock item.
+    static func card(_ session: SessionGroup, store: WorkspaceStore) -> SidebarMenu {
+        let lock = lock(session, store: store)
+        guard let window = session.windows.first else { return SidebarMenu([[goTo(session, store: store)] + lock]) }
+        return SidebarMenu([[goTo(session, store: store)], TopicMembershipMenu.items(store: store, source: .session(window)) + lock])
+    }
+
+    /// The named actions of a Session card's header: Go to Session and the lock item.
+    static func header(_ session: SessionGroup, store: WorkspaceStore) -> SidebarMenu {
+        SidebarMenu([[goTo(session, store: store)] + lock(session, store: store)])
+    }
+
+    /// The menu of a Window row: the Topic membership items for a Window, Rename Window… and New Window in the
+    /// Session, Copy Path and Reveal in Finder, and Kill Window…. Reveal in Finder is off in a Remote Environment.
+    static func window(_ window: TmuxWindow, store: WorkspaceStore) -> SidebarMenu {
+        SidebarMenu([
+            TopicMembershipMenu.items(store: store, source: .window(window)),
+            [SidebarMenuItem(title: "Rename Window…") { store.palette.begin(.text(.renameWindow(window)), text: window.name) },
+             SidebarMenuItem(title: "New Window in \(window.sessionName)") { store.newWindow(beside: window) }],
+            [SidebarMenuItem(title: "Copy Path") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(window.path, forType: .string)
+             },
+             SidebarMenuItem(title: "Reveal in Finder", isEnabled: !store.isRemote) {
+                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: window.path)
+             }],
+            [SidebarMenuItem(title: "Kill Window…", isDestructive: true) {
+                store.palette.begin(.confirm(PaletteConfirmation(.killWindow(window))))
+            }],
+        ])
+    }
+
+    private static func goTo(_ session: SessionGroup, store: WorkspaceStore) -> SidebarMenuItem {
+        SidebarMenuItem(title: "Go to Session") { store.goToSession(session.id) }
+    }
+
+    /// One of Lock Session and Unlock Session, or with `topics.in_play` one of Make a Guest and Bench, because a Lock
+    /// is then a Guest. None for a Session that cannot be Locked: only a No Topic Session of a Local App Window can.
+    /// It is off while a Topic change runs.
+    private static func lock(_ session: SessionGroup, store: WorkspaceStore) -> [SidebarMenuItem] {
+        let card = WorkspaceStore.GuestCard.session(session.id)
+        if let guest = store.guestState(of: card) {
+            return [SidebarMenuItem(title: guest ? "Bench" : "Make a Guest", isEnabled: !store.changingTopic,
+                                    identifier: guest ? "bench" : "make-guest") {
+                if guest { store.bench(card) } else { store.makeGuest(card) }
+            }]
+        }
+        if let locked = store.lockState(ofSession: session.id) {
+            return [SidebarMenuItem(title: locked ? "Unlock Session" : "Lock Session", isEnabled: !store.changingTopic) {
+                store.setLock(ofSession: session.id, !locked)
+            }]
+        }
+        return []
+    }
+}
+
 /// The AppKit Sessions list as one hosted view in the SwiftUI Sidebar: the Sessions page of the pager, or alone when
 /// Topics are off.
 struct SessionsListHost: NSViewRepresentable {

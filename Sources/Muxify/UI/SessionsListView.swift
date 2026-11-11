@@ -134,7 +134,15 @@ final class SessionsListView: NSView {
         card.onSelectWindow = { [weak self] window in self?.store.windowRowDrag.select(window) }
         card.onSelectPane = { [weak self] paneID in self?.selectPane(paneID, of: sessionID) }
         card.onShowAllRows = { [weak self] in self?.showAllRows(of: sessionID) }
+        card.menuItems = { [weak self] in self?.menu(of: sessionID, SessionsListMenus.card) }
+        card.headerActions = { [weak self] in self?.menu(of: sessionID, SessionsListMenus.header) }
+        card.windowMenu = { [weak self] window in self.map { SessionsListMenus.window(window, store: $0.store) } }
         return card
+    }
+
+    /// A menu of the Session's card, as the Session is now. Nil once the Session has gone.
+    private func menu(of sessionID: String, _ menu: (SessionGroup, WorkspaceStore) -> SidebarMenu) -> SidebarMenu? {
+        store.sessions.first { $0.id == sessionID }.map { menu($0, store) }
     }
 
     /// What the card of the Session shows, read from the models as the SwiftUI card reads it.

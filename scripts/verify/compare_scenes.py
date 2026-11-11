@@ -138,6 +138,9 @@ class Cards:
         view.wait(lambda rs: 'expanded' in view.value('session-' + self.session, rs)
                   and 'selected' in [row.get('accessibilityValue') for row in window_rows('session-window-' + window, rs)],
                   'the card of the Location is not open with its Window row selected')
+        # A check never opens a context menu, so it reads the menus as the named actions: the card's, its header's and
+        # those of a Window row's parts.
+        view.read_actions('card-session-' + self.session, 'session-' + self.session, 'session-window-' + window)
 
 
 class WindowParts:

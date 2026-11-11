@@ -486,6 +486,12 @@ enum TestDriver {
                 .map { SessionsListVersion.shown(in: $0).rawValue }
             return ["rows": [], "pressed": true, "versions": versions]
         }
+        // The names of the named accessibility actions of each element with the identifier, in the order of the dump.
+        // A dump row has none, because a dump reads up to 2000 elements.
+        if name == "actions" {
+            let found = dump().filter { $0.row["accessibilityIdentifier"] == target }.map { customActions(of: $0.object).map(\.name) }
+            return ["rows": [], "pressed": !found.isEmpty, "actions": found]
+        }
         let elements = dump()
         for element in elements {
             let object = element.object
@@ -748,12 +754,16 @@ enum TestDriver {
     /// Runs the named custom action (SwiftUI `.accessibilityActions`) the way
     /// VoiceOver does: its handler, or else its target and selector.
     private static func performCustomAction(named name: String, on object: NSObject) -> Bool {
-        guard let action = (value(object, Selectors.customActions) as? [NSAccessibilityCustomAction])?
-            .first(where: { $0.name == name }) else { return false }
+        guard let action = customActions(of: object).first(where: { $0.name == name }) else { return false }
         if let handler = action.handler { return handler() }
         guard let target = action.target as? NSObject, let selector = action.selector else { return false }
         typealias Perform = @convention(c) (NSObject, Selector, NSAccessibilityCustomAction) -> Bool
         return unsafeBitCast(target.method(for: selector), to: Perform.self)(target, selector, action)
+    }
+
+    /// The named custom actions of an element (SwiftUI `.accessibilityActions`), in their order.
+    private static func customActions(of object: NSObject) -> [NSAccessibilityCustomAction] {
+        value(object, Selectors.customActions) as? [NSAccessibilityCustomAction] ?? []
     }
 
     /// Every element of the visible windows, depth first, as the script sees

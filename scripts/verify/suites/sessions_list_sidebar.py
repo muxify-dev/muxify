@@ -17,6 +17,10 @@ keeps the app behind the user's windows: it is a first click while Muxify is not
 AppKit card follows it. The header of the SwiftUI card does not follow the driver's `click`, also before the AppKit
 list existed: a one-off probe on the commit before the AppKit cards showed that. So only the AppKit list gets `click`.
 
+A check never opens a context menu ("Do not take focus" in scripts/verify/README.md). A card of the AppKit list
+gives its menu's items as its named actions, from one list (`SidebarMenu` in UI/SidebarMenu.swift), so the check of
+Go to Session and Lock Session runs them by `action` on the card, and reads the names with `actions`.
+
 The check of a click on a Window row runs against both lists, because the SwiftUI row takes the first click
 (`takesFirstClick` on its drag handle). A click aims at the middle of the row's first part, its app icon.
 
@@ -256,6 +260,32 @@ class SessionsListSidebar(unittest.TestCase):
                     self.s.wait_shown(self.windows[other])
                     self.assertEqual(self.location(), [other], 'a press on the card of another Session did not go to it')
                     self.assertTrue(self.card_value(home).startswith('expanded'), 'the card that the Location left closed')
+
+    def test_the_named_actions_of_an_appkit_card_go_to_its_session_and_lock_it(self):
+        session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'list-actions', SHELL)
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', session)
+        window = self.s.tmux('list-windows', '-t', session, '-F', '#{window_id}')
+        lock = lambda: self.s.tmux('show-options', '-qv', '-t', session, '@muxify_lock')
+        self.show_list('appkit')
+        self.show_mode('sessions')
+        self.stand_on(self.sessions[0], opened=True)
+        self.wait_cards(self.sessions + [session])
+        card = 'card-session-' + session
+        # The names are the titles of the card's menu, in the order SwiftUI gives them: from the last item to the first.
+        self.assertEqual(self.s.actions(card), [['Lock Session', 'New Topic from this Session', 'Move to Topic…', 'Go to Session']])
+        self.assertEqual(self.s.actions('session-' + session), [['Lock Session', 'Go to Session']])
+
+        self.s.act('action', card, 'Go to Session')
+        self.s.wait_shown(window)
+        self.assertEqual(self.location(), [session], 'Go to Session did not go to the Session of the card')
+
+        self.s.act('action', card, 'Lock Session')
+        wait(lambda: lock() != '', 'Lock Session did not set @muxify_lock', seconds=10)
+        self.s.wait_rows(lambda rs: 'Locked' in self.card_value(session, rs).split(', '),
+                         lambda: 'the header of the Locked Session has the value %r' % self.card_value(session))
+        self.assertEqual(self.s.actions(card)[0][0], 'Unlock Session', 'the card of a Locked Session offers no Unlock Session')
+        self.s.act('action', card, 'Unlock Session')
+        wait(lambda: lock() == '', 'Unlock Session kept @muxify_lock', seconds=10)
 
     def test_a_click_on_a_window_row_goes_to_its_window(self):
         session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'list-rows', SHELL)

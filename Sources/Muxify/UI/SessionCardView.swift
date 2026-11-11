@@ -68,6 +68,14 @@ final class SessionCardView: NSView {
     var onShowAllRows: () -> Void = {} {
         didSet { more.onPress = onShowAllRows }
     }
+    /// The card's context menu, which is also its named accessibility actions, as the Session is now.
+    var menuItems: () -> SidebarMenu? = { nil }
+    /// The named accessibility actions of the header, as the Session is now.
+    var headerActions: () -> SidebarMenu? = { nil } {
+        didSet { header.actions = headerActions }
+    }
+    /// The context menu of a Window row, as the list reads it for the Window.
+    var windowMenu: (TmuxWindow) -> SidebarMenu? = { _ in nil }
     private let fill = CardFillView()
     private let header: SessionCardHeaderView
     /// The rows of an open card. A card that closes keeps them, so they fade where they stand.
@@ -152,6 +160,7 @@ final class SessionCardView: NSView {
                 let row = windows.removeValue(forKey: content.window.id)
                     ?? WindowRowView(windowID: content.window.id, identifier: "session-window-" + content.window.id)
                 row.onPress = { [weak self] in self?.onSelectWindow(content.window) }
+                row.menuItems = { [weak self] in self?.windowMenu(content.window) }
                 row.show(content, environment: environment, fades: fades)
                 return row
             case .pane(let content):
@@ -251,7 +260,16 @@ final class SessionCardView: NSView {
         }
     }
 
+    // MARK: The menu
+
+    /// A right-click anywhere on the card shows the card's menu: on the header, the paddings and the gaps between the
+    /// rows, which have no menu of their own and pass the click up to the card. A Window row shows its own menu.
+    override func menu(for event: NSEvent) -> NSMenu? { menuItems()?.contextMenu() }
+
     // MARK: Accessibility
+
+    /// The card's menu, as named actions: a check never opens a menu.
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? { menuItems()?.accessibilityActions }
 
     /// The rows of an open card, each Window row by its parts, then the header and the Hints, each a row of its own
     /// because the header hides its children. SwiftUI lists the header after the rows, which it draws above them, and
@@ -313,6 +331,8 @@ private final class SessionCardHeaderView: SidebarPressView {
     private var environment = SessionsListEnvironment()
     /// The frames of the last layout, and the width they were made for.
     private var arranged: (width: CGFloat, frames: Frames)?
+    /// The header's named accessibility actions: Go to Session and the lock item.
+    var actions: () -> SidebarMenu? = { nil }
 
     /// Where the parts stand in a header of one width.
     private struct Frames {
@@ -455,6 +475,8 @@ private final class SessionCardHeaderView: SidebarPressView {
     override func accessibilityHelp() -> String? { content.isOpen ? "" : content.summary }
 
     override func accessibilityChildren() -> [Any]? { [] }
+
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? { actions()?.accessibilityActions }
 
     /// The middle of the title's line, where a click tool such as Homerow clicks in place of the header's centre.
     override func accessibilityActivationPoint() -> NSPoint {

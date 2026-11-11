@@ -8,8 +8,9 @@ Without a scene it runs every scene of compare_scenes.py, one after the other, e
 its fixture once. Then, for each version, it starts the app with that version, shows each of its shots, and takes a
 picture of the App Window and a dump for it. `make compare` builds the Debug app first.
 
-**The gate** (compare_gate.py) matches the rows inside the Sessions list between the two versions. The run fails when
-a scene's gate fails, or when a scene cannot show a shot or measure it. It names each row that failed, with the
+**The gate** (compare_gate.py) matches the rows inside the Sessions list between the two versions, and compares the
+named actions of the elements that a shot names. The run fails when a scene's gate fails, or when a scene cannot show
+a shot or measure it. It names each row that failed, with the
 values of both versions.
 
 **The report** is REPORT/index.html: for each shot the two pictures side by side, a picture of their difference, the
@@ -32,7 +33,7 @@ import time
 from typing import NamedTuple
 
 from scripts.verify import compare_report, gate
-from scripts.verify.compare_gate import judge, list_rows, rect
+from scripts.verify.compare_gate import judge, judge_actions, list_rows, rect
 from scripts.verify.compare_scenes import SCENES
 from scripts.verify.run import prepare_mac
 from scripts.verify.run_suite import write_json
@@ -75,6 +76,8 @@ class View:
         self.s = sandbox
         self.side = side
         self.out = out
+        # The identifiers whose named actions the measure of the next shot reads.
+        self.named = []
 
     def launch(self, config=None):
         """Starts the app with this showing's version of the Sessions list, or starts it again when it runs. With
@@ -107,16 +110,27 @@ class View:
         self.s.act('press', key)
         self.wait(lambda rs: 'collapsed' in self.value(key, rs), 'the card %s did not close' % key)
 
+    def read_actions(self, *keys):
+        """Makes the measure of this shot read the named accessibility actions of the elements with these identifiers,
+        for the gate. A dump has no named actions, so a shot reads them only for the elements it names."""
+        self.named = list(keys)
+
     def measure(self, shot):
-        """The picture and the dump of a shot: (path of the picture, rows). It first asks the driver which Sessions
-        list shows, and fails when that is not the version this showing asked for. Then it waits until nothing moves."""
+        """The picture, the dump and the named actions of a shot: (path of the picture, rows, actions). `actions` has,
+        for each identifier that the arrange named with `read_actions`, the names of each element's named actions. It
+        first asks the driver which Sessions list shows, and fails when that is not the version this showing asked
+        for. Then it waits until nothing moves."""
         shown = self.s.sessions_list()
         assert shown == self.side.version, (
             'the App Window shows the %s Sessions list, and the scene asked for the %s list' % (shown, self.side.version))
         picture = self.out/('%s-%s.png' % (shot, self.side.label))
         rows = self.rest(picture)
         write_json(picture.with_suffix('.json'), rows)
-        return picture, rows
+        actions = {key: self.s.actions(key) for key in self.named}
+        self.named = []
+        if actions:
+            write_json(picture.with_name('%s-%s-actions.json' % (shot, self.side.label)), actions)
+        return picture, rows, actions
 
     def rest(self, picture=None):
         """Waits until nothing moves: takes a picture and a dump again and again, until REST_SAMPLES in a row are the
@@ -188,14 +202,14 @@ def run_scene(scene, pair, out, self_run):
         for side in pair:
             view = View(sandbox, side, out)
             for shot, arrange in scene.shots():
-                record = taken.setdefault(shot, {})[side.label] = dict(picture=None, rows=None, error=None)
+                record = taken.setdefault(shot, {})[side.label] = dict(picture=None, rows=None, actions=None, error=None)
                 try:
                     arrange(view)
                 except FAILURES as error:
                     record['error'] = 'the scene could not show this shot: %s' % error
                 # A shot that the list could not show is still measured, so the report has its picture and its rows.
                 try:
-                    record['picture'], record['rows'] = view.measure(shot)
+                    record['picture'], record['rows'], record['actions'] = view.measure(shot)
                 except FAILURES as error:
                     record['error'] = '; '.join(filter(None, [record['error'], 'no measure: %s' % error]))
     except FAILURES as error:
@@ -219,6 +233,7 @@ def run_scene(scene, pair, out, self_run):
             entry['pixels'] = picture_diff(one['picture'], other['picture'], difference)
             entry['difference'] = difference.name
             entry['gate'] = judge(list_rows(one['rows']), list_rows(other['rows']))
+            entry['gate']['failed'] += judge_actions(one['actions'], other['actions'])
             entry['crop'], entry['window'] = crop([one['rows'], other['rows']])
             if entry['gate']['failed']:
                 result['failed'].append('%s: the gate failed for %d rows' % (shot, len({row['row'] for row in entry['gate']['failed']})))
