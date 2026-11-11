@@ -448,3 +448,15 @@ _Avoid_: performance log, muxify.log (when you mean all of it), log (alone)
 **Burst**:
 A stretch of at least a few seconds in which the app uses a large share of a core. The Diagnostics log records each one with what the user did and what was moving during it.
 _Avoid_: spike, CPU spike, hot spot
+
+**Update Channel**:
+The feed that Muxify's updater reads: stable, which offers only Releases, or tip, which offers Tip Builds. The local Config sets it under `update.channel`. A beta is part of a Release's version name only, never an Update Channel.
+_Avoid_: beta channel, nightly, track, ring
+
+**Release**:
+A build of Muxify that CI publishes from a `v*` tag on master, for the stable Update Channel. Its version is the tag's, such as `0.1.0-beta.7` or `1.0.0`. Not every GitHub release is a Release: `tip`, `appcast` and `cli-latest` are not.
+_Avoid_: stable build, version (when you mean the build), beta (when you mean the channel)
+
+**Tip Build**:
+A build of Muxify that CI publishes from each push to master, for the tip Update Channel. Its version is the commit and its date, such as `a1b2c3d (2026-11-11)`.
+_Avoid_: nightly, dev build, canary, snapshot

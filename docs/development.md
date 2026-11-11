@@ -485,22 +485,62 @@ Dependency notices are bundled under
 
 ### Publish
 
-The [release workflow](../.github/workflows/release-beta.yml) runs on `macos-26`
-with Xcode 26.6. It caches the pinned Ghostty build, tests Muxify, and on a beta
-tag packages a Release and publishes a **GitHub prerelease**. Pull requests and
-pushes to `master`/`main` run the tests without publishing. Default-branch
-builds warm the dependency cache that beta tags can reuse (GitHub does not share
-tag-only caches between different tags).
+The [release workflow](../.github/workflows/release.yml) runs on `macos-26`
+with Xcode 26.6 and publishes everything to GitHub (ADR 0078). Its `build` job
+checks out full depth, caches the pinned Ghostty build and tests Muxify. Pull
+requests, and pushes to `main`, stop there: they never read the release secrets
+or package. Default-branch builds warm the dependency cache that tags can reuse
+(GitHub does not share tag-only caches between different tags).
 
-After committing and pushing the release tooling and app changes, publish a beta:
+On a push to `master` or a `v*` tag, the `build` job then imports the "Muxify
+Release Signing" certificate into a temporary keychain, packages with
+`scripts/package-release.sh`, writes the feed with `scripts/write-feed.py`
+(`sign_update` needs macOS) and uploads the ZIP, its feed, `SHA256SUMS`,
+`build-info.json` and the release notes as the `package` artifact. Ubuntu jobs
+publish it:
+
+- **A Tip Build** comes from every push to `master`. `publish-tip` uploads its
+  ZIP to the rolling `tip` prerelease, moves the `tip` tag to the commit,
+  deletes all but the ten newest `Muxify-tip-*` ZIPs, then uploads `tip.xml` to
+  the rolling `appcast` prerelease. It is independent of `publish-cli`, which
+  publishes the Host CLI to `cli-latest` (ADR 0076) as long as the tests pass,
+  even when packaging fails.
+- **A Release** comes from a `vX.Y.Z` or `vX.Y.Z-beta.N` tag whose commit is on
+  `master`; the `build` job refuses any other tag. `publish` creates the GitHub
+  release with the ZIP, `SHA256SUMS` and `build-info.json`. Its notes are the
+  install section, then GitHub's generated notes since the previous `v*` tag. A
+  plain `vX.Y.Z` becomes the repository's Latest release; a beta is a
+  prerelease that is never Latest. Then it uploads `stable.xml` to `appcast`.
+
+`tip`, `appcast` and `cli-latest` are prereleases that are never Latest, and
+both publish jobs create theirs when missing. Each job uploads its ZIP before
+its feed, so a copy that reads a new feed always finds its ZIP. `publish-tip`
+and `publish` share the concurrency group `appcast`. GitHub keeps only one
+pending job per group, so a queued job can be cancelled by a newer one; rerun a
+cancelled `publish` from the Actions page.
+
+To cut a Release, push its commit to `master` first, then tag it:
 
 ```sh
-git tag v0.1.0-beta.1
-git push origin v0.1.0-beta.1
+git push origin master
+git tag v0.1.0            # or v0.1.0-beta.1
+git push origin v0.1.0
 ```
 
-The workflow can also be dispatched manually with an existing beta tag. It
-refuses to replace an existing GitHub release; use a new beta tag instead.
+The workflow can also be dispatched manually with an existing tag. It refuses
+to replace an existing GitHub release; use a new tag instead.
 
-The workflow does not yet give the release certificate or check out full depth,
-so it cannot package a tag until it does.
+The workflow needs three repository secrets, and a job that packages fails with
+the name of any that is missing:
+
+- `SPARKLE_ED_PRIVATE_KEY`: the EdDSA private key that signs every ZIP for
+  Sparkle.
+- `MUXIFY_RELEASE_CERTIFICATE_P12`: the "Muxify Release Signing" certificate and
+  key, as a base64 `.p12`.
+- `MUXIFY_RELEASE_CERTIFICATE_PASSWORD`: the `.p12`'s password.
+
+`make release-secrets` makes all three once, writes the public key into
+`scripts/sparkle-public-key.env`, which you commit, and prints the `gh secret
+set` commands to run (see [Feeds and release secrets](#feeds-and-release-secrets)).
+Until the public key is committed, packaging refuses to run, so `master` builds
+publish the Host CLI but no Tip Build.
