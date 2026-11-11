@@ -12,8 +12,12 @@ The context whose Sessions, Windows, Panes and Agents Muxify presents. Local is 
 _Avoid_: workspace, project
 
 **Remote Environment**:
-An Environment on another machine, presented in the local Muxify app.
+An Environment on another machine, presented in the local Muxify app. It has no Topics in the Mac app; its Host CLI keeps that machine's own.
 _Avoid_: remote Session, SSH session (when you mean the Environment)
+
+**Host CLI**:
+The `muxify` on a Remote Environment's machine, which Muxify installs and keeps up to date in `~/.local/bin`. The phone and the Agents on that machine use it, and it keeps that machine's Topics; the Mac app does not read them.
+_Avoid_: remote helper, agent binary, remote CLI
 
 **Active Environment**:
 The Environment shown in an App Window. Each App Window has one Active Environment.

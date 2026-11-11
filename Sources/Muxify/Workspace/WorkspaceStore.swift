@@ -1557,7 +1557,13 @@ final class WorkspaceStore {
                         self.homeDirectory = snapshot.homeDirectory ?? self.homeDirectory
                         self.isConnected = true
                         // The SessionPaths are looked for too, so Start a Session… lists them once no Session is left.
-                        if connecting { self.loadRemoteConfig { [weak self] in self?.refreshSessionPaths() } }
+                        if connecting {
+                            self.loadRemoteConfig { [weak self] in self?.refreshSessionPaths() }
+                            // The machine's own `muxify`, for the phone and its Agents. Nothing waits for it.
+                            HostCLI.install(over: connection, environmentName: self.environmentName,
+                                            baseURL: HostCLI.baseURL(environment: ProcessInfo.processInfo.environment),
+                                            report: Diagnostics.report)
+                        }
                         self.environmentStatus = "Connected to \(self.environmentName)"
                         self.reconnectAttempt = 0
                         self.terminalMessage = nil
