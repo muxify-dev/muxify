@@ -1514,6 +1514,52 @@ final class ConfigTests: XCTestCase {
     func testTheTemplateShowsACommentedOverride() {
         XCTAssertTrue(Config.template.contains("# override: ~/.config/muxify/config.override.yaml"))
     }
+
+    func testTheConfigStoreReloadsWhenAnOverrideOrTheOverrideListChanges() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("config.yaml").path
+        let local = directory.appendingPathComponent("local.yaml").path
+        let other = directory.appendingPathComponent("other.yaml").path
+        var time = 1_000_000.0
+        // A distinct modification time for each write, so two writes within the clock's resolution still differ.
+        func write(_ text: String, to file: String) throws {
+            try text.write(toFile: file, atomically: true, encoding: .utf8)
+            time += 1
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: time)], ofItemAtPath: file)
+        }
+        try write("override: local.yaml\nui:\n  header_height: 26", to: path)
+        let store = ConfigStore(path: path)
+        XCTAssertEqual(store.config.overrides, [local])
+        XCTAssertTrue(store.watchedFiles.contains(path))
+        XCTAssertTrue(store.watchedFiles.contains(local), "a missing Override is watched")
+        XCTAssertFalse(store.reloadIfFilesChanged())
+
+        try write("ui:\n  header_height: 28", to: local)
+        XCTAssertTrue(store.reloadIfFilesChanged(), "creating an Override reloads")
+        XCTAssertEqual(store.config.headerHeight, 28)
+        XCTAssertFalse(store.reloadIfFilesChanged())
+
+        try write("ui:\n  header_height: 30", to: local)
+        XCTAssertTrue(store.reloadIfFilesChanged(), "editing an Override reloads")
+        XCTAssertEqual(store.config.headerHeight, 30)
+
+        try FileManager.default.removeItem(atPath: local)
+        XCTAssertTrue(store.reloadIfFilesChanged(), "deleting an Override reloads")
+        XCTAssertEqual(store.config.headerHeight, 26)
+
+        try write("override: other.yaml\nui:\n  header_height: 26", to: path)
+        XCTAssertTrue(store.reloadIfFilesChanged(), "changing the override list reloads")
+        XCTAssertTrue(store.watchedFiles.contains(other))
+        XCTAssertFalse(store.watchedFiles.contains(local))
+        // The reload stamped the old list before it read; the next look settles on the new one.
+        store.reloadIfFilesChanged()
+        XCTAssertFalse(store.reloadIfFilesChanged())
+        try write("ui:\n  header_height: 32", to: other)
+        XCTAssertTrue(store.reloadIfFilesChanged(), "the next look watches the new list")
+        XCTAssertEqual(store.config.headerHeight, 32)
+    }
 }
 
 final class ConfigFileSetTests: XCTestCase {

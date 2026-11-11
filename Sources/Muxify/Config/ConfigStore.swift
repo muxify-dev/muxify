@@ -4,8 +4,8 @@ import UniformTypeIdentifiers
 import MuxifyCore
 
 /// The live Config. It loads the Ghostty config the Config names into
-/// libghostty, applies the Browser section to every Tab and to Browser History, turns Diagnostics on or off, and when the Config or any
-/// Ghostty config file changes it reads the Config again and reloads the Ghostty config.
+/// libghostty, applies the Browser section to every Tab and to Browser History, turns Diagnostics on or off, and when the Config, a
+/// Config Override it names or any Ghostty config file changes it reads the Config again and reloads the Ghostty config.
 @Observable
 final class ConfigStore {
     let path: String
@@ -23,16 +23,23 @@ final class ConfigStore {
     init(path: String = MuxifyPaths().configFile.path) {
         self.path = path
         load()
+        filesStamp = stampFiles()
     }
 
     /// Must run before any terminal is created.
     func start() {
         GhosttyRuntime.shared.start(ghosttyConfigFile: config.ghosttyConfigFile)
-        filesStamp = stampFiles()
         watcher = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            guard let self, self.stampFiles() != self.filesStamp else { return }
-            self.reload()
+            self?.reloadIfFilesChanged()
         }
+    }
+
+    /// One look of the watcher: reloads when a watched file changed since the last read. Returns whether it reloaded.
+    @discardableResult
+    func reloadIfFilesChanged() -> Bool {
+        guard stampFiles() != filesStamp else { return false }
+        reload()
+        return true
     }
 
     func reload() {
@@ -78,12 +85,17 @@ final class ConfigStore {
         BrowserHistory.shared.setEnabled(config.browser.history)
     }
 
-    /// Modification times of every file the Config or the Ghostty config can
-    /// come from, including missing ones, so creating a file is a change too.
+    /// Every file the Config or the Ghostty config can come from: the Config, the Config Overrides the
+    /// current Config names and the Ghostty config files, including missing ones. A change to the `override`
+    /// list is a change to the Config, and the look after that reload watches the new list.
+    var watchedFiles: [String] {
+        Set([path] + config.overrides + Self.ghosttyFiles(ghosttyConfigFile: config.ghosttyConfigFile)).sorted()
+    }
+
+    /// Modification times of every watched file, including missing ones, so creating a file is a change too.
     private func stampFiles() -> String {
         let fm = FileManager.default
-        let files = Set([path] + Self.ghosttyFiles(ghosttyConfigFile: config.ghosttyConfigFile))
-        return files.sorted().map { path in
+        return watchedFiles.map { path in
             let date = (try? fm.attributesOfItem(atPath: path)[.modificationDate]) as? Date
             return "\(path)@\(date?.timeIntervalSince1970 ?? 0)"
         }.joined(separator: "|")
