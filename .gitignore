@@ -13,3 +13,8 @@ __pycache__/
 
 # make host-cli writes the build stamp of `muxify --version` here.
 /Sources/MuxifyCLI/BuildStamp+Generated.swift
+
+# The global gitignore drops .claude; keep the repository's skills.
+!/.claude/
+/.claude/*
+!/.claude/skills/
