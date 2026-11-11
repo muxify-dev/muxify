@@ -1,4 +1,6 @@
+#if canImport(AppKit)
 import AppKit
+#endif
 import Foundation
 import Yams
 
@@ -235,7 +237,7 @@ public struct Config: Equatable {
     /// `host:path`, skips the sections about the app itself (ADR 0010), and its
     /// Override paths resolve on that machine as `host:path`.
     public static func load(path: String, isRemote: Bool = false,
-                     fontFamilies: @escaping () -> [String] = { SidebarTypography.fontFamilies },
+                     fontFamilies: @escaping () -> [String]? = { SidebarTypography.knownFontFamilies },
                      read: (String) -> String?) -> Result<Config, ConfigSyntaxError> {
         guard let text = read(path) else { return .success(Config()) }
         let root: Node?
@@ -606,7 +608,7 @@ private struct ConfigReader {
     let tree: MergedConfigTree
     let isRemote: Bool
     let read: (String) -> String?
-    let fontFamilies: () -> [String]
+    let fontFamilies: () -> [String]?
     var config = Config()
 
     /// Who a trigger can be bound to anywhere in an App Window.
@@ -646,7 +648,7 @@ private struct ConfigReader {
     private var palettes: [CommandPaletteConfig]?
     private var claims: [Claim<Claimant>] = []
 
-    init(tree: MergedConfigTree, isRemote: Bool, read: @escaping (String) -> String?, fontFamilies: @escaping () -> [String]) {
+    init(tree: MergedConfigTree, isRemote: Bool, read: @escaping (String) -> String?, fontFamilies: @escaping () -> [String]?) {
         self.tree = tree
         self.isRemote = isRemote
         self.read = read
@@ -1066,11 +1068,14 @@ private struct ConfigReader {
                         if node.null != nil { return .some(nil) }
                         guard node.tag == Yams.Tag(.str), let source = node.string else { return nil }
                         let format = try SidebarPartFormat(source)
+                        // Linux has no SF Symbols to check against, so a Config shared from a Mac reads there.
+                        #if canImport(AppKit)
                         for name in format.symbolNames {
                             guard NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil else {
                                 throw SidebarFormat.Failure(description: "unknown SF Symbol \"\(name)\"")
                             }
                         }
+                        #endif
                         return .some(format)
                     }
                     if part == "left" { config.sidebar.formats.windowParts.left = parsed }

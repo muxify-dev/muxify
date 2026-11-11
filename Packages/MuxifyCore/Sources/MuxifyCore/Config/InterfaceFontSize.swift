@@ -1,4 +1,4 @@
-import CoreGraphics
+import Foundation
 
 /// `ui.font_size`: the size in points that all of Muxify's own text in an App Window keeps its ratio to (ADR 0068).
 /// Every surface gives its sizes as they are at 12, its design sizes, and takes them through this value: fonts, the

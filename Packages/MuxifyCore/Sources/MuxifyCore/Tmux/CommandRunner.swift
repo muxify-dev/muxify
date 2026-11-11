@@ -1,5 +1,7 @@
-import Foundation
+#if canImport(Darwin)
 import Darwin
+#endif
+import Foundation
 
 public struct CommandInvocation: Equatable {
     public let executable: String

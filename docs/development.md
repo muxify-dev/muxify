@@ -91,6 +91,13 @@ make run       # vendor libghostty, generate the Xcode project, build and open
 make install   # install a Release build into /Applications (or INSTALL_DIR)
 ```
 
+`make host-cli` builds the `muxify` CLI as static Linux binaries,
+`build/host-cli/muxify-linux-aarch64` and `muxify-linux-x86_64`. It needs
+Docker (OrbStack's on a Mac) and builds in the Swift image with the Swift
+Static Linux SDK that `scripts/host-cli-version.env` pins. The SDK and the
+Linux build folder stay in the `muxify-host-cli-cache` Docker volume, so a
+second run is fast; `docker volume rm muxify-host-cli-cache` starts afresh.
+
 `make build` and `make run` sign ad-hoc. macOS then sees each build as a new
 app, and you must grant Local Network, Accessibility and Input Monitoring again.
 

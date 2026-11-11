@@ -13,7 +13,7 @@ MUXIFY_DEVELOPMENT_TEAM ?=
 # during dependency scanning". A fixed length makes the hash the same.
 XCODEBUILD_SETTINGS := diagnostic_message_length=0
 
-.PHONY: all setup tools project build test test-release verify verify-gate run install release clean
+.PHONY: all setup tools project build test test-release verify verify-gate run install release host-cli clean
 
 all: build
 
@@ -60,6 +60,10 @@ verify-gate:
 # CONFIG=path/to/config.yaml starts a new copy of the app with that Config, through MUXIFY_CONFIG.
 run: build
 	$(if $(CONFIG),open -n --env "MUXIFY_CONFIG=$(if $(filter ~%,$(CONFIG)),$(CONFIG),$(abspath $(CONFIG)))" $(APP),open $(APP))
+
+# Static Linux binaries of the muxify CLI in build/host-cli, built in Docker (scripts/host-cli-version.env pins it).
+host-cli:
+	./scripts/build-host-cli.sh
 
 release:
 	BUILD_NUMBER="$(or $(BUILD_NUMBER),1)" ./scripts/package-release.sh "$(TAG)"

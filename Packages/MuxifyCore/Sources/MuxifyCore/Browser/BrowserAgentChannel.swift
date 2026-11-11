@@ -1,4 +1,6 @@
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 
 /// The Unix socket between `muxify browser` and the app (ADR 0057): one request line of JSON and one reply line
@@ -18,7 +20,7 @@ public enum BrowserAgentChannel {
     }
 
     public static func send(_ request: BrowserAgentRequest, to path: String) throws -> BrowserAgentReply {
-        let fd = try connect(to: path)
+        let fd = try connection(to: path)
         defer { close(fd) }
         var wait = timeval(tv_sec: Int(request.command.replyTimeout), tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
@@ -30,12 +32,12 @@ public enum BrowserAgentChannel {
         catch { throw Failure.broken("Muxify sent a reply that this muxify cannot read; update the CLI and the app together") }
     }
 
-    private static func connect(to path: String) throws -> Int32 {
+    private static func connection(to path: String) throws -> Int32 {
         guard var address = address(path) else { throw Failure.unreachable("the socket path is too long: \(path)") }
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        let fd = socket(AF_UNIX, streamSocket, 0)
         guard fd >= 0 else { throw Failure.unreachable(String(cString: strerror(errno))) }
         let connected = withUnsafePointer(to: &address) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
         guard connected == 0 else {
             let reason = String(cString: strerror(errno))
@@ -61,7 +63,7 @@ public enum BrowserAgentChannel {
         data.withUnsafeBytes { buffer in
             var offset = 0
             while offset < buffer.count {
-                let written = Darwin.write(fd, buffer.baseAddress! + offset, buffer.count - offset)
+                let written = writeWithoutSignal(fd, buffer.baseAddress! + offset, buffer.count - offset)
                 if written < 0, errno == EINTR { continue }
                 guard written > 0 else { return false }
                 offset += written
@@ -87,6 +89,26 @@ public enum BrowserAgentChannel {
     }
 }
 
+/// `SOCK_STREAM`, which Glibc imports as an enum case.
+private let streamSocket: Int32 = {
+    #if canImport(Glibc)
+    Int32(SOCK_STREAM.rawValue)
+    #else
+    SOCK_STREAM
+    #endif
+}()
+
+/// `write`, but a peer that went away fails it with `EPIPE` rather than raising SIGPIPE. Darwin sockets get
+/// `SO_NOSIGPIPE`; Linux has no such option, so it sends with `MSG_NOSIGNAL`. Outside the types, whose own `send`
+/// and `write` would hide the system calls.
+private func writeWithoutSignal(_ fd: Int32, _ bytes: UnsafeRawPointer, _ count: Int) -> Int {
+    #if canImport(Darwin)
+    write(fd, bytes, count)
+    #else
+    send(fd, bytes, count, Int32(MSG_NOSIGNAL))
+    #endif
+}
+
 /// The app's end of the channel. Each connection is read on a queue of its own; `handler` gets the decoded
 /// request and calls `reply` once, from any thread.
 public final class BrowserAgentListener: @unchecked Sendable {
@@ -106,7 +128,7 @@ public final class BrowserAgentListener: @unchecked Sendable {
         // A file left by a crashed app, or by another Muxify on the same server, is replaced: the newest app
         // also writes the option, so it is the one that the CLI finds.
         unlink(path)
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        let fd = socket(AF_UNIX, streamSocket, 0)
         guard fd >= 0 else { throw BrowserAgentChannel.Failure.unreachable(String(cString: strerror(errno))) }
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
@@ -145,8 +167,10 @@ public final class BrowserAgentListener: @unchecked Sendable {
         _ = fcntl(client, F_SETFL, fcntl(client, F_GETFL) & ~O_NONBLOCK)
         var wait = timeval(tv_sec: 5, tv_usec: 0)
         setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
+        #if canImport(Darwin)
         var noSignal: Int32 = 1
         setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
+        #endif
         let respond: @Sendable (BrowserAgentReply) -> Void = { reply in
             var line = (try? JSONEncoder().encode(reply)) ?? Data()
             line.append(UInt8(ascii: "\n"))
