@@ -157,7 +157,11 @@ jobs:
       - name: Check that every binary prints the version line
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends qemu-user-static >/dev/null
+          # Newer Ubuntu images drop qemu-user-static; qemu-user is in every one. The binary is static (musl), so
+          # either emulator runs it.
+          sudo apt-get install -y -qq --no-install-recommends qemu-user >/dev/null
+          qemu="$(command -v qemu-aarch64-static || command -v qemu-aarch64)" \
+            || { echo "::error::qemu-user installed no qemu-aarch64"; exit 1; }
           chmod +x dist/muxify-linux-*
           expected="$(cat dist/version)"
           read -r name sha time <<<"$expected"
@@ -170,7 +174,7 @@ jobs:
             echo "$asset: $printed"
           }
           check muxify-linux-x86_64 "$(dist/muxify-linux-x86_64 --version)"
-          check muxify-linux-aarch64 "$(qemu-aarch64-static dist/muxify-linux-aarch64 --version)"
+          check muxify-linux-aarch64 "$("$qemu" dist/muxify-linux-aarch64 --version)"
           check muxify-darwin-arm64 "$(cat dist/muxify-darwin-arm64.printed)"
 
       - name: Move the cli-latest tag to this commit
