@@ -5,11 +5,11 @@ import Yams
 /// merged on top (ADR 0075). Each node remembers the file it was written in,
 /// so a problem shows that file's path and line, and a relative path in it
 /// starts at that file's directory.
-struct ConfigOverrides {
+struct MergedConfigTree {
     /// The Config's tree with every Config Override merged on top.
     let root: Node
     /// The Override paths the Config names, resolved, missing ones included.
-    let paths: [String]
+    let overridePaths: [String]
     /// Problems with the `override` values, found before the sections are read.
     let problems: [ConfigProblem]
     /// The Config, then each Config Override that was read, in list order.
@@ -24,7 +24,7 @@ struct ConfigOverrides {
     /// A Remote Environment's Config is at `host:path`, and its Override paths
     /// resolve on that machine.
     static func merge(_ config: Node, path: String, isRemote: Bool = false,
-                      read: (String) -> String?) -> Result<ConfigOverrides, ConfigSyntaxError> {
+                      read: (String) -> String?) -> Result<MergedConfigTree, ConfigSyntaxError> {
         var problems: [ConfigProblem] = []
         let named = overridePaths(in: config, path: path, isRemote: isRemote, problems: &problems)
         var root = config
@@ -50,7 +50,7 @@ struct ConfigOverrides {
             }
             root = merged(root, over: tagged(node, anchor))
         }
-        return .success(ConfigOverrides(root: root, paths: named, problems: problems, files: files, anchors: anchors))
+        return .success(MergedConfigTree(root: root, overridePaths: named, problems: problems, files: files, anchors: anchors))
     }
 
     /// The file `node` was written in.

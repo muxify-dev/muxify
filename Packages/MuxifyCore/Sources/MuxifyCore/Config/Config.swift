@@ -246,9 +246,9 @@ public struct Config: Equatable {
         }
         guard let root else { return .success(Config()) }
         return withoutActuallyEscaping(read) { read in
-            ConfigOverrides.merge(root, path: path, isRemote: isRemote, read: read).map { overrides in
-                var reader = ConfigReader(overrides: overrides, isRemote: isRemote, read: read, fontFamilies: fontFamilies)
-                reader.readSections(overrides.root)
+            MergedConfigTree.merge(root, path: path, isRemote: isRemote, read: read).map { tree in
+                var reader = ConfigReader(tree: tree, isRemote: isRemote, read: read, fontFamilies: fontFamilies)
+                reader.readSections(tree.root)
                 return reader.config
             }
         }
@@ -603,7 +603,7 @@ extension ConfigSyntaxError {
 /// Turns the YAML nodes of the Config and its Config Overrides into a Config,
 /// skipping what cannot apply.
 private struct ConfigReader {
-    let overrides: ConfigOverrides
+    let tree: MergedConfigTree
     let isRemote: Bool
     let read: (String) -> String?
     let fontFamilies: () -> [String]
@@ -646,8 +646,8 @@ private struct ConfigReader {
     private var palettes: [CommandPaletteConfig]?
     private var claims: [Claim<Claimant>] = []
 
-    init(overrides: ConfigOverrides, isRemote: Bool, read: @escaping (String) -> String?, fontFamilies: @escaping () -> [String]) {
-        self.overrides = overrides
+    init(tree: MergedConfigTree, isRemote: Bool, read: @escaping (String) -> String?, fontFamilies: @escaping () -> [String]) {
+        self.tree = tree
         self.isRemote = isRemote
         self.read = read
         self.fontFamilies = fontFamilies
@@ -675,10 +675,10 @@ private struct ConfigReader {
     static let appSections: Set<String> = ["ghostty", "browser", "diagnostics", "remote_environments"]
 
     mutating func readSections(_ root: Node) {
-        config.overrides = overrides.paths
-        config.problems = overrides.problems
+        config.overrides = tree.overridePaths
+        config.problems = tree.problems
         for (name, key, value) in entries(of: root, "the Config") {
-            // Read before the sections, by ConfigOverrides.
+            // Read before the sections, by MergedConfigTree.
             if name == "override" { continue }
             if isRemote, Self.appSections.contains(name) { continue }
             guard let section = Self.sections[name] else {
@@ -691,8 +691,8 @@ private struct ConfigReader {
         // In file order, although conflicts are found after every section: the Config, then each Config Override.
         config.problems = config.problems.enumerated()
             .sorted {
-                (overrides.order(of: $0.element.path), $0.element.line, $0.offset)
-                    < (overrides.order(of: $1.element.path), $1.element.line, $1.offset)
+                (tree.order(of: $0.element.path), $0.element.line, $0.offset)
+                    < (tree.order(of: $1.element.path), $1.element.line, $1.offset)
             }
             .map(\.element)
     }
@@ -758,7 +758,7 @@ private struct ConfigReader {
 
     /// The folder of the file `node` was written in: the Config's, or a Config Override's.
     private func directory(of node: Node) -> String {
-        (overrides.file(of: node) as NSString).deletingLastPathComponent
+        (tree.file(of: node) as NSString).deletingLastPathComponent
     }
 
     mutating func readSessionPathAliases(_ node: Node) {
@@ -1735,6 +1735,6 @@ private struct ConfigReader {
     }
 
     private mutating func problem(at node: Node, _ message: String) {
-        config.problems.append(ConfigProblem(path: overrides.file(of: node), line: node.mark?.line ?? 1, message: message))
+        config.problems.append(ConfigProblem(path: tree.file(of: node), line: node.mark?.line ?? 1, message: message))
     }
 }
