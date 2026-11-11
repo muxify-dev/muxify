@@ -37,6 +37,8 @@ struct MuxifyApp: App {
         // also opens a new App Window for the URL.
         .handlesExternalEvents(matching: [])
         .commands { MuxifyCommands(windows: windows) }
+
+        Settings { SettingsView(model: windows.settings) }
     }
 }
 

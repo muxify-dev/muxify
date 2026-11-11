@@ -509,6 +509,7 @@ public struct Config: Equatable {
         #   # with no keybinding. A trigger listed here is taken from the
         #   # defaults of other actions.
         #   # Keybindings work throughout Muxify, including in the Browser.
+        #   # open_settings opens Settings, also while the Terminal has Focus.
         #   # focus_terminal also uses Ctrl+backquote, Ctrl+0 and Alt+0.
         #   # Cmd+backquote stays available for macOS App Window switching.
         #   # select_card_1 through select_card_9 Jump To Topic or Session cards.

@@ -61,6 +61,21 @@ public struct KeyTrigger: Hashable {
         self.modifiers = modifiers
     }
 
+    /// The trigger as the Config spells it: `ctrl+alt+shift+cmd+comma`.
+    public var spelling: String {
+        let names: [(Modifiers, String)] = [(.control, "ctrl"), (.option, "alt"), (.shift, "shift"), (.command, "cmd")]
+        let key: String
+        switch self.key {
+        case .special(let special): key = special.rawValue
+        case .character(let character):
+            key = character.isLetter || character.isNumber
+                ? String(character).lowercased()
+                : Self.keyNames.first { $0.value == character && !$0.key.hasPrefix("key_") && !$0.key.hasPrefix("digit_") }?.key
+                    ?? String(character)
+        }
+        return (names.filter { modifiers.contains($0.0) }.map(\.1) + [key]).joined(separator: "+")
+    }
+
     private static let modifierNames: [String: Modifiers] = [
         "cmd": .command, "command": .command, "super": .command,
         "ctrl": .control, "control": .control,

@@ -55,6 +55,7 @@ enum PaletteCommand: String, CaseIterable {
     case newSession = "New tmux Session"
     case newWorktree = "New Worktree"
     case removeWorktree = "Remove Worktree"
+    case settings = "Settings"
     case openConfig = "Open Config"
     case reloadConfig = "Reload Config"
     case installExtensions = "Install Extensions"
@@ -93,6 +94,7 @@ enum PaletteCommand: String, CaseIterable {
         case .moveTopicDown: .moveTopicDown
         case .pinTopic, .unpinTopic: .togglePinTopic
         case .newAppWindow: .newAppWindow
+        case .settings: .openSettings
         case .maximize, .restore: .toggleMaximize
         case .maximizeTerminal: .toggleMaximizeTerminal
         case .maximizeBrowser: .toggleMaximizeBrowser
@@ -159,7 +161,7 @@ enum PaletteCommand: String, CaseIterable {
             .noMirror("It changes only the Browser of one App Window.")
         case .clearBrowserHistory:
             .noMirror("It removes a file of this Mac's app, which no Agent reads.")
-        case .openConfig, .reloadConfig, .installExtensions, .installCLI:
+        case .settings, .openConfig, .reloadConfig, .installExtensions, .installCLI:
             .noMirror("It sets up the app. An Agent edits the Config file directly.")
         }
     }
@@ -319,6 +321,7 @@ extension CommandPalette {
         case .newSession: store.newSession()
         case .newWorktree: store.presentNewWorktree(keepingHistory: true)
         case .removeWorktree: store.presentRemoveWorktree(keepingHistory: true)
+        case .settings: store.onOpenSettings?()
         case .openConfig: store.openConfig()
         case .reloadConfig: store.reloadConfig()
         case .installExtensions: ExtensionInstaller.run()

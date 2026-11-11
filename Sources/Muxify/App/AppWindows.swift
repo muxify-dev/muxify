@@ -10,6 +10,9 @@ final class AppWindows {
     @ObservationIgnored private let initialEnvironmentName: String?
     private(set) var focusedID: UUID?
     @ObservationIgnored var openWindow: ((AppWindowRequest) -> Void)?
+    @ObservationIgnored var openSettings: (() -> Void)?
+    /// The Settings window's draft, kept while the window is closed (ADR 0074).
+    @ObservationIgnored let settings: SettingsModel
     @ObservationIgnored private var catalog = AppWindowCatalog()
     @ObservationIgnored private var stores: [UUID: WorkspaceStore] = [:]
     @ObservationIgnored private var nativeWindows: [UUID: NSWindow] = [:]
@@ -28,6 +31,7 @@ final class AppWindows {
 
     init(configStore: ConfigStore) {
         self.configStore = configStore
+        settings = SettingsModel(configStore: configStore)
         let remembered = UserDefaults.standard.string(forKey: "selectedEnvironment")
         let name = configStore.config.remoteEnvironments.first { $0.name == remembered }?.name
         initialEnvironmentName = name
@@ -58,6 +62,7 @@ final class AppWindows {
         catalog.updateEnvironment(request.id, name: environment?.name)
         store.onSelectEnvironment = { [weak self] name in self?.selectEnvironment(named: name) }
         store.onNewAppWindow = { [weak self] in self?.newWindow() }
+        store.onOpenSettings = { [weak self] in self?.openSettings?() }
         // The last App Window to close quits the app.
         store.onCloseAppWindow = { [weak self] in self?.nativeWindows[request.id]?.close() }
         store.shouldConsumeOpenRequests = { [weak self, weak store] in
