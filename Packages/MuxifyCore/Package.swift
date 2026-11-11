@@ -14,7 +14,9 @@ let package = Package(
         .package(url: "https://github.com/jpsim/Yams", exact: "6.2.2"),
     ],
     targets: [
-        .target(name: "MuxifyCore", dependencies: [.product(name: "Yams", package: "Yams")]),
+        // The Host CLI install script, a file of its own because `make host-cli` also publishes it (ADR 0076).
+        .target(name: "MuxifyCore", dependencies: [.product(name: "Yams", package: "Yams")],
+                resources: [.copy("Environment/host-cli-install.sh")]),
         .target(name: "MuxifyTestSupport", dependencies: ["MuxifyCore"]),
         .testTarget(name: "MuxifyCoreTests", dependencies: ["MuxifyCore", "MuxifyTestSupport"], resources: [.copy("Fixtures")]),
     ],

@@ -2,7 +2,8 @@
 # Builds every asset of the Host CLI in build/host-cli: the muxify CLI as static
 # (musl) Linux binaries for aarch64 and x86_64, muxify-linux-<arch>, built in
 # Docker with the Swift Static Linux SDK; muxify-darwin-arm64, a release
-# swift build on the Mac; and version, the line that their --version prints.
+# swift build on the Mac; version, the line that their --version prints; and
+# install.sh, the install script that the app runs and the phone fetches.
 # One container cross-compiles both architectures. The SDK, the package cache
 # and the Linux build folder stay in a Docker volume, apart from the Mac's .build,
 # so a second run only rebuilds what changed.
@@ -77,4 +78,6 @@ if [ "$PART" != linux ]; then
   [ "$printed" = "$VERSION" ] || { echo "muxify-darwin-arm64 --version printed '$printed', not '$VERSION'" >&2; exit 1; }
 fi
 printf '%s\n' "$VERSION" >"$OUT/version"
+# The app's own copy of the script, byte for byte (ADR 0076).
+cp "$ROOT/Packages/MuxifyCore/Sources/MuxifyCore/Environment/host-cli-install.sh" "$OUT/install.sh"
 ls -l "$OUT"
