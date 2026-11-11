@@ -1448,7 +1448,7 @@ that is not valid stops the Action before it changes anything.
 A Remote Environment's App Window uses the Config on that machine
 (`~/.config/muxify/config.yaml`, or under its `$XDG_CONFIG_HOME`) when there is
 one, as if Muxify ran there: its Session Paths, palettes, keybindings and `ui`.
-Its `ghostty`, `browser`, `diagnostics` and `remote_environments` sections are
+Its `ghostty`, `browser`, `diagnostics`, `update` and `remote_environments` sections are
 ignored, because they describe this Mac's app. Without a remote Config, the local Config applies, and
 its Session Paths are looked for on the remote. Topics stay on this Mac. The menu shows the focused App
 Window's keybindings.
@@ -1646,6 +1646,27 @@ diagnostics:
 restart.
 [Diagnostics](development.md#diagnostics) lists what the log holds and how to
 read it.
+
+## Updates
+
+Muxify checks for a newer build at launch and every 24 hours, and shows it on
+the Update Button in the header. A background check never opens the Update
+Popover or takes Focus, and shows nothing when it finds nothing or fails; the
+Diagnostics log has its result. **Check for Updates…**, in the app menu and in
+Commands, works whatever `check` says. These are the defaults:
+
+```yaml
+update:
+  check: true
+  # stable offers Releases; tip offers every Tip Build, a build of each commit
+  # on master.
+  channel: stable
+```
+
+`check: false` stops the background checks. Both keys apply when you save the
+Config or run **Reload Config**, with no restart, and a changed `channel` checks
+at once. Moving from `tip` to `stable` keeps the Tip Build you have until a
+Release has a higher build number: Muxify never offers an older build.
 
 ## Hints
 

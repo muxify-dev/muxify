@@ -1,9 +1,11 @@
 """The Update Button and the Update Popover against a feed that the suite serves over http from its run directory.
 
 MUXIFY_UPDATE_FEED_URL turns the updater on in the Debug app, which carries the test public key, and points it at
-this feed. The Debug app is build 1, so a feed item of build 2 is newer and one of build 1 is not. The checks start
-Check for Updates from the Commands palette or the app menu, open the popover with the button's press, and answer
-with the popover's buttons. They never press the notes link, which would open a browser. Only one check presses
+this feed. The Debug app is build 1, so a feed item of build 2 is newer and one of build 1 is not. `Update` runs the
+app with `update.check: false`, so no background check races its checks: they start Check for Updates from the
+Commands palette or the app menu, open the popover with the button's press, and answer with the popover's buttons.
+`BackgroundCheck` runs a second app with the default Config, whose background check at launch, and on a channel
+change in the Config, shows the Update Button by itself without taking Focus. They never press the notes link, which would open a browser. Only one check presses
 Install and Relaunch, on a zip that is not signed with the app's key, which Sparkle refuses before it installs:
 an install that went through would quit the app, start a new copy and take Focus.
 
@@ -16,6 +18,7 @@ import http.server
 import os
 import pathlib
 import plistlib
+import re
 import shutil
 import subprocess
 import threading
@@ -44,6 +47,35 @@ def feed(build, version, link, enclosure='http://127.0.0.1:1/Muxify.zip', size=S
             ' sparkle:edSignature="%(signature)s"/>\n'
             '</item></channel></rss>\n') % dict(version=version, date=RELEASED, link=link, build=build, size=size,
                                                 enclosure=enclosure, signature='A' * 86 + '==')
+
+
+def front_app():
+    """The bundle id of the app in front, which a check must leave in front."""
+    front = subprocess.run(['lsappinfo', 'front'], capture_output=True, text=True).stdout.strip()
+    info = subprocess.run(['lsappinfo', 'info', '-only', 'bundleid', front], capture_output=True, text=True).stdout
+    match = re.search(r'"CFBundleIdentifier"="([^"]*)"', info)
+    return match.group(1) if match else None
+
+
+def start_app(test_class, name, config):
+    """A Sandbox app on its own feed, with `config` as its Config."""
+    test_class.s = s = Sandbox(name)
+    # Sparkle keeps a download and its installer's files under the run's own bundle id; after the teardown.
+    for folder in ('Caches', 'HTTPStorages'):
+        test_class.addClassCleanup(shutil.rmtree, pathlib.Path.home()/'Library'/folder/s.bundle_id, ignore_errors=True)
+    test_class.addClassCleanup(s.teardown)
+    test_class.feed = FeedServer()
+    test_class.feed.start()
+    test_class.addClassCleanup(test_class.feed.stop)
+    (s.root/'config/muxify/config.yaml').write_text(config)
+    s.app_env['MUXIFY_UPDATE_FEED_URL'] = test_class.feed.url
+    s.tmux('new-session', '-d', '-s', 'update', '-c', str(s.root), '/bin/sh')
+    test_class.front = front_app()
+    s.launch()
+
+
+def log_text(s):
+    return ''.join(path.read_text(errors='replace') for path in sorted((s.root/'logs').glob('muxify-*.log')))
 
 
 def wrongly_signed_zip(folder, bundle_id):
@@ -131,17 +163,7 @@ class FeedServer:
 class Update(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
-        # Sparkle keeps a download and its installer's files under the run's own bundle id; after the teardown.
-        for folder in ('Caches', 'HTTPStorages'):
-            cls.addClassCleanup(shutil.rmtree, pathlib.Path.home()/'Library'/folder/s.bundle_id, ignore_errors=True)
-        cls.addClassCleanup(s.teardown)
-        cls.feed = FeedServer()
-        cls.feed.start()
-        cls.addClassCleanup(cls.feed.stop)
-        s.app_env['MUXIFY_UPDATE_FEED_URL'] = cls.feed.url
-        s.tmux('new-session', '-d', '-s', 'update', '-c', str(s.root), '/bin/sh')
-        s.launch()
+        start_app(cls, __name__.rsplit('.', 1)[-1], 'update:\n  check: false\n')
 
     def setUp(self):
         if self.feed.server is None:
@@ -194,9 +216,21 @@ class Update(unittest.TestCase):
         return self.s.wait_rows(lambda rs: self.s.has('update-popover', rs), 'the Update Popover did not open')
 
     def log_text(self):
-        return ''.join(path.read_text(errors='replace') for path in sorted((self.s.root/'logs').glob('muxify-*.log')))
+        return log_text(self.s)
 
     # checks
+
+    def test_with_check_off_nothing_shows_until_check_for_updates(self):
+        # Every other check of this class asks first, so the feed was read only if one of them ran before.
+        requests = self.feed.requests
+        time.sleep(3)
+        self.assertFalse(self.s.has('update-button'), 'the Update Button showed with update.check: false')
+        self.assertEqual(self.feed.requests, requests, 'a background check read the feed with update.check: false')
+        log = self.log_text()
+        self.assertIn('update: background checks off, stable channel', log)
+        self.assertNotIn('update: background check,', log)
+        self.check_from_the_menu()
+        self.wait_button('Update Available: 0.2.0')
 
     def test_the_command_shows_checking_then_the_update_available(self):
         # The feed answers late, so the check lasts long enough to see.
@@ -328,6 +362,67 @@ class Update(unittest.TestCase):
                      'update: failed: The update is improperly signed'):
             self.assertIn(line, log)
         self.assertNotIn('update: installed', log)
+
+
+class BackgroundCheck(unittest.TestCase):
+    """The default Config: a background check at launch, the first launch included, and on a channel change."""
+
+    @classmethod
+    def setUpClass(cls):
+        start_app(cls, 'update-background', '')
+
+    def button(self, rs=None):
+        return self.s.row('update-button', rs).get('accessibilityLabel')
+
+    def wait_button(self, text, seconds=20):
+        """Waits for `text`, and returns every text that the Update Button showed on the way."""
+        shown = []
+
+        def showing(rs):
+            text_now = self.button(rs)
+            if text_now not in shown:
+                shown.append(text_now)
+            return text_now == text
+
+        self.s.wait_rows(showing, lambda: 'the Update Button does not show %r: it showed %r' % (text, shown), seconds)
+        return shown
+
+    def assert_focus_unchanged(self, responders):
+        time.sleep(1)
+        self.assertFalse(self.s.has('update-popover'), 'a background check opened the Update Popover')
+        self.assertEqual(self.s.driver('responder')['responders'], responders, 'a background check moved Focus')
+        self.assertEqual(front_app(), self.front, 'a background check brought an app to the front')
+
+    def test_1_the_launch_shows_the_update_button_with_no_user_action(self):
+        responders = self.s.driver('responder')['responders']
+        shown = self.wait_button('Update Available: 0.2.0')
+        self.assertNotIn('Checking for Updates…', shown)
+        self.assert_focus_unchanged(responders)
+        self.assertGreaterEqual(self.feed.requests, 1)
+        log = log_text(self.s)
+        self.assertIn('update: background check, stable channel', log)
+        self.assertIn('update: found 0.2.0 (build 2), background check', log)
+        self.assertNotIn('asked by the user', log)
+
+    def test_2_a_channel_change_in_the_config_checks_again_at_once(self):
+        if self.button() is None:
+            self.wait_button('Update Available: 0.2.0')
+        # Later hides the button until the next background check finds the update again.
+        if not self.s.has('update-popover'):
+            self.s.act('press', 'update-button')
+        self.s.wait_rows(lambda rs: self.s.has('update-popover', rs), 'the Update Popover did not open')
+        self.s.act('press', 'update-later')
+        self.s.wait_rows(lambda rs: not self.s.has('update-button', rs), 'Later did not hide the Update Button')
+        responders = self.s.driver('responder')['responders']
+        requests = self.feed.requests
+        # The feed answers late, so "Checking for Updates…" would show if the check showed it.
+        self.feed.delay = 3
+        (self.s.root/'config/muxify/config.yaml').write_text('update:\n  channel: tip\n')
+        shown = self.wait_button('Update Available: 0.2.0', seconds=30)
+        self.assertEqual([text for text in shown if text is not None], ['Update Available: 0.2.0'], shown)
+        self.assertGreater(self.feed.requests, requests, 'the channel change read no feed')
+        self.assertIn('update: channel tip', log_text(self.s))
+        self.assert_focus_unchanged(responders)
 
 
 if __name__ == '__main__':

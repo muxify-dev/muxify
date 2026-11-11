@@ -62,6 +62,28 @@ public struct Config: Equatable {
 
     public var diagnostics = Diagnostics()
 
+    /// The `update` section: Muxify's background checks for a newer build, and the Update Channel it reads. It is
+    /// about the app on this Mac, so only the Local Config sets it.
+    public struct Update: Equatable {
+        /// `update.check`: a background check at launch and every 24 hours. On by default; Check for Updates
+        /// works either way.
+        public var check = true
+        /// `update.channel`: which feed the updater reads.
+        public var channel = Channel.stable
+
+        /// The Update Channel: Releases only, or every Tip Build too.
+        public enum Channel: String, Equatable {
+            case stable, tip
+        }
+
+        public init(check: Bool = true, channel: Channel = .stable) {
+            self.check = check
+            self.channel = channel
+        }
+    }
+
+    public var update = Update()
+
     public struct Hints: Equatable {
         public var holdDelay: TimeInterval? = 0.35
         public var cards = Surface(always: true)
@@ -499,6 +521,16 @@ public struct Config: Equatable {
         #   # running. It fills the log fast, so it is off by default.
         #   display_links: false
         #
+        # update:
+        #   # Checks for a newer Muxify at launch and every 24 hours, and
+        #   # shows it on the Update Button. Check for Updates works either
+        #   # way. On by default.
+        #   check: true
+        #   # stable offers Releases; tip offers every Tip Build, a build of
+        #   # each commit on master. Moving back to stable keeps a Tip Build
+        #   # until a Release is newer.
+        #   channel: stable
+        #
         # notifications:
         #   manual_read: false
         #   done_enabled: true
@@ -677,6 +709,7 @@ private struct ConfigReader {
         "hints": { $0.readHints($1) },
         "browser": { $0.readBrowser($1) },
         "diagnostics": { $0.readDiagnostics($1) },
+        "update": { $0.readUpdate($1) },
         "sidebar": { $0.readSidebar($1) },
         "ghostty": { $0.readGhostty($1) },
         "ui": { $0.readUI($1) },
@@ -690,7 +723,7 @@ private struct ConfigReader {
     ]
 
     /// About the app on this Mac, not the machine the Config is on.
-    static let appSections: Set<String> = ["ghostty", "browser", "diagnostics", "remote_environments"]
+    static let appSections: Set<String> = ["ghostty", "browser", "diagnostics", "update", "remote_environments"]
 
     mutating func readSections(_ root: Node) {
         config.overrides = tree.overridePaths
@@ -1004,6 +1037,27 @@ private struct ConfigReader {
                 continue
             }
             if name == "enabled" { config.diagnostics.enabled = enabled } else { config.diagnostics.displayLinks = enabled }
+        }
+    }
+
+    mutating func readUpdate(_ node: Node) {
+        for (name, key, value) in entries(of: node, "update") {
+            switch name {
+            case "check":
+                guard value.tag == Yams.Tag(.bool), let check = value.bool else {
+                    problem(at: value, "update.check: expected a boolean")
+                    continue
+                }
+                config.update.check = check
+            case "channel":
+                guard value.tag == Yams.Tag(.str), let channel = value.string.flatMap(Config.Update.Channel.init(rawValue:)) else {
+                    problem(at: value, "update.channel: expected stable or tip")
+                    continue
+                }
+                config.update.channel = channel
+            default:
+                problem(at: key, "unknown key \"update.\(name)\"")
+            }
         }
     }
 

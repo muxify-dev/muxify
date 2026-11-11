@@ -1,4 +1,5 @@
 import AppKit
+import MuxifyCore
 import Sparkle
 
 /// Muxify's updater: Sparkle's `SPUUpdater` with Muxify's own user driver, which reports every step to the app's one
@@ -7,37 +8,40 @@ import Sparkle
 /// The unit tests do not link Sparkle, so only this file imports it.
 @MainActor final class SparkleUpdater: NSObject, SPUUpdaterDelegate {
     let model: UpdateModel
-    private let feed: URL
+    private let feed: UpdateFeed
     private let driver: UpdateUserDriver
     private var updater: SPUUpdater!
     private var started = false
     /// A check the user asked for while the last session was still ending, such as Retry right after its OK.
     private var checksWhenSessionEnds = false
 
-    /// The updater, when this build has a feed (`UpdateFeed`); it also sets `UpdateModel.shared`.
-    static func startIfConfigured() -> SparkleUpdater? {
-        guard let feed = UpdateFeed.url(info: Bundle.main.infoDictionary, environment: ProcessInfo.processInfo.environment)
+    /// The updater, when this build has a feed (`UpdateFeed`); it also sets `UpdateModel.shared`. The local Config's
+    /// `update` section then starts the background checks; `ConfigStore` applies it again at each reload.
+    static func startIfConfigured(update: Config.Update) -> SparkleUpdater? {
+        guard let feed = UpdateFeed(info: Bundle.main.infoDictionary, environment: ProcessInfo.processInfo.environment)
         else { return nil }
         let updater = SparkleUpdater(feed: feed, model: UpdateModel())
         UpdateModel.shared = updater.model
         updater.start()
+        updater.model.apply(update)
         return updater
     }
 
-    private init(feed: URL, model: UpdateModel) {
+    private init(feed: UpdateFeed, model: UpdateModel) {
         self.feed = feed
         self.model = model
         driver = UpdateUserDriver(model: model)
         super.init()
         updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: driver, delegate: self)
         model.startCheck = { [weak self] in self?.check() }
+        model.startBackgroundCheck = { [weak self] in self?.checkInBackground() ?? false }
     }
 
     private func start() {
         do {
             try updater.start()
             started = true
-            Diagnostics.write("update: updater started, feed \(feed.absoluteString)")
+            Diagnostics.write("update: updater started, feed \(feed)")
         } catch {
             Diagnostics.report("update: the updater did not start: \(error.localizedDescription)")
         }
@@ -62,14 +66,25 @@ import Sparkle
         updater.checkForUpdates()
     }
 
+    /// A check that Muxify starts by itself. Sparkle's scheduled driver shows no "not found" and no error until it
+    /// has shown an update, and leaves out a version the user skipped. Sparkle's own schedule stays off
+    /// (`SUEnableAutomaticChecks`); `UpdateModel` runs this at launch, every 24 hours and on a channel change.
+    private func checkInBackground() -> Bool {
+        guard started, !updater.sessionInProgress else { return false }
+        updater.checkForUpdatesInBackground()
+        return true
+    }
+
     // MARK: SPUUpdaterDelegate
 
     nonisolated func feedURLString(for updater: SPUUpdater) -> String? {
-        MainActor.assumeIsolated { feed.absoluteString }
+        MainActor.assumeIsolated { feed.url(for: model.channel)?.absoluteString }
     }
 
     nonisolated func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
         MainActor.assumeIsolated {
+            // Before a check that waited for this session, which is the user's.
+            if updateCheck == .updatesInBackground { model.backgroundCheckFinished(error.map { $0 as NSError }) }
             guard checksWhenSessionEnds else { return }
             checksWhenSessionEnds = false
             DispatchQueue.main.async { [weak self] in self?.check() }

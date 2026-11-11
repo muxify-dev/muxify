@@ -398,6 +398,20 @@ user driver, which feeds the one `UpdateModel` that every App Window's Update
 Button shows (ADR 0077). Each check and its result go to the Diagnostics log as
 `update:` lines.
 
+The local Config's `update` section drives the background checks: with
+`update.check` true, the default, `UpdateModel` runs one at launch, the first
+launch included, and then every 24 hours by the wall clock, looking once an
+hour. Sparkle's own schedule stays off (`SUEnableAutomaticChecks` is false). A
+background check shows only "Update Available", and Sparkle leaves out a version
+the user skipped; a check that finds nothing or fails changes nothing on screen
+and goes only to the Diagnostics log. `update.channel` picks `<base>stable.xml`
+or `<base>tip.xml`, which Sparkle asks for through its delegate at each check;
+`MUXIFY_UPDATE_FEED_URL` replaces either. `ConfigStore` applies the section at
+each reload: turning `check` off stops the schedule, turning it on starts it
+with a check, and a changed channel checks at once. A remote Config's `update`
+is ignored. Moving from `tip` to `stable` keeps the Tip Build until a Release
+has a higher build number, since Sparkle never offers a lower one.
+
 An update downloads only after Install and Relaunch: `SUAutomaticallyUpdate`
 and `SUAllowsAutomaticUpdates` are false. The Update Button then shows
 "Downloading: N%", "Preparing: N%" and "Installing…". Sparkle's installer quits
@@ -413,7 +427,10 @@ Debug build carries the test key in `scripts/sparkle-debug-public-key.env`
 (`scripts/stamp-debug-update-key.sh`). Its private half,
 `scripts/verify/fixtures/sparkle-test-ed-key`, signs only test feeds.
 `make verify SUITE=update` serves a feed over `http` from its run directory
-and drives the Update Button and the Update Popover against it. One check
+and drives the Update Button and the Update Popover against it, with
+`update.check: false` so that no background check races the checks. A second
+app with the default Config proves that the launch and a channel change show
+the Update Button by themselves, and that Focus and the front app stay. One check
 presses Install and Relaunch on a zip that is not signed with the test key: it
 sees the download's progress, then "Update Failed", and the app is unchanged and
 still running. No check installs an update, which would relaunch the app.

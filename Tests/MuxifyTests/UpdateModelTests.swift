@@ -1,4 +1,5 @@
 import XCTest
+import MuxifyCore
 
 /// The update model, fed the events that its Sparkle driver sends, as the Update Button shows them.
 @MainActor final class UpdateModelTests: XCTestCase {
@@ -324,17 +325,212 @@ import XCTest
 
     func testOnlyABuildWithAFeedHasAnUpdater() {
         // A plain Debug or make install build: no stamp and no variable.
-        XCTAssertNil(UpdateFeed.url(info: ["CFBundleVersion": "1"], environment: [:]))
-        XCTAssertNil(UpdateFeed.url(info: ["MuxifyUpdateFeedBaseURL": ""], environment: ["MUXIFY_UPDATE_FEED_URL": ""]))
+        XCTAssertNil(UpdateFeed(info: ["CFBundleVersion": "1"], environment: [:]))
+        XCTAssertNil(UpdateFeed(info: ["MuxifyUpdateFeedBaseURL": ""], environment: ["MUXIFY_UPDATE_FEED_URL": ""]))
         let base = "https://github.com/muxify-dev/muxify/releases/download/appcast/"
-        XCTAssertEqual(UpdateFeed.url(info: ["MuxifyUpdateFeedBaseURL": base], environment: [:])?.absoluteString,
-                       base + "stable.xml")
-        // The variable turns the updater on in any build and replaces the feed.
-        XCTAssertEqual(UpdateFeed.url(info: ["MuxifyUpdateFeedBaseURL": base],
-                                      environment: ["MUXIFY_UPDATE_FEED_URL": "http://127.0.0.1:8123/feed.xml"])?.absoluteString,
-                       "http://127.0.0.1:8123/feed.xml")
-        XCTAssertNotNil(UpdateFeed.url(info: nil, environment: ["MUXIFY_UPDATE_FEED_URL": "http://127.0.0.1:8123/feed.xml"]))
+        let stamped = UpdateFeed(info: ["MuxifyUpdateFeedBaseURL": base], environment: [:])
+        XCTAssertEqual(stamped?.url(for: .stable)?.absoluteString, base + "stable.xml")
+        XCTAssertEqual(stamped?.url(for: .tip)?.absoluteString, base + "tip.xml")
+        // The variable turns the updater on in any build and replaces the feed, whatever the channel.
+        let local = "http://127.0.0.1:8123/feed.xml"
+        let overridden = UpdateFeed(info: ["MuxifyUpdateFeedBaseURL": base], environment: ["MUXIFY_UPDATE_FEED_URL": local])
+        XCTAssertEqual(overridden?.url(for: .stable)?.absoluteString, local)
+        XCTAssertEqual(overridden?.url(for: .tip)?.absoluteString, local)
+        XCTAssertNotNil(UpdateFeed(info: nil, environment: ["MUXIFY_UPDATE_FEED_URL": local]))
         // The test bundle, like a plain Debug build, has none, so it offers no Check for Updates.
         XCTAssertNil(UpdateModel.shared)
+    }
+
+    // MARK: Background checks
+
+    private var backgroundChecks = 0
+    private var clock = Date(timeIntervalSince1970: 1_790_000_000)
+
+    private func backgroundModel(starts: Bool = true) -> UpdateModel {
+        let model = model()
+        model.startBackgroundCheck = { [unowned self] in
+            backgroundChecks += 1
+            return starts
+        }
+        model.now = { [unowned self] in clock }
+        return model
+    }
+
+    private let noUpdate = NSError(domain: "SUSparkleErrorDomain", code: 1001,
+                                   userInfo: [NSLocalizedDescriptionKey: "You're up to date!"])
+    private let offline = NSError(domain: "SUSparkleErrorDomain", code: 2001,
+                                  userInfo: [NSLocalizedDescriptionKey: "An error occurred in retrieving update information."])
+
+    func testTheLaunchRunsABackgroundCheckWhenTheConfigTurnsThemOn() {
+        let model = backgroundModel()
+        XCTAssertEqual(model.channel, .stable)
+        model.apply(Config.Update())
+        XCTAssertEqual(backgroundChecks, 1)
+        XCTAssertEqual(checks, 0)
+        XCTAssertTrue(model.checksInBackground)
+        XCTAssertEqual(logged, ["update: background checks on, every 24 hours, stable channel",
+                                "update: background check, stable channel"])
+        // Sparkle's scheduled driver never says it is checking; the button stays hidden.
+        model.checking()
+        XCTAssertEqual(model.state, .idle)
+        XCTAssertNil(model.buttonText)
+    }
+
+    func testCheckOffRunsNoBackgroundCheckButCheckForUpdatesStillWorks() {
+        let model = backgroundModel()
+        model.apply(Config.Update(check: false))
+        clock += 3 * 24 * 60 * 60
+        model.backgroundCheckIfDue()
+        XCTAssertEqual(backgroundChecks, 0)
+        XCTAssertEqual(logged, ["update: background checks off, stable channel"])
+        model.check()
+        XCTAssertEqual(checks, 1)
+        model.checking()
+        XCTAssertEqual(model.buttonText, "Checking for Updates…")
+    }
+
+    func testABackgroundCheckRunsAgainEvery24Hours() {
+        let model = backgroundModel()
+        model.apply(Config.Update())
+        model.backgroundCheckFinished(noUpdate)
+        clock += 23 * 60 * 60
+        model.backgroundCheckIfDue()
+        XCTAssertEqual(backgroundChecks, 1)
+        clock += 60 * 60
+        model.backgroundCheckIfDue()
+        XCTAssertEqual(backgroundChecks, 2)
+        model.backgroundCheckFinished(noUpdate)
+        clock += 24 * 60 * 60
+        model.backgroundCheckIfDue()
+        XCTAssertEqual(backgroundChecks, 3)
+    }
+
+    func testABackgroundCheckThatFindsAnUpdateShowsOnlyUpdateAvailable() {
+        let model = backgroundModel()
+        model.apply(Config.Update())
+        var answers: [UpdateChoice] = []
+        model.found(offer) { answers.append($0) }
+        XCTAssertEqual(model.buttonText, "Update Available: 0.2.0")
+        XCTAssertEqual(logged.last, "update: found 0.2.0 (build 101), background check")
+        // Later hides it until the next background check finds it again.
+        model.later()
+        XCTAssertEqual(answers, [.later])
+        XCTAssertNil(model.buttonText)
+        model.backgroundCheckFinished(nil)
+        clock += 24 * 60 * 60
+        model.backgroundCheckIfDue()
+        XCTAssertEqual(backgroundChecks, 2)
+        model.found(offer) { _ in }
+        XCTAssertEqual(model.buttonText, "Update Available: 0.2.0")
+    }
+
+    func testABackgroundCheckThatFindsNothingOrFailsShowsNothingAndLogsIt() {
+        let model = backgroundModel()
+        model.apply(Config.Update())
+        model.backgroundCheckFinished(noUpdate)
+        XCTAssertEqual(model.state, .idle)
+        XCTAssertEqual(logged.last, "update: no newer build, background check")
+        clock += 24 * 60 * 60
+        model.backgroundCheckIfDue()
+        model.backgroundCheckFinished(offline)
+        XCTAssertEqual(model.state, .idle)
+        XCTAssertEqual(logged.last, "update: background check failed: An error occurred in retrieving update information."
+                       + " (SUSparkleErrorDomain 2001)")
+        XCTAssertFalse(model.checksInBackground)
+        // The driver's not-found and error calls in a background check are acknowledged at once, never shown.
+        clock += 24 * 60 * 60
+        model.backgroundCheckIfDue()
+        var acknowledged = 0
+        model.notFound { acknowledged += 1 }
+        XCTAssertEqual(model.state, .idle)
+        model.backgroundCheckFinished(noUpdate)
+        clock += 24 * 60 * 60
+        model.backgroundCheckIfDue()
+        model.failed(offline) { acknowledged += 1 }
+        XCTAssertEqual(model.state, .idle)
+        XCTAssertNil(model.buttonText)
+        XCTAssertEqual(acknowledged, 2)
+        XCTAssertEqual(logged.filter { $0.hasPrefix("update: no newer build") }.count, 2)
+        XCTAssertFalse(logged.contains { $0.hasPrefix("update: failed") })
+    }
+
+    func testAFailedDownloadAfterABackgroundCheckShowsUpdateFailed() {
+        let model = backgroundModel()
+        model.apply(Config.Update())
+        model.found(offer) { _ in }
+        model.install()
+        model.downloadStarted()
+        model.failed(offline) {}
+        XCTAssertEqual(model.buttonText, "Update Failed")
+        // Sparkle ends the session after the user's OK; the background check logs nothing more.
+        let count = logged.count
+        model.dismissFailure()
+        model.backgroundCheckFinished(offline)
+        XCTAssertEqual(logged.count, count)
+    }
+
+    func testACheckTheUserStartedAfterABackgroundCheckShowsEveryState() {
+        let model = backgroundModel()
+        model.apply(Config.Update())
+        model.backgroundCheckFinished(noUpdate)
+        model.check()
+        model.checking()
+        XCTAssertEqual(model.buttonText, "Checking for Updates…")
+        model.notFound {}
+        XCTAssertEqual(model.buttonText, "No Updates Available")
+        XCTAssertEqual(logged.last, "update: no newer build")
+    }
+
+    func testNoBackgroundCheckWhileTheButtonShowsSomethingOrASessionRuns() {
+        let model = backgroundModel()
+        model.apply(Config.Update(check: false))
+        model.check()
+        model.checking()
+        model.apply(Config.Update())
+        XCTAssertEqual(backgroundChecks, 0)
+        XCTAssertEqual(logged.last, "update: no background check, the Update Button shows Checking for Updates…")
+        model.notFound {}
+        clock += 24 * 60 * 60
+        model.backgroundCheckIfDue()
+        XCTAssertEqual(backgroundChecks, 0)
+
+        let busy = backgroundModel(starts: false)
+        busy.apply(Config.Update())
+        XCTAssertEqual(backgroundChecks, 1)
+        XCTAssertFalse(busy.checksInBackground)
+        XCTAssertEqual(logged.last, "update: no background check, a check is running")
+    }
+
+    func testAConfigReloadTurnsBackgroundChecksOffAndOn() {
+        let model = backgroundModel()
+        model.apply(Config.Update())
+        model.backgroundCheckFinished(noUpdate)
+        // The same section again, as a reload of another section applies it, changes nothing.
+        model.apply(Config.Update())
+        XCTAssertEqual(backgroundChecks, 1)
+        model.apply(Config.Update(check: false))
+        clock += 24 * 60 * 60
+        model.backgroundCheckIfDue()
+        XCTAssertEqual(backgroundChecks, 1)
+        // Turning them on starts the schedule with a check at once.
+        model.apply(Config.Update(check: true))
+        XCTAssertEqual(backgroundChecks, 2)
+        XCTAssertEqual(logged.last, "update: background check, stable channel")
+    }
+
+    func testAChannelChangeChecksAtOnceOnTheNewChannel() {
+        let model = backgroundModel()
+        model.apply(Config.Update())
+        model.backgroundCheckFinished(noUpdate)
+        model.apply(Config.Update(channel: .tip))
+        XCTAssertEqual(model.channel, .tip)
+        XCTAssertEqual(backgroundChecks, 2)
+        XCTAssertEqual(logged.suffix(2), ["update: channel tip", "update: background check, tip channel"])
+        model.backgroundCheckFinished(noUpdate)
+        // With background checks off, a channel change checks nothing but still picks the feed.
+        model.apply(Config.Update(check: false, channel: .tip))
+        model.apply(Config.Update(check: false, channel: .stable))
+        XCTAssertEqual(model.channel, .stable)
+        XCTAssertEqual(backgroundChecks, 2)
     }
 }

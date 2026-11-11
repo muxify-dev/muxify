@@ -1,4 +1,5 @@
 import Foundation
+import MuxifyCore
 import Observation
 
 /// What the updater found, as the Update Popover shows it.
@@ -33,21 +34,43 @@ enum UpdateChoice: Equatable {
     case install, skip, later
 }
 
-/// Where the updater checks: `MUXIFY_UPDATE_FEED_URL`, which a verify suite sets in any build, or the stable feed
-/// under the feed base URL that packaging stamps into a Release's or a Tip Build's Info.plist. Nil without either:
-/// a Debug or `make install` build has no updater (docs/adr/0077-an-update-shows-in-the-header-not-in-the-palette.md).
-enum UpdateFeed {
+/// Where the updater checks: `MUXIFY_UPDATE_FEED_URL`, which a verify suite sets in any build, or the Update
+/// Channel's feed under the feed base URL that packaging stamps into a Release's or a Tip Build's Info.plist. Nil
+/// without either: a Debug or `make install` build has no updater
+/// (docs/adr/0077-an-update-shows-in-the-header-not-in-the-palette.md).
+enum UpdateFeed: Equatable, CustomStringConvertible {
+    /// `MUXIFY_UPDATE_FEED_URL`, whatever the channel.
+    case fixed(URL)
+    /// The stamped base URL: a channel's feed is `<base>stable.xml` or `<base>tip.xml`.
+    case base(String)
+
     static let environmentKey = "MUXIFY_UPDATE_FEED_URL"
     static let baseURLKey = "MuxifyUpdateFeedBaseURL"
-    /// The Update Channel that this build reads; the Config chooses it later.
-    static let channel = "stable"
 
-    static func url(info: [String: Any]?, environment: [String: String]) -> URL? {
-        if let override = environment[environmentKey], !override.isEmpty {
-            return URL(string: override)
+    init?(info: [String: Any]?, environment: [String: String]) {
+        if let override = environment[Self.environmentKey], !override.isEmpty {
+            guard let url = URL(string: override) else { return nil }
+            self = .fixed(url)
+            return
         }
-        guard let base = info?[baseURLKey] as? String, !base.isEmpty else { return nil }
-        return URL(string: base + channel + ".xml")
+        guard let base = info?[Self.baseURLKey] as? String, !base.isEmpty, URL(string: base) != nil else { return nil }
+        self = .base(base)
+    }
+
+    var description: String {
+        switch self {
+        case .fixed(let url): "\(url.absoluteString) from \(Self.environmentKey)"
+        case .base(let base): "<channel>.xml under \(base)"
+        }
+    }
+
+    /// The feed that Sparkle reads for `channel`, asked through its delegate at each check, so a channel change
+    /// needs no restart.
+    func url(for channel: Config.Update.Channel) -> URL? {
+        switch self {
+        case .fixed(let url): url
+        case .base(let base): URL(string: base + channel.rawValue + ".xml")
+        }
     }
 }
 
@@ -79,6 +102,19 @@ final class UpdateModel {
     @ObservationIgnored var notFoundSeconds: TimeInterval = 5
     /// Starts a check as the user asked for one; the updater sets it.
     @ObservationIgnored var startCheck: () -> Void = {}
+    /// Starts a background check, and returns false when the updater cannot start one now; the updater sets it.
+    @ObservationIgnored var startBackgroundCheck: () -> Bool = { false }
+    /// How long after a background check the next one is due.
+    @ObservationIgnored var backgroundCheckSeconds: TimeInterval = 24 * 60 * 60
+    /// The clock that says when a background check is due. The schedule looks every hour, by the wall clock, so
+    /// a Mac that slept through the 24 hours checks soon after it wakes.
+    @ObservationIgnored var now: () -> Date = Date.init
+    /// The local Config's `update` section, nil until the updater applies it at launch.
+    @ObservationIgnored private var settings: Config.Update?
+    @ObservationIgnored private var lastBackgroundCheck: Date?
+    /// A background check is running and has shown nothing yet: its result goes only to the Diagnostics log.
+    @ObservationIgnored private(set) var checksInBackground = false
+    @ObservationIgnored private var schedule: Timer?
     @ObservationIgnored private var reply: ((UpdateChoice) -> Void)?
     @ObservationIgnored private var acknowledge: (() -> Void)?
     /// The update that Install and Relaunch chose, for the Diagnostics log of its download and install.
@@ -178,19 +214,94 @@ final class UpdateModel {
         check()
     }
 
+    // MARK: Background checks
+
+    /// The Update Channel whose feed the updater reads.
+    var channel: Config.Update.Channel { settings?.channel ?? .stable }
+
+    /// The local Config's `update` section, at launch and at each Config reload. With `check` on, a background check
+    /// runs at once and then every 24 hours; turning it off stops them. A changed channel checks at once.
+    func apply(_ update: Config.Update) {
+        let previous = settings
+        settings = update
+        guard update != previous else { return }
+        guard update.check else {
+            log("update: background checks off, \(update.channel.rawValue) channel")
+            schedule?.invalidate()
+            schedule = nil
+            return
+        }
+        if previous?.check == true {
+            log("update: channel \(update.channel.rawValue)")
+        } else {
+            log("update: background checks on, every 24 hours, \(update.channel.rawValue) channel")
+            schedule = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.backgroundCheckIfDue() }
+            }
+            schedule?.tolerance = 5 * 60
+        }
+        checkInBackground()
+    }
+
+    /// One look of the schedule: a background check when 24 hours passed since the last one.
+    func backgroundCheckIfDue() {
+        guard settings?.check == true else { return }
+        if let lastBackgroundCheck, now().timeIntervalSince(lastBackgroundCheck) < backgroundCheckSeconds { return }
+        checkInBackground()
+    }
+
+    /// A check that Muxify starts by itself. The Update Button shows only an update that it finds, which Sparkle
+    /// leaves out when the user skipped that version; it never shows "Checking for Updates…", "No Updates
+    /// Available" or "Update Failed", and never opens the Update Popover.
+    private func checkInBackground() {
+        lastBackgroundCheck = now()
+        guard state == .idle else {
+            log("update: no background check, the Update Button shows \(buttonText ?? "")")
+            return
+        }
+        log("update: background check, \(channel.rawValue) channel")
+        checksInBackground = true
+        guard startBackgroundCheck() else {
+            checksInBackground = false
+            log("update: no background check, a check is running")
+            return
+        }
+    }
+
+    /// Sparkle ended a background check's session; `error` says why it found nothing, if it showed nothing.
+    func backgroundCheckFinished(_ error: NSError?) {
+        guard checksInBackground else { return }
+        checksInBackground = false
+        guard let error else { return }
+        if error.domain == "SUSparkleErrorDomain", error.code == 1001 {
+            log("update: no newer build, background check")
+        } else {
+            log("update: background check failed: \(error.localizedDescription) (\(error.domain) \(error.code))")
+        }
+    }
+
     // MARK: What the driver reports
 
     func checking() {
+        guard !checksInBackground else { return }
         state = .checking
     }
 
     func found(_ offer: UpdateOffer, reply: @escaping (UpdateChoice) -> Void) {
-        log("update: found \(offer.version) (build \(offer.build))")
+        log("update: found \(offer.version) (build \(offer.build))" + (checksInBackground ? ", background check" : ""))
+        // From here the user answers, so a failed download shows as after a check they started.
+        checksInBackground = false
         self.reply = reply
         state = .available(offer)
     }
 
     func notFound(acknowledge: @escaping () -> Void) {
+        if checksInBackground {
+            checksInBackground = false
+            log("update: no newer build, background check")
+            acknowledge()
+            return
+        }
         log("update: no newer build")
         self.acknowledge = acknowledge
         state = .notFound
@@ -260,6 +371,12 @@ final class UpdateModel {
 
     /// `detail` goes only to the Diagnostics log, such as the underlying network error.
     func failed(_ message: String, detail: String? = nil, acknowledge: @escaping () -> Void) {
+        if checksInBackground {
+            checksInBackground = false
+            log("update: background check failed: \(message)" + (detail.map { " (\($0))" } ?? ""))
+            acknowledge()
+            return
+        }
         log("update: failed: \(message)" + (detail.map { " (\($0))" } ?? ""))
         self.acknowledge = acknowledge
         state = .failed(message)

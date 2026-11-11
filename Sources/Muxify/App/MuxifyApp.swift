@@ -15,11 +15,11 @@ struct MuxifyApp: App {
         #endif
         AppEnvironment.prepare()
         PTYWatch.start()
-        let configStore = ConfigStore(appliesDiagnostics: true)
+        let configStore = ConfigStore(appliesAppSettings: true)
         configStore.start()
         let windows = AppWindows(configStore: configStore)
         _windows = State(initialValue: windows)
-        _updater = State(initialValue: SparkleUpdater.startIfConfigured())
+        _updater = State(initialValue: SparkleUpdater.startIfConfigured(update: configStore.config.update))
         GhosttyRuntime.shared.delegate = windows
     }
 
