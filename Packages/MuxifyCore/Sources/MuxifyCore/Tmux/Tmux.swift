@@ -1,5 +1,7 @@
-import Foundation
+#if canImport(Darwin)
 import Darwin
+#endif
+import Foundation
 
 /// A tmux window as shown in the sidebar.
 public struct TmuxWindow: Identifiable, Hashable {
@@ -249,7 +251,8 @@ public enum TmuxError: Error, Equatable, CustomStringConvertible {
 public enum Tmux {
     public static let binary: String? = locateBinary()
     public static let hostName: String = {
-        var name = [CChar](repeating: 0, count: Int(MAXHOSTNAMELEN) + 1)
+        // 256 holds any host name: MAXHOSTNAMELEN on macOS, and more than HOST_NAME_MAX (64) on Linux.
+        var name = [CChar](repeating: 0, count: 256 + 1)
         guard gethostname(&name, name.count) == 0 else { return "" }
         return String(cString: name)
     }()

@@ -1,4 +1,6 @@
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 
 /// The whole `muxify` command. It lives in the library, not in the executable, so that

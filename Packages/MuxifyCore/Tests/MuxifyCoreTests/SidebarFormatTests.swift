@@ -209,13 +209,19 @@ final class SidebarFormatTests: XCTestCase {
               left: ''
         """
         let config = try Config.load(path: "/config") { _ in source }.get()
+        #if canImport(AppKit)
         XCTAssertEqual(config.problems.count, 2)
         XCTAssertEqual(config.problems[0].line, 6)
         XCTAssertTrue(config.problems[0].message.contains("sidebar.formats.window.left.sessions"))
         XCTAssertTrue(config.problems[0].message.contains("absent.muxify.symbol"))
-        XCTAssertTrue(config.problems[1].message.contains("sidebar.formats.pane.left"))
-        XCTAssertEqual(config.sidebar.formats.windowParts.left.topics?.source, "#{current_app_icon}")
         XCTAssertNil(config.sidebar.formats.windowParts.left.sessions)
+        #else
+        // Linux has no SF Symbols to check against, so it accepts the name unchecked.
+        XCTAssertEqual(config.problems.count, 1)
+        XCTAssertEqual(config.sidebar.formats.windowParts.left.sessions?.source, "#{symbol:absent.muxify.symbol}")
+        #endif
+        XCTAssertTrue(try XCTUnwrap(config.problems.last).message.contains("sidebar.formats.pane.left"))
+        XCTAssertEqual(config.sidebar.formats.windowParts.left.topics?.source, "#{current_app_icon}")
         XCTAssertNil(config.sidebar.formats.windowParts.right.topics)
         XCTAssertEqual(config.sidebar.formats.windowParts.right.sessions?.source, "✨ #{window_panes}")
         XCTAssertEqual(config.sidebar.formats.window.summary.topics.source, "unchanged")

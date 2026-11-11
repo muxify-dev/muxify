@@ -866,8 +866,14 @@ final class TopicServiceTests: XCTestCase {
         try FileManager.default.removeItem(at: paths.state)
         try Data().write(to: paths.state)
         let notAFolder = try failure(service().handle(EnvironmentRequest(.list)))
-        XCTAssertEqual(notAFolder.message, "Muxify could not read or write the Topic records in \(paths.state.path). "
+        let records = "Muxify could not read or write the Topic records in \(paths.state.path). "
+        #if canImport(Darwin)
+        XCTAssertEqual(notAFolder.message, records
                        + "The file “muxify” couldn’t be saved in the folder “state” because a file with the same name already exists.")
+        #else
+        // Foundation on Linux words the same refusal more briefly.
+        XCTAssertEqual(notAFolder.message, records + "The operation could not be completed. A file with the same name already exists.")
+        #endif
     }
 
     func testAnEditWaitsForTheEditLockAndGivesUpAsStoreBusy() throws {
@@ -1468,7 +1474,8 @@ final class TopicServiceTests: XCTestCase {
         let window = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
         let main = try XCTUnwrap(server.snapshot().windows.first { $0.sessionName == "main" })
         func agent(in window: TmuxWindow, status: String, unread: Bool) throws -> PaneID {
-            let pane = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", window.id, "sleep 600"])
+            // exec: Linux's sh, dash, would otherwise stay the Pane's command in front of sleep.
+            let pane = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", window.id, "exec sleep 600"])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             try server.run(["set-option", "-p", "-t", pane, "@muxify_agent", "claude", ";", "set-option", "-p", "-t", pane, "@muxify_agent_status", status]
                            + (unread ? [";", "set-option", "-p", "-t", pane, "@muxify_agent_unread", "1"] : []))
@@ -1515,7 +1522,7 @@ final class TopicServiceTests: XCTestCase {
         let id = try topicWithSession("Stop it", at: sessionPath.folder.path, using: service())
         let window = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
         let reviewed = Set(server.snapshot().panes.filter { $0.windowID == window.id }.compactMap { PaneID(rawValue: $0.id) })
-        let agent = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", window.id, "sleep 600"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let agent = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", window.id, "exec sleep 600"]).trimmingCharacters(in: .whitespacesAndNewlines)
         try server.run(["set-option", "-p", "-t", agent, "@muxify_agent", "claude"])
         let session = try XCTUnwrap(SessionID(rawValue: window.sessionID))
         let changed = try failure(service().handle(EnvironmentRequest(.killSession, target: .session(session), expectedPaneIDs: reviewed)))

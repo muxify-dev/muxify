@@ -1,5 +1,7 @@
-import Foundation
+#if canImport(Darwin)
 import Darwin
+#endif
+import Foundation
 
 public struct CommandInvocation: Equatable {
     public let executable: String
@@ -68,7 +70,7 @@ public final class CommandRunner: @unchecked Sendable {
             Self.terminate(process)
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline)
-        exit.wait()
+        let ended = exit.wait()
         deadline.cancel()
 
         // A descendant could retain a pipe even after its parent exits.
@@ -80,9 +82,9 @@ public final class CommandRunner: @unchecked Sendable {
         let wasCancelled = cancelled
         lock.unlock()
         if wasCancelled { throw TmuxError.cancelled }
-        guard process.terminationStatus == 0 else {
+        guard ended.status == 0 else {
             throw TmuxError.failed(
-                status: process.terminationStatus,
+                status: ended.status,
                 stderr: String(decoding: errors.value, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             )
         }

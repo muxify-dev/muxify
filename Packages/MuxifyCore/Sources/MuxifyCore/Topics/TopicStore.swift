@@ -1,5 +1,7 @@
-import Foundation
+#if canImport(Darwin)
 import Darwin
+#endif
+import Foundation
 
 /// What the records file holds at one moment.
 public struct TopicContents: Equatable, Sendable {
@@ -79,7 +81,12 @@ public struct TopicStore: Sendable {
     private static func stamp(of url: URL) -> String? {
         var info = stat()
         guard lstat(url.path, &info) == 0 else { return nil }
-        let nanoseconds = Int64(info.st_mtimespec.tv_sec) * 1_000_000_000 + Int64(info.st_mtimespec.tv_nsec)
+        #if canImport(Darwin)
+        let modified = info.st_mtimespec
+        #else
+        let modified = info.st_mtim
+        #endif
+        let nanoseconds = Int64(modified.tv_sec) * 1_000_000_000 + Int64(modified.tv_nsec)
         return "\(info.st_ino):\(nanoseconds):\(info.st_size)"
     }
 

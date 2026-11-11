@@ -1,5 +1,7 @@
-import Foundation
+#if canImport(Darwin)
 import Darwin
+#endif
+import Foundation
 
 /// An advisory `flock` on an empty file that every process opens by name. The kernel keeps the lock on the open
 /// file, never on disk, so a process that exits or crashes releases it, and the file is never written or removed.

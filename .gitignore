@@ -10,3 +10,6 @@ __pycache__/
 /Packages/*/.swiftpm/
 /.claude/worktrees/
 .scratch
+
+# make host-cli writes the build stamp of `muxify --version` here.
+/Sources/MuxifyCLI/BuildStamp+Generated.swift

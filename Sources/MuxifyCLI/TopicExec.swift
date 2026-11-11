@@ -1,4 +1,6 @@
+#if canImport(Darwin)
 import Darwin
+#endif
 import Foundation
 import MuxifyCore
 
@@ -146,7 +148,7 @@ struct TopicExec {
             }
         }
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: deadline)
-        exit.wait()
+        let termination = exit.wait()
         deadline.cancel()
         // A process that the command started in the background can keep a pipe open after the command exits. Its
         // later output is not waited for.
@@ -160,7 +162,7 @@ struct TopicExec {
         lock.lock()
         defer { lock.unlock() }
         // A shell reports a command that a signal ended as 128 plus the signal number.
-        let status = process.terminationReason == .uncaughtSignal ? 128 + process.terminationStatus : process.terminationStatus
+        let status = termination.reason == .uncaughtSignal ? 128 + termination.status : termination.status
         return (expired ? .timedOut : .exited(status), collected[0], collected[1])
     }
 

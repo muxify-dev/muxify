@@ -13,7 +13,7 @@ MUXIFY_DEVELOPMENT_TEAM ?=
 # during dependency scanning". A fixed length makes the hash the same.
 XCODEBUILD_SETTINGS := diagnostic_message_length=0
 
-.PHONY: all setup tools project build test test-release verify verify-gate run install release clean
+.PHONY: all setup tools project build test test-linux test-live-linux test-release verify verify-gate run install release host-cli host-cli-linux host-cli-darwin clean
 
 all: build
 
@@ -43,6 +43,16 @@ test: project
 	TEST_RUNNER_MUXIFY_REQUIRE_TMUX="$$MUXIFY_REQUIRE_TMUX" xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) test
 
+# swift test for the CLI and MuxifyCore on Linux, in Docker (OrbStack on a Mac) with the Swift image of make host-cli,
+# tmux and git, and MUXIFY_REQUIRE_TMUX=1. TEST_LINUX_PLATFORM=linux/amd64 picks another architecture than the host's.
+test-linux:
+	./scripts/test-linux.sh
+
+# The live SSH tests (the Host CLI install and the phone's commands, and the SSH lanes) on a throwaway OrbStack
+# machine per architecture, arm64 and amd64, deleted afterwards. Skips with a message without orb on PATH.
+test-live-linux:
+	./scripts/test-live-linux.sh
+
 test-release:
 	python3 -m unittest discover -s Tests/ReleaseTests -v
 
@@ -60,6 +70,18 @@ verify-gate:
 # CONFIG=path/to/config.yaml starts a new copy of the app with that Config, through MUXIFY_CONFIG.
 run: build
 	$(if $(CONFIG),open -n --env "MUXIFY_CONFIG=$(if $(filter ~%,$(CONFIG)),$(CONFIG),$(abspath $(CONFIG)))" $(APP),open $(APP))
+
+# The Host CLI assets in build/host-cli: static Linux binaries built in Docker (scripts/host-cli-version.env pins it),
+# a release Mac binary, and the version line that all three print. CI builds each part on its own runner:
+# host-cli-linux needs only Docker, host-cli-darwin only the Mac's Swift.
+host-cli:
+	./scripts/build-host-cli.sh
+
+host-cli-linux:
+	./scripts/build-host-cli.sh linux
+
+host-cli-darwin:
+	./scripts/build-host-cli.sh darwin
 
 release:
 	BUILD_NUMBER="$(or $(BUILD_NUMBER),1)" ./scripts/package-release.sh "$(TAG)"
