@@ -15,7 +15,7 @@ public enum HostCLI {
     }
 
     /// The install, in POSIX `sh` so that the phone can run the same text. `$1` is the base URL, ending in `/`;
-    /// `$2`, for tests, replaces `appBundleCLI`. It looks `muxify` up as the phone does, leaves one inside an app
+    /// `$2`, for tests, replaces `appBundleCLI`. It looks `muxify` up as the phone does (the bundle only on a Mac), leaves one inside an app
     /// bundle alone, and downloads `muxify-<os>-<arch>` over `~/.local/bin/muxify` when none is found, when the
     /// found one's `--version` fails, or when the published commit time is later. A newer one is never replaced.
     /// It prints one line, `installed`, `updated`, `current`, `kept`, `skipped:` or `failed:`, and exits 0.
@@ -63,12 +63,16 @@ public enum HostCLI {
         printf '%s %s\n' "$2" "$3"
     }
 
+    os=$(uname -s | tr '[:upper:]' '[:lower:]')
+    arch=$(uname -m)
     found=
     if path=$(command -v muxify 2>/dev/null) && usable "$path"; then
         found=$path
     elif usable "$target"; then
         found=$target
-    elif usable "$bundle"; then
+    # Muxify.app runs only on a Mac. A Linux machine can see the Mac's own through a shared folder (OrbStack
+    # mounts /Applications), and that one does not run there.
+    elif [ "$os" = darwin ] && usable "$bundle"; then
         found=$bundle
     fi
     if [ -n "$found" ]; then
@@ -83,8 +87,6 @@ public enum HostCLI {
         installed=$(version "${out%%"$nl"*}") || installed=
     fi
 
-    os=$(uname -s | tr '[:upper:]' '[:lower:]')
-    arch=$(uname -m)
     case $os-$arch in
         linux-aarch64 | linux-x86_64 | darwin-arm64) ;;
         *) result "failed: no Host CLI for $os $arch" ;;

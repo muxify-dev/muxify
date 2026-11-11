@@ -35,6 +35,8 @@ final class LiveSSHTests: XCTestCase {
         _ = try raw("mkdir -m 700 " + Tmux.shellQuote(root))
         let prefix = "export TMUX_TMPDIR=" + Tmux.shellQuote(root) + " LC_ALL=C; unset TMUX TMUX_PANE; "
         let isolatedCommand = "exec env TMUX_TMPDIR=" + Tmux.shellQuote(root) + " LC_ALL=C "
+        // The connection attaches to a Session of the user's and starts none by itself.
+        _ = try raw(prefix + "tmux -f /dev/null new-session -d -s main -c \"$HOME\"")
         defer {
             _ = try? raw(prefix + "tmux kill-server 2>/dev/null; "
                          + "rm -f \"$TMUX_TMPDIR/tmux-$(id -u)/default\"; "

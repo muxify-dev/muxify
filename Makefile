@@ -13,7 +13,7 @@ MUXIFY_DEVELOPMENT_TEAM ?=
 # during dependency scanning". A fixed length makes the hash the same.
 XCODEBUILD_SETTINGS := diagnostic_message_length=0
 
-.PHONY: all setup tools project build test test-linux test-release verify verify-gate run install release host-cli host-cli-linux host-cli-darwin clean
+.PHONY: all setup tools project build test test-linux test-live-linux test-release verify verify-gate run install release host-cli host-cli-linux host-cli-darwin clean
 
 all: build
 
@@ -47,6 +47,11 @@ test: project
 # tmux and git, and MUXIFY_REQUIRE_TMUX=1. TEST_LINUX_PLATFORM=linux/amd64 picks another architecture than the host's.
 test-linux:
 	./scripts/test-linux.sh
+
+# The live SSH tests (the Host CLI install and the phone's commands, and the SSH lanes) on a throwaway OrbStack
+# machine per architecture, arm64 and amd64, deleted afterwards. Skips with a message without orb on PATH.
+test-live-linux:
+	./scripts/test-live-linux.sh
 
 test-release:
 	python3 -m unittest discover -s Tests/ReleaseTests -v

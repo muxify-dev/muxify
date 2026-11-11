@@ -125,6 +125,8 @@ final class HostCLIScriptTests: XCTestCase {
             let bundled = "\(root)/Applications/Muxify.app/Contents/Resources/bin/muxify"
             try? FileManager.default.removeItem(atPath: "\(root)/Applications")
             try executable(printing: "muxify old1234 100", at: bundled)
+            try FileManager.default.removeItem(atPath: "\(tools)/uname")
+            try write("#!/bin/sh\ncase $1 in -s) echo Darwin ;; -m) echo arm64 ;; esac\n", to: "\(tools)/uname", mode: 0o755)
             // The bundle path itself, the phone's last step.
             XCTAssertEqual(try run(shell), "skipped: app bundle \(bundled)", shell)
             // Install Command Line Tool's link in ~/.local/bin.
@@ -133,6 +135,18 @@ final class HostCLIScriptTests: XCTestCase {
             XCTAssertEqual(try run(shell, bundle: "/nonexistent"), "skipped: app bundle \(bundled)", shell)
             XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: installed), bundled, shell)
             XCTAssertEqual(try versionLine(bundled), "muxify old1234 100", shell)
+        }
+    }
+
+    func testTheMacsMuxifyAppSeenFromALinuxMachineDoesNotCount() throws {
+        for shell in shells {
+            try reset()
+            // OrbStack mounts the Mac's /Applications in its Linux machines.
+            try executable(printing: "muxify old1234 100", at: "\(root)/Applications/Muxify.app/Contents/Resources/bin/muxify")
+            try FileManager.default.removeItem(atPath: "\(tools)/uname")
+            try write("#!/bin/sh\ncase $1 in -s) echo Linux ;; -m) echo aarch64 ;; esac\n", to: "\(tools)/uname", mode: 0o755)
+            XCTAssertEqual(try run(shell), "installed abc1234 200", shell)
+            XCTAssertEqual(try versionLine(installed), published, shell)
         }
     }
 

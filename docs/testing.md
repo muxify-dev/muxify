@@ -20,7 +20,18 @@ resolver does not answer for the Ubuntu mirrors, add
 
 ## Live SSH test
 
-For an OrbStack Ubuntu VM (use its actual Linux username):
+The live tests (`LiveSSHTests` and `LiveHostCLITests`) skip unless
+`MUXIFY_SSH_TEST_HOST` and `MUXIFY_SSH_TEST_USER` name a host. A plain
+`make test` and CI do not set them, so they skip there.
+
+`make test-live-linux` runs them on OrbStack. It runs `make host-cli`, then for
+arm64 and then amd64 (through Rosetta) it creates a throwaway Ubuntu machine with
+a unique `muxify-live-…` name, installs tmux, git and curl, runs only the live
+tests over SSH as `<machine>@orb`, and deletes the machine, also when a step
+fails. It never uses or changes your own machines. Without `orb` on `PATH` it
+prints a skip message and exits 0.
+
+For any other host, set the variables yourself (use its actual Linux username):
 
 ```sh
 TEST_RUNNER_MUXIFY_SSH_TEST_HOST=ubuntu.orb.local \
@@ -35,7 +46,7 @@ TEST_RUNNER_MUXIFY_SSH_TEST_IDENTITY="$HOME/.orbstack/ssh/id_ed25519" \
 Set `TEST_RUNNER_MUXIFY_SSH_TEST_REQUIRE_AGENT=1` to also verify the remote
 forwarded socket can reach your agent (requires server support).
 
-The live test uses the production SSH attachment, command and event paths.
+The SSH test uses the production SSH attachment, command and event paths.
 It checks terminal type/true-color capabilities, client targeting, Window/Pane
 mutations, Browser and Agent metadata, detach, connection-loss detection and a
 fresh connection with state preserved, and background SSH shutdown that leaves
@@ -45,9 +56,25 @@ App Window tests check Environment deduplication, focused/originating-window
 routing, live ⌘N and Focus Terminal overrides, native window-cycle shortcut
 pass-through and isolated Browser views in hidden disposable native windows,
 without starting Ghostty or connecting to tmux.
-It creates and removes its own isolated remote tmux server; existing Sessions,
+The SSH test creates and removes its own isolated remote tmux server; existing Sessions,
 Agent configuration and SSH setup are left alone. It does not exercise Ghostty
 rendering or the app's UI reconnect scheduler.
+
+The Host CLI test runs the app's install over the production SSH script lane,
+expects `installed <version>` and `~/.local/bin/muxify --version` to print
+`build/host-cli/version`, runs the install again and expects `current`, then runs
+the phone's commands (`environment show`, `topic new/show/rename/note/tag set/
+add-session/session-paths/settle/reopen/start-fresh`, `browser open`) with that
+`muxify`, each with JSON that names the Topic, and expects `browser tabs` to exit 1.
+It gives the remote side its own `HOME` and tmux server under a fresh temporary
+directory, and removes both.
+
+The Host CLI test needs `make host-cli` first and fails with "run make host-cli"
+without it. It serves `build/host-cli/` from the Mac with `python3 -m http.server`;
+the host fetches it from `MUXIFY_SSH_TEST_SERVE_HOST`, by default
+`host.orb.internal` (OrbStack's name for the Mac, served on loopback only). For
+another host, set it to the Mac's address; the server then listens on every
+interface.
 
 ## Developer Tools test
 
