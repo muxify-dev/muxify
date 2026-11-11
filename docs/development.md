@@ -384,6 +384,34 @@ It stamps a copy in `build/package/`, so the Release product that
 `make install` also builds stays unstamped: a Debug or `make install` build
 never updates itself.
 
+### Feeds and release secrets
+
+`scripts/write-feed.py` writes a Sparkle feed with exactly one item for one ZIP:
+`--channel stable` for a Release, whose `--notes-url` is its release page, or
+`--channel tip` for a Tip Build, whose `--notes-url` is its commit page. It also
+takes `--zip`, `--build` (the build number), `--version` (a Release's version, or
+a Tip Build's short commit SHA), `--date` (ISO 8601 with a time zone),
+`--download-url` and `--output`. A Tip Build's item shows
+`<short-sha> (<yyyy-mm-dd>)`. The script reads the EdDSA private key on its
+standard input and pipes it to `sign_update --ed-key-file -`; if `sign_update`
+fails, it writes no feed. It finds `sign_update` on `PATH` or in
+`vendor/sparkle` (`make sparkle`).
+
+```sh
+printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | scripts/write-feed.py --channel tip ... --output tip.xml
+```
+
+`make release-secrets` (`scripts/make-release-secrets.sh`) makes the release
+secrets once, in a fresh folder it names: the "Muxify Release Signing"
+certificate as a base64 `.p12` with its random password, and an EdDSA key pair
+made with `generate_keys --account muxify-release`, whose private key it
+exports. It writes the public key into `scripts/sparkle-public-key.env`, and
+prints the `gh secret set` commands for `SPARKLE_ED_PRIVATE_KEY`,
+`MUXIFY_RELEASE_CERTIFICATE_P12` and `MUXIFY_RELEASE_CERTIFICATE_PASSWORD`. It
+sets no secret. Back up the private key: losing it ends every update. If the
+public-key file already holds a key, it refuses; `make release-secrets FORCE=1`
+replaces it, and every installed copy then stops updating.
+
 To test the tooling or build a package locally without publishing:
 
 ```sh

@@ -1,3 +1,4 @@
+import base64
 import gzip
 import importlib.util
 import io
@@ -9,6 +10,7 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
@@ -271,6 +273,226 @@ if [ "$1" = -dvv ]; then echo "Authority=Muxify Release Signing" >&2; fi''')
 if [ "$1" = -dvv ]; then echo "Authority=Muxify Release Signing" >&2; printf "%262144s\\n" diagnostics >&2; fi''')
         result = self.run_script("package-release.sh", "v0.1.0-beta.1")
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    ED_PRIVATE_KEY = "c2VjcmV0LWVkZHNhLXNlZWQtb2YtdGhpcy10ZXN0LW9ubHk="
+    SIGNATURE = "c2lnbmF0dXJl" * 7 + "c2lnbmF0dXJlIQ=="
+    SPARKLE_NS = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
+
+    def feed_fixture(self):
+        shutil.copy(ROOT / "scripts/write-feed.py", self.root / "scripts/write-feed.py")
+        shutil.copy(ROOT / "scripts/sparkle-version.env", self.root / "scripts/sparkle-version.env")
+        self.zip = self.write("dist/Muxify-tip-abcdef1-arm64.zip", "zip fixture\n")
+        # Records what sign_update got, and prints its signing line as the real one does.
+        self.fake_tool("sign_update", f'''
+printf "%s\\n" "$@" > sign-update-args.txt
+env > sign-update-env.txt
+cat > sign-update-stdin.txt
+echo "sparkle:edSignature=\\"{self.SIGNATURE}\\" length=\\"$(wc -c < "${{@: -1}}" | tr -d " ")\\""''')
+
+    def write_feed(self, channel="tip", version="abcdef1", **overrides):
+        options = {
+            "channel": channel, "zip": str(self.zip), "build": "1234", "version": version,
+            "date": "2026-11-11T09:30:00Z",
+            "download-url": "https://github.com/muxify-dev/muxify/releases/download/tip/Muxify-tip-abcdef1-arm64.zip",
+            "notes-url": "https://github.com/muxify-dev/muxify/commit/abcdef1234567890abcdef1234567890abcdef12",
+            "output": str(self.root / "feeds/tip.xml"),
+        }
+        options.update(overrides)
+        args = [part for name, value in options.items() for part in (f"--{name}", value)]
+        return subprocess.run(
+            ["python3", str(self.root / "scripts/write-feed.py"), *args],
+            env=self.env, text=True, capture_output=True, input=self.ED_PRIVATE_KEY + "\n", cwd=self.root,
+        )
+
+    def feed_item(self, path="feeds/tip.xml"):
+        channel = ET.parse(self.root / path).getroot().find("channel")
+        items = channel.findall("item")
+        self.assertEqual(len(items), 1)
+        return items[0]
+
+    def test_feed_writes_one_item_with_its_versions_signature_and_links(self):
+        self.feed_fixture()
+        result = self.write_feed()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = self.feed_item()
+        s = self.SPARKLE_NS
+        self.assertEqual(item.findtext(f"{s}version"), "1234")
+        self.assertEqual(item.findtext(f"{s}minimumSystemVersion"), "14.0")
+        self.assertEqual(item.findtext("pubDate"), "Wed, 11 Nov 2026 09:30:00 +0000")
+        self.assertEqual(item.findtext("link"),
+                         "https://github.com/muxify-dev/muxify/commit/abcdef1234567890abcdef1234567890abcdef12")
+        enclosure = item.find("enclosure")
+        self.assertEqual(enclosure.get("url"),
+                         "https://github.com/muxify-dev/muxify/releases/download/tip/Muxify-tip-abcdef1-arm64.zip")
+        self.assertEqual(enclosure.get(f"{s}edSignature"), self.SIGNATURE)
+        self.assertEqual(enclosure.get("length"), str(self.zip.stat().st_size))
+        # No delta, phased rollout, critical update, major upgrade, or release notes that Sparkle would download.
+        self.assertEqual(
+            sorted(child.tag for child in item),
+            sorted(["title", "pubDate", f"{s}version", f"{s}shortVersionString", f"{s}minimumSystemVersion",
+                    "link", "enclosure"]),
+        )
+        self.assertEqual(sorted(enclosure.attrib), sorted(["url", "type", f"{s}edSignature", "length"]))
+        text = (self.root / "feeds/tip.xml").read_text()
+        for absent in ["deltas", "phasedRollout", "criticalUpdate", "majorUpgrade", "releaseNotesLink"]:
+            self.assertNotIn(absent, text)
+
+    def test_feed_display_version_is_sha_and_date_for_a_tip_build_and_the_version_for_a_release(self):
+        self.feed_fixture()
+        self.assertEqual(self.write_feed(date="2026-11-11T23:30:00-02:00").returncode, 0)
+        # The date is the UTC day of the publish time.
+        self.assertEqual(self.feed_item().findtext(f"{self.SPARKLE_NS}shortVersionString"), "abcdef1 (2026-11-12)")
+        result = self.write_feed(
+            channel="stable", version="1.2.3-beta.4", output=str(self.root / "feeds/stable.xml"),
+            **{"notes-url": "https://github.com/muxify-dev/muxify/releases/tag/v1.2.3-beta.4"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = self.feed_item("feeds/stable.xml")
+        self.assertEqual(item.findtext(f"{self.SPARKLE_NS}shortVersionString"), "1.2.3-beta.4")
+        self.assertEqual(item.findtext("link"), "https://github.com/muxify-dev/muxify/releases/tag/v1.2.3-beta.4")
+
+    def test_feed_escapes_its_text(self):
+        self.feed_fixture()
+        url = "https://example.com/download?a=1&b=\"<2>\""
+        result = self.write_feed(channel="stable", version="1.2.3 & <beta>",
+                                 **{"download-url": url, "notes-url": "https://example.com/notes?x=<y>&z"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        item = self.feed_item()
+        self.assertEqual(item.findtext(f"{self.SPARKLE_NS}shortVersionString"), "1.2.3 & <beta>")
+        self.assertEqual(item.findtext("link"), "https://example.com/notes?x=<y>&z")
+        self.assertEqual(item.find("enclosure").get("url"), url)
+        text = (self.root / "feeds/tip.xml").read_text()
+        self.assertIn("1.2.3 &amp; &lt;beta&gt;", text)
+        self.assertNotIn("<beta>", text)
+
+    def test_feed_gives_the_eddsa_key_to_sign_update_only_on_standard_input(self):
+        self.feed_fixture()
+        self.assertEqual(self.write_feed().returncode, 0)
+        args = (self.root / "sign-update-args.txt").read_text().splitlines()
+        self.assertEqual(args, ["--ed-key-file", "-", str(self.zip)])
+        self.assertEqual((self.root / "sign-update-stdin.txt").read_text().strip(), self.ED_PRIVATE_KEY)
+        self.assertNotIn(self.ED_PRIVATE_KEY, (self.root / "sign-update-env.txt").read_text())
+        self.assertNotIn(self.ED_PRIVATE_KEY, (self.root / "feeds/tip.xml").read_text())
+
+    def test_a_failing_sign_update_writes_no_feed(self):
+        self.feed_fixture()
+        old = self.write("feeds/tip.xml", "previous feed\n")
+        for name, script in [
+            ("exit status", 'cat >/dev/null; echo "ERROR! Unable to read EdDSA private key" >&2; exit 1'),
+            # sign_update prints some errors on standard output and exits 0.
+            ("error output", 'cat >/dev/null; echo "ERROR! Imported key must be 64 bytes or 96 bytes"'),
+        ]:
+            with self.subTest(name):
+                self.fake_tool("sign_update", script)
+                result = self.write_feed()
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("sign_update", result.stderr)
+                self.assertEqual(old.read_text(), "previous feed\n")
+                self.assertEqual(sorted(path.name for path in old.parent.iterdir()), ["tip.xml"])
+
+    def test_feed_refuses_bad_arguments_before_signing(self):
+        self.feed_fixture()
+        for overrides in [{"build": "0"}, {"build": "12a"}, {"version": "v1.2.3"}, {"date": "2026-11-11T09:30:00"},
+                          {"date": "yesterday"}, {"zip": str(self.root / "missing.zip")},
+                          {"download-url": "file:///tmp/Muxify.zip"}]:
+            with self.subTest(overrides=overrides):
+                result = self.write_feed(**overrides)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse((self.root / "sign-update-args.txt").exists())
+                self.assertFalse((self.root / "feeds/tip.xml").exists())
+
+    GENERATED_PUBLIC_KEY = "B" * 42 + "c="
+
+    def secrets_fixture(self):
+        shutil.copy(ROOT / "scripts/make-release-secrets.sh", self.root / "scripts/make-release-secrets.sh")
+        shutil.copy(ROOT / "scripts/sparkle-public-key.env", self.root / "scripts/sparkle-public-key.env")
+        (self.root / "tmp").mkdir()
+        self.env["TMPDIR"] = str(self.root / "tmp")
+        self.fake_tool("generate_keys", f'''
+printf "%s\\n" "$*" >> "{self.root}/generate-keys-args.txt"
+[ "$1 $2" = "--account muxify-release" ] || exit 1
+case "$3" in
+  -p) echo "{self.GENERATED_PUBLIC_KEY}" ;;
+  -x) [ ! -e "$4" ] && echo "{self.ED_PRIVATE_KEY}" > "$4" ;;
+  "") echo "Generating a new signing key." ;;
+  *) exit 1 ;;
+esac''')
+        for tool in ["gh", "security"]:
+            self.fake_tool(tool, f'printf "%s\\n" "$*" >> "{self.root}/{tool}-args.txt"')
+
+    def make_secrets(self, *args):
+        result = self.run_script("make-release-secrets.sh", *args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        folders = list((self.root / "tmp").iterdir())
+        self.assertEqual(len(folders), 1)
+        return result.stdout, folders[0]
+
+    def test_secrets_script_makes_the_certificate_and_eddsa_key_and_prints_the_commands(self):
+        self.secrets_fixture()
+        output, folder = self.make_secrets()
+        self.assertIn(f"The release secrets are in {folder.resolve()}", output)
+        self.assertEqual(folder.stat().st_mode & 0o777, 0o700)
+        # The .p12 opens with its password and holds the code-signing certificate and its key.
+        password = (folder / "muxify-release-signing.p12.password").read_text()
+        p12 = self.root / "identity.p12"
+        p12.write_bytes(base64.b64decode((folder / "muxify-release-signing.p12.base64").read_text()))
+        opened = subprocess.run(["/usr/bin/openssl", "pkcs12", "-in", str(p12), "-passin", f"pass:{password}",
+                                 "-nodes"], capture_output=True, text=True, check=True).stdout
+        self.assertIn("PRIVATE KEY", opened)
+        certificate = subprocess.run(["/usr/bin/openssl", "x509", "-noout", "-subject", "-text"], input=opened,
+                                     capture_output=True, text=True, check=True).stdout
+        self.assertIn("Muxify Release Signing", certificate)
+        self.assertIn("Code Signing", certificate)
+        # The .p12 is the only copy of the certificate's key.
+        self.assertEqual(sorted(path.name for path in folder.iterdir()), [
+            "muxify-release-signing.cert.pem", "muxify-release-signing.p12.base64",
+            "muxify-release-signing.p12.password", "sparkle-ed-private-key",
+        ])
+        self.assertNotIn(password, output)
+        # The EdDSA pair is made under the account, and the private key exported to the folder.
+        self.assertEqual((folder / "sparkle-ed-private-key").read_text().strip(), self.ED_PRIVATE_KEY)
+        exported = folder.resolve() / "sparkle-ed-private-key"
+        self.assertEqual((self.root / "generate-keys-args.txt").read_text().splitlines(), [
+            "--account muxify-release",
+            "--account muxify-release -p",
+            f"--account muxify-release -x {exported}",
+        ])
+        self.assertNotIn(self.ED_PRIVATE_KEY, output)
+        key_file = (self.root / "scripts/sparkle-public-key.env").read_text()
+        self.assertIn(f"\nSPARKLE_PUBLIC_ED_KEY={self.GENERATED_PUBLIC_KEY}\n", "\n" + key_file)
+        self.assertIn("secrets script fills it", key_file)
+        for secret, file in [("SPARKLE_ED_PRIVATE_KEY", "sparkle-ed-private-key"),
+                             ("MUXIFY_RELEASE_CERTIFICATE_P12", "muxify-release-signing.p12.base64"),
+                             ("MUXIFY_RELEASE_CERTIFICATE_PASSWORD", "muxify-release-signing.p12.password")]:
+            self.assertIn(f'gh secret set {secret} --repo muxify-dev/muxify < "{folder.resolve()}/{file}"', output)
+        self.assertIn("back up the EdDSA private key", output)
+        self.assertIn("Losing the private key ends every update", output)
+        # It sets no secret and touches no keychain itself.
+        self.assertFalse((self.root / "gh-args.txt").exists())
+        self.assertFalse((self.root / "security-args.txt").exists())
+
+    def test_secrets_script_refuses_to_replace_a_public_key_unless_forced(self):
+        self.secrets_fixture()
+        self.write("scripts/sparkle-public-key.env", f"# Comment\nSPARKLE_PUBLIC_ED_KEY={self.PUBLIC_KEY}\n")
+        result = self.run_script("make-release-secrets.sh")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--force", result.stderr)
+        self.assertEqual((self.root / "scripts/sparkle-public-key.env").read_text(),
+                         f"# Comment\nSPARKLE_PUBLIC_ED_KEY={self.PUBLIC_KEY}\n")
+        self.assertFalse((self.root / "generate-keys-args.txt").exists())
+        self.assertEqual(list((self.root / "tmp").iterdir()), [])
+        self.make_secrets("--force")
+        self.assertEqual((self.root / "scripts/sparkle-public-key.env").read_text(),
+                         f"# Comment\nSPARKLE_PUBLIC_ED_KEY={self.GENERATED_PUBLIC_KEY}\n")
+
+    def test_secrets_script_stops_on_a_bad_public_key(self):
+        self.secrets_fixture()
+        self.fake_tool("generate_keys", 'if [ "$3" = -p ]; then echo "ERROR: No existing signing key found!"; fi')
+        result = self.run_script("make-release-secrets.sh")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("no base64 Ed25519 public key", result.stderr)
+        self.assertEqual((self.root / "scripts/sparkle-public-key.env").read_text(),
+                         (ROOT / "scripts/sparkle-public-key.env").read_text())
 
     def test_collects_notices_and_font_mapping_in_stable_order(self):
         self.write("source/LICENSE", "MIT license\n")

@@ -13,7 +13,7 @@ MUXIFY_DEVELOPMENT_TEAM ?=
 # during dependency scanning". A fixed length makes the hash the same.
 XCODEBUILD_SETTINGS := diagnostic_message_length=0
 
-.PHONY: all setup tools project build test test-linux test-live-linux test-release test-update sparkle verify verify-gate run install release host-cli host-cli-linux host-cli-darwin clean
+.PHONY: all setup tools project build test test-linux test-live-linux test-release test-update sparkle release-secrets verify verify-gate run install release host-cli host-cli-linux host-cli-darwin clean
 
 all: build
 
@@ -60,6 +60,11 @@ test-release:
 # generate_keys and sparkle-cli, built from the release's source.
 sparkle:
 	./scripts/setup-sparkle.sh
+
+# Makes the release certificate and the Sparkle EdDSA key pair in a fresh folder, writes the public key into
+# scripts/sparkle-public-key.env, and prints the gh secret set commands. Sets no secret. FORCE=1 replaces a key.
+release-secrets:
+	./scripts/make-release-secrets.sh $(if $(FORCE),--force)
 
 # Proves in a throwaway run directory that Sparkle's own installer updates a self-signed Release build to the
 # next build from a feed on localhost, and refuses a zip signed with another EdDSA key. Never launches Muxify.
