@@ -66,29 +66,17 @@ final class SidebarLogo: NSView {
         guard LogoImages.isMonochrome(name) else {
             return image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: hints)
         }
-        let ink = NSColor.labelColor
-        let inked = NSImage(size: size, flipped: false) { frame in
-            image.draw(in: frame)
-            ink.set()
-            frame.fill(using: .sourceIn)
-            return true
-        }
-        inked.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: hints)
+        image.inked(.labelColor, size: size)
+            .draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: hints)
     }
 
     /// The terminal symbol, in the secondary text colour, in the middle of the square.
     private func drawFallback() {
         guard let symbol = NSImage(systemSymbolName: LogoImages.fallbackSymbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: side * LogoImages.fallbackScale, weight: .regular)) else { return }
-        let ink = NSColor.secondaryLabelColor
-        let inked = NSImage(size: symbol.size, flipped: false) { frame in
-            symbol.draw(in: frame)
-            ink.set()
-            frame.fill(using: .sourceIn)
-            return true
-        }
         let rect = NSRect(x: (bounds.width - symbol.size.width) / 2, y: (bounds.height - symbol.size.height) / 2,
                           width: symbol.size.width, height: symbol.size.height)
-        inked.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        symbol.inked(.secondaryLabelColor)
+            .draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
 }

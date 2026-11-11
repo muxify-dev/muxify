@@ -26,6 +26,19 @@ extension NSColor {
     func faded(_ opacity: Double) -> NSColor { withAlphaComponent(alphaComponent * opacity) }
 }
 
+extension NSImage {
+    /// The image's shape in one colour: the ink stays only where the image is, as SwiftUI draws a template image in its
+    /// foreground style. The new image is `size` big, the image's own size when nil, and the image fills it.
+    func inked(_ ink: NSColor, size: NSSize? = nil) -> NSImage {
+        NSImage(size: size ?? self.size, flipped: false) { rect in
+            self.draw(in: rect)
+            ink.set()
+            rect.fill(using: .sourceIn)
+            return true
+        }
+    }
+}
+
 extension CGFloat {
     /// The length in whole pixels, not shorter: SwiftUI gives a text this room.
     func roundedUp(toPixelsOf scale: CGFloat) -> CGFloat { (self * scale - 0.001).rounded(.up) / scale }
@@ -273,14 +286,7 @@ final class SidebarSymbol: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard let image else { return }
-        let ink = ink.color
-        // The symbol's shape in the ink: the ink stays only where the symbol is.
-        let inked = NSImage(size: image.size, flipped: false) { rect in
-            image.draw(in: rect)
-            ink.set()
-            rect.fill(using: .sourceIn)
-            return true
-        }
+        let inked = image.inked(ink.color)
         // The symbol stands on the bottom left corner of AppKit's image.
         inked.draw(in: NSRect(x: 0, y: symbolSize.height - image.size.height, width: image.size.width, height: image.size.height),
                    from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)

@@ -2,9 +2,10 @@ import AppKit
 import MuxifyCore
 import QuartzCore
 
-/// The parts of a card in the AppKit Sessions list that are not its header or its rows (ADR 0074): the fill of an
-/// open card, the spine and the border of the card that holds the Location's Window. Each is a view that hosts its
-/// own layers, takes no click, and reads the sizes that the SwiftUI card reads.
+// The parts of a card in the AppKit Sessions list that are not its header or its rows (ADR 0074): the fill of an open
+// card, the spine and the clock its marks move on, the plain border, the border of the card that holds the Location's
+// Window, and the background of a header that sticks. Each view hosts its own layers, takes no click, and reads the
+// sizes that the SwiftUI card reads.
 
 /// The raised look of an open card: a faint fill of the text colour over a shadow, under the card's rounded shape.
 /// The fill is a layer under the view's own, because AppKit takes the shadow off the layer of a view.
