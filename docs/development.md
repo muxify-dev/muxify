@@ -186,9 +186,36 @@ The app then writes to `~/Library/Logs/Muxify/`:
   after local midnight goes into the next day's file. It holds the launch, or
   `on` and `off` when the Config turns it on or off, with the crash, hang and
   CPU reports macOS wrote for the app since the newest day file was last
-  written; each freeze of the main thread over a second; CPU, memory, threads
-  and open files each minute; Muxify's own messages and the errors the system
-  logged for the app; and the app, window, Space, screen and sleep changes.
+  written; each freeze of the main thread over a second; a `minute` record
+  each minute (below); Muxify's own messages and the errors the system logged
+  for the app; and the app, window, Space, screen and sleep changes.
+- A record is one line that a program can read: the timestamp, a kind word
+  (`minute`, `burst`, `freeze`, `digest` or `limit`), then space-separated
+  `key=value` fields. A value holds no spaces, a list is comma-separated, and
+  a pair in a list is `name:value`. `DiagnosticsRecord` in MuxifyCore writes
+  and parses them. The other lines are free text.
+- The `minute` record's fields, in this order:
+  - `cpu.app.avg` and `cpu.app.peak`: the app's average CPU over the minute
+    and its highest one-second CPU, in % of one core. The app reads its CPU
+    once a second, so a short spike shows in the peak.
+  - `main.busy`: the share of the minute, in %, that the main run loop was
+    awake, from after-waiting to before-waiting.
+  - `mem.app`: the app's memory (phys footprint) in MB; `threads`;
+    `open_files`.
+  - `input`: `idle`, or
+    `keys:N,clicks:N,scrolls:N,sidebar_switches:N,palette_opens:N`: the key
+    presses, clicks and scroll events the app received, and the Sidebar mode
+    switches and Command Palette opens they made. Counts only, never which
+    key, text, a title or a URL.
+  - `window`: the App Window, `visible` or `occluded` and `active` or
+    `inactive`, as `visible,active`; `none` with no App Window.
+  - `working_marks`: the Working marks of the Active Environment's Agents;
+    `marks_move`: `true` when `ui.pulse` is on and Reduce Motion is off.
+  - `sidebar`: the Sidebar mode shown, `topics` or `sessions`; `topic_cards`
+    and `session_rows`: the Topic cards and Session rows it lists.
+
+  The `window` to `session_rows` fields are the state at the end of the
+  minute, in the focused App Window.
 - When a day's file opens, every Diagnostics log file last written over 7 days
   ago is deleted, the older `muxify.log` and `muxify.1.log` too.
 - Once a day's file passes 50 MB, it writes one `limit` line, and for the rest
@@ -205,6 +232,7 @@ The app then writes to `~/Library/Logs/Muxify/`:
 
 To find the trouble, start with
 `grep -E "freeze|LEAK|stuck|report|system log|limit" ~/Library/Logs/Muxify/muxify-*.log`.
+`grep " minute " ~/Library/Logs/Muxify/muxify-*.log` gives the minutes.
 A verify run writes these files into its sandbox's `logs/`, never into yours.
 
 ## Beta releases

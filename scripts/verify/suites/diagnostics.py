@@ -1,5 +1,5 @@
-"""Diagnostics: on by default, the app logs into the sandbox's logs folder, one Diagnostics log file a day
-(docs/development.md)."""
+"""Diagnostics: on by default, the app logs into the sandbox's logs folder, one Diagnostics log file a day, with a
+`minute` record each minute (docs/development.md)."""
 
 import re
 import time
@@ -29,6 +29,21 @@ class Diagnostics(unittest.TestCase):
         wait(lambda: today.exists() and 'launch: pid %d' % self.s.pid in today.read_text(errors='replace'),
              'no launch line in %s' % today, 10)
         self.assertFalse((self.logs/'muxify.log').exists(), 'the app still writes muxify.log')
+
+    def test_a_minute_record_says_the_app_was_idle_and_what_it_showed(self):
+        # The first minute ends a minute after Diagnostics starts at launch. A verify run gives the app no key press,
+        # click or scroll: the driver acts through the accessibility tree.
+        def minutes():
+            return [line for line in self.log_text().splitlines() if re.match(r'\S+ \S+ minute ', line)]
+        line = wait(minutes, 'no minute record in %s' % self.logs, 90)[0]
+        fields = dict(word.split('=', 1) for word in line.split(' ')[3:])
+        for key in ['cpu.app.avg', 'cpu.app.peak', 'main.busy', 'mem.app', 'threads', 'open_files', 'input', 'window',
+                    'working_marks', 'marks_move', 'sidebar', 'topic_cards', 'session_rows']:
+            self.assertIn(key, fields, line)
+        self.assertEqual('idle', fields['input'], line)
+        self.assertEqual('topics', fields['sidebar'], line)
+        self.assertGreaterEqual(float(fields['cpu.app.peak']), float(fields['cpu.app.avg']), line)
+        self.assertNotIn(' resources: ', self.log_text(), 'the app still writes the resources line')
 
     def test_muxify_message_reaches_the_log(self):
         wait(lambda: 'unknown key "sessions.diagnostics_probe"' in self.log_text(), 'no Config problem in the log', 10)

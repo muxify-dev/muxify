@@ -315,6 +315,7 @@ final class CommandPalette {
     private func open() {
         store?.hintHold.receive(.reset)
         if !isOpen {
+            DiagnosticsInput.countUserAction(\.paletteOpens)
             // A field editor serves one field at a time, and the palette's field takes it: the field it edited is
             // what gets Focus back.
             let responder = store?.terminalHost.window?.firstResponder

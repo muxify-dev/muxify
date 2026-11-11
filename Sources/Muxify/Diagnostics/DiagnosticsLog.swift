@@ -1,4 +1,5 @@
 import Foundation
+import MuxifyCore
 
 /// The Diagnostics log: append-only text files that any thread can write to, one a local day,
 /// `muxify-YYYY-MM-DD.log` by the date of each line. When a day's file opens, every Diagnostics log file last written
@@ -6,7 +7,7 @@ import Foundation
 /// it writes one `limit` line and from then on takes only the lines whose kind is in `keptPastLimit`.
 final class DiagnosticsLog: @unchecked Sendable {
     /// The kinds of line a day's file still takes past its size limit.
-    static let keptPastLimit = ["minute", "burst", "freeze", "digest"]
+    static let keptPastLimit: [DiagnosticsRecord.Kind] = [.minute, .burst, .freeze, .digest]
 
     let folder: URL
     /// When the newest Diagnostics log file was last written before this opening, or nil when there is none.
@@ -18,7 +19,7 @@ final class DiagnosticsLog: @unchecked Sendable {
     private var day: String?
     private var file: FileHandle?
     private var limited = false
-    private let clock = DiagnosticsLog.formatter("yyyy-MM-dd HH:mm:ss.SSS")
+    private let clock = DiagnosticsRecord.formatter()
     private let days = DiagnosticsLog.formatter("yyyy-MM-dd")
 
     init(folder: URL, sizeLimit: UInt64 = 50 << 20, kept: TimeInterval = 7 * 24 * 3600,
@@ -44,11 +45,13 @@ final class DiagnosticsLog: @unchecked Sendable {
             let day = days.string(from: date)
             if day != self.day { try? open(day, at: date) }
             guard let file else { return }
-            if limited, !Self.keptPastLimit.contains(Self.kind(of: text)) { return }
+            if limited, !Self.keptPastLimit.map(\.rawValue).contains(Self.kind(of: text)) { return }
             append(text, at: date, to: file)
             guard !limited, let size = try? file.offset(), size >= sizeLimit else { return }
             limited = true
-            append("limit size=\(sizeLimit) keeps=\(Self.keptPastLimit.joined(separator: ","))", at: date, to: file)
+            let limit = DiagnosticsRecord(.limit, [("size", String(sizeLimit)),
+                                                   ("keeps", DiagnosticsRecord.list(Self.keptPastLimit.map(\.rawValue)))])
+            append(limit.text, at: date, to: file)
         }
     }
 

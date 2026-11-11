@@ -1,9 +1,11 @@
 import AppKit
+import MuxifyCore
 import os
 
 /// On unless the Config's `diagnostics.enabled` is false. Then it writes to the Diagnostics log, one
 /// ~/Library/Logs/Muxify/muxify-YYYY-MM-DD.log a day (`DiagnosticsLog`), what helps explain a freeze, a crash or a
-/// slow app: each freeze, with a sample of the process taken during it; CPU and memory each minute; Muxify's own
+/// slow app: each freeze, with a sample of the process taken during it; a `minute` record each minute (CPU, the
+/// main thread's busy share, memory, the user's input and what was moving); Muxify's own
 /// messages and the errors the system logs for it; crash and hang reports left since the last run; and the app,
 /// window, Space and sleep changes around them. `diagnostics.display_links` adds the display-link probe. See
 /// "Diagnostics" in docs/development.md.
@@ -14,6 +16,8 @@ enum Diagnostics {
     private static var screensAsleep = false
     /// The first Config load is at launch.
     private static var configured = false
+    /// What was moving on screen, for the `minute` record. The App Windows set it.
+    @MainActor static var moving: (@MainActor () -> MovingState)?
 
     /// ~/Library/Logs/Muxify, or in a verify run the sandbox's logs folder, so a run never writes into the user's logs.
     static let folder: URL = {
@@ -52,6 +56,7 @@ enum Diagnostics {
             write("report since the last run: \(report.path)")
         }
         observeAppState()
+        DiagnosticsInput.start()
         FreezeWatch.start()
         ResourceMonitor.start()
     }
@@ -63,6 +68,7 @@ enum Diagnostics {
         DisplayLinkProbe.stop()
         ResourceMonitor.stop()
         FreezeWatch.stop()
+        DiagnosticsInput.stop()
         for (center, token) in observers { center.removeObserver(token) }
         observers = []
         log.withLock { $0 = nil }
@@ -70,6 +76,16 @@ enum Diagnostics {
 
     static func write(_ text: String) {
         log.withLock { $0 }?.write(text)
+    }
+
+    /// A record an agent or `muxify diagnostics summary` reads (DiagnosticsRecord).
+    static func write(_ record: DiagnosticsRecord) {
+        write(record.text)
+    }
+
+    /// What was moving at the end of a minute; an empty state when no App Window says.
+    @MainActor static func movingState() -> MovingState {
+        moving?() ?? MovingState()
     }
 
     /// Muxify's own messages: to the system log, as NSLog does, and to the diagnostics log when it is on.

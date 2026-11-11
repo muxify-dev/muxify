@@ -1,13 +1,17 @@
 import Foundation
+import MuxifyCore
 import OSLog
 
-/// Each minute logs the CPU the app used in that minute, its memory, threads and open files, and the errors the
-/// system logged for it. A minute over half a core also samples the process, at most every ten minutes.
+/// Reads the app's CPU each second, and each minute writes a `minute` record: the average and peak per-second CPU,
+/// the main thread's busy share, memory, threads and open files, the user's input and what was moving. Then it
+/// copies the errors the system logged for the app. A minute over half a core also samples the process, at most
+/// every ten minutes.
 enum ResourceMonitor {
     private static let queue = DispatchQueue(label: "dev.muxify.resource-monitor", qos: .utility)
     private static let busyCPU = 50.0
+    private static let minuteLength: TimeInterval = 60
     private static var timer: DispatchSourceTimer?
-    private static var last = (uptime: ProcessInfo.processInfo.systemUptime, cpu: cpuTime())
+    private static var minute = MinuteAggregate(start: reading())
     private static var lastCPUSample = -TimeInterval.infinity
     private static var systemLogRead = Date()
 
@@ -15,11 +19,11 @@ enum ResourceMonitor {
         guard timer == nil else { return }
         // The first minute counts from now, and the system log from now: not from before diagnostics was off.
         queue.async {
-            last = (ProcessInfo.processInfo.systemUptime, cpuTime())
+            minute = MinuteAggregate(start: reading())
             systemLogRead = Date()
         }
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 60, repeating: 60, leeway: .seconds(5))
+        timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(100))
         timer.setEventHandler { tick() }
         timer.resume()
         self.timer = timer
@@ -30,18 +34,31 @@ enum ResourceMonitor {
         timer = nil
     }
 
+    /// One `getrusage` a second; the rest once a minute.
     private static func tick() {
-        let now = (uptime: ProcessInfo.processInfo.systemUptime, cpu: cpuTime())
-        let percent = now.uptime > last.uptime ? (now.cpu - last.cpu) / (now.uptime - last.uptime) * 100 : 0
-        last = now
+        let now = reading()
+        minute.add(now)
+        guard minute.elapsed >= minuteLength - 0.5 else { return }
+        let ended = minute
+        minute = MinuteAggregate(start: now)
         let files = ((try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? 1) - 1
-        Diagnostics.write(String(format: "resources: cpu %.1f%%, memory %.0f MB, %d threads, %d open files",
-                                 percent, Double(footprint()) / 1_048_576, threadCount(), files))
+        let memory = Double(footprint()) / 1_048_576, threads = threadCount(), input = DiagnosticsInput.take()
+        // What was moving is the main thread's state, read there once a minute.
+        DispatchQueue.main.async {
+            let moving = MainActor.assumeIsolated { Diagnostics.movingState() }
+            let record = ended.record(memoryMB: memory, threads: threads, openFiles: files, input: input, moving: moving)
+            Diagnostics.write(record.record)
+        }
         copySystemLog()
-        if percent > busyCPU, now.uptime - lastCPUSample > 600 {
+        if ended.cpuAverage > busyCPU, now.uptime - lastCPUSample > 600 {
             lastCPUSample = now.uptime
             ProcessSampler.sample(reason: "cpu", seconds: 5)
         }
+    }
+
+    private static func reading() -> MinuteAggregate.Reading {
+        let uptime = ProcessInfo.processInfo.systemUptime
+        return MinuteAggregate.Reading(uptime: uptime, cpu: cpuTime(), mainAwake: FreezeWatch.mainAwake(at: uptime))
     }
 
     /// The errors and faults the system logged for this process since the last read, each kind once.

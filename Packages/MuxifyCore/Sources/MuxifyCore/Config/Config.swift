@@ -20,7 +20,7 @@ public struct ConfigSyntaxError: Error, Equatable {
 }
 
 /// What the Sidebar lists above the Agents section. Raw values are the stored choice and the button titles.
-public enum SidebarMode: String {
+public enum SidebarMode: String, Sendable {
     case topics = "Topics"
     case sessions = "Sessions"
 }

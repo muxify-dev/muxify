@@ -1152,7 +1152,10 @@ final class WorkspaceStore {
 
     /// The Sidebar mode the user picked. `TopicsModel.mode` is the one shown, because the Config can turn a mode off.
     var sidebarMode = SidebarMode(rawValue: UserDefaults.standard.string(forKey: "sidebarWorkView") ?? "") ?? .topics {
-        didSet { UserDefaults.standard.set(sidebarMode.rawValue, forKey: "sidebarWorkView") }
+        didSet {
+            UserDefaults.standard.set(sidebarMode.rawValue, forKey: "sidebarWorkView")
+            if sidebarMode != oldValue { DiagnosticsInput.countUserAction(\.sidebarSwitches) }
+        }
     }
     /// The open Session cards, by name (names survive tmux server restarts, ids don't). Sessions mode and the
     /// No Topic card in Topics mode share them, so a card opened in either is open in both.
