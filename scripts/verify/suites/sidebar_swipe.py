@@ -8,6 +8,7 @@ The driver cannot type keys, so the `toggle_sidebar_mode` checks press its View 
 "Switch to Topics") without opening the menu, or run its Command from the palette's search field.
 """
 
+import subprocess
 import time
 import unittest
 
@@ -15,27 +16,8 @@ from scripts.verify.sandbox import Sandbox, wait
 from scripts.verify.topic_records import TopicRecords
 
 
-class SidebarSwipe(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
-        cls.addClassCleanup(s.teardown)
-        project = s.root/'project'
-        project.mkdir()
-        cls.config = s.root/'config/muxify/config.yaml'
-        cls.config.write_text('sidebar:\n  agents: false\n')
-        store = TopicRecords(s.root/'state/muxify')
-        store.put(dict(id='swipe', title='Sidebar swipe', slug='swipe'))
-        cls.session = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'sidebar-swipe',
-                             '-c', str(project), '/bin/zsh -f')
-        s.tmux('set-option', '-t', cls.session, '@muxify_topic', 'swipe')
-        s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics'])
-        s.wait_shown(cls.session + ':')
-
-    def setUp(self):
-        self.s.wait_rows(lambda rs: self.s.has('sidebar-view-topics', rs), 'the two Sidebar views did not return')
-        self.s.act('press', 'sidebar-view-topics')
-        self.wait_mode('topics')
+class SwipeSteps:
+    """The steps every Sidebar swipe check takes through the Debug `sidebar-swipe-input` element of `self.s`."""
 
     def wait_mode(self, mode):
         position = '0.000' if mode == 'topics' else '1.000'
@@ -63,6 +45,97 @@ class SidebarSwipe(unittest.TestCase):
             found.append(self.position())
             time.sleep(0.05)
         return found
+
+
+# A Sidebar full enough that a SwiftUI update of the pages container on every frame would cost the app a lot.
+BURST_SESSIONS = 15
+BURST_SWIPES = 10
+# SwiftUI updates of the pages container a swipe may cause: the committed mode, and one spare for a tmux read that
+# lands mid-swipe. A swipe that drove SwiftUI each frame updated it about once a frame, tens of times a swipe.
+UPDATES_PER_SWIPE = 2
+# CPU seconds a swipe may cost the app, gesture, settle and the driver's reads of the accessibility tree included.
+# Old build (0be752b, SwiftUI moved the pages every frame): `sample` of a swiping app read about 42% of a core against
+# about 2% idle, so a swipe of about a second of gesture and settle cost about 0.4 s, before the driver's reads.
+# New build: not measured yet. The shell that wrote this check has no Accessibility permission, so the driver sees no
+# elements; the sign-off run from a trusted terminal measures it and writes it here. The limit is generous on purpose:
+# it fails a return to per-frame SwiftUI, not a slow machine. The update count above is the sharp guard.
+CPU_PER_SWIPE = 0.3
+
+
+def cpu_seconds(pid):
+    """The user and system CPU time of `pid` so far, read as scripts/verify/suites/working_marks.py reads it."""
+    out = subprocess.run(['/bin/ps', '-o', 'time=', '-p', str(pid)], capture_output=True, text=True,
+                         check=True).stdout.strip()
+    minutes, seconds = out.split(':')
+    return int(minutes) * 60 + float(seconds)
+
+
+class SidebarSwipeBurst(SwipeSteps, unittest.TestCase):
+    """A burst of swipes over a full Sidebar moves the pages as Core Animation layers, not through SwiftUI each frame
+    (docs/adr/0074-motion-that-runs-every-frame-goes-through-core-animation.md)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
+        cls.addClassCleanup(s.teardown)
+        project = s.root/'project'
+        project.mkdir()
+        (s.root/'config/muxify/config.yaml').write_text('sidebar:\n  agents: false\n  animate_switching: true\n')
+        store = TopicRecords(s.root/'state/muxify')
+        cls.topics = ['burst-%02d' % number for number in range(BURST_SESSIONS)]
+        for topic in cls.topics:
+            store.put(dict(id=topic, title='Burst ' + topic[-2:], slug=topic))
+            session = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', topic,
+                             '-c', str(project), '/bin/zsh -f')
+            s.tmux('set-option', '-t', session, '@muxify_topic', topic)
+        s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics'])
+
+    def updates(self):
+        """How many times SwiftUI has updated the pages container: the Debug element's value, "<n> updates"."""
+        return int(self.s.row('sidebar-swipe-input').get('accessibilityValue', '').split(' ', 1)[0])
+
+    def test_a_burst_of_swipes_updates_swiftui_at_most_twice_a_swipe(self):
+        self.s.wait_rows(lambda rs: any(self.s.has('topic-' + topic, rs) for topic in self.topics),
+                         'the Sidebar shows none of the %d Topics' % BURST_SESSIONS)
+        self.wait_mode('topics')
+        self.require_motion()
+        updates, cpu = self.updates(), cpu_seconds(self.s.pid)
+        for number in range(BURST_SWIPES):
+            if number % 2:
+                self.sample('Swipe right')
+                self.wait_mode('topics')
+            else:
+                self.sample('Swipe left')
+                self.wait_mode('sessions')
+        cpu = cpu_seconds(self.s.pid) - cpu
+        updates = self.updates() - updates
+        self.assertLessEqual(updates, UPDATES_PER_SWIPE * BURST_SWIPES,
+                             '%d swipes updated the pages container through SwiftUI %d times' % (BURST_SWIPES, updates))
+        self.assertLess(cpu / BURST_SWIPES, CPU_PER_SWIPE,
+                        'a swipe cost the app %.3f CPU seconds; %d updates in the burst' % (cpu / BURST_SWIPES, updates))
+
+
+class SidebarSwipe(SwipeSteps, unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
+        cls.addClassCleanup(s.teardown)
+        project = s.root/'project'
+        project.mkdir()
+        cls.config = s.root/'config/muxify/config.yaml'
+        cls.config.write_text('sidebar:\n  agents: false\n')
+        store = TopicRecords(s.root/'state/muxify')
+        store.put(dict(id='swipe', title='Sidebar swipe', slug='swipe'))
+        cls.session = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'sidebar-swipe',
+                             '-c', str(project), '/bin/zsh -f')
+        s.tmux('set-option', '-t', cls.session, '@muxify_topic', 'swipe')
+        s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics'])
+        s.wait_shown(cls.session + ':')
+
+    def setUp(self):
+        self.s.wait_rows(lambda rs: self.s.has('sidebar-view-topics', rs), 'the two Sidebar views did not return')
+        self.s.act('press', 'sidebar-view-topics')
+        self.wait_mode('topics')
 
     def test_swipe_switches_views_without_changing_the_window_or_focus(self):
         before = self.s.tmux('list-clients', '-F', '#{client_tty}|#{window_id}')
