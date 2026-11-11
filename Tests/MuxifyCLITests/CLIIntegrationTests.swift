@@ -49,6 +49,20 @@ final class CLIIntegrationTests: XCTestCase {
         }
     }
 
+    /// A test build has no stamp. `--version` needs no tmux, no Config and no records file.
+    func testVersionOfABuildWithNoStampIsDevZeroAndNeedsNoTmuxOrConfig() async throws {
+        let tool = try standaloneCLI()
+        defer { try? FileManager.default.removeItem(at: tool.deletingLastPathComponent()) }
+        let missing = tool.deletingLastPathComponent().appendingPathComponent("missing").path
+        let version = try await run(tool, arguments: ["--version"], environment: [
+            "PATH": missing, "HOME": missing, "XDG_STATE_HOME": missing, "XDG_CONFIG_HOME": missing,
+            "MUXIFY_CONFIG": missing + "/config.yaml", "TMUX_TMPDIR": missing,
+        ])
+        XCTAssertEqual(version.status, 0, version.stderr)
+        XCTAssertEqual(version.stdout, "muxify dev 0\n")
+        XCTAssertEqual(version.stderr, "")
+    }
+
     /// Pins the exact bytes of `topic list` for valid records, so moving the reader into MuxifyCore cannot change them.
     func testTopicListPrintsTheSameBytesForValidRecords() async throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-cli-golden-" + UUID().uuidString)

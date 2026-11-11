@@ -15,6 +15,11 @@ final class CLICommandTests: XCTestCase {
         }
     }
 
+    func testVersionIsTheOnlyArgument() throws {
+        XCTAssertEqual(try CLICommand(arguments: ["--version"], environment: [:]), .version)
+        XCTAssertEqual(BuildStamp.versionLine, "muxify dev 0")
+    }
+
     func testIncompleteAndUnknownCommandsReturnTheUsageOfWhatTheyName() {
         let cases: [([String], [String])] = [
             ([], []), (["unknown"], []), (["browser"], ["browser"]), (["browser", "unknown"], ["browser"]),

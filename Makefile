@@ -61,7 +61,8 @@ verify-gate:
 run: build
 	$(if $(CONFIG),open -n --env "MUXIFY_CONFIG=$(if $(filter ~%,$(CONFIG)),$(CONFIG),$(abspath $(CONFIG)))" $(APP),open $(APP))
 
-# Static Linux binaries of the muxify CLI in build/host-cli, built in Docker (scripts/host-cli-version.env pins it).
+# The Host CLI assets in build/host-cli: static Linux binaries built in Docker (scripts/host-cli-version.env pins it),
+# a release Mac binary, and the version line that all three print.
 host-cli:
 	./scripts/build-host-cli.sh
 

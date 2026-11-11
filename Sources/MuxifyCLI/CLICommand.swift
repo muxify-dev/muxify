@@ -4,6 +4,8 @@ import MuxifyCore
 enum CLICommand: Equatable {
     /// The help for the verbs whose words start with `scope`. An empty scope asks for every verb.
     case help(scope: [String])
+    /// `muxify <short-sha> <commit-unix-time>`, or `muxify dev 0` for a build with no stamp.
+    case version
     case browserAvailable(pane: String?)
     /// `window` is a Window or a Pane id. With `tab`, the one URL loads in that Tab; without it, each URL opens a Tab.
     case browserOpen(window: String, tab: UUID?, urls: [String], json: Bool)
@@ -26,6 +28,7 @@ enum CLICommand: Equatable {
         let args = ArraySlice(arguments)
         let options = args.prefix { $0 != "--" }
         let scope = CLIVerbs.scope(of: args)
+        if args == ["--version"] { self = .version; return }
         guard let noun = args.first, !["-h", "--help", "help"].contains(noun) else {
             guard args.isEmpty else { self = .help(scope: []); return }
             throw CLIError.usage(for: [])
@@ -53,6 +56,7 @@ enum CLICommand: Equatable {
             print(result.rawValue)
             return result.exitCode
         case .help(let scope): print(CLIVerbs.usage(for: scope))
+        case .version: print(BuildStamp.versionLine)
         case .extensionsInstall:
             // Installed links point into the app bundle. Resolve them before
             // locating the installer beside its bundled bin directory.
