@@ -146,6 +146,7 @@ final class BurstTests: XCTestCase {
         BurstRecord(start: DiagnosticsRecord.formatter().date(from: "2026-11-11 17:07:19.250")!, length: 15,
                     cpuAverage: 42.3, cpuPeak: 55.0, mainBusyPeak: 91.5,
                     input: InputCounts(keys: 0, clicks: 2, scrolls: 40, sidebarSwitches: 6, paletteOpens: 0),
+                    bodies: BodyCounts(["TopicsSection": 6, "SidebarCard": 300]),
                     moving: MovingState(window: AppWindowState(visible: true, active: true), workingMarks: 2, marksMove: true,
                                         sidebar: .topics, topicCards: 12, sessionRows: 0),
                     samples: samples, open: open)
@@ -155,7 +156,7 @@ final class BurstTests: XCTestCase {
         let line = burst().record.line(at: date)
         XCTAssertEqual(line, "2026-11-11 17:07:34.120 burst start=2026-11-11T17:07:19.250 length=15.0 cpu.avg=42.3 cpu.peak=55.0 "
             + "main.busy.peak=91.5 input=keys:0,clicks:2,scrolls:40,sidebar_switches:6,palette_opens:0 "
-            + "window=visible,active working_marks=2 marks_move=true sidebar=topics topic_cards=12 session_rows=0 "
+            + "bodies=SidebarCard:300,TopicsSection:6 window=visible,active working_marks=2 marks_move=true sidebar=topics topic_cards=12 session_rows=0 "
             + "samples=burst-2026-11-11-170722.txt,burst-2026-11-11-171722.txt")
         let parsed = try XCTUnwrap(DiagnosticsRecord.parse(line))
         XCTAssertEqual(parsed.record.kind, .burst)

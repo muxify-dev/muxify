@@ -5,8 +5,9 @@ import os
 /// On unless the Config's `diagnostics.enabled` is false. Then it writes to the Diagnostics log, one
 /// ~/Library/Logs/Muxify/muxify-YYYY-MM-DD.log a day (`DiagnosticsLog`), what helps explain a freeze, a crash or a
 /// slow app: each freeze, with a sample of the process taken during it; a `minute` record each minute (CPU, the
-/// main thread's busy share, memory, the same for its commands, WebKit and the tmux server, the user's input and
-/// what was moving); a `burst` record for each Burst of high CPU, with samples taken during it; `digest` records
+/// main thread's busy share, memory, the same for its commands, WebKit and the tmux server, the user's input, the
+/// counted SwiftUI bodies that ran and what was moving); a `burst` record for each Burst of high CPU, with its
+/// bodies and samples taken during it; `digest` records
 /// that fold each sample's main thread; Muxify's own
 /// messages and the errors the system logs for it; crash and hang reports left since the last run; and the app,
 /// window, Space and sleep changes around them. `diagnostics.display_links` adds the display-link probe. See
@@ -59,6 +60,7 @@ enum Diagnostics {
         }
         observeAppState()
         DiagnosticsInput.start()
+        BodyCount.isOn = true
         FreezeWatch.start()
         ResourceMonitor.start()
     }
@@ -72,6 +74,7 @@ enum Diagnostics {
         DisplayLinkProbe.stop()
         FreezeWatch.stop()
         DiagnosticsInput.stop()
+        BodyCount.isOn = false
         for (center, token) in observers { center.removeObserver(token) }
         observers = []
         log.withLock { $0 = nil }

@@ -116,7 +116,8 @@ public struct MovingState: Equatable, Sendable {
 
 /// The `minute` record: the app's CPU (average and peak per-second, in % of one core), the main thread's busy
 /// share (% of the minute), its memory (phys footprint, MB), the same CPU and memory figures for each process group
-/// that could be read, the app's threads and open files, the user's input and what was moving.
+/// that could be read, the app's threads and open files, the user's input, the counted SwiftUI bodies that ran and
+/// what was moving.
 public struct MinuteRecord: Equatable, Sendable {
     public var cpuAverage: Double
     public var cpuPeak: Double
@@ -127,10 +128,11 @@ public struct MinuteRecord: Equatable, Sendable {
     public var threads: Int
     public var openFiles: Int
     public var input: InputCounts
+    public var bodies: BodyCounts
     public var moving: MovingState
 
     public init(cpuAverage: Double, cpuPeak: Double, mainBusy: Double, memoryMB: Double, groups: [ProcessGroup: GroupFigures] = [:],
-                threads: Int, openFiles: Int, input: InputCounts, moving: MovingState) {
+                threads: Int, openFiles: Int, input: InputCounts, bodies: BodyCounts = BodyCounts(), moving: MovingState) {
         self.cpuAverage = cpuAverage
         self.cpuPeak = cpuPeak
         self.mainBusy = mainBusy
@@ -139,6 +141,7 @@ public struct MinuteRecord: Equatable, Sendable {
         self.threads = threads
         self.openFiles = openFiles
         self.input = input
+        self.bodies = bodies
         self.moving = moving
     }
 
@@ -153,7 +156,7 @@ public struct MinuteRecord: Equatable, Sendable {
                        ("cpu.\(group.rawValue).peak", Self.decimal(figures.cpuPeak)),
                        ("mem.\(group.rawValue)", Self.megabytes(figures.memoryMB))]
         }
-        fields += [("threads", String(threads)), ("open_files", String(openFiles)), ("input", input.value)]
+        fields += [("threads", String(threads)), ("open_files", String(openFiles)), ("input", input.value), ("bodies", bodies.value)]
         return DiagnosticsRecord(.minute, fields + moving.fields)
     }
 
@@ -163,7 +166,8 @@ public struct MinuteRecord: Equatable, Sendable {
               let average = record["cpu.app.avg"].flatMap(Double.init), let peak = record["cpu.app.peak"].flatMap(Double.init),
               let busy = record["main.busy"].flatMap(Double.init), let memory = record["mem.app"].flatMap(Double.init),
               let threads = record["threads"].flatMap(Int.init), let files = record["open_files"].flatMap(Int.init),
-              let input = record["input"].flatMap(InputCounts.init(value:)), let moving = MovingState(record)
+              let input = record["input"].flatMap(InputCounts.init(value:)), let bodies = record["bodies"].flatMap(BodyCounts.init(value:)),
+              let moving = MovingState(record)
         else { return nil }
         var groups: [ProcessGroup: GroupFigures] = [:]
         for group in ProcessGroup.allCases {
@@ -175,7 +179,7 @@ public struct MinuteRecord: Equatable, Sendable {
             groups[group] = GroupFigures(cpuAverage: numbers[0], cpuPeak: numbers[1], memoryMB: numbers[2])
         }
         self.init(cpuAverage: average, cpuPeak: peak, mainBusy: busy, memoryMB: memory, groups: groups, threads: threads,
-                  openFiles: files, input: input, moving: moving)
+                  openFiles: files, input: input, bodies: bodies, moving: moving)
     }
 
     private static func decimal(_ value: Double) -> String { String(format: "%.1f", value) }
@@ -233,8 +237,10 @@ public struct MinuteAggregate: Sendable {
         elapsed > 0 ? min(100, (last.mainAwake - start.mainAwake) / elapsed * 100) : 0
     }
 
-    public func record(memoryMB: Double, threads: Int, openFiles: Int, input: InputCounts, moving: MovingState) -> MinuteRecord {
+    public func record(memoryMB: Double, threads: Int, openFiles: Int, input: InputCounts, bodies: BodyCounts = BodyCounts(),
+                       moving: MovingState) -> MinuteRecord {
         MinuteRecord(cpuAverage: cpuAverage, cpuPeak: cpuPeak, mainBusy: mainBusy, memoryMB: memoryMB,
-                     groups: groups.compactMapValues(\.figures), threads: threads, openFiles: openFiles, input: input, moving: moving)
+                     groups: groups.compactMapValues(\.figures), threads: threads, openFiles: openFiles, input: input,
+                     bodies: bodies, moving: moving)
     }
 }

@@ -4,7 +4,7 @@ import OSLog
 
 /// Reads the app's CPU and its process groups' (`ProcessGroupsMeter`) each second, and each minute writes a `minute`
 /// record: the average and peak per-second CPU, the main thread's busy share, memory, each group's figures, threads
-/// and open files, the user's input and what was moving. Then it copies the errors the system logged for the app.
+/// and open files, the user's input, the counted SwiftUI bodies that ran (`BodyCount`) and what was moving. Then it copies the errors the system logged for the app.
 /// Each second also goes to the Burst detector (`BurstDetector`): a Burst is sampled into `burst-<time>.txt`, and
 /// when it ends, or Diagnostics stops or the app quits while it runs, it writes a `burst` record.
 enum ResourceMonitor {
@@ -16,6 +16,9 @@ enum ResourceMonitor {
     private static var minute = MinuteAggregate(start: reading())
     /// The minute's input so far: the input is taken each second, for the Burst detector too.
     private static var minuteInput = InputCounts()
+    /// The body counter at the last second, and the bodies that ran over the minute so far.
+    private static var counted: [String: Int] = [:]
+    private static var minuteBodies = BodyCounts()
     private static var bursts = BurstDetector()
     private static var systemLogRead = Date()
 
@@ -26,6 +29,8 @@ enum ResourceMonitor {
             groups = ProcessGroupsMeter()
             minute = MinuteAggregate(start: reading())
             minuteInput = InputCounts()
+            counted = BodyCount.counts
+            minuteBodies = BodyCounts()
             bursts = BurstDetector()
             systemLogRead = Date()
         }
@@ -56,19 +61,28 @@ enum ResourceMonitor {
         minute.add(now)
         let secondInput = DiagnosticsInput.take()
         minuteInput += secondInput
-        if let second = BurstSecond(from: previous, to: now, end: Date(), input: secondInput) { watchBursts(second) }
+        // Never reset here: the TestDriver's reset is a fall, which `BodyCounts` takes as a restart from zero.
+        let counts = BodyCount.counts
+        let secondBodies = BodyCounts(from: counted, to: counts)
+        counted = counts
+        minuteBodies += secondBodies
+        if let second = BurstSecond(from: previous, to: now, end: Date(), input: secondInput, bodies: secondBodies) {
+            watchBursts(second)
+        }
         guard minute.elapsed >= minuteLength - 0.5 else { return }
         let ended = minute
         minute = MinuteAggregate(start: now)
         let files = ((try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? 1) - 1
-        let memory = Double(footprint()) / 1_048_576, threads = threadCount(), input = minuteInput
+        let memory = Double(footprint()) / 1_048_576, threads = threadCount(), input = minuteInput, bodies = minuteBodies
         minuteInput = InputCounts()
+        minuteBodies = BodyCounts()
         // What was moving is the main thread's state, read there once a minute.
         DispatchQueue.main.async {
             let moving = MainActor.assumeIsolated { Diagnostics.movingState() }
             // The web views' processes, for the next minute's reads.
             ProcessGroupSources.setWebProcesses(MainActor.assumeIsolated { BrowserTab.webProcesses() })
-            let record = ended.record(memoryMB: memory, threads: threads, openFiles: files, input: input, moving: moving)
+            let record = ended.record(memoryMB: memory, threads: threads, openFiles: files, input: input, bodies: bodies,
+                                      moving: moving)
             Diagnostics.write(record.record)
         }
         copySystemLog()

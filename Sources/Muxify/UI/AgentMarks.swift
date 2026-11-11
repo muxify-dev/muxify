@@ -19,6 +19,7 @@ struct AgentMarkView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
+        let _ = BodyCount.tick("AgentMarkView")
         let color = colors[mark].color
         if mark == .working {
             TerminalActivityIndicator(moves: pulses && !reduceMotion, color: color)
@@ -41,6 +42,7 @@ struct AgentMarkSpine: View {
     private static let cornerRadius: CGFloat = 2
 
     var body: some View {
+        let _ = BodyCount.tick("AgentMarkSpine")
         let color = colors[mark].color
         if mark == .working, pulses, !reduceMotion {
             // The shape stays the view that callers label and identify; the layer on it only shows.

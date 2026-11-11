@@ -12,26 +12,33 @@ public struct BurstSecond: Equatable, Sendable {
     public var mainBusy: Double
     /// The user's input during it.
     public var input: InputCounts
+    /// The counted SwiftUI bodies that ran during it.
+    public var bodies: BodyCounts
 
-    public init(end: Date, length: TimeInterval = 1, cpu: Double, mainBusy: Double = 0, input: InputCounts = InputCounts()) {
+    public init(end: Date, length: TimeInterval = 1, cpu: Double, mainBusy: Double = 0, input: InputCounts = InputCounts(),
+                bodies: BodyCounts = BodyCounts()) {
         self.end = end
         self.length = length
         self.cpu = cpu
         self.mainBusy = mainBusy
         self.input = input
+        self.bodies = bodies
     }
 
     /// The second between two per-second readings of the app. Nil when `current` is no later than `previous`.
-    public init?(from previous: MinuteAggregate.Reading, to current: MinuteAggregate.Reading, end: Date, input: InputCounts) {
+    public init?(from previous: MinuteAggregate.Reading, to current: MinuteAggregate.Reading, end: Date, input: InputCounts,
+                 bodies: BodyCounts = BodyCounts()) {
         let length = current.uptime - previous.uptime
         guard length > 0 else { return nil }
         self.init(end: end, length: length, cpu: max(0, current.cpu - previous.cpu) / length * 100,
-                  mainBusy: min(100, max(0, current.mainAwake - previous.mainAwake) / length * 100), input: input)
+                  mainBusy: min(100, max(0, current.mainAwake - previous.mainAwake) / length * 100), input: input,
+                  bodies: bodies)
     }
 }
 
 /// The `burst` record: a Burst's start and length, the app's average and peak per-second CPU (% of one core), the
-/// busiest second's main-thread share (%), the user's input over it, what was moving when it was found, the sample
+/// busiest second's main-thread share (%), the user's input and the counted SwiftUI bodies that ran over it, what was
+/// moving when it was found, the sample
 /// files taken during it, and `open=true` when Diagnostics stopped or the app quit while it ran.
 public struct BurstRecord: Equatable, Sendable {
     public var start: Date
@@ -41,19 +48,22 @@ public struct BurstRecord: Equatable, Sendable {
     public var cpuPeak: Double
     public var mainBusyPeak: Double
     public var input: InputCounts
+    public var bodies: BodyCounts
     public var moving: MovingState
     /// The sample file names, such as `burst-2026-11-11-170734.txt`; empty when the caps let none be taken.
     public var samples: [String]
     public var open: Bool
 
     public init(start: Date, length: TimeInterval, cpuAverage: Double, cpuPeak: Double, mainBusyPeak: Double,
-                input: InputCounts = InputCounts(), moving: MovingState = MovingState(), samples: [String] = [], open: Bool = false) {
+                input: InputCounts = InputCounts(), bodies: BodyCounts = BodyCounts(), moving: MovingState = MovingState(),
+                samples: [String] = [], open: Bool = false) {
         self.start = start
         self.length = length
         self.cpuAverage = cpuAverage
         self.cpuPeak = cpuPeak
         self.mainBusyPeak = mainBusyPeak
         self.input = input
+        self.bodies = bodies
         self.moving = moving
         self.samples = samples
         self.open = open
@@ -66,7 +76,7 @@ public struct BurstRecord: Equatable, Sendable {
         var fields: [(String, String)] = [
             ("start", Self.startFormatter().string(from: start)), ("length", Self.decimal(length)),
             ("cpu.avg", Self.decimal(cpuAverage)), ("cpu.peak", Self.decimal(cpuPeak)),
-            ("main.busy.peak", Self.decimal(mainBusyPeak)), ("input", input.value),
+            ("main.busy.peak", Self.decimal(mainBusyPeak)), ("input", input.value), ("bodies", bodies.value),
         ]
         fields += moving.fields
         fields.append(("samples", samples.isEmpty ? "none" : DiagnosticsRecord.list(samples)))
@@ -79,11 +89,12 @@ public struct BurstRecord: Equatable, Sendable {
         guard record.kind == .burst, let start = record["start"].flatMap(Self.startFormatter().date(from:)),
               let length = record["length"].flatMap(Double.init), let average = record["cpu.avg"].flatMap(Double.init),
               let peak = record["cpu.peak"].flatMap(Double.init), let busy = record["main.busy.peak"].flatMap(Double.init),
-              let input = record["input"].flatMap(InputCounts.init(value:)), let moving = MovingState(record),
+              let input = record["input"].flatMap(InputCounts.init(value:)), let bodies = record["bodies"].flatMap(BodyCounts.init(value:)),
+              let moving = MovingState(record),
               let samples = record.list("samples"), record["open"].map({ $0 == "true" }) ?? true
         else { return nil }
         self.init(start: start, length: length, cpuAverage: average, cpuPeak: peak, mainBusyPeak: busy, input: input,
-                  moving: moving, samples: samples == ["none"] ? [] : samples, open: record["open"] == "true")
+                  bodies: bodies, moving: moving, samples: samples == ["none"] ? [] : samples, open: record["open"] == "true")
     }
 
     /// A new formatter of `startFormat` in local time.
@@ -127,6 +138,7 @@ public struct BurstDetector: Sendable {
         var cpuPeak = 0.0
         var mainBusyPeak = 0.0
         var input = InputCounts()
+        var bodies = BodyCounts()
         var moving = MovingState()
         var samples: [String] = []
         var lastSample: Date?
@@ -137,11 +149,12 @@ public struct BurstDetector: Sendable {
             cpuPeak = max(cpuPeak, second.cpu)
             mainBusyPeak = max(mainBusyPeak, second.mainBusy)
             input += second.input
+            bodies += second.bodies
         }
 
         func record(open: Bool) -> BurstRecord {
             BurstRecord(start: start, length: length, cpuAverage: length > 0 ? cpuSeconds / length : 0, cpuPeak: cpuPeak,
-                        mainBusyPeak: mainBusyPeak, input: input, moving: moving, samples: samples, open: open)
+                        mainBusyPeak: mainBusyPeak, input: input, bodies: bodies, moving: moving, samples: samples, open: open)
         }
     }
 

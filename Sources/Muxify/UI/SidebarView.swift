@@ -135,6 +135,7 @@ private struct TopicsSection: View {
     }
 
     var body: some View {
+        let _ = BodyCount.tick("TopicsSection")
         GeometryReader { proxy in
             VStack(spacing: 0) {
                 topicsList
@@ -152,9 +153,7 @@ private struct TopicsSection: View {
     }
 
     private var topicsList: some View {
-        #if DEBUG
         BodyCount.tick("TopicsList")
-        #endif
         let parts = model.listParts
         let hasBench = parts.bench != nil
         let geometry = geometry
@@ -422,9 +421,7 @@ private struct TopicsListPart: ViewModifier {
     @Binding var lastBenchHeight: CGFloat
 
     func body(content: Content) -> some View {
-        #if DEBUG
         BodyCount.tick("TopicsListPart")
-        #endif
         let isTop = part.isTop, isFirst = part.isFirst, isLastOfTop = part.isLastOfTop, isLastBenched = part.isLastBenched
         // Only an item of the block reads the scroll, so a scroll of the Bench draws the block again, not the Bench.
         let stick = isTop ? geometry.stick(at: scroll.offset) : 0
@@ -728,9 +725,7 @@ struct TopicCard: View, Equatable {
     }
 
     var body: some View {
-        #if DEBUG
         BodyCount.tick("TopicCard")
-        #endif
         return SidebarCard(isOpen: topic.isExpanded, holdsSelection: holdsSelection, mark: topic.usesRowMarks ? nil : topic.mark,
                            viewport: list == nil ? Self.groupsViewport : Self.viewport, restingOpacity: restingOpacity,
                            identifier: topic.id.accessibilityID) {
@@ -1180,6 +1175,7 @@ private struct SessionsSection: View {
     static let viewport = "sessions-viewport"
 
     var body: some View {
+        let _ = BodyCount.tick("SessionsSection")
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {

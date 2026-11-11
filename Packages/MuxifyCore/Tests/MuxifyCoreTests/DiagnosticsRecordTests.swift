@@ -15,7 +15,7 @@ final class DiagnosticsRecordTests: XCTestCase {
         let record = minute().record
         let line = record.line(at: date)
         XCTAssertEqual(line, "2026-11-11 17:07:34.120 minute cpu.app.avg=2.5 cpu.app.peak=42.0 main.busy=7.5 mem.app=512 "
-            + "threads=31 open_files=64 input=keys:12,clicks:3,scrolls:40,sidebar_switches:2,palette_opens:1 "
+            + "threads=31 open_files=64 input=keys:12,clicks:3,scrolls:40,sidebar_switches:2,palette_opens:1 bodies=none "
             + "window=visible,inactive working_marks=3 marks_move=true sidebar=sessions topic_cards=9 session_rows=14")
 
         let parsed = try XCTUnwrap(DiagnosticsRecord.parse(line))

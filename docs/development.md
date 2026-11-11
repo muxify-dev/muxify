@@ -232,6 +232,16 @@ The app then writes to `~/Library/Logs/Muxify/`:
     presses, clicks and scroll events the app received, and the Sidebar mode
     switches and Command Palette opens they made. Counts only, never which
     key, text, a title or a URL.
+  - `bodies`: how many times each counted SwiftUI view's body ran over the
+    minute, as `SidebarCard:300,TopicsSection:2`, by name; a name with zero
+    is left out, and `none` when every count is zero. The counter
+    (`BodyCount` in `App/BodyCount.swift`) is in every build and counts only
+    while Diagnostics is on. The counted views are `SidebarCard`,
+    `TopicCard`, `TopicsList` and `TopicsListPart`, the Sidebar page roots
+    `TopicsSection` and `SessionsSection`, and the Working-mark views
+    `AgentMarkView` and `AgentMarkSpine`. Diagnostics never resets the
+    counter; a count that fell, after the TestDriver's `counts reset=True`,
+    counts again from zero, so a figure is never negative.
   - `window`: the App Window, `visible` or `occluded` and `active` or
     `inactive`, as `visible,active`; `none` with no App Window.
   - `working_marks`: the Working marks of the Active Environment's Agents;
@@ -264,6 +274,8 @@ The app then writes to `~/Library/Logs/Muxify/`:
       busiest second, in %.
     - `input`: the user's input over the Burst, in the `minute` record's
       form.
+    - `bodies`: the counted SwiftUI bodies that ran over the Burst, in the
+      `minute` record's form.
     - `window` to `session_rows`: what was moving when the app found the
       Burst, 3 seconds in, as in the `minute` record.
     - `samples`: the sample file names, comma-separated, or `none`.

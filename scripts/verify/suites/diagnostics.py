@@ -7,6 +7,8 @@ import time
 import unittest
 
 from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.suites.sidebar_swipe import SwipeSteps
+from scripts.verify.topic_records import TopicRecords
 
 CONFIG = 'diagnostics:\n  enabled: %s\nsessions:\n  diagnostics_probe: 1\n'
 
@@ -153,6 +155,53 @@ class Diagnostics(unittest.TestCase):
         self.config.write_text(CONFIG % 'true')
         wait(lambda: ' on: pid %d' % self.s.pid in self.log_text()[off:], 'no on line after the Config turned it on', 10)
         self.assertNotIn('freeze:', self.log_text()[off:], 'a freeze was logged while diagnostics was off')
+
+
+class DiagnosticsBodies(SwipeSteps, unittest.TestCase):
+    """The `minute` record's `bodies`: the SwiftUI bodies of the counted views that ran, in every build."""
+
+    TOPICS = ['bodies-%d' % number for number in range(3)]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1] + '_bodies')
+        cls.addClassCleanup(s.teardown)
+        cls.logs = s.root/'logs'
+        project = s.root/'project'
+        project.mkdir()
+        (s.root/'config/muxify/config.yaml').write_text('sidebar:\n  agents: false\n  animate_switching: true\n')
+        store = TopicRecords(s.root/'state/muxify')
+        for topic in cls.TOPICS:
+            store.put(dict(id=topic, title='Bodies ' + topic[-1], slug=topic))
+            session = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', topic, '-c', str(project), '/bin/zsh -f')
+            s.tmux('set-option', '-t', session, '@muxify_topic', topic)
+        s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics'])
+
+    def minutes(self):
+        text = ''.join(path.read_text(errors='replace') for path in sorted(self.logs.glob('muxify-*.log')))
+        return [dict(word.split('=', 1) for word in line.split(' ')[3:])
+                for line in text.splitlines() if re.match(r'\S+ \S+ minute ', line)]
+
+    def test_a_minute_record_during_swipes_names_the_card_or_page_bodies(self):
+        self.s.wait_rows(lambda rs: all(self.s.has('topic-' + topic, rs) for topic in self.TOPICS),
+                         'the Sidebar does not show the Topics')
+        self.wait_mode('topics')
+        # The verify checks reset the counter as they read it; Diagnostics reads on across a reset.
+        self.s.driver('counts', reset=True)
+        # Swipe on until the minute that the swipes run in is written.
+        deadline = time.monotonic() + 90
+        number = 0
+        while not self.minutes() and time.monotonic() < deadline:
+            self.sample('Swipe right' if number % 2 else 'Swipe left')
+            self.wait_mode('topics' if number % 2 else 'sessions')
+            number += 1
+        fields = wait(self.minutes, 'no minute record in %s' % self.logs, 10)[0]
+        self.assertIn('bodies', fields, fields)
+        self.assertNotEqual('none', fields['bodies'], fields)
+        bodies = dict(item.rsplit(':', 1) for item in fields['bodies'].split(','))
+        self.assertTrue(all(int(count) > 0 for count in bodies.values()), fields['bodies'])
+        named = [name for name in ('SidebarCard', 'TopicsSection', 'SessionsSection') if name in bodies]
+        self.assertTrue(named, 'the minute names no card or page root body: %s' % fields['bodies'])
 
 
 if __name__ == '__main__':
