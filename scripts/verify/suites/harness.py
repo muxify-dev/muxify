@@ -5,6 +5,7 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.harness
 """
 
+import io
 import json
 import os
 import pathlib
@@ -298,26 +299,28 @@ class CompareGate(unittest.TestCase):
 
     WINDOW = (100, 200, 1500, 920)
     LIST = (100, 200, 260, 856)
+    # The identifier of the made-up list whose rows the gate compares, as an area names its list.
+    KEY = 'made-up-list'
 
     def dump(self, *rows):
-        """A dump as the driver gives it: an App Window, a row outside the Sessions list, the list, and `rows` in the
-        list. A row is (identifier, label, frame); a frame is (x, y, width, height) in screen points."""
+        """A dump as the driver gives it: an App Window, a row outside the list, the list, and `rows` in the list. A
+        row is (identifier, label, frame); a frame is (x, y, width, height) in screen points."""
         def row(depth, role, frame, **more):
             return dict(depth=str(depth), accessibilityRole=role, accessibilityFrame='{{%r, %r}, {%r, %r}}' % frame,
                         **{'accessibility' + key.title(): value for key, value in more.items()})
         return ([row(0, 'AXWindow', self.WINDOW, title='made up'),
                  row(1, 'AXButton', (120, 1090, 60, 20), identifier='sidebar-view-sessions', label='Sessions'),
-                 row(1, 'AXScrollArea', self.LIST, identifier='sessions-list')]
+                 row(1, 'AXScrollArea', self.LIST, identifier=self.KEY)]
                 + [row(2, 'AXButton', frame, identifier=identifier, label=label) for identifier, label, frame in rows]
                 + [row(1, 'AXGroup', (360, 200, 1240, 890), identifier='terminal-panel')])
 
     def judged(self, first, second):
-        return judge(list_rows(self.dump(*first)), list_rows(self.dump(*second)))
+        return judge(list_rows(self.dump(*first), self.KEY), list_rows(self.dump(*second), self.KEY))
 
     ALPHA = ('session-$0', 'alpha', (106, 1000, 248, 50))
     BETA = ('session-$1', 'beta', (106, 944, 248, 50))
 
-    def test_the_same_rows_pass_and_only_the_rows_inside_the_sessions_list_count(self):
+    def test_the_same_rows_pass_and_only_the_rows_inside_the_list_count(self):
         result = self.judged([self.ALPHA, self.BETA], [self.ALPHA, self.BETA])
         self.assertEqual(result['failed'], [])
         self.assertIsNone(result['order'])
@@ -374,14 +377,15 @@ class CompareGate(unittest.TestCase):
         with patch.object(self, 'WINDOW', (300, 100, 1500, 920)), patch.object(self, 'LIST', (300, 100, 260, 856)):
             there = self.dump(*[(identifier, label, (x + 200, y - 100, width, height))
                                 for identifier, label, (x, y, width, height) in (self.ALPHA, self.BETA)])
-        self.assertEqual(judge(list_rows(self.dump(self.ALPHA, self.BETA)), list_rows(there))['failed'], [])
+        self.assertEqual(judge(list_rows(self.dump(self.ALPHA, self.BETA), self.KEY), list_rows(there, self.KEY))['failed'],
+                         [])
 
     def test_rows_in_another_order_are_reported_and_do_not_fail(self):
         result = self.judged([self.ALPHA, self.BETA], [self.BETA, self.ALPHA])
         self.assertEqual(result['failed'], [])
         self.assertEqual(result['order'], dict(
-            first=['sessions-list (AXScrollArea)', 'session-$0 (AXButton)', 'session-$1 (AXButton)'],
-            second=['sessions-list (AXScrollArea)', 'session-$1 (AXButton)', 'session-$0 (AXButton)']))
+            first=['made-up-list (AXScrollArea)', 'session-$0 (AXButton)', 'session-$1 (AXButton)'],
+            second=['made-up-list (AXScrollArea)', 'session-$1 (AXButton)', 'session-$0 (AXButton)']))
 
     def test_the_same_named_actions_pass_and_other_names_or_another_order_fail_with_both_values(self):
         card = ['Go to Session', 'Move to Topic…', 'Lock Session']
@@ -398,14 +402,25 @@ class CompareGate(unittest.TestCase):
         self.assertEqual([(row['row'], row['first'], row['second']) for row in failed],
                          [('session-window-@1', '[] []', 'no element')])
 
-    def test_a_scene_fails_its_measure_when_the_app_shows_the_other_sessions_list(self):
+    def test_a_scene_fails_its_measure_when_the_app_shows_the_other_version(self):
         from scripts.verify.compare import Side, View
+        from scripts.verify.compare_scenes import Area
 
         sandbox = Mock()
-        sandbox.sessions_list.return_value = 'swiftui'
-        with self.assertRaisesRegex(AssertionError, 'shows the swiftui Sessions list, and the scene asked for the appkit list'):
-            View(sandbox, Side('appkit', 'appkit'), pathlib.Path('/nowhere')).measure('shot')
+        area = Area(name='made-up', title='Made-up list', list=self.KEY, default='madeUpListAppKit', args=[],
+                    shown=lambda s: 'swiftui', scenes=[])
+        with self.assertRaisesRegex(AssertionError, 'shows the swiftui Made-up list, and the scene asked for the appkit one'):
+            View(sandbox, area, Side('appkit', 'appkit'), pathlib.Path('/nowhere')).measure('shot')
         sandbox.act.assert_not_called()
+
+    def test_with_no_area_that_has_two_versions_the_compare_run_says_so_and_passes(self):
+        from scripts.verify import compare
+
+        with patch.object(compare, 'AREAS', []), patch.object(compare, 'prepare_mac') as prepare, \
+                patch('sys.stdout', new_callable=io.StringIO) as output:
+            self.assertEqual(compare.main([]), 0)
+        self.assertIn('no area has two versions', output.getvalue())
+        prepare.assert_not_called()
 
 
 if __name__ == '__main__':

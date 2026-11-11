@@ -1,7 +1,7 @@
 import CoreGraphics
 import MuxifyCore
 
-/// Where a Window row puts its parts, for both versions of the Sessions list (ADR 0074). A length that grows with the
+/// Where a Window row puts its parts, for the AppKit and the SwiftUI rows (ADR 0074). A length that grows with the
 /// Interface font size is its size at 12.
 enum WindowRowMetrics {
     static let leading: CGFloat = 8
@@ -34,7 +34,7 @@ enum WindowRowMetrics {
     static let paneSymbol = "rectangle.split.2x1"
 }
 
-/// The words of a Window row, for both versions of the Sessions list (ADR 0074): the line under the title, the help of
+/// The words of a Window row, for the AppKit and the SwiftUI rows (ADR 0074): the line under the title, the help of
 /// the badges, and the label of the Pane count.
 enum WindowRowText {
     static let mainWorkingCopy = "Main working copy"
@@ -52,7 +52,7 @@ enum WindowRowText {
     static func panes(_ count: Int, isZoomed: Bool) -> String { isZoomed ? "\(count), Zoomed" : "\(count)" }
 }
 
-/// How the Sidebar marks the selected Window or Pane row, for both versions of the Sessions list (ADR 0074): a soft
+/// How the Sidebar marks the selected Window or Pane row, for the AppKit and the SwiftUI rows (ADR 0074): a soft
 /// accent tint that fades in, so moving between Windows does not flash a block of full colour from row to row. A row
 /// under the pointer has a faint fill of the text colour.
 enum SelectedRow {

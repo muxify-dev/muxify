@@ -2,14 +2,14 @@ import CoreGraphics
 import Foundation
 import MuxifyCore
 
-/// The sizes of a row's Agent mark, for both versions of the Sessions list (ADR 0074). A length is its size at 12, and
+/// The sizes of a row's Agent mark, for the AppKit and the SwiftUI rows (ADR 0074). A length is its size at 12, and
 /// grows with the Interface font size, as the mark sits beside a row's text.
 enum AgentMarkMetrics {
     /// The side of a Notification's dot.
     static let dotSize: CGFloat = 7
 }
 
-/// The Working mark of a row, for both versions of the Sessions list (ADR 0074): eight separate square pixels around a
+/// The Working mark of a row, for the AppKit and the SwiftUI rows (ADR 0074): eight separate square pixels around a
 /// three-by-three grid, with no outline between them. A bright head and dimmer pixels behind it step clockwise, eight
 /// steps in a period, on the clock that every Working mark shares: the time since the reference date.
 enum WorkingGlyph {

@@ -11,10 +11,10 @@ struct SidebarMenuItem {
     let perform: @MainActor () -> Void
 }
 
-/// A Sidebar context menu: groups of items, with a divider between two groups. Both versions of the Sessions list read
-/// one menu (ADR 0074). The SwiftUI list draws it as Buttons in `.contextMenu` and `.accessibilityActions`. The AppKit
-/// list makes from it both the menu that a right-click shows and the element's named accessibility actions, so a check
-/// of the actions is a check of the menu.
+/// A Sidebar context menu: groups of items, with a divider between two groups. The AppKit and the SwiftUI views read one
+/// menu (ADR 0074). A SwiftUI view draws it as Buttons in `.contextMenu` and `.accessibilityActions`. The AppKit
+/// Sessions list makes from it both the menu that a right-click shows and the element's named accessibility actions,
+/// so a check of the actions is a check of the menu.
 struct SidebarMenu {
     let groups: [[SidebarMenuItem]]
 

@@ -480,12 +480,6 @@ enum TestDriver {
             }
             return ["rows": [], "pressed": true, "responders": classes, "editors": editors]
         }
-        // Which Sessions list each visible App Window shows, `appkit` or `swiftui` (ADR 0074).
-        if name == "sessions-list" {
-            let versions = NSApp.windows.filter { $0.isVisible && $0.styleMask.contains(.titled) }
-                .map { SessionsListVersion.shown(in: $0).rawValue }
-            return ["rows": [], "pressed": true, "versions": versions]
-        }
         // The names of the named accessibility actions of each element with the identifier, in the order of the dump.
         // A dump row has none, because a dump reads up to 2000 elements.
         if name == "actions" {

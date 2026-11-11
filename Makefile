@@ -50,21 +50,20 @@ SUITE ?= $(basename $(notdir $(wildcard scripts/verify/suites/*.py)))
 
 # Runs the suites, then the gate. With SUITE= it is a subset run, which never satisfies the gate.
 # ARGS="--repeat N --shuffle" runs the selection N times, each time in a random check order.
-# SESSIONS_LIST=appkit or SESSIONS_LIST=swiftui makes every suite launch the app with that Sessions list
-# (docs/adr/0074-an-area-leaves-swiftui-for-appkit-only-where-swiftui-caused-bugs.md). Such a run never satisfies
-# the gate either. Without it, a suite gets the app's default.
 verify: build
-	MUXIFY_VERIFY_SESSIONS_LIST=$(SESSIONS_LIST) python3 -m scripts.verify.run $(ARGS) $(SUITE)
+	python3 -m scripts.verify.run $(ARGS) $(SUITE)
 
 # Passes only when the last full make verify passed on this exact tree.
 verify-gate:
 	python3 -m scripts.verify.gate
 
-# Shows each scene in the SwiftUI Sessions list and in the AppKit one, fails when their rows differ, and writes the
-# report build/verify/compare/index.html (scripts/verify/README.md, "The compare run"). SCENE="cards hints" runs
-# these scenes. SELF=1 shows each scene twice in the SwiftUI list, which proves the run itself.
+# Shows each scene of an area that has two versions in its SwiftUI version and in its AppKit one, fails when their
+# rows differ, and writes the report build/verify/compare/index.html (scripts/verify/README.md, "The compare run").
+# AREA=<area> chooses the area when there are several. SCENE="<scene> <scene>" runs these scenes. SELF=1 shows each
+# scene twice in the SwiftUI version, which proves the run itself. With no area that has two versions, it says so and
+# passes.
 compare: build
-	python3 -m scripts.verify.compare $(if $(SELF),--self) $(SCENE)
+	python3 -m scripts.verify.compare $(if $(AREA),--area $(AREA)) $(if $(SELF),--self) $(SCENE)
 
 # CONFIG=path/to/config.yaml starts a new copy of the app with that Config, through MUXIFY_CONFIG.
 run: build

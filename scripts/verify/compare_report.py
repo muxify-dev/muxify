@@ -1,6 +1,6 @@
 """The HTML report of the compare run, from the result.json that compare.py writes for each scene.
 
-The page is index.html in the folder of the run's results, build/verify/compare/ or build/verify/compare/self/, and
+The page is index.html in the folder of the run's results, build/verify/compare/<area>/ or its self/, and
 names the pictures by relative paths, so it works opened from disk. It shows each scene that has a result, also one of
 an earlier run, in the order of the scenes. Under a scene's pictures it shows the scene's section of
 scripts/verify/compare-notes.md.
@@ -12,8 +12,6 @@ import re
 from scripts.verify.compare_gate import describe
 from scripts.verify.report import STYLE, esc, tag
 
-# The notes' first section, before the sections of the scenes.
-COST = 'Cost of the pilot'
 PAGE_STYLE = STYLE + '''
 body { max-width: 1700px; } h3 { font-size: 14px; margin: 18px 0 6px; }
 .pictures { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
@@ -130,8 +128,9 @@ def scene_section(result, notes):
                 prose(notes) or '<p class="muted">No notes.</p>'))
 
 
-def render(root, names, notes):
-    """The page for the results in the folder `root`, with the scenes `names` in their order."""
+def render(root, title, names, notes):
+    """The page for the results in the folder `root` of the area whose list is `title`, such as 'Topics list', with
+    the scenes `names` in their order."""
     noted = sections(notes)
     results = []
     for name in names:
@@ -145,7 +144,6 @@ def render(root, names, notes):
         esc(result['scene']), esc(result['scene']), tag('failed' if result['failed'] else 'pass'),
         esc(', '.join('%s %s' % (shot['name'], share(shot['pixels'])) for shot in result['shots'] if shot['pixels'])),
         esc(result['time'])) for result in results)
-    cost = prose(noted.get(COST, ''))
     return '''<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="color-scheme" content="light dark">
 <title>%(title)s</title><style>%(style)s</style></head><body>
@@ -154,15 +152,14 @@ def render(root, names, notes):
 A picture is drawn from the App Window's layers, so it does not show a material that the window server blends.</p>
 %(missing)s
 <table><tr><th>Scene</th><th>Result</th><th>Pixels that differ</th><th>Run</th></tr>%(summary)s</table>
-%(cost)s
 %(scenes)s
 </body></html>
-''' % dict(title='Compare run: the SwiftUI Sessions list twice' if self_run else 'Compare run: the SwiftUI and the AppKit Sessions list',
+''' % dict(title=('Compare run: the SwiftUI %s twice' if self_run else 'Compare run: the SwiftUI and the AppKit %s') % title,
            style=PAGE_STYLE,
-           intro=('Each scene shows twice in the SwiftUI Sessions list, so every difference is a fault of the run.'
+           intro=('Each scene shows twice in the SwiftUI %s, so every difference is a fault of the run.' % title
                   if self_run else
-                  'A scene fails when a row inside the Sessions list has no match in the other version, differs in '
-                  'label, title, value or help, or stands more than half a point away. The pixels are for the eye.'),
+                  'A scene fails when a row inside the %s has no match in the other version, differs in label, title, '
+                  'value or help, or stands more than half a point away. The pixels are for the eye.' % title),
            missing='<p class="muted">No result yet: %s.</p>' % esc(', '.join(missing)) if missing else '',
-           summary=summary, cost='<h2>%s</h2>%s' % (esc(COST), cost) if cost else '',
+           summary=summary,
            scenes=''.join(scene_section(result, noted.get(result['scene'], '')) for result in results))

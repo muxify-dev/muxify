@@ -3,8 +3,7 @@ import MuxifyCore
 import SwiftUI
 
 extension TopicsModel.PaneRow {
-    /// With no Window row above it, the active Pane row shows where the user is, for both versions of the Sessions list
-    /// (ADR 0074).
+    /// With no Window row above it, the active Pane row shows where the user is, for both versions of the row (ADR 0074).
     func showsLocation(selectedWindowID: String?) -> Bool {
         !isUnderWindowRow && pane.isActive && window.id == selectedWindowID
     }

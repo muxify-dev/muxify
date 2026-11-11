@@ -1,6 +1,6 @@
 import CoreGraphics
 
-/// Where a Pane row puts its parts, for both versions of the Sessions list (ADR 0074). A length that grows with the
+/// Where a Pane row puts its parts, for the AppKit and the SwiftUI rows (ADR 0074). A length that grows with the
 /// Interface font size is its size at 12.
 enum PaneRowMetrics {
     /// The room before the mark's place of a row under its Window row, which indents it.
@@ -34,7 +34,7 @@ enum PaneRowMetrics {
     static func leading(isUnderWindowRow: Bool) -> CGFloat { isUnderWindowRow ? leadingUnderWindow : leading }
 }
 
-/// The row that ends a long card, for both versions of the Sessions list (ADR 0074): "N more…", where N is the number
+/// The row that ends a long card, for the AppKit and the SwiftUI rows (ADR 0074): "N more…", where N is the number
 /// of rows the card holds back. A length that grows with the Interface font size is its size at 12.
 enum MoreRowMetrics {
     /// The room before the text.

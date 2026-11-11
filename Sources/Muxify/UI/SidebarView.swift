@@ -64,9 +64,6 @@ struct SidebarView: View {
 
 private struct WorkSection: View {
     let store: WorkspaceStore
-    /// Which Sessions list shows (ADR 0074): the AppKit list unless the user default is false. The Sidebar follows a
-    /// change of the user default while the app runs.
-    @AppStorage(SessionsListVersion.defaultsKey) private var sessionsListAppKit = true
 
     var body: some View {
         let model = store.topics
@@ -76,20 +73,15 @@ private struct WorkSection: View {
                          acceptsGestures: !store.palette.isOpen && store.currentGitView?.isOpen != true) {
                 TopicsSection(store: store, model: model)
             } sessions: {
-                sessionsList
+                SessionsListHost(store: store)
             }
         } else if model.mode == .topics {
             TopicsSection(store: store, model: model)
         } else if model.sessionsEnabled {
-            sessionsList
+            SessionsListHost(store: store)
         } else {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-
-    @ViewBuilder
-    private var sessionsList: some View {
-        if sessionsListAppKit { SessionsListHost(store: store) } else { SessionsSection(store: store) }
     }
 }
 
@@ -1137,82 +1129,8 @@ private struct SectionResizeHandle: View {
     }
 }
 
-/// The Sessions and their Windows.
-private struct SessionsSection: View {
-    let store: WorkspaceStore
-    @Environment(\.sidebarTypography) private var typography
-
-    /// The cards whose "N more…" the user pressed, by Session ID.
-    @State private var showingAllRows: Set<String> = []
-
-    static let viewport = "sessions-viewport"
-
-    var body: some View {
-        let model = store.topics
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    // Not lazy, for the same reason as the Topics list.
-                    VStack(alignment: .leading, spacing: SessionsListMetrics.cardSpacing) {
-                        ForEach(store.sessions) { session in
-                            SessionCard(store: store, model: model, session: session, identifier: "session-\(session.id)",
-                                        viewport: Self.viewport,
-                                        showsAllRows: showingAllRows.contains(session.id),
-                                        onShowAllRows: { showingAllRows.insert(session.id) }) { item in
-                                row(item)
-                            }
-                        }
-                    }
-                    // As wide as the list also with no card: a scroll view takes the width of its content, and with
-                    // none it was 12 points wide, so the empty state wrapped after each letter.
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, SessionsListMetrics.horizontalInset)
-                    .padding(.vertical, SessionsListMetrics.verticalInset)
-                }
-                .coordinateSpace(.named(Self.viewport))
-                .scrollIndicators(.never)
-                .accessibilityIdentifier("sessions-list")
-                // The list scrolls to the card that holds the Window.
-                .onChange(of: store.selectedWindow?.sessionID) { _, id in
-                    guard let id else { return }
-                    withAnimation(.easeOut(duration: SessionsListScroll.glideDuration)) { proxy.scrollTo(id) }
-                }
-            }
-        }
-        .overlay {
-            if let empty = SessionsListEmptyState.text(store) {
-                Text(empty)
-                    .font(typography.font(for: SessionsListEmptyState.role))
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func row(_ item: TopicsModel.SessionChildren.Item) -> some View {
-        switch item {
-        case .window(let window):
-            WindowRow(
-                window: window,
-                content: store.sidebarWindowRow(window),
-                isSelected: window.id == store.selectedWindowID,
-                tooltips: store.config.sidebar.windowTooltips,
-                tabCount: store.tabCount(for: window),
-                isGitViewOpen: store.isGitViewOpen(in: window.id),
-                usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
-                    window, record: store.topicWatcher.records.first { $0.id == window.topicID },
-                    sessionPaths: store.sessionPaths)
-            )
-                .accessibilityIdentifier("session-window-\(window.id)")
-                .accessibilityValue(window.id == store.selectedWindowID ? "selected" : "")
-                .contextMenu { SidebarMenuButtons(SessionsListMenus.window(window, store: store)) }
-        case .pane(let row):
-            PaneRow(store: store, row: row)
-        }
-    }
-}
-
-/// A Session card, in Sessions mode and as the opened No Topic Session in Topics mode. Each place gives its own Window and Pane rows.
+/// The SwiftUI Session card: the opened No Topic Session in Topics mode, which gives its Window and Pane rows. The Sessions
+/// list draws the AppKit card, `SessionCardView` (ADR 0074).
 private struct SessionCard<Row: View>: View {
     let store: WorkspaceStore
     let model: TopicsModel

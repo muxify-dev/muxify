@@ -2,27 +2,6 @@ import AppKit
 import MuxifyCore
 import SwiftUI
 
-/// The two versions of the Sidebar's Sessions list while the list moves from SwiftUI to AppKit (ADR 0074).
-enum SessionsListVersion: String {
-    case swiftui, appkit
-
-    /// The user default that chooses the version: missing or true is the AppKit list; false is the SwiftUI list.
-    /// It is not a Config key, because it goes away with the SwiftUI list.
-    static let defaultsKey = "sessionsListAppKit"
-
-    #if DEBUG
-    /// The version in the App Window, for the verify driver: the AppKit list when the window holds one, also as the
-    /// Sidebar page that does not show.
-    static func shown(in window: NSWindow) -> SessionsListVersion {
-        func holdsList(_ view: NSView?) -> Bool {
-            guard let view else { return false }
-            return view is SessionsListView || view.subviews.contains(where: holdsList)
-        }
-        return holdsList(window.contentView) ? .appkit : .swiftui
-    }
-    #endif
-}
-
 /// What the Sidebar's SwiftUI views read from the environment. The Sidebar hands it to the AppKit Sessions list,
 /// which has no environment.
 struct SessionsListEnvironment: Equatable {
@@ -40,8 +19,8 @@ struct SessionsListEnvironment: Equatable {
     var displayScale: CGFloat = 2
 }
 
-/// What the Sessions list says in its middle while tmux has no Window, for both versions of the list (ADR 0074): in the
-/// font of a Window row's title, in the secondary text colour.
+/// What the Sessions list says in its middle while tmux has no Window: in the font of a Window row's title, in the
+/// secondary text colour.
 @MainActor enum SessionsListEmptyState {
     static let role = SidebarTypography.Role.title
 
@@ -52,7 +31,7 @@ struct SessionsListEnvironment: Equatable {
     }
 }
 
-/// A press on the header of a Session card, for both versions of the Sessions list (ADR 0074). As on a Topic card: on
+/// A press on the header of a Session card, for both versions of the card (ADR 0074). As on a Topic card: on
 /// the card of the Location's Session it opens or closes the card; on another card it goes to that Session, whose
 /// card then opens.
 @MainActor struct SessionCardPress {
@@ -75,8 +54,8 @@ struct SessionsListEnvironment: Equatable {
     }
 }
 
-/// The context menus of the Sessions list and the named accessibility actions they give, for both versions of the list
-/// (ADR 0074). Each item starts what it names; Rename Window…, the Move items and the two Kill items open their step in
+/// The context menus of the Sessions list and the named accessibility actions they give. The SwiftUI Session card of the
+/// Topics list reads the card's and the header's too (ADR 0074). Each item starts what it names; Rename Window…, the Move items and the two Kill items open their step in
 /// the palette's view (ADR 0014).
 @MainActor enum SessionsListMenus {
     /// The menu of a Session card, which is also the card's named actions: Go to Session, the Topic membership items

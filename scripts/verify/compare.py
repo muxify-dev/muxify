@@ -1,24 +1,27 @@
-"""The compare run: shows each scene in the SwiftUI Sessions list and in the AppKit one, fails when the two differ in
-what a check can measure, and leaves a report of pictures for the user to judge
-(docs/adr/0074-an-area-leaves-swiftui-for-appkit-only-where-swiftui-caused-bugs.md).
+"""The compare run: shows each scene of an area in its SwiftUI version and in its AppKit one, fails when the two
+differ in what a check can measure, and leaves a report of pictures for the user to judge
+(docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md).
 
-    python3 -m scripts.verify.compare [--self] [scene ...]
+    python3 -m scripts.verify.compare [--area NAME] [--self] [scene ...]
 
-Without a scene it runs every scene of compare_scenes.py, one after the other, each in its own Sandbox. A scene makes
-its fixture once. Then, for each version, it starts the app with that version, shows each of its shots, and takes a
+An area is a part of the app with two versions (`Area` in compare_scenes.py). --area chooses one of AREAS; it may be
+left out while only one area has two versions. With no area that has two versions, the run says so and passes.
+
+Without a scene it runs every scene of the area, one after the other, each in its own Sandbox. A scene makes its
+fixture once. Then, for each version, it starts the app with that version, shows each of its shots, and takes a
 picture of the App Window and a dump for it. `make compare` builds the Debug app first.
 
-**The gate** (compare_gate.py) matches the rows inside the Sessions list between the two versions, and compares the
+**The gate** (compare_gate.py) matches the rows inside the area's list between the two versions, and compares the
 named actions of the elements that a shot names. The run fails when a scene's gate fails, or when a scene cannot show
 a shot or measure it. It names each row that failed, with the
 values of both versions.
 
-**The report** is REPORT/index.html: for each shot the two pictures side by side, a picture of their difference, the
+**The report** is REPORT/<area>/index.html: for each shot the two pictures side by side, a picture of their difference, the
 share of pixels that differ, the gate's result, and the scene's section of NOTES. Nothing deletes it. A run of some
 scenes replaces their part of the report and keeps the rest. The share of pixels does not fail the run.
 
-**--self** shows each scene twice in the SwiftUI list. Then every difference is a fault of the run itself, so one
-pixel that differs fails the run too. Its report is REPORT/self/index.html, so it leaves the report of the two
+**--self** shows each scene twice in the SwiftUI version. Then every difference is a fault of the run itself, so one
+pixel that differs fails the run too. Its report is REPORT/<area>/self/index.html, so it leaves the report of the two
 versions alone.
 
 The run takes no focus: it starts the app only through `Sandbox.launch`, and it uses only the driver commands of
@@ -34,17 +37,16 @@ from typing import NamedTuple
 
 from scripts.verify import compare_report, gate
 from scripts.verify.compare_gate import judge, judge_actions, list_rows, rect
-from scripts.verify.compare_scenes import SCENES
+from scripts.verify.compare_scenes import AREAS
 from scripts.verify.run import prepare_mac
 from scripts.verify.run_suite import write_json
-from scripts.verify.sandbox import REPO, SESSIONS_LIST_DEFAULT, SESSIONS_LIST_VERSIONS, Sandbox, alive, swift_helper
+from scripts.verify.sandbox import REPO, Sandbox, alive, swift_helper
 
 REPORT = gate.EVIDENCE/'compare'
 NOTES = REPO/'scripts/verify/compare-notes.md'
 PICTURE_DIFF_SOURCE = REPO/'scripts/verify/picture_diff.swift'
-# What every scene starts the app with: the Sidebar with its Sessions list, and no Session card open from an earlier
-# launch, so each launch opens only the cards that the scene opens. A launch argument wins over the stored default.
-ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Sessions', '-expandedSessions', '()']
+# The value of an area's user default for each version. A launch argument wins over the stored default.
+VERSIONS = dict(appkit='YES', swiftui='NO')
 # A shot is at rest when this many pictures and dumps in a row are the same, REST_STEP seconds apart.
 REST_SAMPLES = 3
 REST_STEP = .25
@@ -58,7 +60,7 @@ FAILURES = (AssertionError, subprocess.SubprocessError, OSError, ValueError)
 
 class Side(NamedTuple):
     """One of the two showings of a scene: `label` names its files and its column in the report, and `version` is the
-    Sessions list it asks for."""
+    version of the area it asks for."""
     label: str
     version: str
 
@@ -69,22 +71,23 @@ def sides(self_run):
 
 
 class View:
-    """One showing of a scene: the app with one version of the Sessions list, in the scene's Sandbox `s`. A scene
-    drives it to a shot, and the run measures the shot."""
+    """One showing of a scene: the app with one version of the area, in the scene's Sandbox `s`. A scene drives it to
+    a shot, and the run measures the shot."""
 
-    def __init__(self, sandbox, side, out):
+    def __init__(self, sandbox, area, side, out):
         self.s = sandbox
+        self.area = area
         self.side = side
         self.out = out
         # The identifiers whose named actions the measure of the next shot reads.
         self.named = []
 
     def launch(self, config=None):
-        """Starts the app with this showing's version of the Sessions list, or starts it again when it runs. With
-        `config`, it writes that Config first, so the app reads it as it starts."""
+        """Starts the app with this showing's version of the area, or starts it again when it runs. With `config`, it
+        writes that Config first, so the app reads it as it starts."""
         if config is not None:
             (self.s.root/'config/muxify/config.yaml').write_text(config)
-        args = [*ARGS, '-' + SESSIONS_LIST_DEFAULT, SESSIONS_LIST_VERSIONS[self.side.version]]
+        args = [*self.area.args, '-' + self.area.default, VERSIONS[self.side.version]]
         if self.s.pid is not None and alive(self.s.pid):
             self.s.restart_app(args)
         else:
@@ -92,8 +95,8 @@ class View:
 
     def wait(self, predicate, message, seconds=10):
         """The first dump for which predicate(rows) holds. A shot that the list cannot show fails here."""
-        return self.s.wait_rows(predicate, lambda: '%s, in the %s list' % (message() if callable(message) else message,
-                                                                         self.side.version), seconds)
+        return self.s.wait_rows(predicate, lambda: '%s, in the %s %s' % (message() if callable(message) else message,
+                                                                       self.side.version, self.area.title), seconds)
 
     def go(self, window):
         """Moves the Location to the Window, as `muxify window open` does, and waits until the app shows it. The card
@@ -118,11 +121,11 @@ class View:
     def measure(self, shot):
         """The picture, the dump and the named actions of a shot: (path of the picture, rows, actions). `actions` has,
         for each identifier that the arrange named with `read_actions`, the names of each element's named actions. It
-        first asks the driver which Sessions list shows, and fails when that is not the version this showing asked
-        for. Then it waits until nothing moves."""
-        shown = self.s.sessions_list()
-        assert shown == self.side.version, (
-            'the App Window shows the %s Sessions list, and the scene asked for the %s list' % (shown, self.side.version))
+        first asks the driver which version of the area shows, and fails when that is not the version this showing
+        asked for. Then it waits until nothing moves."""
+        shown = self.area.shown(self.s)
+        assert shown == self.side.version, 'the App Window shows the %s %s, and the scene asked for the %s one' % (
+            shown, self.area.title, self.side.version)
         picture = self.out/('%s-%s.png' % (shot, self.side.label))
         rows = self.rest(picture)
         write_json(picture.with_suffix('.json'), rows)
@@ -185,11 +188,12 @@ def crop(dumps):
     return [left, top, right - left, bottom - top], window
 
 
-def run_scene(scene, pair, out, self_run):
-    """Runs one scene and returns its result, which it also writes to out/result.json. `failed` lists why the scene
-    fails; it is empty when the scene passes."""
+def run_scene(area, scene, pair, out, self_run):
+    """Runs one scene of the area and returns its result, which it also writes to out/result.json. `failed` lists why
+    the scene fails; it is empty when the scene passes."""
     began = time.monotonic()
-    result = dict(scene=scene.name, shows=scene.shows, self_run=self_run, sides=[side._asdict() for side in pair],
+    result = dict(area=area.name, title=area.title, scene=scene.name, shows=scene.shows, self_run=self_run,
+                  sides=[side._asdict() for side in pair],
                   time=time.strftime(gate.TIME), head=gate.git('rev-parse', 'HEAD'), shots=[], failed=[])
     taken = {}
     sandbox = Sandbox('compare-' + scene.name)
@@ -200,7 +204,7 @@ def run_scene(scene, pair, out, self_run):
         # The status line has a clock, and the picture of the App Window has the Terminal.
         sandbox.tmux_ok('set-option', '-g', 'status', 'off')
         for side in pair:
-            view = View(sandbox, side, out)
+            view = View(sandbox, area, side, out)
             for shot, arrange in scene.shots():
                 record = taken.setdefault(shot, {})[side.label] = dict(picture=None, rows=None, actions=None, error=None)
                 try:
@@ -232,14 +236,14 @@ def run_scene(scene, pair, out, self_run):
             difference = out/('%s-difference.png' % shot)
             entry['pixels'] = picture_diff(one['picture'], other['picture'], difference)
             entry['difference'] = difference.name
-            entry['gate'] = judge(list_rows(one['rows']), list_rows(other['rows']))
+            entry['gate'] = judge(list_rows(one['rows'], area.list), list_rows(other['rows'], area.list))
             entry['gate']['failed'] += judge_actions(one['actions'], other['actions'])
             entry['crop'], entry['window'] = crop([one['rows'], other['rows']])
             if entry['gate']['failed']:
                 result['failed'].append('%s: the gate failed for %d rows' % (shot, len({row['row'] for row in entry['gate']['failed']})))
             if self_run and entry['pixels']['differ']:
-                result['failed'].append('%s: %d pixels differ between two showings of the SwiftUI list, %s'
-                                        % (shot, entry['pixels']['differ'], compare_report.where(entry)))
+                result['failed'].append('%s: %d pixels differ between two showings of the SwiftUI %s, %s'
+                                        % (shot, entry['pixels']['differ'], area.title, compare_report.where(entry)))
         result['shots'].append(entry)
     result['seconds'] = round(time.monotonic() - began, 1)
     write_json(out/'result.json', result)
@@ -256,27 +260,59 @@ def explain(result, first, second):
     return lines
 
 
+def parse(argv):
+    """(area name or None, self_run, scene names) of the command line."""
+    area, self_run, names = None, False, []
+    args = iter(argv)
+    for arg in args:
+        if arg == '--area':
+            area = next(args, None)
+            if not area:
+                sys.exit('--area needs the name of an area')
+        elif arg == '--self':
+            self_run = True
+        else:
+            names.append(arg)
+    return area, self_run, names
+
+
+def choose(name, areas):
+    """The area that the run compares: the one named, or the only one. None when no area has two versions."""
+    if not areas:
+        return None
+    named = {area.name: area for area in areas}
+    if name is None and len(areas) > 1:
+        sys.exit('more than one area has two versions; name one with AREA=: %s' % ', '.join(named))
+    if name is not None and name not in named:
+        sys.exit('no area %s has two versions; the areas are %s' % (name, ', '.join(named)))
+    return named[name] if name is not None else areas[0]
+
+
 def main(argv):
-    self_run = '--self' in argv
-    names = [arg for arg in argv if arg != '--self']
-    scenes = {scene.name: scene for scene in SCENES}
-    unknown = [name for name in names if name not in scenes]
+    name, self_run, names = parse(argv)
+    area = choose(name, AREAS)
+    if area is None:
+        print('compare: no area has two versions, so there is nothing to compare%s'
+              % (' (asked for %s)' % name if name else ''))
+        return 0
+    scenes = {scene.name: scene for scene in area.scenes}
+    unknown = [scene for scene in names if scene not in scenes]
     if unknown:
-        sys.exit('no scene %s; the scenes are %s' % (', '.join(unknown), ', '.join(scenes)))
-    chosen = [scene for scene in SCENES if not names or scene.name in names]
+        sys.exit('no scene %s in the area %s; its scenes are %s' % (', '.join(unknown), area.name, ', '.join(scenes)))
+    chosen = [scene for scene in area.scenes if not names or scene.name in names]
     prepare_mac()
 
-    root = REPORT/'self' if self_run else REPORT
+    root = REPORT/area.name/'self' if self_run else REPORT/area.name
     pair = sides(self_run)
-    print('compare: %d scenes, the %s list and the %s list, report in %s' % (
-        len(chosen), pair[0].version, pair[1].version, root/'index.html'), flush=True)
+    print('compare: %d scenes, the %s %s and the %s %s, report in %s' % (
+        len(chosen), pair[0].version, area.title, pair[1].version, area.title, root/'index.html'), flush=True)
     clock = time.monotonic()
     failed = []
     for scene in chosen:
         out = root/scene.name
         shutil.rmtree(out, ignore_errors=True)
         out.mkdir(parents=True)
-        result = run_scene(scene, pair, out, self_run)
+        result = run_scene(area, scene, pair, out, self_run)
         shares = ', '.join('%s %s' % (shot['name'], compare_report.share(shot['pixels'])) for shot in result['shots']
                            if shot['pixels'])
         print('%-7s %-16s %5.1f s  pixels that differ: %s' % ('FAILED' if result['failed'] else 'ok', scene.name,
@@ -285,7 +321,8 @@ def main(argv):
             failed.append(scene.name)
             print('\n'.join(explain(result, *pair)), flush=True)
         # After each scene, so a run that stops halfway leaves a report of what it did.
-        (root/'index.html').write_text(compare_report.render(root, [scene.name for scene in SCENES], NOTES.read_text()))
+        (root/'index.html').write_text(compare_report.render(root, area.title, [scene.name for scene in area.scenes],
+                                                              NOTES.read_text()))
     print('%d scenes in %.0f s: %s' % (len(chosen), time.monotonic() - clock,
                                        '%d failed: %s' % (len(failed), ', '.join(failed)) if failed else 'all passed'))
     print('report: %s' % (root/'index.html'))

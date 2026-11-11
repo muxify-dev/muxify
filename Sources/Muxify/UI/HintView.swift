@@ -31,7 +31,7 @@ struct HintBadge: View {
     }
 }
 
-/// The sizes and colours of a Hint's badge, for both versions of the Sessions list (ADR 0074). The font size is at 12,
+/// The sizes and colours of a Hint's badge, for the AppKit and the SwiftUI rows (ADR 0074). The font size is at 12,
 /// and grows with the Interface font size.
 enum HintBadgeMetrics {
     /// The keys are semibold and monospaced.
@@ -50,7 +50,7 @@ enum HintBadgeMetrics {
     static func text(_ triggers: [KeyTrigger]) -> String { triggers.map(\.symbol).joined(separator: " ") }
 }
 
-/// Where a Window row's Hint stands and how its key at rest looks, for both versions of the Sessions list (ADR 0074).
+/// Where a Window row's Hint stands and how its key at rest looks, for the AppKit and the SwiftUI rows (ADR 0074).
 enum WindowHintMetrics {
     /// The Hint stands this far right of and below the row's top left corner, in the room the row keeps for it.
     static let inset: CGFloat = 5

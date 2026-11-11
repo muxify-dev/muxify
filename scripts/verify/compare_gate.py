@@ -1,10 +1,10 @@
-"""The gate of the compare run: do the two versions of the Sessions list give the same rows in the same places?
+"""The gate of the compare run: do the two versions of an area give the same rows in the same places?
 
 It reads two dumps of the test driver, one of each version (scripts/verify/compare.py), and needs no app:
 
-    result = judge(list_rows(first_dump), list_rows(second_dump))
+    result = judge(list_rows(first_dump, area.list), list_rows(second_dump, area.list))
 
-`list_rows` keeps the rows with an identifier inside the Sessions list. `judge` matches them between the two versions
+`list_rows` keeps the rows with an identifier inside the area's list. `judge` matches them between the two versions
 by identifier and role. SwiftUI gives a row's identifier to the row's parts, so several rows can share one identifier
 and one role: among these, the first of one version matches the first of the other, in the order of the dump.
 
@@ -17,7 +17,6 @@ reports it. suites/harness.py checks the matching on made-up rows.
 
 import re
 
-LIST = 'sessions-list'
 # A frame may stand this many points away on each edge. A frame is rounded to the display's pixels, half a point on
 # a display with two pixels to the point.
 TOLERANCE = .5
@@ -34,13 +33,13 @@ def rect(row):
     return tuple(numbers) if len(numbers) == 4 else None
 
 
-def list_rows(rows):
-    """The rows of a dump that the gate compares: the Sessions list and every row inside it that has an identifier,
-    in the order of the dump. Each is a dict with `identifier`, `role`, the ATTRIBUTES (None when the dump has
-    none) and `frame`: (left, top, right, bottom) in points from the top left corner of the App Window, so the App
-    Window may stand in another place on the screen in the two versions. Empty when the dump has no Sessions list,
-    as while Topics shows: the Sidebar hides the page that does not show from accessibility."""
-    start = next((index for index, row in enumerate(rows) if row.get('accessibilityIdentifier') == LIST), None)
+def list_rows(rows, key):
+    """The rows of a dump that the gate compares: the list with the identifier `key` and every row inside it that has
+    an identifier, in the order of the dump. Each is a dict with `identifier`, `role`, the ATTRIBUTES (None when the
+    dump has none) and `frame`: (left, top, right, bottom) in points from the top left corner of the App Window, so
+    the App Window may stand in another place on the screen in the two versions. Empty when the dump has no such list, as
+    while the Sidebar shows its other page: the Sidebar hides the page that does not show from accessibility."""
+    start = next((index for index, row in enumerate(rows) if row.get('accessibilityIdentifier') == key), None)
     if start is None:
         return []
     depth = int(rows[start]['depth'])
@@ -49,7 +48,7 @@ def list_rows(rows):
         if int(row['depth']) <= depth:
             break
         inside.append(row)
-    # The App Window is the row without a parent that the Sessions list follows.
+    # The App Window is the row without a parent that the list follows.
     window = next((rect(row) for row in reversed(rows[:start]) if int(row['depth']) == 0), None) or (0, 0, 0, 0)
     found = []
     for row in inside:
