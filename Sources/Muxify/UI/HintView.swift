@@ -97,6 +97,60 @@ private struct WindowHint: View {
     }
 }
 
+private struct CardHints: View {
+    let anchors: [QuickSwitchTarget: Anchor<CGRect>]
+    @Environment(\.quickSwitchHints) private var hints
+
+    var body: some View {
+        GeometryReader { proxy in
+            ForEach(anchors.keys.sorted { $0.accessibilityID < $1.accessibilityID }, id: \.self) { target in
+                if let anchor = anchors[target] {
+                    let rect = proxy[anchor]
+                    if case .window = target {
+                        WindowHint(target: target, hints: hints, height: rect.height)
+                            .offset(x: rect.minX + 5, y: rect.minY + 5)
+                    } else {
+                        // The badge ends where the key ends, and grows over the title.
+                        Color.clear
+                            .frame(width: rect.width, height: rect.height)
+                            .overlay(alignment: .trailing) {
+                                if !hints[target].isEmpty {
+                                    HintBadge(target: target, triggers: hints[target])
+                                } else if let key = hints.restKey(for: target) {
+                                    CardRestKey(target: target, key: key)
+                                }
+                            }
+                            .offset(x: rect.minX, y: rect.minY)
+                    }
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// Hides a card's mark while the card's Hint badge shows in its place. It reads the Hints itself, so the card's
+/// header does not run again when they change.
+struct HintHidesMark: ViewModifier {
+    let target: QuickSwitchTarget?
+    @Environment(\.quickSwitchHints) private var hints
+
+    func body(content: Content) -> some View {
+        content.opacity(target.map { hints[$0].isEmpty ? 1 : 0 } ?? 1)
+    }
+}
+
+/// The room a Window row keeps for its Window Hint when the Hints reserve it. It reads the Hints itself, so the row does
+/// not run again when they change.
+struct WindowHintSpace: View {
+    @Environment(\.quickSwitchHints) private var hints
+    @Environment(\.interfaceFontSize) private var fontSize
+
+    var body: some View {
+        if hints.windowSlotReserved { Color.clear.frame(width: fontSize(10)) }
+    }
+}
+
 extension View {
     func hintAnchor(_ target: QuickSwitchTarget?) -> some View {
         anchorPreference(key: HintAnchors.self, value: .bounds) { anchor in
@@ -104,32 +158,11 @@ extension View {
         }
     }
 
-    func cardHints(_ hints: HintPresentation) -> some View {
+    /// Draws the Hints of the card's `CardHintSlot`s over it. The overlay reads the Hints itself, so a change of the
+    /// Hints, as a switch between Topics and Sessions makes, runs only the overlay again, not the card's body.
+    func cardHints() -> some View {
         overlayPreferenceValue(HintAnchors.self) { anchors in
-            GeometryReader { proxy in
-                ForEach(anchors.keys.sorted { $0.accessibilityID < $1.accessibilityID }, id: \.self) { target in
-                    if let anchor = anchors[target] {
-                        let rect = proxy[anchor]
-                        if case .window = target {
-                            WindowHint(target: target, hints: hints, height: rect.height)
-                                .offset(x: rect.minX + 5, y: rect.minY + 5)
-                        } else {
-                            // The badge ends where the key ends, and grows over the title.
-                            Color.clear
-                                .frame(width: rect.width, height: rect.height)
-                                .overlay(alignment: .trailing) {
-                                    if !hints[target].isEmpty {
-                                        HintBadge(target: target, triggers: hints[target])
-                                    } else if let key = hints.restKey(for: target) {
-                                        CardRestKey(target: target, key: key)
-                                    }
-                                }
-                                .offset(x: rect.minX, y: rect.minY)
-                        }
-                    }
-                }
-            }
-            .allowsHitTesting(false)
+            CardHints(anchors: anchors)
         }
         .transformPreference(HintAnchors.self) { $0 = [:] }
     }

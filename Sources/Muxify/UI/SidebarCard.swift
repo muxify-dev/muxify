@@ -16,7 +16,6 @@ struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
     /// The card's accessibility identifier: `card-` and its header's identifier. The card offers its menu's items as
     /// accessibility actions, so a check reaches the menu of the space around the rows without opening it.
     let identifier: String
-    @Environment(\.quickSwitchHints) private var hints
     @ViewBuilder var header: () -> Header
     @ViewBuilder var content: () -> Content
     /// The card's context menu: on its header, its padding, the gaps between its rows and its footer line.
@@ -94,7 +93,7 @@ struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
         // On the whole card, so the space around the rows has it too. A row or heading with its own menu keeps that one.
         .contextMenu { menu() }
         .opacity(restingOpacity)
-        .cardHints(hints)
+        .cardHints()
         // A container, in which the header's sort priority applies.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("card-" + identifier)
@@ -183,7 +182,6 @@ struct CardHeader<Details: View>: View {
     /// A Guest's card shows the Guest mark there.
     var isGuest = false
     var hintTarget: QuickSwitchTarget? = nil
-    @Environment(\.quickSwitchHints) private var hints
     /// Words for the accessibility value after the open state, such as "Dormant".
     var notes: [String] = []
     let summary: String
@@ -248,9 +246,9 @@ struct CardHeader<Details: View>: View {
                 Spacer(minLength: 0)
                 HStack(alignment: .titleLine, spacing: 5) {
                     // The Hint badge takes the mark's place while it shows.
-                    let markOpacity: Double = hintTarget.map { hints[$0].isEmpty ? 1 : 0 } ?? 1
-                    if isPinned { PinMark().opacity(markOpacity) } else if isGuest { GuestMark().opacity(markOpacity) }
-                    else if isLocked { LockMark().opacity(markOpacity) }
+                    if isPinned { PinMark().modifier(HintHidesMark(target: hintTarget)) }
+                    else if isGuest { GuestMark().modifier(HintHidesMark(target: hintTarget)) }
+                    else if isLocked { LockMark().modifier(HintHidesMark(target: hintTarget)) }
                     if let tagsInTitleLine { CardTagsSlot(tags: tagsInTitleLine) }
                     // Keeps the title clear of the label, which `cardCornerLabel` shows as its own accessibility element.
                     if let cornerLabel { CardCornerLabelText(label: cornerLabel).hidden() }

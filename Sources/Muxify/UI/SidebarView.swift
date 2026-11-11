@@ -71,9 +71,9 @@ private struct WorkSection: View {
             SidebarPager(mode: Binding(get: { model.mode }, set: { store.sidebarMode = $0 }),
                          animateSwitching: store.config.sidebar.animateSwitching,
                          acceptsGestures: !store.palette.isOpen && store.currentGitView?.isOpen != true) {
-                TopicsSection(store: store, model: model)
+                TopicsSection(store: store, model: model).animatesSessionCards(store)
             } sessions: {
-                SessionsSection(store: store)
+                SessionsSection(store: store).animatesSessionCards(store)
             }
         } else if model.mode == .topics {
             TopicsSection(store: store, model: model)
@@ -82,6 +82,25 @@ private struct WorkSection: View {
         } else {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+    }
+}
+
+/// Each pager page is its own SwiftUI graph, so the `withAnimation` around a change of the open Session cards in
+/// `SidebarView` does not reach it. The page animates that change itself, at the same pace, unless the change came
+/// with its own animation.
+private struct SessionCardsAnimation: ViewModifier {
+    let store: WorkspaceStore
+
+    func body(content: Content) -> some View {
+        content.transaction(value: store.openSessionCards) { transaction in
+            if transaction.animation == nil, SwitchPace.animates { transaction.animation = .easeOut(duration: 0.15) }
+        }
+    }
+}
+
+extension View {
+    fileprivate func animatesSessionCards(_ store: WorkspaceStore) -> some View {
+        modifier(SessionCardsAnimation(store: store))
     }
 }
 
@@ -1337,7 +1356,6 @@ private struct SessionCard<Row: View>: View, Equatable {
 }
 
 struct WindowRow: View {
-    @Environment(\.quickSwitchHints) private var hints
     let window: TmuxWindow
     var content: SidebarFormats.WindowRowContent? = nil
     let isSelected: Bool
@@ -1353,7 +1371,7 @@ struct WindowRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if hints.windowSlotReserved { Color.clear.frame(width: fontSize(10)) }
+            WindowHintSpace()
             if let left = content?.left {
                 if !left.isEmpty { customPart(left, side: "left") }
             } else {

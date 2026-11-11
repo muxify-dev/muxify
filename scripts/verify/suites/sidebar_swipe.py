@@ -1,11 +1,14 @@
 """Topics/Sessions switching in the Sidebar, driven without taking focus.
 
-SidebarPager exposes Debug-only accessibility samples while the sandbox's TestDriver runs. They feed
-the real gesture recognizer and release path; no check needs to move the pointer or use the user's tmux server.
+SidebarPager exposes a Debug-only `sidebar-swipe-input` element while the sandbox's TestDriver runs. Its actions feed
+the real gesture recognizer and release path; no check needs to move the pointer or use the user's tmux server. The
+pages slide as Core Animation layers, which leave every row's accessibility frame at rest, so a check reads where the
+pages show from the element's label, "Sidebar swipe input animated|instant <position>", never from a row's frame.
 The driver cannot type keys, so the `toggle_sidebar_mode` checks press its View menu item ("Switch to Sessions" /
 "Switch to Topics") without opening the menu, or run its Command from the palette's search field.
 """
 
+import subprocess
 import time
 import unittest
 
@@ -13,7 +16,128 @@ from scripts.verify.sandbox import Sandbox, wait
 from scripts.verify.topic_records import TopicRecords
 
 
-class SidebarSwipe(unittest.TestCase):
+class SwipeSteps:
+    """The steps every Sidebar swipe check takes through the Debug `sidebar-swipe-input` element of `self.s`."""
+
+    def wait_mode(self, mode):
+        position = '0.000' if mode == 'topics' else '1.000'
+        return self.s.wait_rows(lambda rs: self.s.row('sidebar-view-' + mode, rs).get('accessibilityValue') == 'selected'
+                                and self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').endswith(' ' + position),
+                                'the Sidebar did not settle on ' + mode)
+
+    def require_motion(self):
+        """The Sidebar follows a swipe only while it animates. Reduce Motion in System Settings stops that for every app."""
+        if self.s.row('sidebar-swipe-input').get('accessibilityLabel', '').startswith('Sidebar swipe input instant'):
+            self.skipTest('Reduce Motion is on, so the Sidebar does not follow a swipe')
+
+    def sample(self, name):
+        self.s.act('action', 'sidebar-swipe-input', name)
+
+    def position(self, rs=None):
+        """Where the pages show: the end of the Debug element's label, which AppKit answers from the layers."""
+        return self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').rsplit(' ', 1)[-1]
+
+    def positions(self, seconds):
+        """The position, read again and again for `seconds`."""
+        found = []
+        end = time.time() + seconds
+        while time.time() < end:
+            found.append(self.position())
+            time.sleep(0.05)
+        return found
+
+
+# A Sidebar full enough that a SwiftUI update of the pages container on every frame would cost the app a lot.
+BURST_SESSIONS = 15
+BURST_SWIPES = 10
+# SwiftUI updates of the pages container, and modes handed to the slide, a swipe may cause. A swipe that drove SwiftUI
+# each frame updated it about once a frame, tens of times a swipe. The committed mode, the pages' environment that
+# changes with it (the Quick Switch Hints move to the shown page) and a tmux read that lands mid-swipe come to about 3:
+# 28-34 over 10 swipes.
+UPDATES_PER_SWIPE = 4
+# Card bodies a burst may run. A swipe moves only layers, its mode gives no page a new root, and a card reads the Hints
+# that move with the mode in a view of its own, so a burst runs none. The allowance is for a tmux read that lands
+# mid-burst and draws a card again. Before, each swipe ran every card's body on both pages: 300 SidebarCard bodies
+# over 10 swipes of 15 Sessions.
+CARD_BODIES_PER_BURST = 30
+# CPU seconds a swipe may cost the app, gesture, settle and the driver's reads of the accessibility tree included.
+# Measured on 2026-11-11 from a terminal with Accessibility permission, as this check measures it: the app's user and
+# system time from `ps` over the burst, divided by the swipes.
+# - Old build (0be752b, SwiftUI moved the pages every frame): 0.113-0.123 s a swipe.
+# - This build before the pages stopped being rebuilt by each swipe: 0.173-0.192 s a swipe.
+# - This build: 0.162-0.185 s a swipe, in seven runs.
+# `sample` of the main thread at 1 ms over a 20-swipe burst read both builds at about 0.23 s a swipe, and the main
+# thread about 90% busy on the old build against about 59% on this one. So the number cannot tell the builds apart:
+# the driver's reads dominate it. `wait_mode` dumps the accessibility tree again and again until the pages rest, and
+# the app answers each dump for every row. The old build's Debug label gave the committed mode, so the wait ended
+# before the spring; this one gives the position the pages show, so it waits out the spring and dumps more (20 swipes
+# took 15.1 s against 8.4 s). The limit is about twice this build's number: it fails a burst that makes the app much
+# busier, not a slow machine. The card bodies and the update count above are the sharp guards.
+CPU_PER_SWIPE = 0.4
+
+
+def cpu_seconds(pid):
+    """The user and system CPU time of `pid` so far, read as scripts/verify/suites/working_marks.py reads it."""
+    out = subprocess.run(['/bin/ps', '-o', 'time=', '-p', str(pid)], capture_output=True, text=True,
+                         check=True).stdout.strip()
+    minutes, seconds = out.split(':')
+    return int(minutes) * 60 + float(seconds)
+
+
+class SidebarSwipeBurst(SwipeSteps, unittest.TestCase):
+    """A burst of swipes over a full Sidebar moves the pages as Core Animation layers, not through SwiftUI each frame
+    (docs/adr/0074-motion-that-runs-every-frame-goes-through-core-animation.md)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
+        cls.addClassCleanup(s.teardown)
+        project = s.root/'project'
+        project.mkdir()
+        (s.root/'config/muxify/config.yaml').write_text('sidebar:\n  agents: false\n  animate_switching: true\n')
+        store = TopicRecords(s.root/'state/muxify')
+        cls.topics = ['burst-%02d' % number for number in range(BURST_SESSIONS)]
+        for topic in cls.topics:
+            store.put(dict(id=topic, title='Burst ' + topic[-2:], slug=topic))
+            session = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', topic,
+                             '-c', str(project), '/bin/zsh -f')
+            s.tmux('set-option', '-t', session, '@muxify_topic', topic)
+        s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics'])
+
+    def updates(self):
+        """How many times SwiftUI has updated the pages container or handed the slide its mode or motion: the Debug
+        element's value, "<n> updates"."""
+        return int(self.s.row('sidebar-swipe-input').get('accessibilityValue', '').split(' ', 1)[0])
+
+    def test_a_burst_of_swipes_rebuilds_no_page_and_drives_no_swiftui_frame(self):
+        self.s.wait_rows(lambda rs: any(self.s.has('topic-' + topic, rs) for topic in self.topics),
+                         'the Sidebar shows none of the %d Topics' % BURST_SESSIONS)
+        self.wait_mode('topics')
+        self.require_motion()
+        updates, cpu = self.updates(), cpu_seconds(self.s.pid)
+        self.s.driver('counts', reset=True)
+        for number in range(BURST_SWIPES):
+            if number % 2:
+                self.sample('Swipe right')
+                self.wait_mode('topics')
+            else:
+                self.sample('Swipe left')
+                self.wait_mode('sessions')
+        cpu = cpu_seconds(self.s.pid) - cpu
+        updates = self.updates() - updates
+        counts = self.s.driver('counts')['counts']
+        cards = sum(counts.get(name, 0) for name in ('SidebarCard', 'TopicCard'))
+        print('burst: %d updates, %.3f CPU s a swipe, bodies %s' % (updates, cpu / BURST_SWIPES, counts))
+        self.assertLessEqual(updates, UPDATES_PER_SWIPE * BURST_SWIPES,
+                             '%d swipes updated the pages container through SwiftUI %d times' % (BURST_SWIPES, updates))
+        self.assertLessEqual(cards, CARD_BODIES_PER_BURST,
+                             '%d swipes ran the cards\' bodies %d times, so a swipe rebuilt the pages: %s'
+                             % (BURST_SWIPES, cards, counts))
+        self.assertLess(cpu / BURST_SWIPES, CPU_PER_SWIPE,
+                        'a swipe cost the app %.3f CPU seconds; %d updates in the burst' % (cpu / BURST_SWIPES, updates))
+
+
+class SidebarSwipe(SwipeSteps, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
@@ -34,20 +158,6 @@ class SidebarSwipe(unittest.TestCase):
         self.s.wait_rows(lambda rs: self.s.has('sidebar-view-topics', rs), 'the two Sidebar views did not return')
         self.s.act('press', 'sidebar-view-topics')
         self.wait_mode('topics')
-
-    def wait_mode(self, mode):
-        position = '0.000' if mode == 'topics' else '1.000'
-        return self.s.wait_rows(lambda rs: self.s.row('sidebar-view-' + mode, rs).get('accessibilityValue') == 'selected'
-                                and self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').endswith(' ' + position),
-                                'the Sidebar did not settle on ' + mode)
-
-    def require_motion(self):
-        """The Sidebar follows a swipe only while it animates. Reduce Motion in System Settings stops that for every app."""
-        if self.s.row('sidebar-swipe-input').get('accessibilityLabel', '').startswith('Sidebar swipe input instant'):
-            self.skipTest('Reduce Motion is on, so the Sidebar does not follow a swipe')
-
-    def sample(self, name):
-        self.s.act('action', 'sidebar-swipe-input', name)
 
     def test_swipe_switches_views_without_changing_the_window_or_focus(self):
         before = self.s.tmux('list-clients', '-F', '#{client_tty}|#{window_id}')
@@ -105,26 +215,19 @@ class SidebarSwipe(unittest.TestCase):
         self.require_motion()
         self.addCleanup(self.config.write_text, 'sidebar:\n  agents: false\n')
         self.addCleanup(lambda: self.sample('Cancel current swipe'))
-        frames = []
-        def settled(rs):
-            frames.append(self.s.row('topics-list', rs).get('accessibilityFrame'))
-            return len(frames) >= 2 and frames[-1] is not None and frames[-2] == frames[-1]
-        rs = self.s.wait_rows(settled, 'the Topics list did not finish its previous animation')
-        before = self.s.row('topics-list', rs)['accessibilityFrame']
+        # The pages move as layers, which leave every row's accessibility frame where it rests. The Debug position is
+        # where the pages show, mid-settle included, so it ends in 0.000 only once the Topics page is back at rest.
+        self.wait_mode('topics')
         self.sample('Begin swipe left')
-        self.s.wait_rows(lambda rs: self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').endswith(' 0.400'),
-                         'the enabled animation did not preview the swipe')
+        self.s.wait_rows(lambda rs: self.position(rs) == '0.400', 'the enabled animation did not preview the swipe')
         self.config.write_text('sidebar:\n  agents: false\n  animate_switching: false\n')
         self.s.wait_rows(lambda rs: self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').startswith('Sidebar swipe input instant '),
                          'the animation setting did not reload')
-        rs = self.wait_mode('topics')
-        self.assertEqual(self.s.row('topics-list', rs)['accessibilityFrame'], before,
-                         'disabling animation left the Topics list shifted or scaled')
+        self.wait_mode('topics')
         self.sample('Cancel current swipe')
         self.sample('Begin swipe left')
-        rs = self.wait_mode('topics')
-        self.assertEqual(self.s.row('topics-list', rs)['accessibilityFrame'], before,
-                         'a swipe moved the Topics list with animation disabled')
+        positions = self.positions(seconds=0.5)
+        self.assertEqual(set(positions), {'0.000'}, 'a swipe moved the pages with animation disabled: %s' % positions)
         self.sample('Cancel current swipe')
         self.sample('Short swipe left')
         self.wait_mode('topics')

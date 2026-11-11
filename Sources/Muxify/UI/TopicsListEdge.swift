@@ -75,7 +75,6 @@ struct OpenPlaceCard: View {
     let place: Int
     let action: () -> Void
     @Environment(\.interfaceFontSize) private var fontSize
-    @Environment(\.quickSwitchHints) private var hints
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
@@ -96,7 +95,7 @@ struct OpenPlaceCard: View {
         .accessibilityLabel("Open Place \(place)")
         .accessibilityIdentifier("open-place-\(place)")
         // Outside the button's element, so the Hint is its own accessibility element, as on a Topic card.
-        .cardHints(hints)
+        .cardHints()
         .accessibilityElement(children: .contain)
     }
 }
