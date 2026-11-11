@@ -12,11 +12,11 @@ final class SidebarSlide {
     weak var input: SidebarSwipeInputView?
     /// The mode SwiftUI last committed.
     private(set) var mode: SidebarMode
-    private(set) var motionEnabled = true
+    private var motionEnabled = true
     /// Where the pages are, or where the running settle takes them.
     private(set) var position: CGFloat
     /// Where the swipe that tracks began.
-    private(set) var origin: CGFloat?
+    private var origin: CGFloat?
     /// The number of the settle that runs.
     private var settling: Int?
     private var motions = 0
@@ -138,7 +138,7 @@ final class SidebarSlide {
         refreshInput()
     }
 
-    enum Motion: Equatable {
+    enum Motion {
         /// Puts the layers at `position` at once, and stops a running settle.
         case jump
         /// Springs the layers from `from` to `position`.
@@ -170,7 +170,7 @@ final class SidebarSlide {
 
     /// The look a settle springs a page to: a page that leaves the view shrinks and fades all the way out, and is
     /// whole again only when the spring ends. A page that was already out of view stays whole.
-    static func target(distance: CGFloat, from start: CGFloat) -> (scale: CGFloat, opacity: CGFloat) {
+    static func lookAtSpringEnd(distance: CGFloat, from start: CGFloat) -> (scale: CGFloat, opacity: CGFloat) {
         guard distance >= 1, start < 1 else { return look(distance: distance) }
         return (1 - 0.025, 1 - 0.18)
     }
@@ -187,8 +187,8 @@ final class SidebarSlide {
         return spring
     }
 
-    static let response: CGFloat = 0.34
-    static let dampingFraction: CGFloat = 0.86
+    private static let response: CGFloat = 0.34
+    private static let dampingFraction: CGFloat = 0.86
 
     private static func rubberBand(_ distance: CGFloat) -> CGFloat {
         distance * 0.25 / (1 + abs(distance) * 4)
@@ -338,7 +338,7 @@ final class SidebarPagesView: NSView {
                 layer.removeAnimation(forKey: "fade")
             case .spring(let from):
                 let start = SidebarSlide.look(distance: abs(from - page))
-                let end = SidebarSlide.target(distance: abs(position - page), from: abs(from - page))
+                let end = SidebarSlide.lookAtSpringEnd(distance: abs(position - page), from: abs(from - page))
                 layer.add(SidebarSlide.spring("transform",
                                               from: NSValue(caTransform3D: Self.transform(shift(from), scale: start.scale, center: center)),
                                               to: NSValue(caTransform3D: Self.transform(shift(position), scale: end.scale, center: center))),
