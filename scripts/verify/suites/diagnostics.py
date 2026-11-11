@@ -1,5 +1,6 @@
 """Diagnostics: on by default, the app logs into the sandbox's logs folder, one Diagnostics log file a day, with a
-`minute` record each minute and a `burst` record for each Burst (docs/development.md)."""
+`minute` record each minute, a `burst` record for each Burst and `digest` records for each sample
+(docs/development.md)."""
 
 import re
 import time
@@ -106,11 +107,31 @@ class Diagnostics(unittest.TestCase):
         deadline = time.monotonic() + 20
         while not finished_samples() and time.monotonic() < deadline:
             self.s.act('stall', seconds=1.5)
-        sample = wait(finished_samples, 'no finished freeze sample in %s' % self.logs, 5)[0].read_text(errors='replace')
+        path = wait(finished_samples, 'no finished freeze sample in %s' % self.logs, 5)[0]
+        sample = path.read_text(errors='replace')
         # The call graph lists the main thread first.
         threads = re.split(r'\n    \d+ Thread_', sample[sample.index('Call graph:'):])
         main = threads[1]
         self.assertIn('sleepForTimeInterval', main, 'the sample does not show the main thread in the stall')
+
+        # The app folds the sample's main thread into three digest records that name the file.
+        def digests():
+            records = [dict(word.split('=', 1) for word in line.split(' ')[3:]) for line in self.log_text().splitlines()
+                       if re.match(r'\S+ \S+ digest ', line)]
+            named = [fields for fields in records if fields.get('sample') == path.name]
+            return named if len(named) == 3 else None
+        records = wait(digests, 'no three digest records name %s in %s' % (path.name, self.logs), 10)
+        head = next(fields for fields in records if 'libraries' in fields)
+        self.assertGreater(int(head['samples']), 0, head)
+        # The stall sleeps on the main thread outside the run loop's wait, so it is busy time.
+        self.assertGreater(float(head['busy']), 20, head)
+        self.assertNotEqual('none', head['libraries'], head)
+        symbols = next(fields for fields in records if 'symbols' in fields)['symbols'].split(',')
+        self.assertTrue(all('@' in item and float(item.rsplit(':', 1)[1]) >= 0 for item in symbols), symbols)
+        frames = next(fields for fields in records if 'frames' in fields)['frames'].split(',')
+        # The TestDriver runs the stall, so its frame holds most of the busy time.
+        shares = dict(item.rsplit(':', 1) for item in frames)
+        self.assertGreater(float(shares.get('static_TestDriver.run(_:)', 0)), 50, frames)
 
     def test_display_link_probe_is_off_unless_the_config_turns_it_on(self):
         wait(lambda: 'launch: pid %d' % self.s.pid in self.log_text(), 'no launch line in the log', 10)

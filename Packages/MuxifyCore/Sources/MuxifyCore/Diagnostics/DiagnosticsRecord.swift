@@ -1,7 +1,8 @@
 import Foundation
 
 /// One line of the Diagnostics log that a program reads: the timestamp, a kind word, then space-separated
-/// `key=value` fields. A value holds no spaces; a list is comma-separated, and a pair in a list is `name:value`.
+/// `key=value` fields. A value holds no spaces; a list is comma-separated, and a pair in a list is `name:value`,
+/// split at its last colon.
 /// The app writes every record through it, and `muxify diagnostics summary` parses through it. The free-text
 /// event lines (launch, app and window changes, Muxify's messages) are not records.
 public struct DiagnosticsRecord: Equatable, Sendable {
@@ -90,11 +91,12 @@ public struct DiagnosticsRecord: Equatable, Sendable {
         self[key].flatMap(Self.pairs(in:))
     }
 
-    /// The `name:value` pairs of a value. Nil when an item is not a pair.
+    /// The `name:value` pairs of a value. A pair splits at its last `:`, so a name may hold colons, as a symbol's
+    /// does in a `digest` record. Nil when an item is not a pair.
     public static func pairs(in value: String) -> [(name: String, value: String)]? {
         var pairs: [(name: String, value: String)] = []
         for item in value.split(separator: ",") {
-            guard let colon = item.firstIndex(of: ":") else { return nil }
+            guard let colon = item.lastIndex(of: ":") else { return nil }
             pairs.append((String(item[..<colon]), String(item[item.index(after: colon)...])))
         }
         return pairs

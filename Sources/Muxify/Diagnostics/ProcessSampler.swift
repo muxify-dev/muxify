@@ -1,11 +1,12 @@
 import Foundation
+import MuxifyCore
 import os
 
 /// Runs `sample` on the app, the stacks of every thread over a few seconds, into a file in the diagnostics
-/// folder. One sample runs at a time, and the folder keeps the newest `kept`. Its CPU is left out of the `minute`
+/// folder, then writes its main thread's `digest` records (SampleDigest) into the Diagnostics log. One sample runs
+/// at a time, and the folder keeps the raw samples `SampleRetention` keeps. Its CPU is left out of the `minute`
 /// record's commands group.
 enum ProcessSampler {
-    private static let kept = 20
     private static let running = OSAllocatedUnfairLock(initialState: false)
     private static let stamp: DateFormatter = {
         let formatter = DateFormatter()
@@ -37,7 +38,7 @@ enum ProcessSampler {
         return "\(reason)-\(stamp.string(from: Date())).txt"
     }
 
-    /// Runs the claimed sample to its end, then lets the next one run.
+    /// Runs the claimed sample to its end and digests it on the calling thread, then lets the next one run.
     private static func record(_ name: String, reason: String, seconds: Int) {
         defer { running.withLock { $0 = false } }
         let url = Diagnostics.folder.appendingPathComponent(name)
@@ -46,7 +47,19 @@ enum ProcessSampler {
             Diagnostics.write("\(reason): cannot run sample: \(problem)")
             return
         }
+        digest(url)
         prune()
+    }
+
+    /// Writes the `digest` records of the sample at `url`, or a line saying why there are none.
+    private static func digest(_ url: URL) {
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return Diagnostics.write("digest: cannot read \(url.lastPathComponent)")
+        }
+        guard let digest = SampleDigest(sample: text) else {
+            return Diagnostics.write("digest: no main thread in \(url.lastPathComponent)")
+        }
+        for record in digest.records(file: url.lastPathComponent) { Diagnostics.write(record) }
     }
 
     /// Runs `path` to its exit with no input or output, and leaves its CPU out of the commands group: it starts
@@ -81,11 +94,17 @@ enum ProcessSampler {
         return nil
     }
 
+    /// Deletes the raw samples past their 3 days or the 300 MB cap, the oldest first.
     private static func prune() {
-        let files = (try? FileManager.default.contentsOfDirectory(at: Diagnostics.folder, includingPropertiesForKeys: nil)) ?? []
-        // The names start with the reason and end with the time, so sort by the time.
-        let samples = files.filter { $0.pathExtension == "txt" }
-            .sorted { $0.lastPathComponent.suffix(21) > $1.lastPathComponent.suffix(21) }
-        for old in samples.dropFirst(kept) { try? FileManager.default.removeItem(at: old) }
+        let keys: Set<URLResourceKey> = [.contentModificationDateKey, .fileSizeKey]
+        let urls = (try? FileManager.default.contentsOfDirectory(at: Diagnostics.folder, includingPropertiesForKeys: Array(keys))) ?? []
+        let files = urls.compactMap { url -> SampleRetention.File? in
+            guard SampleRetention.isSample(url.lastPathComponent), let values = try? url.resourceValues(forKeys: keys),
+                  let modified = values.contentModificationDate else { return nil }
+            return SampleRetention.File(name: url.lastPathComponent, modified: modified, bytes: Int64(values.fileSize ?? 0))
+        }
+        for name in SampleRetention.doomed(files, now: Date()) {
+            try? FileManager.default.removeItem(at: Diagnostics.folder.appendingPathComponent(name))
+        }
     }
 }

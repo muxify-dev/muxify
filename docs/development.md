@@ -187,12 +187,14 @@ The app then writes to `~/Library/Logs/Muxify/`:
   `on` and `off` when the Config turns it on or off, with the crash, hang and
   CPU reports macOS wrote for the app since the newest day file was last
   written; each freeze of the main thread over a second; a `minute` record
-  each minute and a `burst` record for each Burst (below); Muxify's own messages and the errors the system logged
+  each minute, a `burst` record for each Burst and `digest` records for each
+  sample (below); Muxify's own messages and the errors the system logged
   for the app; and the app, window, Space, screen and sleep changes.
 - A record is one line that a program can read: the timestamp, a kind word
   (`minute`, `burst`, `freeze`, `digest` or `limit`), then space-separated
   `key=value` fields. A value holds no spaces, a list is comma-separated, and
-  a pair in a list is `name:value`. `DiagnosticsRecord` in MuxifyCore writes
+  a pair in a list is `name:value`, split at its last colon, so a name may
+  hold colons. `DiagnosticsRecord` in MuxifyCore writes
   and parses them. The other lines are free text.
 - The `minute` record's fields, in this order:
   - `cpu.app.avg` and `cpu.app.peak`: the app's average CPU over the minute
@@ -267,6 +269,22 @@ The app then writes to `~/Library/Logs/Muxify/`:
     - `samples`: the sample file names, comma-separated, or `none`.
     - `open=true` only when Diagnostics stopped or the app quit while the
       Burst ran.
+- After each sample, freeze and Burst alike, the app folds the sample's main
+  thread off the main thread (`SampleDigest` in MuxifyCore) and writes three
+  `digest` records, each with `sample`, the sample's file name:
+  - `samples`: the main thread's samples; `busy`: the share, in %, not
+    waiting in the run loop (`__CFRunLoopServiceMachPort` and below);
+    `libraries`: the top 8 libraries by self time, as `library:%`.
+  - `symbols`: the top 15 symbols by self time, as `symbol@library:%`.
+  - `frames`: the top 15 frames from the app binary by inclusive time, as
+    `symbol:%`. A frame that recurs on one stack path counts once.
+
+  A frame's self time is its count less its immediate children's. Every %
+  is of the busy samples, so the run loop's wait does not drown the rest. A
+  symbol is shortened to one word: whitespace becomes `_`, an argument list
+  that holds a space, a comma or a bracket becomes `(...)`, and it is cut at
+  80 characters. An empty list is `none`. A sample the app cannot read, or
+  with no main thread, gets a free-text `digest:` line instead.
 - When a day's file opens, every Diagnostics log file last written over 7 days
   ago is deleted, the older `muxify.log` and `muxify.1.log` too.
 - Once a day's file passes 50 MB, it writes one `limit` line, and for the rest
@@ -278,13 +296,18 @@ The app then writes to `~/Library/Logs/Muxify/`:
   an hour, so it is off by default. The `sidebar_pager_scroll` verify suite
   turns it on.
 - `freeze-<time>.txt`: a `sample` of every thread, started a second into a
-  freeze, and `burst-<time>.txt`, taken during a Burst (above). The folder
-  keeps the newest 20.
+  freeze, and `burst-<time>.txt`, taken during a Burst (above). After each
+  sample, the raw `freeze-`, `burst-` and older `cpu-` files last written over
+  3 days ago are deleted, and then the oldest until the rest take under
+  300 MB in all (`SampleRetention` in MuxifyCore). Their `digest` records stay
+  in the day's log.
 
 To find the trouble, start with
 `grep -E "freeze|LEAK|stuck|report|system log|limit" ~/Library/Logs/Muxify/muxify-*.log`.
 `grep " minute " ~/Library/Logs/Muxify/muxify-*.log` gives the minutes, and
-`grep " burst " ~/Library/Logs/Muxify/muxify-*.log` the Bursts.
+`grep " burst " ~/Library/Logs/Muxify/muxify-*.log` the Bursts, and
+`grep " digest sample=burst-" ~/Library/Logs/Muxify/muxify-*.log` the digests
+of their samples.
 A verify run writes these files into its sandbox's `logs/`, never into yours.
 
 ## Beta releases
