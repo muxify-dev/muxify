@@ -67,6 +67,21 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(version.stderr, "")
     }
 
+    func testDiagnosticsSummaryExitsOneForADayWithNoFileAndTwoForABadDate() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-cli-diagnostics-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let missing = try await run(cli, arguments: ["diagnostics", "summary", "--date", "2026-11-09", "--folder", folder.path])
+        XCTAssertEqual(missing.status, 1, missing.output)
+        XCTAssertEqual(missing.stdout, "")
+        XCTAssertEqual(missing.stderr, "muxify: no Diagnostics log for 2026-11-09 in \(folder.path): there is no muxify-2026-11-09.log\n")
+        let bad = try await run(cli, arguments: ["diagnostics", "summary", "--date", "11/09/2026", "--folder", folder.path])
+        XCTAssertEqual(bad.status, 2, bad.output)
+        XCTAssertTrue(bad.stderr.hasPrefix("usage: muxify diagnostics summary [--date YYYY-MM-DD] [--folder PATH]"), bad.stderr)
+        let help = try await run(cli, arguments: ["--help"])
+        XCTAssertTrue(help.stdout.contains("muxify diagnostics summary [--date YYYY-MM-DD] [--folder PATH]"), help.stdout)
+    }
+
     /// Pins the exact bytes of `topic list` for valid records, so moving the reader into MuxifyCore cannot change them.
     func testTopicListPrintsTheSameBytesForValidRecords() async throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-cli-golden-" + UUID().uuidString)

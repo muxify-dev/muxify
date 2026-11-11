@@ -314,7 +314,18 @@ The app then writes to `~/Library/Logs/Muxify/`:
   300 MB in all (`SampleRetention` in MuxifyCore). Their `digest` records stay
   in the day's log.
 
-To find the trouble, start with
+To read a day, run `muxify diagnostics summary` (today) or
+`muxify diagnostics summary --date YYYY-MM-DD`; `--folder PATH` reads
+another folder, such as a verify sandbox's `logs/`. It prints, in this order:
+the day's records, minutes and gaps (each labelled with the sleep, screens
+asleep, `off` or `quit` line nearest it, or `unknown`); CPU p50, p90 and max
+of each process group over idle minutes and minutes with input; the main
+thread's `main.busy`; memory; the 10 worst Bursts by `cpu.avg × length` and
+the freezes, each with its digest; the errors by kind; and a trend line for
+each day file. It needs no running app, and it skips the lines it does not
+know.
+
+To find the trouble by hand, start with
 `grep -E "freeze|LEAK|stuck|report|system log|limit" ~/Library/Logs/Muxify/muxify-*.log`.
 `grep " minute " ~/Library/Logs/Muxify/muxify-*.log` gives the minutes, and
 `grep " burst " ~/Library/Logs/Muxify/muxify-*.log` the Bursts, and

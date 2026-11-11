@@ -62,11 +62,17 @@ public struct DiagnosticsRecord: Equatable, Sendable {
     /// The timestamp and record of a whole log line. Nil for a line that is not a record, such as a free-text
     /// event line or a line cut short. A reader of many lines passes one `formatter()` to every call.
     public static func parse(_ line: String, formatter: DateFormatter = DiagnosticsRecord.formatter()) -> (date: Date, record: DiagnosticsRecord)? {
+        guard let (date, text) = timestamped(line, formatter: formatter), let record = DiagnosticsRecord(text: text) else { return nil }
+        return (date, record)
+    }
+
+    /// The timestamp of a whole log line and the text after it, a record's or a free-text event line's. Nil for a
+    /// line with no timestamp, such as one cut short.
+    public static func timestamped(_ line: String, formatter: DateFormatter = DiagnosticsRecord.formatter()) -> (date: Date, text: String)? {
         // The timestamp is two words: the date and the time.
         let parts = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
-        guard parts.count == 3, let date = formatter.date(from: "\(parts[0]) \(parts[1])"),
-              let record = DiagnosticsRecord(text: String(parts[2])) else { return nil }
-        return (date, record)
+        guard parts.count == 3, let date = formatter.date(from: "\(parts[0]) \(parts[1])") else { return nil }
+        return (date, String(parts[2]))
     }
 
     // MARK: Lists
