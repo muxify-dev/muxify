@@ -169,14 +169,14 @@ enum SessionCardSelection {
 
 struct TopicsModel {
     /// A Window a Settled Topic's record remembers. Reopen rebuilds it; the row only shows it.
-    struct RememberedWindow: Identifiable {
+    struct RememberedWindow: Identifiable, Equatable {
         let id: String
         let name: String
         let directory: String
     }
 
     /// A Pane row under a Window with 2 or more Panes, shown while Show Panes is on.
-    struct PaneRow: Identifiable {
+    struct PaneRow: Identifiable, Equatable {
         let pane: TmuxPane
         let window: TmuxWindow
         /// The Agent the Pane runs, for its Status dot.
@@ -187,8 +187,8 @@ struct TopicsModel {
     }
 
     /// The rows of a live Session: its Windows and, with Show Panes on, their Panes.
-    struct SessionChildren {
-        enum Item: Identifiable {
+    struct SessionChildren: Equatable {
+        enum Item: Identifiable, Equatable {
             case window(TmuxWindow)
             case pane(PaneRow)
 
@@ -235,8 +235,8 @@ struct TopicsModel {
         }
     }
 
-    struct Session: Identifiable {
-        enum Contents {
+    struct Session: Identifiable, Equatable {
+        enum Contents: Equatable {
             case live(SessionChildren)
             case remembered([RememberedWindow])
         }
@@ -250,7 +250,7 @@ struct TopicsModel {
         }
     }
 
-    struct Row: Identifiable {
+    struct Row: Identifiable, Equatable {
         enum Kind: Equatable {
             case open
             /// `outcome` is empty when the user gave none. `settledDate` is nil when the record's date does not parse.

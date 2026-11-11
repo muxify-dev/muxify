@@ -57,7 +57,7 @@ struct SidebarView: View {
             let cards = SessionCardSelection.open(store.openSessionCards, from: moved ? previous : nil, to: name,
                                                   rule: moved ? store.config.sidebar.sessionCards : .any)
             guard cards != store.openSessionCards else { return }
-            withAnimation(.easeOut(duration: 0.15)) { store.openSessionCards = cards }
+            withAnimation(SwitchPace.animates ? .easeOut(duration: 0.15) : nil) { store.openSessionCards = cards }
         }
     }
 }
@@ -257,18 +257,19 @@ private struct TopicsSection: View {
 
     @ViewBuilder
     private func listCard(_ topic: TopicsModel.Row, order: [StackSlot<TopicListID>]) -> some View {
+        let state = store.topicCardState(topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
+                                         showsAllRows: showingAllRows.contains(topic.id), showsTags: true)
         if case .locked(let sessionID) = topic.id {
-            LockedCard(store: store, row: topic, sessionID: sessionID, titles: model.titles,
-                       holdsSelection: topic.id == model.activeTopic,
-                       showsAllRows: showingAllRows.contains(topic.id),
+            LockedCard(store: store, state: state, sessionID: sessionID,
                        onShowAllRows: { showingAllRows.insert(topic.id) },
                        drag: drag, order: order, steps: model.steps(of: topic.id))
+                .equatable()
         } else {
-            TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
-                      showsAllRows: showingAllRows.contains(topic.id),
+            TopicCard(store: store, state: state,
                       onShowAllRows: { showingAllRows.insert(topic.id) },
                       place: .list(TopicListPlace(drag: drag, order: order, steps: model.steps(of: topic.id),
                                                   rename: renameTopic)))
+                .equatable()
         }
     }
 
@@ -287,12 +288,12 @@ private struct TopicsSection: View {
     @ViewBuilder
     private func noTopicCard(_ opened: TopicsModel.Session) -> some View {
         if let session = store.sessions.first(where: { $0.id == opened.id.session }) {
-            SessionCard(store: store, model: model, session: session,
+            SessionCard(store: store, state: store.sessionCardState(session, showsAllRows: showingAllSessionRows.contains(session.id)),
                         identifier: "\(TopicGroupID.noTopic.accessibilityID)-session-\(session.id)", viewport: TopicCard.viewport,
-                        showsAllRows: showingAllSessionRows.contains(session.id),
-                        onShowAllRows: { showingAllSessionRows.insert(session.id) }) { item in
-                TopicItemRow(store: store, item: item, titles: model.titles, isDimmed: false)
+                        onShowAllRows: { showingAllSessionRows.insert(session.id) }) { [titles = model.titles] item, state in
+                TopicItemRow(store: store, item: item, state: state, titles: titles, isDimmed: false)
             }
+            .equatable()
             .tracksEdges(.noTopic, in: scroll)
         }
     }
@@ -623,28 +624,30 @@ private struct SessionHeading: View {
 private struct TopicItemRow: View {
     let store: WorkspaceStore
     let item: TopicsModel.SessionChildren.Item
+    /// What the row shows, read by its list: see SidebarCardState.swift.
+    let state: SidebarRowState
     let titles: [String: String]
     let isDimmed: Bool
 
     var body: some View {
         switch item {
         case .window(let window):
+            let shown = state.window
             Button { store.select(window) } label: {
-                WindowRow(window: window, content: store.sidebarWindowRow(window), isSelected: window.id == store.selectedWindowID,
-                          tooltips: store.config.sidebar.windowTooltips,
-                          tabCount: store.tabCount(for: window), isGitViewOpen: store.isGitViewOpen(in: window.id), topicsView: true,
-                          usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
-                              window, record: store.topicWatcher.records.first { $0.id == window.topicID }, sessionPaths: store.sessionPaths))
+                WindowRow(window: window, content: shown?.content, isSelected: shown?.isSelected ?? false,
+                          tooltips: shown?.tooltips ?? .always,
+                          tabCount: shown?.tabCount ?? 0, isGitViewOpen: shown?.isGitViewOpen ?? false, topicsView: true,
+                          usesMainWorkingCopy: shown?.usesMainWorkingCopy ?? false)
             }
             .buttonStyle(.plain)
             .opacity(isDimmed ? 0.5 : 1)
             .id("\(window.sessionID):\(window.id):\(window.topicID ?? "")")
             .accessibilityIdentifier("topic-window-\(window.id)")
-            .accessibilityValue(window.id == store.selectedWindowID ? "selected" : "")
+            .accessibilityValue(shown?.isSelected == true ? "selected" : "")
             .contextMenu { TopicMembershipMenu(store: store, source: .window(window)) }
             .topicMembershipActions(store: store, source: .window(window))
         case .pane(let row):
-            PaneRow(store: store, row: row)
+            PaneRow(store: store, row: row, state: state.pane)
                 .opacity(isDimmed ? 0.5 : 1)
         }
     }
@@ -652,28 +655,40 @@ private struct TopicItemRow: View {
 
 /// Where a Topic card sits. In the Topics list the card has a Hint, moves by a drag and by Move Up and Move Down, and
 /// offers Settle. In the Settled group it has none of these, and tells how long ago, seen from `now`, it was Settled.
-enum TopicCardPlace {
+enum TopicCardPlace: Equatable {
     case list(TopicListPlace)
     case group(now: Date)
 }
 
 /// What a card in the Topics list needs to move among the cards with its Pin.
-struct TopicListPlace {
+struct TopicListPlace: Equatable {
     let drag: ListDrag<TopicListID>
     /// The Topic and Locked cards among which it moves, in list order, and the views between them that slide.
     let order: [StackSlot<TopicListID>]
     let steps: CardSteps
     let rename: (String) -> Void
+
+    /// The same drag and the same neighbours; `rename` only calls the list.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.drag === rhs.drag && lhs.order == rhs.order && lhs.steps == rhs.steps
+    }
 }
 
-struct TopicCard: View {
+struct TopicCard: View, Equatable {
     let store: WorkspaceStore
-    let topic: TopicsModel.Row
-    let titles: [String: String]
-    let holdsSelection: Bool
-    let showsAllRows: Bool
+    /// What the card shows, which its list reads from the store: see SidebarCardState.swift.
+    let state: TopicCardState
     let onShowAllRows: () -> Void
     let place: TopicCardPlace
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.state == rhs.state && lhs.place == rhs.place
+    }
+
+    private var topic: TopicsModel.Row { state.topic }
+    private var titles: [String: String] { state.titles }
+    private var holdsSelection: Bool { state.holdsSelection }
+    private var showsAllRows: Bool { state.showsAllRows }
     @State private var sessionDrag = ListDrag<String>(spacing: CardSpacing.block)
     @Environment(\.interfaceFontSize) private var fontSize
 
@@ -719,7 +734,7 @@ struct TopicCard: View {
                          guard case .live(let children) = session.contents else { return nil }
                          return CardBlock(id: session.id.session, items: children.items)
                      },
-                     identifier: topic.id.accessibilityID, selectedWindowID: store.selectedWindowID,
+                     identifier: topic.id.accessibilityID, selectedWindowID: state.selectedWindowID,
                      showsAll: showsAllRows, onShowAll: onShowAllRows, reservesCorner: true,
                      agentSpines: topic.agentSpines,
                      blockDrag: topic.kind == .open ? sessionDrag : nil, windows: store.windowRowDrag) { block in
@@ -727,7 +742,8 @@ struct TopicCard: View {
                     SessionHeading(store: store, topic: topic, session: session, ordering: ordering(of: session.id.session))
                 }
             } row: { item in
-                TopicItemRow(store: store, item: item, titles: titles, isDimmed: topic.kind != .open)
+                TopicItemRow(store: store, item: item, state: state.rows[item.id] ?? store.sidebarRowState(item), titles: titles,
+                             isDimmed: topic.kind != .open)
             }
     }
 
@@ -762,9 +778,7 @@ struct TopicCard: View {
                                isManual: store.topicWatcher.records.first { $0.id == id }?.hasManualSessionOrder ?? false)
     }
 
-    private var formatted: SidebarFormats.Text {
-        store.sidebarText(.topic, context: store.sidebarFormatContexts.topics[topic.id])
-    }
+    private var formatted: SidebarFormats.Text { state.formatted }
 
     /// The outcome of a Settled Topic.
     private var groupDetail: String? {
@@ -820,7 +834,7 @@ struct TopicCard: View {
     }
 
     /// A closed card in a group shows no Tags.
-    private var tags: CardTags? { list != nil || topic.isExpanded ? store.cardTags(topic) : nil }
+    private var tags: CardTags? { state.tags }
 
     /// The actions of a card in a group: those of the Settled Topic.
     @ViewBuilder
@@ -903,12 +917,12 @@ struct TopicCard: View {
     /// Make a Guest on a Benched Topic, Bench on an In Play Topic, while the Config sets `topics.in_play`.
     @ViewBuilder
     private func guestButton(_ id: String) -> some View {
-        if store.guestState(of: .topic(id)) == false {
+        if state.guestState == false {
             Button("Make a Guest") { store.makeGuest(.topic(id)) }
                 .accessibilityIdentifier("make-guest")
                 .disabled(store.changingTopic)
         }
-        if store.canBench(.topic(id)) {
+        if state.canBench {
             Button("Bench") { store.bench(.topic(id)) }
                 .accessibilityIdentifier("bench")
                 .disabled(store.changingTopic)
@@ -986,24 +1000,30 @@ private struct CardMoveButtons: View {
 /// A Locked Session among the Topic cards (ADR 0018). It has a Topic card's shape and its place in the order, but it
 /// is a No Topic Session: its title and Summary come from the Session card Formats, its rows are its Windows with no
 /// SessionPath heading, and it offers only what a Session can do.
-private struct LockedCard: View {
+private struct LockedCard: View, Equatable {
     let store: WorkspaceStore
-    let row: TopicsModel.Row
+    /// What the card shows, which its list reads from the store: see SidebarCardState.swift.
+    let state: TopicCardState
     let sessionID: String
-    let titles: [String: String]
-    let holdsSelection: Bool
-    let showsAllRows: Bool
     let onShowAllRows: () -> Void
     let drag: ListDrag<TopicListID>
     let order: [StackSlot<TopicListID>]
     let steps: CardSteps
 
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.state == rhs.state && lhs.sessionID == rhs.sessionID && lhs.drag === rhs.drag
+            && lhs.order == rhs.order && lhs.steps == rhs.steps
+    }
+
+    private var row: TopicsModel.Row { state.topic }
+    private var titles: [String: String] { state.titles }
+    private var holdsSelection: Bool { state.holdsSelection }
+    private var showsAllRows: Bool { state.showsAllRows }
+
     private var id: TopicListID { .lock(sessionID: sessionID) }
     private var window: TmuxWindow? { row.sessions.first?.windows.first }
 
-    private var formatted: SidebarFormats.Text {
-        store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[sessionID])
-    }
+    private var formatted: SidebarFormats.Text { state.formatted }
 
     var body: some View {
         SidebarCard(isOpen: row.isExpanded, holdsSelection: holdsSelection, mark: row.mark, viewport: TopicCard.viewport,
@@ -1014,11 +1034,12 @@ private struct LockedCard: View {
                          guard case .live(let children) = session.contents else { return nil }
                          return CardBlock(id: session.id.session, items: children.items)
                      },
-                     identifier: row.id.accessibilityID, selectedWindowID: store.selectedWindowID,
+                     identifier: row.id.accessibilityID, selectedWindowID: state.selectedWindowID,
                      showsAll: showsAllRows, onShowAll: onShowAllRows, windows: store.windowRowDrag) { _ in
                 EmptyView()
             } row: { item in
-                TopicItemRow(store: store, item: item, titles: titles, isDimmed: false)
+                TopicItemRow(store: store, item: item, state: state.rows[item.id] ?? store.sidebarRowState(item), titles: titles,
+                             isDimmed: false)
             }
         } menu: {
             Button("Go to Session") { store.goToTopic(row.id) }
@@ -1140,19 +1161,20 @@ private struct SessionsSection: View {
     static let viewport = "sessions-viewport"
 
     var body: some View {
-        let model = store.topics
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
                     // Not lazy, for the same reason as the Topics list.
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(store.sessions) { session in
-                            SessionCard(store: store, model: model, session: session, identifier: "session-\(session.id)",
+                        // Read here, not in each card: see SidebarCardState.swift.
+                        let cards = store.sessions.map { store.sessionCardState($0, showsAllRows: showingAllRows.contains($0.id)) }
+                        ForEach(cards, id: \.session.id) { card in
+                            SessionCard(store: store, state: card, identifier: "session-\(card.session.id)",
                                         viewport: Self.viewport,
-                                        showsAllRows: showingAllRows.contains(session.id),
-                                        onShowAllRows: { showingAllRows.insert(session.id) }) { item in
-                                row(item)
+                                        onShowAllRows: { showingAllRows.insert(card.session.id) }) { item, state in
+                                row(item, state)
                             }
+                            .equatable()
                         }
                     }
                     .padding(.horizontal, 6)
@@ -1164,7 +1186,7 @@ private struct SessionsSection: View {
                 // The list scrolls to the card that holds the Window.
                 .onChange(of: store.selectedWindow?.sessionID) { _, id in
                     guard let id else { return }
-                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
+                    withAnimation(SwitchPace.animates ? .easeOut(duration: 0.15) : nil) { proxy.scrollTo(id) }
                 }
             }
         }
@@ -1178,25 +1200,24 @@ private struct SessionsSection: View {
     }
 
     @ViewBuilder
-    private func row(_ item: TopicsModel.SessionChildren.Item) -> some View {
+    private func row(_ item: TopicsModel.SessionChildren.Item, _ state: SidebarRowState) -> some View {
         switch item {
         case .window(let window):
+            let shown = state.window
             WindowRow(
                 window: window,
-                content: store.sidebarWindowRow(window),
-                isSelected: window.id == store.selectedWindowID,
-                tooltips: store.config.sidebar.windowTooltips,
-                tabCount: store.tabCount(for: window),
-                isGitViewOpen: store.isGitViewOpen(in: window.id),
-                usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
-                    window, record: store.topicWatcher.records.first { $0.id == window.topicID },
-                    sessionPaths: store.sessionPaths)
+                content: shown?.content,
+                isSelected: shown?.isSelected ?? false,
+                tooltips: shown?.tooltips ?? .always,
+                tabCount: shown?.tabCount ?? 0,
+                isGitViewOpen: shown?.isGitViewOpen ?? false,
+                usesMainWorkingCopy: shown?.usesMainWorkingCopy ?? false
             )
                 .accessibilityIdentifier("session-window-\(window.id)")
-                .accessibilityValue(window.id == store.selectedWindowID ? "selected" : "")
+                .accessibilityValue(shown?.isSelected == true ? "selected" : "")
                 .contextMenu { menu(for: window) }
         case .pane(let row):
-            PaneRow(store: store, row: row)
+            PaneRow(store: store, row: row, state: state.pane)
         }
     }
 
@@ -1229,27 +1250,32 @@ private struct SessionsSection: View {
 }
 
 /// A Session card, in Sessions mode and as the opened No Topic Session in Topics mode. Each place gives its own Window and Pane rows.
-private struct SessionCard<Row: View>: View {
+/// It shows only `state`, which its list reads from the store, and touches the store only in its actions, so a card whose
+/// values stay the same does not update on a switch elsewhere.
+private struct SessionCard<Row: View>: View, Equatable {
     let store: WorkspaceStore
-    let model: TopicsModel
-    let session: SessionGroup
+    let state: SessionCardState
     let identifier: String
     /// The coordinate space of the list's scroll view.
     let viewport: String
-    let showsAllRows: Bool
     let onShowAllRows: () -> Void
-    @ViewBuilder var row: (TopicsModel.SessionChildren.Item) -> Row
+    @ViewBuilder var row: (TopicsModel.SessionChildren.Item, SidebarRowState) -> Row
+
+    /// The closures only call the store, so the values decide what the card shows.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.store === rhs.store && lhs.state == rhs.state && lhs.identifier == rhs.identifier && lhs.viewport == rhs.viewport
+    }
+
+    private var session: SessionGroup { state.session }
 
     var body: some View {
-        let isOpen = store.openSessionCards.contains(session.name)
-        let mark = model.sessionMarks[session.id].map(CardMark.agent)
-        let isLocked = model.lockedSessionIDs.contains(session.id)
-        SidebarCard(isOpen: isOpen, holdsSelection: holdsSelection, mark: mark,
+        let isOpen = state.isOpen
+        SidebarCard(isOpen: isOpen, holdsSelection: state.holdsSelection, mark: state.mark,
                     viewport: viewport, identifier: identifier) {
-            let isGuest = isLocked && store.topicConfig.inPlay != nil
-            CardHeader(title: formatted.title, isOpen: isOpen, mark: mark, isLocked: isLocked, isGuest: isGuest, hintTarget: .session(session.id),
-                       notes: isGuest ? ["Guest"] : isLocked ? ["Locked"] : [],
-                       summary: formatted.summary) {
+            CardHeader(title: state.formatted.title, isOpen: isOpen, mark: state.mark, isLocked: state.isLocked,
+                       isGuest: state.isGuest, hintTarget: .session(session.id),
+                       notes: state.isGuest ? ["Guest"] : state.isLocked ? ["Locked"] : [],
+                       summary: state.formatted.summary) {
                 if !isOpen, session.windows.contains(where: \.hasBell) {
                     BellMark()
                 }
@@ -1263,12 +1289,12 @@ private struct SessionCard<Row: View>: View {
                 lockButton
             }
         } content: {
-            CardList(blocks: [CardBlock(id: session.id, items: model.sessionChildren[session.id]?.items ?? [])],
-                     identifier: identifier, selectedWindowID: store.selectedWindowID,
-                     showsAll: showsAllRows, onShowAll: onShowAllRows, windows: store.windowRowDrag) { _ in
+            CardList(blocks: [CardBlock(id: session.id, items: state.items)],
+                     identifier: identifier, selectedWindowID: state.selectedWindowID,
+                     showsAll: state.showsAllRows, onShowAll: onShowAllRows, windows: store.windowRowDrag) { _ in
                 EmptyView()
             } row: { item in
-                row(item)
+                row(item, state.rows[item.id] ?? store.sidebarRowState(item))
             }
         } menu: {
             Button("Go to Session") { store.goToSession(session.id) }
@@ -1280,31 +1306,25 @@ private struct SessionCard<Row: View>: View {
         }
     }
 
-    private var formatted: SidebarFormats.Text {
-        store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[session.id])
-    }
-
     /// Only a No Topic Session of a Local App Window can be Locked. With `topics.in_play`, a Lock is a Guest.
     @ViewBuilder
     private var lockButton: some View {
-        if let guest = store.guestState(of: .session(session.id)) {
+        if let guest = state.guestState {
             Button(guest ? "Bench" : "Make a Guest") {
                 if guest { store.bench(.session(session.id)) } else { store.makeGuest(.session(session.id)) }
             }
                 .accessibilityIdentifier(guest ? "bench" : "make-guest")
-                .disabled(store.changingTopic)
-        } else if let locked = store.lockState(ofSession: session.id) {
+                .disabled(state.changingTopic)
+        } else if let locked = state.lockState {
             Button(locked ? "Unlock Session" : "Lock Session") { store.setLock(ofSession: session.id, !locked) }
-                .disabled(store.changingTopic)
+                .disabled(state.changingTopic)
         }
     }
-
-    private var holdsSelection: Bool { session.windows.contains { $0.id == store.selectedWindowID } }
 
     /// As on a Topic card: a press on the card of the selected Window's Session opens or closes it; on another card
     /// it goes to that Session, whose card then opens.
     private func press() {
-        guard !holdsSelection else { return toggle() }
+        guard !state.holdsSelection else { return toggle() }
         withAnimation(.easeOut(duration: 0.15)) { _ = store.openSessionCards.insert(session.name) }
         store.goToSession(session.id)
     }
@@ -1474,20 +1494,16 @@ private struct BellMark: View {
 private struct PaneRow: View {
     let store: WorkspaceStore
     let row: TopicsModel.PaneRow
+    /// What the row shows, read by its list; nil reads it from the store.
+    var state: SidebarRowState.Pane? = nil
     @Environment(\.interfaceFontSize) private var fontSize
 
     @State private var hovering = false
 
-    /// With no Window row above it, the active Pane row shows where the user is.
-    private var isSelected: Bool {
-        !row.isUnderWindowRow && row.pane.isActive && row.window.id == store.selectedWindowID
-    }
-
-    private var formatted: SidebarFormats.Text {
-        store.sidebarText(.pane, context: store.sidebarFormatContexts.panes[row.pane.id])
-    }
-
-    private var mark: AgentMark? { store.topics.agentMarks[row.pane.id] }
+    private var shown: SidebarRowState.Pane { state ?? store.sidebarRowState(.pane(row)).pane! }
+    private var isSelected: Bool { shown.isSelected }
+    private var formatted: SidebarFormats.Text { shown.formatted }
+    private var mark: AgentMark? { shown.mark }
 
     var body: some View {
         Button { store.select(row) } label: {

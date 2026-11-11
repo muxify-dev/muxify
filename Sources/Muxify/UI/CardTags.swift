@@ -3,8 +3,8 @@ import MuxifyCore
 import SwiftUI
 
 /// The Tags a Topic card shows: one item for each pass of the `topic.tags` Format's `T` loop, and where they go.
-struct CardTags {
-    struct Item: Identifiable {
+struct CardTags: Equatable {
+    struct Item: Identifiable, Equatable {
         let shown: ShownTag
         /// What the Format gave: a chip's text, or a Tag Mark's hover text.
         let text: String
