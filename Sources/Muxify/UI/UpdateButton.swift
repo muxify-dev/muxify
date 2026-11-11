@@ -53,7 +53,7 @@ struct UpdateButton: View {
         switch model.state {
         case .available: .accentColor
         case .failed: .orange.opacity(0.2)
-        case .idle, .checking, .notFound: Color(nsColor: .controlBackgroundColor)
+        case .idle, .checking, .notFound, .downloading, .preparing, .installing: Color(nsColor: .controlBackgroundColor)
         }
     }
 
@@ -61,7 +61,7 @@ struct UpdateButton: View {
         switch model.state {
         case .available: .white
         case .failed: .orange
-        case .idle, .checking, .notFound: .primary
+        case .idle, .checking, .notFound, .downloading, .preparing, .installing: .primary
         }
     }
 
@@ -69,7 +69,7 @@ struct UpdateButton: View {
         switch model.state {
         case .available: .white
         case .failed: .orange
-        case .idle, .checking, .notFound: .secondary
+        case .idle, .checking, .notFound, .downloading, .preparing, .installing: .secondary
         }
     }
 }
@@ -85,7 +85,7 @@ private struct UpdatePopover: View {
             switch model.state {
             case .available(let offer): available(offer)
             case .failed(let message): failure(message)
-            case .idle, .checking, .notFound: EmptyView()
+            case .idle, .checking, .notFound, .downloading, .preparing, .installing: EmptyView()
             }
         }
         .frame(width: fontSize(300))

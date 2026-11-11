@@ -60,6 +60,9 @@ targets:
           NSAllowsLocalNetworking: true
         # The Config owns the update checks, so Sparkle never asks whether to check automatically.
         SUEnableAutomaticChecks: false
+        # Sparkle never downloads an update before the user chooses Install and Relaunch.
+        SUAutomaticallyUpdate: false
+        SUAllowsAutomaticUpdates: false
     settings:
       base:
         PRODUCT_NAME: Muxify

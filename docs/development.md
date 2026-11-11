@@ -398,12 +398,25 @@ user driver, which feeds the one `UpdateModel` that every App Window's Update
 Button shows (ADR 0077). Each check and its result go to the Diagnostics log as
 `update:` lines.
 
+An update downloads only after Install and Relaunch: `SUAutomaticallyUpdate`
+and `SUAllowsAutomaticUpdates` are false. The Update Button then shows
+"Downloading: N%", "Preparing: N%" and "Installing…". Sparkle's installer quits
+Muxify with a quit Apple event, which runs the same `applicationShouldTerminate`
+cleanup as ⌘Q, and relaunches the new copy. A failed download, a zip whose
+signature does not verify and a failed install show "Update Failed" with
+Sparkle's message; a translocated or read-only copy shows "Move Muxify to
+Applications to update it." The download, the install and each failure go to
+the Diagnostics log too.
+
 Sparkle's updater does not start on an `http` feed without `SUPublicEDKey`, so a
 Debug build carries the test key in `scripts/sparkle-debug-public-key.env`
 (`scripts/stamp-debug-update-key.sh`). Its private half,
 `scripts/verify/fixtures/sparkle-test-ed-key`, signs only test feeds.
 `make verify SUITE=update` serves a feed over `http` from its run directory
-and drives the Update Button and the Update Popover against it.
+and drives the Update Button and the Update Popover against it. One check
+presses Install and Relaunch on a zip that is not signed with the test key: it
+sees the download's progress, then "Update Failed", and the app is unchanged and
+still running. No check installs an update, which would relaunch the app.
 
 ### Feeds and release secrets
 

@@ -122,35 +122,47 @@ private final class UpdateUserDriver: NSObject, SPUUserDriver {
         onMain { $0.notFound(acknowledge: acknowledgement) }
     }
 
+    /// A failed check, download or install, a zip whose signature does not verify, or a translocated or read-only
+    /// copy (`SURunningTranslocated`, `SURunningFromDiskImageError`).
     func showUpdaterError(_ error: any Error, acknowledgement: @escaping () -> Void) {
-        let underlying = (error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError
-        onMain {
-            $0.failed(error.localizedDescription, detail: underlying.map { "\($0.domain) \($0.code): \($0.localizedDescription)" },
-                      acknowledge: acknowledgement)
-        }
+        onMain { $0.failed(error as NSError, acknowledge: acknowledgement) }
     }
 
-    // The download, extraction and install show on the Update Button in a later change; until then the button
-    // stays hidden while they run.
-    func showDownloadInitiated(cancellation: @escaping () -> Void) {}
+    // The download starts only after Install and Relaunch: Info.plist turns Sparkle's automatic download off.
+    func showDownloadInitiated(cancellation: @escaping () -> Void) {
+        onMain { $0.downloadStarted() }
+    }
 
-    func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {}
+    func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
+        onMain { $0.downloadExpects(expectedContentLength) }
+    }
 
-    func showDownloadDidReceiveData(ofLength length: UInt64) {}
+    func showDownloadDidReceiveData(ofLength length: UInt64) {
+        onMain { $0.downloadReceived(length) }
+    }
 
-    func showDownloadDidStartExtractingUpdate() {}
+    func showDownloadDidStartExtractingUpdate() {
+        onMain { $0.preparingStarted() }
+    }
 
-    func showExtractionReceivedProgress(_ progress: Double) {}
+    func showExtractionReceivedProgress(_ progress: Double) {
+        onMain { $0.preparing(progress) }
+    }
 
     func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
-        // The user chose Install and Relaunch already.
+        // The user chose Install and Relaunch already, so Muxify installs without asking again.
         reply(.install)
     }
 
+    /// Sparkle's installer then sends Muxify a quit Apple event, which goes through `applicationShouldTerminate`
+    /// and `AppDelegate.requestTermination` as ⌘Q does; Muxify never cancels it, so there is nothing to retry.
     func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool,
-                              retryTerminatingApplication: @escaping () -> Void) {}
+                              retryTerminatingApplication: @escaping () -> Void) {
+        onMain { $0.installStarted(applicationTerminated: applicationTerminated) }
+    }
 
     func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
+        onMain { $0.installed(relaunched: relaunched) }
         acknowledgement()
     }
 

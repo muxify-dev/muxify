@@ -3,14 +3,21 @@
 MUXIFY_UPDATE_FEED_URL turns the updater on in the Debug app, which carries the test public key, and points it at
 this feed. The Debug app is build 1, so a feed item of build 2 is newer and one of build 1 is not. The checks start
 Check for Updates from the Commands palette or the app menu, open the popover with the button's press, and answer
-with the popover's buttons. They never press Install and Relaunch, which would start a new copy and take Focus, and
-never press the notes link, which would open a browser.
+with the popover's buttons. They never press the notes link, which would open a browser. Only one check presses
+Install and Relaunch, on a zip that is not signed with the app's key, which Sparkle refuses before it installs:
+an install that went through would quit the app, start a new copy and take Focus.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.update
 """
 
+import hashlib
 import http.server
+import os
+import pathlib
+import plistlib
+import shutil
+import subprocess
 import threading
 import time
 import unittest
@@ -23,8 +30,9 @@ SIZE = 12345678
 RELEASED = 'Wed, 11 Nov 2026 09:30:00 +0000'
 
 
-def feed(build, version, link):
-    """A one-item appcast as scripts/write-feed.py writes it. The signature is never checked: no check downloads."""
+def feed(build, version, link, enclosure='http://127.0.0.1:1/Muxify.zip', size=SIZE):
+    """A one-item appcast as scripts/write-feed.py writes it. Its signature is 64 zero bytes, which no key made, so
+    Sparkle refuses its zip; only the wrongly signed zip's check downloads it."""
     return ('<?xml version="1.0" encoding="utf-8"?>\n'
             '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">\n'
             '<channel><title>Muxify</title><item>\n'
@@ -32,10 +40,28 @@ def feed(build, version, link):
             '<sparkle:version>%(build)s</sparkle:version>\n'
             '<sparkle:shortVersionString>%(version)s</sparkle:shortVersionString>\n'
             '<sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>\n'
-            '<enclosure url="http://127.0.0.1:1/Muxify.zip" length="%(size)d" type="application/octet-stream"'
+            '<enclosure url="%(enclosure)s" length="%(size)d" type="application/octet-stream"'
             ' sparkle:edSignature="%(signature)s"/>\n'
-            '</item></channel></rss>\n') % dict(version=version, date=RELEASED, link=link, build=build, size=SIZE,
-                                                signature='A' * 86 + '==')
+            '</item></channel></rss>\n') % dict(version=version, date=RELEASED, link=link, build=build, size=size,
+                                                enclosure=enclosure, signature='A' * 86 + '==')
+
+
+def wrongly_signed_zip(folder, bundle_id):
+    """A zip of a Muxify.app of build 2 that the feed's signature does not match. A random file makes it big
+    enough that the download shows its progress while the server sends it slowly."""
+    app = folder/'zip'/'Muxify.app'
+    (app/'Contents/MacOS').mkdir(parents=True, exist_ok=True)
+    with open(app/'Contents/Info.plist', 'wb') as f:
+        plistlib.dump(dict(CFBundleIdentifier=bundle_id, CFBundleName='Muxify', CFBundleExecutable='MuxifyApp',
+                           CFBundlePackageType='APPL', CFBundleVersion='2', CFBundleShortVersionString='0.2.0'), f)
+    executable = app/'Contents/MacOS/MuxifyApp'
+    executable.write_text('#!/bin/sh\nexit 0\n')
+    executable.chmod(0o755)
+    (app/'Contents/Resources').mkdir(exist_ok=True)
+    (app/'Contents/Resources/padding').write_bytes(os.urandom(2 * 1024 * 1024))
+    archive = folder/'Muxify-wrongly-signed.zip'
+    subprocess.run(['ditto', '-c', '-k', '--keepParent', str(app), str(archive)], check=True)
+    return archive.read_bytes()
 
 
 class FeedServer:
@@ -45,6 +71,9 @@ class FeedServer:
         self.text = feed(2, '0.2.0', RELEASE_NOTES)
         self.delay = 0
         self.requests = 0
+        # The zip at /Muxify.zip, sent in 64 KB pieces a tenth of a second apart.
+        self.zip = b''
+        self.zip_requests = 0
         self.port = 0
         self.server = None
 
@@ -53,6 +82,8 @@ class FeedServer:
 
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):
+                if self.path == '/Muxify.zip':
+                    return self.send_zip()
                 owner.requests += 1
                 time.sleep(owner.delay)
                 body = owner.text.encode()
@@ -62,6 +93,18 @@ class FeedServer:
                 self.send_header('Cache-Control', 'no-store')
                 self.end_headers()
                 self.wfile.write(body)
+
+            def send_zip(self):
+                owner.zip_requests += 1
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/zip')
+                self.send_header('Content-Length', str(len(owner.zip)))
+                self.end_headers()
+                piece = 64 * 1024
+                for start in range(0, len(owner.zip), piece):
+                    self.wfile.write(owner.zip[start:start + piece])
+                    self.wfile.flush()
+                    time.sleep(0.1)
 
             def log_message(self, *_):
                 pass
@@ -80,11 +123,18 @@ class FeedServer:
     def url(self):
         return 'http://127.0.0.1:%d/feed.xml' % self.port
 
+    @property
+    def zip_url(self):
+        return 'http://127.0.0.1:%d/Muxify.zip' % self.port
+
 
 class Update(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
+        # Sparkle keeps a download and its installer's files under the run's own bundle id; after the teardown.
+        for folder in ('Caches', 'HTTPStorages'):
+            cls.addClassCleanup(shutil.rmtree, pathlib.Path.home()/'Library'/folder/s.bundle_id, ignore_errors=True)
         cls.addClassCleanup(s.teardown)
         cls.feed = FeedServer()
         cls.feed.start()
@@ -241,6 +291,43 @@ class Update(unittest.TestCase):
         wait(lambda: self.log_text().count('update: check for updates, asked by the user') > checks
              and self.log_text().count('update: no newer build') > results,
              lambda: 'the Diagnostics log has no check and result:\n' + self.log_text()[-2000:], 10)
+
+    def test_install_and_relaunch_on_a_wrongly_signed_zip_shows_the_download_then_update_failed(self):
+        self.feed.zip = wrongly_signed_zip(self.s.root/'wrongly-signed', self.s.bundle_id)
+        self.feed.text = feed(2, '0.2.0', RELEASE_NOTES, enclosure=self.feed.zip_url, size=len(self.feed.zip))
+        installed = {path: hashlib.sha256((self.s.app/path).read_bytes()).hexdigest()
+                     for path in ('Contents/Info.plist', 'Contents/MacOS/MuxifyApp')}
+        pid = self.s.pid
+        logged = self.log_text()
+        self.check_with_the_command()
+        self.wait_button('Update Available: 0.2.0')
+        # Nothing downloads before Install and Relaunch.
+        time.sleep(1)
+        self.assertEqual(self.feed.zip_requests, 0, 'the zip downloaded before Install and Relaunch')
+        self.open_popover()
+        self.s.act('press', 'update-install')
+        progress = self.s.wait_rows(lambda rs: (self.button(rs) or '').startswith('Downloading'),
+                                    lambda: 'the Update Button shows no download: it shows %r' % self.button(), 20)
+        self.assertRegex(self.button(progress), r'^Downloading(: \d{1,3}%|…)$')
+        self.wait_button('Update Failed', seconds=60)
+        rs = self.open_popover()
+        message = self.s.row('update-failure-message', rs)
+        self.assertIn('improperly signed', message.get('accessibilityValue') or message.get('accessibilityLabel') or '',
+                      message)
+        self.assertTrue(self.s.has('update-ok', rs) and self.s.has('update-retry', rs), 'the popover has no OK and Retry')
+        self.assertEqual(self.feed.zip_requests, 1)
+        # Nothing is installed, and the app keeps running in its own process.
+        self.assertEqual({path: hashlib.sha256((self.s.app/path).read_bytes()).hexdigest() for path in installed},
+                         installed, 'the update changed the app')
+        self.assertEqual(self.s.pid, pid)
+        os.kill(pid, 0)
+        self.s.act('press', 'update-ok')
+        self.wait_hidden()
+        log = self.log_text()[len(logged):]
+        for line in ('update: install and relaunch 0.2.0 (build 2)', 'update: downloading 0.2.0 (build 2)',
+                     'update: failed: The update is improperly signed'):
+            self.assertIn(line, log)
+        self.assertNotIn('update: installed', log)
 
 
 if __name__ == '__main__':

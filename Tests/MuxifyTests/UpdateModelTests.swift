@@ -177,6 +177,151 @@ import XCTest
         XCTAssertNil(model.buttonText)
     }
 
+    // MARK: Install and Relaunch
+
+    private func installingModel() -> (UpdateModel, () -> [UpdateChoice]) {
+        let model = model()
+        var choices: [UpdateChoice] = []
+        model.found(offer) { choices.append($0) }
+        model.install()
+        return (model, { choices })
+    }
+
+    func testInstallLogsItAndTheDownloadShowsItsProgress() {
+        let (model, choices) = installingModel()
+        XCTAssertEqual(choices(), [.install])
+        XCTAssertEqual(logged.last, "update: install and relaunch 0.2.0 (build 101)")
+        model.downloadStarted()
+        XCTAssertEqual(model.state, .downloading(received: 0, expected: nil))
+        XCTAssertEqual(model.buttonText, "Downloading…")
+        XCTAssertEqual(model.symbol, "arrow.down.circle")
+        XCTAssertFalse(model.opensPopover)
+        XCTAssertEqual(logged.last, "update: downloading 0.2.0 (build 101)")
+        model.downloadExpects(1000)
+        XCTAssertEqual(model.buttonText, "Downloading: 0%")
+        XCTAssertEqual(logged.last, "update: download size 1000 bytes")
+        model.downloadReceived(420)
+        XCTAssertEqual(model.buttonText, "Downloading: 42%")
+        model.downloadReceived(579)
+        XCTAssertEqual(model.buttonText, "Downloading: 99%")
+        model.downloadReceived(1)
+        XCTAssertEqual(model.buttonText, "Downloading: 100%")
+        // More bytes than the server announced never read past 100%.
+        model.downloadReceived(500)
+        XCTAssertEqual(model.buttonText, "Downloading: 100%")
+    }
+
+    func testADownloadWithoutASizeShowsDownloadingWithoutAPercentage() {
+        let (model, _) = installingModel()
+        model.downloadStarted()
+        model.downloadExpects(0)
+        model.downloadReceived(4096)
+        XCTAssertEqual(model.buttonText, "Downloading…")
+    }
+
+    func testPreparingThenInstallingThenRelaunching() {
+        let (model, _) = installingModel()
+        model.downloadStarted()
+        model.downloadExpects(2048)
+        model.downloadReceived(2048)
+        model.preparingStarted()
+        XCTAssertEqual(logged.last, "update: downloaded 2048 bytes")
+        XCTAssertEqual(model.buttonText, "Preparing: 0%")
+        XCTAssertEqual(model.symbol, "shippingbox")
+        model.preparing(0.425)
+        XCTAssertEqual(model.buttonText, "Preparing: 42%")
+        XCTAssertFalse(model.opensPopover)
+        model.installStarted(applicationTerminated: false)
+        XCTAssertEqual(model.state, .installing)
+        XCTAssertEqual(model.buttonText, "Installing…")
+        XCTAssertEqual(model.symbol, "power.circle")
+        XCTAssertFalse(model.opensPopover)
+        XCTAssertEqual(logged.last, "update: installing 0.2.0 (build 101), quitting Muxify")
+        // Sparkle can report the install twice; the log says it once.
+        model.installStarted(applicationTerminated: true)
+        XCTAssertEqual(logged.filter { $0.hasPrefix("update: installing") }.count, 1)
+        model.installed(relaunched: true)
+        XCTAssertEqual(logged.last, "update: installed 0.2.0 (build 101), relaunching")
+    }
+
+    func testCheckForUpdatesWhileAnUpdateInstallsStartsNoCheck() {
+        let (model, _) = installingModel()
+        model.downloadStarted()
+        model.check()
+        XCTAssertEqual(checks, 0)
+        XCTAssertEqual(model.buttonText, "Downloading…")
+    }
+
+    private func sparkleError(_ code: Int, _ message: String, underlying: NSError? = nil) -> NSError {
+        var info: [String: Any] = [NSLocalizedDescriptionKey: message]
+        info[NSUnderlyingErrorKey] = underlying
+        return NSError(domain: "SUSparkleErrorDomain", code: code, userInfo: info)
+    }
+
+    private func assertFailure(after progress: (UpdateModel) -> Void, error: NSError, shows message: String,
+                               line: UInt = #line) {
+        let (model, _) = installingModel()
+        progress(model)
+        var acknowledged = 0
+        model.failed(error, acknowledge: { acknowledged += 1 })
+        XCTAssertEqual(model.state, .failed(message), line: line)
+        XCTAssertEqual(model.buttonText, "Update Failed", line: line)
+        XCTAssertTrue(model.opensPopover, line: line)
+        XCTAssertTrue(logged.last?.hasPrefix("update: failed: \(message) (SUSparkleErrorDomain \(error.code)") == true,
+                      "\(logged.last ?? "")", line: line)
+        // Retry acknowledges the failure and checks again, so the update shows again.
+        model.retry()
+        XCTAssertEqual(acknowledged, 1, line: line)
+        XCTAssertEqual(checks, 1, line: line)
+        checks = 0
+    }
+
+    func testAFailedDownloadShowsUpdateFailedWithSparklesMessage() {
+        let offline = NSError(domain: NSURLErrorDomain, code: -1004, userInfo: [NSLocalizedDescriptionKey: "Could not connect"])
+        assertFailure(after: { $0.downloadStarted(); $0.downloadExpects(100); $0.downloadReceived(10) },
+                      error: sparkleError(2001, "An error occurred while downloading the update.", underlying: offline),
+                      shows: "An error occurred while downloading the update.")
+        XCTAssertTrue(logged.contains { $0.hasSuffix("(SUSparkleErrorDomain 2001; NSURLErrorDomain -1004: Could not connect)") },
+                      "\(logged)")
+    }
+
+    func testABadSignatureShowsUpdateFailedWithSparklesMessage() {
+        assertFailure(after: { $0.downloadStarted(); $0.preparingStarted(); $0.preparing(0.5) },
+                      error: sparkleError(4005, "The update is improperly signed and could not be validated."),
+                      shows: "The update is improperly signed and could not be validated.")
+    }
+
+    func testAFailedInstallShowsUpdateFailedWithSparklesMessage() {
+        assertFailure(after: { $0.downloadStarted(); $0.preparingStarted(); $0.installStarted(applicationTerminated: false) },
+                      error: sparkleError(4004, "An error occurred while relaunching Muxify, but the new version will be available next time you run Muxify."),
+                      shows: "An error occurred while relaunching Muxify, but the new version will be available next time you run Muxify.")
+    }
+
+    func testATranslocatedOrReadOnlyCopySaysToMoveMuxifyToApplications() {
+        for code in [1005, 1003] {
+            let model = model()
+            model.check()
+            model.checking()
+            model.failed(sparkleError(code, "Muxify can’t be updated."), acknowledge: {})
+            XCTAssertEqual(model.state, .failed("Move Muxify to Applications to update it."))
+            XCTAssertEqual(model.buttonText, "Update Failed")
+            XCTAssertTrue(model.opensPopover)
+        }
+        // Another domain's error with the same code keeps its own message.
+        XCTAssertEqual(UpdateModel.message(for: NSError(domain: NSCocoaErrorDomain, code: 1005,
+                                                        userInfo: [NSLocalizedDescriptionKey: "Other"])), "Other")
+    }
+
+    func testSparkleEndingTheSessionAfterAFailedInstallHidesTheButton() {
+        let (model, _) = installingModel()
+        model.downloadStarted()
+        model.failed(sparkleError(2001, "Download failed"), acknowledge: {})
+        model.dismissFailure()
+        model.dismissed()
+        XCTAssertEqual(model.state, .idle)
+        XCTAssertNil(model.buttonText)
+    }
+
     func testOnlyABuildWithAFeedHasAnUpdater() {
         // A plain Debug or make install build: no stamp and no variable.
         XCTAssertNil(UpdateFeed.url(info: ["CFBundleVersion": "1"], environment: [:]))

@@ -60,8 +60,16 @@ final class UpdateModel {
         case checking
         case available(UpdateOffer)
         case notFound
+        /// `received` of `expected` bytes; `expected` is nil while the size is unknown.
+        case downloading(received: UInt64, expected: UInt64?)
+        /// The extraction's progress, from 0 to 1.
+        case preparing(Double)
+        case installing
         case failed(String)
     }
+
+    /// What a translocated copy, or one on a read-only volume, says in place of Sparkle's message.
+    static let moveToApplications = "Move Muxify to Applications to update it."
 
     /// The app's model, when this build has an updater; nil hides the Update Button, the Command and the menu item.
     static var shared: UpdateModel?
@@ -73,6 +81,8 @@ final class UpdateModel {
     @ObservationIgnored var startCheck: () -> Void = {}
     @ObservationIgnored private var reply: ((UpdateChoice) -> Void)?
     @ObservationIgnored private var acknowledge: (() -> Void)?
+    /// The update that Install and Relaunch chose, for the Diagnostics log of its download and install.
+    @ObservationIgnored private var installing: UpdateOffer?
     /// Each "No Updates Available" gets its own number, so a late timer leaves a newer one alone.
     @ObservationIgnored private var notFoundShown = 0
     @ObservationIgnored private let log: (String) -> Void
@@ -90,8 +100,17 @@ final class UpdateModel {
         case .checking: "Checking for Updates…"
         case .available(let offer): offer.version.isEmpty ? "Update Available" : "Update Available: \(offer.version)"
         case .notFound: "No Updates Available"
+        case .downloading(let received, let expected):
+            if let expected, expected > 0 { "Downloading: \(Self.percent(Double(received) / Double(expected)))%" }
+            else { "Downloading…" }
+        case .preparing(let progress): "Preparing: \(Self.percent(progress))%"
+        case .installing: "Installing…"
         case .failed: "Update Failed"
         }
+    }
+
+    private static func percent(_ fraction: Double) -> Int {
+        Int((min(max(fraction, 0), 1) * 100).rounded(.down))
     }
 
     /// Ghostty's SF Symbol for each state.
@@ -101,6 +120,9 @@ final class UpdateModel {
         case .checking: "arrow.triangle.2.circlepath"
         case .available: "shippingbox.fill"
         case .notFound: "info.circle"
+        case .downloading: "arrow.down.circle"
+        case .preparing: "shippingbox"
+        case .installing: "power.circle"
         case .failed: "exclamationmark.triangle.fill"
         }
     }
@@ -109,7 +131,7 @@ final class UpdateModel {
     var opensPopover: Bool {
         switch state {
         case .available, .failed: true
-        case .idle, .checking, .notFound: false
+        case .idle, .checking, .notFound, .downloading, .preparing, .installing: false
         }
     }
 
@@ -125,6 +147,10 @@ final class UpdateModel {
         switch state {
         case .notFound: finishNotFound()
         case .failed: finishFailure()
+        case .downloading, .preparing, .installing:
+            // The Update Button already shows the update that installs.
+            log("update: check for updates, asked by the user while an update installs")
+            return
         case .idle, .checking, .available: break
         }
         log("update: check for updates, asked by the user")
@@ -135,7 +161,13 @@ final class UpdateModel {
 
     func later() { answer(.later, "update: later for") }
 
-    func install() { answer(.install, "update: install and relaunch") }
+    /// Install and Relaunch: only now does the update download. Muxify then installs it and quits as ⌘Q does,
+    /// with no further question (docs/adr/0077-an-update-shows-in-the-header-not-in-the-palette.md).
+    func install() {
+        guard case .available(let offer) = state, reply != nil else { return }
+        installing = offer
+        answer(.install, "update: install and relaunch")
+    }
 
     /// OK on a failure.
     func dismissFailure() { finishFailure() }
@@ -170,6 +202,62 @@ final class UpdateModel {
         }
     }
 
+    func downloadStarted() {
+        log("update: downloading" + installingText)
+        state = .downloading(received: 0, expected: nil)
+    }
+
+    func downloadExpects(_ length: UInt64) {
+        log("update: download size \(length) bytes")
+        state = .downloading(received: 0, expected: length > 0 ? length : nil)
+    }
+
+    func downloadReceived(_ length: UInt64) {
+        guard case .downloading(let received, let expected) = state else { return }
+        state = .downloading(received: received + length, expected: expected)
+    }
+
+    func preparingStarted() {
+        if case .downloading(let received, _) = state { log("update: downloaded \(received) bytes") }
+        state = .preparing(0)
+    }
+
+    func preparing(_ progress: Double) {
+        state = .preparing(progress)
+    }
+
+    /// The installer has the update; Muxify quits through its normal termination path while it installs.
+    func installStarted(applicationTerminated: Bool) {
+        if state != .installing {
+            log("update: installing" + installingText + (applicationTerminated ? "" : ", quitting Muxify"))
+        }
+        state = .installing
+    }
+
+    func installed(relaunched: Bool) {
+        log("update: installed" + installingText + (relaunched ? ", relaunching" : ""))
+    }
+
+    private var installingText: String {
+        installing.map { " \($0.version) (build \($0.build))" } ?? ""
+    }
+
+    /// A Sparkle error: a translocated or read-only copy says how to fix it, any other error shows Sparkle's message.
+    /// The domain and code, and the underlying error, go only to the Diagnostics log.
+    func failed(_ error: NSError, acknowledge: @escaping () -> Void) {
+        var detail = "\(error.domain) \(error.code)"
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            detail += "; \(underlying.domain) \(underlying.code): \(underlying.localizedDescription)"
+        }
+        failed(Self.message(for: error), detail: detail, acknowledge: acknowledge)
+    }
+
+    /// Sparkle's `SURunningFromDiskImageError` (1003) and `SURunningTranslocated` (1005).
+    static func message(for error: NSError) -> String {
+        if error.domain == "SUSparkleErrorDomain", error.code == 1003 || error.code == 1005 { return moveToApplications }
+        return error.localizedDescription
+    }
+
     /// `detail` goes only to the Diagnostics log, such as the underlying network error.
     func failed(_ message: String, detail: String? = nil, acknowledge: @escaping () -> Void) {
         log("update: failed: \(message)" + (detail.map { " (\($0))" } ?? ""))
@@ -181,6 +269,7 @@ final class UpdateModel {
     func dismissed() {
         reply = nil
         acknowledge = nil
+        installing = nil
         state = .idle
     }
 
