@@ -14,17 +14,48 @@ struct HintBadge: View {
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
-        Text(triggers.map(\.symbol).joined(separator: " "))
-            .font(fontSize.font(11, weight: .semibold, design: .monospaced))
+        Text(HintBadgeMetrics.text(triggers))
+            .font(fontSize.font(HintBadgeMetrics.fontSize, weight: .semibold, design: .monospaced))
             .foregroundStyle(.primary)
-            .padding(.horizontal, 5).padding(.vertical, 2)
-            .background(Color(red: 30 / 255, green: 31 / 255, blue: 35 / 255).opacity(0.9), in: RoundedRectangle(cornerRadius: 5))
-            .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(.white.opacity(0.35), lineWidth: 1) }
+            .padding(.horizontal, HintBadgeMetrics.horizontalPadding).padding(.vertical, HintBadgeMetrics.verticalPadding)
+            .background(Color(red: HintBadgeMetrics.fill.red, green: HintBadgeMetrics.fill.green, blue: HintBadgeMetrics.fill.blue)
+                .opacity(HintBadgeMetrics.fillOpacity), in: RoundedRectangle(cornerRadius: HintBadgeMetrics.cornerRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: HintBadgeMetrics.cornerRadius)
+                    .strokeBorder(.white.opacity(HintBadgeMetrics.borderOpacity), lineWidth: HintBadgeMetrics.borderWidth)
+            }
             .environment(\.colorScheme, .dark)
             .fixedSize()
             .allowsHitTesting(false)
             .accessibilityIdentifier(target.accessibilityID)
     }
+}
+
+/// The sizes and colours of a Hint's badge, for both versions of the Sessions list (ADR 0074). The font size is at 12,
+/// and grows with the Interface font size.
+enum HintBadgeMetrics {
+    /// The keys are semibold and monospaced.
+    static let fontSize: CGFloat = 11
+    static let horizontalPadding: CGFloat = 5
+    static let verticalPadding: CGFloat = 2
+    static let cornerRadius: CGFloat = 5
+    /// The box is this colour in sRGB at `fillOpacity`, with a border of white at `borderOpacity`. The keys are the text
+    /// colour of the dark scheme, also in a light theme.
+    static let fill = (red: 30.0 / 255, green: 31.0 / 255, blue: 35.0 / 255)
+    static let fillOpacity = 0.9
+    static let borderOpacity = 0.35
+    static let borderWidth: CGFloat = 1
+
+    /// The keys of the badge, joined by a space, such as "⌃2".
+    static func text(_ triggers: [KeyTrigger]) -> String { triggers.map(\.symbol).joined(separator: " ") }
+}
+
+/// Where a Window row's Hint stands and how its key at rest looks, for both versions of the Sessions list (ADR 0074).
+enum WindowHintMetrics {
+    /// The Hint stands this far right of and below the row's top left corner, in the room the row keeps for it.
+    static let inset: CGFloat = 5
+    /// The key at rest is medium and monospaced, in the secondary text colour, at 12.
+    static let keyFontSize: CGFloat = 10
 }
 
 struct HintKey: View {
@@ -34,7 +65,7 @@ struct HintKey: View {
 
     var body: some View {
         Text(key)
-            .font(fontSize.font(10, weight: .medium, design: .monospaced))
+            .font(fontSize.font(WindowHintMetrics.keyFontSize, weight: .medium, design: .monospaced))
             .foregroundStyle(.secondary)
             .fixedSize()
             .allowsHitTesting(false)
@@ -125,7 +156,7 @@ extension View {
                         let rect = proxy[anchor]
                         if case .window = target {
                             WindowHint(target: target, hints: hints, height: rect.height)
-                                .offset(x: rect.minX + 5, y: rect.minY + 5)
+                                .offset(x: rect.minX + WindowHintMetrics.inset, y: rect.minY + WindowHintMetrics.inset)
                         } else {
                             // The badge ends where the key ends, and grows over the title.
                             Color.clear

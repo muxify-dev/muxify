@@ -1,5 +1,6 @@
 import AppKit
 import MuxifyCore
+import SwiftUI
 
 extension TopicsModel.PaneRow {
     /// With no Window row above it, the active Pane row shows where the user is, for both versions of the Sessions list
@@ -13,6 +14,9 @@ extension TopicsModel.PaneRow {
     func accessibilityValue(mark: AgentMark?) -> String {
         [pane.isActive ? "active" : nil, mark?.rawValue].compactMap { $0 }.joined(separator: ", ")
     }
+
+    /// The detail line of the row's hover label, for both versions: the Pane's path, or its label when it has none.
+    var hoverDetail: String { pane.path.isEmpty ? pane.label : Paths.tildify(pane.path) }
 }
 
 /// What a Pane row shows, as the Sessions list reads it from the models.
@@ -29,12 +33,15 @@ struct PaneRowContent: Equatable {
     var mark: AgentMark?
     /// The value of the accessibility row: `TopicsModel.PaneRow.accessibilityValue`.
     var accessibilityValue = ""
+    /// The detail line of the hover label: `TopicsModel.PaneRow.hoverDetail`.
+    var hoverDetail = ""
 }
 
 /// A Pane row of the AppKit Sessions list (ADR 0074): `PaneRow` in SwiftUI. From the left: the place of the Agent mark,
 /// which stays empty without one, the split icon, filled for the active Pane, and the title on one line with the
 /// Summary under it. A row under its Window row is indented. A row that stands in for the Location's Window row has the
-/// tint, with its icon in the accent colour; the others are in the softer text colour.
+/// tint, with its icon in the accent colour; the others are in the softer text colour. Its hover label shows the full
+/// title when the row cuts it off, and the Pane's path.
 ///
 /// To accessibility it is one button, `pane-<id>`, which hides its parts. A press goes to its Pane, also on the first
 /// click while Muxify is not the front app.
@@ -101,6 +108,10 @@ final class PaneRowView: SidebarRowView, CardRowView {
         layOut()
         showsLocation = content.showsLocation
         showFill(fades: fades && tints)
+        // The label's title is the row's, in the font of the SwiftUI row's title.
+        hoverLabel.anchor.anchor(title, title: Text(title.text).font(size.font(PaneRowMetrics.titleSize)),
+                                 fullWidth: SidebarTextLayout(title.text, font: title.font, scale: environment.displayScale).size.width)
+        hoverLabel.show(RowHoverLabel.Request(detail: content.hoverDetail, fontSize: size))
     }
 
     func height(width: CGFloat) -> CGFloat { layout(width: width).height }

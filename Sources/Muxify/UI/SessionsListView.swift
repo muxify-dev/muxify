@@ -168,13 +168,14 @@ final class SessionsListView: NSView {
                 window: window, formatted: store.sidebarWindowRow(window), isSelected: window.id == store.selectedWindowID,
                 tabCount: store.tabCount(for: window), isGitViewOpen: store.isGitViewOpen(in: window.id),
                 usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
-                    window, record: store.topicWatcher.records.first { $0.id == window.topicID }, sessionPaths: store.sessionPaths)))
+                    window, record: store.topicWatcher.records.first { $0.id == window.topicID }, sessionPaths: store.sessionPaths),
+                tooltips: store.config.sidebar.windowTooltips))
         case .pane(let row):
             let mark = store.topics.agentMarks[row.pane.id]
             return .pane(PaneRowContent(paneID: row.pane.id, text: store.sidebarText(.pane, context: store.sidebarFormatContexts.panes[row.pane.id]),
                                         isActive: row.pane.isActive, isUnderWindowRow: row.isUnderWindowRow,
                                         showsLocation: row.showsLocation(selectedWindowID: store.selectedWindowID), mark: mark,
-                                        accessibilityValue: row.accessibilityValue(mark: mark)))
+                                        accessibilityValue: row.accessibilityValue(mark: mark), hoverDetail: row.hoverDetail))
         }
     }
 

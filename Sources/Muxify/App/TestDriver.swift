@@ -679,6 +679,25 @@ enum TestDriver {
         return NSApp.windows.first(where: { $0.isVisible && $0.frame.contains(NSPoint(x: screen.midX, y: screen.midY)) })
     }
 
+    /// The tracking areas that the pointer at `point`, in the window's coordinates, is in: those of the view under the
+    /// point and of its ancestors, with their owners. `hitTest` takes the point in the coordinates of the content
+    /// view's superview: the content view of a SwiftUI window is flipped, so its own coordinates would hit the view
+    /// at the mirrored height, which SwiftUI's one tracking area for all its views does not notice, and an AppKit view
+    /// inside it does.
+    static func trackingAreas(at point: NSPoint, in window: NSWindow) -> [(owner: NSResponder, area: NSTrackingArea)] {
+        guard let content = window.contentView else { return [] }
+        var found: [(owner: NSResponder, area: NSTrackingArea)] = []
+        var view = content.hitTest(content.superview?.convert(point, from: nil) ?? point)
+        while let current = view {
+            let local = current.convert(point, from: nil)
+            for area in current.trackingAreas where area.rect.contains(local) || area.options.contains(.inVisibleRect) {
+                if let owner = area.owner as? NSResponder { found.append((owner, area)) }
+            }
+            view = current.superview
+        }
+        return found
+    }
+
     private static func hover(_ target: String) -> Bool {
         guard let screen = (dump().first { $0.row["accessibilityIdentifier"] == target }?.object
                                 .value(forKey: "accessibilityFrame") as? NSValue)?.rectValue,
@@ -692,15 +711,7 @@ enum TestDriver {
                                    modifierFlags: [], timestamp: event.timestamp, windowNumber: window.windowNumber, context: nil,
                                    eventNumber: 0, trackingNumber: unsafeBitCast(area, to: Int.self), userData: nil)
         }
-        var entered: [(owner: NSResponder, area: NSTrackingArea, window: NSWindow)] = []
-        var view = window.contentView?.hitTest(window.contentView?.convert(point, from: nil) ?? point)
-        while let current = view {
-            let local = current.convert(point, from: nil)
-            for area in current.trackingAreas where area.rect.contains(local) || area.options.contains(.inVisibleRect) {
-                if let owner = area.owner as? NSResponder { entered.append((owner, area, window)) }
-            }
-            view = current.superview
-        }
+        let entered = trackingAreas(at: point, in: window).map { (owner: $0.owner, area: $0.area, window: window) }
         for left in hovered {
             if let exit = crossing(.mouseExited, left.area, in: left.window) { left.owner.mouseExited(with: exit) }
         }

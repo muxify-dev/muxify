@@ -272,4 +272,86 @@ import XCTest
         list.show(sessions.map { ($0, closed) })
         XCTAssertEqual(header.frame.minY, 0)
     }
+
+    // MARK: The Hints
+
+    private let windowRow = WindowRowContent(
+        window: TmuxWindow(id: "@1", sessionID: "$1", sessionName: "atlas", index: 0, name: "editor", paneTitle: "editor",
+                           path: "/work/app", command: "zsh", isActive: true, paneCount: 1, hasBell: false,
+                           sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(), openRequests: []),
+        formatted: SidebarFormats.WindowRowContent(text: .init(title: "editor", summary: ""), left: nil, right: nil))
+
+    /// The Hints of a list with the card `$1` and its Window `@1` first, while the user holds `modifiers`. Cards show
+    /// their keys at all times, and Window rows when `windows` says so.
+    private func environment(holding modifiers: KeyTrigger.Modifiers?, windows: Bool = false) -> SessionsListEnvironment {
+        var config = Config.Hints()
+        config.windows.always = windows
+        var environment = SessionsListEnvironment()
+        environment.hints = HintPresentation(
+            modifiers: modifiers, keybinds: .defaults,
+            targets: QuickSwitchTargets(cards: [.session("$1")], windows: [.window("@1")], topicWindows: [], tabs: [], sessions: [], topics: []),
+            sidebar: true, browser: false, terminal: false, config: config)
+        return environment
+    }
+
+    private func child(_ identifier: String, of card: SessionCardView) -> NSView? {
+        (card.accessibilityChildren() as? [NSView])?.first { $0.accessibilityIdentifier() == identifier }
+    }
+
+    func testWhileTheBadgeShowsTheLockHidesAndTheTitleKeepsItsLines() throws {
+        func shown(holding modifiers: KeyTrigger.Modifiers?) -> SessionCardView {
+            let environment = environment(holding: modifiers)
+            let card = card(SessionCardContent(title: "a Session whose title is long enough to wrap", isLocked: true,
+                                               hint: CardHint(.session("$1"), in: environment.hints)), environment: environment)
+            card.frame = NSRect(x: 0, y: 0, width: 200, height: card.height(width: 200))
+            return card
+        }
+        let rest = shown(holding: nil), held = shown(holding: .control)
+
+        XCTAssertGreaterThan(rest.titleFrame.height, 20, "the title does not wrap, so the test proves nothing")
+        XCTAssertEqual(held.titleFrame, rest.titleFrame, "the title wraps again when the badge shows")
+        XCTAssertEqual(held.height(width: 200), rest.height(width: 200))
+        XCTAssertEqual(rest.markOpacity, 1)
+        XCTAssertEqual(held.markOpacity, 0, "the lock shows while the badge shows")
+
+        let key = try XCTUnwrap(child("hint-session-$1", of: rest))
+        let badge = try XCTUnwrap(child("hint-session-$1", of: held))
+        XCTAssertEqual(key.accessibilityValue() as? String, "1")
+        XCTAssertEqual(badge.accessibilityValue() as? String, "⌃1")
+        XCTAssertEqual(badge.frame.maxX, key.frame.maxX, "the badge does not end where the key at rest ends")
+        XCTAssertEqual(badge.frame.midY, key.frame.midY)
+        XCTAssertGreaterThan(badge.frame.width, key.frame.width, "the badge does not grow over the title")
+        XCTAssertEqual((held.accessibilityChildren() as? [NSView])?.filter { $0.accessibilityIdentifier() == "hint-session-$1" }.count, 1,
+                       "the key at rest stays beside the badge")
+    }
+
+    func testACardWithNoHintKeepsNoRoomForOne() {
+        let hinted = card(SessionCardContent(title: "atlas", hint: CardHint(.session("$1"), in: environment(holding: nil).hints)))
+        let bare = card(SessionCardContent(title: "atlas"))
+        hinted.frame = NSRect(x: 0, y: 0, width: 248, height: hinted.height(width: 248))
+        bare.frame = hinted.frame
+
+        XCTAssertNil(CardHint(.session("$9"), in: environment(holding: nil).hints))
+        XCTAssertNil(child("hint-session-$1", of: bare))
+        XCTAssertNotNil(child("hint-session-$1", of: hinted))
+    }
+
+    func testAWindowRowsHintStandsInTheRoomBeforeItsIconWhileTheCardIsOpen() throws {
+        for (modifiers, value) in [(nil, "1"), (KeyTrigger.Modifiers.command, "⌘1")] {
+            let environment = environment(holding: modifiers, windows: true)
+            let card = card(SessionCardContent(title: "atlas", isOpen: true, rows: [.window(windowRow)]), environment: environment)
+            card.frame = NSRect(x: 0, y: 0, width: 248, height: card.height(width: 248))
+
+            let hint = try XCTUnwrap(child("hint-window-@1", of: card), "no Hint for the Window row while holding \(String(describing: modifiers))")
+            XCTAssertEqual(hint.accessibilityValue() as? String, value)
+            let row = try XCTUnwrap(child("session-window-@1", of: card)?.superview)
+            let corner = row.convert(NSPoint.zero, to: card)
+            XCTAssertEqual(hint.frame.origin, NSPoint(x: corner.x + WindowHintMetrics.inset, y: corner.y + WindowHintMetrics.inset))
+            XCTAssertEqual((card.accessibilityChildren() as? [NSView])?.suffix(2).map { $0.accessibilityIdentifier() },
+                           ["session-$1", "hint-window-@1"], "the Hint is not after the header")
+
+            card.show(SessionCardContent(title: "atlas", rows: []), environment: environment)
+            XCTAssertNil(child("hint-window-@1", of: card), "a closed card shows the Hint of a Window row")
+        }
+    }
 }

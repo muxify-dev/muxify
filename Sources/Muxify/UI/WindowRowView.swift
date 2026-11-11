@@ -1,5 +1,6 @@
 import AppKit
 import MuxifyCore
+import SwiftUI
 
 /// What a Window row shows, as the Sessions list reads it from the models.
 struct WindowRowContent: Equatable {
@@ -12,12 +13,15 @@ struct WindowRowContent: Equatable {
     var isGitViewOpen = false
     /// The Window left its Session's Worktree for the main working copy of its repository.
     var usesMainWorkingCopy = false
+    /// `sidebar.window_tooltips`: when the row opens its hover label.
+    var tooltips = Config.Sidebar.WindowTooltips.always
 }
 
 /// A Window row of the AppKit Sessions list (ADR 0074): `WindowRow` in SwiftUI. From the left: the room for a Hint,
 /// the app icon or the Format's left part, the title with the lines under it, and at the end the bell, the Git View
 /// icon and the Tab and Pane counts or the Format's right part. It lays its parts out as SwiftUI lays out the row's
-/// `HStack`. The row of the Location's Window has a soft tint, and a row under the pointer a faint fill.
+/// `HStack`. The row of the Location's Window has a soft tint, and a row under the pointer a faint fill. Its hover
+/// label shows the full title when the row cuts it off, and the Window's place and path, as `tooltips` says.
 ///
 /// The row is no accessibility element. As in SwiftUI, each of its parts is one, with the row's identifier and value,
 /// and the card lists them among its children. A click on the row goes to its Window, also on the first click while
@@ -135,6 +139,11 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
         layOut()
         showsLocation = content.isSelected
         showFill(fades: fades && tints)
+        // The label's title is the row's, in the font of the SwiftUI row's title.
+        hoverLabel.anchor.anchor(title, title: Text(title.text).font(typography.font(for: .title)),
+                                 fullWidth: SidebarTextLayout(title.text, font: title.font, scale: environment.displayScale).size.width)
+        hoverLabel.show(RowHoverLabel.Request(detail: WindowRowText.hoverDetail(window), onlyWhenCutOff: content.tooltips == .truncated,
+                                              enabled: content.tooltips != .off, fontSize: size))
     }
 
     func height(width: CGFloat) -> CGFloat { layout(width: width).height }

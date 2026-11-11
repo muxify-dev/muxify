@@ -1411,8 +1411,7 @@ struct WindowRow: View {
         .contentShape(RoundedRectangle(cornerRadius: WindowRowMetrics.cornerRadius, style: .continuous))
         .onHover { hovering = $0 }
         .hintAnchor(.window(window.id))
-        .hoverLabel(detail: "\(window.sessionName):\(window.index) — \(window.abbreviatedPath)",
-                    onlyWhenCutOff: tooltips == .truncated, enabled: tooltips != .off)
+        .hoverLabel(detail: WindowRowText.hoverDetail(window), onlyWhenCutOff: tooltips == .truncated, enabled: tooltips != .off)
     }
 
     private func customPart(_ parts: [SidebarPart], side: String) -> some View {
@@ -1508,7 +1507,7 @@ private struct PaneRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .hoverLabel(detail: row.pane.path.isEmpty ? row.pane.label : Paths.tildify(row.pane.path))
+        .hoverLabel(detail: row.hoverDetail)
         .accessibilityIdentifier("pane-" + row.pane.id)
         .accessibilityValue(row.accessibilityValue(mark: mark))
     }

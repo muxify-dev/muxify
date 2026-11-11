@@ -28,14 +28,29 @@ class SidebarPressView: NSView {
 }
 
 /// A row of an open card in the AppKit Sessions list (ADR 0074): a Window row or a Pane row. The row that shows the
-/// Location has the soft tint, which fades in and out, and a row under the pointer has the faint fill.
+/// Location has the soft tint, which fades in and out, and a row under the pointer has the faint fill. After the
+/// pointer rests on the row, its hover label opens over it; the label closes when the pointer leaves the row and when
+/// the row goes away.
 class SidebarRowView: SidebarPressView {
     let fill = RowFillView()
+    /// The row's hover label. The row gives it its title and what it shows.
+    let hoverLabel = RowHoverLabel()
     private var hovering = false
     private var trackingArea: NSTrackingArea?
 
     /// The row shows the Location, so it has the tint. A row sets it before it calls `showFill`.
     var showsLocation = false
+
+    /// False for a row of a closed card: the card keeps the row, which fades where it stands, and the row has gone away
+    /// for the user. It takes no pointer, and its hover label closes.
+    var isShown = true {
+        didSet {
+            guard isShown != oldValue, !isShown else { return }
+            hovering = false
+            showFill(fades: false)
+            hoverLabel.disappear()
+        }
+    }
 
     private var fillState: RowFillView.Fill { showsLocation ? .tint : hovering ? .hover : .clear }
 
@@ -52,13 +67,22 @@ class SidebarRowView: SidebarPressView {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        guard isShown else { return }
         hovering = true
         showFill(fades: false)
+        hoverLabel.pointer(inside: true)
     }
 
     override func mouseExited(with event: NSEvent) {
         hovering = false
         showFill(fades: false)
+        hoverLabel.pointer(inside: false)
+    }
+
+    /// A row that leaves the window, as when its Window or its card goes, closes its label.
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil { hoverLabel.disappear() }
     }
 
     #if DEBUG

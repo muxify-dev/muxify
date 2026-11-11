@@ -34,20 +34,26 @@ struct CardHint: Equatable {
     let target: QuickSwitchTarget
     /// The key that shows at rest. Empty when the card only keeps the place, for the Hint of a held modifier.
     let restKey: String
+    /// The keys of the modifier the user holds, which the badge shows in place of the key at rest. Empty for none.
+    let triggers: [KeyTrigger]
 
     /// Nil when the card has no Hint: its header then keeps no place for one.
     init?(_ target: QuickSwitchTarget, in hints: HintPresentation) {
         guard hints.restKey(for: target) != nil || !hints[target].isEmpty else { return nil }
         self.target = target
         restKey = hints.restKey(for: target) ?? ""
+        triggers = hints[target]
     }
+
+    /// The badge shows: the user holds the modifier of the Hint.
+    var showsBadge: Bool { !triggers.isEmpty }
 }
 
 /// A Session card of the AppKit Sessions list (ADR 0074). Closed, it is flat, with only its border; open, it is
 /// raised, with its Window and Pane rows under its header, and "N more…" after them when it holds rows back. A spine
 /// shows its mark, and the card that holds the Location's Window has the many-coloured border. It gives the
 /// accessibility rows of the SwiftUI card: `card-session-<id>` for the card, the parts of its Window rows, its Pane rows
-/// and "N more…", `session-<id>` for its header and the Hint's own row.
+/// and "N more…", `session-<id>` for its header, and a row for each Hint: the card's and its Window rows'.
 final class SessionCardView: NSView {
     let sessionID: String
     /// A press on the header.
@@ -72,7 +78,11 @@ final class SessionCardView: NSView {
     private let spine = CardSpineView()
     private let outline = CardOutlineView()
     private let selection = CardSelectionBorderView()
+    /// The card's Hint: its key at rest, or the badge while the user holds the Hint's modifier.
     private let hint = CardRestKeyView()
+    private let badge = SidebarHintView()
+    /// The Hints of the Window rows of an open card, by Window ID.
+    private var windowHints: [String: SidebarHintView] = [:]
     private var content: SessionCardContent?
     private var environment = SessionsListEnvironment()
     /// The card's top edge in the list's viewport. The header of an open card sticks to the viewport's top once the
@@ -88,8 +98,8 @@ final class SessionCardView: NSView {
         // The SwiftUI card cuts nothing off.
         clipsToBounds = false
         // From the back: the fill, the rows, the header, which stays above the rows that scroll under it, the spine,
-        // the border and the Hint.
-        subviews = [fill, rows, header, spine, outline, selection, hint]
+        // the border and the Hints.
+        subviews = chrome
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityIdentifier("card-session-" + sessionID)
@@ -99,6 +109,9 @@ final class SessionCardView: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     override var isFlipped: Bool { true }
+
+    /// The card's views from the back, without the Hints of its Window rows, which come after them.
+    private var chrome: [NSView] { [fill, rows, header, spine, outline, selection, hint, badge] }
 
     var isOpen: Bool { content?.isOpen ?? false }
 
@@ -118,7 +131,12 @@ final class SessionCardView: NSView {
         // The card that holds the Location's Window gives up its plain border for the coloured one.
         outline.isHidden = content.holdsSelection
         selection.isHidden = !content.holdsSelection
-        hint.show(content.hint, fontSize: environment.fontSize, scale: environment.displayScale)
+        // The badge ends where the key at rest ends, and grows over the title.
+        let held = content.hint.flatMap { $0.showsBadge ? $0 : nil }
+        hint.show(held == nil ? content.hint : nil, fontSize: environment.fontSize, scale: environment.displayScale)
+        badge.isHidden = held == nil
+        if let held { badge.show(.badge(held.triggers), target: held.target, fontSize: environment.fontSize, scale: environment.displayScale) }
+        showWindowHints()
         layOut()
         if came, !environment.reduceMotion { selection.turn() }
     }
@@ -151,6 +169,27 @@ final class SessionCardView: NSView {
         if rows.subviews != views { rows.subviews = views }
     }
 
+    /// Shows the Hint of each Window row of an open card: the badge while the user holds its modifier, else its key at
+    /// rest when the Config shows Window Hints at all times. A closed card shows none.
+    private func showWindowHints() {
+        var kept = windowHints
+        windowHints = [:]
+        if isOpen {
+            for case let row as WindowRowView in listed {
+                let target = QuickSwitchTarget.window(row.windowID)
+                let look: SidebarHintView.Look
+                if !environment.hints[target].isEmpty { look = .badge(environment.hints[target]) }
+                else if let key = environment.hints.restKey(for: target) { look = .key(key) }
+                else { continue }
+                let view = kept.removeValue(forKey: row.windowID) ?? SidebarHintView()
+                view.show(look, target: target, fontSize: environment.fontSize, scale: environment.displayScale)
+                windowHints[row.windowID] = view
+            }
+        }
+        let views = chrome + windowHints.keys.sorted().compactMap { windowHints[$0] }
+        if subviews != views { subviews = views }
+    }
+
     /// The card's height at `width`: its header, and under the header of an open card its rows.
     func height(width: CGFloat) -> CGFloat {
         header.height(width: width) + (isOpen ? CardRowsPadding.top + rowsHeight(width: width) + CardRowsPadding.bottom : 0)
@@ -181,8 +220,13 @@ final class SessionCardView: NSView {
         let stuck = isOpen ? StuckHeader.offset(cardTop: viewportTop, cardHeight: bounds.height, headerHeight: height) : 0
         header.frame = NSRect(x: 0, y: stuck, width: bounds.width, height: height)
         header.sticks = stuck > 0
-        // The header keeps the Hint's place, and the card draws the Hint over it.
-        hint.frame = header.hintPlace(width: bounds.width)?.offsetBy(dx: 0, dy: stuck) ?? .zero
+        // The header keeps the Hint's place, and the card draws the Hint over it: the key at rest in the place, and the
+        // badge with its end at the place's end and its middle on the place's middle.
+        let place = header.hintPlace(width: bounds.width)?.offsetBy(dx: 0, dy: stuck) ?? .zero
+        hint.frame = place
+        let size = badge.size, scale = environment.displayScale
+        badge.frame = NSRect(x: (place.maxX - size.width).rounded(toPixelsOf: scale), y: (place.midY - size.height / 2).rounded(toPixelsOf: scale),
+                             width: size.width, height: size.height)
     }
 
     private func layOut() {
@@ -199,14 +243,23 @@ final class SessionCardView: NSView {
         }
         spine.frame = NSRect(x: CardSpine.leading, y: CardSpine.verticalInset, width: CardSpine.width,
                              height: max(0, bounds.height - 2 * CardSpine.verticalInset))
+        // A Window row's Hint stands in the room the row keeps before its icon, from the row's top left corner.
+        for case let row as WindowRowView in listed {
+            guard let view = windowHints[row.windowID] else { continue }
+            view.frame = NSRect(origin: NSPoint(x: rows.frame.minX + row.frame.minX + WindowHintMetrics.inset,
+                                                y: rows.frame.minY + row.frame.minY + WindowHintMetrics.inset), size: view.size)
+        }
     }
 
     // MARK: Accessibility
 
-    /// The rows of an open card, each Window row by its parts, then the header and the Hint, which is a row of its own
-    /// because the header hides its children. SwiftUI lists the header after the rows, which it draws above them.
+    /// The rows of an open card, each Window row by its parts, then the header and the Hints, each a row of its own
+    /// because the header hides its children. SwiftUI lists the header after the rows, which it draws above them, and
+    /// the Hints by their identifiers.
     override func accessibilityChildren() -> [Any]? {
-        (isOpen ? listed.flatMap(\.accessibilityParts) : []) + [header] + (hint.isHidden ? [] : [hint])
+        let hints = ([hint, badge] + Array(windowHints.values)).filter { !$0.isHidden }
+            .sorted { $0.accessibilityIdentifier() < $1.accessibilityIdentifier() }
+        return (isOpen ? listed.flatMap(\.accessibilityParts) : []) + [header] + hints
     }
 
     /// VoiceOver reads the header first, then the rows and the Hint, as SwiftUI's sort priority orders the header.
@@ -221,6 +274,9 @@ final class SessionCardView: NSView {
     /// The turn of the border's colours and the fade of the spine that run now, for the tests.
     var turnAnimation: CAAnimation? { selection.turnAnimation }
     var spineFade: CAAnimation? { spine.fade }
+    /// The opacity of the lock or the Guest mark, and the title's frame in the header, for the tests.
+    var markOpacity: CGFloat { header.markOpacity }
+    var titleFrame: NSRect { header.titleFrame }
     #endif
 }
 
@@ -228,9 +284,13 @@ extension NSRect {
     var centre: NSPoint { NSPoint(x: midX, y: midY) }
 }
 
-/// The rows of a card. A closed card's rows take no click.
+/// The rows of a card. A closed card's rows take no click and no pointer.
 private final class CardRowsView: NSView {
-    var isOpen = false
+    var isOpen = false {
+        didSet {
+            for case let row as SidebarRowView in subviews { row.isShown = isOpen }
+        }
+    }
 
     override var isFlipped: Bool { true }
 
@@ -302,8 +362,10 @@ private final class SessionCardHeaderView: SidebarPressView {
         for part in [title, guest, summary] { part.scale = environment.displayScale }
         for part in [lock, bell] { part.scale = environment.displayScale }
         // A part that the card does not show now stays in its place, so it fades there when the card opens or closes.
-        guest.alphaValue = content.isGuest ? 1 : 0
-        lock.alphaValue = content.isLocked && !content.isGuest ? 1 : 0
+        // The badge of the card's Hint takes the mark's place while it shows.
+        let marks = content.hint?.showsBadge != true
+        guest.alphaValue = content.isGuest && marks ? 1 : 0
+        lock.alphaValue = content.isLocked && !content.isGuest && marks ? 1 : 0
         bell.alphaValue = showsBell ? 1 : 0
         summary.alphaValue = showsSummary ? 1 : 0
         arranged = nil
@@ -400,6 +462,11 @@ private final class SessionCardHeaderView: SidebarPressView {
         let line = frames(width: bounds.width).titleLine
         return window.convertPoint(toScreen: convert(NSPoint(x: line.midX, y: line.midY), to: nil))
     }
+
+    #if DEBUG
+    var markOpacity: CGFloat { (content.isGuest ? guest : lock).alphaValue }
+    var titleFrame: NSRect { title.frame }
+    #endif
 }
 
 /// A card's key at rest, on a faint capsule of the text colour: `CardRestKey` in SwiftUI. It is a row of its own to

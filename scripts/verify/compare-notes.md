@@ -55,7 +55,22 @@ The text differs on subpixels only, by less than 1 % in a channel.
 
 ## hints
 
+The Hints match pixel for pixel in all three shots: the Window rows' keys at rest, and the badges of the cards and of
+the Window rows, whose dark box, light border and continuous corners are the same pixels in both pictures. A card's
+badge ends where its key at rest ends and covers the end of the title, and the title keeps its lines. The keys of a
+badge are cut off at their frame, as SwiftUI cuts off a text, so the left edge of ⌘ shows no pixel past it.
+
+The capsule of a card's key at rest differs on its edge by at most 3 of 255, which cannot be seen: `CardRestKeyView`
+draws it with AppKit's path, and SwiftUI draws its `Capsule` with its own. The app icons differ on their outer edge by
+up to 10 of 255, in single rows and columns of device pixels; the `window-parts` pictures show the same. `SidebarLogo`
+draws the logo's image with AppKit, and SwiftUI's `Image` samples it in its own way; the Hints do not cause it. The
+fill of the open card: as in `cards`. Its coloured border: as in `card-marks`.
+
 ## hover
+
+The hover label opens in the same place in both pictures, with its title exactly on the row's title, and shows the
+same full title and the same detail line. Its pixels differ by at most 2 of 255: the label is translucent, and the open
+card's fill and coloured border under it differ as in `cards` and `card-marks`. The app icons: as in `hints`.
 
 ## more-rows
 

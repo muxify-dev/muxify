@@ -1,4 +1,5 @@
 import CoreGraphics
+import MuxifyCore
 
 /// Where a Window row puts its parts, for both versions of the Sessions list (ADR 0074). A length that grows with the
 /// Interface font size is its size at 12.
@@ -43,6 +44,9 @@ enum WindowRowText {
     static let tabSymbolLabel = "Globe"
 
     static func tabs(_ count: Int) -> String { "\(count) browser tab(s)" }
+
+    /// The detail line of the row's hover label: the Window's place in its Session and its path.
+    static func hoverDetail(_ window: TmuxWindow) -> String { "\(window.sessionName):\(window.index) — \(window.abbreviatedPath)" }
 
     /// The row's own identifier and value replace the badge's, so the label is where a client reads Zoom.
     static func panes(_ count: Int, isZoomed: Bool) -> String { isZoomed ? "\(count), Zoomed" : "\(count)" }
