@@ -26,3 +26,6 @@ fi
 # The Makefile and release script use this same SwiftPM checkout location.
 python3 "$ROOT/scripts/collect-notices.py" "$DST/ThirdPartyNotices/Yams.txt" \
   Yams "$ROOT/build/SourcePackages/checkouts/Yams"
+# Sparkle's checkout holds its license and those of the code it vendors; the app embeds its framework.
+python3 "$ROOT/scripts/collect-notices.py" "$DST/ThirdPartyNotices/Sparkle.txt" \
+  Sparkle "$ROOT/build/SourcePackages/checkouts/Sparkle"

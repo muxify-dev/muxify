@@ -347,6 +347,14 @@ _Avoid_: command (when you mean an Action on a thing), operation, menu item
 A short message at the bottom of an App Window that goes away after some seconds. A Confirmation Pill tells that a change ran, such as "Copied Path" or "Merged". An Explanation Pill tells why an Action changed nothing, or less than the user could expect. A Pill never takes Focus or clicks.
 _Avoid_: toast, banner, alert, Notification (when you mean the Pill)
 
+**Update Button**:
+The button in every App Window's header that shows an available update, or a check, download or install in progress, and opens the Update Popover. It shows nothing while Muxify is up to date, except for a few seconds after a check the user started. It is not a Pill.
+_Avoid_: update pill, badge, banner, Notification (when you mean the Update Button)
+
+**Update Popover**:
+The popover that the Update Button opens in its own App Window, with the update's version, size and release date and its choices: Skip, Later, and Install and Relaunch. Muxify never opens it by itself.
+_Avoid_: update dialog, update alert, update sheet
+
 **Command**:
 An entry in the Commands Source that starts an app operation or an Action on the current Pane, Window, Session, Topic or Tab. It uses the current item without requiring a search result first.
 _Avoid_: Action (when nothing is acted on), menu item, operation

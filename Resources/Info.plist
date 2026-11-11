@@ -48,5 +48,7 @@
 	<string>Programs you run in Muxify connect to servers and containers on your local network.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>SUEnableAutomaticChecks</key>
+	<false/>
 </dict>
 </plist>

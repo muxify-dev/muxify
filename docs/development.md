@@ -384,6 +384,27 @@ It stamps a copy in `build/package/`, so the Release product that
 `make install` also builds stays unstamped: a Debug or `make install` build
 never updates itself.
 
+### The updater
+
+The app links Sparkle 2 as a Swift package, at the version
+`scripts/sparkle-version.env` pins, and bundles its license notice as
+`ThirdPartyNotices/Sparkle.txt`; packaging refuses an app without it. The
+updater exists only when `Info.plist` has `MuxifyUpdateFeedBaseURL`, where it
+reads `<base>stable.xml`, or when `MUXIFY_UPDATE_FEED_URL` names a feed, which
+also turns it on in a Debug build. Without either there is no updater, no
+**Check for Updates** Command and no **Check for Updates…** menu item.
+`Sources/Muxify/Updates/` holds it: Sparkle's `SPUUpdater` with Muxify's own
+user driver, which feeds the one `UpdateModel` that every App Window's Update
+Button shows (ADR 0077). Each check and its result go to the Diagnostics log as
+`update:` lines.
+
+Sparkle's updater does not start on an `http` feed without `SUPublicEDKey`, so a
+Debug build carries the test key in `scripts/sparkle-debug-public-key.env`
+(`scripts/stamp-debug-update-key.sh`). Its private half,
+`scripts/verify/fixtures/sparkle-test-ed-key`, signs only test feeds.
+`make verify SUITE=update` serves a feed over `http` from its run directory
+and drives the Update Button and the Update Popover against it.
+
 ### Feeds and release secrets
 
 `scripts/write-feed.py` writes a Sparkle feed with exactly one item for one ZIP:

@@ -28,7 +28,8 @@ class ReleaseTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         (self.root / "scripts").mkdir()
         for name in ["bundle-ghostty-resources.sh", "collect-notices.py", "package-release.sh", "setup-ghostty.sh",
-                     "ghostty-version.env", "sparkle-public-key.env"]:
+                     "ghostty-version.env", "sparkle-public-key.env", "stamp-debug-update-key.sh",
+                     "sparkle-debug-public-key.env"]:
             shutil.copy(ROOT / "scripts" / name, self.root / "scripts" / name)
         self.env = dict(os.environ)
         for name in ["GHOSTTYKIT", "GHOSTTY_SRC", "GHOSTTY_RESOURCES", "GHOSTTY_NOTICES", "ZIG", "BUILD_NUMBER",
@@ -62,6 +63,8 @@ class ReleaseTests(unittest.TestCase):
             self.write(f"vendor/ghostty/resources/{relative}", "resource\n")
         self.write("vendor/ghostty/notices/Ghostty.txt", "Ghostty license\n")
         self.write("build/SourcePackages/checkouts/Yams/LICENSE", "Yams license\n")
+        self.write("build/SourcePackages/checkouts/Sparkle/LICENSE", "Sparkle license\n")
+        self.write("build/SourcePackages/checkouts/Sparkle/Vendor/ed25519-sparkle/license.txt", "ed25519 license\n")
         self.env["TARGET_BUILD_DIR"] = str(self.root / "products")
         self.env["UNLOCALIZED_RESOURCES_FOLDER_PATH"] = "Muxify.app/Contents/Resources"
 
@@ -86,7 +89,7 @@ class ReleaseTests(unittest.TestCase):
         (self.root / app / "Contents/Info.plist").write_bytes(plistlib.dumps({
             "CFBundleIdentifier": "dev.muxify.shell", "CFBundleVersion": "1", "CFBundleShortVersionString": "0.1.0",
         }))
-        for name in ["Ghostty", "Yams", "libyaml"]:
+        for name in ["Ghostty", "Yams", "libyaml", "Sparkle"]:
             self.write(f"{app}/Contents/Resources/ThirdPartyNotices/{name}.txt", "License\n")
         link = self.root / app / "Contents/Resources/notice-link"
         link.symlink_to("ThirdPartyNotices/Ghostty.txt")
@@ -205,6 +208,37 @@ if [ "$1" = -dvv ]; then echo "Authority=Muxify Release Signing" >&2; fi''')
             with self.subTest(name=name):
                 self.assertNotIn("SUPublicEDKey", text)
                 self.assertNotIn("MuxifyUpdateFeedBaseURL", text)
+
+    def stamp_fixture(self, configuration):
+        plist = self.root / "products/Muxify.app/Contents/Info.plist"
+        plist.parent.mkdir(parents=True)
+        plist.write_bytes(plistlib.dumps({"CFBundleIdentifier": "dev.muxify.shell"}))
+        self.env.update(CONFIGURATION=configuration, TARGET_BUILD_DIR=str(self.root / "products"),
+                        INFOPLIST_PATH="Muxify.app/Contents/Info.plist")
+        result = self.run_script("stamp-debug-update-key.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return plistlib.loads(plist.read_bytes())
+
+    def test_a_debug_build_carries_the_test_key_and_no_feed(self):
+        info = self.stamp_fixture("Debug")
+        pins = dict(line.split("=", 1) for line in (ROOT / "scripts/sparkle-debug-public-key.env").read_text().splitlines()
+                    if line and not line.startswith("#"))
+        self.assertEqual(info["SUPublicEDKey"], pins["SPARKLE_DEBUG_PUBLIC_ED_KEY"])
+        self.assertNotIn("MuxifyUpdateFeedBaseURL", info)
+        # The release key file is another key: the test key's private half is committed with the verify fixtures.
+        release = (ROOT / "scripts/sparkle-public-key.env").read_text()
+        self.assertNotIn(pins["SPARKLE_DEBUG_PUBLIC_ED_KEY"], release)
+        self.assertTrue((ROOT / "scripts/verify/fixtures/sparkle-test-ed-key").is_file())
+
+    def test_a_release_build_gets_no_test_key(self):
+        self.assertNotIn("SUPublicEDKey", self.stamp_fixture("Release"))
+
+    def test_package_requires_the_sparkle_notice(self):
+        self.package_fixture()
+        (self.root / self.BUILT_APP / "Contents/Resources/ThirdPartyNotices/Sparkle.txt").unlink()
+        result = self.run_script("package-release.sh", "v1.2.3")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Missing bundled license notices: Sparkle", result.stderr)
 
     def test_package_refuses_an_empty_or_malformed_public_key_before_building(self):
         self.package_fixture()
@@ -552,6 +586,16 @@ esac''')
         self.assertTrue((resources / "ghostty/shell-integration/zsh/.zshenv").is_file())
         self.assertEqual((resources / "ThirdPartyNotices/Ghostty.txt").read_text(), "Ghostty license\n")
         self.assertIn("Yams license", (resources / "ThirdPartyNotices/Yams.txt").read_text())
+        sparkle = (resources / "ThirdPartyNotices/Sparkle.txt").read_text()
+        self.assertIn("Sparkle license", sparkle)
+        self.assertIn("ed25519 license", sparkle)
+
+    def test_bundle_requires_the_sparkle_checkout(self):
+        self.bundle_fixture()
+        shutil.rmtree(self.root / "build/SourcePackages/checkouts/Sparkle")
+        result = self.run_script("bundle-ghostty-resources.sh")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Sparkle", result.stderr)
 
     def test_bundle_rejects_missing_themes_or_shell_integration(self):
         self.bundle_fixture()

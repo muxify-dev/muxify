@@ -109,7 +109,7 @@ codesign -dvv "$APP" 2>&1 | grep -Fx "Authority=$IDENTITY_NAME" >/dev/null || {
   echo "Muxify.app is not signed by \"$IDENTITY_NAME\"." >&2; exit 1;
 }
 [ "$(lipo -archs "$APP/Contents/MacOS/MuxifyApp")" = arm64 ]
-for notice in Ghostty Yams libyaml; do
+for notice in Ghostty Yams libyaml Sparkle; do
   [ -s "$APP/Contents/Resources/ThirdPartyNotices/$notice.txt" ] || {
     echo "Missing bundled license notices: $notice" >&2; exit 1;
   }

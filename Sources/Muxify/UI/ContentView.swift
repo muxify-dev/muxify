@@ -184,6 +184,11 @@ private struct HeaderBar: View {
                     // its maximum; it is cut only when the header has no other room left.
                     .layoutPriority(2)
             }
+            // The app's one update model, so every App Window shows the same update.
+            if let updates = UpdateModel.shared {
+                UpdateButton(model: updates)
+                    .layoutPriority(2)
+            }
             EnvironmentSelector(environments: store.remoteEnvironments, activeEnvironment: store.activeEnvironment,
                                 isConnected: store.isConnected, hasConnectionError: store.terminalMessage != nil,
                                 status: store.environmentStatus, onSelect: store.selectEnvironment)

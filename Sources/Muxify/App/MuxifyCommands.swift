@@ -153,6 +153,12 @@ import MuxifyCore
                 .keyboardShortcut(keybinds.firstTrigger(for: .toggleFocus)?.shortcut)
                 .disabled(store?.currentBrowser == nil)
         }
+        CommandGroup(after: .appInfo) {
+            // Only a build with an updater has it (UpdateFeed).
+            if let updates = UpdateModel.shared {
+                Button("Check for Updates…") { updates.check() }
+            }
+        }
         CommandGroup(after: .appSettings) {
             Button("Open Config") {
                 if let store { store.openConfig() } else { configStore.openInEditor() }
