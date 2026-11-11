@@ -165,4 +165,62 @@ final class SessionPathDiscoveryTests: XCTestCase {
         XCTAssertNil(missing?.text)
         XCTAssertNil(RemoteConfigFile.parse("Welcome!\n"))
     }
+
+    func testRemoteConfigOverridesOutput() {
+        let paths = ["~/.config/muxify/config.override.yaml", "/etc/muxify.yaml", "~/none.yaml"]
+        let output = "present\nui:\n  header_height: 40\n\nEND\npresent\nno newline\nEND\nmissing\n\nEND\n"
+        let texts = RemoteConfigFile.parseOverrides(output, paths: paths, end: "END")
+        XCTAssertEqual(texts?[paths[0]], "ui:\n  header_height: 40\n")
+        XCTAssertEqual(texts?[paths[1]], "no newline")
+        XCTAssertEqual(texts?.keys.contains(paths[2]), true)
+        XCTAssertEqual(texts?[paths[2]], .some(nil))
+        // Not one block per path: a failed read, which keeps what the App Window has.
+        XCTAssertNil(RemoteConfigFile.parseOverrides("present\nx\nEND\n", paths: paths, end: "END"))
+        XCTAssertNil(RemoteConfigFile.parseOverrides("Welcome!\n", paths: paths, end: "END"))
+        XCTAssertNil(RemoteConfigFile.parseOverrides("present\nx\nEND\ntrailing", paths: Array(paths.prefix(1)), end: "END"))
+    }
+
+    func testTheRemoteOverridesScriptReadsPathsFromTheRemoteHome() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".config/muxify"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        try "ui:\n  header_height: 40\n".write(to: home.appendingPathComponent(".config/muxify/local.yaml"), atomically: true, encoding: .utf8)
+        try "no newline".write(to: home.appendingPathComponent("abs.yaml"), atomically: true, encoding: .utf8)
+        let paths = ["~/.config/muxify/local.yaml", home.appendingPathComponent("abs.yaml").path, "~/missing.yaml"]
+        let end = "muxify-override-end-test"
+        let output = try Shell.run("/usr/bin/env", ["HOME=\(home.path)", "/bin/sh", "-c", RemoteConfigFile.overridesScript, "muxify"]
+                                   + RemoteConfigFile.overridesArguments(paths, end: end))
+        let texts = try XCTUnwrap(RemoteConfigFile.parseOverrides(output, paths: paths, end: end))
+        XCTAssertEqual(texts[paths[0]], "ui:\n  header_height: 40\n")
+        XCTAssertEqual(texts[paths[1]], "no newline")
+        XCTAssertEqual(texts[paths[2]], .some(nil))
+    }
+
+    func testARemoteConfigMergesItsOverridesResolvedOnTheRemote() throws {
+        let shown = "box:~/.config/muxify/config.yaml"
+        let text = "override: [~/machine.yaml, local.yaml, /etc/muxify.yaml, ../up.yaml]\nui:\n  header_height: 30\n"
+        let named = try RemoteConfigFile.load(text, shown: shown).get()
+        XCTAssertEqual(named.overrides, ["box:~/machine.yaml", "box:~/.config/muxify/local.yaml",
+                                         "box:/etc/muxify.yaml", "box:~/.config/up.yaml"])
+        XCTAssertEqual(named.headerHeight, 30)
+
+        let texts: [String: String?] = [
+            "box:~/machine.yaml": "ui:\n  header_height: 40\n",
+            "box:~/.config/muxify/local.yaml": "ui:\n  header_height: 50\n  bogus: 1\n",
+            "box:/etc/muxify.yaml": nil,
+        ]
+        let merged = try RemoteConfigFile.load(text, shown: shown, overrides: texts).get()
+        XCTAssertEqual(merged.headerHeight, 50)
+        XCTAssertTrue(merged.problems.contains { $0.path == "box:~/.config/muxify/local.yaml" && $0.line == 3 },
+                      "\(merged.problems)")
+
+        let broken = RemoteConfigFile.load(text, shown: shown, overrides: ["box:~/machine.yaml": "ui: [\n"])
+        guard case .failure(let error) = broken else { return XCTFail("a syntax error in an Override fails the load") }
+        XCTAssertEqual(error.problem.path, "box:~/machine.yaml")
+        var loaded = LoadedConfig()
+        loaded.update(with: RemoteConfigFile.load(text, shown: shown, overrides: ["box:~/machine.yaml": "ui:\n  header_height: 40\n"]))
+        loaded.update(with: broken)
+        XCTAssertEqual(loaded.config.headerHeight, 40)
+        XCTAssertEqual(loaded.problems.map(\.path), ["box:~/machine.yaml"])
+    }
 }

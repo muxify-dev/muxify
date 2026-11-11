@@ -2294,8 +2294,9 @@ final class WorkspaceStore {
 
     // MARK: - Config and Command Palettes
 
-    /// Reads the Remote Environment's own Config (ADR 0010): on connecting,
-    /// on Reload Config and when a Command Palette opens. Not watched.
+    /// Reads the Remote Environment's own Config (ADR 0010) and the Config
+    /// Overrides it names (ADR 0075): on connecting, on Reload Config and when
+    /// a Command Palette opens. Not watched.
     func loadRemoteConfig(then completion: (() -> Void)? = nil) {
         guard let environment = activeEnvironment, let connection, isConnected else {
             completion?()
@@ -2304,23 +2305,46 @@ final class WorkspaceStore {
         let current = generation
         connection.runScriptAsync(RemoteConfigFile.script) { [weak self] result in
             guard let self, self.generation == current else { return }
-            defer { completion?() }
             // A failed read keeps what this App Window has.
-            guard case .success(let output) = result, let file = RemoteConfigFile.parse(output) else { return }
+            guard case .success(let output) = result, let file = RemoteConfigFile.parse(output) else { completion?(); return }
             self.remoteConfigPath = file.path
             guard let text = file.text else {
                 if self.remoteConfig != nil { self.remoteConfig = nil }
+                completion?()
                 return
             }
             let shown = "\(environment.host):\(Paths.tildify(file.path, home: self.homeDirectory))"
-            var loaded = self.remoteConfig ?? LoadedConfig()
-            loaded.update(with: Config.load(path: shown, isRemote: true) { $0 == shown ? text : nil })
-            if loaded != self.remoteConfig {
-                for problem in loaded.problems { Diagnostics.report("config: \(problem)") }
-                self.remoteConfig = loaded
-                self.remoteProblemsDismissed = false
+            let config = RemoteConfigFile.load(text, shown: shown)
+            let host = "\(environment.host):"
+            guard case .success(let named) = config, !named.overrides.isEmpty,
+                  named.overrides.allSatisfy({ $0.hasPrefix(host) }) else {
+                self.applyRemoteConfig(config)
+                completion?()
+                return
+            }
+            // The Overrides are read on the remote, where `~/` is its home.
+            let paths = named.overrides.map { String($0.dropFirst(host.count)) }
+            let end = "muxify-override-end-\(UUID().uuidString)"
+            connection.runScriptAsync(RemoteConfigFile.overridesScript,
+                                      arguments: RemoteConfigFile.overridesArguments(paths, end: end)) { [weak self] result in
+                guard let self, self.generation == current else { return }
+                defer { completion?() }
+                guard case .success(let output) = result,
+                      let texts = RemoteConfigFile.parseOverrides(output, paths: paths, end: end) else { return }
+                let overrides = Dictionary(uniqueKeysWithValues: texts.map { (host + $0.key, $0.value) })
+                self.applyRemoteConfig(RemoteConfigFile.load(text, shown: shown, overrides: overrides))
             }
         }
+    }
+
+    /// A syntax error keeps the last good remote Config.
+    private func applyRemoteConfig(_ result: Result<Config, ConfigSyntaxError>) {
+        var loaded = remoteConfig ?? LoadedConfig()
+        loaded.update(with: result)
+        guard loaded != remoteConfig else { return }
+        for problem in loaded.problems { Diagnostics.report("config: \(problem)") }
+        remoteConfig = loaded
+        remoteProblemsDismissed = false
     }
 
     /// Reloads the local Config with Reload Config, then this App Window's

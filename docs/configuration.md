@@ -24,6 +24,59 @@ To build and start the Debug app with a Config, use `make run`:
 make run CONFIG=path/to/config.yaml
 ```
 
+## Config Overrides
+
+Keep one Config in git and use it on several machines, with the settings of
+one machine in a local file that only that machine has. The Config names that
+file under `override`:
+
+```yaml
+# ~/.config/muxify/config.yaml, in your dotfiles repository
+override: ~/.config/muxify/config.override.yaml
+sessions:
+  paths:
+    - path: ~/Dev/*
+ui:
+  font_size: 13
+```
+
+```yaml
+# ~/.config/muxify/config.override.yaml, on this machine only
+sessions:
+  paths:
+    - path: ~/Work/*
+ui:
+  header_height: 34
+```
+
+On this machine Muxify reads `ui` as `font_size: 13` and `header_height: 34`,
+and its only Session Path is `~/Work/*`. A machine without the file uses the
+Config as it is.
+
+`override` takes one path or a list of paths. A path that starts with `~/`
+starts in the home directory, and a relative path starts at the Config's
+directory. Muxify merges the files as if one Config had been written:
+
+- A mapping merges key by key.
+- A list or a single value in a Config Override replaces the Config's whole.
+  `sessions.paths` in an Override replaces the shared list, and
+  `keybindings.toggle_sidebar: []` clears that action.
+- Config Overrides apply in list order, and a later one wins.
+- A Config Override that does not exist is skipped with no problem.
+- Only the Config can name Config Overrides. An `override` key inside a Config
+  Override is a problem and is ignored.
+- A key that only a Config Override adds comes after the Config's keys, so for
+  a trigger that two actions list, the Config's action keeps it.
+- An Override can't remove a key to bring back Muxify's default. Write the
+  default value instead.
+
+A relative path inside a Config Override, such as `ghostty.config_file`, an
+`identity_file` or a `sessions.paths` path, starts at that Override's
+directory. A problem in a Config Override shows the Override's path and line.
+The banner lists problems by file, the Config first and then each Override in
+list order, and then by line. A syntax error in a Config Override keeps the last
+good Config, like one in the Config.
+
 ## Terminal environment
 
 Muxify sets `MUXIFY_TERMINAL=1` for its terminal processes, locally and on the
@@ -1405,6 +1458,12 @@ each time a palette opens; it doesn't watch it. A syntax error keeps the last
 good remote Config, and its problems show in that App Window with the host in
 front of the path. **Open Config** there opens the remote file in the remote's
 `$VISUAL` or `$EDITOR` in a new tmux Window.
+
+A remote Config can name [Config Overrides](#config-overrides) too. They are
+files on that machine: `~/` is the remote home, and a relative path starts at the
+remote Config's folder. Muxify reads them over the same SSH connection each time
+it reads the remote Config, and doesn't watch them. A missing one is skipped,
+and a syntax error in one keeps the last good remote Config.
 
 ## Browser and keybindings
 

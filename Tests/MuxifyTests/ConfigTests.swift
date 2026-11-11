@@ -1385,6 +1385,181 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.keybinds, Keybinds.defaults)
         XCTAssertEqual(config.problems, [])
     }
+
+    // MARK: Config Overrides (ADR 0075)
+
+    private let local = "/cfg/muxify/local.yaml"
+
+    func testOneOverrideOrAListAppliesOnTopAndALaterOneWins() throws {
+        let one = try load([
+            root: "override: local.yaml\nui:\n  header_height: 26\n  pulse: false",
+            local: "ui:\n  header_height: 28",
+        ])
+        XCTAssertEqual(one.headerHeight, 28)
+        XCTAssertFalse(one.pulse)
+        XCTAssertEqual(one.overrides, [local])
+        XCTAssertEqual(one.problems, [])
+
+        let home = NSHomeDirectory()
+        let list = try load([
+            root: "override: [~/work.yaml, /etc/muxify/this.yaml]\nui:\n  header_height: 26",
+            home + "/work.yaml": "ui:\n  header_height: 28\n  focus_marker: true",
+            "/etc/muxify/this.yaml": "ui:\n  header_height: 32",
+        ])
+        XCTAssertEqual(list.headerHeight, 32)
+        XCTAssertTrue(list.focusMarker)
+        XCTAssertEqual(list.overrides, [home + "/work.yaml", "/etc/muxify/this.yaml"])
+        XCTAssertEqual(list.problems, [])
+    }
+
+    func testAnOverrideMergesMappingsAndReplacesListsAndSingleValuesWhole() throws {
+        let config = try load([
+            root: """
+            override: local.yaml
+            sessions:
+              paths:
+                - path: ~/Dev
+                - path: ~/Shared
+            browser:
+              history: true
+              vim_keys: false
+            keybindings:
+              toggle_sidebar_mode: [ctrl+cmd+t, shift+cmd+y]
+            """,
+            local: """
+            sessions:
+              paths:
+                - path: ~/Machine
+            browser:
+              history: false
+            keybindings:
+              toggle_sidebar_mode: []
+            """,
+        ])
+        XCTAssertEqual(config.sessionRoots.map(\.path), ["~/Machine"])
+        XCTAssertFalse(config.browser.history)
+        XCTAssertFalse(config.browser.vimKeys)
+        XCTAssertNil(config.keybinds.firstTrigger(for: .toggleSidebarMode))
+        XCTAssertNil(config.keybinds.action(for: trigger("ctrl+cmd+t"), focus: nil))
+        XCTAssertNil(config.keybinds.action(for: trigger("alt+cmd+t"), focus: nil))
+        XCTAssertEqual(config.problems, [])
+    }
+
+    func testAKeyOnlyAnOverrideAddsComesAfterTheConfigsKeysForAContestedTrigger() throws {
+        let config = try load([
+            root: "override: local.yaml\nkeybindings:\n  toggle_browser: cmd+e",
+            local: "keybindings:\n  toggle_sidebar_mode: cmd+e\n  toggle_browser: [cmd+e]",
+        ])
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+e"), focus: nil), .toggleBrowser)
+        XCTAssertEqual(config.problems, [ConfigProblem(path: local, line: 2, message: "cmd+e is already bound to toggle_browser")])
+    }
+
+    func testAMissingOverrideIsSkippedAndABadOrNestedOverrideIsAProblem() throws {
+        var reads: [String] = []
+        let files = [
+            root: "override:\n  - missing.yaml\n  - 1\n  - \"\"\n  - a: b\n  - local.yaml",
+            local: "ui:\n  header_height: 28\noverride: /cfg/other.yaml",
+            "/cfg/other.yaml": "ui:\n  header_height: 32",
+        ]
+        let config = try Config.load(path: root) { reads.append($0); return files[$0] }.get()
+        XCTAssertEqual(config.headerHeight, 28)
+        XCTAssertEqual(config.overrides, ["/cfg/muxify/missing.yaml", local])
+        XCTAssertFalse(reads.contains("/cfg/other.yaml"))
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 3, message: "override: expected a path or a list of paths"),
+            ConfigProblem(path: root, line: 4, message: "override: expected a path or a list of paths"),
+            ConfigProblem(path: root, line: 5, message: "override: expected a path or a list of paths"),
+            ConfigProblem(path: local, line: 3, message: "override: only the Config can name Config Overrides"),
+        ])
+
+        let mapping = try load([root: "override:\n  path: local.yaml", local: "ui:\n  header_height: 28"])
+        XCTAssertEqual(mapping.headerHeight, 30)
+        XCTAssertEqual(mapping.overrides, [])
+        XCTAssertEqual(mapping.problems, [ConfigProblem(path: root, line: 2, message: "override: expected a path or a list of paths")])
+    }
+
+    func testASyntaxErrorInAnOverrideShowsItsPathAndKeepsTheLastGoodConfig() throws {
+        var loaded = LoadedConfig()
+        var override = "ui:\n  header_height: 28"
+        func update() {
+            loaded.update(with: Config.load(path: root) { [root: "override: local.yaml", self.local: override][$0] })
+        }
+        update()
+        XCTAssertEqual(loaded.config.headerHeight, 28)
+        let good = loaded.config
+
+        override = "ui:\n  header_height: 32\n  header_height: 26"
+        update()
+        XCTAssertEqual(loaded.config, good)
+        XCTAssertEqual(loaded.problems.map(\.path), [local])
+        XCTAssertEqual(loaded.problems.map(\.line), [2])
+    }
+
+    func testAProblemInAnOverrideShowsItsPathAndARelativePathStartsAtItsFolder() throws {
+        let override = "/cfg/local/muxify.yaml"
+        let config = try load([
+            root: "override: ../local/muxify.yaml\nui:\n  header_height: 26\nnope: 1",
+            override: "zap: 1\nghostty:\n  config_file: ghostty\nsessions:\n  paths:\n    - path: projects\nzip: 2",
+            "/cfg/local/ghostty": "",
+        ])
+        XCTAssertEqual(config.ghosttyConfigFile, "/cfg/local/ghostty")
+        XCTAssertEqual(config.sessionRoots.map(\.path), ["/cfg/local/projects"])
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 4, message: "unknown section \"nope\""),
+            ConfigProblem(path: override, line: 1, message: "unknown section \"zap\""),
+            ConfigProblem(path: override, line: 7, message: "unknown section \"zip\""),
+        ])
+    }
+
+    func testTheTemplateShowsACommentedOverride() {
+        XCTAssertTrue(Config.template.contains("# override: ~/.config/muxify/config.override.yaml"))
+    }
+
+    func testTheConfigStoreReloadsWhenAnOverrideOrTheOverrideListChanges() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let path = directory.appendingPathComponent("config.yaml").path
+        let local = directory.appendingPathComponent("local.yaml").path
+        let other = directory.appendingPathComponent("other.yaml").path
+        var time = 1_000_000.0
+        // A distinct modification time for each write, so two writes within the clock's resolution still differ.
+        func write(_ text: String, to file: String) throws {
+            try text.write(toFile: file, atomically: true, encoding: .utf8)
+            time += 1
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: time)], ofItemAtPath: file)
+        }
+        try write("override: local.yaml\nui:\n  header_height: 26", to: path)
+        let store = ConfigStore(path: path)
+        XCTAssertEqual(store.config.overrides, [local])
+        XCTAssertTrue(store.watchedFiles.contains(path))
+        XCTAssertTrue(store.watchedFiles.contains(local), "a missing Override is watched")
+        XCTAssertFalse(store.reloadIfFilesChanged())
+
+        try write("ui:\n  header_height: 28", to: local)
+        XCTAssertTrue(store.reloadIfFilesChanged(), "creating an Override reloads")
+        XCTAssertEqual(store.config.headerHeight, 28)
+        XCTAssertFalse(store.reloadIfFilesChanged())
+
+        try write("ui:\n  header_height: 30", to: local)
+        XCTAssertTrue(store.reloadIfFilesChanged(), "editing an Override reloads")
+        XCTAssertEqual(store.config.headerHeight, 30)
+
+        try FileManager.default.removeItem(atPath: local)
+        XCTAssertTrue(store.reloadIfFilesChanged(), "deleting an Override reloads")
+        XCTAssertEqual(store.config.headerHeight, 26)
+
+        try write("override: other.yaml\nui:\n  header_height: 26", to: path)
+        XCTAssertTrue(store.reloadIfFilesChanged(), "changing the override list reloads")
+        XCTAssertTrue(store.watchedFiles.contains(other))
+        XCTAssertFalse(store.watchedFiles.contains(local))
+        // The reload stamped the old list before it read; the next look settles on the new one.
+        store.reloadIfFilesChanged()
+        XCTAssertFalse(store.reloadIfFilesChanged())
+        try write("ui:\n  header_height: 32", to: other)
+        XCTAssertTrue(store.reloadIfFilesChanged(), "the next look watches the new list")
+        XCTAssertEqual(store.config.headerHeight, 32)
+    }
 }
 
 final class ConfigFileSetTests: XCTestCase {

@@ -221,14 +221,19 @@ public struct Config: Equatable {
     /// The Ghostty config file the terminal loads on top of Ghostty's
     /// default files, as an absolute path.
     public var ghosttyConfigFile: String?
+    /// `override`: the Config Override paths the Config names, resolved, in list order, missing ones included
+    /// (ADR 0075).
+    public var overrides: [String] = []
     /// In file order; Local is always available and is never declared here.
     public var remoteEnvironments: [RemoteEnvironment] = []
     public var problems: [ConfigProblem] = []
 
-    /// Reads the Config at `path`. A missing file gives the defaults. A value
-    /// that cannot apply is skipped and recorded in `problems`; a syntax error
-    /// fails the whole read. A Remote Environment's Config skips the sections
-    /// about the app itself (ADR 0010).
+    /// Reads the Config at `path`, with the Config Overrides it names merged on
+    /// top (ADR 0075). A missing file gives the defaults. A value that cannot
+    /// apply is skipped and recorded in `problems`; a syntax error in any of the
+    /// files fails the whole read. A Remote Environment's Config is at
+    /// `host:path`, skips the sections about the app itself (ADR 0010), and its
+    /// Override paths resolve on that machine as `host:path`.
     public static func load(path: String, isRemote: Bool = false,
                      fontFamilies: @escaping () -> [String] = { SidebarTypography.fontFamilies },
                      read: (String) -> String?) -> Result<Config, ConfigSyntaxError> {
@@ -241,9 +246,11 @@ public struct Config: Equatable {
         }
         guard let root else { return .success(Config()) }
         return withoutActuallyEscaping(read) { read in
-            var reader = ConfigReader(path: path, isRemote: isRemote, read: read, fontFamilies: fontFamilies)
-            reader.readSections(root)
-            return .success(reader.config)
+            MergedConfigTree.merge(root, path: path, isRemote: isRemote, read: read).map { tree in
+                var reader = ConfigReader(tree: tree, isRemote: isRemote, read: read, fontFamilies: fontFamilies)
+                reader.readSections(tree.root)
+                return reader.config
+            }
         }
     }
 
@@ -256,6 +263,13 @@ public struct Config: Equatable {
         }
         return """
         # Muxify Config. Muxify reloads it when it changes.
+        #
+        # # Config Overrides: files whose settings apply on top of this one, such
+        # # as a file only this machine has. A mapping merges key by key, and a
+        # # list or a single value replaces this file's. One path or a list; a
+        # # later one wins. A missing file is skipped. ~/ is the home directory;
+        # # a relative path starts at the directory of this file.
+        # override: ~/.config/muxify/config.override.yaml
         #
         # ghostty:
         #   # The Ghostty config the terminal loads after Ghostty's default
@@ -572,7 +586,7 @@ public struct LoadedConfig: Equatable {
     }
 }
 
-private extension ConfigSyntaxError {
+extension ConfigSyntaxError {
     init(path: String, _ error: Error) {
         switch error as? YamlError {
         case let .scanner(context, message, mark, _), let .parser(context, message, mark, _), let .composer(context, message, mark, _):
@@ -586,10 +600,10 @@ private extension ConfigSyntaxError {
     }
 }
 
-/// Turns the YAML nodes of one Config file into a Config, skipping what
-/// cannot apply.
+/// Turns the YAML nodes of the Config and its Config Overrides into a Config,
+/// skipping what cannot apply.
 private struct ConfigReader {
-    let path: String
+    let tree: MergedConfigTree
     let isRemote: Bool
     let read: (String) -> String?
     let fontFamilies: () -> [String]
@@ -632,8 +646,8 @@ private struct ConfigReader {
     private var palettes: [CommandPaletteConfig]?
     private var claims: [Claim<Claimant>] = []
 
-    init(path: String, isRemote: Bool, read: @escaping (String) -> String?, fontFamilies: @escaping () -> [String]) {
-        self.path = path
+    init(tree: MergedConfigTree, isRemote: Bool, read: @escaping (String) -> String?, fontFamilies: @escaping () -> [String]) {
+        self.tree = tree
         self.isRemote = isRemote
         self.read = read
         self.fontFamilies = fontFamilies
@@ -661,7 +675,11 @@ private struct ConfigReader {
     static let appSections: Set<String> = ["ghostty", "browser", "diagnostics", "remote_environments"]
 
     mutating func readSections(_ root: Node) {
+        config.overrides = tree.overridePaths
+        config.problems = tree.problems
         for (name, key, value) in entries(of: root, "the Config") {
+            // Read before the sections, by MergedConfigTree.
+            if name == "override" { continue }
             if isRemote, Self.appSections.contains(name) { continue }
             guard let section = Self.sections[name] else {
                 problem(at: key, "unknown section \"\(name)\"")
@@ -670,9 +688,12 @@ private struct ConfigReader {
             section(&self, value)
         }
         resolveKeybindings()
-        // In file order, although conflicts are found after every section.
+        // In file order, although conflicts are found after every section: the Config, then each Config Override.
         config.problems = config.problems.enumerated()
-            .sorted { ($0.element.line, $0.offset) < ($1.element.line, $1.offset) }
+            .sorted {
+                (tree.order(of: $0.element.path), $0.element.line, $0.offset)
+                    < (tree.order(of: $1.element.path), $1.element.line, $1.offset)
+            }
             .map(\.element)
     }
 
@@ -713,7 +734,8 @@ private struct ConfigReader {
             let depth = count(values["depth"], "sessions.paths.depth", atLeast: 0) ?? 0
             let displayDepth = count(values["display_depth"], "sessions.paths.display_depth", atLeast: 1) ?? 1
             guard config.problems.count == problemCount, let path else { continue }
-            config.sessionRoots.append(SessionPathRoot(path: written(path), depth: depth, displayDepth: displayDepth))
+            config.sessionRoots.append(SessionPathRoot(path: written(path, at: values["path"] ?? item), depth: depth,
+                                                       displayDepth: displayDepth))
         }
     }
 
@@ -727,10 +749,16 @@ private struct ConfigReader {
         return number
     }
 
-    /// `~` stays, so each machine reads it as its own home folder. A relative path starts at the Config's folder.
-    private func written(_ path: String) -> String {
+    /// `~` stays, so each machine reads it as its own home folder. A relative path starts at the folder of the file
+    /// that `node` was written in.
+    private func written(_ path: String, at node: Node) -> String {
         if path == "~" || path.hasPrefix("~/") { return path }
-        return ConfigFileSet.resolve(path, relativeTo: (self.path as NSString).deletingLastPathComponent)
+        return ConfigFileSet.resolve(path, relativeTo: directory(of: node))
+    }
+
+    /// The folder of the file `node` was written in: the Config's, or a Config Override's.
+    private func directory(of node: Node) -> String {
+        (tree.file(of: node) as NSString).deletingLastPathComponent
     }
 
     mutating func readSessionPathAliases(_ node: Node) {
@@ -752,7 +780,7 @@ private struct ConfigReader {
                 problem(at: value, "sessions.aliases.\(pattern): expected a nonempty one-line alias")
                 continue
             }
-            let repositoryPath = written(pattern.trimmingCharacters(in: .whitespacesAndNewlines))
+            let repositoryPath = written(pattern.trimmingCharacters(in: .whitespacesAndNewlines), at: key)
             let written = repositoryPath.hasPrefix("~/") ? "~/" + (String(repositoryPath.dropFirst(2)) as NSString).standardizingPath : repositoryPath
             guard config.sessionAliases[written] == nil else {
                 problem(at: key, "sessions.aliases: \(pattern) already has an alias")
@@ -1082,7 +1110,7 @@ private struct ConfigReader {
                     problem(at: value, "ghostty.config_file: expected a path")
                     continue
                 }
-                let file = ConfigFileSet.resolve(path, relativeTo: (self.path as NSString).deletingLastPathComponent)
+                let file = ConfigFileSet.resolve(path, relativeTo: directory(of: value))
                 // Kept although missing, so the watcher sees the file appear.
                 config.ghosttyConfigFile = file
                 if read(file) == nil { problem(at: value, "ghostty.config_file \(file): not found") }
@@ -1141,7 +1169,7 @@ private struct ConfigReader {
             if let value = values["identity_file"], value.null == nil {
                 if let path = string(value), !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                    path.rangeOfCharacter(from: .controlCharacters) == nil {
-                    identityFile = ConfigFileSet.resolve(path, relativeTo: (self.path as NSString).deletingLastPathComponent)
+                    identityFile = ConfigFileSet.resolve(path, relativeTo: directory(of: value))
                 } else {
                     problem(at: value, "Remote Environment identity_file: expected a local path")
                 }
@@ -1707,6 +1735,6 @@ private struct ConfigReader {
     }
 
     private mutating func problem(at node: Node, _ message: String) {
-        config.problems.append(ConfigProblem(path: path, line: node.mark?.line ?? 1, message: message))
+        config.problems.append(ConfigProblem(path: tree.file(of: node), line: node.mark?.line ?? 1, message: message))
     }
 }
