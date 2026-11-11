@@ -1,6 +1,7 @@
 #if DEBUG
 import AppKit
 import MuxifyCore
+import os
 
 /// Lets scripts/verify drive a Debug build through its accessibility tree.
 /// The script writes `command.json` (with a fresh nonce) into the folder
@@ -109,6 +110,10 @@ enum TestDriver {
             pending = Drag(nonce: nonce, command: command)
             return
         }
+        if command["command"] as? String == "stall", command["busy"] as? Bool == true {
+            pending = Spin(nonce: nonce, seconds: command["seconds"] as? Double ?? 1)
+            return
+        }
         if command["command"] as? String == "scroll", command["by"] != nil {
             pending = ScrollSteps(nonce: nonce, command: command)
             return
@@ -141,6 +146,27 @@ enum TestDriver {
     }
 
     private static var pending: Steps?
+
+    /// A `stall` with `busy`: a thread off the main thread spins for `seconds`, a Burst of CPU for Diagnostics to
+    /// catch with no freeze. It answers when the spin ends.
+    private final class Spin: Steps {
+        let nonce: String
+        private let done = OSAllocatedUnfairLock(initialState: false)
+
+        init(nonce: String, seconds: Double) {
+            self.nonce = nonce
+            let until = ProcessInfo.processInfo.systemUptime + seconds
+            let done = done
+            Thread.detachNewThread {
+                while ProcessInfo.processInfo.systemUptime < until {}
+                done.withLock { $0 = true }
+            }
+        }
+
+        func step() -> [String: Any]? {
+            done.withLock { $0 } ? ["rows": [], "pressed": true] : nil
+        }
+    }
 
     /// A `click`, `drag` or `hover` that comes while the Sidebar slides between Topics and Sessions waits until the
     /// page is at rest: these aim at the centre of the target's frame, and a dump mid-slide gives a frame that the

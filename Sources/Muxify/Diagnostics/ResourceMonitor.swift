@@ -4,16 +4,19 @@ import OSLog
 
 /// Reads the app's CPU and its process groups' (`ProcessGroupsMeter`) each second, and each minute writes a `minute`
 /// record: the average and peak per-second CPU, the main thread's busy share, memory, each group's figures, threads
-/// and open files, the user's input and what was moving. Then it copies the errors the system logged for the app. A minute over half a core also samples the process, at most
-/// every ten minutes.
+/// and open files, the user's input and what was moving. Then it copies the errors the system logged for the app.
+/// Each second also goes to the Burst detector (`BurstDetector`): a Burst is sampled into `burst-<time>.txt`, and
+/// when it ends, or Diagnostics stops or the app quits while it runs, it writes a `burst` record.
 enum ResourceMonitor {
     private static let queue = DispatchQueue(label: "dev.muxify.resource-monitor", qos: .utility)
-    private static let busyCPU = 50.0
     private static let minuteLength: TimeInterval = 60
+    private static let burstSampleSeconds = 5
     private static var timer: DispatchSourceTimer?
     private static var groups = ProcessGroupsMeter()
     private static var minute = MinuteAggregate(start: reading())
-    private static var lastCPUSample = -TimeInterval.infinity
+    /// The minute's input so far: the input is taken each second, for the Burst detector too.
+    private static var minuteInput = InputCounts()
+    private static var bursts = BurstDetector()
     private static var systemLogRead = Date()
 
     static func start() {
@@ -22,6 +25,8 @@ enum ResourceMonitor {
         queue.async {
             groups = ProcessGroupsMeter()
             minute = MinuteAggregate(start: reading())
+            minuteInput = InputCounts()
+            bursts = BurstDetector()
             systemLogRead = Date()
         }
         let timer = DispatchSource.makeTimerSource(queue: queue)
@@ -31,20 +36,33 @@ enum ResourceMonitor {
         self.timer = timer
     }
 
+    /// Writes the Burst that runs now, if any, as `open=true`.
     static func stop() {
         timer?.cancel()
         timer = nil
+        closeBurst()
+    }
+
+    /// Writes the Burst that runs now, if any, as `open=true`: Diagnostics stops or the app quits. On the main thread.
+    static func closeBurst() {
+        guard let open = queue.sync(execute: { bursts.close() }) else { return }
+        Diagnostics.write(open.record)
     }
 
     /// One `getrusage` and one read of the process groups a second; the rest once a minute.
     private static func tick() {
+        let previous = minute.last
         let now = reading()
         minute.add(now)
+        let secondInput = DiagnosticsInput.take()
+        minuteInput += secondInput
+        if let second = BurstSecond(from: previous, to: now, end: Date(), input: secondInput) { watchBursts(second) }
         guard minute.elapsed >= minuteLength - 0.5 else { return }
         let ended = minute
         minute = MinuteAggregate(start: now)
         let files = ((try? FileManager.default.contentsOfDirectory(atPath: "/dev/fd").count) ?? 1) - 1
-        let memory = Double(footprint()) / 1_048_576, threads = threadCount(), input = DiagnosticsInput.take()
+        let memory = Double(footprint()) / 1_048_576, threads = threadCount(), input = minuteInput
+        minuteInput = InputCounts()
         // What was moving is the main thread's state, read there once a minute.
         DispatchQueue.main.async {
             let moving = MainActor.assumeIsolated { Diagnostics.movingState() }
@@ -54,10 +72,23 @@ enum ResourceMonitor {
             Diagnostics.write(record.record)
         }
         copySystemLog()
-        if ended.cpuAverage > busyCPU, now.uptime - lastCPUSample > 600 {
-            lastCPUSample = now.uptime
-            ProcessSampler.sample(reason: "cpu", seconds: 5)
+    }
+
+    /// Feeds the Burst detector. A Burst takes what was moving from the main thread when it starts, and its samples
+    /// run off this queue, so the seconds keep coming while one records. A sample that another sample, such as a
+    /// freeze's, holds back is asked for again the next second.
+    private static func watchBursts(_ second: BurstSecond) {
+        let step = bursts.add(second)
+        if step.started {
+            DispatchQueue.main.async {
+                let moving = MainActor.assumeIsolated { Diagnostics.movingState() }
+                queue.async { bursts.setMoving(moving) }
+            }
         }
+        if step.wantsSample, let name = ProcessSampler.start(reason: "burst", seconds: burstSampleSeconds) {
+            bursts.sampled(name)
+        }
+        if let ended = step.ended { Diagnostics.write(ended.record) }
     }
 
     private static func reading() -> MinuteAggregate.Reading {

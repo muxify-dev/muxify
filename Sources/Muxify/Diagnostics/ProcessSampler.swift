@@ -16,12 +16,30 @@ enum ProcessSampler {
 
     /// Blocks the calling thread for `seconds`, so call it off the main thread. Skips when a sample already runs.
     static func sample(reason: String, seconds: Int) {
+        guard let name = claim(reason) else { return }
+        record(name, reason: reason, seconds: seconds)
+    }
+
+    /// Starts a sample on a utility queue and returns its file name at once, so the caller's queue keeps its pace.
+    /// Nil when a sample already runs.
+    static func start(reason: String, seconds: Int) -> String? {
+        guard let name = claim(reason) else { return nil }
+        DispatchQueue.global(qos: .utility).async { record(name, reason: reason, seconds: seconds) }
+        return name
+    }
+
+    /// Takes the one-at-a-time lock and names the file; nil when a sample already runs.
+    private static func claim(_ reason: String) -> String? {
         guard running.withLock({ running -> Bool in
             defer { running = true }
             return !running
-        }) else { return }
+        }) else { return nil }
+        return "\(reason)-\(stamp.string(from: Date())).txt"
+    }
+
+    /// Runs the claimed sample to its end, then lets the next one run.
+    private static func record(_ name: String, reason: String, seconds: Int) {
         defer { running.withLock { $0 = false } }
-        let name = "\(reason)-\(stamp.string(from: Date())).txt"
         let url = Diagnostics.folder.appendingPathComponent(name)
         Diagnostics.write("\(reason): sampling the process for \(seconds) s to \(name)")
         if let problem = run("/usr/bin/sample", [String(getpid()), String(seconds), "-mayDie", "-file", url.path]) {

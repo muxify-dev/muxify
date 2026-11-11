@@ -436,3 +436,7 @@ _Avoid_: performance log, telemetry, metrics, profiling (when you mean Diagnosti
 **Diagnostics log**:
 The files Diagnostics writes to `~/Library/Logs/Muxify/`: one log per day, and the samples taken during freezes and Bursts.
 _Avoid_: performance log, muxify.log (when you mean all of it), log (alone)
+
+**Burst**:
+A stretch of at least a few seconds in which the app uses a large share of a core. The Diagnostics log records each one with what the user did and what was moving during it.
+_Avoid_: spike, CPU spike, hot spot

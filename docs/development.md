@@ -187,7 +187,7 @@ The app then writes to `~/Library/Logs/Muxify/`:
   `on` and `off` when the Config turns it on or off, with the crash, hang and
   CPU reports macOS wrote for the app since the newest day file was last
   written; each freeze of the main thread over a second; a `minute` record
-  each minute (below); Muxify's own messages and the errors the system logged
+  each minute and a `burst` record for each Burst (below); Muxify's own messages and the errors the system logged
   for the app; and the app, window, Space, screen and sleep changes.
 - A record is one line that a program can read: the timestamp, a kind word
   (`minute`, `burst`, `freeze`, `digest` or `limit`), then space-separated
@@ -239,6 +239,34 @@ The app then writes to `~/Library/Logs/Muxify/`:
 
   The `window` to `session_rows` fields are the state at the end of the
   minute, in the focused App Window.
+- A Burst is a stretch of high CPU that a minute's average hides, such as
+  10–20 seconds of quick Sidebar swipes at about 42%. The app finds them in
+  its per-second CPU (`BurstDetector` in MuxifyCore; the thresholds are
+  constants there):
+  - A Burst starts when the app is at or over 30% of one core for 3 seconds
+    in a row, and ends after 3 seconds in a row below it. A shorter dip is
+    part of the Burst.
+  - When a Burst starts, the app takes a 5-second `sample` of every thread
+    into `burst-<time>.txt`, off the main thread, and another every 10
+    minutes while the Burst lasts. It takes at most one Burst sample a
+    minute and 40 a local day; these caps start again at each launch. A
+    sample the caps or a running sample hold back is tried again each second
+    while the Burst lasts; a Burst that never gets one is still recorded.
+  - When the Burst ends, it writes one `burst` record:
+    - `start`: its local start time, as `2026-11-11T17:07:19.250`;
+      `length`: in seconds, to the end of its last second over the
+      threshold.
+    - `cpu.avg` and `cpu.peak`: the app's average and highest one-second
+      CPU over the Burst, in % of one core.
+    - `main.busy.peak`: the main run loop's awake share of the Burst's
+      busiest second, in %.
+    - `input`: the user's input over the Burst, in the `minute` record's
+      form.
+    - `window` to `session_rows`: what was moving when the app found the
+      Burst, 3 seconds in, as in the `minute` record.
+    - `samples`: the sample file names, comma-separated, or `none`.
+    - `open=true` only when Diagnostics stopped or the app quit while the
+      Burst ran.
 - When a day's file opens, every Diagnostics log file last written over 7 days
   ago is deleted, the older `muxify.log` and `muxify.1.log` too.
 - Once a day's file passes 50 MB, it writes one `limit` line, and for the rest
@@ -250,12 +278,13 @@ The app then writes to `~/Library/Logs/Muxify/`:
   an hour, so it is off by default. The `sidebar_pager_scroll` verify suite
   turns it on.
 - `freeze-<time>.txt`: a `sample` of every thread, started a second into a
-  freeze, and `cpu-<time>.txt`, started after a minute over half a core. The
-  folder keeps the newest 20.
+  freeze, and `burst-<time>.txt`, taken during a Burst (above). The folder
+  keeps the newest 20.
 
 To find the trouble, start with
 `grep -E "freeze|LEAK|stuck|report|system log|limit" ~/Library/Logs/Muxify/muxify-*.log`.
-`grep " minute " ~/Library/Logs/Muxify/muxify-*.log` gives the minutes.
+`grep " minute " ~/Library/Logs/Muxify/muxify-*.log` gives the minutes, and
+`grep " burst " ~/Library/Logs/Muxify/muxify-*.log` the Bursts.
 A verify run writes these files into its sandbox's `logs/`, never into yours.
 
 ## Beta releases

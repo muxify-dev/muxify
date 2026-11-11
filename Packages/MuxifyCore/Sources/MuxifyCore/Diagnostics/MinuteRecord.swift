@@ -18,6 +18,14 @@ public struct InputCounts: Equatable, Sendable {
 
     public var isIdle: Bool { self == InputCounts() }
 
+    public static func += (counts: inout InputCounts, more: InputCounts) {
+        counts.keys += more.keys
+        counts.clicks += more.clicks
+        counts.scrolls += more.scrolls
+        counts.sidebarSwitches += more.sidebarSwitches
+        counts.paletteOpens += more.paletteOpens
+    }
+
     private static let names = ["keys", "clicks", "scrolls", "sidebar_switches", "palette_opens"]
     private var counts: [Int] { [keys, clicks, scrolls, sidebarSwitches, paletteOpens] }
 

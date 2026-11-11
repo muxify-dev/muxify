@@ -1,5 +1,5 @@
 """Diagnostics: on by default, the app logs into the sandbox's logs folder, one Diagnostics log file a day, with a
-`minute` record each minute (docs/development.md)."""
+`minute` record each minute and a `burst` record for each Burst (docs/development.md)."""
 
 import re
 import time
@@ -62,6 +62,34 @@ class Diagnostics(unittest.TestCase):
         self.assertGreaterEqual(float(fields['cpu.tmux.peak']), float(fields['cpu.tmux.avg']), line)
         # The app's commands, such as its tmux control client, are read too.
         self.assertIn('cpu.commands.avg', fields, line)
+
+    def test_a_burst_is_sampled_and_recorded_when_it_ends(self):
+        # A busy stall spins a thread off the main thread: a Burst with no freeze. Launch can make a Burst of its own
+        # that takes the minute's one Burst sample, so the spin goes on until the Burst's sample is written.
+        def finished_samples():
+            return [path for path in self.logs.glob('burst-*.txt') if 'Binary Images:' in path.read_text(errors='replace')]
+        deadline = time.monotonic() + 70
+        while not finished_samples() and time.monotonic() < deadline:
+            self.s.act('stall', seconds=5, busy=True)
+        sample = wait(finished_samples, 'no finished Burst sample in %s' % self.logs, 10)[0]
+
+        def bursts():
+            records = [line for line in self.log_text().splitlines() if re.match(r'\S+ \S+ burst ', line)]
+            return [dict(word.split('=', 1) for word in line.split(' ')[3:]) for line in records
+                    if sample.name in line.split(' samples=', 1)[-1].split(' ')[0].split(',')]
+        # The Burst ends 3 seconds after the spin.
+        fields = wait(bursts, 'no burst record names %s in %s' % (sample.name, self.logs), 20)[0]
+        for key in ['start', 'length', 'cpu.avg', 'cpu.peak', 'main.busy.peak', 'input', 'window', 'working_marks',
+                    'marks_move', 'sidebar', 'topic_cards', 'session_rows', 'samples']:
+            self.assertIn(key, fields, fields)
+        self.assertNotIn('open', fields, fields)
+        self.assertGreaterEqual(float(fields['length']), 3, fields)
+        self.assertGreaterEqual(float(fields['cpu.peak']), 30, fields)
+        self.assertGreaterEqual(float(fields['cpu.peak']), float(fields['cpu.avg']), fields)
+        self.assertEqual('idle', fields['input'], fields)
+        self.assertEqual('topics', fields['sidebar'], fields)
+        self.assertIn('Thread_', sample.read_text(errors='replace'))
+        self.assertEqual([], list(self.logs.glob('cpu-*.txt')), 'the app still takes the old cpu- sample')
 
     def test_muxify_message_reaches_the_log(self):
         wait(lambda: 'unknown key "sessions.diagnostics_probe"' in self.log_text(), 'no Config problem in the log', 10)

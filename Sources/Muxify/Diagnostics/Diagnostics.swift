@@ -6,7 +6,7 @@ import os
 /// ~/Library/Logs/Muxify/muxify-YYYY-MM-DD.log a day (`DiagnosticsLog`), what helps explain a freeze, a crash or a
 /// slow app: each freeze, with a sample of the process taken during it; a `minute` record each minute (CPU, the
 /// main thread's busy share, memory, the same for its commands, WebKit and the tmux server, the user's input and
-/// what was moving); Muxify's own
+/// what was moving); a `burst` record for each Burst of high CPU, with samples taken during it; Muxify's own
 /// messages and the errors the system logs for it; crash and hang reports left since the last run; and the app,
 /// window, Space and sleep changes around them. `diagnostics.display_links` adds the display-link probe. See
 /// "Diagnostics" in docs/development.md.
@@ -65,9 +65,10 @@ enum Diagnostics {
     /// A sample that already runs still finishes into the folder.
     private static func stop() {
         guard log.withLock({ $0 }) != nil else { return }
+        // A Burst that runs now is written before the `off` line.
+        ResourceMonitor.stop()
         write("off")
         DisplayLinkProbe.stop()
-        ResourceMonitor.stop()
         FreezeWatch.stop()
         DiagnosticsInput.stop()
         for (center, token) in observers { center.removeObserver(token) }
@@ -148,7 +149,10 @@ enum Diagnostics {
         }
         on(NSApplication.didBecomeActiveNotification) { _ in "app active\(DisplayLinkProbe.summary)" }
         on(NSApplication.didResignActiveNotification) { _ in "app inactive" }
-        on(NSApplication.willTerminateNotification) { _ in "quit" }
+        on(NSApplication.willTerminateNotification) { _ in
+            ResourceMonitor.closeBurst()
+            return "quit"
+        }
         on(NSApplication.didChangeScreenParametersNotification) { _ in "screen parameters changed: \(NSScreen.screens.count) screens" }
         on(NSWindow.didChangeOcclusionStateNotification) { app($0).map { "occlusion changed: \(describe($0))" } }
         on(NSWindow.didChangeScreenNotification) { app($0).map { "window screen changed: \(describe($0))" } }
