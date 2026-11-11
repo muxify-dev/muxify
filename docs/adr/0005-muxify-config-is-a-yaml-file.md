@@ -1,5 +1,7 @@
 # Muxify's Config is a YAML file, and its keybinds win over Ghostty's
 
+> **Update 2026-11-11:** The Config can name Config Overrides under `override`, files whose settings merge on top of it, so the "Includes" option below is no longer dropped. See [0075](0075-a-config-can-name-overrides-that-merge-on-top-of-it.md).
+
 Muxify's desktop settings live only in its Config, `$XDG_CONFIG_HOME/muxify/config.yaml`: one YAML file, with `snake_case` keys grouped in sections. The UI never writes or overrides a setting. It can open the file and show which keybinds are in effect. What is open or shown now (Sidebar and Browser visibility and Browser Tabs) stays UI state and is never in the Config. The Config also names the Ghostty config the terminal uses (`ghostty.config_file`). Muxify loads it the same way as `ghostty --config-file=`: Ghostty's default files first, then that file on top.
 
 ```yaml

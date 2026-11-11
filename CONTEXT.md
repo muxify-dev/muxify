@@ -410,8 +410,12 @@ _Avoid_: diff base, compare target, marked commit
 ### Configuration
 
 **Config**:
-The Muxify config file on a machine: settings, in YAML sections, that control how Muxify itself behaves. An App Window uses the Config of its Active Environment's machine, or the local one when that machine has none. It never holds what is open or shown now.
+The Muxify config file on a machine, with the Config Overrides it names merged on top: settings, in YAML sections, that control how Muxify itself behaves. An App Window uses the Config of its Active Environment's machine, or the local one when that machine has none. It never holds what is open or shown now.
 _Avoid_: settings, preferences, Muxify settings
+
+**Config Override**:
+A file that the Config names under `override`, whose settings apply on top of the Config's. A mapping merges key by key, and a list or a single value replaces the Config's whole. A later Config Override wins over an earlier one. A Config Override that does not exist is skipped, so one Config can serve every machine and each machine adds its own.
+_Avoid_: include, local config, machine config, override config
 
 **Format**:
 A Config string with #{…} placeholders that sets a Sidebar line or a Window row part from the Topic, Session, Window or Pane that the row shows. Muxify expands it, not tmux. Titles and Summaries give plain text. Window left and right parts can also give the current app icon or macOS SF Symbols.
