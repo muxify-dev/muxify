@@ -21,7 +21,6 @@ struct CLIProcessRunner: CLICommandRunning {
         if quiet { process.standardError = FileHandle.nullDevice }
         let exit = try process.start()
         let data = output.fileHandleForReading.readDataToEndOfFile()
-        exit.wait()
-        return CLICommandResult(status: process.terminationStatus, output: String(decoding: data, as: UTF8.self))
+        return CLICommandResult(status: exit.wait().status, output: String(decoding: data, as: UTF8.self))
     }
 }

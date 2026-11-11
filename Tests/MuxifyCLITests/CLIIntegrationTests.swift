@@ -1,4 +1,8 @@
+#if canImport(Darwin)
 import Darwin
+#else
+import Glibc
+#endif
 import Foundation
 import XCTest
 @testable import MuxifyCLI
@@ -1256,7 +1260,12 @@ final class CLIIntegrationTests: XCTestCase {
 
     /// The CLI beside this test bundle: `muxify-app-cli` from the app's Xcode build, `muxify` from `swift test`.
     private var cli: URL {
+        #if os(macOS)
         let folder = Bundle(for: Self.self).bundleURL.deletingLastPathComponent()
+        #else
+        // On Linux the tests are an executable beside the products, not a .xctest bundle.
+        let folder = URL(fileURLWithPath: "/proc/self/exe").resolvingSymlinksInPath().deletingLastPathComponent()
+        #endif
         let appCLI = folder.appendingPathComponent("muxify-app-cli")
         return FileManager.default.isExecutableFile(atPath: appCLI.path) ? appCLI : folder.appendingPathComponent("muxify")
     }
@@ -1402,10 +1411,11 @@ private final class TopicSandbox {
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
-        try process.run()
+        // start(), not isRunning: on Linux, Foundation sees the exit of a tmux that started the server only when the
+        // server exits.
+        let exit = try process.start()
         let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        while process.isRunning { usleep(5_000) }
-        guard process.terminationStatus == 0 else { throw CLIError("tmux \(arguments.joined(separator: " ")): \(text)") }
+        guard exit.wait().status == 0 else { throw CLIError("tmux \(arguments.joined(separator: " ")): \(text)") }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -1440,17 +1450,17 @@ private final class TopicSandbox {
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
-        try process.run()
+        let exit = try process.start()
         let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        while process.isRunning { usleep(5_000) }
-        guard process.terminationStatus == 0 else { throw CLIError("git \(arguments.joined(separator: " ")): \(text)") }
+        guard exit.wait().status == 0 else { throw CLIError("git \(arguments.joined(separator: " ")): \(text)") }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// A Pane in `session` that runs a program, as an Agent does, with the pane options that its Extension and
     /// Muxify write. `status` nil is an Agent before its first turn.
     func fakeAgent(in session: String, status: String?, unread: Bool, conversation: String? = nil) throws -> PaneID {
-        let id = try tmux(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=" + session + ":", "sleep 600"])
+        // exec: Linux's sh, dash, would otherwise stay the Pane's command in front of sleep.
+        let id = try tmux(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=" + session + ":", "exec sleep 600"])
         guard let pane = PaneID(rawValue: id) else { throw CLIError("split-window printed no Pane id: \(id)") }
         try tmux(["set-option", "-p", "-t", id, "@muxify_agent", "claude"])
         if let status { try tmux(["set-option", "-p", "-t", id, "@muxify_agent_status", status]) }
@@ -1488,8 +1498,14 @@ private final class TopicSandbox {
         let mode = control ? "1" : "0"
         let before = try tmux(["list-clients", "-F", "#{client_tty}"]).split(separator: "\n")
         let process = Process()
+        let command = [tmuxBinary] + (control ? ["-C"] : []) + ["attach-session", "-t", "=" + session]
         process.executableURL = URL(fileURLWithPath: "/usr/bin/script")
-        process.arguments = ["-q", "/dev/null", tmuxBinary] + (control ? ["-C"] : []) + ["attach-session", "-t", "=" + session]
+        #if os(macOS)
+        process.arguments = ["-q", "/dev/null"] + command
+        #else
+        // util-linux's script runs one shell command line, and -e returns its exit status.
+        process.arguments = ["-qec", command.map(Tmux.shellQuote).joined(separator: " "), "/dev/null"]
+        #endif
         var environment = tmuxEnvironment
         environment["TERM"] = "xterm-256color"
         process.environment = environment

@@ -13,7 +13,7 @@ MUXIFY_DEVELOPMENT_TEAM ?=
 # during dependency scanning". A fixed length makes the hash the same.
 XCODEBUILD_SETTINGS := diagnostic_message_length=0
 
-.PHONY: all setup tools project build test test-release verify verify-gate run install release host-cli clean
+.PHONY: all setup tools project build test test-linux test-release verify verify-gate run install release host-cli clean
 
 all: build
 
@@ -42,6 +42,11 @@ test: project
 	# xcodebuild gives a test only the variables named TEST_RUNNER_<name>, as <name>.
 	TEST_RUNNER_MUXIFY_REQUIRE_TMUX="$$MUXIFY_REQUIRE_TMUX" xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) test
+
+# swift test for the CLI and MuxifyCore on Linux, in Docker (OrbStack on a Mac) with the Swift image of make host-cli,
+# tmux and git, and MUXIFY_REQUIRE_TMUX=1. TEST_LINUX_PLATFORM=linux/amd64 picks another architecture than the host's.
+test-linux:
+	./scripts/test-linux.sh
 
 test-release:
 	python3 -m unittest discover -s Tests/ReleaseTests -v

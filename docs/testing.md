@@ -11,6 +11,13 @@ and a verified host key.
 MuxifyCore package: Topic records and plans, Worktrees, the Config and tmux
 parsing. It needs neither Xcode nor libghostty.
 
+`make test-linux` runs both of these on Linux, in Docker (OrbStack on a Mac)
+with the Swift image of `make host-cli`, git, tmux built from the release that
+Homebrew gives the Mac, and `MUXIFY_REQUIRE_TMUX=1`. It uses the host's
+architecture; `TEST_LINUX_PLATFORM=linux/amd64` picks another. When the host's
+resolver does not answer for the Ubuntu mirrors, add
+`TEST_LINUX_DOCKER_ARGS="--dns 1.1.1.1"`.
+
 ## Live SSH test
 
 For an OrbStack Ubuntu VM (use its actual Linux username):

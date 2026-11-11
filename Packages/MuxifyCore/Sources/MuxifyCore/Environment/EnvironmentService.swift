@@ -271,8 +271,10 @@ public struct EnvironmentService: Sendable {
     /// Our failure types say what went wrong in Topic words. A Foundation error only says what the system
     /// refused, and its own description is `Error Domain=… Code=…`, so it gets the state folder and a plain reason.
     private func message(_ error: Error) -> String {
-        // POSIXError and CocoaError have no description of their own; an NSError has one, but it is the raw form.
-        if !(type(of: error) is NSObject.Type), let ours = (error as Any) as? CustomStringConvertible { return ours.description }
+        // An NSError's description is the raw form, and so is POSIXError's and CocoaError's on Linux; on macOS they
+        // have none.
+        if !(type(of: error) is NSObject.Type), !(error is POSIXError), !(error is CocoaError),
+           let ours = (error as Any) as? CustomStringConvertible { return ours.description }
         let foundation = error as NSError
         var reason = foundation.domain == NSPOSIXErrorDomain ? String(cString: strerror(Int32(foundation.code)))
                                                             : foundation.localizedDescription
