@@ -1631,15 +1631,19 @@ commands for browser work, and teaches the Topic, Window and Agent commands.
 
 ## Diagnostics
 
-When the app freezes, crashes or uses too much CPU, turn on Diagnostics to log
-what happened to `~/Library/Logs/Muxify/`. It is off by default:
+Diagnostics logs what helps explain a freeze, a crash or too much CPU to
+`~/Library/Logs/Muxify/`, one file a day, kept for 7 days. It is on by default.
+These are the defaults:
 
 ```yaml
 diagnostics:
   enabled: true
+  # The display-link probe: a line for each AppKit animation.
+  display_links: false
 ```
 
-It applies when you save the Config, with no restart.
+`enabled: false` turns it off. It applies when you save the Config, with no
+restart.
 [Diagnostics](development.md#diagnostics) lists what the log holds and how to
 read it.
 

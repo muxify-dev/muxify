@@ -1,11 +1,12 @@
 import AppKit
 import os
 
-/// On while the Config's `diagnostics.enabled` is true. Then it writes to ~/Library/Logs/Muxify/muxify.log what
-/// helps explain a freeze, a crash or a slow app: each freeze, with a sample of the process taken during it; CPU
-/// and memory each minute; Muxify's own messages and the errors the system logs for it; crash and hang reports
-/// left since the last run; and the app, window, Space and sleep changes around them. See "Diagnostics" in
-/// docs/development.md.
+/// On unless the Config's `diagnostics.enabled` is false. Then it writes to the Diagnostics log, one
+/// ~/Library/Logs/Muxify/muxify-YYYY-MM-DD.log a day (`DiagnosticsLog`), what helps explain a freeze, a crash or a
+/// slow app: each freeze, with a sample of the process taken during it; CPU and memory each minute; Muxify's own
+/// messages and the errors the system logs for it; crash and hang reports left since the last run; and the app,
+/// window, Space and sleep changes around them. `diagnostics.display_links` adds the display-link probe. See
+/// "Diagnostics" in docs/development.md.
 enum Diagnostics {
     /// Any thread writes; the main thread opens and closes it.
     private static let log = OSAllocatedUnfairLock<DiagnosticsLog?>(initialState: nil)
@@ -25,10 +26,13 @@ enum Diagnostics {
             .appendingPathComponent("Logs/Muxify", isDirectory: true)
     }()
 
-    /// Follows the Config's `diagnostics.enabled`, at launch and on each reload of the Config.
-    static func setEnabled(_ enabled: Bool) {
+    /// Follows the Config's `diagnostics.enabled` and `diagnostics.display_links`, at launch and on each reload of
+    /// the Config. The display-link probe runs only while both are true.
+    static func setEnabled(_ enabled: Bool, displayLinks: Bool) {
         defer { configured = true }
-        if enabled { start() } else { stop() }
+        guard enabled else { return stop() }
+        start()
+        if displayLinks, log.withLock({ $0 }) != nil { DisplayLinkProbe.start() } else { DisplayLinkProbe.stop() }
     }
 
     private static func start() {
@@ -50,7 +54,6 @@ enum Diagnostics {
         observeAppState()
         FreezeWatch.start()
         ResourceMonitor.start()
-        DisplayLinkProbe.start()
     }
 
     /// A sample that already runs still finishes into the folder.

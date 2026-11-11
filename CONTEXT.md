@@ -428,3 +428,11 @@ _Avoid_: template, pattern, label string, tmux format (when you mean ours)
 **Ghostty config**:
 The Ghostty config files that control the terminal: its fonts, theme and terminal keybinds.
 _Avoid_: terminal config
+
+**Diagnostics**:
+Muxify's record of its own health on the Local machine: CPU and memory, freezes, Bursts, what the user did and what was moving at the time. It is on unless the Config turns it off.
+_Avoid_: performance log, telemetry, metrics, profiling (when you mean Diagnostics)
+
+**Diagnostics log**:
+The files Diagnostics writes to `~/Library/Logs/Muxify/`: one log per day, and the samples taken during freezes and Bursts.
+_Avoid_: performance log, muxify.log (when you mean all of it), log (alone)

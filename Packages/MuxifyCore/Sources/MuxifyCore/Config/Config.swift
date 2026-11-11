@@ -46,9 +46,21 @@ public struct Config: Equatable {
         public var history = true
     }
 
-    /// `diagnostics.enabled`: the app logs freezes, CPU and errors to a file (docs/development.md). It is about the
-    /// app on this Mac, so only the Local Config sets it.
-    public var diagnostics = false
+    /// The `diagnostics` section: the app logs freezes, CPU and errors to a file (docs/development.md). It is about
+    /// the app on this Mac, so only the Local Config sets it.
+    public struct Diagnostics: Equatable {
+        /// `diagnostics.enabled`: on by default.
+        public var enabled = true
+        /// `diagnostics.display_links`: the display-link probe, off by default, since it fills the log fast.
+        public var displayLinks = false
+
+        public init(enabled: Bool = true, displayLinks: Bool = false) {
+            self.enabled = enabled
+            self.displayLinks = displayLinks
+        }
+    }
+
+    public var diagnostics = Diagnostics()
 
     public struct Hints: Equatable {
         public var holdDelay: TimeInterval? = 0.35
@@ -480,8 +492,12 @@ public struct Config: Equatable {
         #
         # diagnostics:
         #   # Logs each freeze, with a sample of the app taken during it, CPU
-        #   # and memory each minute, and errors to ~/Library/Logs/Muxify.
-        #   enabled: false
+        #   # and memory each minute, and errors to ~/Library/Logs/Muxify,
+        #   # one file a day, kept for 7 days. On by default.
+        #   enabled: true
+        #   # Logs each AppKit animation and the display links it leaves
+        #   # running. It fills the log fast, so it is off by default.
+        #   display_links: false
         #
         # notifications:
         #   manual_read: false
@@ -979,15 +995,15 @@ private struct ConfigReader {
 
     mutating func readDiagnostics(_ node: Node) {
         for (name, key, value) in entries(of: node, "diagnostics") {
-            guard name == "enabled" else {
+            guard name == "enabled" || name == "display_links" else {
                 problem(at: key, "unknown key \"diagnostics.\(name)\"")
                 continue
             }
             guard value.tag == Yams.Tag(.bool), let enabled = value.bool else {
-                problem(at: value, "diagnostics.enabled: expected a boolean")
+                problem(at: value, "diagnostics.\(name): expected a boolean")
                 continue
             }
-            config.diagnostics = enabled
+            if name == "enabled" { config.diagnostics.enabled = enabled } else { config.diagnostics.displayLinks = enabled }
         }
     }
 

@@ -1,4 +1,5 @@
-"""Diagnostics: with `diagnostics.enabled` in the Config, the app logs into the sandbox's logs folder (docs/development.md)."""
+"""Diagnostics: on by default, the app logs into the sandbox's logs folder, one Diagnostics log file a day
+(docs/development.md)."""
 
 import re
 import time
@@ -20,11 +21,14 @@ class Diagnostics(unittest.TestCase):
         s.launch()
 
     def log_text(self):
-        path = self.logs/'muxify.log'
-        return path.read_text() if path.exists() else ''
+        """The day files in order, so a run across local midnight reads on into the next day's file."""
+        return ''.join(path.read_text(errors='replace') for path in sorted(self.logs.glob('muxify-*.log')))
 
     def test_launch_is_logged_in_the_sandbox(self):
-        wait(lambda: 'launch: pid %d' % self.s.pid in self.log_text(), 'no launch line in %s' % (self.logs/'muxify.log'), 10)
+        today = self.logs/time.strftime('muxify-%Y-%m-%d.log')
+        wait(lambda: today.exists() and 'launch: pid %d' % self.s.pid in today.read_text(errors='replace'),
+             'no launch line in %s' % today, 10)
+        self.assertFalse((self.logs/'muxify.log').exists(), 'the app still writes muxify.log')
 
     def test_muxify_message_reaches_the_log(self):
         wait(lambda: 'unknown key "sessions.diagnostics_probe"' in self.log_text(), 'no Config problem in the log', 10)
@@ -46,6 +50,15 @@ class Diagnostics(unittest.TestCase):
         threads = re.split(r'\n    \d+ Thread_', sample[sample.index('Call graph:'):])
         main = threads[1]
         self.assertIn('sleepForTimeInterval', main, 'the sample does not show the main thread in the stall')
+
+    def test_display_link_probe_is_off_unless_the_config_turns_it_on(self):
+        wait(lambda: 'launch: pid %d' % self.s.pid in self.log_text(), 'no launch line in the log', 10)
+        # While the probe runs, a freeze line ends with the leaked display links it counted, beside its own
+        # `animation #` and `display link` lines (sidebar_pager_scroll).
+        self.s.act('stall', seconds=1.3)
+        wait(lambda: 'freeze: main thread busy for 1.' in self.log_text(), 'no freeze line in the log', 10)
+        probe = [line for line in self.log_text().splitlines() if ' animation #' in line or ' display link' in line]
+        self.assertEqual([], probe, 'the display-link probe wrote lines with no diagnostics.display_links')
 
     def test_the_config_turns_it_off_and_on_without_a_restart(self):
         wait(lambda: 'launch: pid %d' % self.s.pid in self.log_text(), 'no launch line in the log', 10)

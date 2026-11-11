@@ -12,7 +12,8 @@ scroll: the list lands on its card at once. So the check proves the end result a
 
 - While Topics shows, the app shows the last Session's Window, so the hidden Sessions list must scroll far down.
 - The hidden list rests. The check counts the scroll animations in the Diagnostics log, the `animation #` lines of
-  DisplayLinkProbe (Diagnostics/DisplayLinkProbe.swift). This count caught the freeze: a list that never reaches its
+  DisplayLinkProbe (Diagnostics/DisplayLinkProbe.swift), which the suite's Config turns on with
+  `diagnostics.display_links`. This count caught the freeze: a list that never reaches its
   target starts one every frame. After the scroll, no new one may start over 2 s. A scroll that does animate may start
   some, so the check needs none to start and needs no Reduce Motion skip. A change that removes the probe must give the
   check another way to count them, or this half proves nothing.
@@ -38,19 +39,21 @@ class SidebarPagerScroll(unittest.TestCase):
     def setUpClass(cls):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(s.teardown)
-        (s.root/'config/muxify/config.yaml').write_text('diagnostics:\n  enabled: true\n')
-        cls.log = s.root/'logs/muxify.log'
+        # Diagnostics is on by default; the display-link probe that writes the `animation #` lines is not.
+        (s.root/'config/muxify/config.yaml').write_text('diagnostics:\n  display_links: true\n')
+        cls.logs = s.root/'logs'
         cls.sessions, cls.windows = [], []
         for number in range(SESSIONS):
             session = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'pager-scroll-%02d' % number, SHELL)
             cls.sessions.append(session)
             cls.windows.append(s.tmux('display-message', '-p', '-t', session + ':', '#{window_id}'))
         s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics'])
-        wait(lambda: 'launch: pid %d' % s.pid in cls.log_text(), 'no launch line in %s' % cls.log, 10)
+        wait(lambda: 'launch: pid %d' % s.pid in cls.log_text(), 'no launch line in %s' % cls.logs, 10)
 
     @classmethod
     def log_text(cls):
-        return cls.log.read_text(errors='replace') if cls.log.exists() else ''
+        """The day files in order, so a run across local midnight reads on into the next day's file."""
+        return ''.join(path.read_text(errors='replace') for path in sorted(cls.logs.glob('muxify-*.log')))
 
     def scroll_animations(self):
         return [line for line in self.log_text().splitlines() if ' animation #' in line]

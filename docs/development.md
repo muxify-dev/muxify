@@ -168,33 +168,43 @@ matters only in shells outside that server. See
 
 ## Diagnostics
 
-To find out why the app froze, crashed or used too much CPU, turn on
-Diagnostics in the Config. It works in Release builds too, and costs nothing
-while it is off. Like the rest of the Config, it applies when you save the
-file, with no restart.
+Diagnostics is on by default, in Release builds too, so that the evidence for a
+freeze, a crash or too much CPU exists before anyone notices the problem. The
+Local Config can turn it off; a remote Config can neither turn it on nor off.
+Like the rest of the Config, it applies when you save the file, with no
+restart.
 
 ```yaml
 diagnostics:
-  enabled: true
+  enabled: false        # on by default
+  display_links: true   # off by default
 ```
 
 The app then writes to `~/Library/Logs/Muxify/`:
 
-- `muxify.log`: the launch, or `on` and `off` when the Config turns it on or
-  off, with the crash, hang and CPU reports macOS wrote for the app since the
-  log was last written; each freeze of the main thread over a
-  second; CPU, memory, threads and open files each minute; Muxify's own
-  messages and the errors the system logged for the app; and the app, window,
-  Space, screen and sleep changes. Its `animation` and `display link` lines
-  follow each AppKit animation and the display links it leaves running:
-  thousands of those links freeze the app on a Space switch. It keeps one
-  older file, `muxify.1.log`, of up to 20 MB.
+- `muxify-YYYY-MM-DD.log`, one Diagnostics log file a local day: the first line
+  after local midnight goes into the next day's file. It holds the launch, or
+  `on` and `off` when the Config turns it on or off, with the crash, hang and
+  CPU reports macOS wrote for the app since the newest day file was last
+  written; each freeze of the main thread over a second; CPU, memory, threads
+  and open files each minute; Muxify's own messages and the errors the system
+  logged for the app; and the app, window, Space, screen and sleep changes.
+- When a day's file opens, every Diagnostics log file last written over 7 days
+  ago is deleted, the older `muxify.log` and `muxify.1.log` too.
+- Once a day's file passes 50 MB, it writes one `limit` line, and for the rest
+  of that day takes only the `minute`, `burst`, `freeze` and `digest` lines.
+- `diagnostics.display_links: true` adds the display-link probe. Its
+  `animation` and `display link` lines follow each AppKit animation and the
+  display links it leaves running: thousands of those links freeze the app on
+  a Space switch. It writes a line for each animation and once filled 20 MB in
+  an hour, so it is off by default. The `sidebar_pager_scroll` verify suite
+  turns it on.
 - `freeze-<time>.txt`: a `sample` of every thread, started a second into a
   freeze, and `cpu-<time>.txt`, started after a minute over half a core. The
   folder keeps the newest 20.
 
 To find the trouble, start with
-`grep -E "freeze|LEAK|stuck|report|system log" ~/Library/Logs/Muxify/muxify.log`.
+`grep -E "freeze|LEAK|stuck|report|system log|limit" ~/Library/Logs/Muxify/muxify-*.log`.
 A verify run writes these files into its sandbox's `logs/`, never into yours.
 
 ## Beta releases
