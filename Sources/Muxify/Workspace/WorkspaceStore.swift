@@ -1152,7 +1152,10 @@ final class WorkspaceStore {
 
     /// The Sidebar mode the user picked. `TopicsModel.mode` is the one shown, because the Config can turn a mode off.
     var sidebarMode = SidebarMode(rawValue: UserDefaults.standard.string(forKey: "sidebarWorkView") ?? "") ?? .topics {
-        didSet { UserDefaults.standard.set(sidebarMode.rawValue, forKey: "sidebarWorkView") }
+        didSet {
+            UserDefaults.standard.set(sidebarMode.rawValue, forKey: "sidebarWorkView")
+            if sidebarMode != oldValue { DiagnosticsInput.countUserAction(\.sidebarSwitches) }
+        }
     }
     /// The open Session cards, by name (names survive tmux server restarts, ids don't). Sessions mode and the
     /// No Topic card in Topics mode share them, so a card opened in either is open in both.
@@ -1602,6 +1605,10 @@ final class WorkspaceStore {
             homeDirectory = snapshot.homeDirectory ?? NSHomeDirectory()
         }
         serverID = snapshot.serverID
+        if !isRemote {
+            // The server ID is `#{pid}:#{start_time}`.
+            ProcessGroupSources.setLocalTmuxServer(snapshot.serverRunning ? snapshot.serverID.flatMap { pid_t($0.prefix { $0 != ":" }) } : nil)
+        }
         if serverRunning, !snapshot.serverRunning {
             browsers.values.forEach { $0.tearDown() }
             browsers.removeAll()

@@ -98,9 +98,13 @@ final class SidebarPagerTests: XCTestCase {
     private let model = PagerModel()
     private let seen = Seen()
     private var window: NSWindow!
+    private var counted = false
 
     override func setUp() async throws {
         _ = NSApplication.shared
+        // Diagnostics turns the body counter on in the app; no Diagnostics runs here.
+        counted = BodyCount.isOn
+        BodyCount.isOn = true
         // Values a page reads that the window would not give it: the theme's forced scheme and a Sidebar setting.
         let root = Pager(model: model, seen: seen)
             .environment(\.wrapsCardTitles, true)
@@ -119,6 +123,7 @@ final class SidebarPagerTests: XCTestCase {
     override func tearDown() async throws {
         window.close()
         window = nil
+        BodyCount.isOn = counted
     }
 
     private func settle() {
@@ -269,10 +274,8 @@ final class SidebarPagerTests: XCTestCase {
         let slide = pages.slide
         let cards = seen.cards
         XCTAssertGreaterThanOrEqual(cards, 6, "the pages did not draw their cards")
-        #if DEBUG
         let sidebarCards = BodyCount.counts["SidebarCard", default: 0]
         XCTAssertGreaterThanOrEqual(sidebarCards, 2, "the pages did not draw their Sidebar cards")
-        #endif
         let updates = slide.updates
         // A swipe that commits Sessions, as `SidebarPager.select` ends it.
         for translation in [-10, -40, -80] as [CGFloat] {
@@ -291,10 +294,8 @@ final class SidebarPagerTests: XCTestCase {
         XCTAssertGreaterThan(slide.updates, updates, "the committed mode never reached the pages container")
         XCTAssertEqual(slide.mode, .topics)
         XCTAssertEqual(seen.cards, cards, "a swipe or a mode commit ran the cards' bodies again")
-        #if DEBUG
         XCTAssertEqual(BodyCount.counts["SidebarCard", default: 0], sidebarCards,
                        "the Hints that moved with the mode ran the Sidebar cards' bodies again")
-        #endif
 
         model.title = "Renamed"
         settle()

@@ -3,7 +3,7 @@ import MuxifyCore
 
 /// Every verb of the command line, in the order that `muxify --help` lists them.
 enum CLIVerbs {
-    static let all: [CLIVerb] = browser + session + extensions + environment + topic + window + worktree + agent + read
+    static let all: [CLIVerb] = browser + session + extensions + environment + topic + window + worktree + agent + read + diagnostics
 
     /// The verb that the words name, and the words after it. The longest match wins.
     static func verb(for arguments: ArraySlice<String>) -> (CLIVerb, ArraySlice<String>)? {
@@ -363,6 +363,34 @@ enum CLIVerbs {
                 """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .request(try RequestInvocation(.environmentShow, parsed: parsed))
+        },
+    ]
+
+    // MARK: - diagnostics
+
+    private static let diagnostics: [CLIVerb] = [
+        CLIVerb(path: .diagnosticsSummary, synopsis: "[--date YYYY-MM-DD] [--folder PATH]",
+                options: [.value("--date"), .value("--folder")],
+                help: """
+                Prints a digest of one day of the Diagnostics log: its records, minutes
+                and gaps, the CPU of each process group and the main thread's load over
+                idle minutes and minutes with input, memory, the 10 worst Bursts and the
+                freezes with their sample digests, and the errors by kind. It ends with
+                a trend line for each day file in the folder. It reads the folder
+                itself, needs no running app and changes nothing.
+                  --date YYYY-MM-DD  the local day (default today)
+                  --folder PATH      the Diagnostics log folder (default
+                                     ~/Library/Logs/Muxify)
+                """) { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            let date = try parsed.value("--date").map { word in
+                guard let day = DiagnosticsSummaryInvocation.day(word) else { throw CLIError.usage }
+                return day
+            } ?? DiagnosticsSummaryInvocation.dayFormatter().string(from: parsed.now)
+            let home = parsed.environment["HOME"] ?? NSHomeDirectory()
+            let folder = try parsed.value("--folder").map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
+                ?? DiagnosticsSummaryInvocation.defaultFolder(home: home)
+            return .diagnosticsSummary(DiagnosticsSummaryInvocation(date: date, folder: folder))
         },
     ]
 

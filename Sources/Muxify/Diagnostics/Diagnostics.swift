@@ -1,11 +1,17 @@
 import AppKit
+import MuxifyCore
 import os
 
-/// On while the Config's `diagnostics.enabled` is true. Then it writes to ~/Library/Logs/Muxify/muxify.log what
-/// helps explain a freeze, a crash or a slow app: each freeze, with a sample of the process taken during it; CPU
-/// and memory each minute; Muxify's own messages and the errors the system logs for it; crash and hang reports
-/// left since the last run; and the app, window, Space and sleep changes around them. See "Diagnostics" in
-/// docs/development.md.
+/// On unless the Config's `diagnostics.enabled` is false. Then it writes to the Diagnostics log, one
+/// ~/Library/Logs/Muxify/muxify-YYYY-MM-DD.log a day (`DiagnosticsLog`), what helps explain a freeze, a crash or a
+/// slow app: each freeze, with a sample of the process taken during it; a `minute` record each minute (CPU, the
+/// main thread's busy share, memory, the same for its commands, WebKit and the tmux server, the user's input, the
+/// counted SwiftUI bodies that ran and what was moving); a `burst` record for each Burst of high CPU, with its
+/// bodies and samples taken during it; `digest` records
+/// that fold each sample's main thread; Muxify's own
+/// messages and the errors the system logs for it; crash and hang reports left since the last run; and the app,
+/// window, Space and sleep changes around them. `diagnostics.display_links` adds the display-link probe. See
+/// "Diagnostics" in docs/development.md.
 enum Diagnostics {
     /// Any thread writes; the main thread opens and closes it.
     private static let log = OSAllocatedUnfairLock<DiagnosticsLog?>(initialState: nil)
@@ -13,6 +19,8 @@ enum Diagnostics {
     private static var screensAsleep = false
     /// The first Config load is at launch.
     private static var configured = false
+    /// What was moving on screen, for the `minute` record. The App Windows set it.
+    @MainActor static var moving: (@MainActor () -> MovingState)?
 
     /// ~/Library/Logs/Muxify, or in a verify run the sandbox's logs folder, so a run never writes into the user's logs.
     static let folder: URL = {
@@ -25,10 +33,13 @@ enum Diagnostics {
             .appendingPathComponent("Logs/Muxify", isDirectory: true)
     }()
 
-    /// Follows the Config's `diagnostics.enabled`, at launch and on each reload of the Config.
-    static func setEnabled(_ enabled: Bool) {
+    /// Follows the Config's `diagnostics.enabled` and `diagnostics.display_links`, at launch and on each reload of
+    /// the Config. The display-link probe runs only while both are true.
+    static func setEnabled(_ enabled: Bool, displayLinks: Bool) {
         defer { configured = true }
-        if enabled { start() } else { stop() }
+        guard enabled else { return stop() }
+        start()
+        if displayLinks, log.withLock({ $0 }) != nil { DisplayLinkProbe.start() } else { DisplayLinkProbe.stop() }
     }
 
     private static func start() {
@@ -48,18 +59,22 @@ enum Diagnostics {
             write("report since the last run: \(report.path)")
         }
         observeAppState()
+        DiagnosticsInput.start()
+        BodyCount.isOn = true
         FreezeWatch.start()
         ResourceMonitor.start()
-        DisplayLinkProbe.start()
     }
 
     /// A sample that already runs still finishes into the folder.
     private static func stop() {
         guard log.withLock({ $0 }) != nil else { return }
+        // A Burst that runs now is written before the `off` line.
+        ResourceMonitor.stop()
         write("off")
         DisplayLinkProbe.stop()
-        ResourceMonitor.stop()
         FreezeWatch.stop()
+        DiagnosticsInput.stop()
+        BodyCount.isOn = false
         for (center, token) in observers { center.removeObserver(token) }
         observers = []
         log.withLock { $0 = nil }
@@ -67,6 +82,16 @@ enum Diagnostics {
 
     static func write(_ text: String) {
         log.withLock { $0 }?.write(text)
+    }
+
+    /// A record an agent or `muxify diagnostics summary` reads (DiagnosticsRecord).
+    static func write(_ record: DiagnosticsRecord) {
+        write(record.text)
+    }
+
+    /// What was moving at the end of a minute; an empty state when no App Window says.
+    @MainActor static func movingState() -> MovingState {
+        moving?() ?? MovingState()
     }
 
     /// Muxify's own messages: to the system log, as NSLog does, and to the diagnostics log when it is on.
@@ -128,7 +153,10 @@ enum Diagnostics {
         }
         on(NSApplication.didBecomeActiveNotification) { _ in "app active\(DisplayLinkProbe.summary)" }
         on(NSApplication.didResignActiveNotification) { _ in "app inactive" }
-        on(NSApplication.willTerminateNotification) { _ in "quit" }
+        on(NSApplication.willTerminateNotification) { _ in
+            ResourceMonitor.closeBurst()
+            return "quit"
+        }
         on(NSApplication.didChangeScreenParametersNotification) { _ in "screen parameters changed: \(NSScreen.screens.count) screens" }
         on(NSWindow.didChangeOcclusionStateNotification) { app($0).map { "occlusion changed: \(describe($0))" } }
         on(NSWindow.didChangeScreenNotification) { app($0).map { "window screen changed: \(describe($0))" } }

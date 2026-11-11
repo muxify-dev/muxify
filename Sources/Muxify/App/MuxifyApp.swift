@@ -13,7 +13,7 @@ struct MuxifyApp: App {
         #endif
         AppEnvironment.prepare()
         PTYWatch.start()
-        let configStore = ConfigStore()
+        let configStore = ConfigStore(appliesDiagnostics: true)
         configStore.start()
         let windows = AppWindows(configStore: configStore)
         _windows = State(initialValue: windows)

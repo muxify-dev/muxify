@@ -20,6 +20,9 @@ struct AppWindowView: View {
                 windows.openWindow = { action(id: "workspace", value: $0) }
             }
             .onChange(of: shown.store.activeEnvironment) { _, _ in windows.updateEnvironment(for: shown.request.id) }
+            #if DEBUG
+            .overlay(alignment: .bottomTrailing) { IdleClockCost() }
+            #endif
     }
 }
 

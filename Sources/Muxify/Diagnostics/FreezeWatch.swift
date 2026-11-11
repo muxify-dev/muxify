@@ -2,13 +2,16 @@ import AppKit
 import os
 
 /// Watches the main run loop. A pass that works for over a second is a freeze: once it passes the second, the
-/// process is sampled to a file, and when it ends its length goes to the log.
+/// process is sampled to a file, and when it ends its length goes to the log. The passes' awake time, from
+/// after-waiting to before-waiting, adds up to the main thread's busy share in the `minute` record.
 enum FreezeWatch {
     private struct Pass {
         var number = 0
         var started: TimeInterval?
         /// Each start and stop counts one, so the watching thread of an earlier start ends.
         var run = 0
+        /// The awake time of the passes that ended, in seconds.
+        var awake: TimeInterval = 0
     }
 
     private static let threshold: TimeInterval = 1
@@ -26,6 +29,7 @@ enum FreezeWatch {
             }
             let started = current.withLock { pass -> TimeInterval? in
                 defer { pass.started = nil }
+                if let started = pass.started { pass.awake += now - started }
                 return pass.started
             }
             guard let started, now - started > threshold else { return }
@@ -43,6 +47,11 @@ enum FreezeWatch {
         CFRunLoopObserverInvalidate(observer)
         self.observer = nil
         current.withLock { $0.run += 1; $0.started = nil }
+    }
+
+    /// The main run loop's awake time so far, in seconds, the pass that runs now included. Any thread reads it.
+    static func mainAwake(at now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> TimeInterval {
+        current.withLock { pass in pass.awake + (pass.started.map { max(0, now - $0) } ?? 0) }
     }
 
     /// Samples each pass at most once, while it still runs.

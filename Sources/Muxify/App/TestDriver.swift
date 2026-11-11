@@ -1,12 +1,13 @@
 #if DEBUG
 import AppKit
 import MuxifyCore
+import os
 
 /// Lets scripts/verify drive a Debug build through its accessibility tree.
 /// The script writes `command.json` (with a fresh nonce) into the folder
 /// named by MUXIFY_TEST_DRIVER; a timer on the main run loop answers each new
 /// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, hover, snapshot, responder, scroll, stall,
-/// binding, counts, each with the option `reveal` that scrolls the target into view first, and `watch` that reads
+/// idle_clock, card_rebuild, binding, counts, each with the option `reveal` that scrolls the target into view first, and `watch` that reads
 /// frames of elements in each drawn frame after it. None of
 /// them activates the app, opens a menu or moves the pointer, so a run never takes focus.
 enum TestDriver {
@@ -109,6 +110,10 @@ enum TestDriver {
             pending = Drag(nonce: nonce, command: command)
             return
         }
+        if command["command"] as? String == "stall", command["busy"] as? Bool == true {
+            pending = Spin(nonce: nonce, seconds: command["seconds"] as? Double ?? 1)
+            return
+        }
         if command["command"] as? String == "scroll", command["by"] != nil {
             pending = ScrollSteps(nonce: nonce, command: command)
             return
@@ -141,6 +146,27 @@ enum TestDriver {
     }
 
     private static var pending: Steps?
+
+    /// A `stall` with `busy`: a thread off the main thread spins for `seconds`, a Burst of CPU for Diagnostics to
+    /// catch with no freeze. It answers when the spin ends.
+    private final class Spin: Steps {
+        let nonce: String
+        private let done = OSAllocatedUnfairLock(initialState: false)
+
+        init(nonce: String, seconds: Double) {
+            self.nonce = nonce
+            let until = ProcessInfo.processInfo.systemUptime + seconds
+            let done = done
+            Thread.detachNewThread {
+                while ProcessInfo.processInfo.systemUptime < until {}
+                done.withLock { $0 = true }
+            }
+        }
+
+        func step() -> [String: Any]? {
+            done.withLock { $0 } ? ["rows": [], "pressed": true] : nil
+        }
+    }
 
     /// A `click`, `drag` or `hover` that comes while the Sidebar slides between Topics and Sessions waits until the
     /// page is at rest: these aim at the centre of the target's frame, and a dump mid-slide gives a frame that the
@@ -461,6 +487,18 @@ enum TestDriver {
         // Blocks the main thread for `seconds`, a freeze for Diagnostics to catch.
         if name == "stall" {
             Thread.sleep(forTimeInterval: command["seconds"] as? Double ?? 1)
+            return ["rows": [], "pressed": true]
+        }
+        // Brings back the idle cost of Case 1: `views` Working-mark-like views under a SwiftUI clock at frame rate,
+        // and 0 turns it off (`TestDriverCosts.idleClockViews`, which gives the CPU it reaches).
+        if name == "idle_clock" {
+            TestDriverCosts.shared.idleClockViews = max(0, command["views"] as? Int ?? 0)
+            return ["rows": [], "pressed": true]
+        }
+        // Brings back the card rebuild of Case 2: every Sidebar card lays out `views` views again from the mode on each
+        // Sidebar switch, and 0 turns it off (`TestDriverCosts.cardRebuildViews`, which gives the CPU it reaches).
+        if name == "card_rebuild" {
+            TestDriverCosts.shared.cardRebuildViews = max(0, command["views"] as? Int ?? 0)
             return ["rows": [], "pressed": true]
         }
         // Performs a Ghostty keybind action, such as `quit`, on the first Terminal, as its key does.

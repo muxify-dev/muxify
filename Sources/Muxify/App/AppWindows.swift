@@ -1,5 +1,6 @@
 import AppKit
 import GhosttyKit
+import MuxifyCore
 import Observation
 
 /// One process/Config, with independent workspaces and owned connections for
@@ -31,6 +32,21 @@ final class AppWindows {
         let remembered = UserDefaults.standard.string(forKey: "selectedEnvironment")
         let name = configStore.config.remoteEnvironments.first { $0.name == remembered }?.name
         initialEnvironmentName = name
+        Diagnostics.moving = { [weak self] in self?.movingState() ?? MovingState() }
+    }
+
+    /// What was moving in the focused App Window, for the Diagnostics `minute` record: the window, the Working
+    /// marks of its Environment's Agents, the Sidebar mode shown and the Topic cards and Session rows it lists.
+    private func movingState() -> MovingState {
+        guard let id = focusedID ?? stores.keys.first, let store = stores[id] else { return MovingState() }
+        let model = store.topics
+        let window = nativeWindows[id].map { window in
+            AppWindowState(visible: window.isVisible && window.occlusionState.contains(.visible) && !window.isMiniaturized,
+                           active: NSApp.isActive && (window.isKeyWindow || window.isMainWindow))
+        }
+        return MovingState(window: window, workingMarks: model.agentMarks.values.filter { $0 == .working }.count,
+                           marksMove: configStore.config.pulse && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+                           sidebar: model.mode, topicCards: model.list.filter { $0.cardID != nil }.count, sessionRows: store.sessions.count)
     }
 
     deinit {

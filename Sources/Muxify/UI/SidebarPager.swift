@@ -47,6 +47,7 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
         .onChange(of: motionEnabled, initial: true) { _, motion in slide.update(mode: mode, motionEnabled: motion) }
         #if DEBUG
         .onDisappear { SidebarPagerMotion.forget(slide) }
+        .onChange(of: mode, initial: true) { _, mode in TestDriverCosts.shared.mode = mode }
         #endif
     }
 
@@ -308,6 +309,10 @@ final class SidebarSwipeInputView: NSView {
 
     func verify(_ name: String) {
         guard isEnabled else { return }
+        // A sample plays the user's swipe, so the switch it makes counts as the user's in Diagnostics.
+        let playing = DiagnosticsInput.playsUserGesture
+        DiagnosticsInput.playsUserGesture = true
+        defer { DiagnosticsInput.playsUserGesture = playing }
         let time = ProcessInfo.processInfo.systemUptime
         if let sample = Self.verificationSamples.first(where: { $0.name == name }) {
             begin(at: time)

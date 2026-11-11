@@ -168,33 +168,169 @@ matters only in shells outside that server. See
 
 ## Diagnostics
 
-To find out why the app froze, crashed or used too much CPU, turn on
-Diagnostics in the Config. It works in Release builds too, and costs nothing
-while it is off. Like the rest of the Config, it applies when you save the
-file, with no restart.
+Diagnostics is on by default, in Release builds too, so that the evidence for a
+freeze, a crash or too much CPU exists before anyone notices the problem. The
+Local Config can turn it off; a remote Config can neither turn it on nor off.
+Like the rest of the Config, it applies when you save the file, with no
+restart.
 
 ```yaml
 diagnostics:
-  enabled: true
+  enabled: false        # on by default
+  display_links: true   # off by default
 ```
 
 The app then writes to `~/Library/Logs/Muxify/`:
 
-- `muxify.log`: the launch, or `on` and `off` when the Config turns it on or
-  off, with the crash, hang and CPU reports macOS wrote for the app since the
-  log was last written; each freeze of the main thread over a
-  second; CPU, memory, threads and open files each minute; Muxify's own
-  messages and the errors the system logged for the app; and the app, window,
-  Space, screen and sleep changes. Its `animation` and `display link` lines
-  follow each AppKit animation and the display links it leaves running:
-  thousands of those links freeze the app on a Space switch. It keeps one
-  older file, `muxify.1.log`, of up to 20 MB.
-- `freeze-<time>.txt`: a `sample` of every thread, started a second into a
-  freeze, and `cpu-<time>.txt`, started after a minute over half a core. The
-  folder keeps the newest 20.
+- `muxify-YYYY-MM-DD.log`, one Diagnostics log file a local day: the first line
+  after local midnight goes into the next day's file. It holds the launch, or
+  `on` and `off` when the Config turns it on or off, with the crash, hang and
+  CPU reports macOS wrote for the app since the newest day file was last
+  written; each freeze of the main thread over a second; a `minute` record
+  each minute, a `burst` record for each Burst and `digest` records for each
+  sample (below); Muxify's own messages and the errors the system logged
+  for the app; and the app, window, Space, screen and sleep changes.
+- A record is one line that a program can read: the timestamp, a kind word
+  (`minute`, `burst`, `freeze`, `digest` or `limit`), then space-separated
+  `key=value` fields. A value holds no spaces, a list is comma-separated, and
+  a pair in a list is `name:value`, split at its last colon, so a name may
+  hold colons. `DiagnosticsRecord` in MuxifyCore writes
+  and parses them. The other lines are free text.
+- The `minute` record's fields, in this order:
+  - `cpu.app.avg` and `cpu.app.peak`: the app's average CPU over the minute
+    and its highest one-second CPU, in % of one core. The app reads its CPU
+    once a second, so a short spike shows in the peak.
+  - `main.busy`: the share of the minute, in %, that the main run loop was
+    awake, from after-waiting to before-waiting.
+  - `mem.app`: the app's memory (phys footprint) in MB.
+  - `cpu.<group>.avg`, `cpu.<group>.peak` and `mem.<group>` for each of
+    the other process groups, in the same units as the app's. The app is
+    the first of the four groups; the others are:
+    - `commands`: the processes the app starts, such as git, tmux and ssh.
+      Children that exited come from the children's rusage total, and live
+      children, such as `ssh` and the `tmux -C` control clients, from a
+      read of each one. `sample`, Diagnostics' own sampler, is in neither,
+      so taking a sample does not look like load. `mem.commands` is the
+      live children's memory.
+    - `webkit`: the Browser's WebContent processes, one for each loaded
+      page, found through the web view's process identifier, which the app
+      reads once a minute. It is a lower bound: a page can have more
+      processes than the one it names, and a new page's process counts
+      from the minute after it starts.
+    - `tmux`: the Local tmux server. It serves all of its clients, Muxify's
+      and any other, such as a terminal attached outside Muxify, so its
+      load is not all Muxify's.
 
-To find the trouble, start with
-`grep -E "freeze|LEAK|stuck|report|system log" ~/Library/Logs/Muxify/muxify.log`.
+    A group whose read fails is left out of the record, never written as
+    zero: no Browser page, no Local server, or a process another user owns.
+    The app reads each group's CPU once a second, off the main thread, and
+    its memory at the end of the minute. The average is over the seconds
+    the group was read.
+  - `threads`; `open_files`.
+  - `input`: `idle`, or
+    `keys:N,clicks:N,scrolls:N,sidebar_switches:N,palette_opens:N`: the key
+    presses, clicks and scroll events the app received, and the Sidebar mode
+    switches and Command Palette opens they made. Counts only, never which
+    key, text, a title or a URL.
+  - `bodies`: how many times each counted SwiftUI view's body ran over the
+    minute, as `SidebarCard:300,TopicsSection:2`, by name; a name with zero
+    is left out, and `none` when every count is zero. The counter
+    (`BodyCount` in `App/BodyCount.swift`) is in every build and counts only
+    while Diagnostics is on. The counted views are `SidebarCard`,
+    `TopicCard`, `TopicsList` and `TopicsListPart`, the Sidebar page roots
+    `TopicsSection` and `SessionsSection`, and the Working-mark views
+    `AgentMarkView` and `AgentMarkSpine`. Diagnostics never resets the
+    counter; a count that fell, after the TestDriver's `counts reset=True`,
+    counts again from zero, so a figure is never negative.
+  - `window`: the App Window, `visible` or `occluded` and `active` or
+    `inactive`, as `visible,active`; `none` with no App Window.
+  - `working_marks`: the Working marks of the Active Environment's Agents;
+    `marks_move`: `true` when `ui.pulse` is on and Reduce Motion is off.
+  - `sidebar`: the Sidebar mode shown, `topics` or `sessions`; `topic_cards`
+    and `session_rows`: the Topic cards and Session rows it lists.
+
+  The `window` to `session_rows` fields are the state at the end of the
+  minute, in the focused App Window.
+- A Burst is a stretch of high CPU that a minute's average hides, such as
+  10–20 seconds of quick Sidebar swipes at about 42%. The app finds them in
+  its per-second CPU (`BurstDetector` in MuxifyCore; the thresholds are
+  constants there):
+  - A Burst starts when the app is at or over 30% of one core for 3 seconds
+    in a row, and ends after 3 seconds in a row below it. A shorter dip is
+    part of the Burst.
+  - When a Burst starts, the app takes a 5-second `sample` of every thread
+    into `burst-<time>.txt`, off the main thread, and another every 10
+    minutes while the Burst lasts. It takes at most one Burst sample a
+    minute and 40 a local day; these caps start again at each launch. A
+    sample the caps or a running sample hold back is tried again each second
+    while the Burst lasts; a Burst that never gets one is still recorded.
+  - When the Burst ends, it writes one `burst` record:
+    - `start`: its local start time, as `2026-11-11T17:07:19.250`;
+      `length`: in seconds, to the end of its last second over the
+      threshold.
+    - `cpu.avg` and `cpu.peak`: the app's average and highest one-second
+      CPU over the Burst, in % of one core.
+    - `main.busy.peak`: the main run loop's awake share of the Burst's
+      busiest second, in %.
+    - `input`: the user's input over the Burst, in the `minute` record's
+      form.
+    - `bodies`: the counted SwiftUI bodies that ran over the Burst, in the
+      `minute` record's form.
+    - `window` to `session_rows`: what was moving when the app found the
+      Burst, 3 seconds in, as in the `minute` record.
+    - `samples`: the sample file names, comma-separated, or `none`.
+    - `open=true` only when Diagnostics stopped or the app quit while the
+      Burst ran.
+- After each sample, freeze and Burst alike, the app folds the sample's main
+  thread off the main thread (`SampleDigest` in MuxifyCore) and writes three
+  `digest` records, each with `sample`, the sample's file name:
+  - `samples`: the main thread's samples; `busy`: the share, in %, not
+    waiting in the run loop (`__CFRunLoopServiceMachPort` and below);
+    `libraries`: the top 8 libraries by self time, as `library:%`.
+  - `symbols`: the top 15 symbols by self time, as `symbol@library:%`.
+  - `frames`: the top 15 frames from the app binary by inclusive time, as
+    `symbol:%`. A frame that recurs on one stack path counts once.
+
+  A frame's self time is its count less its immediate children's. Every %
+  is of the busy samples, so the run loop's wait does not drown the rest. A
+  symbol is shortened to one word: whitespace becomes `_`, an argument list
+  that holds a space, a comma or a bracket becomes `(...)`, and it is cut at
+  80 characters. An empty list is `none`. A sample the app cannot read, or
+  with no main thread, gets a free-text `digest:` line instead.
+- When a day's file opens, every Diagnostics log file last written over 7 days
+  ago is deleted, the older `muxify.log` and `muxify.1.log` too.
+- Once a day's file passes 50 MB, it writes one `limit` line, and for the rest
+  of that day takes only the `minute`, `burst`, `freeze` and `digest` lines.
+- `diagnostics.display_links: true` adds the display-link probe. Its
+  `animation` and `display link` lines follow each AppKit animation and the
+  display links it leaves running: thousands of those links freeze the app on
+  a Space switch. It writes a line for each animation and once filled 20 MB in
+  an hour, so it is off by default. The `sidebar_pager_scroll` verify suite
+  turns it on.
+- `freeze-<time>.txt`: a `sample` of every thread, started a second into a
+  freeze, and `burst-<time>.txt`, taken during a Burst (above). After each
+  sample, the raw `freeze-`, `burst-` and older `cpu-` files last written over
+  3 days ago are deleted, and then the oldest until the rest take under
+  300 MB in all (`SampleRetention` in MuxifyCore). Their `digest` records stay
+  in the day's log.
+
+To read a day, run `muxify diagnostics summary` (today) or
+`muxify diagnostics summary --date YYYY-MM-DD`; `--folder PATH` reads
+another folder, such as a verify sandbox's `logs/`. It prints, in this order:
+the day's records, minutes and gaps (each labelled with the sleep, screens
+asleep, `off` or `quit` line nearest it, or `unknown`); CPU p50, p90 and max
+of each process group over idle minutes and minutes with input; the main
+thread's `main.busy`; memory; the 10 worst Bursts by `cpu.avg × length` and
+the freezes, each with its digest; the errors by kind; and a trend line for
+each day file. It needs no running app, and it skips the lines it does not
+know.
+
+To find the trouble by hand, start with
+`grep -E "freeze|LEAK|stuck|report|system log|limit" ~/Library/Logs/Muxify/muxify-*.log`.
+`grep " minute " ~/Library/Logs/Muxify/muxify-*.log` gives the minutes, and
+`grep " burst " ~/Library/Logs/Muxify/muxify-*.log` the Bursts, and
+`grep " digest sample=burst-" ~/Library/Logs/Muxify/muxify-*.log` the digests
+of their samples.
 A verify run writes these files into its sandbox's `logs/`, never into yours.
 
 ## Beta releases

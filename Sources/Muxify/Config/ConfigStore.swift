@@ -19,9 +19,12 @@ final class ConfigStore {
 
     @ObservationIgnored private var filesStamp = ""
     @ObservationIgnored private var watcher: Timer?
+    /// Only the app's own store turns Diagnostics on or off, so a store in a test never starts it.
+    private let appliesDiagnostics: Bool
 
-    init(path: String = MuxifyPaths().configFile.path) {
+    init(path: String = MuxifyPaths().configFile.path, appliesDiagnostics: Bool = false) {
         self.path = path
+        self.appliesDiagnostics = appliesDiagnostics
         load()
         filesStamp = stampFiles()
     }
@@ -79,7 +82,9 @@ final class ConfigStore {
     private func load() {
         loaded.update(with: Config.load(path: path, read: Self.readFile))
         // Before the problems, so they reach the diagnostics log too.
-        Diagnostics.setEnabled(config.diagnostics)
+        if appliesDiagnostics {
+            Diagnostics.setEnabled(config.diagnostics.enabled, displayLinks: config.diagnostics.displayLinks)
+        }
         for problem in loaded.problems { Diagnostics.report("config: \(problem)") }
         BrowserPageScripts.setVimKeys(config.browser.vimKeys)
         BrowserHistory.shared.setEnabled(config.browser.history)

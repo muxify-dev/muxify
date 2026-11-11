@@ -64,6 +64,14 @@ final class BrowserTab: NSObject, Identifiable {
     /// The URL of the document whose load was last recorded, until another document commits.
     @ObservationIgnored private var visitedURL: String?
 
+    /// Every loaded page's web view, for the Diagnostics `webkit` group.
+    private static let loadedWebViews = NSHashTable<WKWebView>.weakObjects()
+
+    /// The WebContent process of each loaded page that has one. A page can have more processes than the one named.
+    static func webProcesses() -> [pid_t] {
+        loadedWebViews.allObjects.compactMap(BrowserDeveloperTools.webProcessIdentifier(of:))
+    }
+
     private static let configuration: WKWebViewConfiguration = {
         // Pages here take code and formulas, which curly quotes and long dashes break. Without its own key, WebKit
         // follows the system's Smart Quotes setting. A registered default is not written to disk, so a value the
@@ -127,6 +135,7 @@ final class BrowserTab: NSObject, Identifiable {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         loadedWebView = webView
+        Self.loadedWebViews.add(webView)
         let finder = PageFinder(webView: webView)
         self.finder = finder
         BrowserPageScripts.register(webView, finder: finder)

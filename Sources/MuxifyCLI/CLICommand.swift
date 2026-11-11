@@ -19,6 +19,7 @@ enum CLICommand: Equatable {
     case topicSessionPaths(TopicSessionPathsInvocation)
     case agent(AgentInvocation)
     case agentConversation(AgentConversationInvocation)
+    case diagnosticsSummary(DiagnosticsSummaryInvocation)
 
     static var usage: String { CLIVerbs.usage }
 
@@ -99,6 +100,7 @@ enum CLICommand: Equatable {
         case .topicSessionPaths(let invocation): try await invocation.run()
         case .agent(let invocation): try await invocation.run()
         case .agentConversation(let invocation): try invocation.run(using: runner)
+        case .diagnosticsSummary(let invocation): try invocation.run()
         }
         return 0
     }
