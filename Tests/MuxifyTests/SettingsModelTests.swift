@@ -1,6 +1,5 @@
 import XCTest
 import MuxifyCore
-@testable import Muxify
 
 @MainActor
 final class SettingsModelTests: XCTestCase {
