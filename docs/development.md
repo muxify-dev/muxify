@@ -37,13 +37,25 @@ color from `ui.agent_colors` through the `agentColors` environment value:
 - `AgentMarkSpine` is the 3 pt bar along a card's left edge. The Working mark's
   bar fades in and out.
 
-Core Animation moves both Working marks, in layers that SwiftUI places once. Do
-not move a mark that shows for long, such as a Working mark, with a SwiftUI
-clock: `TimelineView`, `repeatForever` or `phaseAnimator`. The App Window is one
-SwiftUI view tree, and each tick of a SwiftUI clock updates and lays out all of
-it: with an Agent at work, the main thread was busy almost all the time, and a
-swipe between Topics and Sessions waited for it. The `working_marks` verify
-suite checks that the app stays idle while Working marks move.
+Motion that runs every frame goes through Core Animation, never through SwiftUI
+state ([ADR 0074](adr/0074-motion-that-runs-every-frame-goes-through-core-animation.md)).
+The App Window is one SwiftUI view tree, and a value that changes every frame,
+from a SwiftUI clock (`TimelineView`, `repeatForever`, `phaseAnimator`), a
+trackpad gesture or a spring on `@State`, updates and lays out all of it on every
+frame. So motion lives in layers that Muxify owns, and SwiftUI hears only where
+it begins and ends:
+
+- Core Animation moves both Working marks, in layers that SwiftUI places once.
+  With an Agent at work, a SwiftUI clock kept the main thread busy almost all
+  the time. The `working_marks` verify suite checks that the app stays idle
+  while Working marks move.
+- The Sidebar pager hosts the Topics page and the Sessions page each in its own
+  `NSHostingView` (`SidebarPages`). A swipe sets their layers' transform and
+  opacity, and the settle is a `CASpringAnimation` (`SidebarSlide`). SwiftUI
+  hears only the committed mode. A layer transform is invisible to SwiftUI
+  geometry, hit-testing and accessibility frames, so a page takes no click or
+  hover while it moves, and a verify check reads the pager's Debug position,
+  not a row's frame.
 
 `ui.pulse: false` and Reduce Motion keep every Working mark still. The
 `ContentView` sets the environment values once, and the Command Palette is an

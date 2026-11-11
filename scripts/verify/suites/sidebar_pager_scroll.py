@@ -1,10 +1,14 @@
 """A list on the Sidebar page that does not show scrolls and then comes to rest.
 
-While Topics shows, the Sessions list still scrolls to the card of the selected Window's Session. SidebarPager shrank
-the page that does not show to 0.975 of its size. A scroll view under that scale puts its scroll on a grid of
-1.95 pixels a point, where SwiftUI's animated scrollTo never reached its target. So SwiftUI started the scroll again
-every frame, for as long as the app ran, and AppKit left a display link behind with many of these starts. On a Space
-switch AppKit updates every link, and tens of thousands of them froze the app for minutes.
+While Topics shows, the Sessions list still scrolls to the card of the selected Window's Session. SidebarPager once
+shrank the page that does not show to 0.975 of its size with SwiftUI. A scroll view under that scale puts its scroll on
+a grid of 1.95 pixels a point, where SwiftUI's animated scrollTo never reached its target. So SwiftUI started the
+scroll again every frame, for as long as the app ran, and AppKit left a display link behind with many of these starts.
+On a Space switch AppKit updates every link, and tens of thousands of them froze the app for minutes.
+
+Now each page is its own hosting view that the pager slides as a Core Animation layer, which the scroll view never
+sees, and the page that does not show rests whole, one width to the side. The check keeps proving that the hidden list
+comes to rest after it scrolls.
 
 The check counts the scroll animations in the Diagnostics log: the `animation #` lines of DisplayLinkProbe
 (Diagnostics/DisplayLinkProbe.swift). It fails when it reads no such line, so a change that removes the probe must
@@ -46,7 +50,7 @@ class SidebarPagerScroll(unittest.TestCase):
         return [line for line in self.log_text().splitlines() if ' animation #' in line]
 
     def require_motion(self):
-        """The pager shrinks a page only while it animates. Reduce Motion in System Settings stops that for every app."""
+        """The pager slides and shrinks a page only while it animates. Reduce Motion in System Settings stops that for every app."""
         if self.s.row('sidebar-swipe-input').get('accessibilityLabel', '').startswith('Sidebar swipe input instant'):
             self.skipTest('Reduce Motion is on, so the Sidebar pager does not animate')
 

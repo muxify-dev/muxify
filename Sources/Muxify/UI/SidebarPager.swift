@@ -4,7 +4,8 @@ import MuxifyCore
 
 /// Switches the Sidebar between Topics and Sessions with buttons or horizontal swipes.
 /// Both lists stay mounted to preserve their scroll positions and opened cards. Only the committed
-/// mode is persisted; the gesture and its preview stay in memory.
+/// mode is persisted; the gesture and its preview stay in memory, in AppKit: `SidebarSlide` moves the pages as layers,
+/// so SwiftUI hears only where a swipe ends and which mode it commits.
 struct SidebarPager<Topics: View, Sessions: View>: View {
     @Binding private var mode: SidebarMode
     private let animateSwitching: Bool
@@ -14,103 +15,50 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.sidebarSwipeArea) private var swipeArea
     @Environment(\.interfaceFontSize) private var fontSize
-    @State private var position: CGFloat
-    @State private var origin: CGFloat?
-    @State private var inputReference = SidebarSwipeInputReference()
+    @State private var slide: SidebarSlide
 
     init(mode: Binding<SidebarMode>, animateSwitching: Bool, acceptsGestures: Bool,
          @ViewBuilder topics: () -> Topics, @ViewBuilder sessions: () -> Sessions) {
         _mode = mode
         self.animateSwitching = animateSwitching
         self.acceptsGestures = acceptsGestures
-        _position = State(initialValue: mode.wrappedValue == .topics ? 0 : 1)
+        _slide = State(initialValue: SidebarSlide(mode: mode.wrappedValue))
         self.topics = topics()
         self.sessions = sessions()
     }
 
     private var motionEnabled: Bool { animateSwitching && !reduceMotion }
-    private var displayedPosition: CGFloat { motionEnabled ? position : (mode == .topics ? 0 : 1) }
 
     var body: some View {
-        GeometryReader { proxy in
-            let width = max(1, proxy.size.width)
-            VStack(spacing: 0) {
-                selector
-                ZStack(alignment: .topLeading) {
-                    page(topics, mode: .topics, index: 0, width: width)
-                        .offset(x: -displayedPosition * width)
-                    page(sessions, mode: .sessions, index: 1, width: width)
-                        .offset(x: (1 - displayedPosition) * width)
-                }
-                .frame(width: width)
-                .frame(maxHeight: .infinity, alignment: .topLeading)
-                .clipped()
-                .contentShape(Rectangle())
-            }
-            .background {
-                SidebarSwipeInput(reference: inputReference, area: swipeArea, isEnabled: acceptsGestures, onChange: { translation in
-                    if origin == nil { origin = mode == .topics ? 0 : 1 }
-                    guard motionEnabled else { return }
-                    let proposed = (origin ?? 0) - translation / width
-                    // A little resistance at either end, rather than wrapping the two views around.
-                    position = proposed < 0 ? rubberBand(proposed) : proposed > 1 ? 1 + rubberBand(proposed - 1) : proposed
-                }, onEnd: { translation, velocity, cancelled in
-                    let start = origin ?? (mode == .topics ? 0 : 1)
-                    let travel = -translation / width
-                    let projected = travel - velocity * 0.16 / width
-                    let advances = !cancelled && abs(travel) > 0.035 && abs(projected) > 0.22
-                    let destination = advances ? min(1, max(0, start + (projected > 0 ? 1 : -1))) : start
-                    origin = nil
-                    select(destination == 0 ? .topics : .sessions)
-                })
-            }
+        VStack(spacing: 0) {
+            selector
+            SidebarPages(slide: slide, mode: mode, motionEnabled: motionEnabled, topics: topics, sessions: sessions)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onChange(of: mode) { _, newMode in
-            origin = nil
-            settle(newMode)
+        .background {
+            SidebarSwipeInput(slide: slide, area: swipeArea, isEnabled: acceptsGestures, onChange: { translation in
+                slide.track(translation)
+            }, onEnd: { translation, velocity, cancelled in
+                select(slide.release(translation: translation, velocity: velocity, cancelled: cancelled))
+            })
         }
-        .onChange(of: motionEnabled) { _, _ in settle(mode) }
         #if DEBUG
-        .onDisappear { SidebarPagerMotion.forget(inputReference) }
+        .onDisappear { SidebarPagerMotion.forget(slide) }
         #endif
     }
 
     private var selector: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: SidebarSelectorHighlightView.spacing) {
             viewButton(.topics)
             viewButton(.sessions)
         }
-        .background {
-            GeometryReader { proxy in
-                let half = (proxy.size.width - 4) / 2
-                RoundedRectangle(cornerRadius: 5)
-                    .fill(Color.primary.opacity(0.1))
-                    .frame(width: half)
-                    .offset(x: min(1, max(0, displayedPosition)) * (half + 4))
-            }
-        }
+        .background { SidebarSelectorHighlight(slide: slide) }
         .padding(6)
         .help("Swipe left or right with two fingers to switch Topics and Sessions")
-        .overlay(alignment: .bottomTrailing) {
-            #if DEBUG
-            if TestDriver.isRunning {
-                Color.clear.frame(width: 1, height: 1)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Sidebar swipe input " + (motionEnabled ? "animated " : "instant ")
-                                        + String(format: "%.3f", Double(displayedPosition)))
-                    .accessibilityIdentifier("sidebar-swipe-input")
-                    .accessibilityActions {
-                        ForEach(SidebarSwipeInputView.verificationNames, id: \.self) { name in
-                            Button(name) { inputReference.view?.verify(name) }
-                        }
-                    }
-            }
-            #endif
-        }
     }
 
     private func viewButton(_ target: SidebarMode) -> some View {
-        Button { origin = nil; select(target) } label: {
+        Button { slide.stopTracking(); select(target) } label: {
             Text(target.rawValue)
                 .font(fontSize.font(11, weight: .semibold))
                 .frame(maxWidth: .infinity)
@@ -122,51 +70,9 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
         .accessibilityValue(mode == target ? "selected" : "")
     }
 
-    private func page<Content: View>(_ content: Content, mode target: SidebarMode, index: CGFloat, width: CGFloat) -> some View {
-        content
-            .frame(width: width)
-            .scaleEffect(scale(ofPage: index))
-            .opacity(motionEnabled ? 1 - min(1, abs(position - index)) * 0.18 : 1)
-            .allowsHitTesting(mode == target && origin == nil)
-            .accessibilityHidden(mode != target)
-    }
-
-    /// A page shrinks a little as it slides away, and is whole again once it is all out of view. The page that does
-    /// not show must not stay shrunk: its list still scrolls, as the Sessions list does to the selected Window's
-    /// Session, and a scroll view under a scale of 0.975 puts its scroll on a grid of 1.95 pixels a point. SwiftUI's
-    /// animated scrollTo never reaches its target on that grid and starts the scroll again every frame, and AppKit
-    /// leaves a display link behind with many of these starts, until a Space switch freezes the app on them.
-    private func scale(ofPage index: CGFloat) -> CGFloat {
-        let distance = abs(position - index)
-        guard motionEnabled, distance < 1 else { return 1 }
-        return 1 - distance * 0.025
-    }
-
-    private func rubberBand(_ distance: CGFloat) -> CGFloat {
-        distance * 0.25 / (1 + abs(distance) * 4)
-    }
-
     private func select(_ target: SidebarMode) {
-        // Keep the store change out of the animation transaction: only the pager should move, not its rows.
         if mode != target { mode = target }
-        settle(target)
-    }
-
-    private func settle(_ target: SidebarMode) {
-        let destination: CGFloat = target == .topics ? 0 : 1
-        // A press settles twice, from select and from the mode change. The second has nothing to move, and its
-        // animation would end at once while the first still slides.
-        guard position != destination else { return }
-        #if DEBUG
-        let settle = SidebarPagerMotion.begin(inputReference, animated: motionEnabled)
-        #endif
-        withAnimation(motionEnabled ? .spring(response: 0.34, dampingFraction: 0.86) : nil, completionCriteria: .removed) {
-            position = destination
-        } completion: {
-            #if DEBUG
-            SidebarPagerMotion.end(settle)
-            #endif
-        }
+        slide.settle(target)
     }
 }
 
@@ -206,8 +112,9 @@ private final class SidebarSwipeAreaView: NSView {
 }
 
 #if DEBUG
-/// The Sidebar pagers whose pages still slide to rest after a switch. A row's frame moves until its page stops, so
-/// the verify driver holds a click, drag or hover until no pager moves; sent mid-slide, it misses its row.
+/// The Sidebar pagers whose pages still slide to rest after a switch: from the start of a settle's Core Animation spring
+/// to its end. A page takes no click or hover until it stops, so the verify driver holds a click, drag or hover until
+/// no pager moves; sent mid-slide, it misses its row.
 enum SidebarPagerMotion {
     /// The number of the latest animated settle of each moving pager.
     private static var moving: [ObjectIdentifier: Int] = [:]
@@ -234,15 +141,10 @@ enum SidebarPagerMotion {
 }
 #endif
 
-/// A weak reference for sandbox verification, without retaining the AppKit view through its callbacks.
-private final class SidebarSwipeInputReference {
-    weak var view: SidebarSwipeInputView?
-}
-
 /// List scroll views own vertical scrolling. Observe scroll events before AppKit dispatches them, and keep
 /// only a precise, horizontally locked gesture that began inside this panel in this App Window.
 private struct SidebarSwipeInput: NSViewRepresentable {
-    let reference: SidebarSwipeInputReference
+    let slide: SidebarSlide
     let area: SidebarSwipeArea?
     let isEnabled: Bool
     let onChange: (CGFloat) -> Void
@@ -250,7 +152,7 @@ private struct SidebarSwipeInput: NSViewRepresentable {
 
     func makeNSView(context: Context) -> SidebarSwipeInputView {
         let view = SidebarSwipeInputView()
-        reference.view = view
+        slide.input = view
         return view
     }
 
@@ -262,7 +164,7 @@ private struct SidebarSwipeInput: NSViewRepresentable {
     }
 }
 
-private final class SidebarSwipeInputView: NSView {
+final class SidebarSwipeInputView: NSView {
     var isEnabled = true {
         didSet {
             if !isEnabled && tracking {

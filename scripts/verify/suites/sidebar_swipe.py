@@ -1,7 +1,9 @@
 """Topics/Sessions switching in the Sidebar, driven without taking focus.
 
-SidebarPager exposes Debug-only accessibility samples while the sandbox's TestDriver runs. They feed
-the real gesture recognizer and release path; no check needs to move the pointer or use the user's tmux server.
+SidebarPager exposes a Debug-only `sidebar-swipe-input` element while the sandbox's TestDriver runs. Its actions feed
+the real gesture recognizer and release path; no check needs to move the pointer or use the user's tmux server. The
+pages slide as Core Animation layers, which leave every row's accessibility frame at rest, so a check reads where the
+pages show from the element's label, "Sidebar swipe input animated|instant <position>", never from a row's frame.
 The driver cannot type keys, so the `toggle_sidebar_mode` checks press its View menu item ("Switch to Sessions" /
 "Switch to Topics") without opening the menu, or run its Command from the palette's search field.
 """
@@ -48,6 +50,19 @@ class SidebarSwipe(unittest.TestCase):
 
     def sample(self, name):
         self.s.act('action', 'sidebar-swipe-input', name)
+
+    def position(self, rs=None):
+        """Where the pages show: the end of the Debug element's label, which AppKit answers from the layers."""
+        return self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').rsplit(' ', 1)[-1]
+
+    def positions(self, seconds):
+        """The position, read again and again for `seconds`."""
+        found = []
+        end = time.time() + seconds
+        while time.time() < end:
+            found.append(self.position())
+            time.sleep(0.05)
+        return found
 
     def test_swipe_switches_views_without_changing_the_window_or_focus(self):
         before = self.s.tmux('list-clients', '-F', '#{client_tty}|#{window_id}')
@@ -105,26 +120,19 @@ class SidebarSwipe(unittest.TestCase):
         self.require_motion()
         self.addCleanup(self.config.write_text, 'sidebar:\n  agents: false\n')
         self.addCleanup(lambda: self.sample('Cancel current swipe'))
-        frames = []
-        def settled(rs):
-            frames.append(self.s.row('topics-list', rs).get('accessibilityFrame'))
-            return len(frames) >= 2 and frames[-1] is not None and frames[-2] == frames[-1]
-        rs = self.s.wait_rows(settled, 'the Topics list did not finish its previous animation')
-        before = self.s.row('topics-list', rs)['accessibilityFrame']
+        # The pages move as layers, which leave every row's accessibility frame where it rests. The Debug position is
+        # where the pages show, mid-settle included, so it ends in 0.000 only once the Topics page is back at rest.
+        self.wait_mode('topics')
         self.sample('Begin swipe left')
-        self.s.wait_rows(lambda rs: self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').endswith(' 0.400'),
-                         'the enabled animation did not preview the swipe')
+        self.s.wait_rows(lambda rs: self.position(rs) == '0.400', 'the enabled animation did not preview the swipe')
         self.config.write_text('sidebar:\n  agents: false\n  animate_switching: false\n')
         self.s.wait_rows(lambda rs: self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').startswith('Sidebar swipe input instant '),
                          'the animation setting did not reload')
-        rs = self.wait_mode('topics')
-        self.assertEqual(self.s.row('topics-list', rs)['accessibilityFrame'], before,
-                         'disabling animation left the Topics list shifted or scaled')
+        self.wait_mode('topics')
         self.sample('Cancel current swipe')
         self.sample('Begin swipe left')
-        rs = self.wait_mode('topics')
-        self.assertEqual(self.s.row('topics-list', rs)['accessibilityFrame'], before,
-                         'a swipe moved the Topics list with animation disabled')
+        positions = self.positions(seconds=0.5)
+        self.assertEqual(set(positions), {'0.000'}, 'a swipe moved the pages with animation disabled: %s' % positions)
         self.sample('Cancel current swipe')
         self.sample('Short swipe left')
         self.wait_mode('topics')
