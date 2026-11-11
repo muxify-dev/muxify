@@ -132,8 +132,9 @@ see it, run:
 security find-certificate -c "Apple Development" -p | openssl x509 -noout -subject
 ```
 
-Use these variables only on your own Mac. Release packaging and CI always sign
-ad-hoc.
+Use these variables only on your own Mac. Release packaging ignores them: it
+signs with the identity that `MUXIFY_RELEASE_IDENTITY` names (see
+[Releases and Tip Builds](#releases-and-tip-builds)).
 
 Desktop build targets run `make setup` first to prepare a fresh machine: it
 installs `xcodegen` with Homebrew if missing, then runs `scripts/setup-ghostty.sh`
@@ -333,29 +334,84 @@ To find the trouble by hand, start with
 of their samples.
 A verify run writes these files into its sandbox's `logs/`, never into yours.
 
-## Beta releases
+## Releases and Tip Builds
 
 ### Verify a download
 
-Betas are ad-hoc signed, not Developer ID signed or notarized. Each release
-includes `SHA256SUMS`. Download it alongside the ZIP and run:
+Builds are not yet Developer ID signed or notarized. Each one includes
+`SHA256SUMS`. Download it alongside the ZIP and run:
 
 ```sh
 shasum -a 256 -c SHA256SUMS
 ```
 
 This checks file integrity, not the publisher's identity. No Ghostty, Zig or
-Xcode installation is needed to run the desktop beta.
+Xcode installation is needed to run Muxify.
+
+### Package
+
+`scripts/package-release.sh` (`make release`) packages one of two kinds of build
+for the updater:
+
+- `tip` packages a **Tip Build**. Its short version
+  (`CFBundleShortVersionString`) is the short commit SHA, and its ZIP is
+  `Muxify-tip-<short-sha>-arm64.zip`.
+- `vX.Y.Z` or `vX.Y.Z-beta.N` packages a **Release**. Its short version is the
+  tag without the `v`, and its ZIP is `Muxify-<version>-arm64.zip`.
+
+It refuses any other argument before it builds. The build number
+(`CFBundleVersion`) is `git rev-list --count HEAD`, so builds on `master` are in
+order. A shallow checkout would count only the commits it fetched, so the
+script refuses one.
+
+The script signs with a named identity from a named keychain, both given
+through the environment. CI gives the "Muxify Release Signing" certificate, so
+every build keeps one designated requirement and macOS keeps its grants across
+updates. A missing identity is an error that names it; there is no ad-hoc
+fallback.
+
+```sh
+export MUXIFY_RELEASE_IDENTITY="Muxify Release Signing"
+export MUXIFY_RELEASE_KEYCHAIN=/path/to/release.keychain-db   # unlocked
+```
+
+The script stamps two keys into the packaged copy's `Info.plist`:
+`MuxifyUpdateFeedBaseURL`, the base URL of the update feeds
+(`https://github.com/muxify-dev/muxify/releases/download/appcast/`), and
+`SUPublicEDKey` from `scripts/sparkle-public-key.env`. The release secrets
+script fills that file once; while its key is empty, packaging refuses to run.
+It stamps a copy in `build/package/`, so the Release product that
+`make install` also builds stays unstamped: a Debug or `make install` build
+never updates itself.
+
+To test the tooling or build a package locally without publishing:
+
+```sh
+make test-release
+make test
+make release              # a Tip Build; TAG=tip is the default
+make release TAG=v0.1.0   # a Release
+```
+
+To sign a local package with your own certificate, set
+`MUXIFY_RELEASE_IDENTITY="Muxify Local Signing"` and
+`MUXIFY_RELEASE_KEYCHAIN=~/Library/Keychains/muxify-local-signing.keychain-db`
+after `make install` has made it.
+
+Packages are written under `build/releases/<tag>/` (`build/releases/tip/` for a
+Tip Build): the ZIP, `SHA256SUMS`, release notes, and `build-info.json`, which
+records the build number, short version, signing identity and commit.
+Dependency notices are bundled under
+`Muxify.app/Contents/Resources/ThirdPartyNotices/`.
 
 ### Publish
 
 The [release workflow](../.github/workflows/release-beta.yml) runs on `macos-26`
-with Xcode 26.6. It caches the pinned Ghostty build, tests Muxify, builds a Release
-app, verifies its ad-hoc signature, and publishes a **GitHub prerelease**, never
-the latest stable release. No Apple account or signing secrets are needed.
-Pull requests and pushes to `master`/`main` run the tests without publishing.
-Default-branch builds warm the dependency cache that beta tags can reuse
-(GitHub does not share tag-only caches between different tags).
+with Xcode 26.6. It caches the pinned Ghostty build, tests Muxify, and on a beta
+tag packages a Release and publishes a **GitHub prerelease**. Pull requests and
+pushes to `master`/`main` run the tests without publishing. Default-branch
+builds warm the dependency cache that beta tags can reuse (GitHub does not share
+tag-only caches between different tags).
 
 After committing and pushing the release tooling and app changes, publish a beta:
 
@@ -364,20 +420,8 @@ git tag v0.1.0-beta.1
 git push origin v0.1.0-beta.1
 ```
 
-The version must use `vMAJOR.MINOR.PATCH-beta.N` with a positive beta number.
-The app's marketing version comes from the tag and its build number from the
-GitHub Actions run number. The workflow can also be dispatched manually with an
-existing beta tag. It refuses to replace an existing GitHub release; use a new
-beta tag instead.
+The workflow can also be dispatched manually with an existing beta tag. It
+refuses to replace an existing GitHub release; use a new beta tag instead.
 
-To test the tooling or build the same package locally without publishing:
-
-```sh
-make test-release
-make test
-make release TAG=v0.1.0-beta.1 BUILD_NUMBER=1
-```
-
-Packages are written under `build/releases/<tag>/`: the ZIP, `SHA256SUMS`,
-release notes, and build provenance. Dependency notices are bundled under
-`Muxify.app/Contents/Resources/ThirdPartyNotices/`.
+The workflow does not yet give the release certificate or check out full depth,
+so it cannot package a tag until it does.

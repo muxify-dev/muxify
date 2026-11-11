@@ -93,8 +93,10 @@ host-cli-linux:
 host-cli-darwin:
 	./scripts/build-host-cli.sh darwin
 
+# TAG=tip (the default) packages a Tip Build, TAG=vX.Y.Z or vX.Y.Z-beta.N a Release, into build/releases/<tag>.
+# It signs with the identity MUXIFY_RELEASE_IDENTITY names, from the unlocked keychain MUXIFY_RELEASE_KEYCHAIN.
 release:
-	BUILD_NUMBER="$(or $(BUILD_NUMBER),1)" ./scripts/package-release.sh "$(TAG)"
+	./scripts/package-release.sh "$(or $(TAG),tip)"
 
 install: project
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Release -destination "platform=macOS,arch=arm64" \
