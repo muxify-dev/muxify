@@ -32,7 +32,7 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             selector
-            SidebarPages(slide: slide, mode: mode, motionEnabled: motionEnabled, topics: topics, sessions: sessions)
+            SidebarPages(slide: slide, topics: topics, sessions: sessions)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background {
@@ -42,6 +42,9 @@ struct SidebarPager<Topics: View, Sessions: View>: View {
                 select(slide.release(translation: translation, velocity: velocity, cancelled: cancelled))
             })
         }
+        // Apart from the pages, so a new mode gives no page a new root.
+        .onChange(of: mode) { _, mode in slide.update(mode: mode, motionEnabled: motionEnabled) }
+        .onChange(of: motionEnabled, initial: true) { _, motion in slide.update(mode: mode, motionEnabled: motion) }
         #if DEBUG
         .onDisappear { SidebarPagerMotion.forget(slide) }
         #endif

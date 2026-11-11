@@ -21,7 +21,8 @@ final class SidebarSlide {
     private var settling: Int?
     private var motions = 0
     #if DEBUG
-    /// How many times SwiftUI updated the pages container: the verify driver bounds it per swipe.
+    /// How many times SwiftUI updated the pages container or handed the slide its mode or motion: the verify driver
+    /// bounds it per swipe.
     var updates = 0
     #endif
 
@@ -36,8 +37,11 @@ final class SidebarSlide {
 
     private var width: CGFloat { max(1, pages?.bounds.width ?? 1) }
 
-    /// SwiftUI's committed mode and `motionEnabled`, from each update of the pages container.
+    /// SwiftUI's committed mode and `motionEnabled`, from `SidebarPager` when either changes.
     func update(mode newMode: SidebarMode, motionEnabled newMotion: Bool) {
+        #if DEBUG
+        updates += 1
+        #endif
         let modeChanged = newMode != mode
         let motionChanged = newMotion != motionEnabled
         mode = newMode
@@ -209,10 +213,13 @@ extension SidebarMode {
 /// The two Sidebar pages, each in its own `NSHostingView`, in an AppKit view that the pager places once. Each page's
 /// root gets this container's whole SwiftUI environment, so a value set above the pager reaches the page unchanged.
 /// Both stay mounted, so each keeps its scroll position and open cards.
+///
+/// SwiftUI updates this container only when a page's content or the environment changes, and only then does a page
+/// get a new root. The mode and motion reach the slide from `SidebarPager`'s `onChange`, not through this container: a
+/// new root makes SwiftUI compare every view on the page again. So a root never depends on the mode, and the AppKit
+/// container alone decides which page takes hits and is in the accessibility tree.
 struct SidebarPages<Topics: View, Sessions: View>: NSViewRepresentable {
     let slide: SidebarSlide
-    let mode: SidebarMode
-    let motionEnabled: Bool
     let topics: Topics
     let sessions: Sessions
 
@@ -225,16 +232,8 @@ struct SidebarPages<Topics: View, Sessions: View>: NSViewRepresentable {
         slide.updates += 1
         #endif
         slide.pages = view
-        view.hosts[0].rootView = page(topics, .topics, context.environment)
-        view.hosts[1].rootView = page(sessions, .sessions, context.environment)
-        slide.update(mode: mode, motionEnabled: motionEnabled)
-    }
-
-    private func page(_ content: some View, _ target: SidebarMode, _ environment: EnvironmentValues) -> AnyView {
-        AnyView(content
-            .environment(\.self, environment)
-            .allowsHitTesting(mode == target)
-            .accessibilityHidden(mode != target))
+        view.hosts[0].rootView = AnyView(topics.environment(\.self, context.environment))
+        view.hosts[1].rootView = AnyView(sessions.environment(\.self, context.environment))
     }
 }
 
@@ -297,8 +296,8 @@ final class SidebarPagesView: NSView {
         slide.isMoving ? nil : super.hitTest(point)
     }
 
-    /// The page of the committed mode. The other one is out of the accessibility tree, as its root's
-    /// `accessibilityHidden` also says.
+    /// The page of the committed mode. The other one is out of the accessibility tree; its root does not know the
+    /// mode, so this container alone decides.
     var accessiblePages: [SidebarPageHost] { [hosts[slide.mode == .topics ? 0 : 1]] }
 
     override func accessibilityChildren() -> [Any]? {
@@ -458,8 +457,8 @@ final class SidebarSelectorHighlightView: NSView {
 #if DEBUG
 /// The Debug `sidebar-swipe-input` element of the verify driver. AppKit answers its label when the driver reads it,
 /// so a swipe costs SwiftUI no update. Its label is "Sidebar swipe input animated|instant <position>", the position
-/// the pages show; its value is "<n> updates", how many times SwiftUI updated the pages container; and its actions
-/// are the swipe samples of `SidebarSwipeInputView.verify(_:)`.
+/// the pages show; its value is "<n> updates", how many times SwiftUI updated the pages container or handed the slide
+/// its mode or motion; and its actions are the swipe samples of `SidebarSwipeInputView.verify(_:)`.
 final class SidebarSwipeDebugView: NSView {
     private weak var slide: SidebarSlide?
 

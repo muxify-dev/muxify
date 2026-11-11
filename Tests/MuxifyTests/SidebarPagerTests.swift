@@ -7,6 +7,7 @@ import XCTest
 @Observable private final class PagerModel {
     var mode = SidebarMode.topics
     var animates = true
+    var title = "Topics"
 }
 
 /// The pager in a borderless window that is never shown. Reduce Motion is set off: CI runners have it on.
@@ -16,10 +17,14 @@ final class SidebarPagerTests: XCTestCase {
     private final class Seen {
         var wraps: [String: Bool] = [:]
         var schemes: [String: ColorScheme] = [:]
+        var titles: [String: String] = [:]
+        /// How many times a card's body ran, on either page.
+        var cards = 0
     }
 
     private struct Page: View {
         let id: String
+        var title = ""
         let seen: Seen
         @Environment(\.wrapsCardTitles) private var wraps
         @Environment(\.colorScheme) private var scheme
@@ -27,9 +32,37 @@ final class SidebarPagerTests: XCTestCase {
         var body: some View {
             let _ = seen.wraps[id] = wraps
             let _ = seen.schemes[id] = scheme
+            let _ = seen.titles[id] = title
             Button(id) {}
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier(id)
+                .background {
+                    VStack {
+                        ForEach(0..<3) { number in Card(name: "\(id) \(number)", seen: seen) }
+                        // A real Sidebar card with a Hint, which reads the Hints that change with the mode.
+                        SidebarCard(isOpen: false, holdsSelection: false, mark: nil, identifier: id + "-card") {
+                            CardHeader(title: id, isOpen: false, mark: nil, isPinned: true, hintTarget: Pager.hintTarget(id),
+                                       summary: "") { EmptyView() }
+                        } content: {
+                            EmptyView()
+                        } menu: {
+                            EmptyView()
+                        }
+                    }
+                }
+        }
+    }
+
+    /// A card that reads the environment, as a Sidebar card does.
+    private struct Card: View {
+        let name: String
+        let seen: Seen
+        @Environment(\.wrapsCardTitles) private var wraps
+        @Environment(\.colorScheme) private var scheme
+
+        var body: some View {
+            let _ = seen.cards += 1
+            Text(name).lineLimit(wraps ? nil : 1).foregroundStyle(scheme == .dark ? .white : .black)
         }
     }
 
@@ -40,10 +73,24 @@ final class SidebarPagerTests: XCTestCase {
         var body: some View {
             SidebarPager(mode: Binding(get: { model.mode }, set: { model.mode = $0 }), animateSwitching: model.animates,
                          acceptsGestures: true) {
-                Page(id: "topics-page", seen: seen)
+                Page(id: "topics-page", title: model.title, seen: seen)
             } sessions: {
                 Page(id: "sessions-page", seen: seen)
             }
+            // As in the App Window, the Hints change with the mode: the cards of the shown page have them.
+            .environment(\.quickSwitchHints, hints(for: model.mode))
+        }
+
+        static func hintTarget(_ page: String) -> QuickSwitchTarget {
+            page == "topics-page" ? .topic(page) : .session(page)
+        }
+
+        private func hints(for mode: SidebarMode) -> HintPresentation {
+            let shown = Self.hintTarget(mode == .topics ? "topics-page" : "sessions-page")
+            return HintPresentation(modifiers: .control, keybinds: .defaults,
+                                    targets: QuickSwitchTargets(cards: [shown], windows: [], topicWindows: [], tabs: [],
+                                                                sessions: [], topics: []),
+                                    sidebar: true, browser: false, terminal: false)
         }
     }
 
@@ -212,6 +259,46 @@ final class SidebarPagerTests: XCTestCase {
         XCTAssertTrue(CATransform3DIsIdentity(pages.hosts[0].layer!.transform))
         slide.track(-120)
         XCTAssertEqual(slide.position, 0, "a swipe moved the pages with animation off")
+    }
+
+    /// A swipe, a committed mode and a change of motion move layers and tell AppKit which page takes input. A page's
+    /// root does not depend on the mode, and a card draws the Hints that move with the mode in an overlay of its own,
+    /// so no card's body runs again on either page.
+    func testASwipeAndAModeCommitRunNoCardBodiesWhileNewContentStillReachesItsPage() {
+        let pages = pages
+        let slide = pages.slide
+        let cards = seen.cards
+        XCTAssertGreaterThanOrEqual(cards, 6, "the pages did not draw their cards")
+        #if DEBUG
+        let sidebarCards = BodyCount.counts["SidebarCard", default: 0]
+        XCTAssertGreaterThanOrEqual(sidebarCards, 2, "the pages did not draw their Sidebar cards")
+        #endif
+        let updates = slide.updates
+        // A swipe that commits Sessions, as `SidebarPager.select` ends it.
+        for translation in [-10, -40, -80] as [CGFloat] {
+            slide.track(translation)
+            settle()
+        }
+        let destination = slide.release(translation: -80, velocity: -2000, cancelled: false)
+        model.mode = destination
+        slide.settle(destination)
+        settle()
+        // Motion turned off, then a press back to Topics.
+        model.animates = false
+        settle()
+        model.mode = .topics
+        settle()
+        XCTAssertGreaterThan(slide.updates, updates, "the committed mode never reached the pages container")
+        XCTAssertEqual(slide.mode, .topics)
+        XCTAssertEqual(seen.cards, cards, "a swipe or a mode commit ran the cards' bodies again")
+        #if DEBUG
+        XCTAssertEqual(BodyCount.counts["SidebarCard", default: 0], sidebarCards,
+                       "the Hints that moved with the mode ran the Sidebar cards' bodies again")
+        #endif
+
+        model.title = "Renamed"
+        settle()
+        XCTAssertEqual(seen.titles["topics-page"], "Renamed", "new content did not reach the Topics page")
     }
 
     /// SwiftUI builds its accessibility tree only for a client outside the app, so this checks the pages container's

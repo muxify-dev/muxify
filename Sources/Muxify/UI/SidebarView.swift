@@ -1356,7 +1356,6 @@ private struct SessionCard<Row: View>: View, Equatable {
 }
 
 struct WindowRow: View {
-    @Environment(\.quickSwitchHints) private var hints
     let window: TmuxWindow
     var content: SidebarFormats.WindowRowContent? = nil
     let isSelected: Bool
@@ -1372,7 +1371,7 @@ struct WindowRow: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if hints.windowSlotReserved { Color.clear.frame(width: fontSize(10)) }
+            WindowHintSpace()
             if let left = content?.left {
                 if !left.isEmpty { customPart(left, side: "left") }
             } else {

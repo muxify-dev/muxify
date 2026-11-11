@@ -50,16 +50,30 @@ class SwipeSteps:
 # A Sidebar full enough that a SwiftUI update of the pages container on every frame would cost the app a lot.
 BURST_SESSIONS = 15
 BURST_SWIPES = 10
-# SwiftUI updates of the pages container a swipe may cause: the committed mode, and one spare for a tmux read that
-# lands mid-swipe. A swipe that drove SwiftUI each frame updated it about once a frame, tens of times a swipe.
-UPDATES_PER_SWIPE = 2
+# SwiftUI updates of the pages container, and modes handed to the slide, a swipe may cause. A swipe that drove SwiftUI
+# each frame updated it about once a frame, tens of times a swipe. The committed mode, the pages' environment that
+# changes with it (the Quick Switch Hints move to the shown page) and a tmux read that lands mid-swipe come to about 3:
+# 28-34 over 10 swipes.
+UPDATES_PER_SWIPE = 4
+# Card bodies a burst may run. A swipe moves only layers, its mode gives no page a new root, and a card reads the Hints
+# that move with the mode in a view of its own, so a burst runs none. The allowance is for a tmux read that lands
+# mid-burst and draws a card again. Before, each swipe ran every card's body on both pages: 300 SidebarCard bodies
+# over 10 swipes of 15 Sessions.
+CARD_BODIES_PER_BURST = 30
 # CPU seconds a swipe may cost the app, gesture, settle and the driver's reads of the accessibility tree included.
-# Old build (0be752b, SwiftUI moved the pages every frame): `sample` of a swiping app read about 42% of a core against
-# about 2% idle, so a swipe of about a second of gesture and settle cost about 0.4 s, before the driver's reads.
-# New build: not measured yet. The shell that wrote this check has no Accessibility permission, so the driver sees no
-# elements; the sign-off run from a trusted terminal measures it and writes it here. The limit is generous on purpose:
-# it fails a return to per-frame SwiftUI, not a slow machine. The update count above is the sharp guard.
-CPU_PER_SWIPE = 0.3
+# Measured on 2026-11-11 from a terminal with Accessibility permission, as this check measures it: the app's user and
+# system time from `ps` over the burst, divided by the swipes.
+# - Old build (0be752b, SwiftUI moved the pages every frame): 0.113-0.123 s a swipe.
+# - This build before the pages stopped being rebuilt by each swipe: 0.173-0.192 s a swipe.
+# - This build: 0.162-0.185 s a swipe, in seven runs.
+# `sample` of the main thread at 1 ms over a 20-swipe burst read both builds at about 0.23 s a swipe, and the main
+# thread about 90% busy on the old build against about 59% on this one. So the number cannot tell the builds apart:
+# the driver's reads dominate it. `wait_mode` dumps the accessibility tree again and again until the pages rest, and
+# the app answers each dump for every row. The old build's Debug label gave the committed mode, so the wait ended
+# before the spring; this one gives the position the pages show, so it waits out the spring and dumps more (20 swipes
+# took 15.1 s against 8.4 s). The limit is about twice this build's number: it fails a burst that makes the app much
+# busier, not a slow machine. The card bodies and the update count above are the sharp guards.
+CPU_PER_SWIPE = 0.4
 
 
 def cpu_seconds(pid):
@@ -91,15 +105,17 @@ class SidebarSwipeBurst(SwipeSteps, unittest.TestCase):
         s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics'])
 
     def updates(self):
-        """How many times SwiftUI has updated the pages container: the Debug element's value, "<n> updates"."""
+        """How many times SwiftUI has updated the pages container or handed the slide its mode or motion: the Debug
+        element's value, "<n> updates"."""
         return int(self.s.row('sidebar-swipe-input').get('accessibilityValue', '').split(' ', 1)[0])
 
-    def test_a_burst_of_swipes_updates_swiftui_at_most_twice_a_swipe(self):
+    def test_a_burst_of_swipes_rebuilds_no_page_and_drives_no_swiftui_frame(self):
         self.s.wait_rows(lambda rs: any(self.s.has('topic-' + topic, rs) for topic in self.topics),
                          'the Sidebar shows none of the %d Topics' % BURST_SESSIONS)
         self.wait_mode('topics')
         self.require_motion()
         updates, cpu = self.updates(), cpu_seconds(self.s.pid)
+        self.s.driver('counts', reset=True)
         for number in range(BURST_SWIPES):
             if number % 2:
                 self.sample('Swipe right')
@@ -109,8 +125,14 @@ class SidebarSwipeBurst(SwipeSteps, unittest.TestCase):
                 self.wait_mode('sessions')
         cpu = cpu_seconds(self.s.pid) - cpu
         updates = self.updates() - updates
+        counts = self.s.driver('counts')['counts']
+        cards = sum(counts.get(name, 0) for name in ('SidebarCard', 'TopicCard'))
+        print('burst: %d updates, %.3f CPU s a swipe, bodies %s' % (updates, cpu / BURST_SWIPES, counts))
         self.assertLessEqual(updates, UPDATES_PER_SWIPE * BURST_SWIPES,
                              '%d swipes updated the pages container through SwiftUI %d times' % (BURST_SWIPES, updates))
+        self.assertLessEqual(cards, CARD_BODIES_PER_BURST,
+                             '%d swipes ran the cards\' bodies %d times, so a swipe rebuilt the pages: %s'
+                             % (BURST_SWIPES, cards, counts))
         self.assertLess(cpu / BURST_SWIPES, CPU_PER_SWIPE,
                         'a swipe cost the app %.3f CPU seconds; %d updates in the burst' % (cpu / BURST_SWIPES, updates))
 

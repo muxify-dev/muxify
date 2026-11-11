@@ -20,6 +20,8 @@ So motion that runs every frame lives in layers that Muxify owns, and SwiftUI on
 ## Consequences
 
 - Each page is a separate SwiftUI graph. Environment values set above the pager must be handed to each page's root.
+- A page gets a new root only when its content or its environment changes, never for the mode or a swipe. A new root makes SwiftUI run the body of every card on the page again, so the mode reaches the AppKit container apart from the pages, and the container alone decides which page takes hits and is in the accessibility tree.
+- A committed mode still changes values in a page's environment, such as the Quick Switch Hints, which move to the cards of the shown page. A card reads such a value in a small view of its own (`CardHints`, `HintHidesMark`), so the change runs that view again, not the card's body.
 - A transaction opened outside a page, such as `withAnimation`, does not reach a page's views.
 - SwiftUI geometry, AppKit `convert`, accessibility frames and hit-testing do not see a layer transform. They report a page's resting place while it moves, so a page takes no clicks or hover while it moves.
 - Verify checks prove the motion through the pager's Debug position and update counter, not through row frames.
