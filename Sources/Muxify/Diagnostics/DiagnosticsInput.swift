@@ -40,9 +40,18 @@ enum DiagnosticsInput {
         counts.withLock { $0[keyPath: kind] += 1 }
     }
 
+    #if DEBUG
+    /// True while the verify driver plays a user's gesture, such as a Sidebar swipe sample, so what it makes counts as
+    /// the user's. On the main thread.
+    static var playsUserGesture = false
+    #endif
+
     /// Counts a Sidebar mode switch or a Command Palette open that the user's key press, click or scroll makes, not
     /// one the app makes by itself, such as Start a Session… at launch. On the main thread.
     static func countUserAction(_ kind: WritableKeyPath<InputCounts, Int>) {
+        #if DEBUG
+        if playsUserGesture { return count(kind) }
+        #endif
         guard let type = NSApp.currentEvent?.type, userEvents.contains(type) else { return }
         count(kind)
     }

@@ -42,6 +42,9 @@ struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
 
     var body: some View {
         BodyCount.tick("SidebarCard")
+        #if DEBUG
+        let rebuild = TestDriverCosts.shared.cardRebuild
+        #endif
         return VStack(alignment: .leading, spacing: 0) {
             header()
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
@@ -92,6 +95,9 @@ struct SidebarCard<Header: View, Content: View, CardMenu: View>: View {
         .contextMenu { menu() }
         .opacity(restingOpacity)
         .cardHints()
+        #if DEBUG
+        .overlay { if let rebuild { CardRebuildCost(mode: rebuild.mode, views: rebuild.views) } }
+        #endif
         // A container, in which the header's sort priority applies.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("card-" + identifier)

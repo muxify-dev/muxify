@@ -3,14 +3,68 @@
 (docs/development.md)."""
 
 import re
+import subprocess
 import time
 import unittest
 
-from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.sandbox import DEBUG_APP, Sandbox, wait
 from scripts.verify.suites.sidebar_swipe import SwipeSteps
 from scripts.verify.topic_records import TopicRecords
 
 CONFIG = 'diagnostics:\n  enabled: %s\nsessions:\n  diagnostics_probe: 1\n'
+CLI = DEBUG_APP/'Contents/Resources/bin/muxify'
+# The libraries of SwiftUI's view graph. A digest of SwiftUI-bound work leads with one of them.
+SWIFTUI = {'AttributeGraph', 'SwiftUI', 'SwiftUICore'}
+
+
+def records(logs, kind):
+    """The fields of every `kind` record in the day files of `logs`, in order."""
+    text = ''.join(path.read_text(errors='replace') for path in sorted(logs.glob('muxify-*.log')))
+    return [dict(word.split('=', 1) for word in line.split(' ')[3:])
+            for line in text.splitlines() if re.match(r'\S+ \S+ %s ' % kind, line)]
+
+
+def finished_burst_samples(logs):
+    return {path.name for path in logs.glob('burst-*.txt') if 'Binary Images:' in path.read_text(errors='replace')}
+
+
+def burst_naming(logs, sample):
+    """The `burst` record whose samples name `sample`, or None."""
+    return next((fields for fields in records(logs, 'burst') if sample in fields.get('samples', '').split(',')), None)
+
+
+def libraries(logs, sample):
+    """The digest's libraries of `sample`, the highest share first, as [(name, share)]."""
+    head = next((fields for fields in records(logs, 'digest') if fields.get('sample') == sample and 'libraries' in fields),
+                None)
+    assert head, 'no digest record names %s' % sample
+    return [(name, float(share)) for name, share in (item.rsplit(':', 1) for item in head['libraries'].split(','))]
+
+
+def summary_burst(test, logs, sample):
+    """The lines of the Burst whose digest names `sample` in `muxify diagnostics summary`'s Bursts section."""
+    result = subprocess.run([str(CLI), 'diagnostics', 'summary', '--folder', str(logs)], capture_output=True, text=True,
+                            timeout=30)
+    test.assertEqual(0, result.returncode, result.stdout + result.stderr)
+    lines = result.stdout.splitlines()
+    test.assertTrue(any(line.startswith('Bursts ') for line in lines), result.stdout)
+    section = lines[next(index for index, line in enumerate(lines) if line.startswith('Bursts ')):]
+    section = section[:section.index('')] if '' in section else section
+    entries, entry = [], None
+    for line in section:
+        if re.match(r'  \d+\. ', line):
+            entry = [line]
+            entries.append(entry)
+        elif entry is not None:
+            entry.append(line)
+    found = next((entry for entry in entries if any(line.strip().startswith('digest %s ' % sample) for line in entry)), None)
+    test.assertIsNotNone(found, 'the summary lists no Burst with the digest of %s:\n%s' % (sample, '\n'.join(section)))
+    return found
+
+
+def summary_line(entry, label):
+    """The text after `label` on the line of a summary Burst that starts with it."""
+    return next(line.strip()[len(label) + 1:] for line in entry if line.strip().startswith(label + ' '))
 
 
 class Diagnostics(unittest.TestCase):
@@ -202,6 +256,128 @@ class DiagnosticsBodies(SwipeSteps, unittest.TestCase):
         self.assertTrue(all(int(count) > 0 for count in bodies.values()), fields['bodies'])
         named = [name for name in ('SidebarCard', 'TopicsSection', 'SessionsSection') if name in bodies]
         self.assertTrue(named, 'the minute names no card or page root body: %s' % fields['bodies'])
+
+
+# Views under the idle clock (`TestDriverCosts.idleClockViews`, which gives the CPU measured), and the Agents at work.
+IDLE_CLOCK_VIEWS = 1600
+IDLE_AGENTS = 4
+
+
+class DiagnosticsIdleCost(unittest.TestCase):
+    """Case 1: a SwiftUI clock under Working-mark-like views while nobody touches the app, as the Working marks were
+    before #114. The Diagnostics log alone must name it: an idle Burst, with Working marks, of SwiftUI's view graph."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1] + '_idle')
+        cls.addClassCleanup(s.teardown)
+        cls.logs = s.root/'logs'
+        (s.root/'config/muxify/config.yaml').write_text('sidebar:\n  agents_scope:\n    topics: all\n    sessions: all\n')
+        project = s.root/'projects/working'
+        project.mkdir(parents=True)
+        cls.panes = []
+        for number in range(IDLE_AGENTS):
+            pane = s.tmux('new-session', '-d', '-P', '-F', '#{pane_id}', '-s', 'idle-%d' % number, '-c', str(project),
+                          'sleep 600')
+            s.tmux('set-option', '-p', '-t', pane, '@muxify_agent', 'claude',
+                   ';', 'set-option', '-p', '-t', pane, '@muxify_agent_status', 'working')
+            cls.panes.append(pane)
+        s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-agentsVisible', 'YES'])
+
+    def test_an_idle_swiftui_clock_is_an_idle_burst_with_working_marks_and_a_swiftui_digest(self):
+        self.s.wait_rows(lambda rs: all(self.s.has('agent-' + pane, rs) for pane in self.panes),
+                         'the Agents section does not list every Working Agent')
+        before = finished_burst_samples(self.logs)
+        self.addCleanup(self.s.act, 'idle_clock', views=0)
+        self.s.act('idle_clock', views=IDLE_CLOCK_VIEWS)
+        # A Burst at launch can take the minute's one sample, so the clock runs on until a sample of its own is written.
+        # The driver acts through the accessibility tree, so the app sees no input while it waits.
+        def new_samples():
+            return sorted(finished_burst_samples(self.logs) - before)
+        sample = wait(new_samples, 'the idle clock made no sampled Burst in %s' % self.logs, 80)[0]
+        self.s.act('idle_clock', views=0)
+        # The Burst ends 3 seconds after the clock stops.
+        fields = wait(lambda: burst_naming(self.logs, sample), 'no burst record names %s' % sample, 20)
+        self.assertEqual('idle', fields['input'], fields)
+        self.assertGreater(int(fields['working_marks']), 0, fields)
+        shares = libraries(self.logs, sample)
+        self.assertIn(shares[0][0], SWIFTUI, 'the digest of %s does not lead with SwiftUI: %s' % (sample, shares))
+
+        entry = summary_burst(self, self.logs, sample)
+        self.assertEqual('idle', summary_line(entry, 'input'), entry)
+        moving = dict(word.split('=', 1) for word in summary_line(entry, 'moving').split(' '))
+        self.assertGreater(int(moving['working_marks']), 0, entry)
+        self.assertIn(summary_line(entry, 'libraries').split(' ', 1)[0], SWIFTUI, entry)
+
+
+# Topics with a Session each, so each page has as many cards, and the views each card lays out again on each switch
+# (`TestDriverCosts.cardRebuildViews`, which gives the CPU measured).
+SWIPE_CARDS = 15
+CARD_REBUILD_VIEWS = 2000
+
+
+class DiagnosticsSwipeCost(SwipeSteps, unittest.TestCase):
+    """Case 2: every Sidebar card's body runs again on each Sidebar switch, as the cards did while they read the Quick
+    Switch Hints before #119. The Diagnostics log alone must name it: a Burst during the switches, with the cards'
+    bodies, of SwiftUI's view graph."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1] + '_swipe')
+        cls.addClassCleanup(s.teardown)
+        cls.logs = s.root/'logs'
+        project = s.root/'project'
+        project.mkdir()
+        (s.root/'config/muxify/config.yaml').write_text('sidebar:\n  agents: false\n  animate_switching: true\n')
+        store = TopicRecords(s.root/'state/muxify')
+        cls.topics = ['swipe-cost-%02d' % number for number in range(SWIPE_CARDS)]
+        for topic in cls.topics:
+            store.put(dict(id=topic, title='Swipe cost ' + topic[-2:], slug=topic))
+            session = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', topic, '-c', str(project),
+                             '/bin/zsh -f')
+            s.tmux('set-option', '-t', session, '@muxify_topic', topic)
+        s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics'])
+
+    def test_card_rebuilds_on_each_switch_are_a_burst_with_the_switches_card_bodies_and_a_swiftui_digest(self):
+        self.s.wait_rows(lambda rs: any(self.s.has('topic-' + topic, rs) for topic in self.topics),
+                         'the Sidebar shows none of the %d Topics' % SWIPE_CARDS)
+        self.wait_mode('topics')
+        self.require_motion()
+        before = finished_burst_samples(self.logs)
+        self.addCleanup(self.s.act, 'card_rebuild', views=0)
+        self.s.act('card_rebuild', views=CARD_REBUILD_VIEWS)
+        # Swipe on until a Burst's sample is written; a Burst at launch can take the minute's one sample.
+        swipes = []
+        deadline = time.monotonic() + 80
+        while not finished_burst_samples(self.logs) - before and time.monotonic() < deadline:
+            left = len(swipes) % 2 == 0
+            swipes.append(time.time())
+            self.sample('Swipe left' if left else 'Swipe right')
+            self.wait_mode('sessions' if left else 'topics')
+        sample = wait(lambda: sorted(finished_burst_samples(self.logs) - before),
+                      'the swipes made no sampled Burst in %s' % self.logs, 10)[0]
+        # The Burst ends 3 seconds after the swipes stop.
+        fields = wait(lambda: burst_naming(self.logs, sample), 'no burst record names %s' % sample, 20)
+        start = time.mktime(time.strptime(fields['start'].split('.')[0], '%Y-%m-%dT%H:%M:%S'))
+        start += float('0.' + fields['start'].split('.')[1])
+        # The swipes made well inside the Burst, a second from either end, so the clocks' rounding cannot move one out.
+        inside = [moment for moment in swipes if start + 1 <= moment <= start + float(fields['length']) - 1]
+        self.assertTrue(inside, 'no swipe falls inside the Burst %s: swipes at %s' % (fields, swipes))
+        switches = dict(item.split(':') for item in fields['input'].split(',')).get('sidebar_switches', '0')
+        self.assertGreaterEqual(int(switches), len(inside), fields)
+        bodies = dict(item.rsplit(':', 1) for item in fields['bodies'].split(',')) if fields['bodies'] != 'none' else {}
+        # Each switch runs at least one page's cards again; without the rebuild a whole burst runs at most
+        # sidebar_swipe.CARD_BODIES_PER_BURST.
+        self.assertGreater(int(bodies.get('SidebarCard', 0)), len(inside) * SWIPE_CARDS, fields)
+        shares = libraries(self.logs, sample)
+        self.assertIn(shares[0][0], SWIFTUI, 'the digest of %s does not lead with SwiftUI: %s' % (sample, shares))
+
+        entry = summary_burst(self, self.logs, sample)
+        counts = dict(item.split(':') for item in summary_line(entry, 'input').split(','))
+        self.assertGreaterEqual(int(counts['sidebar_switches']), len(inside), entry)
+        named = dict(item.rsplit(':', 1) for item in summary_line(entry, 'bodies').split(','))
+        self.assertGreater(int(named.get('SidebarCard', 0)), len(inside) * SWIPE_CARDS, entry)
+        self.assertIn(summary_line(entry, 'libraries').split(' ', 1)[0], SWIFTUI, entry)
 
 
 if __name__ == '__main__':
