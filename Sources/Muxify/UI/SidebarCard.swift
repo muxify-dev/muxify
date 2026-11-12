@@ -165,11 +165,21 @@ private struct WrapsCardTitlesKey: EnvironmentKey {
     static let defaultValue = true
 }
 
+private struct CardRowLimitKey: EnvironmentKey {
+    static let defaultValue: Int? = CardRows.limit
+}
+
 extension EnvironmentValues {
     /// `sidebar.titles.wrap`: a card title wraps so it always shows whole. False keeps it on one line, cut with "…".
     var wrapsCardTitles: Bool {
         get { self[WrapsCardTitlesKey.self] }
         set { self[WrapsCardTitlesKey.self] = newValue }
+    }
+
+    /// `sidebar.card_rows`: the rows an open card lists before "N more…"; nil lists every row.
+    var cardRowLimit: Int? {
+        get { self[CardRowLimitKey.self] }
+        set { self[CardRowLimitKey.self] = newValue }
     }
 }
 
@@ -404,7 +414,7 @@ private struct WindowUnit: Identifiable {
     }
 }
 
-/// An open card's list: each block's heading and rows, cut at `CardRows.limit` with "N more…" below.
+/// An open card's list: each block's heading and rows, cut at `sidebar.card_rows` with "N more…" below.
 /// A block whose rows are all cut loses its heading too. A drag on a Window row moves the Window within its
 /// Session; with `blockDrag`, a drag on a heading moves its whole block.
 struct CardList<Heading: View, Row: View>: View {
@@ -426,10 +436,12 @@ struct CardList<Heading: View, Row: View>: View {
 
     @State private var windowDrag = ListDrag<String>(spacing: CardSpacing.row)
     @Environment(\.interfaceFontSize) private var fontSize
+    @Environment(\.cardRowLimit) private var rowLimit
 
     var body: some View {
         let total = blocks.reduce(0) { $0 + $1.items.count }
-        let shown = CardRows.shownCount(blocks.flatMap(\.items), selectedWindowID: selectedWindowID, showsAll: showsAll)
+        let shown = CardRows.shownCount(blocks.flatMap(\.items), selectedWindowID: selectedWindowID, showsAll: showsAll,
+                                         limit: rowLimit)
         let hiddenMark = blocks.flatMap(\.items).dropFirst(shown).compactMap { agentSpines[$0.id] }.max()
         let starts = blocks.indices.map { index in blocks[..<index].reduce(0) { $0 + $1.items.count } }
         let visible = blocks.indices.filter { starts[$0] < shown }.map { index in
