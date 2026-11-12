@@ -338,7 +338,7 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
 /// The fill of a row: clear, the faint fill of a row under the pointer, or the soft tint of the Location's row, in the
 /// row's rounded shape. The shape is a layer under the view's own: the driver's `snapshot` draws the corners of a
 /// view's own layer square.
-final class RowFillView: NSView {
+final class RowFillView: LayerColoredView {
     enum Fill { case clear, hover, tint }
 
     private static let fadeKey = "tint"
@@ -371,7 +371,7 @@ final class RowFillView: NSView {
         guard fill != self.fill else { return }
         self.fill = fill
         let shown = (shape.presentation() ?? shape).backgroundColor
-        color()
+        recolor()
         guard fades else { return shape.removeAnimation(forKey: Self.fadeKey) }
         let fade = CABasicAnimation(keyPath: "backgroundColor")
         fade.fromValue = shown
@@ -380,21 +380,13 @@ final class RowFillView: NSView {
         shape.add(fade, forKey: Self.fadeKey)
     }
 
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        color()
-    }
-
-    /// A layer keeps the colour it got, so it gets the colour again for each appearance.
-    private func color() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            let color: NSColor? = switch fill {
-            case .clear: nil
-            case .hover: NSColor.labelColor.faded(SelectedRow.hoverOpacity)
-            case .tint: NSColor.controlAccentColor.faded(SelectedRow.tintOpacity)
-            }
-            LayerGlide.withoutActions { shape.backgroundColor = color?.cgColor }
+    override func colorLayers() {
+        let color: NSColor? = switch fill {
+        case .clear: nil
+        case .hover: NSColor.labelColor.faded(SelectedRow.hoverOpacity)
+        case .tint: NSColor.controlAccentColor.faded(SelectedRow.tintOpacity)
         }
+        shape.backgroundColor = color?.cgColor
     }
 }
 

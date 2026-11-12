@@ -479,9 +479,9 @@ private final class LiftShadowView: NSView {
 
 /// The face of the plate: the chrome's colour of a Ghostty theme, under the faint fill of the text colour, in a thin
 /// border of it. The shapes are layers under the view's own, as `RowFillView`'s.
-private final class LiftFaceView: NSView {
+private final class LiftFaceView: LayerColoredView {
     var base: NSColor? {
-        didSet { color() }
+        didSet { recolor() }
     }
     private let under = CALayer()
     private let fill = CALayer()
@@ -513,31 +513,16 @@ private final class LiftFaceView: NSView {
         }
     }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        color()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        color()
-    }
-
-    /// A layer keeps the colour it got, so it gets the colours again for each appearance.
-    private func color() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            LayerGlide.withoutActions {
-                under.backgroundColor = base?.cgColor
-                fill.backgroundColor = NSColor.labelColor.faded(ListLift.plateFillOpacity).cgColor
-                fill.borderColor = NSColor.labelColor.faded(ListLift.plateBorderOpacity).cgColor
-            }
-        }
+    override func colorLayers() {
+        under.backgroundColor = base?.cgColor
+        fill.backgroundColor = NSColor.labelColor.faded(ListLift.plateFillOpacity).cgColor
+        fill.borderColor = NSColor.labelColor.faded(ListLift.plateBorderOpacity).cgColor
     }
 }
 
 /// The place where a lifted unit would land: a slot of its size, in the accent colour, with a dashed border. `DropSlot`
 /// in SwiftUI.
-final class DropSlotView: NSView {
+final class DropSlotView: LayerColoredView {
     private let fill = CALayer()
     private let border = CAShapeLayer()
 
@@ -574,23 +559,9 @@ final class DropSlotView: NSView {
         }
     }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        color()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        color()
-    }
-
-    private func color() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            LayerGlide.withoutActions {
-                fill.backgroundColor = NSColor.controlAccentColor.faded(ListLift.slotFillOpacity).cgColor
-                border.strokeColor = NSColor.controlAccentColor.faded(ListLift.slotBorderOpacity).cgColor
-            }
-        }
+    override func colorLayers() {
+        fill.backgroundColor = NSColor.controlAccentColor.faded(ListLift.slotFillOpacity).cgColor
+        border.strokeColor = NSColor.controlAccentColor.faded(ListLift.slotBorderOpacity).cgColor
     }
 
     /// The slot shows, or not, moving to it by `motion`.

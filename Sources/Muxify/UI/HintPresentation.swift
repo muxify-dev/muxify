@@ -1,4 +1,3 @@
-import SwiftUI
 import MuxifyCore
 
 struct HintPresentation: Equatable {
@@ -54,15 +53,4 @@ struct HintPresentation: Equatable {
     }
 
     subscript(_ target: QuickSwitchTarget) -> [KeyTrigger] { triggers[target] ?? [] }
-}
-
-private struct QuickSwitchHintsKey: EnvironmentKey {
-    static let defaultValue = HintPresentation.hidden
-}
-
-extension EnvironmentValues {
-    var quickSwitchHints: HintPresentation {
-        get { self[QuickSwitchHintsKey.self] }
-        set { self[QuickSwitchHintsKey.self] = newValue }
-    }
 }

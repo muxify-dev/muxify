@@ -9,7 +9,7 @@ import QuartzCore
 
 /// The raised look of an open card: a faint fill of the text colour over a shadow, under the card's rounded shape.
 /// The fill is a layer under the view's own, because AppKit takes the shadow off the layer of a view.
-final class CardFillView: NSView {
+final class CardFillView: LayerColoredView {
     private let fill = CALayer()
 
     init() {
@@ -38,21 +38,8 @@ final class CardFillView: NSView {
         LayerGlide.withoutActions { fill.frame = bounds }
     }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        color()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        color()
-    }
-
-    /// A layer keeps the colour it got, so it gets the text colour again for each appearance.
-    private func color() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            LayerGlide.withoutActions { fill.backgroundColor = NSColor.labelColor.faded(CardOutline.openFillOpacity).cgColor }
-        }
+    override func colorLayers() {
+        fill.backgroundColor = NSColor.labelColor.faded(CardOutline.openFillOpacity).cgColor
     }
 }
 
@@ -75,7 +62,7 @@ enum MarkClock {
 
 /// The spine: a bar along the card's left edge in the colour of the card's mark. The Working mark's bar fades in and
 /// out on the clock that every Working mark shares.
-final class CardSpineView: NSView {
+final class CardSpineView: LayerColoredView {
     private let bar = CALayer()
     private var mark: CardMark?
     private var colors = AgentColors()
@@ -106,7 +93,7 @@ final class CardSpineView: NSView {
         self.colors = colors
         breathes = moves && mark == .agent(.working)
         isHidden = mark == nil
-        color()
+        recolor()
         breathe()
     }
 
@@ -122,26 +109,18 @@ final class CardSpineView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        color()
         breathe()
     }
 
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        color()
-    }
-
-    /// A mark's colour can differ between the light and the dark appearance, and a layer keeps the colour it got.
-    private func color() {
+    /// A mark's colour can differ between the light and the dark appearance.
+    override func colorLayers() {
         guard let mark else { return }
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            let color: NSColor
-            switch mark {
-            case .unread: color = .controlAccentColor
-            case .agent(let mark): color = colors[mark].nsColor(in: effectiveAppearance)
-            }
-            LayerGlide.withoutActions { bar.backgroundColor = color.cgColor }
+        let color: NSColor
+        switch mark {
+        case .unread: color = .controlAccentColor
+        case .agent(let mark): color = colors[mark].nsColor(in: effectiveAppearance)
         }
+        bar.backgroundColor = color.cgColor
     }
 
     /// Starts or stops the fade: one period of `MarkBreath`, again and again on the clock of the marks.
@@ -175,7 +154,7 @@ private final class CardRing: CALayer {
 }
 
 /// The plain border of a card: the text colour at `CardOutline.borderOpacity`, in a ring of `CardOutline.borderWidth`.
-final class CardOutlineView: NSView {
+final class CardOutlineView: LayerColoredView {
     private let ring = CardRing(width: CardOutline.borderWidth)
 
     init() {
@@ -197,21 +176,8 @@ final class CardOutlineView: NSView {
         LayerGlide.withoutActions { ring.frame = bounds }
     }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        color()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        color()
-    }
-
-    /// A layer keeps the colour it got, so it gets the text colour again for each appearance.
-    private func color() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            LayerGlide.withoutActions { layer?.backgroundColor = NSColor.labelColor.faded(CardOutline.borderOpacity).cgColor }
-        }
+    override func colorLayers() {
+        layer?.backgroundColor = NSColor.labelColor.faded(CardOutline.borderOpacity).cgColor
     }
 }
 
@@ -371,7 +337,7 @@ final class StuckHeaderBackdropView: NSView {
 
 /// The faint fill and the divider of a header that sticks. The divider is a layer under the view's own, along its
 /// bottom edge.
-private final class StuckHeaderTintView: NSView {
+private final class StuckHeaderTintView: LayerColoredView {
     private let divider = CALayer()
 
     init() {
@@ -391,23 +357,8 @@ private final class StuckHeaderTintView: NSView {
         LayerGlide.withoutActions { divider.frame = CGRect(x: 0, y: bounds.height - StuckHeader.dividerWidth, width: bounds.width, height: StuckHeader.dividerWidth) }
     }
 
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        color()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        color()
-    }
-
-    /// A layer keeps the colour it got, so it gets the colours again for each appearance.
-    private func color() {
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            LayerGlide.withoutActions {
-                layer?.backgroundColor = NSColor.labelColor.faded(StuckHeader.fillOpacity).cgColor
-                divider.backgroundColor = NSColor.separatorColor.cgColor
-            }
-        }
+    override func colorLayers() {
+        layer?.backgroundColor = NSColor.labelColor.faded(StuckHeader.fillOpacity).cgColor
+        divider.backgroundColor = NSColor.separatorColor.cgColor
     }
 }

@@ -26,7 +26,8 @@ AREAS = {
         'SessionsListView', 'SessionCardView', 'SessionCardDrag', 'SidebarCardChrome', 'SidebarLabel',
         'SidebarAgentMark', 'SidebarHintView', 'SidebarRowView', 'SidebarLogo', 'LayerGlide', 'ObservedUpdate',
         'AgentMarkMetrics', 'WindowRowMetrics', 'PaneRowMetrics', 'SessionsListMetrics', 'WindowRowView',
-        'PaneRowView', 'SessionsList', 'SidebarMenu')],
+        'PaneRowView', 'SessionsList', 'SidebarMenu', 'LayerColoredView', 'StackLayout', 'ListLift', 'CardMetrics',
+        'HintMetrics', 'HintPresentation', 'RowHoverLabel', 'GitViewIconShape')],
 }
 # The files of an area that may import SwiftUI for now, each with the task or stage that removes the import. A task
 # is one of the task set remove-swiftui (.cook/tasks/remove-swiftui/), which is stage 1.

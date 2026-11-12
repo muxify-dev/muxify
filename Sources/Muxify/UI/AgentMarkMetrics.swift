@@ -76,3 +76,13 @@ enum WorkingGlyph {
         }
     }
 }
+
+/// The fade of a card's Working mark, for both versions of the card (ADR 0074): its opacity at a time on the clock that
+/// every Working mark reads, in seconds since the reference date.
+enum MarkBreath {
+    static let period: TimeInterval = 1.6
+    private static let middle = 0.675
+    private static let swing = 0.325
+
+    static func opacity(at time: TimeInterval) -> Double { middle + swing * cos(2 * .pi * time / period) }
+}

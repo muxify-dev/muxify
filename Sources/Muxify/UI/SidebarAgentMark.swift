@@ -6,7 +6,7 @@ import QuartzCore
 /// pixel glyph of `WorkingGlyph`, whose pixels step on the clock that every Working mark shares; a Notification is a
 /// dot in the mark's colour of the Config. The mark stands in the middle of the view, and both grow with the Interface
 /// font size. The view's corner must stand on a device pixel, so the glyph's pixels do too.
-final class SidebarAgentMark: NSView {
+final class SidebarAgentMark: LayerColoredView {
     private var mark: AgentMark?
     private var colors = AgentColors()
     private var moves = false
@@ -52,7 +52,7 @@ final class SidebarAgentMark: NSView {
         glyph.isHidden = mark != .working
         dot.isHidden = mark == nil || mark == .working
         layOut()
-        color()
+        recolor()
         step()
     }
 
@@ -63,13 +63,7 @@ final class SidebarAgentMark: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        color()
         step()
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        color()
     }
 
     private var footprint: CGSize { CGSize(width: fontSize(WorkingGlyph.footprint), height: fontSize(WorkingGlyph.footprint)) }
@@ -102,18 +96,14 @@ final class SidebarAgentMark: NSView {
         }
     }
 
-    /// A mark's colour can differ between the light and the dark appearance, and a layer keeps the colour it got.
-    private func color() {
+    /// A mark's colour can differ between the light and the dark appearance.
+    override func colorLayers() {
         guard let mark else { return }
-        effectiveAppearance.performAsCurrentDrawingAppearance {
-            let color = colors[mark].nsColor(in: effectiveAppearance).cgColor
-            LayerGlide.withoutActions {
-                if mark == .working {
-                    for pixel in pixels { pixel.backgroundColor = color }
-                } else {
-                    dot.fillColor = color
-                }
-            }
+        let color = colors[mark].nsColor(in: effectiveAppearance).cgColor
+        if mark == .working {
+            for pixel in pixels { pixel.backgroundColor = color }
+        } else {
+            dot.fillColor = color
         }
     }
 
