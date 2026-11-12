@@ -70,8 +70,7 @@ extension EnvironmentService {
                     if let left = edit.leftTopic {
                         _ = try transaction.apply(TopicRecordChange(before: records.first { $0.id == left.id }, after: left))
                     }
-                    return try transaction.apply(TopicRecordChange(before: read, after: record), arrival: topics.arrival,
-                                                 replacingLockOf: planned.replacedLockOf)
+                    return try transaction.apply(TopicRecordChange(before: read, after: record), replacingLockOf: planned.replacedLockOf)
                 }
                 commands += moved.map { .tmux($0.command) }
                 phase = .recordSaved
@@ -88,7 +87,7 @@ extension EnvironmentService {
                 let before = edit.record ?? records.first { $0.id == record.id }
                 let locks = SessionLock.locks(in: try server.snapshot().windows, records: try store.read().records)
                 let moved = try store.write(locks: locks) {
-                    try $0.apply(TopicRecordChange(before: before, after: record), arrival: topics.arrival)
+                    try $0.apply(TopicRecordChange(before: before, after: record))
                 }
                 try executor.run(moved.map { .tmux($0.command) }, client: client)
             case .forget(let id):
@@ -116,7 +115,7 @@ extension EnvironmentService {
             return (resolved.source, resolved.snapshot)
         }
         switch request.command {
-        case .list, .show, .environmentShow, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .benchTopic, .fillOpenPlace,
+        case .list, .show, .environmentShow, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .benchTopic, .fillOpenPlace,
              .markRead, .markAllRead, .forgetSettled, .createWorktree, .removeWorktree, .listWorktrees:
             throw TopicRequestError.noTarget
         case .create(let title, let tags):
@@ -313,34 +312,6 @@ extension EnvironmentService {
             return Planned(edit: try TopicReopenPlan(topic: topic, records: records, windows: snapshot.windows, sessionPaths: sessionPaths,
                                                      existingDirectories: TopicReopening.existingWorktrees(of: topic),
                                                      choice: request.command == .startFresh ? .startFresh : .reopen).edit)
-        }
-    }
-
-    /// Lock and Unlock change only the Session option and, when a Lock renumbers the list, the Topic records. With
-    /// `topics.in_play` they are Make a Guest and Bench of a Session.
-    func changeLock(_ request: EnvironmentRequest, locked: Bool, client: String?) -> EnvironmentResponse {
-        var phase = TopicFailure.Phase.nothingChanged
-        do {
-            let records = try store.read().records
-            let snapshot = try server.snapshot()
-            let window = try noTopicSession(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
-            let commands: [TopicPlan.Command]
-            let locks = SessionLock.locks(in: snapshot.windows, records: records)
-            if locked {
-                let changed = try store.write(locks: locks) { $0.lock(window.sessionID) }
-                commands = changed.map { .tmux($0.command) }
-            } else if topics.inPlay != nil, locks.contains(where: { $0.sessionID == window.sessionID }) {
-                // With in_play the Lock is a Guest, and the other Guests keep their positions when it ends.
-                let changed = try store.write(locks: locks) { $0.unlock(window.sessionID) }
-                commands = changed.map { .tmux($0.command) }
-            } else {
-                commands = window.lockOrder == nil ? [] : [.tmux(SessionLock.unsetOption(window.sessionID))]
-            }
-            phase = .changesStarted
-            try executor.run(commands, client: client)
-            return .changed(TopicChange(topicID: nil))
-        } catch {
-            return .failed(failure(error, phase: phase))
         }
     }
 

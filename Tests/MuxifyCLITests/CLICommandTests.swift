@@ -376,20 +376,20 @@ final class CLICommandTests: XCTestCase {
         }
     }
 
-    func testSessionLockTakesTheNamedSessionOrTheCallersSession() throws {
+    func testMakeAGuestAndBenchTakeTheNamedSessionOrTheCallersCard() throws {
         let inside = ["TMUX_PANE": "%7", "XDG_STATE_HOME": "/state", "HOME": "/home/me"]
         let outside = ["XDG_STATE_HOME": "/state", "HOME": "/home/me"]
         let paths = MuxifyPaths(environment: inside, home: "/home/me")
         let caller = try XCTUnwrap(PaneID(rawValue: "%7"))
-        XCTAssertEqual(try CLICommand(arguments: ["session", "lock"], environment: inside),
-                       .request(RequestInvocation(command: .lock(true), target: nil, caller: caller, output: .text, paths: paths)))
-        XCTAssertEqual(try CLICommand(arguments: ["session", "unlock", "--session", "my notes", "--json"], environment: outside),
-                       .request(RequestInvocation(command: .lock(false), target: .sessionName("my notes"), caller: nil, output: .json, paths: paths)))
-        XCTAssertEqual(try CLICommand(arguments: ["session", "lock", "--help"], environment: [:]), .help(scope: ["session", "lock"]))
+        XCTAssertEqual(try CLICommand(arguments: ["topic", "make-guest"], environment: inside),
+                       .request(RequestInvocation(command: .makeGuest, target: nil, caller: caller, output: .text, paths: paths)))
+        XCTAssertEqual(try CLICommand(arguments: ["topic", "bench", "--session", "my notes", "--json"], environment: outside),
+                       .request(RequestInvocation(command: .benchTopic, target: .sessionName("my notes"), caller: nil, output: .json, paths: paths)))
+        XCTAssertThrowsError(try CLICommand(arguments: ["session", "lock"], environment: inside), "session lock is gone")
+        XCTAssertThrowsError(try CLICommand(arguments: ["session", "unlock"], environment: inside), "session unlock is gone")
         let errors: [([String], [String: String], String)] = [
-            (["session", "lock", "notes"], inside, CLIVerbs.usage(for: ["session", "lock"])),
-            (["session", "lock", "--session"], inside, CLIVerbs.usage(for: ["session", "lock"])),
-            (["session", "lock"], outside, "not inside tmux; name the target with --session <name|id>"),
+            (["topic", "make-guest", "notes"], inside, CLIVerbs.usage(for: ["topic", "make-guest"])),
+            (["topic", "make-guest", "--session"], inside, CLIVerbs.usage(for: ["topic", "make-guest"])),
         ]
         for (arguments, environment, message) in errors {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: environment), "\(arguments)") { error in

@@ -24,7 +24,7 @@ final class EnvironmentSnapshotTests: XCTestCase {
     }
 
     private func snapshot(_ records: [TopicRecord], openPlaces: [OpenPlace] = [], windows: [TmuxWindow], agents: [AgentPane] = [],
-                          inPlay: Int? = nil, tags: ConfigTags? = nil) -> EnvironmentSnapshot {
+                          inPlay: Int = Config.Topics.defaultInPlay, tags: ConfigTags? = nil) -> EnvironmentSnapshot {
         var topics = Config.Topics()
         topics.inPlay = inPlay
         topics.tags = tags
@@ -111,11 +111,11 @@ final class EnvironmentSnapshotTests: XCTestCase {
         }
     }
 
-    func testWithoutInPlayTheUnpinnedCardsAreOneListWithTheLockedSessionAndNoOpenPlace() {
-        let shown = snapshot([topic("a", order: 0), topic("b", order: 2)], openPlaces: [OpenPlace(id: "gap", order: 3)],
+    func testALockedSessionThatWasAmongTheTopicsIsAGuestAndNotInNoTopic() {
+        let shown = snapshot([topic("a", order: 0), topic("b", order: 2)],
                              windows: [window("$1", topic: "a"), window("$3", lock: 1), window("$4")])
-        guard case .list(let cards) = shown.unpinned else { return XCTFail("expected kind list: \(shown.unpinned)") }
-        XCTAssertEqual(names(cards), ["topic:a", "session:$3", "topic:b"], "in the order the user gave, Topics and Locked Sessions mixed")
+        XCTAssertEqual(sections(shown)?.places, ["topic:a", "topic:b"])
+        XCTAssertEqual(sections(shown)?.guests, ["session:$3"])
         XCTAssertEqual(shown.noTopic, ["$4"], "a Locked Session has a card, so it is not in no_topic")
     }
 
@@ -193,7 +193,7 @@ final class EnvironmentSnapshotTests: XCTestCase {
             let context = "unread=\(unread) \(statuses)"
             XCTAssertEqual(topicCard("a", in: shown)?.mark, card, context)
             XCTAssertEqual(shown.sessions.first { $0.id == "$1" }?.mark, session.map(CardMark.agent), "a Session shows its Agent mark: " + context)
-            guard case .list(let cards) = shown.unpinned, case .session(_, let locked)? = cards.last else { return XCTFail("no Locked card") }
+            guard case .inPlay(_, _, let guests, _) = shown.unpinned, case .session(_, let locked)? = guests.last else { return XCTFail("no Locked card") }
             XCTAssertEqual(locked, session.map(CardMark.agent), "a Locked Session's card has no Unread of its own: " + context)
         }
     }

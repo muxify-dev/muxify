@@ -142,7 +142,7 @@ final class ConfigSettingTests: XCTestCase {
 
     func testAnExampleIsNotADefault() throws {
         XCTAssertFalse(try XCTUnwrap(setting("ghostty.config_file")).isDefault)
-        XCTAssertFalse(try XCTUnwrap(setting("topics.in_play")).isDefault)
+        XCTAssertTrue(try XCTUnwrap(setting("topics.in_play")).isDefault)
         XCTAssertTrue(try XCTUnwrap(setting("browser.vim_keys")).isDefault)
         XCTAssertTrue(try XCTUnwrap(setting("keybindings.toggle_sidebar")).isDefault)
     }

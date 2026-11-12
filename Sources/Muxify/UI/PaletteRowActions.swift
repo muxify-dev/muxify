@@ -76,8 +76,6 @@ extension CommandPalette {
             if let window { begin(.confirm(PaletteConfirmation(.killWindow(window))), keepingHistory: true) }
         case .killSession:
             if let window { begin(.confirm(PaletteConfirmation(.killSession(window))), keepingHistory: true) }
-        case .lockSession, .unlockSession:
-            if let window { close(); store.setLock(ofSession: window.sessionID, action == .lockSession) }
         case .makeGuest:
             if let window { close(); store.makeGuest(.session(window.sessionID)) }
         case .bench:

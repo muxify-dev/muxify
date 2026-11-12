@@ -186,7 +186,7 @@ private struct TopicsSection: View {
                     return
                 }
                 guard !store.benchShown, store.benchPeek != .all, let dragged = drag.dragged,
-                      model.split?.inPlay.contains(where: { $0.id.listID == dragged }) == true
+                      model.split.inPlay.contains(where: { $0.id.listID == dragged })
                 else { return }
                 store.benchPeek = .all
             }
@@ -929,7 +929,7 @@ struct TopicCard: View, Equatable {
             .disabled(store.changingTopic)
     }
 
-    /// Make a Guest on a Benched Topic, Bench on an In Play Topic, while the Config sets `topics.in_play`.
+    /// Make a Guest on a Benched Topic, Bench on an In Play Topic.
     @ViewBuilder
     private func guestButton(_ id: String) -> some View {
         if state.guestState == false {
@@ -1065,8 +1065,8 @@ private struct LockedCard: View, Equatable {
     }
 
     private var header: some View {
-        CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isLocked: true, isGuest: row.isGuest,
-                   hintTarget: .locked(sessionID), notes: [row.isGuest ? "Guest" : "Locked"], summary: formatted.summary) {
+        CardHeader(title: formatted.title, isOpen: row.isExpanded, mark: row.mark, isGuest: true,
+                   hintTarget: .locked(sessionID), notes: ["Guest"], summary: formatted.summary) {
             if !row.isExpanded, row.sessions.flatMap(\.windows).contains(where: \.hasBell) {
                 BellMark()
             }
@@ -1084,13 +1084,10 @@ private struct LockedCard: View, Equatable {
         }
     }
 
-    /// The Actions of a Locked Session. It is not a Topic, so it has no Settle, Pin or Forget. With `topics.in_play`
-    /// it is a Guest, and its Unlock is Bench.
+    /// The Actions of a Guest Session. It is not a Topic, so it has no Settle, Pin or Forget.
     @ViewBuilder
     private var actions: some View {
-        Button(row.isGuest ? "Bench" : "Unlock Session") {
-            if row.isGuest { store.bench(.session(sessionID)) } else { store.setLock(ofSession: sessionID, false) }
-        }
+        Button("Bench") { store.bench(.session(sessionID)) }
             .disabled(store.changingTopic)
         if let window {
             Button("Rename Session…") { store.palette.begin(.text(.renameSession(window)), text: window.sessionName) }
@@ -1288,9 +1285,9 @@ private struct SessionCard<Row: View>: View, Equatable {
         let isOpen = state.isOpen
         SidebarCard(isOpen: isOpen, holdsSelection: state.holdsSelection, mark: state.mark,
                     viewport: viewport, identifier: identifier) {
-            CardHeader(title: state.formatted.title, isOpen: isOpen, mark: state.mark, isLocked: state.isLocked,
+            CardHeader(title: state.formatted.title, isOpen: isOpen, mark: state.mark,
                        isGuest: state.isGuest, hintTarget: .session(session.id),
-                       notes: state.isGuest ? ["Guest"] : state.isLocked ? ["Locked"] : [],
+                       notes: state.isGuest ? ["Guest"] : [],
                        summary: state.formatted.summary) {
                 if !isOpen, session.windows.contains(where: \.hasBell) {
                     BellMark()
@@ -1302,7 +1299,7 @@ private struct SessionCard<Row: View>: View, Equatable {
             .accessibilityIdentifier(identifier)
             .accessibilityActions {
                 Button("Go to Session") { store.goToSession(session.id) }
-                lockButton
+                guestButton
             }
         } content: {
             CardList(blocks: [CardBlock(id: session.id, items: state.items)],
@@ -1318,21 +1315,18 @@ private struct SessionCard<Row: View>: View, Equatable {
                 Divider()
                 TopicMembershipMenu(store: store, source: .session(window))
             }
-            lockButton
+            guestButton
         }
     }
 
-    /// Only a No Topic Session of a Local App Window can be Locked. With `topics.in_play`, a Lock is a Guest.
+    /// Only a No Topic Session of a Local App Window can be a Guest.
     @ViewBuilder
-    private var lockButton: some View {
+    private var guestButton: some View {
         if let guest = state.guestState {
             Button(guest ? "Bench" : "Make a Guest") {
                 if guest { store.bench(.session(session.id)) } else { store.makeGuest(.session(session.id)) }
             }
                 .accessibilityIdentifier(guest ? "bench" : "make-guest")
-                .disabled(state.changingTopic)
-        } else if let locked = state.lockState {
-            Button(locked ? "Unlock Session" : "Lock Session") { store.setLock(ofSession: session.id, !locked) }
                 .disabled(state.changingTopic)
         }
     }

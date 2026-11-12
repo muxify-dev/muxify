@@ -1370,24 +1370,39 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.problems, [])
     }
 
-    func testTopicInsertPosition() throws {
-        XCTAssertEqual(try load("").topics.insertPosition, .bottom)
-        XCTAssertEqual(try load("topics:\n  insert_position: top").topics.insertPosition, .top)
-        XCTAssertEqual(try load("topics:\n  insert_position: bottom").topics.insertPosition, .bottom)
-        for value in ["middle", "true", "1", "[]"] {
-            let bad = try load("topics:\n  insert_position: " + value)
-            XCTAssertEqual(bad.topics.insertPosition, .bottom)
-            XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "topics.insert_position: expected bottom or top")])
+    func testTopicInsertPositionIsGoneAndTheProblemSaysWhereATopicGoes() throws {
+        for value in ["top", "bottom"] {
+            XCTAssertEqual(try load("topics:\n  insert_position: " + value).problems, [ConfigProblem(
+                path: root, line: 2, message: "topics.insert_position is gone: a new or returning Topic always goes to the top of the Bench")])
         }
+        XCTAssertFalse(Config.template.contains("insert_position"))
     }
 
-    func testTopicsInPlayTakesAWholeNumberOfOneOrMoreAndIsOffWhenAbsent() throws {
-        XCTAssertNil(try load("").topics.inPlay)
+    func testTheLockActionsAreGoneAndEachProblemNamesWhatToUse() throws {
+        let config = try load("""
+        keybindings:
+          toggle_lock: cmd+l
+          command_palette:
+            lock_session: alt+8
+            unlock_session: alt+9
+        """)
+        XCTAssertEqual(config.problems, [
+            ConfigProblem(path: root, line: 2, message: "toggle_lock is gone: use make_guest and bench in keybindings.command_palette, "
+                + "or move_topic_up on the opened No Topic Session"),
+            ConfigProblem(path: root, line: 4, message: "lock_session is gone: use make_guest"),
+            ConfigProblem(path: root, line: 5, message: "unlock_session is gone: use bench"),
+        ])
+        XCTAssertNil(config.keybinds.action(for: trigger("cmd+l"), focus: nil))
+        XCTAssertNil(config.paletteKeybinds.action(for: trigger("alt+8")))
+    }
+
+    func testTopicsInPlayTakesAWholeNumberOfOneOrMoreAndIsFiveWhenAbsent() throws {
+        XCTAssertEqual(try load("").topics.inPlay, 5)
         XCTAssertEqual(try load("topics:\n  in_play: 3").topics.inPlay, 3)
-        XCTAssertNil(try load("topics:\n  in_play:").topics.inPlay)
+        XCTAssertEqual(try load("topics:\n  in_play:").topics.inPlay, 5)
         for value in ["0", "-2", "2.5", "three", "true"] {
             let bad = try load("topics:\n  in_play: " + value)
-            XCTAssertNil(bad.topics.inPlay, value)
+            XCTAssertEqual(bad.topics.inPlay, 5, "a bad value does not turn In Play off: " + value)
             XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "topics.in_play: expected a whole number of 1 or more")], value)
         }
     }

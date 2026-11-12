@@ -20,8 +20,6 @@ extension EnvironmentCommand {
         case .startFresh: .verb(.topicStartFresh)
         case .moveSession: .verb(.sessionMove)
         case .sortSessions: .verb(.topicSortSessions)
-        case .lock: .verb(.sessionLock)
-        case .unlock: .verb(.sessionUnlock)
         case .tags: .verb(.topicTag)
         case .note: .verb(.topicNote)
         case .newWindow: .verb(.windowNew)

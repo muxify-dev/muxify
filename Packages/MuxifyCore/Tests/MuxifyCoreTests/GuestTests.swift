@@ -3,12 +3,12 @@ import XCTest
 
 /// The cases of the In Play design, with `topics.in_play` 3. A Sidebar is written as its cards in order: `📌name` is
 /// Pinned, `_` is an Open Place, `name(G)` is a Guest Topic, `~name(G)` is a Guest Session, `🔒name` is a Locked Session
-/// without `in_play`, `+` is the Guests line and `|` is the Bench line.
+/// that an older Muxify kept among the Topics, `+` is the Guests line and `|` is the Bench line.
 final class GuestTests: XCTestCase {
     private let limit = 3
 
     /// The transaction for `sidebar`, with each card in the order that it has there.
-    private func transaction(_ sidebar: String, inPlay: Int? = 3) -> TopicTransaction {
+    private func transaction(_ sidebar: String, inPlay: Int = 3) -> TopicTransaction {
         var records: [TopicRecord] = [], locks: [SessionLock] = [], places: [OpenPlace] = []
         for (order, card) in sidebar.split(separator: " ").filter({ $0 != "|" && $0 != "+" }).enumerated() {
             var name = String(card)
@@ -36,21 +36,18 @@ final class GuestTests: XCTestCase {
         return transaction
     }
 
-    private func sidebar(_ transaction: TopicTransaction, inPlay: Int? = 3) -> String {
+    private func sidebar(_ transaction: TopicTransaction, inPlay: Int = 3) -> String {
         let all = transaction.entries
-        let pinned = TopicOrder.sorted(all).filter(\.isPinned).map { "📌" + name($0, inPlay: inPlay) }
-        guard let inPlay else {
-            return (pinned + TopicOrder.sorted(all).filter { !$0.isPinned }.map { name($0, inPlay: nil) }).joined(separator: " ")
-        }
+        let pinned = TopicOrder.sorted(all).filter(\.isPinned).map { "📌" + name($0) }
         let cut = TopicOrder.cut(all, inPlay: inPlay)
-        let sections = [cut.places, cut.guests, cut.bench].map { $0.map { name($0, inPlay: inPlay) } }
+        let sections = [cut.places, cut.guests, cut.bench].map { $0.map(name) }
         return (pinned + sections[0] + ["+"] + sections[1] + ["|"] + sections[2]).joined(separator: " ")
     }
 
-    private func name(_ entry: TopicListEntry, inPlay: Int?) -> String {
+    private func name(_ entry: TopicListEntry) -> String {
         switch entry {
-        case .topic(let record): return record.id + (inPlay != nil && entry.isGuest ? "(G)" : "")
-        case .lock(let lock): return (inPlay != nil ? "~" : "🔒") + lock.sessionID + (inPlay != nil ? "(G)" : "")
+        case .topic(let record): return record.id + (entry.isGuest ? "(G)" : "")
+        case .lock(let lock): return "~" + lock.sessionID + "(G)"
         case .openPlace: return "_"
         }
     }
@@ -148,13 +145,7 @@ final class GuestTests: XCTestCase {
         XCTAssertEqual(try paths.storedOpenPlaces(), [])
     }
 
-    func testAnOpenPlaceClosesWithoutInPlayOrPastTheLastPlace() throws {
-        var off = transaction("payments _ docs + | release")
-        off = TopicTransaction(records: off.records, inPlay: nil)
-        off.openPlaces = transaction("payments _ docs + | release").openPlaces
-        try off.move(.topic("docs"), to: .before(.topic("payments")))
-        XCTAssertEqual(off.openPlaces, [], "without in_play an Open Place holds no place")
-
+    func testAnOpenPlaceClosesPastTheLastPlace() throws {
         var fewer = transaction("payments _ docs _ release", inPlay: 2)
         XCTAssertEqual(sidebar(fewer, inPlay: 2), "payments _ + | docs release")
         try fewer.move(.topic("release"), to: .before(.topic("docs")))
@@ -258,11 +249,11 @@ final class GuestTests: XCTestCase {
 
     func testANewTopicGoesToTheTopOfTheBenchAndLeavesAnOpenPlaceOpen() throws {
         var full = transaction("payments _ docs + infra(G) | release")
-        try full.create(TopicRecord(id: "new", title: "new"), arrival: .topOfBench(inPlay: limit))
+        try full.create(TopicRecord(id: "new", title: "new"))
         XCTAssertEqual(sidebar(full), "payments _ docs + infra(G) | new release")
 
         var short = transaction("payments + infra(G) |")
-        try short.create(TopicRecord(id: "new", title: "new"), arrival: .topOfBench(inPlay: limit))
+        try short.create(TopicRecord(id: "new", title: "new"))
         XCTAssertEqual(sidebar(short), "payments new + infra(G) |", "with a free place, it is In Play")
     }
 
@@ -296,18 +287,20 @@ final class GuestTests: XCTestCase {
         XCTAssertThrowsError(try session.chooseInPlay([.lock(sessionID: "scratch")], inPlay: limit), "a Guest Session takes no place")
     }
 
-    func testSettingInPlayPutsEachLockInTheGuestsAndRemovingItKeepsEveryPlace() throws {
-        var s1 = transaction("payments 🔒scratch auth-bug docs infra 🔒tmp", inPlay: nil)
-        s1 = { var t = TopicTransaction(records: s1.records, inPlay: limit)
-               t.locks = s1.locks; return t }()
-        try s1.gatherGuests(inPlay: limit)
+    func testTheGatherPutsEachLockThatWasAmongTheTopicsInTheGuests() throws {
+        var s1 = transaction("payments 🔒scratch auth-bug docs infra 🔒tmp")
+        XCTAssertFalse(TopicOrder.isInSections(s1.entries, inPlay: limit))
+        s1.gatherGuests(inPlay: limit)
         XCTAssertEqual(sidebar(s1), "payments auth-bug docs + ~scratch(G) ~tmp(G) | infra")
         assertWrittenInOrder(s1)
         XCTAssertEqual(s1.gatherGuests(inPlay: limit), [], "a second gather changes nothing")
 
-        let s2 = transaction("payments auth-bug docs ~scratch(G) infra(G) | release", inPlay: nil)
-        XCTAssertEqual(sidebar(s2, inPlay: nil), "payments auth-bug docs 🔒scratch infra release")
-        XCTAssertTrue(s2.records.first { $0.id == "infra" }!.isGuest, "the mark is kept for the next in_play")
+        var moved = transaction("payments auth-bug docs + ~scratch(G) | infra release")
+        try moved.move(.topic("release"), to: .before(.topic("infra")))
+        XCTAssertTrue(TopicOrder.isInSections(moved.entries, inPlay: limit))
+        let before = moved.entries
+        XCTAssertEqual(moved.gatherGuests(inPlay: limit), [], "a list in its sections is not numbered again")
+        XCTAssertEqual(moved.entries, before)
     }
 
     func testTheGuestMarkIsInTheTopicRecord() throws {

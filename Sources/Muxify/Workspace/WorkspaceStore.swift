@@ -317,7 +317,7 @@ final class WorkspaceStore {
     /// on an Open Place fills it. While the Bench is hidden, the card that goes to the Bench shows under the line until
     /// the Sidebar folds it in.
     func tradeCard(_ id: TopicListID, with other: TopicListID) {
-        guard let cut = topics.cut else { return }
+        let cut = topics.cut
         if case .openPlace(let place) = other, case .topic(let topic) = id {
             let places = cut.places
             guard let index = places.firstIndex(where: { if case .openPlace(place) = $0 { return true } else { return false } }) else { return }
@@ -339,7 +339,7 @@ final class WorkspaceStore {
 
     /// The step that asks what fills the Open Place at In Play place `place`.
     func presentFillOpenPlace(_ place: Int) {
-        guard !isRemote, !changingTopic, topicConfig.inPlay != nil else { return }
+        guard !isRemote, !changingTopic else { return }
         palette.begin(.fillOpenPlace(place))
     }
 
@@ -376,19 +376,6 @@ final class WorkspaceStore {
         perform(EnvironmentRequest(pinned ? .pin : .unpin, target: .topic(.id(id))))
     }
 
-    /// Whether the Session is Locked; nil when it cannot be: it is in an open Topic, or Topics are off or Remote.
-    func lockState(ofSession sessionID: String) -> Bool? {
-        guard !isRemote, topics.topicsEnabled, let window = windows.first(where: { $0.sessionID == sessionID }) else { return nil }
-        if let id = window.topicID, topicWatcher.records.contains(where: { $0.id == id && $0.settledAt == nil }) { return nil }
-        return topics.lockedSessionIDs.contains(sessionID)
-    }
-
-    /// Lock and Unlock go through the Topic service, as `muxify session lock` does (ADR 0032).
-    func setLock(ofSession sessionID: String, _ locked: Bool) {
-        guard lockState(ofSession: sessionID) != nil, let id = SessionID(rawValue: sessionID) else { return }
-        perform(EnvironmentRequest(locked ? .lock : .unlock, target: .session(id)))
-    }
-
     /// A card that Make a Guest and Bench act on: a Topic, or a No Topic Session, which is a Guest through its Lock.
     enum GuestCard: Equatable {
         case topic(String)
@@ -400,41 +387,46 @@ final class WorkspaceStore {
             case .session(let id): .locked(id)
             }
         }
+
+        var target: EnvironmentTarget? {
+            switch self {
+            case .topic(let id): .topic(.id(id))
+            case .session(let id): SessionID(rawValue: id).map(EnvironmentTarget.session)
+            }
+        }
     }
 
-    /// Whether the card is a Guest; nil when Make a Guest does not apply to it: the Config does not set
-    /// `topics.in_play`, or the card is a Topic that is not on the Bench. A Guest leaves through Bench.
+    /// Whether the card is a Guest; nil when Make a Guest does not apply to it: the card is a Topic that is not on the
+    /// Bench or a Session in an open Topic, or Topics are off or Remote. A Guest leaves through Bench.
     func guestState(of card: GuestCard) -> Bool? {
-        guard let cut = topics.split, !isRemote, topics.topicsEnabled else { return nil }
+        guard !isRemote, topics.topicsEnabled else { return nil }
         switch card {
-        case .session(let id): return lockState(ofSession: id)
-        case .topic(let id): return cut.bench.contains { $0.id == .topic(id) } ? false : nil
+        case .session(let id):
+            guard let window = windows.first(where: { $0.sessionID == id }) else { return nil }
+            if let topic = window.topicID, topicWatcher.records.contains(where: { $0.id == topic && $0.settledAt == nil }) { return nil }
+            return topics.lockedSessionIDs.contains(id)
+        case .topic(let id): return topics.split.bench.contains { $0.id == .topic(id) } ? false : nil
         }
     }
 
     /// Bench applies to a card In Play: a Topic in an In Play place, a Guest Topic or a Guest Session. Not to a
     /// Benched or Pinned Topic.
     func canBench(_ card: GuestCard) -> Bool {
-        guard let cut = topics.split, !isRemote, topics.topicsEnabled else { return false }
+        guard !isRemote, topics.topicsEnabled else { return false }
         switch card {
-        case .topic(let id): return cut.inPlay.contains { $0.id == .topic(id) }
+        case .topic(let id): return topics.split.inPlay.contains { $0.id == .topic(id) }
         case .session: return guestState(of: card) == true
         }
     }
 
-    /// Bench goes through the Topic service, as `muxify topic bench` and `muxify session unlock` do. A Topic goes to the
-    /// top of the Bench; a Session has no record to wait there, so it leaves its Lock and waits in No Topic. When the
+    /// Bench goes through the Topic service, as `muxify topic bench` does. A Topic goes to the top of the Bench; a
+    /// Session has no record to wait there, so it leaves its Lock and waits in No Topic. When the
     /// user is on the card, the Next Topic opens, as after Settle, but only when it shows: the card's Sessions stay, so
     /// with no other card In Play the user stays on it rather than on another Benched card.
     func bench(_ card: GuestCard) {
         guard canBench(card), !changingTopic else { return }
-        let request: EnvironmentRequest
-        switch card {
-        case .topic(let id): request = EnvironmentRequest(.benchTopic, target: .topic(.id(id)))
-        case .session(let id):
-            guard let session = SessionID(rawValue: id) else { return }
-            request = EnvironmentRequest(.unlock, target: .session(session))
-        }
+        guard let target = card.target else { return }
+        let request = EnvironmentRequest(.benchTopic, target: target)
         if let next = nextCard(leaving: card.id), topics.shows(next) { perform(request, presenting: .goTo(next)) } else { perform(request) }
     }
 
@@ -451,25 +443,17 @@ final class WorkspaceStore {
         return selectedWindow.map { .session($0.sessionID) }
     }
 
-    /// Make a Guest goes through the Topic service, as `muxify topic make-guest` and `muxify session lock` do. A
-    /// Session is a Guest through its Lock.
+    /// Make a Guest goes through the Topic service, as `muxify topic make-guest` does (ADR 0032). A Session is a Guest
+    /// through its Lock.
     func makeGuest(_ card: GuestCard) {
-        guard guestState(of: card) == false else { return }
-        switch card {
-        case .topic(let id): perform(EnvironmentRequest(.makeGuest, target: .topic(.id(id))))
-        case .session(let id): setLock(ofSession: id, true)
-        }
-    }
-
-    func toggleLockOfCurrentSession() {
-        guard let id = selectedWindow?.sessionID, let locked = lockState(ofSession: id) else { return }
-        setLock(ofSession: id, !locked)
+        guard guestState(of: card) == false, let target = card.target else { return }
+        perform(EnvironmentRequest(.makeGuest, target: target))
     }
 
     /// Whether Move Topic Up (`previous`) or Down (`next`) can move the card of the Active Topic or Locked Session, as
     /// the card's own Move Up and Move Down do. Not at that end of the cards with its Pin, for a Settled
-    /// Topic, and outside Topics mode, where the cards do not show. The opened No Topic Session has Up only, with
-    /// `topics.in_play`: Make a Guest.
+    /// Topic, and outside Topics mode, where the cards do not show. The opened No Topic Session has Up only: Make a
+    /// Guest.
     /// While a change runs or waits for its snapshot, a press waits in the queue instead, up to `queuedMoveLimit` for
     /// the card. The queued step is decided when it runs, so a press at the end of the cards is accepted and then does
     /// nothing.
@@ -648,17 +632,12 @@ final class WorkspaceStore {
         return nil
     }
 
-    /// When the Config sets `topics.in_play`, each Lock becomes a Guest at the end of In Play (ADR 0061). The flag in
-    /// UserDefaults says that this Mac gathered them for the `in_play` now set, so a restart or a reload does not move
-    /// the Guests again.
-    private func gatherGuestsWhenInPlayIsSet() {
-        let key = "guestsGathered"
-        guard !isRemote, topics.topicsEnabled else { return }
-        guard topicConfig.inPlay != nil else {
-            if defaults.bool(forKey: key) { defaults.set(false, forKey: key) }
-            return
-        }
-        guard !defaults.bool(forKey: key), !changingTopic else { return }
+    /// A Locked Session that an older Muxify kept among the Topics becomes a Guest in the Guests (ADR 0061). The order of
+    /// the list says when there is one to gather, so a list that is already in its three sections is not written again.
+    private func gatherGuests() {
+        guard !isRemote, topics.topicsEnabled, !changingTopic else { return }
+        let cards = TopicCards.order(records: topicWatcher.records, windows: windows, openPlaces: topicWatcher.openPlaces)
+        guard !TopicOrder.isInSections(cards, inPlay: topicConfig.inPlay) else { return }
         changingTopic = true
         let service = topicService()
         Task { [weak self] in
@@ -667,7 +646,6 @@ final class WorkspaceStore {
             self.changingTopic = false
             self.topicWatcher.reload()
             if let failure { NSLog("muxify: topics: gather Guests: \(failure.message)") }
-            else { self.defaults.set(true, forKey: key) }
         }
     }
 
@@ -1024,17 +1002,17 @@ final class WorkspaceStore {
         benchShown.toggle()
     }
 
-    /// Choose In Play needs `topics.in_play` and a card that is not Pinned. In Sessions mode too: In Play is a place in
+    /// Choose In Play needs a card that is not Pinned. In Sessions mode too: In Play is a place in
     /// the Topics list, which both modes share.
     var canChooseInPlay: Bool {
-        !isRemote && !changingTopic && topics.topicsEnabled && topicConfig.inPlay != nil && topics.rows.contains { !$0.isPinned }
+        !isRemote && !changingTopic && topics.topicsEnabled && topics.rows.contains { !$0.isPinned }
     }
 
     /// The check step of Choose In Play, with the In Play Topics and the Guest Topics checked.
     func presentChooseInPlay(keepingHistory: Bool = false) {
-        guard canChooseInPlay, let inPlay = topicConfig.inPlay, let cut = self.topics.split else { return }
-        let topics = cut.inPlay.filter { if case .topic = $0.id { return true } else { return false } }
-        let draft = CheckDraft(action: .chooseInPlay(places: inPlay), checked: Set(topics.map(\.id)))
+        guard canChooseInPlay else { return }
+        let topics = self.topics.split.inPlay.filter { if case .topic = $0.id { return true } else { return false } }
+        let draft = CheckDraft(action: .chooseInPlay(places: topicConfig.inPlay), checked: Set(topics.map(\.id)))
         palette.begin(.check(draft), keepingHistory: keepingHistory)
     }
 
@@ -1046,7 +1024,8 @@ final class WorkspaceStore {
     /// The card of the Location while it is In Play and the Bench has a card for Replace from Bench to put in its place.
     /// In Sessions mode too: In Play is a place in the Topics list, which both modes share.
     private var replaceableCard: TopicGroupID? {
-        guard !isRemote, !changingTopic, topics.topicsEnabled, let cards = topics.split, let active = topics.activeTopic else { return nil }
+        guard !isRemote, !changingTopic, topics.topicsEnabled, let active = topics.activeTopic else { return nil }
+        let cards = topics.split
         return !cards.bench.isEmpty && cards.inPlay.contains { $0.id == active } ? active : nil
     }
 
@@ -1658,7 +1637,7 @@ final class WorkspaceStore {
         consumeOpenRequests()
         publishBrowserSocket(snapshot)
         if !updateUnread(snapshot.panes) {
-            gatherGuestsWhenInPlayIsSet()
+            gatherGuests()
         }
 
         // Listen while the user has a Session. The Watch Session alone must not keep the server running.
@@ -2843,7 +2822,6 @@ final class WorkspaceStore {
         case .forgetTopic: if let id = activeTopicID, topicWatcher.records.contains(where: { $0.id == id && $0.settledAt == nil }) { presentForgetTopic(id) }
         case .renameTopic: presentRenameTopic()
         case .setTopicNote: presentSetTopicNote()
-        case .toggleLock: toggleLockOfCurrentSession()
         case .moveTopicUp: moveActiveCard(.previous)
         case .moveTopicDown: moveActiveCard(.next)
         case .togglePinTopic: togglePinOfActiveTopic()

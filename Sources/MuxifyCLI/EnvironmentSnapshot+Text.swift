@@ -28,8 +28,6 @@ extension EnvironmentSnapshot {
             sections.append(("In Play (\(limit))", places.enumerated().map { "\($0 + 1)\t" + line($1) }))
             sections.append(("Guests", guests.map(line)))
             sections.append(("Bench", bench.map(line)))
-        case .list(let cards):
-            sections.append(("Topics", cards.map(line)))
         }
         sections.append(("No Topic", noTopic.map { line([$0, names[$0] ?? $0]) }))
         return sections.filter { !$0.lines.isEmpty }.map { ([$0.header] + $0.lines).joined(separator: "\n") + "\n" }.joined()

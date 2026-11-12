@@ -66,6 +66,7 @@ enum CLIVerbs {
     private static let agentOptions: [CLIOption] = [.value("--window", aliases: ["-w"]), .value("--tab")]
 
     private static let topicTarget = "[--topic <id|label> | --window <id> | --pane <id>]"
+    private static let cardTarget = "[--topic <id|label> | --session <name|id> | --window <id> | --pane <id>]"
 
     // MARK: - browser
 
@@ -205,19 +206,6 @@ enum CLIVerbs {
             guard !parsed.operands.isEmpty else { throw CLIError.usage }
             return .sessionOpen(name: parsed.operands.joined(separator: " "))
         },
-        lock(true, help: """
-        Locks this Pane's tmux Session, or the Session that --session names:
-        it keeps a card with a number in the Topics list, after the Topics
-        that are not Pinned. Only a Session in No Topic can be Locked. A
-        Locked Session stays where it is. With topics.in_play in the Config,
-        a Locked Session is a Guest: its card goes to the end of the Guests, as
-        Make a Guest does.
-        """),
-        lock(false, help: """
-        Ends the Lock. The Session stays, in No Topic. With topics.in_play in
-        the Config, this is Bench of a Guest Session: the Guests get one card shorter, and
-        no Open Place stays.
-        """),
         CLIVerb(path: .sessionRemoveFromTopic, synopsis: "[--kill [--remove-worktree]] [--session <name|id> | --pane <id>] [--json]",
                 options: [.flag("--kill"), .flag("--remove-worktree"), .flag("--json")], targets: [.session, .pane],
                 help: """
@@ -266,10 +254,11 @@ enum CLIVerbs {
                 options: [.flag("--json")], targets: [.session, .pane],
                 help: """
                 Moves this Pane's Session one place up or down among the Sessions of its Topic, as
-                Move Up and Move Down do on its row. For a Locked Session, which is in no Topic, it
+                Move Up and Move Down do on its row. For a Guest Session, which is in no Topic, it
                 moves its card as Move Topic Up and Down do: see `topic move`. At the end it fails.
-                With in_play, `up` on a Session that is in no Topic and not Locked Locks it: Make a
-                Guest, at the end of the Guests. `down` on it fails: Lock it first.
+                `up` on a Session that is in no Topic and not a Guest makes it a Guest Session, at
+                the end of the Guests, as Make a Guest does. `down` on it fails: make it a Guest
+                first.
                 """) { parsed in
             .request(try RequestInvocation(.moveSession(try upOrDown(parsed) ? .up : .down), parsed: parsed))
         },
@@ -282,14 +271,6 @@ enum CLIVerbs {
             return .sessionList(SessionListInvocation(output: parsed.output, paths: parsed.paths))
         },
     ]
-
-    private static func lock(_ locked: Bool, help: String) -> CLIVerb {
-        CLIVerb(path: locked ? .sessionLock : .sessionUnlock, synopsis: "[--session <name|id>] [--json]",
-                options: [.flag("--json")], targets: [.session], help: help) { parsed in
-            guard parsed.operands.isEmpty else { throw CLIError.usage }
-            return .request(try RequestInvocation(.lock(locked), parsed: parsed))
-        }
-    }
 
     // MARK: - worktree
 
@@ -606,28 +587,28 @@ enum CLIVerbs {
                   Moves the card of this Pane's Topic one place up or down among the cards that the
                   Topics list shows now, with the same Pin, as Move Topic Up and Down do. At the end
                   of the cards it fails.
-                  With in_play, a step that passes the Guests line or the Bench line changes the
+                  A step that passes the Guests line or the Bench line changes the
                   section of the card, one section for each step. Down from the last In Play place
                   makes the card the top Guest, and leaves an Open Place. Up from the top Guest
                   fills the lowest Open Place, or trades with the last place when none is open.
                   Down from the last Guest is Bench. Up from the top of the Bench is Make a Guest.
                   A Guest Session cannot take a place, so it has no Up from the top of the Guests.
-                  For a Session in no Topic that is not Locked, see `session move`.
+                  For a Session in no Topic that is not a Guest, see `session move`.
                   The command acts as if the Bench shows.
                   With --before or --after, the card goes next to the card that you name, as a drag
                   inside one section does. A card keeps its Pin: next to a card with the other Pin,
                   it goes to the edge of its own Pin group. The same command again changes nothing.
                     --before <id|label>, --after <id|label>             next to this open Topic
-                    --before-session, --after-session <name|id>         next to this Locked Session
+                    --before-session, --after-session <name|id>         next to this Guest Session
                     --before-place <id>, --after-place <id>             next to this Open Place, by the
                                                                         id that environment show gives
                   With --trade-with, the two cards change places, as a drag across the Guests line
                   or the Bench line does, and no other card moves. Neither card can be Pinned.
                   Each card takes the mark of its new section: a card that comes into the Guests
                   is a Guest, and a Guest that leaves them loses its mark. A Guest Session cannot
-                  take an In Play place, and the Lock of a Guest Session that goes to the Bench ends.
+                  take an In Play place, and a Guest Session that goes to the Bench stops being a Guest.
                     --trade-with <id|label>            the open Topic to trade places with
-                    --trade-with-session <name|id>     the Locked Session to trade places with
+                    --trade-with-session <name|id>     the Guest Session to trade places with
                   """) { parsed in
             let named = parsed.values(of: cardMoveOptions)
             guard let (option, value) = named.first else { return .moveCard(try upOrDown(parsed) ? .up : .down) }
@@ -645,9 +626,9 @@ enum CLIVerbs {
                 cards than places, the other places are Open Places. A Guest Topic that
                 fills a place loses its Guest mark. Of the cards after the last place, the
                 regular ones go to the top of the Bench, and a Guest stays a Guest. The
-                other cards keep their order. It needs topics.in_play in the Config.
+                other cards keep their order.
                   --topic <id|label>     an open Topic that is not Pinned; give one for each card
-                  --session <name|id>    a Locked Session, which is a Guest Session: it cannot
+                  --session <name|id>    a Guest Session: it cannot
                                          fill a place
                 """) { parsed in
             let cards = try parsed.values(of: ["--topic", "--session"]).map { option -> RequestInvocation.CardName in
@@ -664,10 +645,10 @@ enum CLIVerbs {
                 Puts a Benched card in the place of this Pane's card, which must be In Play,
                 as Replace from Bench does. The replaced card goes to the end of the Bench.
                 When it is a Guest, the card that comes In Play gets its Guest mark: a Guest
-                Topic goes to the Bench without it, and the Lock of a Guest Session ends.
-                It needs topics.in_play in the Config. --session names a Locked Session.
+                Topic goes to the Bench without it, and a Guest Session stops being a Guest.
+                --session names a Guest Session.
                   --with <id|label>          the Benched Topic that comes In Play
-                  --with-session <name|id>   the Benched Locked Session that comes In Play
+                  --with-session <name|id>   the Benched Guest Session that comes In Play
                 """) { parsed in
             let benched: RequestInvocation.CardName
             switch (try parsed.value("--with"), try parsed.value("--with-session")) {
@@ -678,32 +659,36 @@ enum CLIVerbs {
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .request(try RequestInvocation(.replaceFromBench(with: benched), parsed: parsed))
         },
-        topicVerb(.topicMakeGuest, synopsis: "\(topicTarget) [--json]",
-                  help: """
-                  Makes this Pane's Benched Topic a Guest, as Make a Guest does: its card goes
-                  to the end of the Guests, and no other card goes to the Bench. It needs
-                  topics.in_play in the Config. To make a Session a Guest, use session lock.
-                  """) { parsed in
+        CLIVerb(path: .topicMakeGuest, synopsis: cardTarget + " [--json]", options: [.flag("--json")],
+                targets: [.topic, .session, .window, .pane],
+                help: """
+                Makes this Pane's Benched Topic a Guest, as Make a Guest does: its card goes
+                to the end of the Guests, and no other card goes to the Bench. A Session in
+                no Topic becomes a Guest Session: it gets a card at the end of the Guests. A
+                Guest does not change.
+                """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }
-            return .makeGuest
+            return .request(try RequestInvocation(.makeGuest, parsed: parsed))
         },
-        topicVerb(.topicBench, synopsis: "\(topicTarget) [--json]",
-                  help: """
-                  Puts this Pane's In Play Topic at the top of the Bench, as Bench does.
-                  It keeps its Sessions and Agents. A Topic from an In Play place leaves an
-                  Open Place there, and no Benched card moves up. A Guest Topic loses its
-                  Guest mark and leaves no Open Place. It needs topics.in_play in the Config.
-                  To end a Guest Session, use session unlock.
-                  """) { parsed in
+        CLIVerb(path: .topicBench, synopsis: cardTarget + " [--json]", options: [.flag("--json")],
+                targets: [.topic, .session, .window, .pane],
+                help: """
+                Puts this Pane's In Play Topic at the top of the Bench, as Bench does.
+                It keeps its Sessions and Agents. A Topic from an In Play place leaves an
+                Open Place there, and no Benched card moves up. A Guest Topic loses its
+                Guest mark and leaves no Open Place. A Guest Session stops being a Guest:
+                its card goes, the Session stays in No Topic, and the other Guests keep
+                their positions.
+                """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError.usage }
-            return .benchTopic
+            return .request(try RequestInvocation(.benchTopic, parsed: parsed))
         },
         topicVerb(.topicFillPlace, synopsis: "<place> \(topicTarget) [--json]",
                   help: """
                   Puts this Pane's Guest Topic or Benched Topic in the Open Place at In Play
                   place <place>, counted from 1 after the Pinned Topics, as a click on the
                   Open Place card does. A Guest Topic loses its Guest mark. No other card
-                  moves. It needs topics.in_play in the Config.
+                  moves.
                   """) { parsed in
             guard parsed.operands.count == 1, let place = Int(parsed.operands[0]), place >= 1 else { throw CLIError.usage }
             return .fillPlace(place)

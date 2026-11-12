@@ -34,7 +34,6 @@ struct RequestInvocation: Equatable {
         /// A Dormant or Settled Topic has no Pane, so these take only `--topic`.
         case reopen
         case startFresh
-        case lock(Bool)
         /// `topic` is an open Topic's id or label. `session` chooses its destination Session; `newSession` makes one.
         case moveWindow(topic: String, session: String?, newSession: Bool)
         /// Before or after another Window of the same Session.
@@ -90,13 +89,12 @@ struct RequestInvocation: Equatable {
         var targets: [TargetOption] {
             switch self {
             case .new: return []
-            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .makeGuest, .benchTopic, .fillPlace, .moveCard, .placeCard, .tradeCard,
+            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .fillPlace, .moveCard, .placeCard, .tradeCard,
                  .sortSessions:
                 return [.topic, .window, .pane]
             case .moveSession: return [.session, .pane]
-            case .replaceFromBench: return [.topic, .session, .window, .pane]
+            case .replaceFromBench, .makeGuest, .benchTopic: return [.topic, .session, .window, .pane]
             case .reopen, .startFresh: return [.topic]
-            case .lock: return [.session]
             case .moveWindow, .moveToNewTopic, .removeWindowFromTopic: return [.window, .pane]
             case .moveToNewWindow: return [.pane]
             case .newWindow: return [.topic, .session, .window, .pane]
@@ -126,7 +124,7 @@ struct RequestInvocation: Equatable {
         /// A Tag change needs no SessionPath, and a command that shows a Topic finds only the SessionPaths of its Sessions.
         var findsAllSessionPaths: Bool {
             switch self {
-            case .new, .environmentShow, .tag, .note, .lock, .pin, .makeGuest, .benchTopic, .fillPlace, .moveCard, .placeCard, .tradeCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
+            case .new, .environmentShow, .tag, .note, .pin, .makeGuest, .benchTopic, .fillPlace, .moveCard, .placeCard, .tradeCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
                  .forgetSettled, .placeWindow, .zoomPane, .createWorktree, .removeWorktree, .listWorktrees: return false
             default: return !showsTopic
             }
@@ -152,7 +150,6 @@ struct RequestInvocation: Equatable {
             case .rename: return "topic rename"
             case .reopen: return "topic reopen"
             case .startFresh: return "topic start-fresh"
-            case .lock(let locked): return locked ? "session lock" : "session unlock"
             case .moveWindow: return "window move"
             case .moveToNewTopic: return "window move --new-topic"
             case .moveToNewWindow: return "window move --new-window"
@@ -478,7 +475,6 @@ extension RequestInvocation {
         case .rename(let title): return .rename(title: title)
         case .reopen: return .reopen
         case .startFresh: return .startFresh
-        case .lock(let locked): return locked ? .lock : .unlock
         case .moveWindow(let topic, let session, let newSession):
             guard let session else { return .move(to: newSession ? .newSession(topic: .named(topic)) : .topic(.named(topic))) }
             let response = service.handle(EnvironmentRequest(.show, target: .topic(.named(topic))))

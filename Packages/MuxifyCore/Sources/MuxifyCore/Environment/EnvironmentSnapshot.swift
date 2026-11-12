@@ -110,15 +110,14 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
         }
     }
 
-    /// The cards that are not Pinned: cut into In Play sections when the Config sets `topics.in_play`, else one list.
+    /// The cards that are not Pinned, cut into the In Play sections. `kind` stays on the wire for the readers that
+    /// knew a second kind.
     public enum Unpinned: Codable, Hashable, Sendable {
         /// The places in place order (place number = index + 1), the Guests, and the Bench, top first.
         case inPlay(limit: Int, places: [Card], guests: [Card], bench: [Card])
-        /// Topics and Locked Sessions mixed, in the order the user gave. No Open Place.
-        case list([Card])
 
-        private enum Kind: String, Codable { case inPlay = "in_play", list }
-        private enum CodingKeys: String, CodingKey { case kind, limit, places, guests, bench, cards }
+        private enum Kind: String, Codable { case inPlay = "in_play" }
+        private enum CodingKeys: String, CodingKey { case kind, limit, places, guests, bench }
 
         public init(from decoder: Decoder) throws {
             let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -126,8 +125,6 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
             case .inPlay:
                 self = .inPlay(limit: try values.decode(Int.self, forKey: .limit), places: try values.decode([Card].self, forKey: .places),
                                guests: try values.decode([Card].self, forKey: .guests), bench: try values.decode([Card].self, forKey: .bench))
-            case .list:
-                self = .list(try values.decode([Card].self, forKey: .cards))
             }
         }
 
@@ -140,9 +137,6 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
                 try values.encode(places, forKey: .places)
                 try values.encode(guests, forKey: .guests)
                 try values.encode(bench, forKey: .bench)
-            case .list(let cards):
-                try values.encode(Kind.list, forKey: .kind)
-                try values.encode(cards, forKey: .cards)
             }
         }
     }
@@ -161,7 +155,6 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
     public var cards: [Card] {
         switch unpinned {
         case .inPlay(_, let places, let guests, let bench): return pinned + places + guests + bench
-        case .list(let cards): return pinned + cards
         }
     }
 
@@ -188,13 +181,9 @@ public struct EnvironmentSnapshot: Codable, Hashable, Sendable {
                     })
         }
         pinned = list.pinned.map(Card.init)
-        if let inPlay = list.inPlay {
-            let cut = inPlay.cut
-            unpinned = .inPlay(limit: inPlay.limit, places: cut.places.map(Card.init), guests: cut.guests.map(Card.init),
-                               bench: cut.bench.map(Card.init))
-        } else {
-            unpinned = .list(list.unpinned.map(Card.init))
-        }
+        let cut = list.inPlay.cut
+        unpinned = .inPlay(limit: list.inPlay.limit, places: cut.places.map(Card.init), guests: cut.guests.map(Card.init),
+                           bench: cut.bench.map(Card.init))
         noTopic = firsts.filter { list.group(of: $0) == .noTopic }.map(\.sessionID)
     }
 }

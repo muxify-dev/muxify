@@ -13,8 +13,6 @@ public enum CLIVerbPath: String, CaseIterable, Sendable {
     case browserScreenshot = "browser screenshot"
     case browserClose = "browser close"
     case sessionOpen = "session open"
-    case sessionLock = "session lock"
-    case sessionUnlock = "session unlock"
     case sessionRemoveFromTopic = "session remove-from-topic"
     case sessionNew = "session new"
     case sessionRename = "session rename"
@@ -116,10 +114,8 @@ extension PaletteAction {
         case .newWindow: .verb(.windowNew)
         case .killWindow: .verb(.windowKill)
         case .killSession: .verb(.sessionKill)
-        case .lockSession: .verb(.sessionLock)
-        case .unlockSession: .verb(.sessionUnlock)
-        case .makeGuest: .verbs([.topicMakeGuest, .sessionLock])
-        case .bench: .verbs([.topicBench, .sessionUnlock])
+        case .makeGuest: .verb(.topicMakeGuest)
+        case .bench: .verb(.topicBench)
         case .choosePane, .chooseWindow, .chooseSession: .verb(.windowMove)
         case .toggleIncludeTab: .noMirror("The Tab is the view of one App Window.")
         }

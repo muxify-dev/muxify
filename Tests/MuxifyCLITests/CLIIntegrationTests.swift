@@ -481,12 +481,12 @@ final class CLIIntegrationTests: XCTestCase {
         _ = try await newTopic("Second", in: sandbox.game, sandbox: sandbox)
         try sandbox.tmux(["new-session", "-d", "-s", "notes", "-c", sandbox.tools.path])
         let environment = sandbox.cliEnvironment(pane: try sandbox.pane(of: "main"))
-        let locked = try await run(cli, arguments: ["session", "lock", "--session", "notes"], environment: environment)
+        let locked = try await run(cli, arguments: ["topic", "make-guest", "--session", "notes"], environment: environment)
         XCTAssertEqual(locked.status, 0, locked.output)
 
         let refused = try await run(cli, arguments: ["topic", "replace-from-bench", "--with-session", "notes", "--topic", "First"],
                                     environment: environment)
-        XCTAssertEqual(refused.status, 1, "with in_play, a Locked Session is a Guest, In Play: " + refused.output)
+        XCTAssertEqual(refused.status, 1, "a Guest Session is In Play: " + refused.output)
         XCTAssertTrue(refused.stderr.contains("not on the Bench"), refused.stderr)
         let replaced = try await run(cli, arguments: ["topic", "replace-from-bench", "--with", "Second", "--session", "notes"],
                                      environment: environment)
@@ -646,11 +646,11 @@ final class CLIIntegrationTests: XCTestCase {
         let second = try await newTopic("Second", in: sandbox.game, sandbox: sandbox)
         try sandbox.tmux(["new-session", "-d", "-s", "notes", "-c", sandbox.tools.path])
         let environment = sandbox.cliEnvironment(pane: nil)
-        let locked = try await run(cli, arguments: ["session", "lock", "--session", "notes"], environment: environment)
+        let locked = try await run(cli, arguments: ["topic", "make-guest", "--session", "notes"], environment: environment)
         XCTAssertEqual(locked.status, 0, locked.output)
 
         let guest = try await run(cli, arguments: ["topic", "choose-in-play", "--session", "notes", "--topic", "Second"], environment: environment)
-        XCTAssertEqual(guest.status, 1, "a Locked Session is a Guest, which keeps its place: " + guest.output)
+        XCTAssertEqual(guest.status, 1, "a Guest Session keeps its place: " + guest.output)
         let chosen = try await run(cli, arguments: ["topic", "choose-in-play", "--topic", "Second"], environment: environment)
         XCTAssertEqual(chosen.status, 0, chosen.output)
         let list = try await run(cli, arguments: ["topic", "list"], environment: environment)

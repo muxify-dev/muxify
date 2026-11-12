@@ -61,8 +61,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     public var hasManualSessionOrder = false
     /// The Topic stays above every Topic that is not Pinned (`pinned: true`).
     public var isPinned = false
-    /// The Topic is a Guest: In Play above `topics.in_play` (`guest: true`). Without `in_play` the mark has no effect,
-    /// and the record keeps it.
+    /// The Topic is a Guest: In Play above `topics.in_play` (`guest: true`).
     public var isGuest = false
     public var isUnread = false
     /// The record keeps them in `tags` as an array of names, A→Z.

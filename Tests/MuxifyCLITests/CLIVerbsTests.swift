@@ -57,7 +57,6 @@ final class CLIVerbsTests: XCTestCase {
             (["topic", "start-fresh", "--pane", "%3"], "topic start-fresh does not take --pane; name the target with --topic <id|label>"),
             (["session", "remove-from-topic", "--remove-worktree"], CLIVerbs.usage(for: ["session", "remove-from-topic"])),
             (["session", "remove-from-topic", "--window", "@1"], CLIVerbs.usage(for: ["session", "remove-from-topic"])),
-            (["session", "lock", "--pane", "%3"], CLIVerbs.usage(for: ["session", "lock"])),
             (["window", "zoom", "extra"], CLIVerbs.usage(for: ["window", "zoom"])),
             (["window", "remove-from-topic"],
              "window remove-from-topic takes the destination: --session <name|id> of a No Topic Session, or --new-session"),

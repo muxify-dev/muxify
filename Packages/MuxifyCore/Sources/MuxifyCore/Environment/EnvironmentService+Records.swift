@@ -54,12 +54,12 @@ extension EnvironmentService {
                 let step: TopicCards.Step = move == .up ? .up : .down
                 var outcome = TopicCards.step(card.id, step, in: cards, inPlay: topics.inPlay)
                 // A Lock that has no card is the unlocked No Topic Session, which `card` let through for this step.
-                if outcome == .hidden, case .lock = card.id { outcome = TopicCards.stepUnlockedSession(step, inPlay: topics.inPlay) }
+                if outcome == .hidden, case .lock = card.id { outcome = TopicCards.stepUnlockedSession(step) }
                 switch outcome {
                 case .atEnd: throw TopicRequestError.cardAtEnd(card: card.label, up: move == .up, pinned: card.pinned)
                 case .hidden:
                     if case .lock(let sessionID) = card.id, let window = snapshot.windows.first(where: { $0.sessionID == sessionID }) {
-                        throw TopicRequestError.cardHidden(Self.lockFirst(window))
+                        throw TopicRequestError.cardHidden(Self.makeGuestFirst(window))
                     }
                     throw TopicRequestError.cardHidden("\(card.label) has no card in the Topics list.")
                 case .reorder, .toGuests, .fill, .trade, .takePlace, .bench, .makeGuest, .refused:
@@ -88,12 +88,11 @@ extension EnvironmentService {
     private func chooseInPlay(_ cards: [TopicListRef], client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
-            guard let inPlay = topics.inPlay else { throw TopicRequestError.inPlayOff }
             let contents = try store.read()
             let snapshot = try server.snapshot()
             let chosen = try cards.map { try listID($0, records: contents.records) }
             let moved = try store.write(locks: SessionLock.locks(in: snapshot.windows, records: contents.records)) {
-                try $0.chooseInPlay(chosen, inPlay: inPlay)
+                try $0.chooseInPlay(chosen, inPlay: topics.inPlay)
             }
             phase = .changesStarted
             try executor.run(moved.map { .tmux($0.command) }, client: client)
@@ -107,13 +106,12 @@ extension EnvironmentService {
     private func replaceFromBench(_ request: EnvironmentRequest, with ref: TopicListRef, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
-            guard let inPlay = topics.inPlay else { throw TopicRequestError.inPlayOff }
             let contents = try store.read()
             let snapshot = try server.snapshot()
             let card = try self.card(request.target, caller: request.caller, records: contents.records, snapshot: snapshot, client: client)
             let benched = try listID(ref, records: contents.records)
             let moved = try store.write(locks: SessionLock.locks(in: snapshot.windows, records: contents.records)) {
-                try $0.replaceFromBench(card.id, with: benched, inPlay: inPlay)
+                try $0.replaceFromBench(card.id, with: benched, inPlay: topics.inPlay)
             }
             phase = .changesStarted
             try executor.run(moved.map { .tmux($0.command) }, client: client)
@@ -123,60 +121,64 @@ extension EnvironmentService {
         }
     }
 
-    /// Make a Guest writes the order of the Topics list and the Topic's Guest mark. A Guest Topic does not change. A
-    /// Session is a Guest through its Lock, so `lock` makes it one.
+    /// Make a Guest writes the order of the Topics list and the Topic's Guest mark. A No Topic Session becomes a Guest
+    /// through its Lock. A Guest does not change.
     private func guest(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
-        inPlayTopicChange(request, client: client) { topic, inPlay in
-            topic.isGuest && !topic.isPinned ? nil : { try $0.makeGuest(topic.id, inPlay: inPlay) }
+        cardChange(request, client: client, allowUnlockedSession: true) { card, records in
+            if case .topic(let id) = card, let topic = records.first(where: { $0.id == id }), topic.isGuest, !topic.isPinned { return nil }
+            return { try $0.apply(.makeGuest, to: card) }
         }
     }
 
-    /// Bench of a Topic writes the order of the Topics list, the Topic's Guest mark and the Open Places.
+    /// Bench writes the order of the Topics list, the Topic's Guest mark and the Open Places. Bench of a Guest Session
+    /// ends its Lock, and a No Topic Session that is not a Guest does not change.
     private func bench(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
-        inPlayTopicChange(request, client: client) { topic, inPlay in { try $0.bench(topic.id, inPlay: inPlay) } }
+        cardChange(request, client: client, allowUnlockedSession: true) { card, _ in { try $0.apply(.bench, to: card) } }
     }
 
     private func fillOpenPlace(_ request: EnvironmentRequest, place: Int, client: String?) -> EnvironmentResponse {
-        inPlayTopicChange(request, client: client) { topic, inPlay in
+        let inPlay = topics.inPlay
+        return cardChange(request, client: client) { card, _ in
             { transaction in
+                guard case .topic(let topic) = card else { throw TopicOrder.Failure.guestSession }
                 let places = TopicOrder.cut(transaction.entries, inPlay: inPlay).places
                 guard places.indices.contains(place - 1), case .openPlace(let open) = places[place - 1] else {
                     throw TopicOrder.Failure.notOpenPlace
                 }
-                return try transaction.fillOpenPlace(open.id, with: topic.id, inPlay: inPlay)
+                return try transaction.fillOpenPlace(open.id, with: topic, inPlay: inPlay)
             }
         }
     }
 
-    /// A change of the target's open Topic with `topics.in_play`: one write of the Topics list, then the Locks it moved
-    /// go to tmux. `change` gives nil when the Topic is already as the request asks.
-    private func inPlayTopicChange(_ request: EnvironmentRequest, client: String?,
-                                   _ change: (TopicRecord, Int) -> ((inout TopicTransaction) throws -> [SessionLockChange])?) -> EnvironmentResponse {
+    /// A change of the target's card: one write of the Topics list, then the Locks it moved go to tmux. `change` gives
+    /// nil when the card is already as the request asks.
+    private func cardChange(_ request: EnvironmentRequest, client: String?, allowUnlockedSession: Bool = false,
+                            _ change: (TopicListID, [TopicRecord]) -> ((inout TopicTransaction) throws -> [SessionLockChange])?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
-            guard let inPlay = topics.inPlay else { throw TopicRequestError.inPlayOff }
             let records = try store.read().records
             let snapshot = try server.snapshot()
-            let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
-            guard let write = change(topic, inPlay) else { return .changed(TopicChange(topicID: topic.id)) }
+            let card = try self.card(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client,
+                                     allowUnlockedSession: allowUnlockedSession).id
+            guard let write = change(card, records) else { return .changed(card.change) }
             let moved = try store.write(locks: SessionLock.locks(in: snapshot.windows, records: records), write)
             phase = .changesStarted
             try executor.run(moved.map { .tmux($0.command) }, client: client)
-            return .changed(TopicChange(topicID: topic.id))
+            return .changed(card.change)
         } catch {
             return .failed(failure(error, phase: phase))
         }
     }
 
-    /// Puts each Guest at the end of In Play: the host calls it when the Config sets `topics.in_play`, so the Locks
-    /// that were in the order of the Topics become Guests under the In Play Topics. Nil when it succeeded.
+    /// Gathers each Locked Session that an older Muxify kept among the Topics into the Guests. The host calls it at
+    /// launch. A list that is already in the three sections does not change. Nil when it succeeded.
     public func gatherGuests(client: String? = nil) -> TopicFailure? {
-        guard let inPlay = topics.inPlay, topicsAvailable else { return nil }
+        guard topicsAvailable else { return nil }
         var phase = TopicFailure.Phase.nothingChanged
         do {
             let records = try store.read().records
             let locks = SessionLock.locks(in: try server.snapshot().windows, records: records)
-            let moved = try store.write(locks: locks) { $0.gatherGuests(inPlay: inPlay) }
+            let moved = try store.write(locks: locks) { $0.gatherGuests(inPlay: topics.inPlay) }
             phase = .recordSaved
             try executor.run(moved.map { .tmux($0.command) }, client: client)
             return nil
@@ -243,12 +245,12 @@ extension EnvironmentService {
         }
     }
 
-    private static func lockFirst(_ session: TmuxWindow) -> String {
-        "The Session \(session.sessionName) has no card in the Topics list. Lock it first: muxify session lock --session \(session.sessionID)."
+    private static func makeGuestFirst(_ session: TmuxWindow) -> String {
+        "The Session \(session.sessionName) has no card in the Topics list. Make it a Guest first: muxify topic make-guest --session \(session.sessionID)."
     }
 
     /// The card that a request moves: the target's open Topic, else the target's Locked Session. With
-    /// `allowUnlockedSession`, a Session that is not Locked answers as its own `lock` card, for the step that Locks it.
+    /// `allowUnlockedSession`, a Session that is not Locked answers as its own `lock` card, for the change that Locks it.
     private func card(_ target: EnvironmentTarget?, caller: TopicCaller?, records: [TopicRecord], snapshot: TmuxSnapshot,
                       client: String?, allowUnlockedSession: Bool = false) throws -> (id: TopicListID, label: String, pinned: Bool) {
         if case .topic(let ref)? = target {
@@ -261,9 +263,9 @@ extension EnvironmentService {
         }
         guard SessionLock.locks(in: snapshot.windows, records: records).contains(where: { $0.sessionID == window.sessionID }) else {
             if allowUnlockedSession { return (.lock(sessionID: window.sessionID), "The Session " + window.sessionName, false) }
-            throw TopicRequestError.cardHidden(Self.lockFirst(window))
+            throw TopicRequestError.cardHidden(Self.makeGuestFirst(window))
         }
-        return (.lock(sessionID: window.sessionID), "The Locked Session " + window.sessionName, false)
+        return (.lock(sessionID: window.sessionID), "The Guest Session " + window.sessionName, false)
     }
 
     /// Tags are one column of one record, so a Tag change writes only that column.

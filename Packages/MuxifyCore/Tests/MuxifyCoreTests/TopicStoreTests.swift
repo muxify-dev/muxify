@@ -233,8 +233,8 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertEqual(try paths.storedTopicRows(), before)
         XCTAssertThrowsError(try store.write { try $0.move(.topic("a"), to: .after(.topic("missing"))) })
         XCTAssertEqual(try paths.storedTopicRows(), before)
-        try store.write { try $0.create(record("new", order: nil), arrival: .end(.top)) }
-        XCTAssertEqual(TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id), ["new", "a"])
+        try store.write { try $0.create(record("new", order: nil)) }
+        XCTAssertEqual(TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id), ["a", "new"])
         XCTAssertTrue(try records(store).allSatisfy { $0.order?.isFinite == true })
     }
 
@@ -247,17 +247,17 @@ final class TopicStoreTests: XCTestCase {
             return transaction.locks
         }
         XCTAssertEqual(left, [], "the Topic takes the place of the Lock, which ends")
-        XCTAssertEqual(try shown(store), ["a", "new", "b", "other"], "a Topic from no Lock uses the configured end")
+        XCTAssertEqual(try shown(store), ["a", "new", "b", "other"], "a Topic from no Lock goes after the last place")
     }
 
-    func testALockGoesLastAndALockedSessionKeepsItsPlace() throws {
+    func testALockGoesToTheEndOfTheGuestsAndALockedSessionKeepsItsPlace() throws {
         let store = TopicStore(paths: paths)
         try seed(record("a", order: 0), record("b", order: 1))
-        let locks = [SessionLock(sessionID: "$1", order: 0.5)]
+        let locks = [SessionLock(sessionID: "$1", order: 2)]
         let added = try store.write(locks: locks) { transaction -> [SessionLockChange] in
             transaction.lock("$2") + transaction.lock("$1")
         }
-        XCTAssertEqual(added, [.set(SessionLock(sessionID: "$2", order: 2))])
+        XCTAssertEqual(added, [.set(SessionLock(sessionID: "$2", order: 3))])
     }
 
     func testAWriteWhoseBodyFailsChangesNothing() throws {
@@ -282,15 +282,15 @@ final class TopicStoreTests: XCTestCase {
 
     private func shown(_ store: TopicStore) throws -> [String] { TopicOrder.sorted(try records(store).map(TopicListEntry.topic)).records.map(\.id) }
 
-    func testPinPutsATopicLastAmongPinnedTopicsAndUnpinFirstAmongTheOthers() throws {
-        let store = TopicStore(paths: paths)
+    func testPinPutsATopicLastAmongPinnedTopicsAndUnpinAtTheTopOfTheBench() throws {
+        let store = TopicStore(paths: paths, inPlay: 2)
         try seed(record("a", order: 0), record("b", order: 1), record("c", order: 2), record("d", order: 3), record("e", order: 4))
         try store.write { try $0.pin("c", true) }
         XCTAssertEqual(try shown(store), ["c", "a", "b", "d", "e"])
         try store.write { try $0.pin("e", true) }
         XCTAssertEqual(try shown(store), ["c", "e", "a", "b", "d"], "a new Pin goes below the Topics already Pinned")
         try store.write { try $0.pin("c", false) }
-        XCTAssertEqual(try shown(store), ["e", "c", "a", "b", "d"], "Unpin puts the Topic first among the others")
+        XCTAssertEqual(try shown(store), ["e", "a", "b", "c", "d"], "Unpin puts the Topic at the top of the Bench, where a new Topic goes")
         XCTAssertEqual(try records(store).filter(\.isPinned).map(\.id), ["e"])
         XCTAssertThrowsError(try store.write { try $0.pin("missing", true) })
     }
@@ -299,9 +299,9 @@ final class TopicStoreTests: XCTestCase {
         let store = TopicStore(paths: paths)
         var pinned = record("p", order: 0)
         pinned.isPinned = true
-        try seed(record("a", order: -.greatestFiniteMagnitude), pinned)
+        try seed(record("a", order: .greatestFiniteMagnitude), pinned)
         try store.write { try $0.pin("p", false) }
-        XCTAssertEqual(try shown(store), ["p", "a"])
+        XCTAssertEqual(try shown(store), ["a", "p"])
         XCTAssertTrue(try records(store).allSatisfy { !$0.isPinned && $0.order?.isFinite == true })
     }
 
@@ -387,26 +387,22 @@ final class TopicStoreTests: XCTestCase {
         XCTAssertNil(try records(store).first?.note)
     }
 
-    func testInsertionPlacesTopicsAroundLocksAndNormalizesBothExtremeEnds() throws {
-        for position in TopicInsertPosition.allCases {
-            let edge: Double = position == .top ? -.greatestFiniteMagnitude : .greatestFiniteMagnitude
+    func testANewTopicGoesAfterTheLastPlaceAndTheOrdersStayFiniteAtBothExtremeEnds() throws {
+        for edge in [-Double.greatestFiniteMagnitude, .greatestFiniteMagnitude] {
             var pinned = record("p", order: 0)
             pinned.isPinned = true
             var transaction = TopicTransaction(records: [pinned, record("a", order: edge)])
             transaction.locks = [SessionLock(sessionID: "$1", order: edge)]
-            let moved = try transaction.create(record("new", order: nil), arrival: .end(position))
-            let shown = TopicOrder.sorted(transaction.records.map(TopicListEntry.topic) + transaction.locks.map(TopicListEntry.lock))
-            let expected: [TopicListID] = position == .top
-                ? [.topic("p"), .topic("new"), .lock(sessionID: "$1"), .topic("a")]
-                : [.topic("p"), .lock(sessionID: "$1"), .topic("a"), .topic("new")]
-            XCTAssertEqual(shown.map(\.id), expected)
+            let moved = try transaction.create(record("new", order: nil))
+            let shown = TopicOrder.sorted(transaction.entries)
+            XCTAssertEqual(shown.records.map(\.id), ["p", "a", "new"])
             XCTAssertTrue(shown.allSatisfy { $0.order?.isFinite == true })
-            XCTAssertEqual(moved, transaction.locks.map(SessionLockChange.set))
+            XCTAssertEqual(moved, transaction.locks.filter { $0.order != edge }.map(SessionLockChange.set), "a Lock that got a new order goes to tmux")
         }
     }
 
-    func testReopenAndStartFreshPlaceOnlySettledTopicsAtTheConfiguredEnd() throws {
-        for position in TopicInsertPosition.allCases {
+    func testReopenAndStartFreshPlaceOnlySettledTopicsAfterTheLastPlace() throws {
+        do {
             for pinned in [false, true] {
                 for settled in [false, true] {
                     for remembered in [false, true] {
@@ -423,10 +419,9 @@ final class TopicStoreTests: XCTestCase {
                                                           existingDirectories: [], choice: choice).edit
                             var transaction = TopicTransaction(records: initial)
                             if let saved = plan.savedCompletionRecord {
-                                try transaction.apply(TopicRecordChange(before: topic, after: saved), arrival: .end(position))
+                                try transaction.apply(TopicRecordChange(before: topic, after: saved))
                             }
-                            let expected = !settled ? ["first", "returning", "last"]
-                                : position == .top ? ["returning", "first", "last"] : ["first", "last", "returning"]
+                            let expected = settled ? ["first", "last", "returning"] : ["first", "returning", "last"]
                             XCTAssertEqual(TopicOrder.sorted(transaction.records.map(TopicListEntry.topic)).records.map(\.id), expected)
                         }
                     }
@@ -446,9 +441,9 @@ final class TopicStoreTests: XCTestCase {
         pinned.isPinned = true
         var transaction = TopicTransaction(records: [pinned, current, record("a", order: 0)])
         let change = TopicRecordChange(before: settled, after: reopened)
-        try transaction.apply(change, arrival: .end(.bottom))
+        try transaction.apply(change)
         XCTAssertEqual(TopicOrder.sorted(transaction.records.map(TopicListEntry.topic)).records.map(\.id), ["p", "returning", "a"])
-        try transaction.apply(change, arrival: .end(.top))
+        try transaction.apply(change)
         XCTAssertEqual(TopicOrder.sorted(transaction.records.map(TopicListEntry.topic)).records.map(\.id), ["p", "returning", "a"])
     }
 }

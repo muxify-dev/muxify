@@ -191,9 +191,7 @@ struct CardHeader<Details: View>: View {
     let isOpen: Bool
     let mark: CardMark?
     var isPinned = false
-    /// A Locked Session's card shows a lock where a Pinned Topic's card shows its pin.
-    var isLocked = false
-    /// A Guest's card shows the Guest mark there.
+    /// A Guest's card shows the Guest mark where a Pinned Topic's card shows its pin.
     var isGuest = false
     var hintTarget: QuickSwitchTarget? = nil
     /// Words for the accessibility value after the open state, such as "Dormant".
@@ -262,7 +260,6 @@ struct CardHeader<Details: View>: View {
                     // The Hint badge takes the mark's place while it shows.
                     if isPinned { PinMark().modifier(HintHidesMark(target: hintTarget)) }
                     else if isGuest { GuestMark().modifier(HintHidesMark(target: hintTarget)) }
-                    else if isLocked { LockMark().modifier(HintHidesMark(target: hintTarget)) }
                     if let tagsInTitleLine { CardTagsSlot(tags: tagsInTitleLine) }
                     // Keeps the title clear of the label, which `cardCornerLabel` shows as its own accessibility element.
                     if let cornerLabel { CardCornerLabelText(label: cornerLabel).hidden() }
@@ -361,16 +358,6 @@ struct GuestMark: View {
     }
 }
 
-/// The mark after a Locked Session's title.
-struct LockMark: View {
-    @Environment(\.interfaceFontSize) private var fontSize
-
-    var body: some View {
-        Image(systemName: "lock.fill").font(fontSize.font(9)).foregroundStyle(.secondary)
-    }
-}
-
-/// The rows of one Session in an open card.
 struct CardBlock: Identifiable {
     /// The Session ID.
     let id: String

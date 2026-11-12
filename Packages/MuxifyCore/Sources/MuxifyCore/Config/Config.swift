@@ -105,12 +105,11 @@ public struct Config: Equatable {
 
     public struct Topics: Equatable, Sendable {
         public var sessionOrder = SessionOrder.oldestFirst
-        public var insertPosition = TopicInsertPosition.bottom
         /// Nil: Tags are off, and `#` in New Topic is plain title text.
         public var tags: ConfigTags?
-        /// How many cards that are not Pinned the Sidebar shows In Play; the others are on the Bench. Nil: the Sidebar
-        /// shows every card and has no Bench.
-        public var inPlay: Int?
+        public static let defaultInPlay = 5
+        /// The number of In Play places. The other regular cards that are not Pinned wait on the Bench.
+        public var inPlay = defaultInPlay
         /// The days that Forget Settled Older Than… offers first. It forgets nothing by itself.
         public var forgetSettledOlderThan = 14
         /// When Muxify launches, it Reopens every Dormant open Topic, once per launch per Environment. False: Dormant
@@ -546,13 +545,10 @@ public struct Config: Equatable {
         #   # oldest_first or newest_first. Once you move a Session, the Topic
         #   # keeps your order, and a new Session goes to this order's end.
         #   session_order: oldest_first
-        #   # New and returning Settled Topics go at the bottom or top of their
-        #   # part of the list. Dormant Topics keep their place. With in_play,
-        #   # they go to the top of the Bench instead.
-        #   insert_position: bottom
-        #   # The Sidebar shows the Pinned Topics and this many other Topics and
-        #   # Locked Sessions In Play. The rest wait on the Bench, behind one line
-        #   # that shows them. Not set: the Sidebar shows them all.
+        #   # The number of In Play places. The Sidebar shows the Pinned Topics,
+        #   # the Topics in these places and the Guests. The other Topics wait on
+        #   # the Bench, behind one line that shows them. New and returning
+        #   # Settled Topics go to the top of the Bench.
         #   in_play: 5
         #   # The number of days that Forget Settled Older Than… offers first.
         #   # It forgets the Settled Topics that were Settled more days ago.
@@ -850,11 +846,7 @@ private struct ConfigReader {
         for (name, key, value) in entries(of: node, "topics") {
             switch name {
             case "insert_position":
-                guard value.tag == Yams.Tag(.str), let position = value.string.flatMap(TopicInsertPosition.init(rawValue:)) else {
-                    problem(at: value, "topics.insert_position: expected bottom or top")
-                    continue
-                }
-                config.topics.insertPosition = position
+                problem(at: key, "topics.insert_position is gone: a new or returning Topic always goes to the top of the Bench")
             case "session_order":
                 guard value.tag == Yams.Tag(.str), let order = value.string.flatMap(SessionOrder.init(rawValue:)) else {
                     problem(at: value, "topics.session_order: expected oldest_first or newest_first")
@@ -862,7 +854,8 @@ private struct ConfigReader {
                 }
                 config.topics.sessionOrder = order
             case "tags": readTags(value)
-            case "in_play": config.topics.inPlay = count(value, "topics.in_play", atLeast: 1)
+            case "in_play":
+                if let places = count(value, "topics.in_play", atLeast: 1) { config.topics.inPlay = places }
             case "forget_settled_older_than":
                 if let days = count(value, "topics.forget_settled_older_than", atLeast: 1) { config.topics.forgetSettledOlderThan = days }
             case "reopen_at_launch":
@@ -1431,6 +1424,8 @@ private struct ConfigReader {
         "move_session": .chooseSession,
         "include_tab": .toggleIncludeTab,
         "new_worktree": .toggleNewWorktree,
+        "lock_session": .makeGuest,
+        "unlock_session": .bench,
     ]
 
     mutating func readKeybindings(_ node: Node) {
@@ -1445,6 +1440,10 @@ private struct ConfigReader {
             }
             if name == "open_switcher" {
                 problem(at: key, "open_switcher is gone: the Go to… Command Palette replaces the Switcher; bind it in command_palettes")
+                continue
+            }
+            if name == "toggle_lock" {
+                problem(at: key, "toggle_lock is gone: use make_guest and bench in keybindings.command_palette, or move_topic_up on the opened No Topic Session")
                 continue
             }
             if let renamed = Self.removedActions[name] {

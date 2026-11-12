@@ -46,7 +46,6 @@ public enum ConfigAction: String, KeybindAction {
     case forgetTopic = "forget_topic"
     case renameTopic = "rename_topic"
     case setTopicNote = "set_topic_note"
-    case toggleLock = "toggle_lock"
     case moveTopicUp = "move_topic_up"
     case moveTopicDown = "move_topic_down"
     case togglePinTopic = "toggle_pin_topic"
@@ -129,7 +128,6 @@ public enum ConfigAction: String, KeybindAction {
         .forgetTopic: [],
         .renameTopic: [],
         .setTopicNote: [],
-        .toggleLock: [],
         .moveTopicUp: ["alt+cmd+up"],
         .moveTopicDown: ["alt+cmd+down"],
         .togglePinTopic: [],
@@ -246,8 +244,6 @@ public enum PaletteAction: String, KeybindAction {
     case revealFolder = "reveal_folder"
     case killWindow = "kill_window"
     case killSession = "kill_session"
-    case lockSession = "lock_session"
-    case unlockSession = "unlock_session"
     case makeGuest = "make_guest"
     case bench = "bench"
     case choosePane = "choose_pane"
@@ -285,8 +281,6 @@ public enum PaletteAction: String, KeybindAction {
         .revealFolder: [],
         .killWindow: [],
         .killSession: [],
-        .lockSession: [],
-        .unlockSession: [],
         .makeGuest: [],
         .bench: [],
         .choosePane: ["alt+1"],

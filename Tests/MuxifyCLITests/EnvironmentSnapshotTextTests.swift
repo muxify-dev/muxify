@@ -41,13 +41,14 @@ final class EnvironmentSnapshotTextTests: XCTestCase {
             """)
     }
 
-    func testAListWithoutInPlayHasOneTopicsSectionAndNoEmptySection() throws {
+    func testTheTextFormHasNoEmptySection() throws {
         let json = #"""
         {"tags":[],"sessions":[],"pinned":[],"no_topic":[],
-         "unpinned":{"kind":"list","cards":[{"kind":"topic","mark":null,"sessions":[],
-                                             "topic":{"id":"a","label":"Fix","note":null,"tags":[],"state":"empty"}}]}}
+         "unpinned":{"kind":"in_play","limit":5,"guests":[],"bench":[],
+                     "places":[{"kind":"topic","mark":null,"sessions":[],
+                                "topic":{"id":"a","label":"Fix","note":null,"tags":[],"state":"empty"}}]}}
         """#
         let snapshot = try JSONDecoder().decode(EnvironmentSnapshot.self, from: Data(json.utf8))
-        XCTAssertEqual(snapshot.text, "Topics\ntopic\ta\tFix\tempty\t\t\t\n")
+        XCTAssertEqual(snapshot.text, "In Play (5)\n1\ttopic\ta\tFix\tempty\t\t\t\n")
     }
 }

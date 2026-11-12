@@ -37,12 +37,13 @@ final class TopicRequestURLTests: XCTestCase {
                        EnvironmentRequest(.move(to: .topic(.named("Fix reward"))), target: pane7))
     }
 
-    func testLockAndUnlockNameTheSession() throws {
-        XCTAssertEqual(try request("muxify://topic/lock?session=my%20notes"), EnvironmentRequest(.lock, target: .sessionName("my notes")))
-        XCTAssertEqual(try request("muxify://topic/unlock?session=notes"), EnvironmentRequest(.unlock, target: .sessionName("notes")))
-        XCTAssertThrowsError(try request("muxify://topic/lock?pane=%257"))
-        XCTAssertThrowsError(try request("muxify://topic/unlock?session=notes&pane=%257"))
-        XCTAssertThrowsError(try request("muxify://topic/lock?session="), "a Lock needs a Session name")
+    func testLockAndUnlockAreGoneAndNameTheCommandToUse() {
+        for (path, verb) in [("lock", "make-guest"), ("unlock", "bench")] {
+            XCTAssertThrowsError(try request("muxify://topic/\(path)?session=notes")) { error in
+                XCTAssertEqual((error as? TopicRequestError)?.description,
+                               "muxify://topic/\(path) is gone. Use: muxify topic \(verb) --session <name>")
+            }
+        }
     }
 
     func testRejectsMissingDuplicateAndUnknownInputs() {
