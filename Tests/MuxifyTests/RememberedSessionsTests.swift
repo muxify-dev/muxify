@@ -55,6 +55,23 @@ final class RememberedSessionsTests: XCTestCase {
         XCTAssertEqual(watcher.changeToken(), token, "nothing was committed")
     }
 
+    func testTheSaveWritesItsSessionsOverAnotherWritersAndNeverBringsBackAForgottenTopic() throws {
+        let state = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: state) }
+        let paths = MuxifyPaths(environment: ["XDG_STATE_HOME": state.path], home: "/nonexistent")
+        let store = TopicStore(paths: paths)
+        let remembered = try XCTUnwrap(TopicRecord(id: "topic").remembering(snapshot(), order: .oldestFirst))
+        try store.write { try $0.create(TopicRecord(id: "topic")) }
+        // Another writer changes the Sessions after the app's snapshot; the save does not compare and writes its own.
+        let other = try XCTUnwrap(TopicRecord(id: "topic").remembering(snapshot(["c"]), order: .oldestFirst))
+        try store.write { try $0.update("topic") { $0.sessions = other.sessions } }
+        XCTAssertTrue(try store.write { try $0.remember(remembered.sessions, of: "topic") })
+        XCTAssertEqual(try store.read().records.first?.sessions, remembered.sessions, "the last write wins")
+        _ = try store.write { try $0.forget(["topic"]) }
+        XCTAssertFalse(try store.write { try $0.remember(remembered.sessions, of: "topic") })
+        XCTAssertEqual(try store.read().records, [])
+    }
+
     func testKilledSessionIsForgottenWhileAnotherLivesAndLastRemovalKeepsSet() throws {
         let both = try XCTUnwrap(TopicRecord(id: "topic").remembering(snapshot(), order: .oldestFirst))
         let remaining = try XCTUnwrap(both.remembering(snapshot(["b"]), order: .oldestFirst, previously: snapshot().windows))

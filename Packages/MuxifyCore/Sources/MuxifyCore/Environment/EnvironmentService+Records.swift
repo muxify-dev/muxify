@@ -1,6 +1,6 @@
 import Foundation
 
-// The records lane: commands that take no edit lock. Each writes keys of Topic records, Agent options in tmux, or both.
+// The records lane: commands that need no plan. Each writes keys of Topic records, Agent options in tmux, or both.
 extension EnvironmentService {
     func changeRecords(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
         switch request.command {
@@ -266,7 +266,7 @@ extension EnvironmentService {
         return (.lock(sessionID: window.sessionID), "The Locked Session " + window.sessionName, false)
     }
 
-    /// Tags are one column of one record, so a Tag change takes no edit lock.
+    /// Tags are one column of one record, so a Tag change writes only that column.
     private func changeTags(_ request: EnvironmentRequest, _ change: TopicTagChange, client: String?) -> EnvironmentResponse {
         do {
             let records = try store.read().records

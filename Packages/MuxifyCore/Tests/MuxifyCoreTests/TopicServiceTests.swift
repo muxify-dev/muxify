@@ -259,14 +259,22 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(server.snapshot().windows.count, sessions)
     }
 
-    func testTwoEditsAtOnceChooseDifferentNamesBecauseOneWaitsForTheOther() throws {
-        let service = service()
-        let responses = Responses()
-        DispatchQueue.concurrentPerform(iterations: 2) { _ in
-            responses.append(service.handle(EnvironmentRequest(.create(title: "Fix"))))
-        }
-        for response in responses.all { _ = try change(response) }
-        XCTAssertEqual(Set(try records().compactMap(\.slug)), ["fix", "fix-2"])
+    func testATagChangeDuringASettleOfTheSameTopicKeepsBothWrites() throws {
+        let backend = Tag(name: "backend")!
+        let id = try topicWithSession("Ship", at: sessionPath.folder.path, using: service())
+        let choices = try service().settleChoices(for: .topic(.id(id))).get()
+        let tagger = service()
+        let tagged = Responses()
+        // The Settle has read the records; the Tag change commits before the Settle plans from that read and writes.
+        let settler = EnvironmentService(paths: paths, server: Interleaving(server: server) {
+            tagged.append(tagger.handle(EnvironmentRequest(.tags(.add([backend])), target: .topic(.id(id)))))
+        }, sessionPaths: [sessionPath, tools])
+        _ = try change(settler.handle(EnvironmentRequest(.settle(choices: choices, outcome: "Done"), target: .topic(.id(id)))))
+        XCTAssertEqual(tagged.all.count, 1, "the Tag change ran inside the Settle")
+        for response in tagged.all { _ = try change(response) }
+        let record = try XCTUnwrap(records().first { $0.id == id })
+        XCTAssertNotNil(record.settledAt, "the Settle's write landed")
+        XCTAssertEqual(record.tags, [backend], "the Tag change's write landed")
     }
 
     func testMoveTakesAWholeSessionIntoTheTopicThatARefNames() throws {
@@ -843,7 +851,7 @@ final class TopicServiceTests: XCTestCase {
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: paths.state.path) }
         let denied = try failure(service().handle(EnvironmentRequest(.create(title: "X"))))
         XCTAssertEqual(denied.kind, .storeFailed)
-        XCTAssertEqual(denied.message, "Muxify could not read or write the Topic records in \(paths.state.path). Permission denied.")
+        XCTAssertEqual(denied.message, "Muxify could not read or write its state in \(paths.stateDatabase.path). SQLite: unable to open database file.")
         XCTAssertEqual(denied.phase.summary, "No changes were made.")
 
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: paths.state.path)
@@ -862,17 +870,6 @@ final class TopicServiceTests: XCTestCase {
         // Foundation on Linux words the same refusal more briefly.
         XCTAssertEqual(notAFolder.message, records + "The operation could not be completed. A file with the same name already exists.")
         #endif
-    }
-
-    func testAnEditWaitsForTheEditLockAndGivesUpAsStoreBusy() throws {
-        let holder = try hold(paths.editLock)
-        defer { if holder.isRunning { kill(holder.processIdentifier, SIGKILL) } }
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, tools], editLockTimeout: 0.3)
-        let busy = try failure(service.handle(EnvironmentRequest(.create(title: "Blocked"))))
-        XCTAssertEqual(busy.kind, .storeBusy)
-        XCTAssertEqual(busy.phase, .nothingChanged)
-        XCTAssertEqual(try records(), [])
-        guard case .topics = service.handle(EnvironmentRequest(.list)) else { return XCTFail("a list does not wait for an edit") }
     }
 
     func testListGivesTheOpenTopicsWithTheirLabelsAndSkipsInvalidEntries() throws {
@@ -1699,18 +1696,29 @@ final class TopicServiceTests: XCTestCase {
         }
         XCTFail("\(window) is not in \(path)")
     }
+}
 
-    /// A process that holds an exclusive flock on `url` until it is killed.
-    private func hold(_ url: URL) throws -> Process {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let holder = Process()
-        holder.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        holder.arguments = ["-e", #"use Fcntl ":flock"; open(F, ">>", $ARGV[0]) or die; flock(F, LOCK_EX) or die; $| = 1; print "held\n"; sleep 30"#, url.path]
-        let output = Pipe()
-        holder.standardOutput = output
-        try holder.run()
-        XCTAssertEqual(String(data: output.fileHandleForReading.availableData, encoding: .utf8), "held\n")
-        return holder
+/// The test's tmux server, which runs `during` once, when a request first reads tmux: after it read the records, before
+/// it plans and writes.
+private final class Interleaving: TmuxRunning, @unchecked Sendable {
+    private let server: TmuxServer
+    private let lock = NSLock()
+    private var during: (() -> Void)?
+
+    init(server: TmuxServer, during: @escaping () -> Void) {
+        self.server = server
+        self.during = during
+    }
+
+    func run(_ arguments: [String]) throws -> String { try server.run(arguments) }
+
+    func snapshot() throws -> TmuxSnapshot {
+        lock.lock()
+        let once = during
+        during = nil
+        lock.unlock()
+        once?()
+        return try server.snapshot()
     }
 }
 

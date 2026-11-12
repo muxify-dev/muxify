@@ -1,8 +1,9 @@
 import Foundation
 
 /// The one way to read or change the Environment. The app's palette, the muxify://topic URL and the command line tool
-/// all send an `EnvironmentRequest` here, so each change takes the same locks and fails in the same way, by its
-/// command's `lane`. It blocks, so call it off the main thread.
+/// all send an `EnvironmentRequest` here, so each change runs and fails in the same way, by its command's `lane`.
+/// No request takes a lock: each record write is one short transaction of the columns it changed, and the last write
+/// to a field wins. It blocks, so call it off the main thread.
 public struct EnvironmentService: Sendable {
     public let paths: MuxifyPaths
     public let server: any TmuxRunning
@@ -21,21 +22,11 @@ public struct EnvironmentService: Sendable {
     /// The Config's `worktrees.root_path`.
     public let worktreesRoot: String?
     let store: TopicStore
-    let editLockTimeout: TimeInterval
 
     public init(paths: MuxifyPaths, server: any TmuxRunning = TmuxServer.local, sessionPaths: [SessionPath] = [],
                 topics: Config.Topics = Config.Topics(), notifications: Config.Notifications = Config.Notifications(),
                 topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(),
                 environmentName: String? = nil, worktreesRoot: String? = nil) {
-        self.init(paths: paths, server: server, sessionPaths: sessionPaths, topics: topics, notifications: notifications,
-                  topicsAvailable: topicsAvailable, scripts: scripts, environmentName: environmentName, worktreesRoot: worktreesRoot,
-                  editLockTimeout: 10)
-    }
-
-    init(paths: MuxifyPaths, server: any TmuxRunning, sessionPaths: [SessionPath], topics: Config.Topics = Config.Topics(),
-         notifications: Config.Notifications = Config.Notifications(),
-         topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(), environmentName: String? = nil, worktreesRoot: String? = nil,
-         editLockTimeout: TimeInterval) {
         self.paths = paths
         self.server = server
         self.sessionPaths = sessionPaths
@@ -45,7 +36,6 @@ public struct EnvironmentService: Sendable {
         self.scripts = scripts
         self.environmentName = environmentName
         self.worktreesRoot = worktreesRoot
-        self.editLockTimeout = editLockTimeout
         store = TopicStore(paths: paths, inPlay: topics.inPlay)
     }
 
@@ -71,23 +61,17 @@ public struct EnvironmentService: Sendable {
         case .records:
             return changeRecords(request, client: client)
         case .edit:
-            do {
-                return try FileLock.withLock(paths.editLock, .exclusive, rank: .edit, timeout: editLockTimeout) {
-                    switch request.command {
-                    case .lock: return changeLock(request, locked: true, client: client)
-                    case .unlock: return changeLock(request, locked: false, client: client)
-                    case .moveSession(.up): return stepSession(request, .up, client: client)
-                    case .moveSession(.down): return stepSession(request, .down, client: client)
-                    case .createWorktree(let name, let from, let start, let open):
-                        return createWorktree(request, name: name, from: from, start: start, open: open, client: client)
-                    case .removeWorktree(let worktree, let kill, let force):
-                        return removeWorktree(request, worktree, kill: kill, force: force, client: client)
-                    case .forgetSettled(let days, let asOf): return forgetSettled(olderThan: days, asOf: asOf, client: client)
-                    default: return edit(request, client: client)
-                    }
-                }
-            } catch {
-                return .failed(failure(error, phase: .nothingChanged))
+            switch request.command {
+            case .lock: return changeLock(request, locked: true, client: client)
+            case .unlock: return changeLock(request, locked: false, client: client)
+            case .moveSession(.up): return stepSession(request, .up, client: client)
+            case .moveSession(.down): return stepSession(request, .down, client: client)
+            case .createWorktree(let name, let from, let start, let open):
+                return createWorktree(request, name: name, from: from, start: start, open: open, client: client)
+            case .removeWorktree(let worktree, let kill, let force):
+                return removeWorktree(request, worktree, kill: kill, force: force, client: client)
+            case .forgetSettled(let days, let asOf): return forgetSettled(olderThan: days, asOf: asOf, client: client)
+            default: return edit(request, client: client)
             }
         }
     }
@@ -348,7 +332,6 @@ public struct EnvironmentService: Sendable {
             case .nameInvalid: return .worktreeNameInvalid
             }
         case is TopicTransaction.Failure: return .topicUnavailable
-        case is FileLock.Busy: return .storeBusy
         case let error as SQLiteError where error.isBusy: return .storeBusy
         case is TmuxError: return .tmuxFailed
         case is ShellError: return .gitFailed
@@ -369,8 +352,8 @@ extension EnvironmentCommand {
         case listWorktrees(all: Bool, from: String?)
     }
 
-    /// The locks a command takes. `read`: none. `records`: none, for one write of record columns and the tmux options that go with it.
-    /// `edit`: the edit lock, then read, plan, git, record, tmux, show. A new command does not compile until it
+    /// How a command runs; none takes a lock. `read`: reads only. `records`: one write of record columns and the tmux
+    /// options that go with it. `edit`: read, plan, git, record, tmux, show. A new command does not compile until it
     /// chooses its lane.
     var lane: Lane {
         switch self {

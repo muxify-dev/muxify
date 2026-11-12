@@ -120,8 +120,9 @@ it updates only the columns whose values the write changed. So a Topic edit
 keeps a column that another writer changed while the edit ran, and when two
 writers change the same column, the last write wins. A write that changes
 nothing commits nothing. A writer waits up to 10 seconds for another
-connection's transaction, then fails with the kind `store_busy`. A program that
-changes the records writes a transaction that changes only its own columns.
+connection's transaction, then fails with the kind `store_busy`. No writer takes
+a lock of its own (ADR 0080): a program that changes the records writes a
+transaction that changes only its own columns.
 
 The app polls `PRAGMA data_version` on its own connection every 0.25 seconds,
 and reads the records again when another connection committed a change.
@@ -167,8 +168,10 @@ means the user moved a Session: Muxify then lists the Sessions in the order of
 does not name at the end that `topics.session_order` gives new Sessions. Sort
 Sessions by Creation removes the field. Another value counts as absent.
 
-Muxify records the live Sessions after a 0.3 second write delay. An unchanged
-snapshot writes nothing. Confirmed Muxify closures and removals observed
+Muxify records the live Sessions after a 0.3 second write delay. The write is a
+plain update of `sessions`: it does not check what another writer put there
+since the snapshot, so the last write wins, and the next change to the Topic's
+Windows writes again (ADR 0080). An unchanged snapshot writes nothing. Confirmed Muxify closures and removals observed
 between complete inventories of the same running server remove the stopped Session
 or Window. A confirmed last closure leaves an Empty Topic. An absent server,
 failed read, initial reconnect inventory or a different server incarnation does not

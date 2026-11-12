@@ -2,7 +2,7 @@
 
 The Topic records, the Open Places, the Muxify Worktree records and Browser History are tables in one SQLite database, `$XDG_STATE_HOME/muxify/muxify.db`, on the Mac and on each Host alike. This supersedes [ADR 0066](0066-the-topic-records-live-in-one-file.md), one `topics.json`, and the storage parts of [ADR 0028](0028-topic-records-live-outside-tmux.md) (the records folder), [ADR 0059](0059-browser-history-ranks-pages-by-a-decaying-score.md) (`browser-history.json`) and [ADR 0062](0062-a-muxify-worktree-can-exist-without-a-topic.md) (`worktrees/<uuid>.json`). What each record holds, and where the Topic link lives (on the tmux Session), do not change.
 
-Each JSON file was read whole and written whole, and every writer had to lock, reread and merge it by key to keep another process's change. A database changes one row in place, in a transaction, so the writers need no lock files and no merge code of their own: a write changes only the columns it changed, and the last write to a field wins. It also writes one file in place, so a virus scanner does not see a new file for each write, the reason for ADR 0066.
+Each JSON file was read whole and written whole, and every writer had to lock, reread and merge it by key to keep another process's change. A database changes one row in place, in a transaction, so the writers need no lock files and no merge code of their own: a write changes only the columns it changed, and the last write to a field wins ([ADR 0080](0080-writes-take-no-lock-and-the-last-write-to-a-field-wins.md)). It also writes one file in place, so a virus scanner does not see a new file for each write, the reason for ADR 0066.
 
 ## The tables
 

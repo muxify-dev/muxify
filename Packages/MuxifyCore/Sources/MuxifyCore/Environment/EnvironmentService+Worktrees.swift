@@ -1,7 +1,7 @@
 import Foundation
 
-// Muxify Worktrees, in a Topic or not (ADR 0062). Create and Remove run under the edit lock, so a second request sees
-// the first one's Sessions and records; List reads only.
+// Muxify Worktrees, in a Topic or not (ADR 0062). Create and Remove take no lock: a second Worktree at the same path
+// fails in `git worktree add` or at its record, and is not retried; List reads only.
 extension EnvironmentService {
     var worktrees: MuxifyWorktrees { MuxifyWorktrees(scripts: scripts) }
     var worktreeStore: MuxifyWorktreeStore { MuxifyWorktreeStore(paths: paths) }

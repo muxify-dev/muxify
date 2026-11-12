@@ -118,7 +118,7 @@ class TopicsSidebar(unittest.TestCase):
         self.s.tmux_ok('kill-session', '-t', sid)
 
     def write_topic(self, topic_id, title, home, **fields):
-        # As a script that changes the records: the file is replaced with one rename under the record lock.
+        # As a script that changes the records: one transaction that writes only the rows it names.
         self.addCleanup(self.store.remove, topic_id)
         self.store.put(dict(id=topic_id, title=title, slug=topic_id, **fields))
 

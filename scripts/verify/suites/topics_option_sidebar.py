@@ -19,8 +19,8 @@ from scripts.verify.topics_sidebar import REFRESH_LIMIT, TopicsSidebar
 
 class TopicsOptionSidebar(TopicsSidebar):
     def test_app_answers_while_another_process_holds_the_topic_records(self):
-        # The held record lock stands in for a file open that a virus scanner holds for seconds. A new Topic record and a
-        # renamed Window of a Topic make the app read and write the records while the lock is held.
+        # The held write transaction stands in for another process that holds the database for seconds. A new Topic record and a
+        # renamed Window of a Topic make the app read and write the records while it is held.
         s = self.s
         self.write_topic('held-records', 'Held records', self.beta, order=-1000200)
         sid = self.new_session('beta/held-records', self.beta, topic='held-records')

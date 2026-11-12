@@ -160,6 +160,15 @@ public struct TopicTransaction {
         records[index] = record
     }
 
+    /// The app's save of a Topic's remembered Sessions: a plain update of `sessions`, with no check of what another
+    /// writer put there since the app's snapshot, so the last write wins. False, and nothing written, when the Topic is
+    /// gone from the records: a save never brings a forgotten Topic back.
+    public mutating func remember(_ sessions: [JSONValue], of id: String) throws -> Bool {
+        guard records.contains(where: { $0.id == id }) else { return false }
+        try update(id) { $0.sessions = sessions }
+        return true
+    }
+
     /// Writes what a plan changed from the record it read, onto the record as it is now: for each column,
     /// `after` when it differs from `before`, else the value in the database. A Tag that another writer set while
     /// the plan ran stays. When two writers change one column, the last write wins for that column. A Topic that is
