@@ -49,7 +49,7 @@ import XCTest
         card.menuItems = { [store] in SessionsListMenus.card(session, store: store) }
         card.headerActions = { [store] in SessionsListMenus.header(session, store: store) }
         card.windowMenu = { [store] in SessionsListMenus.window($0, store: store) }
-        card.show(SessionCardContent(title: "atlas", isOpen: true, rows: windows.map(row)), environment: SessionsListEnvironment())
+        card.show(SessionCardContent(title: "atlas", isOpen: true, rows: windows.map(row)), environment: SidebarListEnvironment())
         let root = FlippedView(frame: NSRect(x: 0, y: 0, width: 248, height: 400))
         root.addSubview(card)
         card.frame = NSRect(x: 0, y: 0, width: 248, height: card.height(width: 248))
@@ -145,7 +145,7 @@ import XCTest
                                      rows: [row(window("@1")), .pane(PaneRowContent(paneID: "%1", text: .init(title: "zsh", summary: ""), windowID: "@1")),
                                             row(window("@2"))],
                                      moreCount: 2),
-                  environment: SessionsListEnvironment())
+                  environment: SidebarListEnvironment())
         let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 400), styleMask: .borderless, backing: .buffered, defer: false)
         host.isReleasedWhenClosed = false
         let root = FlippedView(frame: NSRect(x: 0, y: 0, width: 260, height: 400))

@@ -6,7 +6,7 @@ import XCTest
 /// of a card, the glide of a card that opens or closes, the scroll and the header that sticks, the Hints, the empty
 /// state, the Sidebar's font family and the theme.
 @MainActor final class SessionCardViewTests: XCTestCase {
-    private func card(_ content: SessionCardContent, environment: SessionsListEnvironment = SessionsListEnvironment()) -> SessionCardView {
+    private func card(_ content: SessionCardContent, environment: SidebarListEnvironment = SidebarListEnvironment()) -> SessionCardView {
         let card = SessionCardView(sessionID: "$1")
         card.show(content, environment: environment)
         return card
@@ -79,7 +79,7 @@ import XCTest
         let saved = UserDefaults.standard.object(forKey: "expandedSessions")
         defer { UserDefaults.standard.set(saved, forKey: "expandedSessions") }
         let list = SessionsListView(store: WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml")),
-                                    environment: SessionsListEnvironment())
+                                    environment: SidebarListEnvironment())
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 400), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = list
@@ -122,7 +122,7 @@ import XCTest
     /// A list of closed cards in a window 400 points high, with its scroll view.
     private func list() -> (list: SessionsListView, scroll: NSScrollView, window: NSWindow) {
         let list = SessionsListView(store: WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml")),
-                                    environment: SessionsListEnvironment())
+                                    environment: SidebarListEnvironment())
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 400), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = list
@@ -202,10 +202,10 @@ import XCTest
 
     /// The Hints of a list with the card `$1` and its Window `@1` first, while the user holds `modifiers`. Cards show
     /// their keys at all times, and Window rows when `windows` says so.
-    private func environment(holding modifiers: KeyTrigger.Modifiers?, windows: Bool = false) -> SessionsListEnvironment {
+    private func environment(holding modifiers: KeyTrigger.Modifiers?, windows: Bool = false) -> SidebarListEnvironment {
         var config = Config.Hints()
         config.windows.always = windows
-        var environment = SessionsListEnvironment()
+        var environment = SidebarListEnvironment()
         environment.hints = HintPresentation(
             modifiers: modifiers, keybinds: .defaults,
             targets: QuickSwitchTargets(cards: [.session("$1")], windows: [.window("@1")], topicWindows: [], tabs: [], sessions: [], topics: []),
@@ -262,7 +262,7 @@ import XCTest
     func testWithNoWindowTheListSaysSoInItsMiddleInTheFontOfAWindowRowsTitle() throws {
         let (list, _, window) = list()
         defer { window.contentView = nil }
-        var environment = SessionsListEnvironment()
+        var environment = SidebarListEnvironment()
         environment.typography = SidebarTypography(fontSize: InterfaceFontSize(18))
         list.environment = environment
 
@@ -278,7 +278,7 @@ import XCTest
 
     func testTheTitlesOfACardAndOfItsWindowRowsFollowTheSidebarFontFamily() throws {
         let family = "Helvetica Neue"
-        var environment = SessionsListEnvironment()
+        var environment = SidebarListEnvironment()
         environment.typography = SidebarTypography(fontSize: InterfaceFontSize(18), fontFamily: family)
         var row = windowRow
         row.isSelected = true
@@ -303,7 +303,7 @@ import XCTest
         let dark = TerminalTheme(background: NSColor(srgbRed: 0.1, green: 0.1, blue: 0.12, alpha: 1), foreground: .white)
         let light = TerminalTheme(background: NSColor(srgbRed: 0.96, green: 0.96, blue: 0.95, alpha: 1), foreground: .black)
         let label = try XCTUnwrap(labels("No windows", in: list).first)
-        var environment = SessionsListEnvironment()
+        var environment = SidebarListEnvironment()
         for (theme, isDark) in [(dark, true), (light, false), (dark, true)] {
             environment.chromeTheme = theme
             list.environment = environment
@@ -320,7 +320,7 @@ import XCTest
     func testTheFillAndTheAgentColoursOfACardFollowAChangeOfTheAppearance() throws {
         let (list, _, window) = list()
         defer { window.contentView = nil }
-        var environment = SessionsListEnvironment()
+        var environment = SidebarListEnvironment()
         environment.agentColors.working = .pair(light: .rgb(red: 255, green: 0, blue: 0), dark: .rgb(red: 0, green: 0, blue: 255))
         list.environment = environment
         list.show([("$1", SessionCardContent(title: "atlas", isOpen: true, mark: .agent(.working)))])

@@ -24,8 +24,9 @@ SwiftUI leaves the whole app, one area at a time. Before you add or change a vie
 
 - Write new view code of a moved area in AppKit, by the four rules.
 - The guard, `make verify SUITE=appkit_areas`, fails when a file of a moved area imports SwiftUI. When you add AppKit files of a moved area, add them to `AREAS` in `scripts/verify/suites/appkit_areas.py`.
-- While an area has two versions, make each change in both, and prove it in both. Now no area has two versions.
-  - Run the compare run after a change that can move or redraw a part of the area: `make compare`, or `make compare SCENE=<scene>` for one scene. It must pass its gate in every scene. After you add or change a scene, `make compare SELF=1` must report no difference. Read "The compare run" in `scripts/verify/README.md` before you run it or change a scene.
+- While an area has two versions, make each change in both, and prove it in both. The Sidebar's Topics list has two: the user default `topicsListAppKit` chooses one, and a missing value means the SwiftUI list.
+  - Run the suites against each version: `make verify TOPICS_LIST=appkit` and `make verify TOPICS_LIST=swiftui`. Add `SUITE=<suite>` for one suite.
+  - Run the compare run after a change that can move or redraw a part of the area: `make compare AREA=topics`, or `make compare AREA=topics SCENE=<scene>` for one scene. It must pass its gate in every scene. After you add or change a scene, `make compare AREA=topics SELF=1` must report no difference. Read "The compare run" in `scripts/verify/README.md` before you run it or change a scene.
 
 ## tmux in tests and verification
 

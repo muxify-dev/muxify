@@ -106,3 +106,10 @@ The checks reported as FLAKY in the full runs of task 11, three against each lis
 - `git_view_remotes`, with both lists, most often the pull that waits in the write queue: the staging did not run within 15 s after the pull. The cause was not found. It is in the Git View, of which the set changed only where the outline of its icon is defined.
 - `local_session_end` and `attachments_terminal`, late in the parallel pass: the Terminal's tmux Client did not attach within 20 s, or the Recorder Window of an attachment check did not appear in time. The set does not touch the Terminal.
 - `client_terminal`, with the AppKit list: the read of a half-written file, repaired above.
+
+## topic-cards
+
+Task 04 of the set `remove-swiftui` draws the AppKit Topics list's cards bare: each has its border and its title on
+one line, and its header has no value, no help and no default action. So in the AppKit version the press that closes
+the Location's card does nothing, and the gate fails on the headers' values and help and on the frames of the cards,
+which are lower than the SwiftUI cards. Task 05 draws the closed Topic card and the Locked card.

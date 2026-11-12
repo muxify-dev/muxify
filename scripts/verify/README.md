@@ -17,6 +17,15 @@ make verify SUITE=topics_cards_sidebar
 make verify SUITE="topics_cards_sidebar command_palette"
 ```
 
+Run the suites against one version of the Topics list, while the list has two (`docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md`):
+
+```sh
+make verify TOPICS_LIST=appkit
+make verify TOPICS_LIST=swiftui SUITE=topics_cards_sidebar
+```
+
+`TOPICS_LIST` makes every launch of every suite show that Topics list: `Sandbox.launch` adds the launch argument `-topicsListAppKit YES` or `NO`, unless the check's own arguments set the user default `topicsListAppKit`. Without the option, a suite gets the app's default, which is the SwiftUI list until the AppKit list is done. A run with `TOPICS_LIST` never satisfies the gate, because it proves nothing about the default. `Sandbox.topics_list()` asks the driver which Topics list the App Window shows, `appkit` or `swiftui`. The suite `topics_list_sidebar` checks the switch.
+
 `make verify` runs each suite in its own process, and 10 suites at the same time (`run.py`). Set `MUXIFY_VERIFY_JOBS` to change the number. With all suites at the same time, the Mac starts processes so slowly that checks fail by chance. It writes one line when a suite ends. The full output of a suite goes to `build/verify/<suite>/last-run.log` in the checkout, so runs in two checkouts at the same time do not overwrite each other's logs. When a suite fails, `make verify` also writes that output.
 
 The checks that fail run again, in `<suite>.rerun`. A rerun starts when the parallel pass has started every suite and at most 2 suites still run. When a check fails in a rerun that ran beside another suite, it runs once more, alone, after everything else, in `<suite>.alone`. When it passes in a rerun, the last lines name it as FLAKY. `make verify` fails only when a check also fails in its last rerun, and that run was alone. A FLAKY check depends on timing: find the cause, do not ignore it.
@@ -69,7 +78,7 @@ When a driver command times out, read `logs/app.log` and `driver/stall-<n>.txt` 
 Checks run while the user works. A check must not take the keyboard focus, the mouse or the front position from the user.
 
 - `Sandbox.launch` starts the app in the background through LaunchServices (`open -g`). Do not start the app in a different way.
-- Use the driver commands: `dump`, `press`, `set`, `focus`, `action`, `actions`, `click`, `drag`, `hover`, `snapshot`, `responder`, `scroll`, `stall`, `binding` and `counts`. `action` performs a named accessibility action of an element: `sandbox.act('action', '<identifier>', '<action name>')`.
+- Use the driver commands: `dump`, `press`, `set`, `focus`, `action`, `actions`, `click`, `drag`, `hover`, `snapshot`, `responder`, `scroll`, `stall`, `binding`, `counts` and `topics-list`. `action` performs a named accessibility action of an element: `sandbox.act('action', '<identifier>', '<action name>')`.
 - `actions` answers the names of the named accessibility actions of each element with the identifier, in the order of the dump and in the order each element gives them: `sandbox.actions('<identifier>')` gives a list for each element, such as `[['Lock Session', 'Go to Session']]`, and an empty list when no element has the identifier. Use it to check which items a context menu offers, where the menu gives its items as named actions. A dump row has no named actions, because a dump reads up to 2000 elements. SwiftUI gives the Buttons of `.accessibilityActions` from the last to the first.
 - `hover` puts the pointer on an element for the app's hover tracking, without moving the real pointer: `sandbox.act('hover', '<identifier>')`. A later `hover` on another element moves it there. When other windows cover the App Window whole, macOS marks it as not visible and SwiftUI sends its views no hover, so `hover` fails and says so: uncover a part of the App Window, for example make a window in front smaller.
 - `snapshot` draws the App Window into a PNG, without a screen capture, so it needs no screen recording permission: `sandbox.act('snapshot', '<identifier>', '<path>.png')` keeps only that element, and an empty identifier keeps the whole App Window. Use it for a picture of a visual change; a check asserts on the dump, not on pixels.
@@ -77,6 +86,7 @@ Checks run while the user works. A check must not take the keyboard focus, the m
 - `responder` gives the class name of the first responder of each visible App Window, such as `TerminalSurfaceView` or `WKWebView`. Use it to find which view has Focus: `sandbox.driver('responder')['responders']`. When the first responder is a field editor, `editors` has its `frame`, its `visible` part and the `field` it edits, in the field's points; an editor taller than its field draws text that the field cuts off.
 - `scroll` scrolls the scroll view under an element so that the end of its content is `from_end` points below the bottom edge, without the pointer: `sandbox.act('scroll', 'topics-list', from_end=10)`. Use it to put a list in one exact place near its end. With `by`, it scrolls down by that many points in `steps` equal moves, one each tick of the driver, so the app draws a frame between two moves as under a wheel: `sandbox.act('scroll', 'topics-list', by=600, steps=20)`. The result's `seconds` is how long the moves took, which grows with the frames' lag.
 - `counts` reads how often each counted view's body ran since the last reset (`BodyCount` in `App/BodyCount.swift`), as `{'TopicCard': 41, ...}` in the result's `counts`; `reset=True` resets them after the read: `sandbox.driver('counts', reset=True)`. Use it to prove that a scroll or a change does not draw a list's cards again. To count a view, add `BodyCount.tick("<name>")` under `#if DEBUG` at the top of its body.
+- `topics-list` answers which Topics list each visible App Window shows, `appkit` or `swiftui`, in the result's `versions`: `sandbox.topics_list()`. The AppKit list counts also while it is the Sidebar page that does not show.
 - `stall` blocks the app's main thread for `seconds`, a freeze for Diagnostics to catch: `sandbox.act('stall', seconds=1.6)`.
 - `binding` performs a Ghostty keybind action on the first Terminal, as its key does, without a key: `sandbox.act('binding', text='quit')`.
 - `click` sends a mouse down and a mouse up to the centre of an element, without the pointer: `sandbox.act('click', '<identifier>')`. Use it to test a gesture, because `press` performs the element's accessibility action and skips the gesture. `command_key=True` holds ⌘ through the click. The same first-click rule as for `drag` applies.
@@ -96,14 +106,15 @@ Commit a check that must stay true with the feature that it checks. Keep a one-o
 While an area of the app has two versions, a SwiftUI one and an AppKit one, the compare run is the check that they are the same (`docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md`, with the meaning of "the same" from ADR 0074). It shows each scene of the area in both versions, fails when the two differ in what a check can measure, and leaves a report of pictures for a person to judge.
 
 ```sh
-make compare                          # every scene of the area
-make compare AREA=<area>              # the scenes of this area, when several areas have two versions
-make compare SCENE=<scene>            # one scene
-make compare SCENE="<scene> <scene>"  # these scenes
-make compare SELF=1                   # each scene twice in the SwiftUI version
+make compare AREA=topics                          # every scene of the Topics list
+make compare AREA=topics SCENE=<scene>            # one scene
+make compare AREA=topics SCENE="<scene> <scene>"  # these scenes
+make compare AREA=topics SELF=1                   # each scene twice in the SwiftUI version
 ```
 
-**Areas.** An area (`Area` in `compare_scenes.py`) names the identifier of the list whose rows the gate compares, the user default that chooses the version (`YES` is the AppKit version), the launch arguments its scenes start the app with, how the run asks the driver which version shows, and its scenes. `AREAS` lists the areas that have two versions now. Without `AREA`, the run takes the only one. With no area that has two versions, `make compare` says so and passes. The Sessions list was the first area. The user signed it off, so its SwiftUI version, its switch and its scenes are deleted, and no area has two versions until the next one adds itself to `AREAS`.
+**Areas.** An area (`Area` in `compare_scenes.py`) is a part of the app with two versions. It names the identifier of the list whose rows the gate compares, the user default that chooses the version (`YES` is the AppKit version), the launch arguments its scenes start the app with, how the run asks the driver which version shows, and its scenes. `AREAS` lists the areas that have two versions now. `AREA=<area>` chooses one; without it, the run takes the only one, and with several it asks for one. With no area that has two versions, `make compare` says so and passes. `SCENE=` and `SELF=1` choose among the scenes of the area that the run takes.
+
+The area now is the Topics list, `topics`: its list is `topics-list`, its user default `topicsListAppKit`, its scenes start the app with the Sidebar showing Topics, and the driver answers its version with `topics-list`. Its first scene is `topic-cards`. The Sessions list was the first area. The user signed it off, so its SwiftUI version, its switch and its scenes are deleted.
 
 `make compare` builds the Debug app first. The scenes run one after the other, each in its own Sandbox. Without `make`, after `make build`: `python3 -m scripts.verify.compare [--area <area>] [--self] [scene ...]`.
 
@@ -111,7 +122,7 @@ The run follows "Do not take focus". It starts the app only through `Sandbox.lau
 
 A scene makes its fixture once. Then the run does this for each version:
 
-1. It starts the app with the area's user default as a launch argument, `NO` or `YES`, on the same tmux server, state and defaults.
+1. It starts the app with the area's user default as a launch argument, `NO` or `YES`, on the same tmux server, state and defaults. The argument wins over a stored default and over `TOPICS_LIST`.
 2. It shows each shot of the scene. A scene has one shot or more, and each shot gives one picture.
 3. It asks the driver which version shows, through the area. The shot fails when that is not the version the run asked for.
 4. It waits until nothing moves: until the picture of the App Window and the dump are the same three times in a row.
@@ -144,11 +155,11 @@ The gate reads rows, so the first two do not fail a run of the two versions. The
 
 **Add a scene**
 
-1. In `compare_scenes.py`, write a class with a `name`, a line `shows` for the report, `fixture(s)` and `shots()`. The fixture helpers there, such as `session`, `agent`, `ring` and `fresh_shell`, make what a scene needs; the Sessions list's scenes, in the git history before its SwiftUI version was deleted, show how. `fixture` makes the tmux Sessions, the Topic records and the folders in the Sandbox, before the app starts. `shots` gives `(name, arrange)` pairs.
-2. In an arrange, start the app with `view.launch(config(...))`, move the Location with `view.go(window)`, and end with `view.wait(predicate, message)` on the rows that prove the list shows the state. When one version cannot show the state, the wait fails with the message, and the run still takes the picture.
+1. In `compare_scenes.py`, write a class with a `name`, a line `shows` for the report, `fixture(s)` and `shots()`. The fixture helpers there, such as `session`, `topic`, `locked`, `agent`, `ring` and `fresh_shell`, make what a scene needs; `TopicCards`, and the Sessions list's scenes in the git history before its SwiftUI version was deleted, show how. `fixture` makes the tmux Sessions, the Topic records and the folders in the Sandbox, before the app starts. `shots` gives `(name, arrange)` pairs.
+2. In an arrange, start the app with `view.launch(config(...))`, move the Location with `view.go(window)`, close the card that the move opened with `view.close_card('<header>')`, and end with `view.wait(predicate, message)` on the rows that prove the list shows the state. When one version cannot show the state, the wait fails with the message, and the run still takes the picture.
 3. Make each shot start from the same state in both versions. The second version runs after the first, on the same tmux server: set again what an earlier shot changed, such as a bell. The Terminal shows the Location's Window in the picture, and a shell there can draw its prompt again after a launch that changed its size: start it again with `fresh_shell(s, window)` after the move. Call `view.rest()` before a step that starts from where the list stands, such as a swipe or a hover. `config()` sets `ui.pulse: false`, so a Working mark stands still.
 4. Add the scene to its area's `scenes`, and a section `## <name>` to `compare-notes.md`. A new area adds an `Area` to `AREAS`.
-5. Run `make compare SELF=1 SCENE=<name>` a few times. It must pass each time, with no pixel that differs.
+5. Run `make compare AREA=<area> SELF=1 SCENE=<name>` a few times. It must pass each time, with no pixel that differs.
 
 The run compares two pictures with `picture_diff.swift`. It builds this helper once with `swiftc`, into the folder of `ax-wake` ("Accessibility permission"). The helper needs no permission.
 

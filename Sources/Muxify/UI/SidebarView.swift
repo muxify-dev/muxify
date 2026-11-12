@@ -73,12 +73,12 @@ private struct WorkSection: View {
                          acceptsGestures: !store.palette.isOpen && store.currentGitView?.isOpen != true) {
                 TopicsSection(store: store, model: model)
             } sessions: {
-                SessionsListHost(store: store)
+                SidebarListHost<SessionsListView>(store: store)
             }
         } else if model.mode == .topics {
             TopicsSection(store: store, model: model)
         } else if model.sessionsEnabled {
-            SessionsListHost(store: store)
+            SidebarListHost<SessionsListView>(store: store)
         } else {
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -90,8 +90,11 @@ private struct TopicsSection: View {
     @Environment(\.interfaceFontSize) private var fontSize
     let store: WorkspaceStore
     let model: TopicsModel
-    @State private var drag = ListDrag<TopicListID>(spacing: 6, tradesAcross: [TopicsModel.ListItem.guestsLineID,
-                                                                                TopicsModel.ListItem.benchLineID])
+    /// Which Topics list shows (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md): the SwiftUI list
+    /// unless the user default is true. The Sidebar follows a change of the user default while the app runs.
+    @AppStorage(TopicsListVersion.defaultsKey) private var topicsListAppKit = false
+    @State private var drag = ListDrag<TopicListID>(spacing: TopicsListMetrics.itemSpacing,
+                                                    tradesAcross: [TopicsModel.ListItem.guestsLineID, TopicsModel.ListItem.benchLineID])
     /// The cards whose "N more…" the user pressed.
     @State private var showingAllRows: Set<TopicGroupID> = []
     /// The No Topic Session cards whose "N more…" the user pressed, by Session ID.
@@ -107,8 +110,8 @@ private struct TopicsSection: View {
 
     /// The coordinate space of the Topics list's content, from the top of its first item.
     static let contentSpace = "topics-content"
-    static let contentSpacing: CGFloat = 6
-    static let contentInset: CGFloat = 4
+    static let contentSpacing = TopicsListMetrics.itemSpacing
+    static let contentInset = TopicsListMetrics.verticalInset
 
     private var geometry: BenchGeometry {
         BenchGeometry(topHeight: topHeight, viewportHeight: viewportHeight, spacing: Self.contentSpacing, inset: Self.contentInset,
@@ -118,7 +121,8 @@ private struct TopicsSection: View {
     var body: some View {
         GeometryReader { proxy in
             VStack(spacing: 0) {
-                topicsList
+                if topicsListAppKit { SidebarListHost<TopicsListView>(store: store) } else { topicsList }
+                // The SwiftUI Settled group, also under the AppKit list, until the AppKit list draws its own.
                 if !model.groups.isEmpty {
                     VStack(spacing: 4) {
                         ForEach(model.groups) { group in
@@ -179,7 +183,7 @@ private struct TopicsSection: View {
                 default: if store.benchPeek != nil { store.benchPeek = nil }
                 }
             }
-            .padding(.horizontal, 6).padding(.vertical, Self.contentInset)
+            .padding(.horizontal, TopicsListMetrics.horizontalInset).padding(.vertical, Self.contentInset)
             // The drag hears the scroll from the action, not from this view's body: a lifted card reads where the
             // area scrolled to when it lands, and nothing reads it while no card is lifted.
             .onGeometryChange(for: CGFloat.self) { hasBench ? -$0.frame(in: .named(TopicCard.viewport)).minY : 0 } action: { offset in

@@ -13,9 +13,12 @@ only a check that fails alone is failed. A suite that stops making progress reac
 check that ran gets the status timeout. --repeat N runs the selection N times, and --shuffle shuffles
 the order of the checks in each suite, with a seed that the output names.
 
+With MUXIFY_VERIFY_TOPICS_LIST set to appkit or swiftui, which `make verify TOPICS_LIST=` does, every launch of every
+suite shows that Topics list (sandbox.py). Such a run does not count for the gate.
+
 Each run keeps its evidence in RUNS/<run-id>/: per suite the output, results.json and the app logs.
 Nothing deletes it. REPORTS/<run-id>.html shows it per check. The exit status is 1 when a check
-fails, and, for a full run, when the gate fails.
+fails, and, for a full run that counts for the gate, when the gate fails.
 """
 
 import json
@@ -29,7 +32,7 @@ import time
 
 from scripts.verify import gate, report
 from scripts.verify.run_suite import write_json
-from scripts.verify.sandbox import AX_WAKE_NOT_TRUSTED, EVIDENCE, REPO, ax_wake, new_run_id
+from scripts.verify.sandbox import AX_WAKE_NOT_TRUSTED, EVIDENCE, REPO, ax_wake, new_run_id, topics_list_option
 
 SUITES = REPO/'scripts/verify/suites'
 RUNS = gate.EVIDENCE/'runs'
@@ -257,8 +260,14 @@ def main(argv):
     unknown = [name for name in names if name not in every]
     if unknown:
         sys.exit('no suite %s in %s' % (', '.join(unknown), SUITES))
-    # The gate trusts only a run of every suite: a passing subset proves nothing about the others.
+    try:
+        topics_list = topics_list_option()
+    except AssertionError as error:
+        sys.exit('nothing ran: %s' % error)
+    # The gate trusts only a run of every suite: a passing subset proves nothing about the others. It trusts only a
+    # run of the app's own Topics list: a run of the list that TOPICS_LIST names proves nothing about the default.
     full = names == every
+    counted = full and topics_list is None
 
     prepare_mac()
 
@@ -271,8 +280,9 @@ def main(argv):
         timings = {}
     tree = gate.tree_state()
     clock, started = time.monotonic(), time.strftime(gate.TIME)
-    print('run %s: %d suites%s, %d jobs, evidence in %s' % (run_id, len(names), ' (full)' if full else '', jobs,
-                                                            run_dir), flush=True)
+    print('run %s: %d suites%s%s, %d jobs, evidence in %s' % (
+        run_id, len(names), ' (full)' if full else '', ', the %s Topics list' % topics_list if topics_list else '',
+        jobs, run_dir), flush=True)
 
     rounds = []
     for number in range(1, repeat + 1):
@@ -287,7 +297,7 @@ def main(argv):
     verdicts = [(check['verdict'], check['check']) for one in rounds for suite in one['suites'] for check in suite['checks']]
     failed = sorted({check for status, check in verdicts if status == 'failed'})
     flaky = sorted({check for status, check in verdicts if status == 'FLAKY'})
-    if full:
+    if counted:
         if gate.tree_state()['files'] == tree['files']:
             gate.record_full_run(run_id, tree, passed=not failed)
         else:
@@ -295,8 +305,8 @@ def main(argv):
     problems = gate.problems()
 
     summary = dict(run=run_id, started=started, seconds=round(time.monotonic() - clock), tree=tree, full=full,
-                   jobs=jobs, repeat=repeat, rounds=rounds, failed=failed, flaky=flaky,
-                   gate=dict(problems=problems, counted=full))
+                   topics_list=topics_list, jobs=jobs, repeat=repeat, rounds=rounds, failed=failed, flaky=flaky,
+                   gate=dict(problems=problems, counted=counted))
     (run_dir/'run.json').write_text(json.dumps(summary, indent=2))
     REPORTS.mkdir(parents=True, exist_ok=True)
     page = REPORTS/(run_id + '.html')
@@ -308,10 +318,11 @@ def main(argv):
         print('FAILED  %s' % check)
     print('%d suites in %.0f s: %s' % (len(names), time.monotonic() - clock, '; '.join(
         ['%d checks failed' % len(failed)] * bool(failed) + ['%d FLAKY' % len(flaky)] * bool(flaky)) or 'all passed'))
-    print('verify gate%s: %s' % ('' if full else ' (a subset run: not part of its status)',
-                                 'FAILED\n' + '\n'.join('  - ' + problem for problem in problems) if problems else 'passed'))
+    uncounted = '' if counted else ' (a %s: not part of its status)' % ('run with TOPICS_LIST' if full else 'subset run')
+    print('verify gate%s: %s' % (uncounted, 'FAILED\n' + '\n'.join('  - ' + problem for problem in problems)
+                                 if problems else 'passed'))
     print('report: %s' % page)
-    return 1 if failed or (full and problems) else 0
+    return 1 if failed or (counted and problems) else 0
 
 
 if __name__ == '__main__':

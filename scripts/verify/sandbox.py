@@ -48,6 +48,14 @@ OWNER = 'owner.json'
 OWNERLESS_GRACE = 60
 # run.py names a folder in build/verify/runs/ here; teardown copies the app logs of its own run into it.
 EVIDENCE = 'MUXIFY_VERIFY_EVIDENCE'
+# `make verify TOPICS_LIST=appkit` or `swiftui` names here the Topics list that every launch shows
+# (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md). Not set or empty, a launch shows the app's
+# default.
+TOPICS_LIST = 'MUXIFY_VERIFY_TOPICS_LIST'
+# The user default that chooses the Topics list.
+TOPICS_LIST_DEFAULT = 'topicsListAppKit'
+# The value of the user default of an area with two versions, for each version: YES is the AppKit version.
+VERSIONS = dict(appkit='YES', swiftui='NO')
 
 
 def swift_helper(source, name):
@@ -76,6 +84,13 @@ def ax_wake(pid):
 
 def new_run_id():
     return time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:6]
+
+
+def topics_list_option():
+    """The Topics list that TOPICS_LIST names for this run, 'appkit' or 'swiftui'; None without the option."""
+    version = os.environ.get(TOPICS_LIST) or None
+    assert version is None or version in VERSIONS, 'TOPICS_LIST is %r: it must be %s' % (version, ' or '.join(VERSIONS))
+    return version
 
 
 class Sandbox:
@@ -285,7 +300,11 @@ class Sandbox:
     # app
 
     def launch(self, args=(), app_source=DEBUG_APP, timeout=30):
-        """Starts the app with `args`."""
+        """Starts the app with `args`. With TOPICS_LIST, it shows that Topics list, unless `args` set the user default
+        themselves."""
+        version = topics_list_option()
+        if version and '-' + TOPICS_LIST_DEFAULT not in args:
+            args = [*args, '-' + TOPICS_LIST_DEFAULT, VERSIONS[version]]
         if self.app.exists():
             shutil.rmtree(self.app)
         shutil.copytree(app_source, self.app, symlinks=True)
@@ -375,6 +394,13 @@ class Sandbox:
 
     def rows(self):
         return self.driver('dump')['rows']
+
+    def topics_list(self):
+        """Which Topics list the App Window shows, 'appkit' or 'swiftui'. The AppKit list counts also while it is the
+        Sidebar page that does not show."""
+        versions = self.driver('topics-list')['versions']
+        assert len(versions) == 1, 'the driver sees %d App Windows: %s' % (len(versions), versions)
+        return versions[0]
 
     def actions(self, key):
         """The names of the named accessibility actions of each element with the identifier, in the order of the dump:

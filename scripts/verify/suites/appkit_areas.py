@@ -27,15 +27,18 @@ AREAS = {
         'SidebarAgentMark', 'SidebarHintView', 'SidebarRowView', 'SidebarLogo', 'LayerGlide', 'ObservedUpdate',
         'AgentMarkMetrics', 'WindowRowMetrics', 'PaneRowMetrics', 'SessionsListMetrics', 'WindowRowView',
         'PaneRowView', 'SessionsList', 'SidebarMenu', 'LayerColoredView', 'StackLayout', 'ListLift', 'CardMetrics',
-        'HintMetrics', 'HintPresentation', 'RowHoverLabel', 'GitViewIconShape')],
+        'HintMetrics', 'HintPresentation', 'RowHoverLabel', 'GitViewIconShape', 'SidebarList', 'SidebarListHost')],
+    'Topics list': [UI + name + '.swift' for name in ('TopicsListView', 'TopicCardView', 'TopicsListMetrics')],
 }
 # The files of an area that may import SwiftUI for now, each with the task or stage that removes the import. A task
 # is one of the task set remove-swiftui (.cook/tasks/remove-swiftui/), which is stage 1.
 EXCEPTIONS = {
     UI + 'WindowRowView.swift': 'task 14 (hover labels): the row hands its hover label a SwiftUI Text',
     UI + 'PaneRowView.swift': 'task 14 (hover labels): the row hands its hover label a SwiftUI Text',
-    UI + 'SessionsList.swift': ('stage 2: it serves the AppKit list and the SwiftUI Sidebar, which hosts the list '
-                                'through SessionsListHost'),
+    UI + 'SessionsList.swift': ('stage 2: SessionCardPress opens a card with SwiftUI\'s withAnimation, for the SwiftUI '
+                                'Session card of the Topics list'),
+    UI + 'SidebarListHost.swift': ('stage 2: the SwiftUI Sidebar hosts the AppKit Sessions list and Topics list through '
+                                   'it'),
     UI + 'SidebarMenu.swift': ('stage 2: it serves the AppKit list and the SwiftUI views, which draw a menu with '
                                'SidebarMenuButtons'),
 }

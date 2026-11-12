@@ -5,10 +5,10 @@ import MuxifyCore
 /// the SwiftUI list. Its views lay out by frames, and it reads the store through `ObservedUpdate`. It owns its scroll
 /// view: it glides to the card of the Location's Session by moving its own clip view, and the header of an open card
 /// sticks to the top while the card's rows scroll under it.
-final class SessionsListView: NSView {
+final class SessionsListView: NSView, SidebarList {
     private let store: WorkspaceStore
     /// The values from the SwiftUI Sidebar. The list draws again when one changes.
-    var environment: SessionsListEnvironment {
+    var environment: SidebarListEnvironment {
         didSet {
             if environment != oldValue { update.run() }
         }
@@ -26,7 +26,7 @@ final class SessionsListView: NSView {
     private var locationSessionID: String?
     private lazy var update = ObservedUpdate { [weak self] in self?.render() }
 
-    init(store: WorkspaceStore, environment: SessionsListEnvironment) {
+    init(store: WorkspaceStore, environment: SidebarListEnvironment) {
         self.store = store
         self.environment = environment
         super.init(frame: .zero)
@@ -64,8 +64,7 @@ final class SessionsListView: NSView {
 
     /// Makes the cards the Sessions of the store, each with what it shows now.
     private func render() {
-        // Text follows the lightness of the Ghostty theme, as the SwiftUI Sidebar's colour scheme does.
-        let themed = environment.chromeTheme.flatMap { NSAppearance(named: $0.isDark ? .darkAqua : .aqua) }
+        let themed = environment.appearance
         if appearance?.name != themed?.name { appearance = themed }
         let empty = SessionsListEmptyState.text(store)
         emptyState.text = empty ?? ""

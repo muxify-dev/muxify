@@ -2,23 +2,6 @@ import AppKit
 import MuxifyCore
 import SwiftUI
 
-/// What the Sidebar's SwiftUI views read from the environment. The Sidebar hands it to the AppKit Sessions list,
-/// which has no environment.
-struct SessionsListEnvironment: Equatable {
-    var fontSize = InterfaceFontSize()
-    var typography = SidebarTypography()
-    var hints = HintPresentation.hidden
-    var agentColors = AgentColors()
-    /// `ui.pulse` in the Config.
-    var pulses = true
-    /// The Ghostty theme of the chrome, nil for the system materials.
-    var chromeTheme: TerminalTheme?
-    var wrapsCardTitles = true
-    var reduceMotion = false
-    /// The pixels in a point on the display. A length is whole pixels, as SwiftUI lays its views out.
-    var displayScale: CGFloat = 2
-}
-
 /// What the Sessions list says in its middle while tmux has no Window: in the font of a Window row's title, in the
 /// secondary text colour.
 @MainActor enum SessionsListEmptyState {
@@ -112,34 +95,5 @@ struct SessionsListEnvironment: Equatable {
             }]
         }
         return []
-    }
-}
-
-/// The AppKit Sessions list as one hosted view in the SwiftUI Sidebar: the Sessions page of the pager, or alone when
-/// Topics are off.
-struct SessionsListHost: NSViewRepresentable {
-    let store: WorkspaceStore
-    @Environment(\.interfaceFontSize) private var fontSize
-    @Environment(\.sidebarTypography) private var typography
-    @Environment(\.quickSwitchHints) private var hints
-    @Environment(\.agentColors) private var agentColors
-    @Environment(\.pulses) private var pulses
-    @Environment(\.chromeTheme) private var chromeTheme
-    @Environment(\.wrapsCardTitles) private var wrapsCardTitles
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.displayScale) private var displayScale
-
-    private var environment: SessionsListEnvironment {
-        SessionsListEnvironment(fontSize: fontSize, typography: typography, hints: hints, agentColors: agentColors,
-                                pulses: pulses, chromeTheme: chromeTheme, wrapsCardTitles: wrapsCardTitles,
-                                reduceMotion: reduceMotion, displayScale: displayScale)
-    }
-
-    func makeNSView(context: Context) -> SessionsListView {
-        SessionsListView(store: store, environment: environment)
-    }
-
-    func updateNSView(_ view: SessionsListView, context: Context) {
-        view.environment = environment
     }
 }

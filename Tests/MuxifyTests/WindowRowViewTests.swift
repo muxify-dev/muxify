@@ -9,7 +9,7 @@ import XCTest
                                     path: "/work/app", command: "zsh", isActive: true, paneCount: 1, hasBell: false,
                                     sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(), openRequests: [])
 
-    private func row(environment: SessionsListEnvironment = SessionsListEnvironment()) -> WindowRowView {
+    private func row(environment: SidebarListEnvironment = SidebarListEnvironment()) -> WindowRowView {
         let row = WindowRowView(windowID: window.id, identifier: "session-window-" + window.id)
         row.show(WindowRowContent(window: window, formatted: SidebarFormats.WindowRowContent(text: .init(title: "editor", summary: ""),
                                                                                             left: nil, right: nil)),
@@ -28,7 +28,7 @@ import XCTest
     func testWithWindowHintsAtAllTimesTheRowKeepsRoomBeforeItsIcon() throws {
         var config = Config.Hints()
         config.windows.always = true
-        var environment = SessionsListEnvironment()
+        var environment = SidebarListEnvironment()
         environment.hints = HintPresentation(modifiers: nil, keybinds: .defaults,
                                              targets: QuickSwitchTargets(cards: [], windows: [], topicWindows: [], tabs: [], sessions: [], topics: []),
                                              sidebar: true, browser: false, terminal: false, config: config)

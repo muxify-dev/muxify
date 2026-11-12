@@ -43,7 +43,7 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
     private var left: [NSView] = []
     private var right: [NSView] = []
     private var content: WindowRowContent?
-    private var environment = SessionsListEnvironment()
+    private var environment = SidebarListEnvironment()
     /// The layout of the last width.
     private var arranged: (width: CGFloat, layout: Layout)?
     /// The row's context menu, as the list reads it for the Window.
@@ -110,7 +110,7 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
 
     /// Shows the content. The tint fades in or out when the Location comes to the row or leaves it, unless `fades` is
     /// false, as for the rows of a card that opens.
-    func show(_ content: WindowRowContent, environment: SessionsListEnvironment, fades: Bool = true) {
+    func show(_ content: WindowRowContent, environment: SidebarListEnvironment, fades: Bool = true) {
         guard content != self.content || environment != self.environment else { return }
         let old = self.content
         let tints = old.map { $0.isSelected != content.isSelected } ?? false
@@ -448,7 +448,7 @@ final class PaneCountView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
-    func show(count: Int, isZoomed: Bool, environment: SessionsListEnvironment) {
+    func show(count: Int, isZoomed: Bool, environment: SidebarListEnvironment) {
         self.isZoomed = isZoomed
         symbol.pointSize = environment.fontSize(WindowRowMetrics.symbolSize)
         symbol.scale = environment.displayScale

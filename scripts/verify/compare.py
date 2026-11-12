@@ -40,13 +40,11 @@ from scripts.verify.compare_gate import judge, judge_actions, list_rows, rect
 from scripts.verify.compare_scenes import AREAS
 from scripts.verify.run import prepare_mac
 from scripts.verify.run_suite import write_json
-from scripts.verify.sandbox import REPO, Sandbox, alive, swift_helper
+from scripts.verify.sandbox import REPO, VERSIONS, Sandbox, alive, swift_helper
 
 REPORT = gate.EVIDENCE/'compare'
 NOTES = REPO/'scripts/verify/compare-notes.md'
 PICTURE_DIFF_SOURCE = REPO/'scripts/verify/picture_diff.swift'
-# The value of an area's user default for each version. A launch argument wins over the stored default.
-VERSIONS = dict(appkit='YES', swiftui='NO')
 # A shot is at rest when this many pictures and dumps in a row are the same, REST_STEP seconds apart.
 REST_SAMPLES = 3
 REST_STEP = .25
@@ -83,8 +81,9 @@ class View:
         self.named = []
 
     def launch(self, config=None):
-        """Starts the app with this showing's version of the area, or starts it again when it runs. With `config`, it
-        writes that Config first, so the app reads it as it starts."""
+        """Starts the app with this showing's version of the area, or starts it again when it runs. The version is the
+        area's user default as a launch argument (VERSIONS), which wins over the stored default and over TOPICS_LIST.
+        With `config`, it writes that Config first, so the app reads it as it starts."""
         if config is not None:
             (self.s.root/'config/muxify/config.yaml').write_text(config)
         args = [*self.area.args, '-' + self.area.default, VERSIONS[self.side.version]]
@@ -106,9 +105,9 @@ class View:
     def value(self, key, rows):
         return self.s.row(key, rows).get('accessibilityValue') or ''
 
-    def close_card(self, session):
-        """Closes the card of the Location's Session, which the move to the Session opened."""
-        key = 'session-' + session
+    def close_card(self, key):
+        """Closes the card of the Location, which the move to the Location opened, by a press on its header: `key` is
+        the header's identifier, such as `session-$1` or `topic-<Topic ID>`."""
         self.wait(lambda rs: 'expanded' in self.value(key, rs), 'the card %s of the Location is not open' % key)
         self.s.act('press', key)
         self.wait(lambda rs: 'collapsed' in self.value(key, rs), 'the card %s did not close' % key)

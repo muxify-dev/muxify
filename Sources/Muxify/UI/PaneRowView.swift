@@ -55,7 +55,7 @@ final class PaneRowView: SidebarRowView, CardRowView {
     private let title = SidebarLabel()
     private let summary = SidebarLabel()
     private var content: PaneRowContent?
-    private var environment = SessionsListEnvironment()
+    private var environment = SidebarListEnvironment()
     /// The layout of the last width.
     private var arranged: (width: CGFloat, layout: Layout)?
 
@@ -83,7 +83,7 @@ final class PaneRowView: SidebarRowView, CardRowView {
 
     /// Shows the content. The tint fades in or out when the Location comes to the row or leaves it, unless `fades` is
     /// false, as for the rows of a card that opens.
-    func show(_ content: PaneRowContent, environment: SessionsListEnvironment, fades: Bool = true) {
+    func show(_ content: PaneRowContent, environment: SidebarListEnvironment, fades: Bool = true) {
         guard content != self.content || environment != self.environment else { return }
         let tints = self.content.map { $0.showsLocation != content.showsLocation } ?? false
         self.content = content
@@ -192,7 +192,7 @@ final class PaneRowView: SidebarRowView, CardRowView {
 /// card's header and `-more`.
 final class MoreRowView: SidebarPressView, CardRowView {
     private let label = SidebarLabel()
-    private var environment = SessionsListEnvironment()
+    private var environment = SidebarListEnvironment()
 
     init(identifier: String) {
         super.init(frame: .zero)
@@ -208,7 +208,7 @@ final class MoreRowView: SidebarPressView, CardRowView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
     /// Shows the number of rows the card holds back.
-    func show(count: Int, environment: SessionsListEnvironment) {
+    func show(count: Int, environment: SidebarListEnvironment) {
         self.environment = environment
         label.text = MoreRowMetrics.text(count)
         label.font = .systemFont(ofSize: environment.fontSize(MoreRowMetrics.fontSize))

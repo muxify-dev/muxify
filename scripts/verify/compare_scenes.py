@@ -3,9 +3,9 @@
 An area is a part of the app with two versions while it moves from SwiftUI to AppKit
 (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md). `Area` names the list whose rows the gate
 compares, the user default that chooses the version, how the run asks the driver which version shows, and the area's
-scenes. AREAS lists the areas that have two versions now. An area leaves it when the user signs it off and its
-SwiftUI version is deleted. The Sessions list was the first area; its scenes are in the git history before its
-SwiftUI version was deleted.
+scenes. AREAS lists the areas that have two versions now: the Topics list (`make compare AREA=topics`). An area leaves
+it when the user signs it off and its SwiftUI version is deleted. The Sessions list was the first area; its scenes are
+in the git history before its SwiftUI version was deleted.
 
 A scene has a `name` for `make compare SCENE=`, a line `shows` for the report, a `fixture` and its `shots`:
 
@@ -24,14 +24,15 @@ Both versions must start a shot from the same state, or `make compare SELF=1` fi
 own. So an arrange sets again what an earlier shot changed, such as a bell, and calls `view.rest()` before a step
 that starts from where the list stands, such as a swipe or a hover.
 
-To add a scene, write a class like the pilot's, add it to its area's `scenes`, and add its section to
+To add a scene, write a class like `TopicCards`, add it to its area's `scenes`, and add its section to
 compare-notes.md.
 """
 
 import re
 from typing import Callable, NamedTuple
 
-from scripts.verify.sandbox import wait
+from scripts.verify.sandbox import TOPICS_LIST_DEFAULT, wait
+from scripts.verify.topic_records import TopicRecords
 
 SHELL = '/bin/zsh -f'
 # What the Pane of an Agent runs. A Pane at a plain shell runs no Agent (`Agent.runs` in MuxifyCore), so the list shows
@@ -53,10 +54,6 @@ class Area(NamedTuple):
     args: list
     shown: Callable
     scenes: list
-
-
-# The areas that have two versions now. None: the Sessions list was signed off and its SwiftUI version deleted.
-AREAS = []
 
 
 def config(sidebar='', ui='', more=''):
@@ -114,6 +111,23 @@ def fresh_shell(s, window):
     s.tmux('respawn-pane', '-k', '-t', window, '-c', folder, SHELL)
 
 
+def topic(s, topic_id, title, windows=('main',), **fields):
+    """A Topic with a live Session: its record, with `fields` such as `order`, and a Session of the same name that
+    names the Topic. Returns (Session id, list of Window ids)."""
+    TopicRecords(s.root/'state/muxify').put(dict(id=topic_id, title=title, slug=topic_id, **fields))
+    found = session(s, topic_id, windows)
+    s.tmux('set-option', '-t', found[0], '@muxify_topic', topic_id)
+    return found
+
+
+def locked(s, name, order):
+    """A No Topic Session that is Locked at `order` in the Topic order, as tmux keeps a Lock. Returns (Session id,
+    list of Window ids)."""
+    found = session(s, name)
+    s.tmux('set-option', '-t', found[0], '@muxify_lock', str(order))
+    return found
+
+
 def window_rows(key, rows):
     return [row for row in rows if row.get('accessibilityIdentifier') == key]
 
@@ -132,8 +146,43 @@ def cards(rows):
 def close_cards(view, session):
     """Closes the card of the Location's Session, and waits until the list shows closed cards only, with no Window
     row and no Pane row. With `sidebar.session_cards: one`, no other card is open."""
-    view.close_card(session)
+    view.close_card('session-' + session)
     def closed(rows):
         return (all(value.startswith('collapsed') for value in cards(rows).values())
                 and not any(key.startswith(('session-window-', 'pane-')) for key in view.s.ids(rows)))
     view.wait(closed, lambda: 'the list does not show closed cards only: it has %s' % cards(view.s.rows()))
+
+
+class TopicCards:
+    name = 'topic-cards'
+    shows = 'Closed Topic cards and a Locked card, with the Location in the first Topic, whose card a press closed.'
+
+    def fixture(self, s):
+        self.session, self.windows = topic(s, 'atlas', 'Atlas', order=0)
+        topic(s, 'birch', 'Birch', order=1)
+        topic(s, 'cedar', 'Cedar', order=2)
+        lock, _ = locked(s, 'dune', 3)
+        # The headers of the cards, in the order of the list.
+        self.headers = ['topic-atlas', 'topic-birch', 'topic-cedar', 'locked-' + lock]
+
+    def shots(self):
+        return [('topic-cards', self.cards)]
+
+    def cards(self, view):
+        view.launch(config())
+        view.go(self.windows[0])
+        fresh_shell(view.s, self.windows[0])
+        view.close_card(self.headers[0])
+        values = lambda rows: {key: view.value(key, rows) for key in self.headers}
+        view.wait(lambda rows: all(value.startswith('collapsed') for value in values(rows).values()),
+                  lambda: 'the list does not show closed cards only: their headers have %s' % values(view.s.rows()))
+
+
+# The launch arguments of every scene of the Topics list: the Sidebar shows, with Topics.
+TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics']
+
+# The areas that have two versions now.
+AREAS = [
+    Area(name='topics', title='Topics list', list='topics-list', default=TOPICS_LIST_DEFAULT, args=TOPICS_ARGS,
+         shown=lambda s: s.topics_list(), scenes=[TopicCards()]),
+]

@@ -6,7 +6,7 @@ import XCTest
 /// harness shows them: the Working mark's pixels on device pixels and the colours of a Notification, as the mark
 /// takes them from the shared definitions, and the press and the accessibility rows of the rows.
 @MainActor final class PaneRowViewTests: XCTestCase {
-    private func paneRow(_ content: PaneRowContent, environment: SessionsListEnvironment = SessionsListEnvironment()) -> PaneRowView {
+    private func paneRow(_ content: PaneRowContent, environment: SidebarListEnvironment = SidebarListEnvironment()) -> PaneRowView {
         let row = PaneRowView(paneID: content.paneID)
         row.show(content, environment: environment)
         row.frame = NSRect(x: 0, y: 0, width: 240, height: row.height(width: 240))
@@ -106,7 +106,7 @@ import XCTest
         XCTAssertEqual(presses, 1)
 
         let more = MoreRowView(identifier: "session-$1")
-        more.show(count: 3, environment: SessionsListEnvironment())
+        more.show(count: 3, environment: SidebarListEnvironment())
         more.frame = NSRect(x: 0, y: 0, width: 240, height: more.height(width: 240))
         more.onPress = { presses += 1 }
         XCTAssertTrue(more.hitTest(NSPoint(x: 10, y: 10)) === more)
@@ -119,7 +119,7 @@ import XCTest
 
     func testNMoreIsAButtonWithTheIdentifierOfTheHeaderAndTheCountOfTheRowsHeldBack() {
         let more = MoreRowView(identifier: "session-$1")
-        more.show(count: 3, environment: SessionsListEnvironment())
+        more.show(count: 3, environment: SidebarListEnvironment())
         XCTAssertEqual(more.accessibilityRole(), .button)
         XCTAssertEqual(more.accessibilityIdentifier(), "session-$1-more")
         XCTAssertEqual(more.accessibilityLabel(), "3 more…")
@@ -137,7 +137,7 @@ import XCTest
         var shown = false
         card.onShowAllRows = { shown = true }
         card.show(SessionCardContent(title: "atlas", isOpen: true, rows: [.window(windowRow), .pane(content())], moreCount: 4),
-                  environment: SessionsListEnvironment())
+                  environment: SidebarListEnvironment())
         card.frame = NSRect(x: 0, y: 0, width: 248, height: card.height(width: 248))
 
         let identifiers = try XCTUnwrap(card.accessibilityChildren() as? [NSView]).map { $0.accessibilityIdentifier() }

@@ -103,7 +103,7 @@ final class SessionCardView: NSView {
     /// The Hints of the Window rows of an open card, by Window ID.
     private var windowHints: [String: SidebarHintView] = [:]
     private var content: SessionCardContent?
-    private var environment = SessionsListEnvironment()
+    private var environment = SidebarListEnvironment()
     /// The card's top edge in the list's viewport. The header of an open card sticks to the viewport's top once the
     /// card's top has scrolled past it.
     private var viewportTop: CGFloat = 0
@@ -135,7 +135,7 @@ final class SessionCardView: NSView {
     var isOpen: Bool { content?.isOpen ?? false }
 
     /// Shows the content. The colours of the border turn once when the Location comes to a card that already showed.
-    func show(_ content: SessionCardContent, environment: SessionsListEnvironment) {
+    func show(_ content: SessionCardContent, environment: SidebarListEnvironment) {
         guard content != self.content || environment != self.environment else { return }
         let came = self.content.map { !$0.holdsSelection && content.holdsSelection } ?? false
         let wasOpen = isOpen
@@ -452,7 +452,7 @@ private final class SessionCardHeaderView: SidebarPressView {
     private let bell = SidebarSymbol(CardHeaderMark.bell)
     private let summary = SidebarLabel()
     private var content = SessionCardContent(title: "")
-    private var environment = SessionsListEnvironment()
+    private var environment = SidebarListEnvironment()
     /// The frames of the last layout, and the width they were made for.
     private var arranged: (width: CGFloat, frames: Frames)?
     /// The header's named accessibility actions: Go to Session and the lock item.
@@ -490,7 +490,7 @@ private final class SessionCardHeaderView: SidebarPressView {
         didSet { backdrop.isHidden = !sticks }
     }
 
-    func show(_ content: SessionCardContent, environment: SessionsListEnvironment) {
+    func show(_ content: SessionCardContent, environment: SidebarListEnvironment) {
         self.content = content
         self.environment = environment
         backdrop.theme = environment.chromeTheme
