@@ -387,7 +387,9 @@ final class SessionCardView: NSView {
     // MARK: The menu
 
     /// A right-click anywhere on the card shows the card's menu: on the header, the paddings and the gaps between the
-    /// rows, which have no menu of their own and pass the click up to the card. A Window row shows its own menu.
+    /// rows, which have no menu of their own and pass the click up to the card. A Window row shows its own menu. A
+    /// Control-click shows the same menu: AppKit asks the view under it for a menu, and a header or a row with none
+    /// passes the click up as a right-click (`SidebarPressView`).
     override func menu(for event: NSEvent) -> NSMenu? { menuItems()?.contextMenu() }
 
     // MARK: Accessibility
@@ -411,25 +413,14 @@ final class SessionCardView: NSView {
     }
 
     override func accessibilityActivationPoint() -> NSPoint { accessibilityFrame().centre }
-
-    #if DEBUG
-    /// The drag of the Window rows and its placeholder, for the tests.
-    var windowDrag: SessionCardDrag { drag }
-    var dropSlot: DropSlotView { slot }
-    /// The turn of the border's colours and the fade of the spine that run now, for the tests.
-    var turnAnimation: CAAnimation? { selection.turnAnimation }
-    var spineFade: CAAnimation? { spine.fade }
-    /// The opacity of the lock or the Guest mark, and the title's frame in the header, for the tests.
-    var markOpacity: CGFloat { header.markOpacity }
-    var titleFrame: NSRect { header.titleFrame }
-    #endif
 }
 
 extension NSRect {
     var centre: NSPoint { NSPoint(x: midX, y: midY) }
 }
 
-/// The rows of a card. A closed card's rows take no click and no pointer.
+/// The rows of a card. A closed card's rows take no click and no pointer. The view takes no click of its own: a click
+/// between two rows goes to the card, so a Control-click there opens the card's menu, as a right-click does.
 private final class CardRowsView: NSView {
     var isOpen = false {
         didSet {
@@ -441,7 +432,11 @@ private final class CardRowsView: NSView {
 
     override var isFlipped: Bool { true }
 
-    override func hitTest(_ point: NSPoint) -> NSView? { isOpen ? super.hitTest(point) : nil }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard isOpen else { return nil }
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
+    }
 }
 
 /// The header of a Session card: the title, after it the place of the card's Hint and the lock or the Guest mark,
@@ -613,11 +608,6 @@ private final class SessionCardHeaderView: SidebarPressView {
         let line = frames(width: bounds.width).titleLine
         return window.convertPoint(toScreen: convert(NSPoint(x: line.midX, y: line.midY), to: nil))
     }
-
-    #if DEBUG
-    var markOpacity: CGFloat { (content.isGuest ? guest : lock).alphaValue }
-    var titleFrame: NSRect { title.frame }
-    #endif
 }
 
 /// A card's key at rest, on a faint capsule of the text colour: `CardRestKey` in SwiftUI. It is a row of its own to

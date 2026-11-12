@@ -12,7 +12,7 @@ import MuxifyCore
 /// Where a unit lands and how far it may move come from `StackLayout` and `DropPlacement`, which the SwiftUI drag uses
 /// too. A row of a card with one Window does not lift, and no row lifts while the store turns the drag off.
 @MainActor final class SessionCardDrag {
-    enum Phase: Equatable {
+    private enum Phase: Equatable {
         case idle
         case pressing(String)
         case lifted(String)
@@ -22,11 +22,11 @@ import MuxifyCore
 
     /// The card whose Window units the drag moves.
     private unowned let card: SessionCardView
-    private(set) var phase = Phase.idle
+    private var phase = Phase.idle
     /// How far the lifted unit stands below its place.
-    private(set) var translation: CGFloat = 0
+    private var translation: CGFloat = 0
     /// Where the lifted unit would land; nil at its own place.
-    private(set) var placement: DropPlacement<String>?
+    private var placement: DropPlacement<String>?
     /// The Window units' heights, with `CardSpacing.row` between two, as the card stacks them.
     private var layout = StackLayout<String>(heights: [:], spacing: CardSpacing.row)
     /// The Window units as the card shows them now: the places a lifted unit can reach.
@@ -290,7 +290,7 @@ extension ListLift.Spring {
 
 /// A Window row and the Pane rows under it, which a drag lifts as one; or a Pane row in place of its Session's only
 /// Window row, which does not move. It stands on a plate while it is pressed or lifted. It takes no click of its own:
-/// a click between its rows goes to the card's rows, as before the rows had a unit.
+/// a click between its rows goes to the card, as before the rows had a unit.
 final class WindowUnitView: NSView {
     enum Look {
         case resting
@@ -307,7 +307,7 @@ final class WindowUnitView: NSView {
     /// Its top in the card's rows, without the drag's offset.
     var place: CGFloat = 0
     private let plate = LiftPlateView()
-    private(set) var look = Look.resting
+    private var look = Look.resting
 
     /// The rows from the top.
     var rows: [CardRowView] = [] {
@@ -389,14 +389,6 @@ final class WindowUnitView: NSView {
         let x = bounds.width * ListLift.anchor.x, y = bounds.height * ListLift.anchor.y
         return CATransform3DTranslate(CATransform3DScale(CATransform3DMakeTranslation(x, y, 0), scale, scale, 1), -x, -y, 0)
     }
-
-    #if DEBUG
-    /// The scale the unit has now, and the animation of it that runs, for the tests.
-    var shownScale: CGFloat { layer?.sublayerTransform.m11 ?? 1 }
-    var scaleMotion: CAAnimation? { layer?.animation(forKey: "set-sublayerTransform") }
-    var plateOpacity: Float { plate.layer?.opacity ?? 0 }
-    var shadowOpacity: Float { plate.shadowOpacity }
-    #endif
 }
 
 /// What a pressed or lifted unit stands on, so the rows it passes over do not show through it: the chrome's
@@ -441,8 +433,6 @@ private final class LiftPlateView: NSView {
         for view in [shade, material, face] { view.frame = bounds }
     }
 
-    var shadowOpacity: Float { shade.opacity }
-
     func show(_ shows: Shows, motion: LayerMotion) {
         if let layer { LayerGlide.set("opacity", of: layer, to: Float(shows == .none ? 0 : 1), motion: motion) }
         shade.show(shows == .shadow, motion: motion)
@@ -481,8 +471,6 @@ private final class LiftShadowView: NSView {
                                       cornerHeight: WindowRowMetrics.cornerRadius, transform: nil)
         }
     }
-
-    var opacity: Float { shape.shadowOpacity }
 
     func show(_ shows: Bool, motion: LayerMotion) {
         LayerGlide.set("shadowOpacity", of: shape, to: Float(shows ? ListLift.shadowOpacity : 0), motion: motion)

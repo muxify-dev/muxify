@@ -3,8 +3,8 @@ import XCTest
 @testable import MuxifyCore
 
 /// The context menus of the AppKit Sessions list (ADR 0074), which no check of the end-to-end harness opens: what a
-/// right-click shows on a card and on a Window row, in order, which items are enabled, and the named accessibility
-/// actions that the same menu gives.
+/// right-click shows on a card and on a Window row, in order, which items are enabled, the named accessibility actions
+/// that the same menu gives, and a Control-click, which is a right-click and no press.
 @MainActor final class SessionsListMenuTests: XCTestCase {
     /// A store of a local App Window in which no Topic change runs. It reads no tmux server.
     private let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"))
@@ -126,5 +126,69 @@ import XCTest
         let parts = children.filter { $0.accessibilityIdentifier().hasPrefix("session-window-") }
         XCTAssertFalse(parts.isEmpty)
         XCTAssertEqual(parts.flatMap { $0.accessibilityCustomActions() ?? [] }.map(\.name), [])
+    }
+
+    // MARK: Control-click
+
+    /// A Control-press on the header, a Window row, a Pane row and "N more…" of an open card with two Window rows,
+    /// the first with a Pane row under it, presses nothing and starts no drag, and the same press without Control
+    /// presses each. The card has no menus, so a Control-click here opens none.
+    func testAControlPressOnTheHeaderAWindowRowAPaneRowOrNMorePressesNothingAndStartsNoDrag() throws {
+        let card = SessionCardView(sessionID: "$1")
+        var pressed: [String] = []
+        card.onPress = { pressed.append("header") }
+        card.onSelectWindow = { pressed.append($0.id) }
+        card.onMoveWindow = { window, _ in pressed.append("moved " + window.id) }
+        card.onSelectPane = { pressed.append($0) }
+        card.onShowAllRows = { pressed.append("more") }
+        card.show(SessionCardContent(title: "atlas", isOpen: true,
+                                     rows: [row(window("@1")), .pane(PaneRowContent(paneID: "%1", text: .init(title: "zsh", summary: ""), windowID: "@1")),
+                                            row(window("@2"))],
+                                     moreCount: 2),
+                  environment: SessionsListEnvironment())
+        let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 260, height: 400), styleMask: .borderless, backing: .buffered, defer: false)
+        host.isReleasedWhenClosed = false
+        let root = FlippedView(frame: NSRect(x: 0, y: 0, width: 260, height: 400))
+        host.contentView = root
+        defer { host.contentView = nil }
+        root.addSubview(card)
+        card.frame = NSRect(x: 6, y: 4, width: 248, height: card.height(width: 248))
+
+        let children = card.accessibilityChildren() as? [NSView] ?? []
+        func part(_ identifier: String) throws -> NSView {
+            let part = try XCTUnwrap(children.first { $0.accessibilityIdentifier() == identifier }, identifier)
+            // A Window row's parts are its accessibility rows: the row is their superview.
+            return identifier.hasPrefix("session-window-") ? try XCTUnwrap(part.superview, identifier) : part
+        }
+        let parts = try [("header", part("session-$1")), ("@1", part("session-window-@1")), ("%1", part("pane-%1")),
+                         ("more", part("session-$1-more"))]
+        let rows = try ["session-window-@1", "pane-%1", "session-window-@2"].map(part)
+        func frames() -> [NSRect] { rows.map { $0.convert($0.bounds, to: card) } }
+        let before = frames()
+
+        func click(_ view: NSView, with flags: NSEvent.ModifierFlags, moving move: CGFloat = 0) {
+            let point = view.convert(NSPoint(x: 40, y: view.bounds.midY), to: nil)
+            func event(_ type: NSEvent.EventType, down: CGFloat) -> NSEvent {
+                NSEvent.mouseEvent(with: type, location: NSPoint(x: point.x, y: point.y - down), modifierFlags: flags, timestamp: 0,
+                                   windowNumber: host.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                                   pressure: type == .leftMouseUp ? 0 : 1)!
+            }
+            view.mouseDown(with: event(.leftMouseDown, down: 0))
+            if move != 0 {
+                for step in [10, move] { view.mouseDragged(with: event(.leftMouseDragged, down: step)) }
+            }
+            view.mouseUp(with: event(.leftMouseUp, down: move))
+        }
+
+        for (name, view) in parts {
+            click(view, with: .control)
+            click(view, with: .control, moving: 30)
+            XCTAssertEqual(pressed, [], "a Control-press on \(name) pressed it")
+            XCTAssertEqual(frames(), before, "a Control-press that moved on \(name) dragged a row")
+        }
+        for (name, view) in parts {
+            click(view, with: [])
+            XCTAssertEqual(pressed.last, name, "a click on \(name) did not press it")
+        }
     }
 }

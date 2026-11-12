@@ -18,7 +18,7 @@ final class SidebarAgentMark: NSView {
     /// The dot of a Notification.
     private let dot = CAShapeLayer()
 
-    static let stepKey = "step"
+    private static let stepKey = "step"
 
     init() {
         super.init(frame: .zero)
@@ -135,15 +135,4 @@ final class SidebarAgentMark: NSView {
             pixel.add(animation, forKey: Self.stepKey)
         }
     }
-
-    #if DEBUG
-    /// The steps of the glyph's pixels that run now, the frames of its pixels in the view, and their opacities, for
-    /// the tests.
-    var stepAnimations: [CAAnimation] { pixels.compactMap { $0.animation(forKey: Self.stepKey) } }
-    var pixelFrames: [CGRect] { pixels.map { glyph.convert($0.frame, to: layer) } }
-    var pixelOpacities: [Float] { pixels.map(\.opacity) }
-    /// The dot's colour and frame in the view, nil when the view shows no dot.
-    var dotColor: CGColor? { dot.isHidden ? nil : dot.fillColor }
-    var dotFrame: CGRect { dot.frame }
-    #endif
 }

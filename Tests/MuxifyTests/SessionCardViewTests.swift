@@ -2,9 +2,9 @@ import AppKit
 import XCTest
 @testable import MuxifyCore
 
-/// The motion of the cards of the AppKit Sessions list (ADR 0074), which no picture and no dump of the end-to-end
-/// harness shows: the turn of the border's colours, the fade of the Working mark's spine and the glide of a card that
-/// opens or closes.
+/// The cards of the AppKit Sessions list (ADR 0074), where no dump of the end-to-end harness shows them: the height
+/// of a card, the glide of a card that opens or closes, the scroll and the header that sticks, the Hints, the empty
+/// state, the Sidebar's font family and the theme.
 @MainActor final class SessionCardViewTests: XCTestCase {
     private func card(_ content: SessionCardContent, environment: SessionsListEnvironment = SessionsListEnvironment()) -> SessionCardView {
         let card = SessionCardView(sessionID: "$1")
@@ -18,87 +18,6 @@ import XCTest
             timing?.getControlPoint(at: index, values: &point)
             return point
         }
-    }
-
-    func testTheBorderTurnsOnceWhenTheLocationComesToTheCard() throws {
-        let card = card(SessionCardContent(title: "atlas"))
-        XCTAssertNil(card.turnAnimation)
-
-        card.show(SessionCardContent(title: "atlas", holdsSelection: true), environment: SessionsListEnvironment())
-
-        let turn = try XCTUnwrap(card.turnAnimation as? CABasicAnimation)
-        XCTAssertEqual(turn.keyPath, "transform.rotation.z")
-        XCTAssertEqual(try XCTUnwrap(turn.fromValue as? Double), -150 * .pi / 180, accuracy: 0.0001)
-        XCTAssertEqual(turn.toValue as? Double, 0)
-        XCTAssertEqual(turn.duration, 0.9)
-        XCTAssertEqual(turn.repeatCount, 0)
-        XCTAssertEqual(controlPoints(turn.timingFunction), [0.18, 0.85, 0.25, 1])
-    }
-
-    func testTheBorderDoesNotTurnOnACardThatShowsWithTheLocationOnIt() {
-        XCTAssertNil(card(SessionCardContent(title: "atlas", holdsSelection: true)).turnAnimation)
-    }
-
-    func testTheBorderDoesNotTurnWithReduceMotion() {
-        var still = SessionsListEnvironment()
-        still.reduceMotion = true
-        let card = card(SessionCardContent(title: "atlas"), environment: still)
-
-        card.show(SessionCardContent(title: "atlas", holdsSelection: true), environment: still)
-
-        XCTAssertNil(card.turnAnimation)
-    }
-
-    func testTheSpineOfTheWorkingMarkFadesOnTheSharedClock() throws {
-        let card = card(SessionCardContent(title: "atlas", mark: .agent(.working)))
-
-        let fade = try XCTUnwrap(card.spineFade as? CAKeyframeAnimation)
-        XCTAssertEqual(fade.keyPath, "opacity")
-        XCTAssertEqual(fade.duration, 1.6)
-        XCTAssertEqual(fade.repeatCount, .infinity)
-        let values = try XCTUnwrap(fade.values as? [Double])
-        XCTAssertEqual(try XCTUnwrap(values.max()), 1, accuracy: 0.0001)
-        XCTAssertEqual(try XCTUnwrap(values.min()), 0.35, accuracy: 0.0001)
-        XCTAssertEqual(try XCTUnwrap(values.first), 1, accuracy: 0.0001)
-        // Where the fade stands in its period now is where the time since the reference date stands in it.
-        let place = (CACurrentMediaTime() - fade.beginTime + fade.timeOffset).truncatingRemainder(dividingBy: 1.6)
-        let clock = Date().timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.6)
-        XCTAssertLessThan(min(abs(place - clock), 1.6 - abs(place - clock)), 0.05)
-    }
-
-    func testEverySpineFadesOnOneClock() throws {
-        let first = try XCTUnwrap(card(SessionCardContent(title: "atlas", mark: .agent(.working))).spineFade)
-        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
-        let second = try XCTUnwrap(card(SessionCardContent(title: "birch", mark: .agent(.working))).spineFade)
-
-        XCTAssertEqual(first.beginTime, second.beginTime)
-        XCTAssertEqual(first.timeOffset, second.timeOffset)
-    }
-
-    func testTheSpineStaysStillWithoutPulseWithReduceMotionAndForAnotherMark() {
-        var noPulse = SessionsListEnvironment()
-        noPulse.pulses = false
-        var reduced = SessionsListEnvironment()
-        reduced.reduceMotion = true
-        XCTAssertNil(card(SessionCardContent(title: "atlas", mark: .agent(.working)), environment: noPulse).spineFade)
-        XCTAssertNil(card(SessionCardContent(title: "atlas", mark: .agent(.working)), environment: reduced).spineFade)
-        XCTAssertNil(card(SessionCardContent(title: "atlas", mark: .agent(.blocked))).spineFade)
-        XCTAssertNil(card(SessionCardContent(title: "atlas")).spineFade)
-    }
-
-    func testTheSpineStopsItsFadeWhenTheMarkIsNoLongerWorkingOrPulseGoesOff() {
-        let card = card(SessionCardContent(title: "atlas", mark: .agent(.working)))
-        XCTAssertNotNil(card.spineFade)
-
-        card.show(SessionCardContent(title: "atlas", mark: .agent(.done)), environment: SessionsListEnvironment())
-        XCTAssertNil(card.spineFade)
-
-        card.show(SessionCardContent(title: "atlas", mark: .agent(.working)), environment: SessionsListEnvironment())
-        XCTAssertNotNil(card.spineFade)
-        var noPulse = SessionsListEnvironment()
-        noPulse.pulses = false
-        card.show(SessionCardContent(title: "atlas", mark: .agent(.working)), environment: noPulse)
-        XCTAssertNil(card.spineFade)
     }
 
     func testAnOpenCardIsItsHeaderAndTheRoomForItsRows() {
@@ -296,33 +215,6 @@ import XCTest
 
     private func child(_ identifier: String, of card: SessionCardView) -> NSView? {
         (card.accessibilityChildren() as? [NSView])?.first { $0.accessibilityIdentifier() == identifier }
-    }
-
-    func testWhileTheBadgeShowsTheLockHidesAndTheTitleKeepsItsLines() throws {
-        func shown(holding modifiers: KeyTrigger.Modifiers?) -> SessionCardView {
-            let environment = environment(holding: modifiers)
-            let card = card(SessionCardContent(title: "a Session whose title is long enough to wrap", isLocked: true,
-                                               hint: CardHint(.session("$1"), in: environment.hints)), environment: environment)
-            card.frame = NSRect(x: 0, y: 0, width: 200, height: card.height(width: 200))
-            return card
-        }
-        let rest = shown(holding: nil), held = shown(holding: .control)
-
-        XCTAssertGreaterThan(rest.titleFrame.height, 20, "the title does not wrap, so the test proves nothing")
-        XCTAssertEqual(held.titleFrame, rest.titleFrame, "the title wraps again when the badge shows")
-        XCTAssertEqual(held.height(width: 200), rest.height(width: 200))
-        XCTAssertEqual(rest.markOpacity, 1)
-        XCTAssertEqual(held.markOpacity, 0, "the lock shows while the badge shows")
-
-        let key = try XCTUnwrap(child("hint-session-$1", of: rest))
-        let badge = try XCTUnwrap(child("hint-session-$1", of: held))
-        XCTAssertEqual(key.accessibilityValue() as? String, "1")
-        XCTAssertEqual(badge.accessibilityValue() as? String, "⌃1")
-        XCTAssertEqual(badge.frame.maxX, key.frame.maxX, "the badge does not end where the key at rest ends")
-        XCTAssertEqual(badge.frame.midY, key.frame.midY)
-        XCTAssertGreaterThan(badge.frame.width, key.frame.width, "the badge does not grow over the title")
-        XCTAssertEqual((held.accessibilityChildren() as? [NSView])?.filter { $0.accessibilityIdentifier() == "hint-session-$1" }.count, 1,
-                       "the key at rest stays beside the badge")
     }
 
     func testACardWithNoHintKeepsNoRoomForOne() {

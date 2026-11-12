@@ -154,11 +154,6 @@ final class CardSpineView: NSView {
         MarkClock.repeats(animation, every: MarkBreath.period, on: bar)
         bar.add(animation, forKey: Self.breath)
     }
-
-    #if DEBUG
-    /// The fade that runs now, for the tests.
-    var fade: CAAnimation? { bar.animation(forKey: Self.breath) }
-    #endif
 }
 
 /// The ring of a card's border: opaque where the border is, `width` wide inside the card's rounded shape, to mask the
@@ -288,11 +283,6 @@ final class CardSelectionBorderView: NSView {
         animation.timingFunction = CAMediaTimingFunction(controlPoints: Float(curve.x1), Float(curve.y1), Float(curve.x2), Float(curve.y2))
         colors.add(animation, forKey: Self.turn)
     }
-
-    #if DEBUG
-    /// The turn that runs now, for the tests.
-    var turnAnimation: CAAnimation? { colors.animation(forKey: Self.turn) }
-    #endif
 }
 
 /// A colour in Oklab, the space in which SwiftUI mixes the colours of a gradient. It is made from an sRGB colour and

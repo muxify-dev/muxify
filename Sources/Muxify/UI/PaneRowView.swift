@@ -185,14 +185,6 @@ final class PaneRowView: SidebarRowView, CardRowView {
     override func accessibilityChildren() -> [Any]? { [] }
 
     override func accessibilityActivationPoint() -> NSPoint { accessibilityFrame().centre }
-
-    #if DEBUG
-    /// The Agent mark, for the tests.
-    var agentMark: SidebarAgentMark { mark }
-    /// The ink of the title and of the icon, for the tests.
-    var titleInk: SidebarInk { title.ink }
-    var iconInk: SidebarInk { icon.ink }
-    #endif
 }
 
 /// The row that ends a long open card in the AppKit Sessions list (ADR 0074): "N more…", where N is the number of rows

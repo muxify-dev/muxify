@@ -684,7 +684,7 @@ enum TestDriver {
     /// view's superview: the content view of a SwiftUI window is flipped, so its own coordinates would hit the view
     /// at the mirrored height, which SwiftUI's one tracking area for all its views does not notice, and an AppKit view
     /// inside it does.
-    static func trackingAreas(at point: NSPoint, in window: NSWindow) -> [(owner: NSResponder, area: NSTrackingArea)] {
+    private static func trackingAreas(at point: NSPoint, in window: NSWindow) -> [(owner: NSResponder, area: NSTrackingArea)] {
         guard let content = window.contentView else { return [] }
         var found: [(owner: NSResponder, area: NSTrackingArea)] = []
         var view = content.hitTest(content.superview?.convert(point, from: nil) ?? point)

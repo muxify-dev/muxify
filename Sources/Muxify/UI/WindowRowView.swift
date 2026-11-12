@@ -295,23 +295,23 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
         if isDraggable { addCursorRect(bounds, cursor: .openHand) }
     }
 
-    override func mouseDown(with event: NSEvent) {
-        drag?.press(windowID, at: event.locationInWindow)
+    override func pressDown(at point: NSPoint) {
+        drag?.press(windowID, at: point)
     }
 
-    override func mouseDragged(with event: NSEvent) {
-        drag?.drag(windowID, to: event.locationInWindow)
+    override func pressMoved(to point: NSPoint) {
+        drag?.drag(windowID, to: point)
     }
 
-    override func mouseUp(with event: NSEvent) {
-        guard let drag else { return super.mouseUp(with: event) }
+    override func pressUp(at point: NSPoint) {
+        guard let drag else { return super.pressUp(at: point) }
         drag.release(windowID, onTap: onPress)
     }
 
     // MARK: The menu
 
-    /// A right-click on the row shows the row's menu, in place of the card's. As in SwiftUI, the menu gives the row's
-    /// parts no named accessibility actions.
+    /// A right-click or a Control-click on the row shows the row's menu, in place of the card's. As in SwiftUI, the menu
+    /// gives the row's parts no named accessibility actions.
     override func menu(for event: NSEvent) -> NSMenu? { menuItems()?.contextMenu() }
 
     // MARK: The help
@@ -341,8 +341,8 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
 final class RowFillView: NSView {
     enum Fill { case clear, hover, tint }
 
-    static let fadeKey = "tint"
-    private(set) var fill = Fill.clear
+    private static let fadeKey = "tint"
+    private var fill = Fill.clear
     private let shape = CALayer()
 
     init() {
@@ -396,12 +396,6 @@ final class RowFillView: NSView {
             LayerGlide.withoutActions { shape.backgroundColor = color?.cgColor }
         }
     }
-
-    #if DEBUG
-    /// The colour the fill has now, and the fade of the tint that runs, for the tests.
-    var shownColor: CGColor? { shape.backgroundColor }
-    var fade: CAAnimation? { shape.animation(forKey: Self.fadeKey) }
-    #endif
 }
 
 /// The Git View icon of a Window whose Git View is open, as `GitViewIcon` strokes it, in the secondary text colour.

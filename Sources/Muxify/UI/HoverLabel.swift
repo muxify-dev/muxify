@@ -46,11 +46,6 @@ final class HoverLabels {
         }
     }
 
-    #if DEBUG
-    /// The anchor of the row whose label shows or waits out its rest, for the tests.
-    var anchorInPlay: HoverAnchor? { owner }
-    #endif
-
     func leave(_ anchor: HoverAnchor) {
         guard owner === anchor else { return }
         owner = nil
@@ -145,7 +140,7 @@ final class RowHoverLabel {
     }
 
     let anchor = HoverAnchor()
-    private(set) var request = Request()
+    private var request = Request()
     private var hovering = false
 
     /// Takes what the label shows from now on. As in SwiftUI, a change of `onlyWhenCutOff` closes the label and opens

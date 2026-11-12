@@ -1,10 +1,17 @@
 import AppKit
 
-/// A part of the AppKit Sessions list that a click presses (ADR 0074): a card's header or a row. It takes every click
-/// on it, and its parts take none. A press works on the first click while Muxify is not the front app, and it ends
-/// where the mouse comes up, as a tap in SwiftUI. To accessibility, a part that is an element presses with its action.
+/// A part of an AppKit list that a click presses (ADR 0074): a card's header or a row. It takes every click on it, and
+/// its parts take none. A press works on the first click while Muxify is not the front app, and it ends where the mouse
+/// comes up, as a tap in SwiftUI. To accessibility, a part that is an element presses with its action.
+///
+/// A Control-click is a right-click, as in SwiftUI: it opens the menu that a right-click opens there, and it presses
+/// nothing and starts no drag. A part that does more with a press than `onPress`, such as a drag, does it in
+/// `pressDown`, `pressMoved` and `pressUp`, which a Control-click never reaches.
 class SidebarPressView: NSView {
     var onPress: () -> Void = {}
+    /// The mouse went down on the part without Control and has not come up: the mouse's moves and its coming up
+    /// belong to a press.
+    private var pressing = false
 
     override var isFlipped: Bool { true }
 
@@ -15,10 +22,31 @@ class SidebarPressView: NSView {
 
     override var mouseDownCanMoveWindow: Bool { false }
 
-    override func mouseDown(with event: NSEvent) {}
+    final override func mouseDown(with event: NSEvent) {
+        pressing = !event.modifierFlags.contains(.control)
+        guard pressing else { return rightMouseDown(with: event) }
+        pressDown(at: event.locationInWindow)
+    }
 
-    override func mouseUp(with event: NSEvent) {
-        if bounds.contains(convert(event.locationInWindow, from: nil)) { onPress() }
+    final override func mouseDragged(with event: NSEvent) {
+        if pressing { pressMoved(to: event.locationInWindow) }
+    }
+
+    final override func mouseUp(with event: NSEvent) {
+        guard pressing else { return }
+        pressing = false
+        pressUp(at: event.locationInWindow)
+    }
+
+    /// The mouse went down on the part at `point`, in the window.
+    func pressDown(at point: NSPoint) {}
+
+    /// The mouse moved to `point` in the window while it presses the part.
+    func pressMoved(to point: NSPoint) {}
+
+    /// The mouse came up at `point` in the window: on the part, the part is pressed.
+    func pressUp(at point: NSPoint) {
+        if bounds.contains(convert(point, from: nil)) { onPress() }
     }
 
     override func accessibilityPerformPress() -> Bool {
@@ -84,12 +112,6 @@ class SidebarRowView: SidebarPressView {
         super.viewDidMoveToWindow()
         if window == nil { hoverLabel.disappear() }
     }
-
-    #if DEBUG
-    /// The colour the row's fill has now, and the fade of the tint that runs, for the tests.
-    var fillColor: CGColor? { fill.shownColor }
-    var tintFade: CAAnimation? { fill.fade }
-    #endif
 }
 
 /// A row of an open card, as the card lays its rows out and lists their accessibility rows.
