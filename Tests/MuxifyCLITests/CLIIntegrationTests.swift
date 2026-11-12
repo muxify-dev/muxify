@@ -573,6 +573,69 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(afterRefusal, [before[3], before[2], before[1], before[0]], "only the Pin moved a card")
     }
 
+    func testTopicMoveBeforeAndAfterPlaceTheCardNextToTheAnchorOnceAndKeepItsPin() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        for name in ["First", "Second", "Third", "Fourth"] { _ = try await newTopic(name, in: sandbox.game, sandbox: sandbox) }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        func order() async throws -> [String] {
+            let list = try await run(cli, arguments: ["topic", "list"], environment: environment)
+            return list.stdout.split(separator: "\n").map { String($0.prefix { $0 != "\t" }) }
+        }
+        let start = try await order()
+
+        for attempt in ["first", "second"] {
+            let moved = try await run(cli, arguments: ["topic", "move", "--before", start[1], "--topic", start[3]], environment: environment)
+            XCTAssertEqual(moved.status, 0, moved.output)
+            let afterBefore = try await order()
+            XCTAssertEqual(afterBefore, [start[0], start[3], start[1], start[2]], "\(attempt) call")
+        }
+        let after = try await run(cli, arguments: ["topic", "move", "--after", start[2], "--topic", start[0]], environment: environment)
+        XCTAssertEqual(after.status, 0, after.output)
+        let afterAfter = try await order()
+        XCTAssertEqual(afterAfter, [start[3], start[1], start[2], start[0]])
+
+        let pinned = try await run(cli, arguments: ["topic", "pin", "--topic", start[0]], environment: environment)
+        XCTAssertEqual(pinned.status, 0, pinned.output)
+        let edge = try await run(cli, arguments: ["topic", "move", "--before", start[0], "--topic", start[2]], environment: environment)
+        XCTAssertEqual(edge.status, 0, edge.output)
+        let afterEdge = try await order()
+        XCTAssertEqual(afterEdge, [start[0], start[2], start[3], start[1]],
+                       "next to a Pinned card, a card that is not Pinned goes to the top of its own group")
+    }
+
+    func testTopicMoveAfterPlacePutsAnInPlayCardNextToTheOpenPlace() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let config = try String(contentsOf: sandbox.config, encoding: .utf8)
+        try Data(config.replacingOccurrences(of: "topics:\n", with: "topics:\n  in_play: 3\n").utf8).write(to: sandbox.config)
+        for name in ["First", "Second", "Third"] { _ = try await newTopic(name, in: sandbox.game, sandbox: sandbox) }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        func places() async throws -> [String] {
+            let shown = try await run(cli, arguments: ["environment", "show", "--json"], environment: environment)
+            let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(shown.stdout.utf8)) as? [String: Any], shown.stdout)
+            let unpinned = try XCTUnwrap(object["unpinned"] as? [String: Any], shown.stdout)
+            return try XCTUnwrap(unpinned["places"] as? [[String: Any]], shown.stdout).map { card in
+                (card["topic"] as? [String: Any])?["label"] as? String ?? "open " + (card["id"] as? String ?? "?")
+            }
+        }
+        let start = try await places()
+        let benched = try await run(cli, arguments: ["topic", "bench", "--topic", start[1]], environment: environment)
+        XCTAssertEqual(benched.status, 0, benched.output)
+        let open = try await places()[1]
+        XCTAssertTrue(open.hasPrefix("open "), open)
+
+        for attempt in ["first", "second"] {
+            let moved = try await run(cli, arguments: ["topic", "move", "--after-place", String(open.dropFirst(5)), "--topic", start[0]],
+                                      environment: environment)
+            XCTAssertEqual(moved.status, 0, moved.output)
+            let afterMove = try await places()
+            XCTAssertEqual(afterMove, [open, start[0], start[2]], "\(attempt) call")
+        }
+        let gone = try await run(cli, arguments: ["topic", "move", "--before-place", "no-such-place", "--topic", start[0]], environment: environment)
+        XCTAssertEqual(gone.status, 1, gone.output)
+    }
+
     func testChooseInPlayPutsTheNamedCardsFirstInTheOrderOfTheCommandLine() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
