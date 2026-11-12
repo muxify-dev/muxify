@@ -21,17 +21,11 @@ public struct MuxifyPaths: Equatable, Sendable {
 
     /// The state database (`StateDatabase`): one SQLite file that every Muxify process on this machine shares.
     public var stateDatabase: URL { state.appendingPathComponent("muxify.db") }
-    /// Every Topic record and the Open Places, in one file. A write replaces it with one rename.
+    /// Where an older Muxify kept every Topic record and the Open Places. Only the import of the state database reads
+    /// it, once, and renames it to `topics.json.migrated`.
     public var topicRecords: URL { state.appendingPathComponent("topics.json") }
-    /// Where an older Muxify kept one file for each Topic. The first write after the update moves them into
-    /// `topicRecords` and removes the folder.
-    public var legacyTopicsFolder: URL { state.appendingPathComponent("topics", isDirectory: true) }
-    /// The Zen record of an older Muxify. Only the upgrade of the records reads it, then removes it.
-    public var legacyZenFile: URL { state.appendingPathComponent("zen.json") }
-    /// Empty, and never removed: only its lock matters. Every write of the records file holds it.
-    public var recordLock: URL { state.appendingPathComponent("topics.lock") }
-    /// Empty, like the record lock. One Topic edit at a time holds it, from its read to its last tmux command,
-    /// so a second edit sees the first one's Topic and Session names before it chooses its own.
+    /// Empty, and never removed: only its lock matters. One Topic edit at a time holds it, from its read to its last
+    /// tmux command, so a second edit sees the first one's Topic and Session names before it chooses its own.
     public var editLock: URL { state.appendingPathComponent("topic-edits.lock") }
     /// Browser History, for every Window of every Environment: the Browser runs on this Mac.
     public var browserHistory: URL { state.appendingPathComponent("browser-history.json") }

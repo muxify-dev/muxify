@@ -10,9 +10,10 @@ enum FileLock {
     enum Mode { case shared, exclusive }
 
     /// The order a thread takes the locks in. Two threads that each held one and waited for the other would
-    /// wait for ever, so a thread never takes a lock of a lower rank than one it holds.
+    /// wait for ever, so a thread never takes a lock of a lower rank than one it holds. The edit lock is the one lock
+    /// left, so a thread never takes it twice.
     enum Rank: Int {
-        case edit = 1, record
+        case edit = 1
     }
 
     struct Busy: Error, CustomStringConvertible {

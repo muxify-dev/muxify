@@ -59,8 +59,8 @@ public enum SessionLockChange: Equatable, Sendable {
 }
 
 /// An Open Place: an In Play place that no card fills, after a regular In Play card left it. It has its order in the
-/// Topics list, so the other places keep their positions until the user fills it. The records file keeps it in
-/// `open_places`, beside the records.
+/// Topics list, so the other places keep their positions until the user fills it. The state database keeps it in the
+/// `open_places` table, beside the `topics` table.
 public struct OpenPlace: Codable, Hashable, Sendable {
     public let id: String
     public var order: Double

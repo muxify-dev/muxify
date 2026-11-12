@@ -197,7 +197,7 @@ public struct EnvironmentService: Sendable {
         }
     }
 
-    /// One read of the records under the shared record lock, then one tmux snapshot, as `show` does.
+    /// One read of the records, then one tmux snapshot, as `show` does.
     func environmentShow() -> EnvironmentResponse {
         do {
             let contents = try store.read()
@@ -369,7 +369,7 @@ extension EnvironmentCommand {
         case listWorktrees(all: Bool, from: String?)
     }
 
-    /// The locks a command takes. `read`: none. `records`: the record lock only, for one write of record keys and the tmux options that go with it.
+    /// The locks a command takes. `read`: none. `records`: none, for one write of record columns and the tmux options that go with it.
     /// `edit`: the edit lock, then read, plan, git, record, tmux, show. A new command does not compile until it
     /// chooses its lane.
     var lane: Lane {

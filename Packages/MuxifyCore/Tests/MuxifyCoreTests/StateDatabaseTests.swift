@@ -21,7 +21,7 @@ final class StateDatabaseTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: paths.stateDatabase.path))
         XCTAssertEqual(try connection.query("PRAGMA journal_mode") { $0.text(0) }, ["wal"])
         XCTAssertEqual(try connection.query("PRAGMA busy_timeout") { $0.int(0) }, [10_000])
-        XCTAssertEqual(try StateDatabase.userVersion(connection), 0)
+        XCTAssertEqual(try StateDatabase.userVersion(connection), StateDatabase.migrations.count)
     }
 
     func testOpeningAppliesOnlyTheMigrationsPastTheStoredVersion() throws {
@@ -49,7 +49,7 @@ final class StateDatabaseTests: XCTestCase {
     func testTheImportsRunAfterTheMigrationsOnEveryOpen() throws {
         let table = StateDatabase.Migration("CREATE TABLE moved (name TEXT)")
         var imports = 0
-        let move: StateDatabase.Import = { connection, paths in
+        let move: StateDatabase.Import = { connection, paths, _ in
             imports += 1
             XCTAssertEqual(paths, self.paths)
             try connection.execute("INSERT INTO moved (name) VALUES (?)", "run \(imports)")
@@ -116,5 +116,108 @@ final class StateDatabaseTests: XCTestCase {
             XCTAssertEqual(failure.message,
                            "Muxify could not read or write its state in \(paths.stateDatabase.path). SQLite: no such table: missing.")
         }
+    }
+
+    // MARK: - The import of topics.json
+
+    /// Opens the database as the app does, with the import's problem lines collected.
+    private func open() throws -> (SQLiteConnection, [String]) {
+        var problems: [String] = []
+        let connection = try StateDatabase.open(paths, migrations: StateDatabase.migrations, imports: StateDatabase.imports,
+                                                report: { problems.append($0) })
+        return (connection, problems)
+    }
+
+    private var migratedFile: URL { paths.topicRecords.appendingPathExtension("migrated") }
+
+    func testTheTopicsTableHoldsAColumnForEachFieldAndTheSlugIsNotUnique() throws {
+        let (connection, _) = try open()
+        let columns = try connection.query("SELECT name FROM pragma_table_info('topics') ORDER BY cid") { $0.text(0) ?? "" }
+        XCTAssertEqual(columns, ["id"] + TopicTable.columns)
+        XCTAssertEqual(try connection.query("SELECT name FROM pragma_table_info('open_places') ORDER BY cid") { $0.text(0) ?? "" },
+                       ["id", "order"])
+        try connection.execute("INSERT INTO topics (id, slug) VALUES ('a', 'same'), ('b', 'same')")
+        XCTAssertEqual(try TopicStore(paths: paths).read().records.map(\.slug), ["same", "same"])
+    }
+
+    func testTheImportMovesTheValidRecordsAndOpenPlacesAndRenamesTheFile() throws {
+        try paths.seedTopicRecordsFile(entries: [
+            ##"{"id":"b","title":"B","order":1,"pinned":true,"tags":["Backend","#ops"],"note":"Bisect","snoozed_until":"never"}"##,
+            #"{"id":"a","title":"A","order":-1.7976931348623157e+308,"session_order":"manual","unread":true,"guest":true,"settled_at":"2026-10-01T00:00:00Z","outcome":"Done","created_at":"2026-09-01T00:00:00Z","slug":"a","sessions":[{"id":"s","future":{"large":18446744073709551615}}]}"#,
+        ], openPlaces: #"[{"id":"p2","order":2.5},{"id":"p1","order":0.5}]"#)
+        let (_, problems) = try open()
+        XCTAssertEqual(problems, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.topicRecords.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: migratedFile.path), "the old file stays readable as topics.json.migrated")
+
+        let contents = try TopicStore(paths: paths).read()
+        XCTAssertEqual(contents.records.map(\.id), ["a", "b"])
+        var a = TopicRecord(id: "a", title: "A", slug: "a")
+        a.order = -.greatestFiniteMagnitude
+        a.hasManualSessionOrder = true
+        a.isUnread = true
+        a.isGuest = true
+        a.settledAt = "2026-10-01T00:00:00Z"
+        a.outcome = "Done"
+        a.createdAt = "2026-09-01T00:00:00Z"
+        a.sessions = [.object(["id": .string("s"), "future": .object(["large": .unsignedInteger(UInt64.max)])])]
+        var b = TopicRecord(id: "b", title: "B")
+        b.order = 1
+        b.isPinned = true
+        b.tags = [Tag(name: "backend")!, Tag(name: "ops")!]
+        b.note = "Bisect"
+        XCTAssertEqual(contents.records, [a, b])
+        XCTAssertEqual(contents.openPlaces, [OpenPlace(id: "p2", order: 2.5), OpenPlace(id: "p1", order: 0.5)])
+        XCTAssertEqual(try paths.storedJSON("b", "tags"), .array([.string("backend"), .string("ops")]))
+    }
+
+    func testTheImportSkipsAnInvalidEntryAndARepeatedIDWithAProblemLineForEach() throws {
+        try paths.seedTopicRecordsFile(entries: [
+            #"{"id":"a","title":"A"}"#, #"{"id":"odd","title":7}"#, "42", #"{"id":"bad/id"}"#, #"{"id":"a","title":"Twin"}"#,
+        ])
+        let (_, problems) = try open()
+        XCTAssertEqual(try TopicStore(paths: paths).read().records.map(\.title), ["A"], "the first entry with an id is the record")
+        XCTAssertEqual(problems.count, 4, "\(problems)")
+        let file = paths.topicRecords.path
+        XCTAssertTrue(problems[0].hasPrefix("\(file): records[1] (id odd) is not a valid Topic record"), problems[0])
+        XCTAssertTrue(problems[1].hasPrefix("\(file): records[2] is not a valid Topic record"), problems[1])
+        XCTAssertTrue(problems[2].hasPrefix("\(file): records[3] (id bad/id) is not a valid Topic record"), problems[2])
+        XCTAssertEqual(problems[3], "\(file): records[4] (id a) repeats the id of an earlier record, so Muxify did not import it")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: migratedFile.path), "the skipped entries stay readable there")
+    }
+
+    func testAFileThatIsNotARecordsFileStaysInPlaceAndNothingIsImported() throws {
+        for text in [#"{"records":"gone"}"#, "[]", "{"] {
+            try? FileManager.default.removeItem(at: root)
+            try FileManager.default.createDirectory(at: paths.state, withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: paths.topicRecords)
+            let (_, problems) = try open()
+            XCTAssertEqual(problems.count, 1, "\(text): \(problems)")
+            XCTAssertTrue(problems.first?.hasPrefix("\(paths.topicRecords.path) is not a Topic records file") == true, "\(problems)")
+            XCTAssertEqual(try Data(contentsOf: paths.topicRecords), Data(text.utf8), "the file is left for the user")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: migratedFile.path))
+            XCTAssertEqual(try TopicStore(paths: paths).read(), TopicContents(records: []))
+        }
+    }
+
+    func testASecondOpenImportsNothing() throws {
+        try paths.seedTopicRecordsFile(entries: [#"{"id":"a","title":"A"}"#], openPlaces: #"[{"id":"p","order":1}]"#)
+        _ = try open()
+        try TopicStore(paths: paths).write { transaction in
+            try transaction.update("a") { $0.title = "Changed" }
+            transaction.openPlaces = []
+        }
+        let (_, problems) = try open()
+        XCTAssertEqual(problems, [])
+        let contents = try TopicStore(paths: paths).read()
+        XCTAssertEqual(contents.records.map(\.title), ["Changed"], "the second open did not read the old file again")
+        XCTAssertEqual(contents.openPlaces, [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: migratedFile.path))
+    }
+
+    func testTheFirstReadOfAStoreImportsTheFile() throws {
+        try paths.seedTopicRecordsFile(entries: [#"{"id":"a","title":"A"}"#])
+        XCTAssertEqual(try TopicStore(paths: paths).read().records.map(\.id), ["a"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.topicRecords.path))
     }
 }

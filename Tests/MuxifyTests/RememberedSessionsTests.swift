@@ -43,18 +43,16 @@ final class RememberedSessionsTests: XCTestCase {
     func testUnchangedSnapshotDoesNotWrite() throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: state) }
-        let writes = WriteCount()
-        let store = TopicStore(paths: MuxifyPaths(environment: ["XDG_STATE_HOME": state.path], home: "/nonexistent")) { data, url in
-            writes.add()
-            try data.write(to: url, options: .atomic)
-        }
+        let paths = MuxifyPaths(environment: ["XDG_STATE_HOME": state.path], home: "/nonexistent")
+        let store = TopicStore(paths: paths), watcher = TopicStore(paths: paths)
         let record = try XCTUnwrap(TopicRecord(id: "topic").remembering(snapshot(), order: .oldestFirst))
         try store.write { try $0.create(record) }
+        let token = watcher.changeToken()
         let loaded = try XCTUnwrap(store.read().records.first)
         let change = loaded.remembering(snapshot(), order: .oldestFirst)
         XCTAssertNil(change)
         if let change { try store.write { try $0.update(change.id) { $0 = change } } }
-        XCTAssertEqual(writes.count, 1)
+        XCTAssertEqual(watcher.changeToken(), token, "nothing was committed")
     }
 
     func testKilledSessionIsForgottenWhileAnotherLivesAndLastRemovalKeepsSet() throws {
@@ -66,11 +64,10 @@ final class RememberedSessionsTests: XCTestCase {
         XCTAssertNil(both.remembering(snapshot([]), order: .oldestFirst))
     }
 
-    func testUnknownFieldsAndWorktreeBranchSurviveSnapshotUpdates() throws {
-        let data = Data(#"{"id":"topic","future_topic":true,"sessions":[{"id":"$a","name":"a","directory":"/work/a","repository_path":"/main","worktree_path":"/work/a","branch":"fix","future_session":42,"windows":[{"window_id":"@a","future_window":{"large":18446744073709551615}}]}]}"#.utf8)
+    func testUnknownSessionFieldsAndWorktreeBranchSurviveSnapshotUpdates() throws {
+        let data = Data(#"{"id":"topic","sessions":[{"id":"$a","name":"a","directory":"/work/a","repository_path":"/main","worktree_path":"/work/a","branch":"fix","future_session":42,"windows":[{"window_id":"@a","future_window":{"large":18446744073709551615}}]}]}"#.utf8)
         let original = try JSONDecoder().decode(TopicRecord.self, from: data)
         let updated = try XCTUnwrap(original.remembering(snapshot(["a"]), order: .oldestFirst))
-        XCTAssertEqual(updated.unknownFields, original.unknownFields)
         XCTAssertEqual(updated.sessions[0]["repository_path"], .string("/main"))
         XCTAssertEqual(updated.sessions[0]["worktree_path"], .string("/work/a"))
         XCTAssertEqual(updated.sessions[0]["branch"], .string("fix"))
@@ -91,11 +88,4 @@ final class RememberedSessionsTests: XCTestCase {
         XCTAssertNil(try windowFields(shell)["agent"])
         XCTAssertNil(try windowFields(shell)["agent_conversation"])
     }
-}
-
-private final class WriteCount: @unchecked Sendable {
-    private let lock = NSLock()
-    private var value = 0
-    var count: Int { lock.lock(); defer { lock.unlock() }; return value }
-    func add() { lock.lock(); value += 1; lock.unlock() }
 }

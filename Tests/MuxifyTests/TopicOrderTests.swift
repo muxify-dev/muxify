@@ -6,7 +6,6 @@ final class TopicOrderTests: XCTestCase {
         var record = TopicRecord(id: id, title: id, slug: "untitled-" + id)
         record.order = order
         record.createdAt = "1970-01-01T00:00:00Z"
-        record.unknownFields = ["future": .object(["id": .string(id)])]
         record.sessions = [.object(["repository_path": .string("/work/app"), "future_session": .integer(42)])]
         return record
     }

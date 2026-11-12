@@ -100,7 +100,7 @@ final class TopicSessionPathsInvocationTests: XCTestCase {
             try transaction.create(TopicRecord(id: "duplicate1", title: "Duplicate"))
             try transaction.create(TopicRecord(id: "duplicate2", title: "Duplicate"))
         }
-        let saved = try Data(contentsOf: paths.topicRecords)
+        let saved = try store.read()
         let service = EnvironmentService(paths: paths, server: EmptyServer(), sessionPaths: [SessionPath(path: "/repo", name: "repo")])
         for value in ["empty", "Empty", "dormant", "Dormant"] {
             guard case .topicSessionPaths(let invocation) = try CLICommand(arguments: ["topic", "session-paths", "--topic", value], environment: [:]) else {
@@ -120,7 +120,7 @@ final class TopicSessionPathsInvocationTests: XCTestCase {
                 XCTAssertEqual(CLIError(failure).exitCode, 1)
             }
         }
-        XCTAssertEqual(try Data(contentsOf: paths.topicRecords), saved)
+        XCTAssertEqual(try TopicStore(paths: paths).read(), saved)
     }
 
     private struct EmptyServer: TmuxRunning {

@@ -1,22 +1,41 @@
-# The Topic records file
+# The Topic records
 
-Every Topic record and the Open Places are one UTF-8 JSON object in
-`$XDG_STATE_HOME/muxify/topics.json`. If `XDG_STATE_HOME` is absent, use
-`~/.local/state/muxify/topics.json`.
+Every Topic record and the Open Places are rows in the state database, the
+SQLite file `$XDG_STATE_HOME/muxify/muxify.db`. If `XDG_STATE_HOME` is absent,
+use `~/.local/state/muxify/muxify.db`. The Mac and each Host have their own. The
+database is in WAL mode; read it with the `sqlite3` command line tool:
 
-```json
-{
-  "open_places": [{"id": "6f1c0d2e", "order": 2.5}],
-  "records": [{"id": "reward-drop", "title": "Fix reward drop"}]
-}
+```sh
+sqlite3 ~/.local/state/muxify/muxify.db 'SELECT id, title, tags FROM topics'
 ```
 
-`records` holds one object for each Topic, in id order by bytes. `open_places`
-holds the Open Places of the Topics list, each with its `id` and its `order`
-in the scale of the records' `order`. An id must be nonempty, not `.` or `..`,
-and have no `/`.
+## The tables
 
-A record:
+`topics` holds one row for each Topic, keyed by its `id`. An id must be
+nonempty, not `.` or `..`, and have no `/`. Muxify lists the rows in id order by
+bytes.
+
+| Column | Type | Holds |
+| --- | --- | --- |
+| `id` | text | The Topic id. |
+| `title` | text or NULL | The Topic's title. |
+| `slug` | text or NULL | The slug of its Session names. Not unique. |
+| `outcome` | text or NULL | What Settle recorded. |
+| `order` | real or NULL | Its place in the Topics list. |
+| `created_at`, `settled_at` | text or NULL | ISO 8601 times. |
+| `session_order` | text or NULL | `manual`, or NULL. |
+| `pinned`, `guest`, `unread` | integer | 1 or 0. |
+| `note` | text or NULL | The Topic Note. |
+| `sessions` | JSON text | The remembered Sessions, an array. |
+| `tags` | JSON text | The Tags, an array of names. |
+
+`open_places` holds one row for each Open Place of the Topics list: its `id`
+and its `order`, in the scale of the records' `order`.
+
+`sessions` and `tags` are JSON, and Muxify writes each one whole. A remembered
+Session and its Windows are open JSON: Muxify keeps a key that it does not know.
+In JSON, a record reads as one object with these columns as keys, as `muxify`
+prints it and as the old `topics.json` held it:
 
 ```json
 {
@@ -61,7 +80,9 @@ A record:
 }
 ```
 
-Only `id` is required. Dates use strings.
+Only `id` is required. A new column is always nullable or has a default, so an
+older Muxify that opens a database a newer one changed keeps working.
+
 An absent or null `title` gives an Untitled Topic. A slug such as `untitled-3`
 gives the label `Untitled 3`. Without that slug, the view assigns a free number
 in Topic id order. Manual display order does not change those numbers.
@@ -70,60 +91,56 @@ A non-null `settled_at` removes the Topic from the Topics view.
 `tags` holds the Topic's Tags, without `#`, A→Z. A Tag has only lower case
 letters `a` to `z`, digits and `-`, and it is not empty. Muxify reads an entry
 as the user types a Tag: it makes upper case lower case and removes one `#` at
-the start, so `Backend` and `#backend` are the Tag `backend`. Muxify keeps an
-entry that is still not a Tag, and writes it back after the Tags. It reads a
-`tags` value that is not an array as no Tags, and writes the value back until
-a Tag change gives the Topic Tags. A Topic without Tags and without such
-entries has no `tags` key. The Config's `topics.tags` says which Tags exist
+the start, so `Backend` and `#backend` are the Tag `backend`. Muxify reads an
+entry that is still not a Tag as no Tag, and a `tags` value that is not an
+array as no Tags. A Topic without Tags has an empty array. The Config's
+`topics.tags` says which Tags exist
 (see [Tags](configuration.md#tags)), so `tags` may hold a name that the Config
 no longer defines, such as a Tag the user removed or renamed there. Muxify
 keeps that name in the record and shows it dimmed. A Tag change can remove it,
 but cannot add it again.
 Edit Tags in the app and `muxify topic tag` change the field through the Topic
-service. They change only the `tags` key, and only for an open Topic. A change
+service. They change only the `tags` column, and only for an open Topic. A change
 that adds a Tag the Config does not define fails with the kind `tag_undefined`
 and writes nothing.
 
 `note` holds the Topic Note: one line of text that tells the user what they
-were doing in the Topic. A Topic without a Note has no `note` key. Set Topic
+were doing in the Topic. A Topic without a Note has a NULL `note`. Set Topic
 Note and Clear Topic Note in the app, and `muxify topic note`, change the field
-through the Topic service. They change only the `note` key, and only for an
+through the Topic service. They change only the `note` column, and only for an
 open Topic. The service removes spaces at the two ends, joins lines with one
-space, and removes the key for text with no words. Settle removes the `note` key, so
+space, and clears the Note for text with no words. Settle clears the Note, so
 a Reopened Topic starts without a Note.
 
-The store retains unknown JSON fields during writes, including nested fields
-in remembered Sessions and Windows. A write that changes anything replaces
-the whole file with one atomic rename, and a write that changes nothing
-writes no file. The app checks the file's inode, modification time and size
-every 0.25 seconds.
+## Writes
 
-An entry of `records` that is not a valid record, such as a record with a
-field of the wrong type, a second record with the id of an earlier one, or a
-value that is not an object, is reported in the Diagnostics log and written
-back unchanged by every write. A new Topic cannot take its id. A file that is
-not an object with a `records` array is reported, and no write replaces it:
-the write fails and names the file.
+The app and `muxify` both write the tables. A write is one SQLite transaction.
+It inserts a new Topic's row and deletes a removed one, and for a changed Topic
+it updates only the columns whose values the write changed. So a Topic edit
+keeps a column that another writer changed while the edit ran, and when two
+writers change the same column, the last write wins. A write that changes
+nothing commits nothing. A writer waits up to 10 seconds for another
+connection's transaction, then fails with the kind `store_busy`. A program that
+changes the records writes a transaction that changes only its own columns.
 
-The app and `muxify` both write this file. Each write holds an exclusive
-`flock` on `$XDG_STATE_HOME/muxify/topics.lock`, and each read holds a shared
-one. The lock file stays empty, and Muxify never removes it. A program that
-writes the records file must hold the exclusive lock while it reads, changes
-and replaces it. A write rereads the file under the lock. A Topic edit changes
-only the JSON keys that it changed itself, so it keeps a key that another
-writer set while the edit ran.
+The app polls `PRAGMA data_version` on its own connection every 0.25 seconds,
+and reads the records again when another connection committed a change.
 
-## Upgrade from one file for each Topic
+## Import from topics.json
 
-An older Muxify kept one file for each Topic in `$XDG_STATE_HOME/muxify/topics/`
-and the Open Places in `topics/open-places`. Until the first write, a read
-reads that folder, so nothing disappears after the update. The first write,
-under the record lock, reads the folder, writes `topics.json`, and removes
-each file it read, then the folder when it is empty. A file that is JSON but
-not a record becomes an entry of `records` as it is. A file that is not JSON
-stays in the folder, with the folder, and each read reports that the folder
-stays until you remove it by hand. The write also removes the `.topics-*`
-staging folders that a writer of the old layout left when it crashed.
+An older Muxify kept every record in `$XDG_STATE_HOME/muxify/topics.json`, an
+object with a `records` array and an `open_places` array. When Muxify opens the
+database and that file is there, it moves the valid records and the Open Places
+into the tables in one transaction, then renames the file to
+`topics.json.migrated`. It never reads the file again. An entry that is not a
+valid record, such as a record with a field of the wrong type or a value that
+is not an object, and a second record with the id of an earlier one, stays
+behind, and a problem line in the Diagnostics log names it. The CLI writes the
+lines to standard error. A `topics.json` that is not an object with a `records`
+array stays in place, Muxify moves nothing from it, and a problem line names
+it. Unknown keys of a record are not moved: the `.migrated` file keeps them.
+An older Muxify, from before this change, finds no `topics.json` and shows no
+Topics until it updates.
 
 Live membership comes only from the tmux Session option. For example:
 
@@ -151,7 +168,7 @@ does not name at the end that `topics.session_order` gives new Sessions. Sort
 Sessions by Creation removes the field. Another value counts as absent.
 
 Muxify records the live Sessions after a 0.3 second write delay. An unchanged
-snapshot does not write a file. Confirmed Muxify closures and removals observed
+snapshot writes nothing. Confirmed Muxify closures and removals observed
 between complete inventories of the same running server remove the stopped Session
 or Window. A confirmed last closure leaves an Empty Topic. An absent server,
 failed read, initial reconnect inventory or a different server incarnation does not
@@ -245,34 +262,6 @@ Locked Session takes the Lock's value as its `order`.
 `muxify://topic/lock?session=<name>` and `muxify://topic/unlock?session=<name>`,
 change a Lock through the Topic service.
 
-## Upgrade from Snooze and Zen
-
-An older Muxify kept a Snooze in each record's `snoozed_until`: an ISO 8601
-time or `never`. It kept a running Zen in `$XDG_STATE_HOME/muxify/zen.json`,
-with `until`, and `changes` with `topic_id` and `previous_snoozed_until`.
-
-The app upgrades the records on this Mac when it reads them. The CLI does not
-upgrade them. It keeps the old keys as unknown fields until the app runs. The
-upgrade is one write, under the record lock:
-
-1. The Zen ends as it did before. Each Topic in `changes` whose
-   `snoozed_until` is still Zen's `until` gets its `previous_snoozed_until`
-   back, or no Snooze when that is null. So a Topic that only Zen Snoozed
-   keeps its place.
-2. Each open Topic that is not Pinned and still has a Snooze goes to the top
-   of the Bench, in the order it would wake. The soonest time is first and
-   `never` is last. Equal times keep their list order. The top of the Bench is
-   the place after the first `topics.in_play` cards that are not Pinned, and
-   Locked Sessions count. Without `topics.in_play`, the Topics go as one block
-   in wake order where `topics.insert_position` puts them: at the top or the
-   bottom of the cards that are not Pinned. A Pinned Topic keeps its place. A
-   value that is not a time or `never` is no Snooze.
-3. No record keeps `snoozed_until`, and Muxify removes `zen.json`. A
-   `zen.json` that does not read counts as no Zen.
-
-A second run changes nothing. When the move renumbers Locked Sessions, Muxify
-writes their new `@muxify_lock` values to tmux.
-
 ## Forget
 
 Forget removes the Topic's record after it kills or detaches the Topic's live Sessions.
@@ -294,24 +283,3 @@ Both use the Topic service. They keep Worktrees unless the request selects them.
 
 A stale record update or remembered-Session write cannot create the removed Topic again.
 Only an explicit creation with no previous record can create a Topic record.
-
-## One-off beta migration
-
-It rewrites the files of the old layout, one for each Topic in `topics/`; the app
-then moves them into `topics.json` on its first write.
-Quit Muxify and stop Topic CLI edits before migrating. There is no legacy record reader.
-The Bash entry point requires Python 3 and reads tmux without changing Sessions:
-
-```sh
-bash scripts/migrate-topic-sessions.sh --dry-run
-bash scripts/migrate-topic-sessions.sh --apply
-```
-
-Use `--state-dir /path/to/muxify` for another state directory and `--socket /path/to/socket`
-to inspect a particular server. Use `--no-tmux` to explicitly accept folder-derived names
-when inventory is unavailable. Live members recover their exact names and stable identities;
-inactive names cannot be recovered from the old files, so every fallback is reported.
-The script removes the old home field, preserves unknown fields and explicit Worktree
-provenance, backs up all changed records before replacement, and is idempotent. It does
-not invent a Session for an Empty Topic. Backups stay beside `topics/`, outside the files
-the app reads. Review the dry-run and keep that backup until restoration is verified.

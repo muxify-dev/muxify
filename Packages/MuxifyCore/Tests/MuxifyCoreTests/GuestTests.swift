@@ -145,7 +145,7 @@ final class GuestTests: XCTestCase {
 
         try store.write { try $0.fillOpenPlace(read.openPlaces[0].id, with: "release", inPlay: limit) }
         XCTAssertEqual(try store.read().openPlaces, [], "a filled Open Place closes")
-        XCTAssertEqual(try paths.storedOpenPlaces(), .array([]))
+        XCTAssertEqual(try paths.storedOpenPlaces(), [])
     }
 
     func testAnOpenPlaceClosesWithoutInPlayOrPastTheLastPlace() throws {
@@ -313,10 +313,13 @@ final class GuestTests: XCTestCase {
     func testTheGuestMarkIsInTheTopicRecord() throws {
         var record = TopicRecord(id: "infra", title: "infra")
         record.isGuest = true
-        let data = try TopicStore.encoded(record)
+        XCTAssertEqual(TopicTable.values(of: record)["guest"], .integer(1))
+        XCTAssertTrue(TopicTable.record(id: "infra", TopicTable.values(of: record)).isGuest)
+        let data = try JSONEncoder().encode(record)
         XCTAssertEqual(try JSONDecoder().decode([String: JSONValue].self, from: data)["guest"], .bool(true))
         XCTAssertTrue(try JSONDecoder().decode(TopicRecord.self, from: data).isGuest)
         record.isGuest = false
-        XCTAssertNil(try JSONDecoder().decode([String: JSONValue].self, from: TopicStore.encoded(record))["guest"])
+        XCTAssertEqual(TopicTable.values(of: record)["guest"], .integer(0))
+        XCTAssertNil(try JSONDecoder().decode([String: JSONValue].self, from: JSONEncoder().encode(record))["guest"])
     }
 }

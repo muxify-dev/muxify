@@ -32,7 +32,7 @@ final class EnvironmentSnapshotTests: XCTestCase {
             TmuxPane(id: "%\(index)", windowID: windows.first { $0.sessionID == agent.session }!.id, command: "claude", agent: "claude",
                      agentStatus: agent.status.rawValue, unread: agent.unread)
         }
-        return EnvironmentSnapshot(contents: TopicContents(records: records, problems: [], openPlaces: openPlaces),
+        return EnvironmentSnapshot(contents: TopicContents(records: records, openPlaces: openPlaces),
                                    tmux: TmuxSnapshot(windows: windows, clients: [], panes: panes, serverRunning: true),
                                    topics: topics, notifications: Config.Notifications())
     }
@@ -78,7 +78,7 @@ final class EnvironmentSnapshotTests: XCTestCase {
             notifications.doneEnabled = enabled
             notifications.failedEnabled = enabled
             notifications.blockedEnabled = enabled
-            let shown = EnvironmentSnapshot(contents: TopicContents(records: [record], problems: [], openPlaces: []),
+            let shown = EnvironmentSnapshot(contents: TopicContents(records: [record], openPlaces: []),
                                             tmux: tmux, topics: Config.Topics(), notifications: notifications)
             let detail = TopicDetail(record: record, label: "A", snapshot: tmux, sessionPaths: [], topics: Config.Topics(),
                                      notifications: notifications, branches: TopicBranches(records: [record]) { _ in nil })

@@ -391,20 +391,6 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertFalse(try records().contains { $0.title == "Untagged" }, "a refused New Topic writes no record")
     }
 
-    func testTheUpgradePutsASnoozedTopicAfterTheConfigsInPlayCards() throws {
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        for title in ["First", "Second", "Third"] { _ = try change(service().handle(EnvironmentRequest(.create(title: title)))) }
-        _ = try change(service().handle(EnvironmentRequest(.lock, target: .sessionName("notes"))))
-        let third = try XCTUnwrap(records().first { $0.title == "Third" }).id
-        try TopicStore(paths: paths).write { try $0.update(third) { $0.unknownFields["snoozed_until"] = .string("never") } }
-        let inPlay = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath],
-                                        topics: { var topics = Config.Topics(); topics.inPlay = 1; return topics }())
-        XCTAssertNil(inPlay.upgradeRecords())
-        XCTAssertEqual(try topicList(), ["First", "Third", "Second", "lock:notes"])
-        XCTAssertFalse(try TopicStore(paths: paths).read().needsUpgrade)
-    }
-
-
     func testALockedSessionThatGoesIntoATopicLosesItsLock() throws {
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
         try server.run(["new-session", "-d", "-s", "chores", "-c", tools.folder.path])
@@ -622,9 +608,10 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(made.topicID, try records().first { $0.title == "C" }?.id)
         XCTAssertEqual(try topicList(), ["A", "B", "C", "D"], "no other card goes to the Bench")
         XCTAssertEqual(try guests(), ["C"])
-        let stamp = TopicStore(paths: paths).stamp()
+        let observer = TopicStore(paths: paths)
+        let token = observer.changeToken()
         _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("C")))))
-        XCTAssertEqual(TopicStore(paths: paths).stamp(), stamp, "a Guest that is made a Guest again does not change")
+        XCTAssertEqual(observer.changeToken(), token, "a Guest that is made a Guest again does not change")
 
         _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("D")))))
         XCTAssertEqual(try topicList(), ["A", "B", "C", "D"])
@@ -810,9 +797,10 @@ final class TopicServiceTests: XCTestCase {
 
         XCTAssertNil(service(inPlay: 2).gatherGuests())
         XCTAssertEqual(try topicList(), ["A", "B", "lock:notes", "C"])
-        let stamp = TopicStore(paths: paths).stamp()
+        let observer = TopicStore(paths: paths)
+        let token = observer.changeToken()
         XCTAssertNil(service(inPlay: 2).gatherGuests())
-        XCTAssertEqual(TopicStore(paths: paths).stamp(), stamp, "a second gather writes nothing")
+        XCTAssertEqual(observer.changeToken(), token, "a second gather writes nothing")
 
         let created = try change(service(inPlay: 2).handle(EnvironmentRequest(.move(to: .newTopic(title: "Notes work")), target: .session(sessionID("notes")))))
         XCTAssertTrue(created.created)
@@ -888,7 +876,7 @@ final class TopicServiceTests: XCTestCase {
     }
 
     func testListGivesTheOpenTopicsWithTheirLabelsAndSkipsInvalidEntries() throws {
-        try paths.seedTopicRecords(entries: [
+        try paths.seedTopicRecordsFile(entries: [
             #"{"id":"a","title":"Fix"}"#, #"{"id":"b","slug":"fix-login"}"#, #"{"id":"c","title":""}"#,
             #"{"id":"d","title":"Done","settled_at":"2026-10-01T10:00:00Z"}"#,
             #"{"id":"e","title":7}"#, #"{"id":"a","title":"Twin"}"#,
@@ -900,10 +888,10 @@ final class TopicServiceTests: XCTestCase {
 
     func testTheSettlePreviewOffersEachLiveSessionAndChangesNothing() throws {
         let id = try topicWithSession("Ship", at: sessionPath.folder.path, using: service())
-        let before = try Data(contentsOf: paths.topicRecords)
+        let before = try paths.storedTopicRows()
         let choices = try service().settleChoices(for: .topic(.id(id))).get()
         XCTAssertEqual(choices.map(\.name), ["game/ship"])
-        XCTAssertEqual(try Data(contentsOf: paths.topicRecords), before)
+        XCTAssertEqual(try paths.storedTopicRows(), before)
     }
 
     /// A Topic with a Session in game and one in tools.
@@ -1652,9 +1640,8 @@ final class TopicServiceTests: XCTestCase {
     func testReopenFailsAndChangesNothingWhenTheRecordedBaseIsGone() throws {
         let app = try repository()
         let (id, base) = try settledWithGoneWorktree(of: app)
-        let file = paths.topicRecords
         let missing = String(repeating: "0", count: 40)
-        try String(contentsOf: file, encoding: .utf8).replacingOccurrences(of: base, with: missing).write(to: file, atomically: true, encoding: .utf8)
+        try paths.withStateDatabase { try $0.execute("UPDATE topics SET sessions = replace(sessions, ?, ?)", base, missing) }
         let before = try records()
         let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
         let worktree = paths.worktrees.appendingPathComponent("app/ship").path

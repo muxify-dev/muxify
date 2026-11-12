@@ -27,47 +27,33 @@ final class TagTests: XCTestCase {
         XCTAssertNil(Tag(name: "#backend"), "a record stores the name without #")
     }
 
-    private func written(_ id: String) throws -> [String: JSONValue] {
-        try XCTUnwrap(paths.storedTopicRecord(id))
+    private func written(_ id: String) throws -> JSONValue? {
+        try paths.storedJSON(id, "tags")
     }
 
-    func testTheRecordKeepsTagsAsASortedArrayReadsTypedFormsAndKeepsUnknownFields() throws {
-        let data = Data(##"{"id":"t","tags":["release","Backend","#ops","release"],"future":{"kept":true}}"##.utf8)
+    func testTheRecordKeepsTagsAsASortedArrayAndReadsTypedForms() throws {
+        let data = Data(##"{"id":"t","tags":["release","Backend","#ops","release"]}"##.utf8)
         let record = try JSONDecoder().decode(TopicRecord.self, from: data)
         XCTAssertEqual(record.tags, tags("backend", "ops", "release"))
         let store = TopicStore(paths: paths)
         try store.write { try $0.create(record) }
         try store.write { try $0.update("t") { $0.title = "Renamed" } }
-        XCTAssertEqual(try written("t")["tags"], .array([.string("backend"), .string("ops"), .string("release")]))
-        XCTAssertEqual(try written("t")["future"], .object(["kept": .bool(true)]))
+        XCTAssertEqual(try written("t"), .array([.string("backend"), .string("ops"), .string("release")]))
         XCTAssertEqual(try store.read().records.first?.tags, tags("backend", "ops", "release"))
 
         try store.write { try $0.changeTags(of: "t", .set([])) }
-        XCTAssertNil(try written("t")["tags"], "a Topic with no Tags has no tags key")
-        XCTAssertEqual(try written("t")["title"], .string("Renamed"))
+        XCTAssertEqual(try written("t"), .array([]), "a Topic with no Tags has an empty array")
+        XCTAssertEqual(try store.read().records.first?.title, "Renamed")
     }
 
-    func testAWriteKeepsTagEntriesThatAreNotTagsAndATagChangeKeepsThemAfterTheTags() throws {
-        try paths.seedTopicRecords(entries: [#"{"id":"t","tags":["release","",7,"a b",{"x":1}]}"#])
+    func testTheImportKeepsTheTagsOfAnEntryAndLeavesOutWhatIsNotATag() throws {
+        try paths.seedTopicRecordsFile(entries: [#"{"id":"t","tags":["release","",7,"a b",{"x":1}]}"#, #"{"id":"u","tags":"backend"}"#])
         let store = TopicStore(paths: paths)
-        XCTAssertEqual(try store.read().records.first?.tags, tags("release"))
-        let unreadable: [JSONValue] = [.string(""), .integer(7), .string("a b"), .object(["x": .integer(1)])]
-        try store.write { try $0.update("t") { $0.title = "Renamed" } }
-        XCTAssertEqual(try written("t")["tags"], .array([.string("release")] + unreadable), "a write of another field dropped them")
-        try store.write { try $0.changeTags(of: "t", .set([Tag(name: "qa")!])) }
-        XCTAssertEqual(try written("t")["tags"], .array([.string("qa")] + unreadable))
-        try store.write { try $0.changeTags(of: "t", .set([])) }
-        XCTAssertEqual(try written("t")["tags"], .array(unreadable), "removing every Tag dropped them")
-    }
-
-    func testAWriteKeepsATagsValueThatIsNotAnArrayUntilATagChangeSetsTags() throws {
-        try paths.seedTopicRecords(entries: [#"{"id":"t","tags":"backend"}"#])
-        let store = TopicStore(paths: paths)
-        XCTAssertEqual(try store.read().records.first?.tags, [])
-        try store.write { try $0.update("t") { $0.title = "Renamed" } }
-        XCTAssertEqual(try written("t")["tags"], .string("backend"), "a write of another field dropped the value")
-        try store.write { try $0.changeTags(of: "t", .add([Tag(name: "qa")!])) }
-        XCTAssertEqual(try written("t")["tags"], .array([.string("qa")]))
+        XCTAssertEqual(try store.read().records.map(\.tags), [tags("release"), []])
+        XCTAssertEqual(try written("t"), .array([.string("release")]))
+        XCTAssertEqual(try written("u"), .array([]), "a tags value that is not an array is no Tags")
+        try store.write { try $0.changeTags(of: "u", .add([Tag(name: "qa")!])) }
+        XCTAssertEqual(try written("u"), .array([.string("qa")]))
     }
 
     func testAChangeAddsRemovesOrSetsAndOnlyAnOpenTopicChanges() throws {

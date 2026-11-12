@@ -648,21 +648,6 @@ final class WorkspaceStore {
         return nil
     }
 
-    /// Records that a Muxify with Snooze and Zen wrote are upgraded on this Mac as soon as the app reads them, with
-    /// this App Window's Config. The records are local, so a Remote App Window upgrades them too.
-    private func upgradeTopicRecords() {
-        guard topicWatcher.needsUpgrade, !changingTopic else { return }
-        changingTopic = true
-        let service = topicService()
-        Task { [weak self] in
-            let failure = await Task.detached(priority: .userInitiated) { service.upgradeRecords() }.value
-            guard let self else { return }
-            self.changingTopic = false
-            self.topicWatcher.reload()
-            if let failure { NSLog("muxify: topics: upgrade: \(failure.message)") }
-        }
-    }
-
     /// When the Config sets `topics.in_play`, each Lock becomes a Guest at the end of In Play (ADR 0061). The flag in
     /// UserDefaults says that this Mac gathered them for the `in_play` now set, so a restart or a reload does not move
     /// the Guests again.
@@ -1675,7 +1660,6 @@ final class WorkspaceStore {
         consumeOpenRequests()
         publishBrowserSocket(snapshot)
         if !updateUnread(snapshot.panes) {
-            upgradeTopicRecords()
             gatherGuestsWhenInPlayIsSet()
         }
 

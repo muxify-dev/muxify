@@ -1,5 +1,7 @@
 # Browser History ranks pages by a decaying score, and its hosts and paths get the score of their pages
 
+> **Storage superseded by [ADR-0079](0079-muxifys-state-lives-in-one-sqlite-database.md):** Browser History moves from `browser-history.json` into the state database, `$XDG_STATE_HOME/muxify/muxify.db`. The rest of this decision stands.
+
 The address field of a Tab did not suggest anything. The user typed the full URL, or a search, each time. Browser History records the pages that the user loads, so that the address field can suggest them ([ADR 0060](0060-the-address-field-suggests-in-a-list-under-it.md)).
 
 ## One store, and the hosts and paths come from it

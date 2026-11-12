@@ -64,6 +64,10 @@ When a driver command times out, read `logs/app.log` and `driver/stall-<n>.txt` 
 - To make the app show a Window before a check, use `sandbox.show(window)`. It asks the app, as `muxify window open` does. A `switch-client` to the Window that the client is already on does not move the client, so the app stays on an Empty Topic page.
 - If a check fails because of a known app bug, mark it `@unittest.expectedFailure`. Write a one-line comment above it that names the bug. When the bug is fixed, the run reports "unexpected success". Then remove the mark.
 
+## Topic records
+
+The sandbox's Topic records are rows in `state/muxify/muxify.db`, the state database. Read and seed them through `TopicRecords` in `topic_records.py`, which uses Python's `sqlite3` and takes no lock of Muxify's own: `put`, `remove`, `get`, `ids` and `set_open_places`, and `held()` to hold the database's write lock for a block, as another process in a long transaction does. A record is a dict in the shape of the old `topics.json` entry. To prove the import of an old records file, write `state/muxify/topics.json` before the app's first launch, as `topics_reopen_at_launch` does: the first open of the database imports it and renames it to `topics.json.migrated`.
+
 ## Do not take focus
 
 Checks run while the user works. A check must not take the keyboard focus, the mouse or the front position from the user.

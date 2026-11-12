@@ -4,6 +4,8 @@ status: accepted
 
 # A Muxify Worktree can exist without a Topic
 
+> **Storage superseded by [ADR-0079](0079-muxifys-state-lives-in-one-sqlite-database.md):** each Muxify Worktree record moves from `worktrees/<uuid>.json` into a row of the state database, `$XDG_STATE_HOME/muxify/muxify.db`. The rest of this decision stands.
+
 The user made Worktrees with a shell script: `worktree create <name>` in any tmux Session, with a per-project `.worktree.json` that copies files, links folders and runs hooks. Muxify could make a Worktree only as part of a Topic's Add a Session. So we let Muxify make a Worktree that no Topic owns, and every Worktree that Muxify makes, in a Topic or not, gets the same Worktree setup and the same record.
 
 ## A record proves that Muxify made the Worktree

@@ -50,6 +50,41 @@ extension Data: SQLiteBindable {
     }
 }
 
+/// One column's value, as SQLite stores it, so that two values compare as the database would hold them.
+public enum SQLiteValue: Equatable, SQLiteBindable {
+    case null, integer(Int64), real(Double), text(String)
+
+    public init(_ text: String?) { self = text.map(SQLiteValue.text) ?? .null }
+    public init(_ number: Double?) { self = number.map(SQLiteValue.real) ?? .null }
+    public init(_ flag: Bool) { self = .integer(flag ? 1 : 0) }
+
+    public func bind(to statement: OpaquePointer, at index: Int32) -> Int32 {
+        switch self {
+        case .null: return sqlite3_bind_null(statement, index)
+        case .integer(let value): return value.bind(to: statement, at: index)
+        case .real(let value): return value.bind(to: statement, at: index)
+        case .text(let value): return value.bind(to: statement, at: index)
+        }
+    }
+
+    public var text: String? {
+        if case .text(let value) = self { return value }
+        return nil
+    }
+
+    /// A number as a Double, whether SQLite holds it as an integer or a real; nil for NULL or text.
+    public var real: Double? {
+        switch self {
+        case .integer(let value): return Double(value)
+        case .real(let value): return value
+        default: return nil
+        }
+    }
+
+    /// An integer that is not 0. A real that is not 0 counts too, as SQLite reads it.
+    public var isTrue: Bool { (real ?? 0) != 0 }
+}
+
 /// One connection to a SQLite database file. Use it from one thread at a time: a transaction belongs to the
 /// connection, not to the thread that began it.
 public final class SQLiteConnection {
@@ -177,6 +212,16 @@ public final class SQLiteStatement {
             let error = connection.lastError()
             sqlite3_reset(handle)
             throw error
+        }
+    }
+
+    /// The column as SQLite holds it in this row. A blob reads as NULL: no Muxify table keeps one.
+    public func value(_ column: Int32) -> SQLiteValue {
+        switch sqlite3_column_type(handle, column) {
+        case SQLITE_INTEGER: return .integer(sqlite3_column_int64(handle, column))
+        case SQLITE_FLOAT: return .real(sqlite3_column_double(handle, column))
+        case SQLITE_TEXT: return text(column).map(SQLiteValue.text) ?? .null
+        default: return .null
         }
     }
 

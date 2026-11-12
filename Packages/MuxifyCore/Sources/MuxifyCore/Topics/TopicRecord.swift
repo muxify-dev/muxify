@@ -1,6 +1,7 @@
 import Foundation
 
-/// Unknown fields remain values, including fields inside remembered Sessions and Windows.
+/// Any JSON value. A remembered Session and its Windows are open JSON: a key that this Muxify does not know stays as
+/// it is.
 public enum JSONValue: Codable, Equatable, Sendable {
     case null, bool(Bool), integer(Int64), unsignedInteger(UInt64), number(Decimal), string(String)
     case array([JSONValue]), object([String: JSONValue])
@@ -64,15 +65,10 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     /// and the record keeps it.
     public var isGuest = false
     public var isUnread = false
-    /// The record keeps them in `tags` as an array of names, A→Z, and leaves the key out when it has nothing to keep.
+    /// The record keeps them in `tags` as an array of names, A→Z.
     public var tags: Set<Tag> = []
     /// The Topic Note: one line that tells the user what they were doing in the Topic. Nil is no Note.
     public var note: String?
-    /// What `tags` holds that is not a Tag: the array of those entries, or a `tags` value that is not an array. A
-    /// write puts the entries back after the Tags, and the value back while the Topic has no Tags, as it keeps
-    /// unknown fields.
-    var unreadableTags: JSONValue?
-    public var unknownFields: [String: JSONValue] = [:]
 
     public init(id: String, title: String? = nil, slug: String? = nil) {
         self.id = id
@@ -80,23 +76,16 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         self.slug = slug
     }
 
-    private enum CodingKeys: String, CodingKey, CaseIterable {
+    private enum CodingKeys: String, CodingKey {
         case id, title, slug, outcome, order, sessions
         case createdAt = "created_at", settledAt = "settled_at"
         case sessionOrder = "session_order", pinned, guest, unread, tags, note
     }
 
-    private struct FieldKey: CodingKey {
-        public let stringValue: String
-        public var intValue: Int? { nil }
-        public init?(stringValue: String) { self.stringValue = stringValue }
-        public init?(intValue: Int) { return nil }
-    }
-
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         id = try values.decode(String.self, forKey: .id)
-        guard !id.isEmpty, id != ".", id != "..", !id.contains("/"), !id.contains("\0") else {
+        guard Self.isValidID(id) else {
             throw DecodingError.dataCorruptedError(forKey: .id, in: values, debugDescription: "expected a Topic id that is a filename")
         }
         title = try values.decodeIfPresent(String.self, forKey: .title)
@@ -111,25 +100,18 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         isGuest = (try? values.decodeIfPresent(Bool.self, forKey: .guest)) == true
         isUnread = (try? values.decodeIfPresent(Bool.self, forKey: .unread)) == true
         note = try values.decodeIfPresent(String.self, forKey: .note)
-        switch try values.decodeIfPresent(JSONValue.self, forKey: .tags) {
-        case .array(let entries)?:
-            // An entry is read as the user types a Tag, so `Backend` and `#backend` are the Tag `backend`.
-            let read = entries.map { ($0, $0.string.flatMap(Tag.init(typed:))) }
-            tags = Set(read.compactMap(\.1))
-            let rest = read.filter { $0.1 == nil }.map(\.0)
-            unreadableTags = rest.isEmpty ? nil : .array(rest)
-        case let value?: unreadableTags = value
-        case nil: break
-        }
-        let known = Set(CodingKeys.allCases.map(\.rawValue))
-        let fields = try decoder.container(keyedBy: FieldKey.self)
-        unknownFields = Dictionary(uniqueKeysWithValues: try fields.allKeys.filter { !known.contains($0.stringValue) }.map {
-            ($0.stringValue, try fields.decode(JSONValue.self, forKey: $0))
-        })
+        // An entry is read as the user types a Tag, so `Backend` and `#backend` are the Tag `backend`. An entry that is
+        // not a Tag, or a `tags` value that is not an array, is left out.
+        let entries = (try? values.decodeIfPresent([JSONValue].self, forKey: .tags)) ?? nil
+        tags = Set((entries ?? []).compactMap { $0.string.flatMap(Tag.init(typed:)) })
+    }
+
+    /// A Topic id is a filename: not empty, not `.` or `..`, and without `/` or NUL.
+    public static func isValidID(_ id: String) -> Bool {
+        !id.isEmpty && id != "." && id != ".." && !id.contains("/") && !id.contains("\0")
     }
 
     public func encode(to encoder: Encoder) throws {
-        try unknownFields.encode(to: encoder)
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(id, forKey: .id)
         try values.encodeIfPresent(title, forKey: .title)
@@ -144,11 +126,6 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         if isPinned { try values.encode(true, forKey: .pinned) }
         if isGuest { try values.encode(true, forKey: .guest) }
         try values.encodeIfPresent(note, forKey: .note)
-        let names = tags.sorted().map { JSONValue.string($0.name) }
-        switch unreadableTags {
-        case .array(let rest)?: try values.encode(names + rest, forKey: .tags)
-        case let value? where tags.isEmpty: try values.encode(value, forKey: .tags)
-        default: if !tags.isEmpty { try values.encode(names, forKey: .tags) }
-        }
+        if !tags.isEmpty { try values.encode(tags.sorted().map(\.name), forKey: .tags) }
     }
 }

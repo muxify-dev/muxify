@@ -1,40 +1,114 @@
-"""The Topic records of a sandbox: `state/muxify/topics.json`, read and written as the app writes it.
+"""The Topic records of a sandbox: the `topics` and `open_places` tables of `state/muxify/muxify.db`, read and
+written with Python's `sqlite3`, as another process writes them.
 
-The file is one JSON object: `records`, a list of Topic records, and `open_places`, a list of Open Places. A change
-holds the exclusive record lock (`topics.lock`, an flock, the one `TopicStore` takes) while it reads the file, changes
-it and replaces it with one rename. The app reads a record and renames its new version in under that lock, so a change
-between the two would bring the record back, or lose the app's write.
+A record is a dict in the shape the old `topics.json` had: the columns by name, with `sessions` and `tags` as lists,
+`pinned`, `guest` and `unread` as `True` or left out, `session_order` as `'manual'` or left out, and every other
+column left out when it is NULL. A write is one transaction that changes only the rows it names. No write takes a lock
+of Muxify's own: SQLite's own locks keep two writers apart, and a writer waits up to 10 seconds for another, as the app
+does.
 """
 
 import contextlib
-import fcntl
 import json
-import os
+import sqlite3
 from pathlib import Path
 
-EMPTY = {'records': [], 'open_places': []}
+# The columns of `topics` besides `id`.
+TEXT = ['title', 'slug', 'outcome', 'created_at', 'settled_at', 'session_order', 'note']
+FLAGS = ['pinned', 'guest', 'unread']
+LISTS = ['sessions', 'tags']
+COLUMNS = TEXT + ['order'] + FLAGS + LISTS
+
+# The tables as the app makes them. A helper that runs before the app's first launch makes them too, at the same
+# `user_version`, so the app then finds nothing to add.
+SCHEMA = [
+    '''CREATE TABLE IF NOT EXISTS topics (
+        id TEXT PRIMARY KEY NOT NULL, title TEXT, slug TEXT, outcome TEXT, "order" REAL, created_at TEXT,
+        settled_at TEXT, session_order TEXT, pinned INTEGER NOT NULL DEFAULT 0, guest INTEGER NOT NULL DEFAULT 0,
+        unread INTEGER NOT NULL DEFAULT 0, note TEXT, sessions TEXT NOT NULL DEFAULT '[]', tags TEXT NOT NULL DEFAULT '[]')''',
+    '''CREATE TABLE IF NOT EXISTS open_places (id TEXT PRIMARY KEY NOT NULL, "order" REAL NOT NULL)''',
+]
+SCHEMA_VERSION = 1
 
 
 class TopicRecords:
     def __init__(self, state):
         """`state` is the sandbox's `state/muxify` folder."""
         self.state = Path(state)
-        self.path = self.state/'topics.json'
-        self.lock_path = self.state/'topics.lock'
-        self._lock = None
+        self.path = self.state/'muxify.db'
+        self._held = None
 
-    # Reads. A read takes no lock: the app replaces the file with one rename, so a read sees a whole file.
+    @contextlib.contextmanager
+    def _connection(self, write=False):
+        """The held connection inside `held`, else a new one. With `write`, the block is one transaction that
+        commits at its end, or rolls back when it raises."""
+        if self._held is not None:
+            yield self._held
+            return
+        connection = self._open()
+        try:
+            if not write:
+                yield connection
+                return
+            connection.execute('BEGIN IMMEDIATE')
+            try:
+                yield connection
+            except BaseException:
+                connection.execute('ROLLBACK')
+                raise
+            connection.execute('COMMIT')
+        finally:
+            connection.close()
+
+    def _open(self):
+        self.state.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(str(self.path), timeout=10, isolation_level=None)
+        connection.execute('PRAGMA journal_mode = WAL')
+        version = connection.execute('PRAGMA user_version').fetchone()[0]
+        if version < SCHEMA_VERSION:
+            connection.execute('BEGIN IMMEDIATE')
+            for statement in SCHEMA:
+                connection.execute(statement)
+            connection.execute('PRAGMA user_version = %d' % SCHEMA_VERSION)
+            connection.execute('COMMIT')
+        return connection
+
+    # Reads.
+
+    @staticmethod
+    def _record(row):
+        record = {'id': row['id']}
+        for column in TEXT:
+            if row[column] is not None:
+                record[column] = row[column]
+        if row['order'] is not None:
+            record['order'] = row['order']
+        for column in FLAGS:
+            if row[column]:
+                record[column] = True
+        record['sessions'] = json.loads(row['sessions'] or '[]')
+        tags = json.loads(row['tags'] or '[]')
+        if tags:
+            record['tags'] = tags
+        return record
 
     def read(self):
-        """The file as a dict with `records` and `open_places`; the empty shape when there is no file."""
+        """A dict with `records`, a list of records in id order, and `open_places`, as `topics.json` had them."""
         if not self.path.exists():
-            return json.loads(json.dumps(EMPTY))
-        return json.loads(self.path.read_text())
+            return {'records': [], 'open_places': []}
+        with self._connection() as connection:
+            connection.row_factory = sqlite3.Row
+            try:
+                records = [self._record(row) for row in connection.execute('SELECT * FROM topics ORDER BY id')]
+                places = [dict(id=row['id'], order=row['order'])
+                          for row in connection.execute('SELECT id, "order" FROM open_places ORDER BY rowid')]
+            finally:
+                connection.row_factory = None
+        return {'records': records, 'open_places': places}
 
     def records(self):
-        """The entries that have a string `id`, by id. An entry that is not a record is left out."""
-        return {entry['id']: entry for entry in self.read()['records']
-                if isinstance(entry, dict) and isinstance(entry.get('id'), str)}
+        """Every record, by id."""
+        return {record['id']: record for record in self.read()['records']}
 
     def get(self, topic_id):
         """The record with this id, or None."""
@@ -44,50 +118,54 @@ class TopicRecords:
         return sorted(self.records())
 
     def open_places(self):
-        return self.read().get('open_places') or []
+        return self.read()['open_places']
 
     # Changes.
 
     @contextlib.contextmanager
     def held(self):
-        """Holds the exclusive record lock for the block, as a virus scanner holds a file open. A change inside the
-        block uses this lock."""
-        if self._lock is not None:
+        """Holds the database's write lock for the block, as another process in a long transaction does. A change
+        inside the block joins that transaction, and the block commits it at its end."""
+        if self._held is not None:
             yield
             return
-        self.state.mkdir(parents=True, exist_ok=True)
-        with open(self.lock_path, 'a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            self._lock = lock
+        connection = self._open()
+        try:
+            connection.execute('BEGIN IMMEDIATE')
+            self._held = connection
             try:
                 yield
-            finally:
-                self._lock = None
-
-    def change(self, apply):
-        """Runs `apply(data)` on the file's dict under the lock, and replaces the file with one rename."""
-        with self.held():
-            data = self.read()
-            apply(data)
-            temporary = self.path.with_name(self.path.name + '.tmp-%d' % os.getpid())
-            temporary.write_text(json.dumps(data, indent=2, sort_keys=True))
-            os.replace(temporary, self.path)
+            except BaseException:
+                connection.execute('ROLLBACK')
+                raise
+            connection.execute('COMMIT')
+        finally:
+            self._held = None
+            connection.close()
 
     def put(self, record):
-        """Writes the record in the place of the entry with its id, or at the end."""
-        def apply(data):
-            entries = data['records']
-            for index, entry in enumerate(entries):
-                if isinstance(entry, dict) and entry.get('id') == record['id']:
-                    entries[index] = record
-                    return
-            entries.append(record)
-        self.change(apply)
+        """Writes the record in the place of the row with its id, or as a new row. A key the record leaves out is
+        NULL, or false for a flag, or empty for a list."""
+        values = [record['id']]
+        for column in TEXT:
+            values.append(record.get(column))
+        values.append(record.get('order'))
+        for column in FLAGS:
+            values.append(1 if record.get(column) else 0)
+        for column in LISTS:
+            values.append(json.dumps(record.get(column) or [], sort_keys=True))
+        names = ', '.join('"%s"' % column for column in ['id'] + COLUMNS)
+        marks = ', '.join('?' for _ in values)
+        with self._connection(write=True) as connection:
+            connection.execute('INSERT OR REPLACE INTO topics (%s) VALUES (%s)' % (names, marks), values)
 
     def remove(self, topic_id):
-        """Removes the entries with this id. Nothing happens when there is none."""
-        self.change(lambda data: data['records'].__setitem__(
-            slice(None), [e for e in data['records'] if not (isinstance(e, dict) and e.get('id') == topic_id)]))
+        """Removes the row with this id. Nothing happens when there is none."""
+        with self._connection(write=True) as connection:
+            connection.execute('DELETE FROM topics WHERE id = ?', (topic_id,))
 
     def set_open_places(self, places):
-        self.change(lambda data: data.__setitem__('open_places', list(places)))
+        with self._connection(write=True) as connection:
+            connection.execute('DELETE FROM open_places')
+            connection.executemany('INSERT INTO open_places (id, "order") VALUES (?, ?)',
+                                   [(place['id'], place['order']) for place in places])
