@@ -138,6 +138,8 @@ class SidebarRowView: SidebarPressView {
     var onSelectPane: (String) -> Void = { _ in }
     /// The context menu of a Window row.
     var windowMenu: (TmuxWindow) -> SidebarMenu? = { _ in nil }
+    /// The named accessibility actions of a Window row of the Topics list, which is one button.
+    var windowActions: (TmuxWindow) -> SidebarMenu? = { _ in nil }
 
     init(inTopicsList: Bool) {
         self.inTopicsList = inTopicsList
@@ -158,6 +160,7 @@ class SidebarRowView: SidebarPressView {
                                      isButton: inTopicsList)
                 row.onPress = { [weak self] in self?.onSelectWindow(window) }
                 row.menuItems = { [weak self] in self?.windowMenu(window) }
+                row.actions = { [weak self] in self?.windowActions(window) }
                 row.show(content, environment: environment, fades: fades)
                 windows[window.id] = row
                 return row

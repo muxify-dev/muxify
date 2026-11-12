@@ -131,6 +131,8 @@ final class SessionCardView: NSView {
     }
     /// The context menu of a Window row, as the list reads it for the Window.
     var windowMenu: (TmuxWindow) -> SidebarMenu? = { _ in nil }
+    /// The named accessibility actions of a Window row of the Topics list, which is one button.
+    var windowActions: (TmuxWindow) -> SidebarMenu? = { _ in nil }
     private let fill = CardFillView()
     private let header: CardHeaderView
     /// The rows of an open card. A card that closes keeps them, so they fade where they stand.
@@ -180,6 +182,7 @@ final class SessionCardView: NSView {
         rowViews.onSelectWindow = { [weak self] in self?.onSelectWindow($0) }
         rowViews.onSelectPane = { [weak self] in self?.onSelectPane($0) }
         rowViews.windowMenu = { [weak self] in self?.windowMenu($0) }
+        rowViews.windowActions = { [weak self] in self?.windowActions($0) }
     }
 
     @available(*, unavailable)

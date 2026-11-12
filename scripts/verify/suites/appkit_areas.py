@@ -32,7 +32,8 @@ AREAS = {
                                                        'TopicCardMetrics', 'TopicsLineView', 'TopicCardRows',
                                                        'SidebarTagsView', 'CardTagsMetrics', 'OpenPlaceView',
                                                        'NSScrollView+Moves', 'BenchScroll', 'EdgePillView',
-                                                       'TopicsListScroll', 'TopicGroupsView', 'RememberedRowView')],
+                                                       'TopicsListScroll', 'TopicGroupsView', 'RememberedRowView',
+                                                       'TopicsListMenus')],
 }
 # The files of an area that may import SwiftUI for now, each with the task or stage that removes the import. A task
 # is one of the task set remove-swiftui (.cook/tasks/remove-swiftui/), which is stage 1.

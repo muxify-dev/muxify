@@ -80,6 +80,34 @@ final class TopicCardView: NSView {
         get { rows.onShowAllRows }
         set { rows.onShowAllRows = newValue }
     }
+    /// The card's context menu, which is also its named accessibility actions, as the card is now.
+    var menuItems: () -> SidebarMenu? {
+        get { card.menuItems }
+        set { card.menuItems = newValue }
+    }
+    /// The named accessibility actions of the header, as the card is now.
+    var headerActions: () -> SidebarMenu? {
+        get { header.actions }
+        set { header.actions = newValue }
+    }
+    /// The context menu of a Window row and its named accessibility actions, as the list reads them for the Window.
+    var windowMenu: (TmuxWindow) -> SidebarMenu? {
+        get { rows.rowViews.windowMenu }
+        set { rows.rowViews.windowMenu = newValue }
+    }
+    var windowActions: (TmuxWindow) -> SidebarMenu? {
+        get { rows.rowViews.windowActions }
+        set { rows.rowViews.windowActions = newValue }
+    }
+    /// The context menu of a Session line and its named accessibility actions, with the Session's ID.
+    var sessionMenu: (String) -> SidebarMenu? {
+        get { rows.sessionMenu }
+        set { rows.sessionMenu = newValue }
+    }
+    var sessionActions: (String) -> SidebarMenu? {
+        get { rows.sessionActions }
+        set { rows.sessionActions = newValue }
+    }
     /// The card, as one accessibility row.
     private let card = TopicCardGroupView()
     /// The parts of the card that rest at its opacity.
@@ -246,10 +274,12 @@ final class TopicCardView: NSView {
 }
 
 /// The card as one accessibility row: a group of its header and its Hint, though the Hint is no part of what rests at
-/// the card's opacity.
+/// the card's opacity. It holds the card's menu, which is also its named actions.
 private final class TopicCardGroupView: NSView {
     /// The rows of the card: the rows of an open card, its header, its Tags, then the Hint.
     var rows: () -> [NSView] = { [] }
+    /// The card's menu.
+    var menuItems: () -> SidebarMenu? = { nil }
     /// The card's header, which VoiceOver reads first.
     weak var header: NSView?
 
@@ -273,6 +303,14 @@ private final class TopicCardGroupView: NSView {
     }
 
     override func accessibilityActivationPoint() -> NSPoint { accessibilityFrame().centre }
+
+    /// A right-click anywhere on the card shows the card's menu: on the header, its Tags, the paddings and the gaps
+    /// between the rows, which have no menu of their own and pass the click up to the card. A Session line and a Window
+    /// row show their own menus. A Control-click shows the same menu (`SidebarPressView`).
+    override func menu(for event: NSEvent) -> NSMenu? { menuItems()?.contextMenu() }
+
+    /// The card's menu, as named actions: a check never opens a menu.
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? { menuItems()?.accessibilityActions }
 }
 
 /// The word in a card's top-right corner, such as how long ago a Topic was Settled, as SwiftUI's `cardCornerLabel`

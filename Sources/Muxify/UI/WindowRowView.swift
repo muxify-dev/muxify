@@ -55,6 +55,9 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
     private var arranged: (width: CGFloat, layout: Layout)?
     /// The row's context menu, as the list reads it for the Window.
     var menuItems: () -> SidebarMenu? = { nil }
+    /// The named accessibility actions of a row that is one button, as the list reads them for the Window: in the Topics
+    /// list Move Window to Topic…, which is not the row's whole menu.
+    var actions: () -> SidebarMenu? = { nil }
     /// The drag of its card's Window rows, which a press on the row starts, and through which a click goes to the
     /// Window. Without one, a click goes to the Window where the mouse comes up.
     weak var drag: SessionCardDrag?
@@ -326,6 +329,11 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
     /// A right-click or a Control-click on the row shows the row's menu, in place of the card's. As in SwiftUI, the menu
     /// gives the row's parts no named accessibility actions.
     override func menu(for event: NSEvent) -> NSMenu? { menuItems()?.contextMenu() }
+
+    /// The named actions of a row that is one button; the parts of a row that is no element have none.
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? {
+        isButton ? actions()?.accessibilityActions : nil
+    }
 
     // MARK: The help
 

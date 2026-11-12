@@ -225,7 +225,36 @@ final class TopicsListView: NSView, SidebarList {
             self?.showingAllRows.insert(id)
             self?.update.run()
         }
+        card.menuItems = { [weak self] in self?.menu(of: id, header: false) }
+        card.headerActions = { [weak self] in self?.menu(of: id, header: true) }
+        card.sessionMenu = { [weak self] sessionID in self?.sessionLineMenu(sessionID, of: id, actions: false) }
+        card.sessionActions = { [weak self] sessionID in self?.sessionLineMenu(sessionID, of: id, actions: true) }
+        card.windowMenu = { [weak self] window in self.map { TopicsListMenus.window(window, store: $0.store) } }
+        card.windowActions = { [weak self] window in self.map { TopicsListMenus.windowActions(window, store: $0.store) } }
         return card
+    }
+
+    /// The menu of a Topic card or a Locked card, or with `header` its header's named actions, as the card is now. Nil
+    /// once the card has gone.
+    private func menu(of id: TopicGroupID, header: Bool) -> SidebarMenu? {
+        let model = store.topics
+        guard let row = model.rows.first(where: { $0.id == id }) else { return nil }
+        let steps = model.steps(of: id)
+        if case .locked(let sessionID) = id {
+            return header ? TopicsListMenus.lockedHeader(row, sessionID: sessionID, steps: steps, store: store)
+                : TopicsListMenus.lockedCard(row, sessionID: sessionID, steps: steps, store: store)
+        }
+        return header ? TopicsListMenus.topicHeader(row, steps: steps, store: store) : TopicsListMenus.topicCard(row, steps: steps, store: store)
+    }
+
+    /// The menu of a Session line of the card, or with `actions` its named actions, as the card is now. Nil once the
+    /// card has gone.
+    private func sessionLineMenu(_ sessionID: String, of id: TopicGroupID, actions: Bool) -> SidebarMenu? {
+        guard let row = store.topics.rows.first(where: { $0.id == id }) else { return nil }
+        let order = SessionLineOrder(row, sessionID: sessionID, store: store)
+        guard !actions else { return TopicsListMenus.sessionLineActions(order, store: store) }
+        let window = row.sessions.first { $0.id.session == sessionID }?.windows.first
+        return TopicsListMenus.sessionLine(order, window: window, store: store)
     }
 
     /// The card of the No Topic Session, as the SwiftUI list's `SessionCard` with Topic rows.
@@ -245,6 +274,9 @@ final class TopicsListView: NSView, SidebarList {
         }
         card.menuItems = { [weak self] in self?.sessionMenu(sessionID, SessionsListMenus.card) }
         card.headerActions = { [weak self] in self?.sessionMenu(sessionID, SessionsListMenus.header) }
+        // Its Window rows are the Topics list's, as in the SwiftUI list's No Topic card.
+        card.windowMenu = { [weak self] window in self.map { TopicsListMenus.window(window, store: $0.store) } }
+        card.windowActions = { [weak self] window in self.map { TopicsListMenus.windowActions(window, store: $0.store) } }
         noTopicCard = card
         return card
     }

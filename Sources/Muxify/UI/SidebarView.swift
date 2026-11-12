@@ -274,8 +274,7 @@ private struct TopicsSection: View {
             TopicCard(store: store, topic: topic, titles: model.titles, holdsSelection: topic.id == model.activeTopic,
                       showsAllRows: showingAllRows.contains(topic.id),
                       onShowAllRows: { showingAllRows.insert(topic.id) },
-                      place: .list(TopicListPlace(drag: drag, order: order, steps: model.steps(of: topic.id),
-                                                  rename: renameTopic)))
+                      place: .list(TopicListPlace(drag: drag, order: order, steps: model.steps(of: topic.id))))
         }
     }
 
@@ -304,10 +303,6 @@ private struct TopicsSection: View {
         }
     }
 
-    private func renameTopic(_ id: String) {
-        guard let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return }
-        store.palette.begin(.text(.renameTopic(topic)), text: topic.title ?? "")
-    }
 }
 
 /// Hands a lifted card's pointer to `driver`, so the Topics list scrolls while the pointer rests at an edge: the edges
@@ -547,11 +542,8 @@ private struct RememberedSessions: View {
 private struct SessionOrdering {
     /// The drag of the card's Session blocks; the line starts it, and the whole block moves.
     let drag: ListDrag<String>
-    /// The Sessions right above and below this one, where Move Up and Move Down put it.
-    let above: String?
-    let below: String?
-    /// The Topic keeps an order the user gave, which Sort Sessions by Creation ends.
-    let isManual: Bool
+    /// Where Move Up and Move Down put it.
+    let order: SessionLineOrder
 }
 
 /// The heading of one Session inside a Topic: its SessionPath. Pressing it goes to the Session's
@@ -571,13 +563,9 @@ private struct SessionHeading: View {
             .accessibilityAddTraits(.isButton)
             .accessibilityAction(.default, go)
             .accessibilityIdentifier("\(topic.id.accessibilityID)-session-\(session.id.session)")
-            .accessibilityActions { orderButtons }
+            .accessibilityActions { SidebarMenuButtons(TopicsListMenus.sessionLineActions(ordering?.order, store: store)) }
             .contextMenu {
-                orderButtons
-                if let window = session.windows.first {
-                    if ordering != nil { Divider() }
-                    TopicMembershipMenu(store: store, source: .session(window))
-                }
+                SidebarMenuButtons(TopicsListMenus.sessionLine(ordering?.order, window: session.windows.first, store: store))
             }
     }
 
@@ -598,21 +586,6 @@ private struct SessionHeading: View {
             }
         } else {
             label.onTapGesture(perform: go)
-        }
-    }
-
-    @ViewBuilder
-    private var orderButtons: some View {
-        if let ordering, case .topic(let topicID) = topic.id {
-            let id = session.id.session
-            Button("Move Up") { store.moveSession(id, to: .up) }
-                .disabled(ordering.above == nil || store.changingTopic)
-            Button("Move Down") { store.moveSession(id, to: .down) }
-                .disabled(ordering.below == nil || store.changingTopic)
-            if ordering.isManual {
-                Button("Sort Sessions by Creation") { store.sortSessionsByCreation(ofTopic: topicID) }
-                    .disabled(store.changingTopic)
-            }
         }
     }
 
@@ -643,8 +616,8 @@ private struct TopicItemRow: View {
             .id("\(window.sessionID):\(window.id):\(window.topicID ?? "")")
             .accessibilityIdentifier("topic-window-\(window.id)")
             .accessibilityValue(window.id == store.selectedWindowID ? "selected" : "")
-            .contextMenu { TopicMembershipMenu(store: store, source: .window(window)) }
-            .topicMembershipActions(store: store, source: .window(window))
+            .contextMenu { SidebarMenuButtons(TopicsListMenus.window(window, store: store)) }
+            .topicMembershipActions(store: store, window: window)
         case .pane(let row):
             PaneRow(store: store, row: row)
                 .opacity(isDimmed ? TopicCardRowsOpacity.notOpen : 1)
@@ -665,7 +638,6 @@ struct TopicListPlace {
     /// The Topic and Locked cards among which it moves, in list order, and the views between them that slide.
     let order: [StackSlot<TopicListID>]
     let steps: CardSteps
-    let rename: (String) -> Void
 }
 
 struct TopicCard: View {
@@ -706,7 +678,7 @@ struct TopicCard: View {
                 sessionList
             }
         } menu: {
-            if let list { listMenu(list) } else { groupActions }
+            SidebarMenuButtons(menu)
         }
         .cardCorner { corner.opacity(restingOpacity) }
         .modifier(CardItem(list: list, listID: listID))
@@ -752,12 +724,20 @@ struct TopicCard: View {
 
     /// How a Session line moves within this Topic. A Settled Topic's lines do not move.
     private func ordering(of sessionID: String) -> SessionOrdering? {
-        guard topic.kind == .open, case .topic(let id) = topic.id else { return nil }
-        let order = topic.sessions.map(\.id.session)
-        guard let index = order.firstIndex(of: sessionID) else { return nil }
-        return SessionOrdering(drag: sessionDrag,
-                               above: index > 0 ? order[index - 1] : nil, below: index + 1 < order.count ? order[index + 1] : nil,
-                               isManual: store.topicWatcher.records.first { $0.id == id }?.hasManualSessionOrder ?? false)
+        SessionLineOrder(topic, sessionID: sessionID, store: store).map { SessionOrdering(drag: sessionDrag, order: $0) }
+    }
+
+    /// The card's menu, which is also its named actions: in the Topics list the Topic card's, in a group the Settled
+    /// card's.
+    private var menu: SidebarMenu {
+        guard let list else { return TopicsListMenus.settledCard(topic, store: store) }
+        return TopicsListMenus.topicCard(topic, steps: list.steps, store: store)
+    }
+
+    /// The header's named actions, which in the Topics list are another list than the card's menu.
+    private var headerActions: SidebarMenu {
+        guard let list else { return TopicsListMenus.settledCard(topic, store: store) }
+        return TopicsListMenus.topicHeader(topic, steps: list.steps, store: store)
     }
 
     private var formatted: SidebarFormats.Text {
@@ -798,108 +778,13 @@ struct TopicCard: View {
         }))
         .accessibilityAction(.default, press)
         .accessibilityIdentifier(topic.id.accessibilityID)
-        .accessibilityActions {
-            if let list { listActions(list) } else { groupActions }
-        }
+        .accessibilityActions { SidebarMenuButtons(headerActions) }
         .cardTagsOverlay(tags, onPress: press)
         .cardCornerLabel(settledAge)
     }
 
     /// A closed card in a group shows no Tags.
     private var tags: CardTags? { list != nil || topic.isExpanded ? store.cardTags(topic) : nil }
-
-    /// The actions of a card in a group: those of the Settled Topic.
-    @ViewBuilder
-    private var groupActions: some View {
-        if case .topic(let id) = topic.id {
-            Button("Forget Topic…") { store.presentForgetTopic(id) }.disabled(store.changingTopic)
-        }
-    }
-
-    @ViewBuilder
-    private func listActions(_ list: TopicListPlace) -> some View {
-        Button("Go to Topic") { store.goToTopic(topic.id) }
-        if case .topic(let id) = topic.id {
-            Button("Forget Topic…") { store.presentForgetTopic(id) }.disabled(store.changingTopic)
-            pinButton(id)
-            guestButton(id)
-            CardMoveButtons(store: store, id: .topic(id), steps: list.steps)
-            Button("Rename Topic…") {
-                DispatchQueue.main.async { list.rename(id) }
-            }
-            .disabled(store.changingTopic)
-            noteButtons(id)
-            Button("Add a Session…") { store.presentAddSession(toTopic: id) }
-                .disabled(store.changingTopic)
-        }
-    }
-
-    @ViewBuilder
-    private func listMenu(_ list: TopicListPlace) -> some View {
-        Button("Go to Topic") { store.goToTopic(topic.id) }
-            .accessibilityIdentifier("go-to-topic")
-        if case .topic(let id) = topic.id {
-            Divider()
-            if topic.state == .dormant {
-                Button("Reopen") { store.reopenTopic(id, .reopen) }
-                    .accessibilityIdentifier("reopen-topic-" + id)
-                    .disabled(store.changingTopic)
-                Button("Start Fresh") { store.reopenTopic(id, .startFresh) }
-                    .accessibilityIdentifier("start-fresh-topic-" + id)
-                    .disabled(store.changingTopic)
-            }
-            Button("Forget Topic…") { store.presentForgetTopic(id) }
-                .accessibilityIdentifier("forget-topic").disabled(store.changingTopic)
-            Button("Settle Topic…") { store.presentSettleTopic(id) }
-                .accessibilityIdentifier("settle-topic")
-                .disabled(store.changingTopic)
-            Divider()
-            Button("Rename Topic…") { list.rename(id) }
-                .accessibilityIdentifier("rename-topic")
-                .disabled(store.changingTopic)
-            noteButtons(id)
-            Button("Add a Session…") { store.presentAddSession(toTopic: id) }
-                .accessibilityIdentifier("add-topic-sessionPath")
-                .disabled(store.changingTopic)
-            Divider()
-            pinButton(id)
-            guestButton(id)
-            CardMoveButtons(store: store, id: .topic(id), steps: list.steps)
-        }
-    }
-
-    @ViewBuilder
-    private func noteButtons(_ id: String) -> some View {
-        Button("Set Topic Note…") { DispatchQueue.main.async { store.presentSetTopicNote(of: id) } }
-            .accessibilityIdentifier("set-topic-note")
-            .disabled(store.changingTopic)
-        if topic.note != nil {
-            Button("Clear Topic Note") { store.setTopicNote(of: id, nil) }
-                .accessibilityIdentifier("clear-topic-note")
-                .disabled(store.changingTopic)
-        }
-    }
-
-    private func pinButton(_ id: String) -> some View {
-        Button(topic.isPinned ? "Unpin Topic" : "Pin Topic") { store.pinTopic(id, !topic.isPinned) }
-            .accessibilityIdentifier("pin-topic")
-            .disabled(store.changingTopic)
-    }
-
-    /// Make a Guest on a Benched Topic, Bench on an In Play Topic, while the Config sets `topics.in_play`.
-    @ViewBuilder
-    private func guestButton(_ id: String) -> some View {
-        if store.guestState(of: .topic(id)) == false {
-            Button("Make a Guest") { store.makeGuest(.topic(id)) }
-                .accessibilityIdentifier("make-guest")
-                .disabled(store.changingTopic)
-        }
-        if store.canBench(.topic(id)) {
-            Button("Bench") { store.bench(.topic(id)) }
-                .accessibilityIdentifier("bench")
-                .disabled(store.changingTopic)
-        }
-    }
 
     /// A press on the Active Topic's header opens or closes the card; on another Topic's header it goes to that Topic,
     /// whose card then opens as the Active Topic's. A Settled one shows its Reopen choice.
@@ -947,20 +832,6 @@ private struct CardItem: ViewModifier {
     }
 }
 
-/// Move Up and Move Down of a Topic or Locked card: the Sidebar's own order change, which the palette does not show.
-private struct CardMoveButtons: View {
-    let store: WorkspaceStore
-    let id: TopicListID
-    let steps: CardSteps
-
-    var body: some View {
-        Button("Move Up") { store.moveCard(id, .up) }
-            .disabled(!steps.canMove(.up) || store.changingTopic)
-        Button("Move Down") { store.moveCard(id, .down) }
-            .disabled(!steps.canMove(.down) || store.changingTopic)
-    }
-}
-
 /// A Locked Session among the Topic cards (ADR 0018). It has a Topic card's shape and its place in the order, but it
 /// is a No Topic Session: its title and Summary come from the Session card Formats, its rows are its Windows with no
 /// SessionPath heading, and it offers only what a Session can do.
@@ -977,7 +848,6 @@ private struct LockedCard: View {
     let steps: CardSteps
 
     private var id: TopicListID { .lock(sessionID: sessionID) }
-    private var window: TmuxWindow? { row.sessions.first?.windows.first }
 
     private var formatted: SidebarFormats.Text {
         store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[sessionID])
@@ -999,9 +869,7 @@ private struct LockedCard: View {
                 TopicItemRow(store: store, item: item, titles: titles, isDimmed: false)
             }
         } menu: {
-            Button("Go to Session") { store.goToTopic(row.id) }
-            Divider()
-            actions
+            SidebarMenuButtons(TopicsListMenus.lockedCard(row, sessionID: sessionID, steps: steps, store: store))
         }
         .listDragItem(id, drag: drag, shown: order, cornerRadius: 9)
     }
@@ -1021,28 +889,8 @@ private struct LockedCard: View {
         .accessibilityAction(.default, press)
         .accessibilityIdentifier(row.id.accessibilityID)
         .accessibilityActions {
-            Button("Go to Session") { store.goToTopic(row.id) }
-            actions
+            SidebarMenuButtons(TopicsListMenus.lockedHeader(row, sessionID: sessionID, steps: steps, store: store))
         }
-    }
-
-    /// The Actions of a Locked Session. It is not a Topic, so it has no Settle, Pin or Forget. With `topics.in_play`
-    /// it is a Guest, and its Unlock is Bench.
-    @ViewBuilder
-    private var actions: some View {
-        Button(row.isGuest ? "Bench" : "Unlock Session") {
-            if row.isGuest { store.bench(.session(sessionID)) } else { store.setLock(ofSession: sessionID, false) }
-        }
-            .disabled(store.changingTopic)
-        if let window {
-            Button("Rename Session…") { store.palette.begin(.text(.renameSession(window)), text: window.sessionName) }
-            Button("Move to Topic…") { store.palette.openMove(window, scope: .session) }
-                .disabled(store.changingTopic)
-            Button("New Topic from this Session") { store.palette.openMove(window, scope: .session) }
-                .disabled(store.changingTopic)
-            Button("Kill Session…", role: .destructive) { store.palette.begin(.confirm(PaletteConfirmation(.killSession(window)))) }
-        }
-        CardMoveButtons(store: store, id: id, steps: steps)
     }
 
     /// As on a Topic card: a press on the Active card opens or closes it; on another card it goes there.

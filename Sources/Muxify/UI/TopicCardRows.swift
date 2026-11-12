@@ -33,6 +33,9 @@ struct TopicCardBlock: Equatable {
 final class TopicCardRowsView: NSView, TopicCardBody {
     /// A press on a Session line, with the Session's ID.
     var onSession: (String) -> Void = { _ in }
+    /// The context menu of a Session line, and its named accessibility actions, with the Session's ID.
+    var sessionMenu: (String) -> SidebarMenu? = { _ in nil }
+    var sessionActions: (String) -> SidebarMenu? = { _ in nil }
     /// A press on "N more…".
     var onShowAllRows: () -> Void = {} {
         didSet { more.onPress = onShowAllRows }
@@ -97,6 +100,8 @@ final class TopicCardRowsView: NSView, TopicCardBody {
             let line = shownLines.removeValue(forKey: content.sessionID) ?? SessionLineView()
             let sessionID = content.sessionID
             line.onPress = { [weak self] in self?.onSession(sessionID) }
+            line.menuItems = { [weak self] in self?.sessionMenu(sessionID) }
+            line.actions = { [weak self] in self?.sessionActions(sessionID) }
             line.show(text, identifier: headerIdentifier + "-session-" + sessionID, environment: environment)
             line.alphaValue = content.fades ? TopicCardRowsOpacity.notOpen : 1
             lines[content.sessionID] = line
@@ -266,6 +271,10 @@ final class RememberedSessionsView: NSView, TopicCardBody {
 /// the first click while Muxify is not the front app.
 final class SessionLineView: SidebarPressView {
     private let label = SidebarLabel()
+    /// The line's context menu and its named accessibility actions, as the list reads them for the Session. A line with
+    /// no menu passes a right-click to its card.
+    var menuItems: () -> SidebarMenu? = { nil }
+    var actions: () -> SidebarMenu? = { nil }
 
     init() {
         super.init(frame: .zero)
@@ -302,6 +311,11 @@ final class SessionLineView: SidebarPressView {
         let size = label.fit(width: max(0, room))
         label.frame = NSRect(x: SessionLineMetrics.leading, y: SessionLineMetrics.top, width: size.width, height: size.height)
     }
+
+    /// A right-click or a Control-click on the line shows the line's menu, in place of the card's.
+    override func menu(for event: NSEvent) -> NSMenu? { menuItems()?.contextMenu() }
+
+    override func accessibilityCustomActions() -> [NSAccessibilityCustomAction]? { actions()?.accessibilityActions }
 
     override func accessibilityChildren() -> [Any]? { [] }
 

@@ -126,6 +126,11 @@ look the same. The difference picture marks three things, none of which a person
 The Guest note of a Topic card shows only with `topics.in_play`, which also shows the Guests line: `locked-cards`
 shows it.
 
+Task 11 reads the named actions of each card, `card-topic-<id>`, and of its header, `topic-<id>`: the card's menu, with
+Unpin on the Pinned card, Clear Topic Note on the card with a Note and Reopen and Start Fresh on the Dormant card, and
+the header's own list, which has no Settle Topic…, no Reopen and no Start Fresh, and another order. Both versions read
+them from `TopicsListMenus`, and the gate passes with them.
+
 ## locked-cards
 
 Task 05 of the set `remove-swiftui`. Two shots: `locked-cards`, a Locked card with its lock and the bell of a Window
@@ -135,6 +140,9 @@ many-coloured border of the Location's card and the edges of glyphs, for the rea
 
 The AppKit list draws the Guests line from this task on, because a Guest shows only under it; the Bench line and the
 Open Places come with task 08.
+
+Task 11 reads the named actions of the Locked card and its header in both shots, with Unlock Session in the first and
+Bench in the second, and of the Guest Topic's card and header, with Bench.
 
 ## topic-open
 
@@ -157,6 +165,9 @@ Window, "N more…" and the footer line beside Settle stand on the same pixels. 
 An Empty Topic's open card lists no Session, and SwiftUI still keeps the room between the empty stack of Sessions and
 the footer line: `TopicCardRowsView` keeps it too, so the card is 67 points high in both.
 
+Task 11 reads the named actions of the open card and its header, of the Session lines (Move Up and Move Down) and of
+the Topic rows (Move Window to Topic…) in each shot.
+
 ## no-topic-card
 
 Task 06 of the set `remove-swiftui`. Two shots: `no-topic-card`, the open No Topic card of a Session with no Topic
@@ -165,6 +176,9 @@ card closed, with its Summary. The AppKit list draws it with the Sessions list's
 are the Topics list's (`topic-window-<id>`, one button each). The gate passes in both, and side by side the pictures
 look the same. The difference picture marks the fill of the open card and the app icons, as in `topic-open`, and the
 many-coloured border and the edges of glyphs, as in `topic-cards`.
+
+Task 11 reads the named actions of the card, of its header and of its Window rows, which are the Topics list's: Move
+Window to Topic….
 
 ## topics-stuck-header
 
@@ -265,3 +279,5 @@ the ages, the rows and "Show 2 more" stand on the same pixels. The difference pi
 - The fill of the open card, one step of 255, as in `topic-open`. It is most of the share of pixels that differ.
 - The many-coloured border of the card that holds the Location, which the press moved to the Settled card, and the
   edges of the glyphs of "Settle" and "Reopen", as in `topic-cards`.
+
+Task 11 reads the named actions of the opened Settled card and of its header in both shots: Forget Topic…, its menu.

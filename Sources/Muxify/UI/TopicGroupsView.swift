@@ -199,7 +199,15 @@ private final class TopicGroupBlockView: NSView {
         card.onCorner = { [weak self] in
             if case .topic(let topicID) = id { self?.store.reopenTopic(topicID, .reopen) }
         }
+        // A Settled card offers Forget Topic… as its menu and as its header's named action.
+        card.menuItems = { [weak self] in self?.menu(of: id) }
+        card.headerActions = { [weak self] in self?.menu(of: id) }
         return card
+    }
+
+    /// The menu of a card in the group, as the card is now. Nil once the card has gone.
+    private func menu(of id: TopicGroupID) -> SidebarMenu? {
+        store.topics.groups.lazy.flatMap(\.topics).first { $0.id == id }.map { TopicsListMenus.settledCard($0, store: store) }
     }
 
     /// A press on the header of a card in the group, as the card is now: on another Topic's card it goes to the Topic,

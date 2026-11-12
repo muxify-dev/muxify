@@ -24,7 +24,7 @@ struct TopicMembershipMenu: View {
         let menu = TopicMembershipMenu(store: store, source: source)
         let enabled = !store.changingTopic
         var items = [
-            SidebarMenuItem(title: menu.moveTitle + "…", isEnabled: enabled) { menu.openMove() },
+            moveItem(store: store, source: source, isEnabled: enabled),
             SidebarMenuItem(title: menu.isSession ? "New Topic from this Session" : "New Topic from this Window", isEnabled: enabled) {
                 menu.openMove()
             },
@@ -43,6 +43,12 @@ struct TopicMembershipMenu: View {
         return items
     }
 
+    /// Move to Topic… for a Session, Move Window to Topic… for a Window, which opens the move in the palette's view.
+    @MainActor static func moveItem(store: WorkspaceStore, source: TopicMembershipPlan.Source, isEnabled: Bool = true) -> SidebarMenuItem {
+        let menu = TopicMembershipMenu(store: store, source: source)
+        return SidebarMenuItem(title: menu.moveTitle + "…", isEnabled: isEnabled) { menu.openMove() }
+    }
+
     var body: some View {
         SidebarMenuButtons(SidebarMenu([Self.items(store: store, source: source)]))
     }
@@ -54,10 +60,8 @@ struct TopicMembershipMenu: View {
 }
 
 extension View {
-    func topicMembershipActions(store: WorkspaceStore, source: TopicMembershipPlan.Source) -> some View {
-        let menu = TopicMembershipMenu(store: store, source: source)
-        return accessibilityActions {
-            Button(menu.moveTitle + "…") { menu.openMove() }
-        }
+    /// The named action of a Window row in the Topics list, which the AppKit list gives too (`TopicsListMenus`).
+    func topicMembershipActions(store: WorkspaceStore, window: TmuxWindow) -> some View {
+        accessibilityActions { SidebarMenuButtons(TopicsListMenus.windowActions(window, store: store)) }
     }
 }

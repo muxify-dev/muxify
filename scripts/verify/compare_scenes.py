@@ -205,6 +205,9 @@ class TopicCards:
                  'topic-dune': 'unread', 'topic-elm': 'Dormant', 'topic-fir': 'Empty'}
         missing = lambda rows: {key: view.value(key, rows) for key, note in notes.items() if note not in view.value(key, rows)}
         view.wait(lambda rows: not missing(rows), lambda: 'these headers miss their note: %s' % missing(view.s.rows()))
+        # Each card's menu and its header's list, which differs from the menu: Unpin on the Pinned card, Clear Topic Note
+        # on the card with a Note, Reopen and Start Fresh on the Dormant card.
+        view.read_actions(*[key for header in self.headers for key in ('card-' + header, header)])
 
 
 class LockedCards:
@@ -235,6 +238,7 @@ class LockedCards:
         self.arrive(view, config(), ['topic-atlas', 'topic-birch', header])
         view.wait(lambda rows: view.value(header, rows) == 'collapsed, Locked',
                   lambda: 'the Locked card has the value %r' % view.value(header, view.s.rows()))
+        view.read_actions('card-' + header, header)
 
     def guests(self, view):
         header = 'locked-' + self.lock
@@ -242,6 +246,8 @@ class LockedCards:
         values = lambda rows: [view.value(key, rows) for key in ('topic-birch', header)]
         view.wait(lambda rows: values(rows) == ['collapsed, Guest', 'collapsed, Guest'] and view.s.has('topics-guests-line', rows),
                   lambda: 'the Guests show no Guest mark or no Guests line: %s' % values(view.s.rows()))
+        # Bench on the Guest Topic and on the Locked Session, which is a Guest.
+        view.read_actions('card-' + header, header, 'card-topic-birch', 'topic-birch')
 
 
 def member(s, topic_id, base, windows=('main',)):
@@ -296,18 +302,23 @@ class TopicOpen:
                   and view.s.row(self.more, rs).get('accessibilityLabel') == '4 more…',
                   lambda: 'the open card does not list its first five rows under their Session lines with "4 more…": %s'
                   % [key for key in rows + [self.more] if not view.s.has(key)])
+        # The open card's menu and its header's list, the Session lines' order items and the Topic rows' Move Window to
+        # Topic….
+        view.read_actions('card-topic-atlas', 'topic-atlas', *rows)
 
     def all_rows(self, view):
         view.s.act('press', self.more)
         rows = ['topic-window-' + window for window in self.web_windows] + ['topic-atlas-session-' + self.docs]
         view.wait(lambda rs: all(view.s.has(key, rs) for key in rows) and not view.s.has(self.more, rs),
                   lambda: 'a press on "N more…" did not list every row: it misses %s' % [key for key in rows if not view.s.has(key)])
+        view.read_actions(*rows)
 
     def empty(self, view):
         # A press on the card of the Empty Topic goes to it, and its card opens.
         view.s.act('press', 'topic-cedar')
         view.wait(lambda rs: view.value('topic-cedar', rs).startswith('expanded, Empty'),
                   lambda: 'the card of the Empty Topic did not open: %s' % view.value('topic-cedar', view.s.rows()))
+        view.read_actions('card-topic-cedar', 'topic-cedar')
 
 
 class NoTopicCard:
@@ -331,6 +342,7 @@ class NoTopicCard:
         rows = [self.header] + ['topic-window-' + window for window in self.windows]
         view.wait(lambda rs: view.value(self.header, rs).startswith('expanded') and all(view.s.has(key, rs) for key in rows),
                   lambda: 'the No Topic card is not open with its Window rows: it misses %s' % [key for key in rows if not view.s.has(key)])
+        view.read_actions('card-' + self.header, *rows)
 
     def closed(self, view):
         view.close_card(self.header)
@@ -602,7 +614,8 @@ class SettledGroup:
         view.wait(lambda rs: view.value(self.CARD, rs).startswith('expanded') and all(s.has(key, rs) for key in shown),
                   lambda: 'the opened Settled card does not show its remembered Windows, Reopen and its age, or the group '
                   'has no "Show N more": it misses %s' % [key for key in shown if not s.has(key)])
-        view.read_actions(self.GROUP)
+        # A Settled card offers Forget Topic… as its menu and as its header's list.
+        view.read_actions(self.GROUP, 'card-' + self.CARD, self.CARD)
 
     def end(self, view):
         s = view.s
@@ -613,7 +626,7 @@ class SettledGroup:
             return None not in (more, group) and group - 20 <= more <= group
         view.wait(at_end, lambda: 'the Settled group did not scroll to "Show N more" at its end: its bottom and the '
                   'group\'s %s' % [bottom_of(view, key, s.rows()) for key in ('settled-show-more', 'topic-groups')])
-        view.read_actions(self.GROUP)
+        view.read_actions(self.GROUP, 'card-' + self.CARD, self.CARD)
 
 
 # The launch arguments of every scene of the Topics list: the Sidebar shows, with Topics.
