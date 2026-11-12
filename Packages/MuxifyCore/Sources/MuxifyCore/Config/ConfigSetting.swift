@@ -31,9 +31,9 @@ extension Config {
     /// Every setting of the template, in its order.
     public static let settings: [ConfigSetting] = settings(in: ConfigText(templateYAML), under: [])
 
-    /// Reads `text` as a Config of its own.
+    /// Reads `text` as a Config of its own. Every other file it names, such as a Config Override, is there and empty.
     static func probe(_ text: ConfigText) -> Config {
-        (try? load(path: "/settings.yaml") { _ in text.text }.get()) ?? Config()
+        (try? load(path: "/settings.yaml") { $0 == "/settings.yaml" ? text.text : "" }.get()) ?? Config()
     }
 
     private static func settings(in template: ConfigText, under path: [String]) -> [ConfigSetting] {

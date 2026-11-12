@@ -92,7 +92,7 @@ final class ConfigSettingTests: XCTestCase {
     }
 
     func testTheUncommentedTemplateLoadsWithNoProblems() throws {
-        let config = try Config.load(path: "/template.yaml") { _ in Config.templateYAML }.get()
+        let config = try Config.load(path: "/template.yaml") { $0 == "/template.yaml" ? Config.templateYAML : "" }.get()
         XCTAssertEqual(config.problems, [])
     }
 
@@ -128,6 +128,16 @@ final class ConfigSettingTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(setting("keybindings.open_settings")).templateValue, "cmd+comma")
         // A Muxify keybind acts before the Terminal, so Ghostty's own cmd+, (open_config) never gets it.
         XCTAssertEqual(Keybinds.defaults.action(for: try KeyTrigger("cmd+comma"), focus: .terminal), .openSettings)
+    }
+
+    func testTheUpdateSectionIsAToggleAndAChannelPicker() throws {
+        let check = try XCTUnwrap(setting("update.check"))
+        XCTAssertTrue(check.isBool)
+        XCTAssertTrue(check.isDefault)
+        let channel = try XCTUnwrap(setting("update.channel"))
+        XCTAssertEqual(channel.choices, ["stable", "tip"])
+        XCTAssertTrue(channel.isDefault)
+        XCTAssertTrue(channel.help.contains("tip offers every Tip Build"))
     }
 
     func testAnExampleIsNotADefault() throws {
