@@ -393,7 +393,7 @@ extension EnvironmentCommand {
         case .createWorktree, .removeWorktree, .listWorktrees: return false
         // Agent Unread is in tmux. Only a Topic's Read state is in its record; Mark All as Read leaves the records
         // out where there are none.
-        case .markRead(_, let scope): return scope == .topic
+        case .markRead(_, let scope): return scope == .topic || scope == .topicMark
         case .markAllRead: return false
         case .list, .show, .environmentShow, .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename, .reopen, .startFresh,
              .moveSession, .sortSessions, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench,

@@ -209,9 +209,8 @@ extension EnvironmentService {
             let records = topicsAvailable ? try store.read().records : []
             let snapshot = try server.snapshot()
             let place = try scope.map { try readPlace($0, request, records: records, snapshot: snapshot, client: client) } ?? .environment
-            var changed = ReadPlan.changes(change, in: place, records: records,
-                                           agents: Agent.list(panes: snapshot.panes, windows: snapshot.windows, ordered: false),
-                                           windows: snapshot.windows)
+            let agents = scope == .topicMark ? [] : Agent.list(panes: snapshot.panes, windows: snapshot.windows, ordered: false)
+            var changed = ReadPlan.changes(change, in: place, records: records, agents: agents, windows: snapshot.windows)
             if !changed.topicIDs.isEmpty {
                 let ids = changed.topicIDs, unread = change == .unread
                 let written = try store.write { transaction -> Set<String> in
@@ -240,9 +239,9 @@ extension EnvironmentService {
     private func readPlace(_ scope: ReadScope, _ request: EnvironmentRequest, records: [TopicRecord], snapshot: TmuxSnapshot,
                            client: String?) throws -> ReadPlan.Place {
         switch (scope, request.target) {
-        case (.topic, .topic(let ref)?):
+        case (.topic, .topic(let ref)?), (.topicMark, .topic(let ref)?):
             return .topic(try ref.resolve(in: records, open: false).id)
-        case (.topic, _):
+        case (.topic, _), (.topicMark, _):
             return .topic(try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client).id)
         case (.session, _):
             return .session(try sessionWindow(request.target, caller: request.caller, snapshot: snapshot, client: client).sessionID)

@@ -103,7 +103,7 @@ struct RequestInvocation: Equatable {
             case .renameWindow, .placeWindow, .zoomPane: return [.window, .pane]
             case .kill(let session): return session ? [.session, .window, .pane] : [.window, .pane]
             case .removeSessionFromTopic: return [.session, .pane]
-            case .markRead(_, .topic): return [.topic, .window, .pane]
+            case .markRead(_, .topic), .markRead(_, .topicMark): return [.topic, .window, .pane]
             case .markRead(_, .session): return [.session, .window, .pane]
             case .markRead(_, .window): return [.window, .pane]
             case .markRead(_, .pane): return [.pane]
@@ -579,8 +579,8 @@ extension CLIVerbPath {
     /// The verb that marks this scope Read or Unread.
     static func markRead(_ change: ReadChange, scope: ReadScope) -> CLIVerbPath {
         switch (scope, change) {
-        case (.topic, .read): .topicMarkRead
-        case (.topic, .unread): .topicMarkUnread
+        case (.topic, .read), (.topicMark, .read): .topicMarkRead
+        case (.topic, .unread), (.topicMark, .unread): .topicMarkUnread
         case (.session, .read): .sessionMarkRead
         case (.session, .unread): .sessionMarkUnread
         case (.window, .read): .windowMarkRead
