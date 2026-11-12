@@ -28,12 +28,14 @@ public enum StateDatabase {
     static let migrations: [Migration] = [
         TopicTable.migration,
         WorktreeTable.migration,
+        BrowserHistoryTable.migration,
     ]
 
     /// The one-time imports, run after `migrations` on every open.
     static let imports: [Import] = [
         TopicTable.importRecordsFile,
         WorktreeTable.importRecordFiles,
+        BrowserHistoryTable.importFile,
     ]
 
     /// Where the problem lines of an import go. The app sends them to its Diagnostics log; anywhere else they go to

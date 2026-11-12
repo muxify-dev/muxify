@@ -1,3 +1,4 @@
+import MuxifyCore
 import XCTest
 
 final class SuggestionRankerTests: XCTestCase {
@@ -101,7 +102,7 @@ final class SuggestionRankerTests: XCTestCase {
 
     func testTheStoreSuggestsAPageRecordedAfterAnEarlierQuery() throws {
         let directory = try TestDirectory()
-        let history = BrowserHistory(file: directory.url.appendingPathComponent("browser-history.json"), writeDelay: 0)
+        let history = BrowserHistory(paths: MuxifyPaths(environment: ["XDG_STATE_HOME": directory.url.path], home: "/nonexistent"), writeDelay: 0)
         history.setEnabled(true)
         history.record(url: URL(string: "https://alpha.test/one")!, title: "", visit: .link, topic: nil, at: now)
         XCTAssertEqual(history.suggestions(for: "alpha", live: LiveRows(), activeTopic: nil, now: now).map(\.display), ["alpha.test/one", "alpha"])

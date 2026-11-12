@@ -1,3 +1,4 @@
+import MuxifyCore
 import XCTest
 
 final class ClearBrowserHistoryTests: XCTestCase {
@@ -7,7 +8,8 @@ final class ClearBrowserHistoryTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
     private func history(_ directory: TestDirectory) -> BrowserHistory {
-        BrowserHistory(file: directory.url.appendingPathComponent("state/browser-history.json"), writeDelay: 0)
+        BrowserHistory(paths: MuxifyPaths(environment: ["XDG_STATE_HOME": directory.url.appendingPathComponent("state").path],
+                                          home: "/nonexistent"), writeDelay: 0)
     }
 
     private func record(_ history: BrowserHistory, _ page: String, ago: [TimeInterval]) {
@@ -16,17 +18,17 @@ final class ClearBrowserHistoryTests: XCTestCase {
         }
     }
 
-    private func fileKeys(_ history: BrowserHistory) throws -> [String] {
-        try JSONDecoder().decode([HistoryEntry].self, from: Data(contentsOf: history.file)).map(\.key)
+    private func rowKeys(_ history: BrowserHistory) throws -> [String] {
+        try history.store.entries().map(\.key).sorted()
     }
 
-    @MainActor func testTheCommandListsTheRangesAndAllTimeInRedRemovesTheFile() throws {
+    @MainActor func testTheCommandListsTheRangesAndAllTimeInRedDeletesEveryRow() throws {
         let directory = try TestDirectory()
         let history = history(directory)
         let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify-clear-history.yaml"), browserHistory: history,
                                    defaults: isolatedDefaults())
         defer { store.palette.close() }
-        XCTAssertFalse(store.palette.commands.contains(.clearBrowserHistory), "nothing to clear while it is off and has no file")
+        XCTAssertFalse(store.palette.commands.contains(.clearBrowserHistory), "nothing to clear while it is off and has no rows")
 
         history.setEnabled(true)
         history.record(url: URL(string: "https://example.com")!, title: "Example", visit: .typed, topic: nil)
@@ -37,13 +39,13 @@ final class ClearBrowserHistoryTests: XCTestCase {
         let rows = store.palette.results.rows
         XCTAssertEqual(rows.map(\.title.text), ["Last hour", "Last 6 hours", "Last day", "Last 3 days", "Last 7 days", "All time"])
         XCTAssertEqual(rows.filter(\.isDestructive).map(\.title.text), ["All time"])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: history.file.path), "the step clears nothing before a choice")
+        XCTAssertTrue(history.store.hasEntries, "the step clears nothing before a choice")
 
         store.palette.perform(.jumpTo, on: try XCTUnwrap(rows.last))
         history.flush()
         XCTAssertNil(store.palette.flow, "the choice closes the palette")
         XCTAssertTrue(history.entries.isEmpty)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: history.file.path))
+        XCTAssertEqual(try rowKeys(history), [])
         XCTAssertEqual(history.suggestions(for: "example", live: LiveRows(), activeTopic: nil), [.search("example")])
     }
 
@@ -68,7 +70,7 @@ final class ClearBrowserHistoryTests: XCTestCase {
         }
     }
 
-    func testAnEntryThatARangeEmptiesLeavesTheSuggestionsAndTheFile() throws {
+    func testAnEntryThatARangeEmptiesLeavesTheSuggestionsAndTheTable() throws {
         let directory = try TestDirectory()
         let history = history(directory)
         history.setEnabled(true)
@@ -78,10 +80,10 @@ final class ClearBrowserHistoryTests: XCTestCase {
         history.flush()
         XCTAssertEqual(Set(history.entries.keys), ["https://kept.test/page"])
         XCTAssertEqual(history.suggestions(for: "fresh", live: LiveRows(), activeTopic: nil, now: now), [.search("fresh")])
-        XCTAssertEqual(try fileKeys(history), ["https://kept.test/page"])
+        XCTAssertEqual(try rowKeys(history), ["https://kept.test/page"])
     }
 
-    func testARangeClearsTheFileWhileBrowserHistoryIsOff() throws {
+    func testARangeClearsTheTableWhileBrowserHistoryIsOff() throws {
         let directory = try TestDirectory()
         let on = history(directory)
         on.setEnabled(true)
@@ -93,10 +95,10 @@ final class ClearBrowserHistoryTests: XCTestCase {
         off.clear(.lastDay, now: now)
         off.flush()
         XCTAssertTrue(off.entries.isEmpty, "off keeps nothing in memory")
-        XCTAssertEqual(try fileKeys(off), ["https://kept.test/page"])
+        XCTAssertEqual(try rowKeys(off), ["https://kept.test/page"])
         off.clear(.last3Days, now: now)
         off.flush()
-        XCTAssertFalse(FileManager.default.fileExists(atPath: off.file.path), "a clear that leaves no entry removes the file")
+        XCTAssertEqual(try rowKeys(off), [], "a clear that leaves no entry leaves no row")
         XCTAssertFalse(off.canClear)
     }
 
@@ -106,7 +108,7 @@ final class ClearBrowserHistoryTests: XCTestCase {
         XCTAssertNil(entry.lastVisit, "the one score holds a visit of the range, so it cannot stay")
     }
 
-    func testAPendingWriteDoesNotBringTheFileBackAfterAClear() throws {
+    func testAPendingWriteDoesNotBringTheRowsBackAfterAClear() throws {
         let directory = try TestDirectory()
         let history = history(directory)
         history.setEnabled(true)
@@ -114,6 +116,31 @@ final class ClearBrowserHistoryTests: XCTestCase {
         history.clear(.allTime)
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         history.flush()
-        XCTAssertFalse(FileManager.default.fileExists(atPath: history.file.path))
+        XCTAssertEqual(try rowKeys(history), [])
+    }
+
+    func testARangeAndAllTimeRemoveTheRowsOfAnotherProcessToo() throws {
+        let directory = try TestDirectory()
+        let history = history(directory)
+        let other = self.history(directory)
+        history.setEnabled(true)
+        other.setEnabled(true)
+        record(history, "https://fresh.test/page", ago: [10 * minute])
+        record(history, "https://mixed.test/page", ago: [10 * minute, 2 * day])
+        record(other, "https://other-fresh.test/page", ago: [20 * minute])
+        record(other, "https://other-kept.test/page", ago: [3 * hour])
+        history.flush()
+        other.flush()
+
+        history.clear(.lastHour, now: now)
+        history.flush()
+        XCTAssertEqual(try rowKeys(history), ["https://mixed.test/page", "https://other-kept.test/page"],
+                       "the rows of the visits of the last hour go, also those that only the other process loaded")
+        let mixed = try XCTUnwrap(try history.store.entries().first { $0.key == "https://mixed.test/page" })
+        XCTAssertEqual(mixed.recent.map(\.at), [now - 2 * day], "a row keeps its visits before the range")
+
+        history.clear(.allTime, now: now)
+        history.flush()
+        XCTAssertEqual(try rowKeys(history), [], "All time deletes every row")
     }
 }

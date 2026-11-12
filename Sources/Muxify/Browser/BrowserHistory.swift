@@ -2,95 +2,6 @@ import Foundation
 import WebKit
 import MuxifyCore
 
-/// One page in Browser History (ADR 0059).
-struct HistoryEntry: Codable, Equatable {
-    /// A visit of the last `recentSpan`, kept on its own so that Clear Browser History can remove it.
-    struct Visit: Codable, Equatable {
-        let at: Date
-        let weight: Double
-    }
-
-    /// The visits before the recent ones, as one score at the time of the newest of them.
-    struct Folded: Codable, Equatable {
-        let score: Double
-        let at: Date
-    }
-
-    /// `BrowserTab.matchKey` of the URL.
-    var key: String
-    var url: String
-    var title: String
-    var folded: Folded?
-    /// Oldest first.
-    var recent: [Visit]
-    /// The Topics of the Windows where the user loaded the page.
-    var topics: Set<String>
-
-    static let halfLife: TimeInterval = 14 * 86_400
-    static let recentSpan: TimeInterval = 7 * 86_400
-
-    init(key: String, url: String, title: String, folded: Folded? = nil, recent: [Visit] = [], topics: Set<String>) {
-        self.key = key
-        self.url = url
-        self.title = title
-        self.folded = folded
-        self.recent = recent
-        self.topics = topics
-    }
-
-    /// The sum of the weights of every visit, each halved for each `halfLife` since that visit.
-    func score(at now: Date) -> Double {
-        let base = folded.map { Self.decay($0.score, from: $0.at, to: now) } ?? 0
-        return recent.reduce(base) { $0 + Self.decay($1.weight, from: $1.at, to: now) }
-    }
-
-    /// Nil when no visit is left, after a clear.
-    var lastVisit: Date? { recent.last?.at ?? folded?.at }
-
-    mutating func add(_ visit: Visit) {
-        recent.append(visit)
-        fold(before: visit.at - Self.recentSpan)
-    }
-
-    /// Moves the recent visits before `cutoff` into the folded score.
-    mutating func fold(before cutoff: Date) {
-        while let oldest = recent.first, oldest.at < cutoff {
-            recent.removeFirst()
-            let base = folded.map { Self.decay($0.score, from: $0.at, to: oldest.at) } ?? 0
-            folded = Folded(score: base + oldest.weight, at: oldest.at)
-        }
-    }
-
-    /// Removes the visits at or after `since`. A folded score that holds such a visit goes as a whole, because it
-    /// cannot tell its visits apart. Only a file from before the recent visits were kept has one.
-    mutating func removeVisits(since: Date) {
-        recent.removeAll { $0.at >= since }
-        if let folded, folded.at >= since { self.folded = nil }
-    }
-
-    private static func decay(_ score: Double, from then: Date, to now: Date) -> Double {
-        score * pow(0.5, max(0, now.timeIntervalSince(then)) / halfLife)
-    }
-
-    private enum CodingKeys: String, CodingKey { case key, url, title, folded, recent, topics }
-    /// The shape of a file from before the recent visits were kept: one score at the last visit.
-    private enum ScoreAtLastVisitKeys: String, CodingKey { case score, lastVisit }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        key = try container.decode(String.self, forKey: .key)
-        url = try container.decode(String.self, forKey: .url)
-        title = try container.decode(String.self, forKey: .title)
-        topics = try container.decode(Set<String>.self, forKey: .topics)
-        recent = try container.decodeIfPresent([Visit].self, forKey: .recent) ?? []
-        folded = try container.decodeIfPresent(Folded.self, forKey: .folded)
-        let old = try decoder.container(keyedBy: ScoreAtLastVisitKeys.self)
-        if folded == nil, recent.isEmpty, let score = try old.decodeIfPresent(Double.self, forKey: .score) {
-            folded = Folded(score: score, at: try old.decode(Date.self, forKey: .lastVisit))
-        }
-    }
-}
-
 /// The time whose visits Clear Browser History removes.
 enum ClearRange: CaseIterable {
     case lastHour, last6Hours, lastDay, last3Days, last7Days, allTime
@@ -183,13 +94,15 @@ struct HistoryLoads {
     }
 }
 
-/// Browser History: one store for the whole app, kept in memory and written to one file a short time after each
-/// change. Used on the main thread only. While `browser.history` is off it records nothing and never reads the file.
+/// Browser History: one store for the whole app, kept in memory and written to the state database a short time after
+/// each change. A write upserts the History entries that changed since the last one and deletes those that went, so
+/// another Muxify process's entries stay. Used on the main thread only. While `browser.history` is off it records
+/// nothing and never reads the table.
 final class BrowserHistory {
-    static let shared = BrowserHistory(file: MuxifyPaths().browserHistory)
+    static let shared = BrowserHistory(paths: MuxifyPaths())
     static let capacity = 10_000
 
-    let file: URL
+    let store: BrowserHistoryStore
     private let capacity: Int
     private let writeDelay: TimeInterval
     private(set) var isEnabled = false
@@ -198,11 +111,14 @@ final class BrowserHistory {
     }
     private var cachedIndex: HistoryIndex?
     private var writeScheduled = false
-    /// Writes and removals of the file, in the order they were asked for.
+    /// The keys whose entries changed, and those that went by the cap, since the last write.
+    private var changedKeys: Set<String> = []
+    private var removedKeys: Set<String> = []
+    /// Writes and clears of the table, in the order they were asked for.
     private let io = DispatchQueue(label: "dev.muxify.browser-history", qos: .utility)
 
-    init(file: URL, capacity: Int = BrowserHistory.capacity, writeDelay: TimeInterval = 2) {
-        self.file = file
+    init(paths: MuxifyPaths, capacity: Int = BrowserHistory.capacity, writeDelay: TimeInterval = 2) {
+        store = BrowserHistoryStore(paths: paths)
         self.capacity = capacity
         self.writeDelay = writeDelay
     }
@@ -211,7 +127,7 @@ final class BrowserHistory {
         guard enabled != isEnabled else { return }
         if enabled {
             isEnabled = true
-            entries = Self.read(file)
+            entries = read()
         } else {
             flush()
             isEnabled = false
@@ -242,9 +158,13 @@ final class BrowserHistory {
         if !title.isEmpty { entry.title = title }
         if let topic { entry.topics.insert(topic) }
         entries[key] = entry
+        changedKeys.insert(key)
+        removedKeys.remove(key)
         if entries.count > capacity,
            let lowest = entries.values.filter({ $0.key != key }).min(by: { $0.score(at: now) < $1.score(at: now) }) {
             entries[lowest.key] = nil
+            changedKeys.remove(lowest.key)
+            removedKeys.insert(lowest.key)
         }
         changed()
     }
@@ -254,38 +174,39 @@ final class BrowserHistory {
         let key = BrowserTab.matchKey(url)
         guard isEnabled, !title.isEmpty, let entry = entries[key], entry.title != title else { return }
         entries[key]?.title = title
+        changedKeys.insert(key)
         changed()
     }
 
-    /// While it is on, or while the file of an earlier time stays.
-    var canClear: Bool { isEnabled || FileManager.default.fileExists(atPath: file.path) }
+    /// While it is on, or while the table keeps History entries of an earlier time.
+    var canClear: Bool { isEnabled || store.hasEntries }
 
-    /// Forgets the visits of `range` and writes the file at once, also while Browser History is off. An entry with no
-    /// visit left goes. All time removes the file.
+    /// Forgets the visits of `range` in memory and in the table at once, also while Browser History is off. An entry
+    /// with no visit left goes. All time deletes every row.
     func clear(_ range: ClearRange, now: Date = Date()) {
-        writeScheduled = false
-        guard let duration = range.duration else {
-            entries = [:]
-            save([])
-            return
-        }
-        let since = now - duration
-        func cleared(_ entries: [String: HistoryEntry]) -> [String: HistoryEntry] {
-            entries.compactMapValues { entry in
-                var entry = entry
-                entry.removeVisits(since: since)
-                return entry.lastVisit == nil ? nil : entry
-            }
-        }
+        // The pending changes reach the table first, so that the clear there covers them as it does in memory.
+        write()
+        let since = range.duration.map { now - $0 }
         if isEnabled {
-            entries = cleared(entries)
-            save(Array(entries.values))
-        } else {
-            save(Array(cleared(Self.read(file)).values))
+            entries = since.map { since in
+                entries.compactMapValues { entry in
+                    var entry = entry
+                    entry.removeVisits(since: since)
+                    return entry.lastVisit == nil ? nil : entry
+                }
+            } ?? [:]
+        }
+        let store = store
+        io.async {
+            do {
+                try store.clear(since: since)
+            } catch {
+                Diagnostics.report("cannot clear Browser History in \(store.paths.stateDatabase.path): \(error)")
+            }
         }
     }
 
-    /// Writes a pending change now and waits for the file, as the app quits.
+    /// Writes a pending change now and waits for the database, as the app quits.
     func flush() {
         write()
         io.sync {}
@@ -300,45 +221,34 @@ final class BrowserHistory {
     private func write() {
         guard writeScheduled else { return }
         writeScheduled = false
-        save(Array(entries.values))
-    }
-
-    /// With no entries it removes the file, so that Clear Browser History is not offered while Browser History is off.
-    private func save(_ list: [HistoryEntry]) {
-        let file = file
-        guard !list.isEmpty else {
-            io.async { try? FileManager.default.removeItem(at: file) }
-            return
-        }
-        let data: Data
-        do {
-            data = try JSONEncoder().encode(list.sorted { $0.key < $1.key })
-        } catch {
-            Diagnostics.report("cannot encode Browser History: \(error)")
-            return
-        }
+        let changed = changedKeys.sorted().compactMap { entries[$0] }
+        let removed = removedKeys
+        changedKeys = []
+        removedKeys = []
+        let store = store
         io.async {
             do {
-                try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try data.write(to: file, options: .atomic)
+                try store.save(changed, removing: removed)
             } catch {
-                Diagnostics.report("cannot write Browser History to \(file.path): \(error)")
+                Diagnostics.report("cannot write Browser History to \(store.paths.stateDatabase.path): \(error)")
             }
         }
     }
 
-    private static func read(_ file: URL) -> [String: HistoryEntry] {
-        guard let data = try? Data(contentsOf: file) else { return [:] }
+    /// The entries of the table, with the visits before the last 7 days folded. A table that cannot be read gives no
+    /// entry for this run, and a problem line: the writes of this run then touch only the pages it records.
+    private func read() -> [String: HistoryEntry] {
+        io.sync {}
         do {
             let cutoff = Date() - HistoryEntry.recentSpan
-            let list = try JSONDecoder().decode([HistoryEntry].self, from: data).map { entry in
+            let list = try store.entries().map { entry in
                 var entry = entry
                 entry.fold(before: cutoff)
                 return entry
             }
             return Dictionary(list.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
         } catch {
-            Diagnostics.report("cannot read Browser History from \(file.path): \(error)")
+            Diagnostics.report("cannot read Browser History from \(store.paths.stateDatabase.path), so this run starts with none: \(error)")
             return [:]
         }
     }

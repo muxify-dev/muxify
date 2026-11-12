@@ -1500,16 +1500,20 @@ browser:
   history: false
 ```
 
-Muxify keeps Browser History in one file on this Mac,
-`$XDG_STATE_HOME/muxify/browser-history.json`. It does not record a page that a
-Browser command loads, a reload, or a URL whose query or fragment has a key such
-as `token`, `code` or `password`. While it is off, Muxify does not record pages,
-does not read the file, and the address field shows no Suggestions.
+Muxify keeps Browser History on this Mac, in its state database,
+`$XDG_STATE_HOME/muxify/muxify.db`. Two Muxify apps that run at once, such as a
+dev build beside the release app, each add their pages to it. It does not record
+a page that a Browser command loads, a reload, or a URL whose query or fragment
+has a key such as `token`, `code` or `password`. While it is off, Muxify does not
+record pages, does not read Browser History, and the address field shows no
+Suggestions. On its first launch after the update, Muxify imports the
+`browser-history.json` of an older Muxify and renames it to
+`browser-history.json.migrated`.
 
 The Command **Clear Browser History** asks for a time: Last hour, Last 6 hours,
 Last day, Last 3 days, Last 7 days, or All time. The row that you choose clears
 at once. Browser History then forgets each visit in that time, and a page with
-no visit left. All time removes the file. Esc changes nothing.
+no visit left. All time removes every page. Esc changes nothing.
 
 Configurable [Keybindings](keybindings.md) work throughout the app, including in
 Browser pages. The guide lists all actions, defaults, built-in shortcuts and a

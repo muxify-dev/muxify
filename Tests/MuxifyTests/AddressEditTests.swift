@@ -1,3 +1,4 @@
+import MuxifyCore
 import XCTest
 
 final class AddressEditTests: XCTestCase {

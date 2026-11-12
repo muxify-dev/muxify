@@ -298,4 +298,77 @@ final class StateDatabaseTests: XCTestCase {
         XCTAssertEqual(problems, [])
         XCTAssertEqual(try MuxifyWorktreeStore(paths: paths).all(), [], "the second open did not read the old file again")
     }
+
+    // MARK: - The import of browser-history.json
+
+    private func seedBrowserHistoryFile(_ text: String) throws {
+        try FileManager.default.createDirectory(at: paths.state, withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: paths.browserHistory)
+    }
+
+    func testTheBrowserHistoryTableHasAColumnForEachPartOfAnEntry() throws {
+        let (connection, _) = try open()
+        XCTAssertEqual(try connection.query("SELECT name FROM pragma_table_info('browser_history') ORDER BY cid") { $0.text(0) ?? "" },
+                       ["key", "url", "title", "folded_score", "folded_at", "recent", "topics"])
+    }
+
+    func testTheImportMovesACurrentAndALegacyBrowserHistoryFileAndRenamesIt() throws {
+        let current = #"[{"key":"https://a.test","url":"https://a.test/","title":"A","folded":{"score":2,"at":800000000},"#
+            + #""recent":[{"at":810000000,"weight":1},{"at":810000100,"weight":2}],"topics":["t","u"]},"#
+            + #"{"key":"https://b.test","url":"https://b.test","title":"","recent":[],"topics":[]}]"#
+        let legacy = #"[{"key":"https://a.test","url":"https://a.test","title":"A","score":3.5,"lastVisit":800000000,"topics":["t"]}]"#
+        let expected: [(String, [HistoryEntry])] = [
+            (current, [
+                HistoryEntry(key: "https://a.test", url: "https://a.test/", title: "A",
+                             folded: .init(score: 2, at: Date(timeIntervalSinceReferenceDate: 800_000_000)),
+                             recent: [.init(at: Date(timeIntervalSinceReferenceDate: 810_000_000), weight: 1),
+                                      .init(at: Date(timeIntervalSinceReferenceDate: 810_000_100), weight: 2)],
+                             topics: ["t", "u"]),
+                HistoryEntry(key: "https://b.test", url: "https://b.test", title: "", topics: []),
+            ]),
+            (legacy, [
+                HistoryEntry(key: "https://a.test", url: "https://a.test", title: "A",
+                             folded: .init(score: 3.5, at: Date(timeIntervalSinceReferenceDate: 800_000_000)), topics: ["t"]),
+            ]),
+        ]
+        for (text, entries) in expected {
+            try? FileManager.default.removeItem(at: root)
+            try seedBrowserHistoryFile(text)
+            let (_, problems) = try open()
+            XCTAssertEqual(problems, [])
+            XCTAssertEqual(try BrowserHistoryStore(paths: paths).entries().sorted { $0.key < $1.key }, entries)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: paths.browserHistory.path))
+            XCTAssertEqual(try Data(contentsOf: paths.browserHistory.appendingPathExtension("migrated")), Data(text.utf8),
+                           "the old file stays readable as browser-history.json.migrated")
+        }
+    }
+
+    func testABrowserHistoryFileThatDoesNotDecodeStaysInPlaceWithAProblemLine() throws {
+        let text = #"[{"key":"https://a.test","url":7}]"#
+        try seedBrowserHistoryFile(text)
+        let (_, problems) = try open()
+        XCTAssertEqual(problems.count, 1, "\(problems)")
+        XCTAssertTrue(problems.first?.hasPrefix("\(paths.browserHistory.path) is not a Browser History file") == true, "\(problems)")
+        XCTAssertEqual(try Data(contentsOf: paths.browserHistory), Data(text.utf8), "the file is left for the user")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.browserHistory.appendingPathExtension("migrated").path))
+        XCTAssertEqual(try BrowserHistoryStore(paths: paths).entries(), [], "nothing is imported from it")
+    }
+
+    func testASecondOpenImportsNoBrowserHistory() throws {
+        try seedBrowserHistoryFile(#"[{"key":"https://a.test","url":"https://a.test","title":"A","recent":[],"topics":[]}]"#)
+        _ = try open()
+        try BrowserHistoryStore(paths: paths).clear(since: nil)
+        let (_, problems) = try open()
+        XCTAssertEqual(problems, [])
+        XCTAssertEqual(try BrowserHistoryStore(paths: paths).entries(), [], "the second open did not read the old file again")
+    }
+
+    func testAnImportedEntryLeavesTheRowOfItsKeyAsItIs() throws {
+        let store = BrowserHistoryStore(paths: paths)
+        let row = HistoryEntry(key: "https://a.test", url: "https://a.test", title: "Newer", recent: [.init(at: Date(timeIntervalSince1970: 1_800_000_000), weight: 2)], topics: [])
+        try store.save([row], removing: [])
+        try seedBrowserHistoryFile(#"[{"key":"https://a.test","url":"https://a.test","title":"Older","recent":[],"topics":[]}]"#)
+        _ = try open()
+        XCTAssertEqual(try store.entries(), [row])
+    }
 }

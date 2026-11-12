@@ -31,8 +31,11 @@ SCHEMA = [
     '''CREATE TABLE IF NOT EXISTS worktrees (
         id TEXT PRIMARY KEY NOT NULL, environment TEXT, repository TEXT NOT NULL, name TEXT NOT NULL,
         path TEXT NOT NULL UNIQUE, branch TEXT NOT NULL, base TEXT NOT NULL, created_at TEXT NOT NULL)''',
+    '''CREATE TABLE IF NOT EXISTS browser_history (
+        key TEXT PRIMARY KEY NOT NULL, url TEXT NOT NULL, title TEXT NOT NULL, folded_score REAL, folded_at REAL,
+        recent TEXT NOT NULL DEFAULT '[]', topics TEXT NOT NULL DEFAULT '[]')''',
 ]
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class TopicRecords:

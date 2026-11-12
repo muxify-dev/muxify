@@ -24,7 +24,8 @@ public struct MuxifyPaths: Equatable, Sendable {
     /// Where an older Muxify kept every Topic record and the Open Places. Only the import of the state database reads
     /// it, once, and renames it to `topics.json.migrated`.
     public var topicRecords: URL { state.appendingPathComponent("topics.json") }
-    /// Browser History, for every Window of every Environment: the Browser runs on this Mac.
+    /// Where an older Muxify kept Browser History. Only the import of the state database reads it, once, and renames it
+    /// to `browser-history.json.migrated`.
     public var browserHistory: URL { state.appendingPathComponent("browser-history.json") }
     /// Every new Worktree goes to `<worktrees>/<sessionPath name>/<slug>`. Settle removes only Worktrees inside it.
     public var worktrees: URL { state.appendingPathComponent("worktrees", isDirectory: true) }
