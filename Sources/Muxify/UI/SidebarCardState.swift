@@ -42,8 +42,7 @@ struct SessionCardState: Equatable {
     let session: SessionGroup
     let isOpen: Bool
     let mark: CardMark?
-    let isLocked: Bool
-    /// A Lock is a Guest with `topics.in_play`.
+    /// A Locked Session is a Guest Session.
     let isGuest: Bool
     let formatted: SidebarFormats.Text
     let items: [TopicsModel.SessionChildren.Item]
@@ -52,7 +51,6 @@ struct SessionCardState: Equatable {
     /// card as it was.
     let selectedWindowID: String?
     let guestState: Bool?
-    let lockState: Bool?
     let changingTopic: Bool
     let showsAllRows: Bool
 
@@ -84,16 +82,15 @@ extension WorkspaceStore {
 
     func sessionCardState(_ session: SessionGroup, showsAllRows: Bool) -> SessionCardState {
         let model = topics
-        let isLocked = model.lockedSessionIDs.contains(session.id)
         let items = model.sessionChildren[session.id]?.items ?? []
         let selected = selectedWindowID.flatMap { id in session.windows.contains { $0.id == id } ? id : nil }
         return SessionCardState(
             session: session, isOpen: openSessionCards.contains(session.name),
-            mark: model.sessionMarks[session.id].map(CardMark.agent), isLocked: isLocked,
-            isGuest: isLocked && topicConfig.inPlay != nil,
+            mark: model.sessionMarks[session.id].map(CardMark.agent),
+            isGuest: model.lockedSessionIDs.contains(session.id),
             formatted: sidebarText(.session, context: sidebarFormatContexts.sessions[session.id]),
             items: items, rows: sidebarRowStates(items), selectedWindowID: selected,
-            guestState: guestState(of: .session(session.id)), lockState: lockState(ofSession: session.id),
+            guestState: guestState(of: .session(session.id)),
             changingTopic: changingTopic, showsAllRows: showsAllRows)
     }
 }

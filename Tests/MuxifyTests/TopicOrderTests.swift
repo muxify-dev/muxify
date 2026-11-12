@@ -359,33 +359,33 @@ final class TopicOrderTests: XCTestCase {
         XCTAssertThrowsError(try TopicOrder.moving(.topic("a"), to: .after(.topic("missing")), in: entries))
     }
 
-    func testNewTopicIsFirstAfterMovesAndAtFiniteLimits() throws {
+    func testANewTopicGoesToTheTopOfTheBenchAfterMovesAndAtFiniteLimits() throws {
         let original = [record("a", order: 0), record("b", order: 1), record("c", order: 2)].map(TopicListEntry.topic)
         let moved = applying(try TopicOrder.moving(.topic("c"), to: .before(.topic("a")), in: original), to: original)
         let new = TopicRecord(newTopic: "new", title: "New", slug: "new", now: Date())
-        let placed = applying(TopicOrder.inserting(new, at: .end(.top), in: moved), to: moved)
-        XCTAssertEqual(shown(placed), ["new", "c", "a", "b"])
+        let placed = applying(TopicOrder.inserting(new, inPlay: 2, in: moved), to: moved)
+        XCTAssertEqual(shown(placed), ["c", "a", "new", "b"])
         let extreme = [record("a", order: -.greatestFiniteMagnitude), record("b", order: .greatestFiniteMagnitude)].map(TopicListEntry.topic)
-        let inserted = applying(TopicOrder.inserting(record("new", order: nil), at: .end(.top), in: extreme), to: extreme)
-        XCTAssertEqual(shown(inserted), ["new", "a", "b"])
+        let inserted = applying(TopicOrder.inserting(record("new", order: nil), inPlay: 5, in: extreme), to: extreme)
+        XCTAssertEqual(shown(inserted), ["a", "b", "new"], "with a free place, after the last place")
         XCTAssertTrue(inserted.allSatisfy { $0.order?.isFinite == true })
         let bottom = applying(try TopicOrder.moving(.topic("a"), to: .after(.topic("b")), in: extreme), to: extreme)
         XCTAssertEqual(shown(bottom), ["b", "a"])
         XCTAssertTrue(bottom.allSatisfy { $0.order?.isFinite == true })
     }
 
-    func testALockGoesLastAmongTheUnpinnedEntriesAndMovesAsAnUnpinnedTopic() throws {
+    func testALockGoesToTheEndOfTheGuestsAndMovesAsAnUnpinnedTopic() throws {
         var pinned = record("p", order: 9)
         pinned.isPinned = true
         let entries = [pinned, record("a", order: 0), record("b", order: 1)].map(TopicListEntry.topic)
             + [.lock(SessionLock(sessionID: "$1", order: 0.5))]
         XCTAssertEqual(shown(entries), ["p", "a", "lock:$1", "b"])
-        let locked = applying(TopicOrder.appendingLock(of: "$2", in: entries), to: entries)
-        XCTAssertEqual(shown(locked), ["p", "a", "lock:$1", "b", "lock:$2"])
+        let locked = applying(TopicOrder.appendingLock(of: "$2", inPlay: 5, in: entries), to: entries)
+        XCTAssertEqual(shown(locked), ["p", "a", "b", "lock:$1", "lock:$2"], "the Lock that was among the Topics goes to the Guests too")
         let moved = applying(try TopicOrder.moving(.lock(sessionID: "$2"), to: .before(.topic("p")), in: locked), to: locked)
-        XCTAssertEqual(shown(moved), ["p", "lock:$2", "a", "lock:$1", "b"], "a Lock is never Pinned, so it stays below the Pinned Topics")
-        let prepended = applying(TopicOrder.inserting(record("new", order: nil), at: .end(.top), in: moved), to: moved)
-        XCTAssertEqual(shown(prepended), ["p", "new", "lock:$2", "a", "lock:$1", "b"], "a new Topic goes before the Locks too")
+        XCTAssertEqual(shown(moved), ["p", "lock:$2", "a", "b", "lock:$1"], "a Lock is never Pinned, so it stays below the Pinned Topics")
+        let added = applying(TopicOrder.inserting(record("new", order: nil), inPlay: 5, in: moved), to: moved)
+        XCTAssertEqual(shown(added), ["p", "lock:$2", "a", "b", "new", "lock:$1"], "a new Topic goes after the last place, and a Lock takes none")
     }
 
     func testARenumberGivesTheLocksTheirNewOrderToo() throws {

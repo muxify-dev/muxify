@@ -54,9 +54,8 @@ extension EnvironmentRequest {
                 self.init(.forget(choices: [], worktrees: []), target: try pane(values["pane"]))
             }
         case "/lock", "/unlock":
-            try keys(["session"])
-            guard let name = values["session"], !name.isEmpty else { throw TopicRequestError.invalidURL }
-            self.init(parts.path == "/lock" ? .lock : .unlock, target: .sessionName(name))
+            let verb = parts.path == "/lock" ? "make-guest" : "bench"
+            throw TopicRequestError.removedForm("muxify://topic\(parts.path) is gone. Use: muxify topic \(verb) --session <name>")
         case "/move":
             try keys(["pane", "topic"])
             self.init(.move(to: .topic(.named(values["topic"]!))), target: try pane(values["pane"]))

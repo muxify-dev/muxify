@@ -1,5 +1,7 @@
 # Move Up makes the opened No Topic Session a Guest
 
+> **Partly superseded by [ADR-0081](0081-in-play-is-the-only-topics-mode.md):** `topics.in_play` is always set, so Move Up always makes the opened No Topic Session a Guest. Lock Session is gone, and the error of `muxify session move down` names `muxify topic make-guest`.
+
 With `topics.in_play` set, Move Topic Up on a Benched Topic makes a Guest ([ADR-0070](0070-move-up-and-move-down-cross-the-in-play-lines-one-section-per-step.md)). The opened No Topic Session, which is a Session in no Topic that is not Locked, has no card in the Topics list. Move Up did nothing on it, so the user needed another Command to make it a Guest.
 
 We make Move Up on the unlocked No Topic Session Make a Guest. A Session is a Guest through its Lock, so the step Locks it, and it goes to the end of the Guests. Move Down on it does nothing, because the Session has no card below.

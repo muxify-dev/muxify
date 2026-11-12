@@ -2,7 +2,7 @@ import MuxifyCore
 
 extension TopicsModel {
     /// The rows that are not Pinned, cut at the Guests line and the Bench line, without the Open Places.
-    var split: InPlayCut<Row>? { cut?.compactMap(\.row) }
+    var split: InPlayCut<Row> { cut.compactMap(\.row) }
 }
 
 /// Choose In Play after its check step: one choose-a-row step for each checked card, from the first place. The places
@@ -81,7 +81,8 @@ extension CommandPalette {
     /// Fill an Open Place: the Guest Topics, then the Benched Topics. A Guest Session must become a Topic first, so it
     /// has no row.
     func openPlaceRows() -> PickList<PaletteItem> {
-        guard let store, let cut = store.topics.split else { return .empty }
+        guard let store else { return .empty }
+        let cut = store.topics.split
         let topics = { (rows: [TopicsModel.Row]) in
             rows.filter { if case .topic = $0.id { return true } else { return false } }.map { self.cardCandidate($0, choice: .card($0.id)) }
         }
@@ -93,7 +94,8 @@ extension CommandPalette {
 
     /// Replace from Bench: one row for each Benched card.
     func benchRows() -> PickList<PaletteItem> {
-        guard let store, let cut = store.topics.split else { return .empty }
+        guard let store else { return .empty }
+        let cut = store.topics.split
         let candidates = cut.bench.map { cardCandidate($0, choice: .card($0.id)) }
         return FuzzyRanker.list([PickSectionInput(id: "bench", title: "Bench", rule: .ranked(showsWhenEmpty: true), candidates: candidates)],
                                 query: FuzzyQuery(query), rules: PickRules())

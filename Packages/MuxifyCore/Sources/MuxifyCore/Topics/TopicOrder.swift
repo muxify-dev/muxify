@@ -104,7 +104,7 @@ public enum TopicListEntry: Equatable, Sendable {
         return false
     }
 
-    /// Whether the card is a Guest while `topics.in_play` is set. A Locked Session is always a Guest then.
+    /// A Locked Session is always a Guest.
     public var isGuest: Bool {
         switch self {
         case .topic(let record): return record.isGuest && !record.isPinned
@@ -226,42 +226,6 @@ extension Array where Element == TopicListEntry {
     }
 }
 
-public enum TopicInsertPosition: String, CaseIterable, Sendable {
-    case top, bottom
-}
-
-/// Where a new Topic goes in the Topics list, and a Topic that Reopen or Start Fresh brings back. The Config gives it
-/// once, so no caller asks two settings.
-public enum TopicArrival: Equatable, Sendable {
-    /// Without `topics.in_play`: the `topics.insert_position` end of the cards with the Topic's Pin.
-    case end(TopicInsertPosition)
-    /// With `topics.in_play`: right after the last In Play place while there are fewer places than `inPlay`, else right
-    /// before the first Benched card, or last when there is none. A Guest does not count toward `inPlay`.
-    /// A Pinned Topic has no Bench, so it goes last among the Pinned Topics, as Pin puts it.
-    case topOfBench(inPlay: Int)
-
-    public init(inPlay: Int?, insertPosition: TopicInsertPosition) {
-        self = inPlay.map { .topOfBench(inPlay: $0) } ?? .end(insertPosition)
-    }
-
-    /// The index in `zone`, the cards with the Topic's Pin without the Topic, where it goes.
-    func index(in zone: [TopicListEntry], pinned: Bool) -> Int {
-        switch self {
-        case .end(.top): return 0
-        case .end(.bottom): return zone.count
-        case .topOfBench(let inPlay):
-            guard !pinned else { return zone.count }
-            let regulars = zone.indices.filter { zone[$0].slot != .guest }
-            if regulars.count > inPlay { return regulars[inPlay] }
-            return regulars.count < inPlay ? regulars.last.map { $0 + 1 } ?? 0 : zone.count
-        }
-    }
-}
-
-extension Config.Topics {
-    public var arrival: TopicArrival { TopicArrival(inPlay: inPlay, insertPosition: insertPosition) }
-}
-
 public enum TopicPlacement: Equatable, Sendable {
     case before(TopicListID)
     case after(TopicListID)
@@ -290,9 +254,9 @@ public struct TopicListChange: Equatable, Sendable {
 /// The order of the Topics list. Topics, Locked Sessions and Open Places share it, and a Lock moves, renumbers and
 /// clamps by the rules of a Topic that is not Pinned. Each change returns only the entries it changed.
 ///
-/// With `topics.in_play` set, the Sidebar shows the cards that are not Pinned in three sections (`InPlayCut`): the
-/// In Play places, the Guests, and the Bench. The changes that take an `inPlay` limit write the order in these
-/// sections, so the order of the list is the order that the Sidebar shows.
+/// The Sidebar shows the cards that are not Pinned in three sections (`InPlayCut`): the In Play places, the Guests,
+/// and the Bench. The changes that take an `inPlay` limit write the order in these sections, so the order of the list
+/// is the order that the Sidebar shows.
 public enum TopicOrder {
     public enum Failure: Error, CustomStringConvertible {
         case sourceUnavailable, anchorUnavailable
@@ -360,30 +324,32 @@ public enum TopicOrder {
         return placing(source, at: index, in: ordered, others: original.filter { $0.isPinned != source.isPinned })
     }
 
-    /// Pin puts the Topic last among the Pinned Topics and ends its Guest mark. Unpin puts it first among the others,
-    /// or with `inPlay` at the top of the Bench, where a new Topic goes.
-    public static func pinning(_ id: String, _ pinned: Bool, inPlay: Int? = nil, in entries: [TopicListEntry]) throws -> [TopicListEntry] {
-        let original = sorted(entries)
-        guard let found = original.first(where: { $0.id == .topic(id) }) else { throw Failure.sourceUnavailable }
-        guard found.isPinned != pinned else { return [] }
-        let source = found.pinned(pinned)
-        if !pinned, let inPlay, case .topic(let record) = source {
-            return inserting(record, at: .topOfBench(inPlay: inPlay), in: entries)
-        }
-        var zone = original.filter { $0.isPinned == pinned }
-        let index = pinned ? zone.count : 0
-        zone.insert(source, at: index)
-        return placing(source, at: index, in: zone, others: original.filter { $0.isPinned != pinned && $0.id != source.id })
+    /// Pin puts the Topic last among the Pinned Topics and ends its Guest mark. Unpin puts it at the top of the Bench,
+    /// where a new Topic goes.
+    public static func pinning(_ id: String, _ pinned: Bool, inPlay: Int, in entries: [TopicListEntry]) throws -> [TopicListEntry] {
+        guard let found = sorted(entries).first(where: { $0.id == .topic(id) }) else { throw Failure.sourceUnavailable }
+        guard found.isPinned != pinned, case .topic(let record) = found.pinned(pinned) else { return [] }
+        return inserting(record, inPlay: inPlay, in: entries)
     }
 
-    /// Places a new or returning Topic where `arrival` puts it among the entries with its pin.
-    public static func inserting(_ record: TopicRecord, at arrival: TopicArrival, in entries: [TopicListEntry]) -> [TopicListEntry] {
+    /// Places a new Topic, or a Topic that Reopen, Start Fresh or Unpin brings back, at the top of the Bench. A Pinned
+    /// Topic has no Bench, so it goes last among the Pinned Topics.
+    public static func inserting(_ record: TopicRecord, inPlay: Int, in entries: [TopicListEntry]) -> [TopicListEntry] {
         let original = sorted(entries).filter { $0.id != .topic(record.id) }
         let source = TopicListEntry.topic(record)
         var zone = original.filter { $0.isPinned == record.isPinned }
-        let index = arrival.index(in: zone, pinned: record.isPinned)
+        let index = record.isPinned ? zone.count : topOfBench(in: zone, inPlay: inPlay)
         zone.insert(source, at: index)
         return placing(source, at: index, in: zone, others: original.filter { $0.isPinned != record.isPinned })
+    }
+
+    /// The index in `zone`, the cards that are not Pinned, where a new or returning Topic goes: right after the last
+    /// In Play place while there are fewer places than `inPlay`, else right before the first Benched card, or last when
+    /// there is none. A Guest does not count toward `inPlay`.
+    static func topOfBench(in zone: [TopicListEntry], inPlay: Int) -> Int {
+        let regulars = zone.indices.filter { zone[$0].slot != .guest }
+        if regulars.count > inPlay { return regulars[inPlay] }
+        return regulars.count < inPlay ? regulars.last.map { $0 + 1 } ?? 0 : zone.count
     }
 
     /// Choose In Play: the first `inPlay` of `chosen` fill the In Play places in this order, and the places after the
@@ -430,22 +396,16 @@ public enum TopicOrder {
         return rewriting(zone, from: original, endedLocks: ended)
     }
 
-    /// A trade: two cards that are not Pinned exchange their positions, and no other card moves. With `inPlay`, each
+    /// A trade: two cards that are not Pinned exchange their positions, and no other card moves. Each
     /// card takes the mark of the section it lands in: a Guest that comes into a place loses its Guest mark, and a card
     /// that comes into the Guests section gets it. A Guest Session cannot take a place, and its Lock ends when it goes
     /// to the Bench. An Open Place that leaves the places closes, so a trade with one fills it.
-    public static func trading(_ card: TopicListID, with other: TopicListID, inPlay: Int? = nil,
+    public static func trading(_ card: TopicListID, with other: TopicListID, inPlay: Int,
                                in entries: [TopicListEntry]) throws -> TopicListChange {
         let all = sorted(entries)
         guard let source = all.first(where: { $0.id == card }) else { throw Failure.sourceUnavailable }
         guard let anchor = all.first(where: { $0.id == other }) else { throw Failure.anchorUnavailable }
         guard !source.isPinned, !anchor.isPinned else { throw Failure.pinned }
-        guard let inPlay else {
-            let original = all.filter { !$0.isPinned }
-            var zone = original
-            zone.swapAt(zone.firstIndex { $0.id == card }!, zone.firstIndex { $0.id == other }!)
-            return TopicListChange(normalized(zone, from: original))
-        }
         let cut = cut(entries, inPlay: inPlay)
         enum Section { case places, guests, bench }
         func section(_ id: TopicListID) -> Section {
@@ -524,10 +484,9 @@ public enum TopicOrder {
 
     /// The order after a change that took cards out of the list, such as Settle, Forget, Pin or the end of a Lock: each
     /// regular card that left an In Play place `before` leaves an Open Place there, so no other card moves. A Guest that
-    /// leaves leaves no Open Place. Each Open Place past the last place, or any Open Place without `inPlay`, closes.
-    public static func keepingPlaces(from before: [TopicListEntry], in after: [TopicListEntry], inPlay: Int?) -> TopicListChange {
+    /// leaves leaves no Open Place. Each Open Place past the last place closes.
+    public static func keepingPlaces(from before: [TopicListEntry], in after: [TopicListEntry], inPlay: Int) -> TopicListChange {
         let zone = sorted(after).filter { !$0.isPinned }
-        guard let inPlay else { return TopicListChange([], closedPlaces: zone.openPlaces.map(\.id)) }
         let ids = Set(zone.map(\.id))
         let left = cut(before, inPlay: inPlay).places.enumerated().filter { _, entry in
             if case .topic = entry { return !ids.contains(entry.id) }
@@ -543,24 +502,25 @@ public enum TopicOrder {
         return rewriting(cut.places + zone.filter(\.isGuest) + cut.bench, from: zone)
     }
 
-    /// The order in the three sections, as the Sidebar shows it: what `topics.in_play` does to the Locked Sessions when
-    /// the Config sets it. A list in that order does not change.
+    /// The order in the three sections, as the Sidebar shows it: each Locked Session that an older Muxify kept among
+    /// the Topics goes to the Guests. A list in that order does not change.
     public static func gatheringGuests(inPlay: Int, in entries: [TopicListEntry]) -> TopicListChange {
+        guard !isInSections(entries, inPlay: inPlay) else { return TopicListChange([]) }
         let zone = sorted(entries).filter { !$0.isPinned }
         return rewriting(layout(entries, inPlay: inPlay), from: zone)
     }
 
-    /// Locks the Session last among the entries that are not Pinned, or with `inPlay` at the end of the Guests.
-    static func appendingLock(of sessionID: String, inPlay: Int? = nil, in entries: [TopicListEntry]) -> [TopicListEntry] {
+    /// Whether the cards that are not Pinned are in the order of the three sections, as the Sidebar shows them.
+    public static func isInSections(_ entries: [TopicListEntry], inPlay: Int) -> Bool {
+        sorted(entries).filter { !$0.isPinned }.map(\.id) == layout(entries, inPlay: inPlay).map(\.id)
+    }
+
+    /// Locks the Session at the end of the Guests.
+    static func appendingLock(of sessionID: String, inPlay: Int, in entries: [TopicListEntry]) -> [TopicListEntry] {
         // NaN is never an index, so a renumber gives the new Lock its order too.
         let source = TopicListEntry.lock(SessionLock(sessionID: sessionID, order: .nan))
-        if let inPlay {
-            let cut = cut(entries, inPlay: inPlay)
-            return normalized(cut.places + cut.guests + [source] + cut.bench, from: layout(entries, inPlay: inPlay))
-        }
-        let original = sorted(entries)
-        let zone = original.filter { !$0.isPinned } + [source]
-        return placing(source, at: zone.count - 1, in: zone, others: original.filter(\.isPinned))
+        let cut = cut(entries, inPlay: inPlay)
+        return normalized(cut.places + cut.guests + [source] + cut.bench, from: layout(entries, inPlay: inPlay))
     }
 
     /// The open cards that are not Pinned, in the three sections, with each Open Place past the last place.

@@ -19,10 +19,10 @@ public struct TopicContents: Equatable, Sendable {
 public struct TopicStore: Sendable {
     public let paths: MuxifyPaths
     /// The Config's `topics.in_play`. A write that takes a card out of an In Play place leaves an Open Place by it.
-    public let inPlay: Int?
+    public let inPlay: Int
     private let database: StateConnection
 
-    public init(paths: MuxifyPaths, inPlay: Int? = nil) {
+    public init(paths: MuxifyPaths, inPlay: Int = Config.Topics.defaultInPlay) {
         self.paths = paths
         self.inPlay = inPlay
         database = StateConnection(paths: paths)
@@ -91,11 +91,10 @@ public struct TopicTransaction {
     public internal(set) var locks: [SessionLock] = []
     /// The Open Places, which share the records' order.
     public internal(set) var openPlaces: [OpenPlace] = []
-    /// The Config's `topics.in_play`: with it, the Locked Sessions are Guests, and a regular card that leaves an In Play
-    /// place leaves an Open Place.
-    public let inPlay: Int?
+    /// The Config's `topics.in_play`: a regular card that leaves an In Play place leaves an Open Place.
+    public let inPlay: Int
 
-    init(records: [TopicRecord], inPlay: Int? = nil) {
+    init(records: [TopicRecord], inPlay: Int = Config.Topics.defaultInPlay) {
         self.records = records
         self.inPlay = inPlay
     }
@@ -114,10 +113,10 @@ public struct TopicTransaction {
         records.map(TopicListEntry.topic) + locks.map(TopicListEntry.lock) + openPlaces.map(TopicListEntry.openPlace)
     }
 
-    /// Adds a new Topic where `arrival` puts it, or in the place of the Lock of `lockedSessionID`, which then ends. With
-    /// `in_play`, that Lock is a Guest, so the Topic gets the Guest mark. An id that a record has is taken. The plan that makes the Topic ends the Lock in tmux, so the result leaves it out.
+    /// Adds a new Topic at the top of the Bench, or in the place of the Lock of `lockedSessionID`, which then ends. That
+    /// Lock is a Guest, so the Topic gets the Guest mark. An id that a record has is taken. The plan that makes the Topic ends the Lock in tmux, so the result leaves it out.
     @discardableResult
-    public mutating func create(_ record: TopicRecord, arrival: TopicArrival = .end(.bottom), replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLockChange] {
+    public mutating func create(_ record: TopicRecord, replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLockChange] {
         try TopicStore.check(record)
         guard !records.contains(where: { $0.id == record.id }) else {
             throw CocoaError(.fileWriteFileExists)
@@ -125,10 +124,10 @@ public struct TopicTransaction {
         if let lock = locks.first(where: { $0.sessionID == lockedSessionID }) {
             var placed = record
             placed.order = lock.order
-            placed.isGuest = inPlay != nil
+            placed.isGuest = true
             return put(TopicListChange([.topic(placed)], endedLocks: [lock.sessionID])).filter { $0 != .end(sessionID: lock.sessionID) }
         }
-        return put(TopicOrder.inserting(record, at: arrival, in: entries))
+        return put(TopicOrder.inserting(record, inPlay: inPlay, in: entries))
     }
 
     public mutating func update(_ id: String, _ mutate: (inout TopicRecord) throws -> Void) throws {
@@ -153,10 +152,10 @@ public struct TopicTransaction {
     /// the plan ran stays. When two writers change one column, the last write wins for that column. A Topic that is
     /// not in the database is created only when the plan read no previous record, as `create` does.
     @discardableResult
-    public mutating func apply(_ change: TopicRecordChange, arrival: TopicArrival = .end(.bottom), replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLockChange] {
+    public mutating func apply(_ change: TopicRecordChange, replacingLockOf lockedSessionID: String? = nil) throws -> [SessionLockChange] {
         guard let current = records.first(where: { $0.id == change.after.id }) else {
             guard change.before == nil else { throw Failure.topicUnavailable(change.after.id) }
-            return try create(change.after, arrival: arrival, replacingLockOf: lockedSessionID)
+            return try create(change.after, replacingLockOf: lockedSessionID)
         }
         let before = TopicTable.values(of: change.before ?? TopicRecord(id: current.id))
         let after = TopicTable.values(of: change.after)
@@ -167,7 +166,7 @@ public struct TopicTransaction {
         let record = TopicTable.record(id: current.id, merged)
         try TopicStore.check(record)
         if current.settledAt != nil, record.settledAt == nil {
-            return put(TopicOrder.inserting(record, at: arrival, in: entries))
+            return put(TopicOrder.inserting(record, inPlay: inPlay, in: entries))
         }
         return put([.topic(record)])
     }
@@ -215,21 +214,17 @@ public struct TopicTransaction {
             guard case .topic(let topic) = id else { throw TopicOrder.Failure.guestSession }
             return topic
         }
-        func limit() throws -> Int {
-            guard let inPlay else { throw TopicOrder.Failure.notInPlay }
-            return inPlay
-        }
         switch outcome {
         case .reorder(let placement): return try move(id, to: placement)
-        case .toGuests: return put(try TopicOrder.sendingToGuests(topicID(), inPlay: limit(), in: entries))
-        case .fill(let place): return try fillOpenPlace(place, with: topicID(), inPlay: limit())
+        case .toGuests: return put(try TopicOrder.sendingToGuests(topicID(), inPlay: inPlay, in: entries))
+        case .fill(let place): return try fillOpenPlace(place, with: topicID(), inPlay: inPlay)
         case .trade(let other): return try trade(id, with: other)
-        case .takePlace: return put(try TopicOrder.takingNextPlace(topicID(), inPlay: limit(), in: entries))
+        case .takePlace: return put(try TopicOrder.takingNextPlace(topicID(), inPlay: inPlay, in: entries))
         case .bench:
-            guard case .lock(let sessionID) = id else { return try bench(topicID(), inPlay: limit()) }
+            guard case .lock(let sessionID) = id else { return try bench(topicID(), inPlay: inPlay) }
             return unlock(sessionID)
         case .makeGuest:
-            guard case .lock(let sessionID) = id else { return try makeGuest(topicID(), inPlay: limit()) }
+            guard case .lock(let sessionID) = id else { return try makeGuest(topicID(), inPlay: inPlay) }
             return lock(sessionID)
         case .refused(let failure): throw failure
         case .atEnd, .hidden: return []
@@ -268,21 +263,20 @@ public struct TopicTransaction {
         put(try TopicOrder.makingGuest(id, inPlay: inPlay, in: entries))
     }
 
-    /// Writes the order in the three sections, as the Config's `in_play` does to the Locks when it is set.
+    /// Writes the order in the three sections, so each Locked Session that an older Muxify kept among the Topics is a Guest.
     @discardableResult
     public mutating func gatherGuests(inPlay: Int) -> [SessionLockChange] {
         put(TopicOrder.gatheringGuests(inPlay: inPlay, in: entries))
     }
 
-    /// Locks the Session last among the Topics that are not Pinned, or with `in_play` at the end of In Play, where it is
-    /// a Guest. A Session that is already Locked keeps its place.
+    /// Locks the Session at the end of the Guests. A Session that is already Locked keeps its place.
     @discardableResult
     public mutating func lock(_ sessionID: String) -> [SessionLockChange] {
         guard !locks.contains(where: { $0.sessionID == sessionID }) else { return [] }
         return put(TopicOrder.appendingLock(of: sessionID, inPlay: inPlay, in: entries))
     }
 
-    /// Ends the Lock of the Session. With `in_play` it is a Guest that leaves, so it leaves no Open Place.
+    /// Ends the Lock of the Session. It is a Guest that leaves, so it leaves no Open Place.
     @discardableResult
     public mutating func unlock(_ sessionID: String) -> [SessionLockChange] {
         guard locks.contains(where: { $0.sessionID == sessionID }) else { return [] }

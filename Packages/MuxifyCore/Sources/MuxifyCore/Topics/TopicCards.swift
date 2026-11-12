@@ -35,13 +35,13 @@ public enum TopicCards {
         TopicOrder.sorted(TopicListEntry.all(records: records, windows: windows, openPlaces: openPlaces))
     }
 
-    /// What one step does to the card. With `inPlay`, a card that is not Pinned moves inside its section of the cut
+    /// What one step does to the card. A card that is not Pinned moves inside its section of the cut
     /// (`InPlayCut`), and a step past the end of a section goes into the next one. A hidden Bench has no card to reorder
     /// with below its top, so Up from any Benched card makes a Guest.
-    public static func step(_ id: TopicListID, _ step: Step, in cards: [TopicListEntry], inPlay: Int?,
+    public static func step(_ id: TopicListID, _ step: Step, in cards: [TopicListEntry], inPlay: Int,
                             benchShown: Bool = true) -> Outcome {
         guard let card = cards.first(where: { $0.id == id }) else { return .hidden }
-        guard let inPlay, !card.isPinned else { return neighbor(of: id, step, in: cards.filter { $0.isPinned == card.isPinned }) }
+        guard !card.isPinned else { return neighbor(of: id, step, in: cards.filter { $0.isPinned == card.isPinned }) }
         if case .openPlace = card { return .hidden }
         let cut = TopicOrder.cut(cards, inPlay: inPlay)
         if cut.places.contains(where: { $0.id == id }) {
@@ -60,10 +60,10 @@ public enum TopicCards {
         return .hidden
     }
 
-    /// What one step does to the No Topic Session that is not Locked. It has no card, so only Up with `inPlay` does
-    /// anything: Make a Guest, which is a Lock. Without `inPlay`, Lock Session is the way.
-    public static func stepUnlockedSession(_ step: Step, inPlay: Int?) -> Outcome {
-        inPlay != nil && step == .up ? .makeGuest : .hidden
+    /// What one step does to the No Topic Session that is not Locked. It has no card, so only Up does anything: Make a
+    /// Guest, which is a Lock.
+    public static func stepUnlockedSession(_ step: Step) -> Outcome {
+        step == .up ? .makeGuest : .hidden
     }
 
     private static func upFromTopGuest(_ guest: TopicListEntry, cut: InPlayCut<TopicListEntry>, inPlay: Int) -> Outcome {

@@ -168,7 +168,6 @@ final class CommandPalette {
                 if session.windows.first?.topicID != nil { actions += [.removeFromTopic, .removeFromTopicAndKill] }
             }
             if let guest = store?.guestState(of: .session(session.id)) { actions += [guest ? .bench : .makeGuest] }
-            else if let locked = store?.lockState(ofSession: session.id) { actions += [locked ? .unlockSession : .lockSession] }
             actions += [.newSession, .rename, .newWindow, .killSession]
         case .window(let window):
             if store?.isRemote == false { actions += [.move]; if window.topicID != nil { actions += [.removeFromTopic] } }
@@ -228,8 +227,6 @@ final class CommandPalette {
         case .revealFolder: return "Reveal in Finder"
         case .killWindow: return "Kill Window"
         case .killSession: return "Kill Session"
-        case .lockSession: return "Lock"
-        case .unlockSession: return "Unlock"
         case .makeGuest: return "Make a Guest"
         case .bench: return "Bench"
         default: return action.rawValue

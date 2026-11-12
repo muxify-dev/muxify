@@ -19,7 +19,7 @@ final class TopicWireTests: XCTestCase {
             .move(to: .newSession(topic: nil)), .move(to: .newTopic(title: "Fix")),
             .settle(choices: [], outcome: "Done"), .forget(choices: [], worktrees: []),
             .removeFromTopic, .removeAndKill(worktrees: []), .rename(title: "Next"), .reopen, .startFresh,
-            .lock, .unlock, .moveSession(to: .before(session)), .moveSession(to: .up), .moveSession(to: .down), .sortSessions,
+            .moveSession(to: .before(session)), .moveSession(to: .up), .moveSession(to: .down), .sortSessions,
             .tags(.set([Tag(name: "backend")!])), .note("Bisect"), .note(nil),
             .newWindow(command: ["make", "test"]), .newSession(sessionPath: "/work", name: "notes"), .renameSession(name: "n"),
             .renameWindow(name: "w"), .zoomPane, .killWindow, .killSession, .pin, .unpin, .moveCard(.up), .moveCard(.down),

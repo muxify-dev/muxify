@@ -1,5 +1,7 @@
 # A Guest is In Play above the limit and keeps its position
 
+> **Partly superseded by [ADR-0081](0081-in-play-is-the-only-topics-mode.md):** every Locked Session is a Guest Session, and Lock Session and Unlock Session are gone. The app gathers the Locks into the Guests when the order on disk is not the order of the sections, and it keeps no flag. The text below about a Config without `in_play` does not apply.
+
 > **Partly superseded by [ADR-0064](0064-in-play-places-stay-open-and-guests-show-in-their-own-section.md):** a Guest no longer keeps its position among the In Play cards. The Guests show in their own section, under a Guests line after the In Play places. A regular card that leaves a place leaves an Open Place. A Trade across the Guests line gives the Guest mark to the card that leaves the places. Bench Topic takes the place of End Guest for a Guest Topic, and Choose In Play lists the Guest Topics. The rules for Make a Guest, the Lock and the mark in the record still apply.
 
 With `topics.in_play` set, a user who goes to a Benched Topic from a Command Palette had two ways to keep it in view: Replace from Bench or a Trade. Both send another card to the Bench. Often the user wants the Topic in view for a short time only, without a change to the regular In Play cards. A Locked Session had the same problem: it took one of the N places, so a Lock pushed a Topic to the Bench.

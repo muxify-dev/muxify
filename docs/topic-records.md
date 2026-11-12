@@ -242,9 +242,10 @@ remembered Session. It makes one shell Window there, with no Tabs and no Agent.
 When the new Sessions are live, the record remembers them in place of the old
 Windows.
 
-## Locked Sessions
+## Guest Sessions
 
-A Lock (ADR 0018) has no record. tmux keeps it in the Session option
+A Guest Session has no record. It is a No Topic Session with a Lock (ADR 0018).
+tmux keeps the Lock in the Session option
 `@muxify_lock`. Its value is the place of the Session's card in the Topics list,
 in the same scale as the `order` of the Topic records:
 
@@ -252,18 +253,25 @@ in the same scale as the `order` of the Topic records:
 tmux set-option -t notes @muxify_lock 3.5
 ```
 
-Only a No Topic Session can be Locked. Muxify ignores the option on a Session
-whose `@muxify_topic` names an open Topic. A Lock is never Pinned, so its card
-moves among the Topics that are not Pinned. When a move renumbers the list,
-Muxify writes the new `order` values to the records and the new
-`@muxify_lock` values to tmux. A new Lock goes after the last Topic that is not
-Pinned. The Lock ends when the user Unlocks the Session, when the Session ends,
+Only a No Topic Session can have a Lock. Muxify ignores the option on a Session
+whose `@muxify_topic` names an open Topic. A Lock is never Pinned, and its
+Session is always a Guest, so its card shows in the Guests. When a move
+renumbers the list, Muxify writes the new `order` values to the records and the
+new `@muxify_lock` values to tmux. A new Lock goes to the end of the Guests.
+The Lock ends when the user Benches the Guest Session, when the Session ends,
 and when the Session goes into a Topic. A Topic that the user makes from a
-Locked Session takes the Lock's value as its `order`.
+Guest Session takes the Lock's value as its `order`, and the Guest mark.
 
-`muxify session lock` and `muxify session unlock`, and the URLs
-`muxify://topic/lock?session=<name>` and `muxify://topic/unlock?session=<name>`,
-change a Lock through the Topic service.
+`muxify topic make-guest --session <name>` and `muxify topic bench --session
+<name>` set and end a Lock through the Topic service. `muxify session lock`,
+`muxify session unlock` and the URLs `muxify://topic/lock` and
+`muxify://topic/unlock` are gone.
+
+An older Muxify kept a Locked Session among the Topics while the Config did not
+set `topics.in_play`. When the app starts and finds a Lock outside the Guests,
+it writes the list again in the order of the three sections: the In Play
+places, the Guests, the Bench. A list that is already in this order does not
+change.
 
 ## Forget
 

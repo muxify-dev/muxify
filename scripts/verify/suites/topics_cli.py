@@ -54,7 +54,7 @@ class TopicsCli(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         paths = self.help_paths(result.stdout)
         self.assertEqual(len(paths), len(set(paths)), 'a verb is listed twice: %s' % paths)
-        for path in ['topic new', 'topic add-session', 'window move', 'session lock', 'agent conversation']:
+        for path in ['topic new', 'topic add-session', 'window move', 'topic make-guest', 'agent conversation']:
             self.assertIn(path, paths)
         for path in paths:
             verb = self.muxify(*path.split(), '--help', pane='')
@@ -532,18 +532,26 @@ class TopicsCli(unittest.TestCase):
         self.assertLess(ids.index(second), ids.index(first), ids)
 
     def test_topic_move_steps_the_card_and_fails_at_the_end_or_for_a_settled_topic(self):
-        top, settled, moved = (json.loads(self.muxify('topic', 'new', title, '--json', pane='').stdout)['changed']['topic_id']
-                               for title in ('Move top', 'Move settled', 'Move moved'))
+        def new(title):
+            return json.loads(self.muxify('topic', 'new', title, '--json', pane='').stdout)['changed']['topic_id']
+        # The Settled Topic is Settled before the others exist, so the Open Place that it leaves is not between them.
+        settled = new('Move settled')
         settle = self.muxify('topic', 'settle', '--topic', settled, pane='')
         self.assertEqual(settle.returncode, 0, settle.stderr)
+        top, moved = new('Move top'), new('Move moved')
+        # The suite's other checks leave Topics, so the two get the first In Play places by name.
+        chosen = self.muxify('topic', 'choose-in-play', '--topic', top, '--topic', moved, pane='')
+        self.assertEqual(chosen.returncode, 0, chosen.stderr)
+        ids = [topic['id'] for topic in self.topic_list()]
+        self.assertEqual(ids[:2], [top, moved], 'the two Topics are not in the first In Play places: %s' % ids)
 
         up = self.muxify('topic', 'move', 'up', '--topic', moved, pane='')
         self.assertEqual(up.returncode, 0, up.stderr)
         ids = [topic['id'] for topic in self.topic_list()]
-        self.assertEqual(ids[-2:], [moved, top], 'the card did not step up: %s' % ids)
+        self.assertEqual(ids[:2], [moved, top], 'the card did not step up: %s' % ids)
 
         before = self.topic_list()
-        at_end = self.muxify('topic', 'move', 'down', '--topic', top, '--json', pane='')
+        at_end = self.muxify('topic', 'move', 'up', '--topic', moved, '--json', pane='')
         self.assertEqual(at_end.returncode, 1, at_end.stderr)
         self.assertEqual(json.loads(at_end.stdout)['failed']['kind'], 'card_at_end', at_end.stdout)
         closed = self.muxify('topic', 'move', 'up', '--topic', settled, '--json', pane='')

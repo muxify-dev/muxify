@@ -266,7 +266,7 @@ struct TopicsModel {
         var agentSpines: [String: AgentMark] = [:]
         var usesRowMarks = false
         var isUnread = false
-        /// A Guest, while the Config sets `topics.in_play`: a Topic with the Guest mark, or a Locked Session.
+        /// A Guest: a Topic with the Guest mark, or a Locked Session.
         var isGuest = false
         let isPinned: Bool
         let sessions: [Session]
@@ -440,10 +440,9 @@ struct TopicsModel {
     private let cards: [TopicListEntry]
     private let inPlayInTopicsMode: Int?
 
-    /// The cards that are not Pinned, cut at the Guests line and the Bench line, as `TopicsList` cuts them; nil while
-    /// the Config does not set `topics.in_play`. It does not follow the Sidebar mode, so the In Play Actions work in
-    /// Sessions mode too.
-    let cut: InPlayCut<ListCard>?
+    /// The cards that are not Pinned, cut at the Guests line and the Bench line, as `TopicsList` cuts them. It does not
+    /// follow the Sidebar mode, so the In Play Actions work in Sessions mode too.
+    let cut: InPlayCut<ListCard>
 
     /// The slots of `list` that the item `id` can reach in a drag: the cards with its Pin and, among the cards that are
     /// not Pinned, the Bench line and the opened No Topic Session, which a card passes. A card that crosses the line
@@ -459,17 +458,17 @@ struct TopicsModel {
 
     /// What Move Up and Move Down do to a card of the Topics list, with the Bench as the Sidebar shows it now.
     func steps(of id: TopicListID) -> CardSteps {
+        guard let inPlay = inPlayInTopicsMode else { return CardSteps(up: .hidden, down: .hidden) }
         let benchShown = isBenchShown == true
-        return CardSteps(up: TopicCards.step(id, .up, in: cards, inPlay: inPlayInTopicsMode, benchShown: benchShown),
-                         down: TopicCards.step(id, .down, in: cards, inPlay: inPlayInTopicsMode, benchShown: benchShown))
+        return CardSteps(up: TopicCards.step(id, .up, in: cards, inPlay: inPlay, benchShown: benchShown),
+                         down: TopicCards.step(id, .down, in: cards, inPlay: inPlay, benchShown: benchShown))
     }
 
     /// The opened No Topic Session has no card until it is Locked, but Move Up makes it a Guest (`TopicCards.stepUnlockedSession`).
     func steps(of id: TopicGroupID) -> CardSteps {
         if let listID = id.listID { return steps(of: listID) }
-        guard id == .noTopic, openedNoTopicSession != nil else { return CardSteps(up: .hidden, down: .hidden) }
-        return CardSteps(up: TopicCards.stepUnlockedSession(.up, inPlay: inPlayInTopicsMode),
-                         down: TopicCards.stepUnlockedSession(.down, inPlay: inPlayInTopicsMode))
+        guard id == .noTopic, openedNoTopicSession != nil, inPlayInTopicsMode != nil else { return CardSteps(up: .hidden, down: .hidden) }
+        return CardSteps(up: TopicCards.stepUnlockedSession(.up), down: TopicCards.stepUnlockedSession(.down))
     }
 
     /// Every live No Topic Session, Locked or not. The Command Palette reaches each of them.
@@ -515,7 +514,7 @@ struct TopicsModel {
     let mode: SidebarMode
     /// `topics.tags`; nil while Tags are off.
     let tags: ConfigTags?
-    /// The list shows In Play places: `topics.in_play` is set and the Sidebar is in Topics mode.
+    /// The list shows In Play places: the Sidebar is in Topics mode.
     let showsInPlay: Bool
     var showsToggle: Bool { topicsEnabled && sessionsEnabled }
 
@@ -602,7 +601,7 @@ struct TopicsModel {
             }
         }
         let listCardsByID = Dictionary(zip(topicsList.entries.map(\.id), listCards), uniquingKeysWith: { first, _ in first })
-        let cut = topicsList.inPlay?.cut.compactMap { listCardsByID[$0.id] }
+        let cut = topicsList.inPlay.cut.compactMap { listCardsByID[$0.id] }
         self.cut = cut
         let rows = listCards.compactMap(\.row)
         let outsideTopics = windows.filter { window in
@@ -618,7 +617,7 @@ struct TopicsModel {
         topicSessions = Dictionary((rows.flatMap(\.sessions) + noTopicSessions).map { ($0.id.session, $0) },
                                    uniquingKeysWith: { first, _ in first })
         self.rows = rows
-        showsInPlay = self.mode == .topics && config.topics.inPlay != nil
+        showsInPlay = self.mode == .topics
         list = Self.list(listCards, cut: self.mode == .topics ? cut : nil, benchShown: benchShown,
                          peek: benchPeek, location: active, noTopic: openedNoTopicSession)
         let settled = records.filter { $0.settledAt != nil }

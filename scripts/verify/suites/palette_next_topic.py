@@ -48,8 +48,9 @@ class PaletteNextTopic(unittest.TestCase):
             s.act('press', 'sidebar-view-topics')
         rs = s.wait_rows(lambda rs: all(s.has('topic-' + name, rs) for name in names), 'The Topic cards did not show')
         order = sorted(names, key=lambda name: -frame(s.row('topic-' + name, rs))[1])
-        current = order[-1] if placement == 'above' else order[0]
-        expected = order[-2] if placement == 'above' else order[1] if placement == 'below' else None
+        current = order[-1] if placement == 'last' else order[0]
+        # The last card that shows has no card below it, so the first In Play card opens.
+        expected = order[0] if placement == 'last' else order[1] if placement == 'below' else None
         self.select_window(windows[current])
         wait(lambda: s.driver('press', 'Settle Topic…')['pressed'], 'Settle stayed disabled')
         s.wait_rows(lambda rs: any(key.startswith('palette-row-session-') for key in s.ids(rs)),
@@ -79,8 +80,8 @@ class PaletteNextTopic(unittest.TestCase):
     def test_settle_opens_the_topic_below(self):
         self.check_next('below')
 
-    def test_settle_opens_the_topic_above_at_the_end(self):
-        self.check_next('above')
+    def test_settle_of_the_last_card_opens_the_first_card_in_play(self):
+        self.check_next('last')
 
     def test_settle_opens_no_topic_when_no_other_topic_remains(self):
         self.check_next('none')

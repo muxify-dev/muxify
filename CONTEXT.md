@@ -89,7 +89,7 @@ The Topic of the App Window's Location: the Topic of its Window or of its Empty 
 _Avoid_: current Topic, selected Topic, focused Topic
 
 **Next Topic**:
-The Topic or Locked Session that Muxify opens when the card that the user is on leaves the Sidebar by Settle, Forget or Bench: the nearest card below it that the Sidebar shows. With In Play and no such card, the first In Play card, also when the Bench is empty. Else the nearest row below it in the Topics list that stays, else the nearest such row above it, else No Topic. With In Play it is never a Pinned Topic.
+The Topic or Guest Session that Muxify opens when the card that the user is on leaves the Sidebar by Settle, Forget or Bench: the nearest card below it that the Sidebar shows. With no such card, the first In Play card, also when the Bench is empty. Else the nearest row below it in the Topics list that stays, else the nearest such row above it, else No Topic. It is never a Pinned Topic.
 _Avoid_: following Topic, previous Topic, last Topic
 
 **Tag**:
@@ -137,11 +137,11 @@ An open Topic that has no live Session and remembers no Session: the user stoppe
 _Avoid_: Dormant (when it remembers no Session), blank, cleared
 
 **In Play**:
-The In Play places and the Guests. The number of places is the number that the Config gives. Each place holds an open Topic that is not Pinned and is not a Guest. A place that holds no Topic is an Open Place. The Sidebar shows the Pinned Topics, then the places, then the Guests line and the Guests, then the Bench line. A Guest never shows between two places.
+The In Play places and the Guests. It is the only way the Sidebar lists the Topics. The number of places is the number that the Config gives, and 5 when the Config gives none. Each place holds an open Topic that is not Pinned and is not a Guest. A place that holds no Topic is an Open Place. The Sidebar shows the Pinned Topics, then the places, then the Guests line and the Guests, then the Bench line. A Guest never shows between two places.
 _Avoid_: active Topics, focus Topics, front Topics, WIP limit
 
 **Bench**:
-The open Topics in the Topics list that are not Pinned, not Guests and hold no In Play place. The Sidebar hides them behind the Bench line until the user shows the Bench. A Benched Topic keeps its place in the list, its Sessions and its Agents. A Locked Session is never Benched: with In Play it is a Guest.
+The open Topics in the Topics list that are not Pinned, not Guests and hold no In Play place. The Sidebar hides them behind the Bench line until the user shows the Bench. A Benched Topic keeps its place in the list, its Sessions and its Agents. A new Topic and a Topic that comes back go to the top of the Bench. A Locked Session is never Benched: it is a Guest.
 _Avoid_: backlog, queue, hidden Topics, overflow, Snooze (when you mean the Bench)
 
 **Choose In Play**:
@@ -157,24 +157,24 @@ To keep a Topic above every Topic that is not Pinned, in each list of Topics, un
 _Avoid_: favorite, star, sticky, keep on top
 
 **Lock**:
-To keep a No Topic Session in the Topics list as a card with a number, in the order of the Topics, until the user Unlocks it, the Session ends, or the Session goes into a Topic. With In Play, a Lock makes the Session a Guest, so the user does it with Make a Guest.
-_Avoid_: pin, keep, dock, sticky
+The tmux option that makes a No Topic Session a Guest Session. Make a Guest sets it. It stays until Bench ends it, the Session ends, or the Session goes into a Topic. It is a word of the code and of tmux: the user sees Guest Session, Make a Guest and Bench.
+_Avoid_: pin, keep, dock, sticky, Lock Session (as a Command or an Action)
 
 **Locked Session**:
-A No Topic Session that the user Locked. It has a card among the Topics, but it is not a Topic: it cannot be Settled, Pinned or Forgotten. With In Play, every Locked Session is a Guest.
+A No Topic Session that has a Lock. It has a card among the Guests, but it is not a Topic: it cannot be Settled, Pinned or Forgotten. Every Locked Session is a Guest, and the user sees it as a Guest Session.
 _Avoid_: kept Session, pinned Session, Topic (when you mean the Session)
 
 **Unlock**:
-To end a Lock. The Session stays, as a No Topic Session. With In Play, Bench of a Guest Session Unlocks it.
-_Avoid_: unpin, release
+To end a Lock, which Bench of a Guest Session does. The Session stays, as a No Topic Session. It is a word of the code: the user sees Bench.
+_Avoid_: unpin, release, Unlock Session (as a Command or an Action)
 
 **Guest**:
 A card In Play above the number that the Config gives: a Topic with the Guest mark, or a Locked Session. It does not count toward that number, and it shows under the Guests line, after the In Play places. It never waits on the Bench, and when it leaves it leaves no Open Place.
 _Avoid_: visitor, temporary Topic, extra slot, Pin (when you mean a Guest)
 
 **Make a Guest**:
-An Action on a Benched Topic or a No Topic Session. The card goes to the end of the Guests, directly above the Bench line, as a Guest. No other card goes to the Bench. For a Session, it is a Lock.
-_Avoid_: put In Play, promote, Lock (when the Config sets In Play)
+An Action on a Benched Topic or a No Topic Session. The card goes to the end of the Guests, directly above the Bench line, as a Guest. No other card goes to the Bench. For a Session, it sets the Lock.
+_Avoid_: put In Play, promote, Lock Session
 
 **Bench (the Action)**:
 The Action that takes a card out of In Play: an In Play Topic, a Guest Topic or a Guest Session. A Topic goes to the top of the Bench and keeps its Sessions and Agents. From an In Play place it leaves an Open Place there. A Guest Topic loses its Guest mark and leaves no Open Place. A Guest Session has no record to wait on the Bench, so Bench Unlocks it: it waits in No Topic, and its card ends. When the user is on the card, the Next Topic opens if the Sidebar shows it.
@@ -189,7 +189,7 @@ A Sidebar drag that takes a card across the Guests line or the Bench line and le
 _Avoid_: swap, Replace from Bench (when the replaced card does not go to the end of the Bench), exchange
 
 **Move Up / Move Down**:
-A key step of one card in the Topics list: Move Topic Up and Move Topic Down, the Move buttons of a card, and `muxify topic move up|down`. Inside a section it is a reorder. With In Play, a step that would cross the Guests line or the Bench line changes the card's section instead, one section per step. Down from the last place makes the card the top Guest and leaves an Open Place. Up from the top Guest fills the lowest Open Place, or Trades with the last place when no place is open. Down from the last Guest is Bench. Up from the top of the Bench, or from any Benched card while the Bench is hidden, is Make a Guest. The user stays on the card, also on a hidden Bench. With In Play, Up on the opened No Topic Session, which has no card, is Make a Guest: it is Locked and goes to the end of the Guests. It has no Down. The CLI acts as if the Bench shows. Presses of the key made while a step runs each make one more step, and stop silently at the end.
+A key step of one card in the Topics list: Move Topic Up and Move Topic Down, the Move buttons of a card, and `muxify topic move up|down`. Inside a section it is a reorder. A step that would cross the Guests line or the Bench line changes the card's section instead, one section per step. Down from the last place makes the card the top Guest and leaves an Open Place. Up from the top Guest fills the lowest Open Place, or Trades with the last place when no place is open. Down from the last Guest is Bench. Up from the top of the Bench, or from any Benched card while the Bench is hidden, is Make a Guest. The user stays on the card, also on a hidden Bench. Up on the opened No Topic Session, which has no card, is Make a Guest: it is Locked and goes to the end of the Guests. It has no Down. The CLI acts as if the Bench shows. Presses of the key made while a step runs each make one more step, and stop silently at the end.
 _Avoid_: shift, nudge, Trade (when you mean a key step)
 
 ### Browser
@@ -378,7 +378,7 @@ The ranked list of an Action's step, such as Add a Session or Move. Each has a n
 _Avoid_: picker, dropdown, menu
 
 **Check step**:
-A palette step that lists Topics and Locked Sessions with a box on each, before an Action on the checked ones. Choose In Play starts with it.
+A palette step that lists Topics and Guest Sessions with a box on each, before an Action on the checked ones. Choose In Play starts with it.
 _Avoid_: pick step, chips, mark, multi-select, selection
 
 ### Git

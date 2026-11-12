@@ -136,7 +136,7 @@ enum PaletteFlow {
 
     @MainActor var placeholder: String {
         switch self {
-        case .check: "Topics and Locked Sessions, or #tag"
+        case .check: "Topics and Guest Sessions, or #tag"
         case .order(let draft): "What goes at place \(draft.place)?"
         case .replaceFromBench: "What comes In Play?"
         case .fillOpenPlace: "What takes this place?"

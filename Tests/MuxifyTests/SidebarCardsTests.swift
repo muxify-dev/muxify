@@ -43,14 +43,14 @@ final class SidebarCardsTests: XCTestCase {
         return TmuxSnapshot(windows: windows, clients: [], panes: panes, serverRunning: true)
     }
 
-    private func config(inPlay: Int?) -> Config {
+    private func config(inPlay: Int) -> Config {
         var config = Config()
         config.topics.inPlay = inPlay
         return config
     }
 
     /// Each section as lines of `kind id label state mark`, as the Sidebar lists its cards.
-    private func sidebar(inPlay: Int?) -> [String: [String]] {
+    private func sidebar(inPlay: Int) -> [String: [String]] {
         let tmux = tmux
         let model = TopicsModel(records: records, openPlaces: openPlaces, windows: tmux.windows, config: config(inPlay: inPlay),
                                 selection: TopicSelection(), benchShown: true, agents: tmux.agents)
@@ -59,7 +59,7 @@ final class SidebarCardsTests: XCTestCase {
         for item in model.list {
             switch item {
             case .card(let row):
-                if section == "pinned", !row.isPinned { section = inPlay == nil ? "list" : "places" }
+                if section == "pinned", !row.isPinned { section = "places" }
                 switch row.id {
                 case .topic(let id): sections[section, default: []].append(["topic", id, row.title, row.state?.rawValue ?? "-", row.mark?.rawValue ?? "-"].joined(separator: " "))
                 case .locked(let session): sections[section, default: []].append(["session", session, row.mark?.rawValue ?? "-"].joined(separator: " "))
@@ -81,13 +81,5 @@ final class SidebarCardsTests: XCTestCase {
         XCTAssertEqual(shown["guests"], ["topic guest Guest live -", "session $4 failed"])
         XCTAssertEqual(shown["bench"], ["topic beta Beta dormant -", "topic untitled-a Untitled 2 empty -",
                                         "topic untitled-b Untitled 1 live done", "topic chores Chores live unread"])
-    }
-
-    func testWithoutInPlayOneListShowsEveryCardInTheUsersOrder() {
-        let shown = sidebar(inPlay: nil)
-        XCTAssertEqual(shown["pinned"], ["topic pinned Pinned live working"])
-        XCTAssertEqual(shown["list"], ["topic alpha Alpha live blocked", "topic beta Beta dormant -", "topic guest Guest live -", "session $4 failed",
-                                       "topic untitled-a Untitled 2 empty -", "topic untitled-b Untitled 1 live done", "topic chores Chores live unread"],
-                       "no Open Place, and a Guest stays where the order puts it")
     }
 }

@@ -24,7 +24,7 @@ final class BenchTests: XCTestCase {
     private var windows: [TmuxWindow] { [window("1")] }
 
     /// The Topics model as the Sidebar builds it, at the Location of a Topic id, a Window id ("@…") or nowhere.
-    private func model(inPlay: Int?, benchShown: Bool = false, at place: String? = nil,
+    private func model(inPlay: Int, benchShown: Bool = false, at place: String? = nil,
                        records: [TopicRecord]? = nil, windows: [TmuxWindow]? = nil, openPlaces: [OpenPlace] = [],
                        benchPeek: TopicsModel.BenchPeek? = nil) -> TopicsModel {
         var config = Config()
@@ -66,7 +66,6 @@ final class BenchTests: XCTestCase {
                        "with no other In Play card, a Benched card, not the Pinned Topic next in the order")
         XCTAssertEqual(model(inPlay: 1, at: "a", records: Array(pinnedBetween.prefix(2))).nextTopic(after: .topic("a")), .noTopic,
                        "with only a Pinned Topic left, no Topic")
-        XCTAssertEqual(model(inPlay: nil, at: "d").nextTopic(after: .topic("d")), .topic("c"), "without In Play, the nearest card above")
         XCTAssertEqual(model(inPlay: 2, at: "@1", windows: [window("1", lock: 5)]).nextTopic(after: .locked("$1")), .topic("a"),
                        "a Guest Session, the last card that shows, goes to the first In Play card")
         let onlyInPlay = model(inPlay: 1, at: "a")
@@ -92,12 +91,11 @@ final class BenchTests: XCTestCase {
         XCTAssertFalse(shown.steps(of: TopicGroupID.topic("d")).canMove(.down))
     }
 
-    func testTheOpenedNoTopicSessionMovesUpToMakeAGuestOnlyWithInPlay() {
+    func testTheOpenedNoTopicSessionMovesUpToMakeAGuest() {
         let inPlay = model(inPlay: 2, at: "@1")
         XCTAssertEqual(inPlay.steps(of: TopicGroupID.noTopic).up, .makeGuest)
         XCTAssertTrue(inPlay.steps(of: TopicGroupID.noTopic).canMove(.up))
         XCTAssertFalse(inPlay.steps(of: TopicGroupID.noTopic).canMove(.down))
-        XCTAssertFalse(model(inPlay: nil, at: "@1").steps(of: TopicGroupID.noTopic).canMove(.up), "Lock Session is the way without In Play")
         XCTAssertFalse(model(inPlay: 2, at: "a").steps(of: TopicGroupID.noTopic).canMove(.up), "no Session is opened in No Topic")
     }
 
@@ -109,25 +107,15 @@ final class BenchTests: XCTestCase {
         XCTAssertEqual(topics.steps(of: TopicGroupID.topic("b")).down, .toGuests)
     }
 
-    func testWithoutInPlayAStepStaysAmongTheCardsWithTheSamePin() {
-        let topics = model(inPlay: nil)
-        XCTAssertEqual(topics.steps(of: TopicGroupID.topic("b")).up, .reorder(.before(.topic("a"))))
-        XCTAssertEqual(topics.steps(of: TopicGroupID.topic("d")).down, .atEnd)
-        XCTAssertFalse(topics.steps(of: TopicGroupID.topic("pinned")).canMove(.up))
-    }
-
     private func cards(_ model: TopicsModel) -> [QuickSwitchTarget] {
         QuickSwitchTargets(model: model, sessions: [], windows: [], tabIDs: []).cards
     }
 
-    func testWithoutInPlayTheListIsEveryCardThenTheNoTopicSessionAndHasNoBench() {
-        let off = model(inPlay: nil, at: "@1")
-        XCTAssertEqual(shown(off), ["topic-pinned", "topic-a", "topic-b", "topic-c", "topic-d", "no-topic"])
-        XCTAssertEqual(off.list.compactMap(\.cardID?.quickSwitchTarget), off.rows.compactMap(\.id.quickSwitchTarget))
-        XCTAssertNil(off.isBenchShown)
-        XCTAssertEqual(shown(model(inPlay: 4)), ["topic-pinned", "topic-a", "topic-b", "topic-c", "topic-d"],
-                       "with no card left for the Bench, the list has no Bench line")
-        XCTAssertNil(model(inPlay: 4).isBenchShown)
+    func testWithNoCardLeftForTheBenchTheListHasNoBenchLine() {
+        let wide = model(inPlay: 4, at: "@1")
+        XCTAssertEqual(shown(wide), ["topic-pinned", "topic-a", "topic-b", "topic-c", "topic-d", "no-topic"])
+        XCTAssertEqual(wide.list.compactMap(\.cardID?.quickSwitchTarget), wide.rows.compactMap(\.id.quickSwitchTarget))
+        XCTAssertNil(wide.isBenchShown)
     }
 
     func testPinnedCardsAlwaysShowAndDoNotCountTowardInPlay() {
@@ -147,16 +135,13 @@ final class BenchTests: XCTestCase {
         XCTAssertEqual(lock.rows.filter(\.isGuest).map(\.id), [.locked("$2")])
         XCTAssertEqual(CheckAction.chooseInPlay(places: 2).listed(lock).map(\.id), [.topic("a"), .topic("b"), .topic("c"), .topic("d")],
                        "Choose In Play does not list a Guest Session")
-        XCTAssertEqual(shown(model(inPlay: nil, windows: [window("2", lock: 0.5)])),
-                       ["topic-pinned", "topic-a", "locked-$2", "topic-b", "topic-c", "topic-d"])
 
         var records = self.records
         records[4].isGuest = true
         let topic = model(inPlay: 2, records: records)
         XCTAssertEqual(shown(topic), ["topic-pinned", "topic-a", "topic-b", "guests-line", "topic-d", "bench-line"],
                        "a Guest Topic is In Play, also when the order puts it after a Benched card")
-        XCTAssertEqual(topic.split?.bench.map(\.id), [.topic("c")])
-        XCTAssertFalse(model(inPlay: nil, records: records).rows.contains(where: \.isGuest), "without in_play the mark has no effect")
+        XCTAssertEqual(topic.split.bench.map(\.id), [.topic("c")])
     }
 
     func testAHiddenBenchShowsOnlyTheLocationsCardUnderTheLine() {
@@ -190,10 +175,10 @@ final class BenchTests: XCTestCase {
         XCTAssertTrue(topics.isBenched(.topic("c")))
         XCTAssertFalse(topics.isBenched(.topic("a")))
         XCTAssertEqual(model(inPlay: 2).listParts.bench?.map(\.id), [], "a hidden Bench away from the Location shows no card")
-        let off = model(inPlay: nil, at: "@1")
-        XCTAssertNil(off.listParts.bench, "without a Bench line every item is at the top")
-        XCTAssertEqual(off.listParts.top.map(\.id), shown(off))
-        XCTAssertEqual(off.benchCardIDs, [])
+        let wide = model(inPlay: 4, at: "@1")
+        XCTAssertNil(wide.listParts.bench, "without a Bench line every item is at the top")
+        XCTAssertEqual(wide.listParts.top.map(\.id), shown(wide))
+        XCTAssertEqual(wide.benchCardIDs, [])
     }
 
     func testADragShowsBenchedCardsOnlyForAMoment() {

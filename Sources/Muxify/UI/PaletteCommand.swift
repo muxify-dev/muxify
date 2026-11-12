@@ -24,8 +24,6 @@ enum PaletteCommand: String, CaseIterable {
     case moveTopicDown = "Move Topic Down"
     case pinTopic = "Pin Topic"
     case unpinTopic = "Unpin Topic"
-    case lockSession = "Lock Session"
-    case unlockSession = "Unlock Session"
     case makeGuest = "Make a Guest"
     case bench = "Bench"
     case maximize = "Maximize"
@@ -90,7 +88,6 @@ enum PaletteCommand: String, CaseIterable {
         case .forgetTopic: .forgetTopic
         case .renameTopic: .renameTopic
         case .setTopicNote: .setTopicNote
-        case .lockSession, .unlockSession: .toggleLock
         case .moveTopicUp: .moveTopicUp
         case .moveTopicDown: .moveTopicDown
         case .pinTopic, .unpinTopic: .togglePinTopic
@@ -145,10 +142,8 @@ enum PaletteCommand: String, CaseIterable {
         case .replaceFromBench: .verb(.topicReplaceFromBench)
         case .pinTopic: .verb(.topicPin)
         case .unpinTopic: .verb(.topicUnpin)
-        case .lockSession: .verb(.sessionLock)
-        case .unlockSession: .verb(.sessionUnlock)
-        case .makeGuest: .verbs([.topicMakeGuest, .sessionLock])
-        case .bench: .verbs([.topicBench, .sessionUnlock])
+        case .makeGuest: .verb(.topicMakeGuest)
+        case .bench: .verb(.topicBench)
         case .newWindow: .verb(.windowNew)
         case .newSession: .verb(.sessionNew)
         case .newWorktree: .verb(.worktreeCreate)
@@ -216,10 +211,6 @@ extension CommandPalette {
             case .pinTopic, .unpinTopic:
                 guard canChangeTopics, let topic = store.pinnableActiveTopic else { return false }
                 return topic.isPinned == (command == .unpinTopic)
-            case .lockSession, .unlockSession:
-                guard canChangeTopics, store.topicConfig.inPlay == nil, let id = store.selectedWindow?.sessionID,
-                      let locked = store.lockState(ofSession: id) else { return false }
-                return locked == (command == .unlockSession)
             case .makeGuest: return canChangeTopics && store.currentGuestCard.map { store.guestState(of: $0) == false } == true
             case .bench: return canChangeTopics && store.currentGuestCard.map(store.canBench) == true
             case .installExtensions: return !store.isRemote
@@ -309,7 +300,6 @@ extension CommandPalette {
         case .renameWindow:
             if let window = store.selectedWindow { begin(.text(.renameWindow(window)), text: window.name, keepingHistory: true) }
         case .editTags: if let id = store.activeTopicID { store.presentEditTags(of: id, keepingHistory: true) }
-        case .lockSession, .unlockSession: store.toggleLockOfCurrentSession()
         case .makeGuest: if let card = store.currentGuestCard { store.makeGuest(card) }
         case .bench: if let card = store.currentGuestCard { store.bench(card) }
         case .moveTopicUp: store.moveActiveCard(.previous)

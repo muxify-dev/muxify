@@ -62,8 +62,6 @@ public struct EnvironmentService: Sendable {
             return changeRecords(request, client: client)
         case .edit:
             switch request.command {
-            case .lock: return changeLock(request, locked: true, client: client)
-            case .unlock: return changeLock(request, locked: false, client: client)
             case .moveSession(.up): return stepSession(request, .up, client: client)
             case .moveSession(.down): return stepSession(request, .down, client: client)
             case .createWorktree(let name, let from, let start, let open):
@@ -191,30 +189,6 @@ public struct EnvironmentService: Sendable {
         }
     }
 
-    /// The No Topic Session that the target names, or the Session of the caller's Pane.
-    func noTopicSession(_ target: EnvironmentTarget?, caller: TopicCaller?, records: [TopicRecord], snapshot: TmuxSnapshot,
-                                client: String?) throws -> TmuxWindow {
-        let found: TmuxWindow?
-        switch target {
-        case .session(let id)?: found = snapshot.windows.first { $0.sessionID == id.rawValue }
-        case .sessionName(let name)?:
-            guard let named = snapshot.windows.first(where: { $0.sessionName == name }) else {
-                throw TopicRequestError.sessionUnavailable(name)
-            }
-            found = named
-        case .topic?: throw TopicRequestError.noTarget
-        default:
-            guard let pane = paneRequest(target, caller: caller) else { throw TopicRequestError.noTarget }
-            let sessionID = try executor.pane(pane, in: snapshot, client: client).source.window.sessionID
-            found = snapshot.windows.first { $0.sessionID == sessionID }
-        }
-        guard let window = found else { throw TopicEditFailure.sourceUnavailable }
-        if let topic = records.first(where: { $0.id == window.topicID && $0.settledAt == nil }) {
-            throw TopicRequestError.sessionInTopic(session: window.sessionName, topic: TopicLabels(records).label(of: topic))
-        }
-        return window
-    }
-
     func forgetTopic(_ target: EnvironmentTarget?, caller: TopicCaller?, records: [TopicRecord],
                              snapshot: TmuxSnapshot, client: String?) throws -> TopicRecord {
         if case .topic(let ref)? = target { return try ref.resolve(in: records, open: false) }
@@ -279,7 +253,6 @@ public struct EnvironmentService: Sendable {
             case .topicAmbiguous: return .topicAmbiguous
             case .topicMembershipChanged: return .topicMembershipChanged
             case .sessionUnavailable: return .sourceUnavailable
-            case .sessionInTopic: return .sessionInTopic
             case .baseUnavailable, .worktreeBaseMissing, .worktreeHasChanges: return .gitFailed
             case .branchUnavailable: return .branchUnavailable
             case .branchCheckedOut: return .branchCheckedOut
@@ -292,7 +265,6 @@ public struct EnvironmentService: Sendable {
             case .sessionAtEnd: return .sessionAtEnd
             case .cardHidden: return .cardHidden
             case .windowNotInSession: return .windowNotInSession
-            case .inPlayOff: return .inPlayOff
             }
         case let error as TopicEditFailure:
             switch error {
@@ -364,7 +336,7 @@ extension EnvironmentCommand {
         case .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench, .makeGuest, .benchTopic, .fillOpenPlace, .markRead, .markAllRead:
             return .records
         case .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename,
-             .reopen, .startFresh, .moveSession, .sortSessions, .lock, .unlock, .newWindow, .newSession, .renameSession,
+             .reopen, .startFresh, .moveSession, .sortSessions, .newWindow, .newSession, .renameSession,
              .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession, .createWorktree, .removeWorktree, .forgetSettled: return .edit
         }
     }
@@ -380,7 +352,7 @@ extension EnvironmentCommand {
         case .markRead(_, let scope): return scope == .topic || scope == .topicMark
         case .markAllRead: return false
         case .list, .show, .environmentShow, .create, .addSession, .settle, .forget, .move, .removeFromTopic, .removeAndKill, .rename, .reopen, .startFresh,
-             .moveSession, .sortSessions, .lock, .unlock, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench,
+             .moveSession, .sortSessions, .tags, .note, .pin, .unpin, .moveCard, .chooseInPlay, .replaceFromBench,
              .makeGuest, .benchTopic, .fillOpenPlace, .forgetSettled:
             return true
         }
@@ -428,7 +400,6 @@ public enum TopicRequestError: Error, CustomStringConvertible {
     case worktreeBaseMissing(base: String, worktree: String)
     case worktreeHasChanges(String)
     case sessionUnavailable(String)
-    case sessionInTopic(session: String, topic: String)
     case targetAndTopics
     case undefinedTags([Tag])
     case branchUnavailable(branch: String, worktree: String)
@@ -442,8 +413,6 @@ public enum TopicRequestError: Error, CustomStringConvertible {
     case sessionAtEnd(session: String, topic: String, up: Bool)
     case cardHidden(String)
     case windowNotInSession(window: String, anchor: String)
-    /// Choose In Play and Replace from Bench need `topics.in_play`.
-    case inPlayOff
     /// An old form of a request that now fails, with the message that names the new form.
     case removedForm(String)
 
@@ -462,8 +431,6 @@ public enum TopicRequestError: Error, CustomStringConvertible {
         case .worktreeHasChanges(let worktree):
             return "The Worktree \(worktree) has uncommitted changes. Commit or remove them, or keep the Worktree."
         case .sessionUnavailable(let name): return "No tmux Session has the name \(name)."
-        case .sessionInTopic(let session, let topic):
-            return "The Session \(session) is in the Topic \(topic). Only a No Topic Session can be Locked."
         case .targetAndTopics: return "The request names a target and a list of Topics. Name only one of them."
         case .removedForm(let message): return message
         case .chooseSession(let topic, let sessions):
@@ -480,7 +447,6 @@ public enum TopicRequestError: Error, CustomStringConvertible {
             return "The Session \(session) is the \(up ? "first" : "last") Session of the Topic \(topic)."
         case .cardHidden(let message): return message
         case .windowNotInSession(let window, let anchor): return "The Window \(anchor) is not in the Session of the Window \(window)."
-        case .inPlayOff: return "The Config does not set topics.in_play, so no card is In Play."
         case .sessionNameInvalid(let name): return "\(name) cannot name a tmux Session: it is empty, or it has a period, a colon or a control character."
         case .branchUnavailable(let branch, let worktree): return "No local branch \(branch) is in the repository of \(worktree)."
         case .branchCheckedOut(let branch, let worktree):

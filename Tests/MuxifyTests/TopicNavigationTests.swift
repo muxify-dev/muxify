@@ -73,7 +73,7 @@ final class TopicNavigationTests: XCTestCase {
         }
         let result = model(records, [], TopicSelection())
         XCTAssertEqual(result.nextTopic(after: .topic("b"), skipping: ["c", "d"]), .topic("e"), "the nearest row below that stays")
-        XCTAssertEqual(result.nextTopic(after: .topic("d"), skipping: ["e", "c"]), .topic("b"), "else the nearest row above that stays")
+        XCTAssertEqual(result.nextTopic(after: .topic("d"), skipping: ["e", "c"]), .topic("a"), "else the first In Play card that stays")
         XCTAssertEqual(result.nextTopic(after: .topic("a"), skipping: ["b", "c", "d", "e"]), .noTopic)
     }
 

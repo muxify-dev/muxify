@@ -1,5 +1,7 @@
 # Choose In Play and Replace from Bench replace Snooze and Zen
 
+> **Partly superseded by [ADR-0081](0081-in-play-is-the-only-topics-mode.md):** `topics.in_play` is always set, with 5 as its default, and `topics.insert_position` is gone. The text below about a Config without `topics.in_play` does not apply.
+
 > **Partly superseded by [ADR-0064](0064-in-play-places-stay-open-and-guests-show-in-their-own-section.md):** a Settle of an In Play card no longer moves the top of the Bench up. It leaves an Open Place. Choose In Play also lists the Guest Topics, and the places that no checked card fills are Open Places. The other rules below still apply.
 
 With `topics.in_play` set, the Bench ([ADR 0055](0055-the-sidebar-shows-only-the-topics-in-play.md)) already keeps out of view the Topics that the user does not work on now. Snooze and Zen did the same job in a second way, and the user used Snooze mostly to hide one part of the day's Topics, such as personal Topics during work. We remove Snooze, Unsnooze, Snooze Topics…, Unsnooze Topics… and Zen. Two Actions set the In Play Topics instead. Both use palette steps that already exist, and both show only while `topics.in_play` is set.
