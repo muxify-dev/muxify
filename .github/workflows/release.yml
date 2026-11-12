@@ -1,5 +1,7 @@
 # Tests every push and pull request. A push to master publishes a Tip Build and the Host CLI; a v* tag on master
 # publishes a Release (docs/adr/0078-muxify-updates-itself-with-sparkle-from-feeds-in-a-github-release.md).
+# On macOS, test runs the tests and package builds what is published; they start together, and nothing publishes
+# before test passes.
 name: Build, test and release
 
 on:
@@ -22,16 +24,59 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Check the toolchain
+        run: |
+          [[ "$(uname -m)" = arm64 ]]
+          xcodebuild -version
+
+      - name: Cache pinned Ghostty library, resources, and notices
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor/ghostty
+          key: ghostty-macos-26-arm64-xcode-26.6-${{ hashFiles('scripts/ghostty-version.env', 'scripts/setup-ghostty.sh', 'scripts/collect-notices.py') }}
+
+      - name: Test release tooling
+        run: python3 -m unittest discover -s Tests/ReleaseTests -v
+
+      - name: Prepare dependencies
+        run: |
+          brew install tmux ripgrep
+          make setup
+
+      - name: Test Muxify
+        timeout-minutes: 15
+        env:
+          NSUnbufferedIO: 'YES'
+          # A test that needs tmux fails here when tmux is missing, and does not skip.
+          MUXIFY_REQUIRE_TMUX: '1'
+        run: make test
+
+  # Starts with test, not after it, and publishes nothing: the publish jobs need both.
+  package:
+    # A job's if cannot read env, so this repeats the condition under which PACKAGE_TAG below is not empty.
+    if: >-
+      github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+      || (github.event_name == 'push' && github.ref == 'refs/heads/master')
     runs-on: macos-26
     timeout-minutes: 90
     outputs:
-      # Set once the tests pass and the Host CLI for macOS is uploaded, so publish-cli runs even when packaging fails.
+      # Set once the Host CLI for macOS is uploaded, so publish-cli runs even when packaging fails.
       cli-ready: ${{ steps.cli.outputs.ready }}
       previous-tag: ${{ steps.validate.outputs.previous-tag }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
-      # What this run packages: tip on a master push, the tag on a v* tag or a manual run, and nothing otherwise.
+      # What this run packages: tip on a master push, and the tag on a v* tag or a manual run.
       PACKAGE_TAG: >-
         ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')) && (inputs.tag || github.ref_name)
         || (github.event_name == 'push' && github.ref == 'refs/heads/master') && 'tip' || '' }}
@@ -46,7 +91,7 @@ jobs:
       - name: Validate the tag, its commit and the toolchain
         id: validate
         run: |
-          if [[ -n "$PACKAGE_TAG" && "$PACKAGE_TAG" != tip ]]; then
+          if [[ "$PACKAGE_TAG" != tip ]]; then
             [[ "$PACKAGE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.([1-9][0-9]*))?$ ]] \
               || { echo "::error::$PACKAGE_TAG is not a release tag: use vX.Y.Z or vX.Y.Z-beta.N"; exit 1; }
             git rev-parse --verify --quiet origin/master >/dev/null \
@@ -67,21 +112,8 @@ jobs:
           path: vendor/ghostty
           key: ghostty-macos-26-arm64-xcode-26.6-${{ hashFiles('scripts/ghostty-version.env', 'scripts/setup-ghostty.sh', 'scripts/collect-notices.py') }}
 
-      - name: Test release tooling
-        run: python3 -m unittest discover -s Tests/ReleaseTests -v
-
       - name: Prepare dependencies
-        run: |
-          brew install tmux ripgrep
-          make setup
-
-      - name: Test Muxify
-        timeout-minutes: 10
-        env:
-          NSUnbufferedIO: 'YES'
-          # A test that needs tmux fails here when tmux is missing, and does not skip.
-          MUXIFY_REQUIRE_TMUX: '1'
-        run: make test
+        run: make setup
 
       - name: Build the Host CLI for macOS
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
@@ -105,9 +137,9 @@ jobs:
         id: cli
         run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
-      # Only a master push, a v* tag or a manual run reaches the secrets; a pull request never does.
+      # Only this job reads the secrets, and only a master push, a v* tag or a manual run starts it; a pull request
+      # never does.
       - name: Import the release signing certificate into a temporary keychain
-        if: env.PACKAGE_TAG != ''
         env:
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
           MUXIFY_RELEASE_CERTIFICATE_P12: ${{ secrets.MUXIFY_RELEASE_CERTIFICATE_P12 }}
@@ -140,14 +172,12 @@ jobs:
           echo "MUXIFY_RELEASE_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
 
       - name: Package the Tip Build or Release
-        if: env.PACKAGE_TAG != ''
         env:
           MUXIFY_RELEASE_IDENTITY: Muxify Release Signing
         run: ./scripts/package-release.sh "$PACKAGE_TAG"
 
       # sign_update needs macOS, so the feed is written here and the Linux publish jobs only upload it.
       - name: Write the feed
-        if: env.PACKAGE_TAG != ''
         env:
           SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
         run: |
@@ -170,7 +200,6 @@ jobs:
             --notes-url "$notes" --output "$dist/$channel.xml"
 
       - name: Upload the package
-        if: env.PACKAGE_TAG != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: package
@@ -225,12 +254,13 @@ jobs:
 
   # Republishes the rolling prerelease cli-latest, from which the app installs the Host CLI
   # (docs/adr/0076-the-app-installs-the-host-cli-from-a-rolling-github-prerelease.md).
-  # It needs the build job's tests and macOS binary, not its package, so a Sparkle problem never stops it.
+  # It needs test to pass and package's Host CLI for macOS, not the package itself, so a Sparkle problem never
+  # stops it.
   publish-cli:
-    needs: [build, test-linux, host-cli-linux]
+    needs: [test, package, test-linux, host-cli-linux]
     if: >-
       !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master'
-      && needs.build.outputs.cli-ready == 'true'
+      && needs.test.result == 'success' && needs.package.outputs.cli-ready == 'true'
       && needs.test-linux.result == 'success' && needs.host-cli-linux.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -300,7 +330,7 @@ jobs:
   # Publishes the Tip Build to the rolling tip prerelease, then its feed to the rolling appcast prerelease
   # (docs/adr/0078-muxify-updates-itself-with-sparkle-from-feeds-in-a-github-release.md).
   publish-tip:
-    needs: build
+    needs: [test, package]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -368,7 +398,7 @@ jobs:
 
   # Publishes a Release from a v* tag, then its feed to the rolling appcast prerelease.
   publish:
-    needs: build
+    needs: [test, package]
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -382,7 +412,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-      PREVIOUS_TAG: ${{ needs.build.outputs.previous-tag }}
+      PREVIOUS_TAG: ${{ needs.package.outputs.previous-tag }}
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
