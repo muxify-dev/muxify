@@ -1,5 +1,7 @@
 # The CLI runs Topic requests through MuxifyCore
 
+> **Locks and merge superseded by [ADR-0080](0080-writes-take-no-lock-and-the-last-write-to-a-field-wins.md):** no Topic request takes a lock of Muxify's own, `topics.lock` and `topic-edits.lock` are gone, and each write is one SQLite transaction that changes only its own columns, so the last write to a field wins. The service, and the CLI running it in its own process, stand.
+
 Every Topic read and edit goes through one service in the `MuxifyCore` package: the app's sheets, the `muxify://topic` URL and the command line tool all send a `TopicRequest` and get a `TopicResponse`. The command line tool runs the service in its own process, so it works when Muxify is off and can give a real result and exit code. This makes the command line tool a second writer of the Topic records ([ADR 0028](0028-topic-records-live-outside-tmux.md)), so the service takes two locks and merges each write. Every `muxify topic` command and `muxify window move` run this way.
 
 ## Considered Options

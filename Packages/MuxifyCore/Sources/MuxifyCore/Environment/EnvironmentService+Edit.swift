@@ -1,6 +1,6 @@
 import Foundation
 
-// The edit lane: every command that runs under the edit lock.
+// The edit lane: every command that reads, plans, and then changes git, the records and tmux.
 extension EnvironmentService {
     /// A plan with what the host shows when the plan itself selects nothing.
     private struct Planned {
@@ -16,7 +16,7 @@ extension EnvironmentService {
     }
 
     /// `session move up|down` has one meaning for each Session: a Session in an open Topic takes one place among the
-    /// Topic's Sessions, and a Locked Session, which is always in no Topic, moves its card. Runs under the edit lock.
+    /// Topic's Sessions, and a Locked Session, which is always in no Topic, moves its card.
     func stepSession(_ request: EnvironmentRequest, _ move: CardMove, client: String?) -> EnvironmentResponse {
         do {
             let records = try store.read().records
@@ -28,8 +28,8 @@ extension EnvironmentService {
         }
     }
 
-    /// Under the edit lock, so it never runs between the read and the write of a Reopen. The Topics are chosen in the
-    /// same transaction that removes them. The answer lists the forgotten Topics, oldest first.
+    /// The Topics are chosen in the same transaction that removes them, so a Topic that a Reopen wrote back before it
+    /// stays. The answer lists the forgotten Topics, oldest first.
     func forgetSettled(olderThan days: Int, asOf: Date?, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
@@ -139,13 +139,13 @@ extension EnvironmentService {
                 try? CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", PaneCommandLines.script]))
             }
             return Planned(edit: TopicSettlePlan(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, choices: choices, outcome: outcome,
-                                                 mergedWorktrees: TopicWorktrees.merged(in: topic, root: paths.worktrees.path),
+                                                 mergedWorktrees: TopicWorktrees.merged(in: topic, paths: paths),
                                                  order: topics.sessionOrder).edit)
         case .forget(let choices, let worktrees):
             let topic = try forgetTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             try checkMembership(request.expectedSessionIDs, choices: choices, topic: topic, snapshot: snapshot)
             return Planned(edit: TopicForgetPlan(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, choices: choices,
-                                                  worktrees: worktrees, root: paths.worktrees.path).edit)
+                                                  worktrees: worktrees, paths: paths).edit)
         case .move(let destination):
             if case .newWindow(let title) = destination {
                 if case .session = request.target { throw TopicRequestError.noTarget }

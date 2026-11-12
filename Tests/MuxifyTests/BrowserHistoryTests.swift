@@ -1,3 +1,4 @@
+import MuxifyCore
 import WebKit
 import XCTest
 
@@ -5,8 +6,16 @@ final class BrowserHistoryTests: XCTestCase {
     private let day: TimeInterval = 86_400
     private let start = Date(timeIntervalSince1970: 1_800_000_000)
 
+    private func paths(_ directory: TestDirectory) -> MuxifyPaths {
+        MuxifyPaths(environment: ["XDG_STATE_HOME": directory.url.appendingPathComponent("state").path], home: "/nonexistent")
+    }
+
     private func history(_ directory: TestDirectory, capacity: Int = BrowserHistory.capacity) -> BrowserHistory {
-        BrowserHistory(file: directory.url.appendingPathComponent("state/browser-history.json"), capacity: capacity, writeDelay: 0)
+        BrowserHistory(paths: paths(directory), capacity: capacity, writeDelay: 0)
+    }
+
+    private func rowKeys(_ directory: TestDirectory) throws -> Set<String> {
+        Set(try BrowserHistoryStore(paths: paths(directory)).entries().map(\.key))
     }
 
     private func url(_ string: String) -> URL { URL(string: string)! }
@@ -91,6 +100,40 @@ final class BrowserHistoryTests: XCTestCase {
         history.record(url: url("https://new.test"), title: "", visit: .link, topic: nil, at: start + 20 * day)
         XCTAssertEqual(Set(history.entries.keys), ["https://kept.test", "https://new.test"],
                        "2 decayed over 20 days is below a link of now")
+    }
+
+    func testTheCapDeletesTheRowOfTheLowestScore() throws {
+        let directory = try TestDirectory()
+        let history = history(directory, capacity: 2)
+        history.setEnabled(true)
+        history.record(url: url("https://old.test"), title: "", visit: .typed, topic: nil, at: start)
+        history.record(url: url("https://kept.test"), title: "", visit: .link, topic: nil, at: start + 20 * day)
+        history.flush()
+        XCTAssertEqual(try rowKeys(directory), ["https://old.test", "https://kept.test"])
+        history.record(url: url("https://new.test"), title: "", visit: .link, topic: nil, at: start + 20 * day)
+        history.flush()
+        XCTAssertEqual(try rowKeys(directory), ["https://kept.test", "https://new.test"], "the row of the lowest score goes with its entry")
+    }
+
+    func testTwoProcessesOnOneDatabaseKeepEachOthersPages() throws {
+        let directory = try TestDirectory()
+        let first = history(directory)
+        let second = history(directory)
+        first.setEnabled(true)
+        second.setEnabled(true)
+        first.record(url: url("https://one.test"), title: "One", visit: .typed, topic: "a", at: start)
+        second.record(url: url("https://two.test"), title: "Two", visit: .link, topic: "b", at: start)
+        first.flush()
+        second.flush()
+        first.record(url: url("https://three.test"), title: "Three", visit: .link, topic: nil, at: start)
+        first.flush()
+
+        let third = history(directory)
+        third.setEnabled(true)
+        XCTAssertEqual(Set(third.entries.keys), ["https://one.test", "https://two.test", "https://three.test"],
+                       "a flush writes only its own changed entries, so it never erases the other's")
+        XCTAssertEqual(third.entries["https://one.test"], first.entries["https://one.test"])
+        XCTAssertEqual(third.entries["https://two.test"], second.entries["https://two.test"])
     }
 
     func testOnlyPagesThatArePlacesWithoutSecretsAreRecordable() {
@@ -180,23 +223,23 @@ final class BrowserHistoryTests: XCTestCase {
         XCTAssertEqual(second.entries, first.entries)
     }
 
-    func testWhileOffNothingIsRecordedAndTheFileIsNeitherReadNorWritten() throws {
+    func testWhileOffNothingIsRecordedAndTheTableIsNeitherReadNorWritten() throws {
         let directory = try TestDirectory()
         let off = history(directory)
         off.record(url: url("https://example.com"), title: "", visit: .typed, topic: nil, at: start)
         off.flush()
         XCTAssertTrue(off.entries.isEmpty)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: off.file.path), "off writes no file")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths(directory).stateDatabase.path), "off writes no database")
 
         let on = history(directory)
         on.setEnabled(true)
         on.record(url: url("https://example.com"), title: "", visit: .typed, topic: nil, at: start)
         on.flush()
         let unread = history(directory)
-        XCTAssertTrue(unread.entries.isEmpty, "off does not read the file")
+        XCTAssertTrue(unread.entries.isEmpty, "off does not read the table")
         on.setEnabled(false)
         XCTAssertTrue(on.entries.isEmpty, "turning it off drops the entries from memory")
-        XCTAssertTrue(FileManager.default.fileExists(atPath: on.file.path), "turning it off keeps the file")
+        XCTAssertEqual(try rowKeys(directory), ["https://example.com"], "turning it off keeps the rows")
     }
 
     func testWhileOffTheAddressFieldSuggestsNothingNotEvenTheOpenTabsPortsOrSearch() throws {

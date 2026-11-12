@@ -1,5 +1,7 @@
 # Topic records live outside tmux; the Topic link lives on the Session
 
+> **Storage superseded by [ADR-0079](0079-muxifys-state-lives-in-one-sqlite-database.md):** every record and the Open Places are rows in the state database, `$XDG_STATE_HOME/muxify/muxify.db`. The rest of this decision stands.
+
 > **File layout superseded by [ADR-0066](0066-the-topic-records-live-in-one-file.md):** every record and the Open Places are one file, `$XDG_STATE_HOME/muxify/topics.json`. The rest of this decision stands.
 
 A Topic's record is one JSON file in `$XDG_STATE_HOME/muxify/topics/`. The record holds the title, Home Session Path, dates, outcome, remembered Sessions, snooze time and position. A Session's link to its Topic is the session option `@muxify_topic <topic id>` on tmux. This is the first state Muxify keeps outside tmux, and it is an exception to ADR 0001. A Settled Topic has no Sessions, and a Dormant Topic lost its Sessions in a tmux restart. tmux cannot hold the record of a thing that has no Session. The link stays on tmux because the Session is the thing that comes and goes. When the Session is killed, or when tmux restarts, the link goes too, so Muxify never shows a stale membership. ADR 0003 uses the same reason for Browser state.

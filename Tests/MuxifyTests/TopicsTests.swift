@@ -9,30 +9,30 @@ final class TopicsTests: XCTestCase {
                    storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, sessionPath: path)
     }
 
-    func testWatcherLoadsFolderCreatedAfterStartAndExternalRewrites() throws {
+    func testWatcherLoadsADatabaseCreatedAfterStartAndAnotherConnectionsWrites() throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: state) }
         let paths = MuxifyPaths(environment: ["XDG_STATE_HOME": state.path], home: "/nonexistent")
         let store = TopicWatcher(store: TopicStore(paths: paths))
         store.start()
         XCTAssertTrue(store.records.isEmpty)
-        try FileManager.default.createDirectory(at: paths.state, withIntermediateDirectories: true)
-        let file = paths.topicRecords
-        try Data(#"{"records":[{"id":"external","title":"First"}],"open_places":[]}"#.utf8).write(to: file, options: .atomic)
+        // Another process: a store with its own connection, which creates the state folder and the database.
+        let external = TopicStore(paths: paths)
+        try external.write { try $0.create(TopicRecord(id: "external", title: "First")) }
         let appeared = expectation(description: "external Topic appears within one second")
         let firstTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { timer in
             if store.records.first?.title == "First" { timer.invalidate(); appeared.fulfill() }
         }
         wait(for: [appeared], timeout: 0.95)
         firstTimer.invalidate()
-        try Data(#"{"records":[{"id":"external","title":"Second"}],"open_places":[]}"#.utf8).write(to: file, options: .atomic)
-        let changed = expectation(description: "external replacement appears within one second")
+        try external.write { try $0.update("external") { $0.title = "Second" } }
+        let changed = expectation(description: "external change appears within one second")
         let secondTimer = Timer.scheduledTimer(withTimeInterval: 0.02, repeats: true) { timer in
             if store.records.first?.title == "Second" { timer.invalidate(); changed.fulfill() }
         }
         wait(for: [changed], timeout: 0.95)
         secondTimer.invalidate()
-        try FileManager.default.removeItem(at: file)
+        try external.write { try $0.forget(["external"]) }
         let reloaded = expectation(description: "a reload shows the removal")
         Task { await store.reloaded(); reloaded.fulfill() }
         wait(for: [reloaded], timeout: 2)

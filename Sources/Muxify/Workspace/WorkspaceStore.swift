@@ -202,7 +202,7 @@ final class WorkspaceStore {
         startSession(in: target.directory, named: target.name)
     }
 
-    /// Starts a No Topic Session at `directory` and shows it. The service names it under the edit lock, so a name that
+    /// Starts a No Topic Session at `directory` and shows it. The service names it from tmux's Sessions, so a name that
     /// a Session has gets +2. A second press before the snapshot shows the Session does nothing.
     private func startSession(in directory: Folder, named name: String) {
         // A Remote Environment with no Session has no connection to run the request on: a new one starts the Session.
@@ -646,21 +646,6 @@ final class WorkspaceStore {
     var activeTopicID: String? {
         if case .topic(let id) = topics.activeTopic { return id }
         return nil
-    }
-
-    /// Records that a Muxify with Snooze and Zen wrote are upgraded on this Mac as soon as the app reads them, with
-    /// this App Window's Config. The records are local, so a Remote App Window upgrades them too.
-    private func upgradeTopicRecords() {
-        guard topicWatcher.needsUpgrade, !changingTopic else { return }
-        changingTopic = true
-        let service = topicService()
-        Task { [weak self] in
-            let failure = await Task.detached(priority: .userInitiated) { service.upgradeRecords() }.value
-            guard let self else { return }
-            self.changingTopic = false
-            self.topicWatcher.reload()
-            if let failure { NSLog("muxify: topics: upgrade: \(failure.message)") }
-        }
     }
 
     /// When the Config sets `topics.in_play`, each Lock becomes a Guest at the end of In Play (ADR 0061). The flag in
@@ -1214,8 +1199,6 @@ final class WorkspaceStore {
     @ObservationIgnored private var browsers: [String: Browser] = [:]
     @ObservationIgnored private var topicSnapshots: [String: TmuxSnapshot] = [:]
     @ObservationIgnored private var rememberedTopics: [String: TopicRecord] = [:]
-    /// The record's `sessions` on disk when its pending snapshot was taken.
-    @ObservationIgnored private var topicSnapshotBases: [String: [JSONValue]] = [:]
     @ObservationIgnored private var memoryServerID: String?
     @ObservationIgnored private var topicPersistWork: [String: DispatchWorkItem] = [:]
     /// The Topics whose remembered Sessions are being written now.
@@ -1675,7 +1658,6 @@ final class WorkspaceStore {
         consumeOpenRequests()
         publishBrowserSocket(snapshot)
         if !updateUnread(snapshot.panes) {
-            upgradeTopicRecords()
             gatherGuestsWhenInPlayIsSet()
         }
 
@@ -2800,7 +2782,6 @@ final class WorkspaceStore {
                 branches: topicBranches, previously: continuous ? windows : []) {
                 rememberedTopics[record.id] = updated
                 topicSnapshots[record.id] = snapshot
-                topicSnapshotBases[record.id] = record.sessions
                 topicPersistWork[record.id]?.cancel()
                 topicPersistWork[record.id] = nil
             }
@@ -2821,35 +2802,28 @@ final class WorkspaceStore {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
 
-    /// Writes the Sessions that the last snapshot gave the Topic onto its record as it is on disk now.
-    /// When another writer changed the Sessions after the snapshot, as `muxify topic remove` does, the snapshot
-    /// is stale and is dropped: it would put a removed Session back, and the Topic would be Dormant, not Empty.
+    /// Writes the Sessions that the last snapshot gave the Topic onto its record: a plain update of `sessions`, with
+    /// no check that `sessions` is unchanged since the snapshot (ADR 0080). The last write wins, and the save runs
+    /// again after each change to the Topic's Windows. A Topic that is gone from the records is not written back.
     private func persistRememberedTopic(_ id: String) async {
         guard let updated = rememberedTopics[id], !persistingTopics.contains(id) else { return }
-        let base = topicSnapshotBases[id]
         persistingTopics.insert(id)
         defer { persistingTopics.remove(id) }
         let wrote: Bool
         do {
-            wrote = try await topicWatcher.write { transaction in
-                guard let current = transaction.records.first(where: { $0.id == id }), current.sessions == base else { return false }
-                try transaction.update(id) { $0.sessions = updated.sessions }
-                return true
-            }
+            wrote = try await topicWatcher.write { try $0.remember(updated.sessions, of: id) }
         } catch {
             Diagnostics.report("remembering Topic \(id): \(error)")
             return
         }
-        // A snapshot while the write ran remembered more. It goes onto the Sessions this write left on disk.
+        // A snapshot while the write ran remembered more. It is written next.
         if wrote, rememberedTopics[id]?.sessions != updated.sessions {
-            topicSnapshotBases[id] = updated.sessions
             persistingTopics.remove(id)
             schedulePersist(id)
             return
         }
         rememberedTopics[id] = nil
         topicSnapshots[id] = nil
-        topicSnapshotBases[id] = nil
     }
 
     // MARK: - Keyboard

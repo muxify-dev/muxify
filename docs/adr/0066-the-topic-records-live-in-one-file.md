@@ -1,4 +1,10 @@
+---
+status: superseded by ADR-0079
+---
+
 # The Topic records live in one file
+
+> **Superseded by [ADR-0079](0079-muxifys-state-lives-in-one-sqlite-database.md):** every Topic record and the Open Places are rows in the state database, `$XDG_STATE_HOME/muxify/muxify.db`, and `topics.json` is read once to import it.
 
 Every Topic record and the Open Places are one JSON file, `$XDG_STATE_HOME/muxify/topics.json`. A write replaces the file with one rename, so a write of any size makes one new file, and a read opens one file. This supersedes the file layout of [ADR 0028](0028-topic-records-live-outside-tmux.md), one file for each Topic in `topics/`, and the `open-places` file of [ADR 0064](0064-in-play-places-stay-open-and-guests-show-in-their-own-section.md). The record itself, the locks and the merge by JSON key of [ADR 0032](0032-the-cli-runs-topic-requests-through-muxifycore.md) do not change.
 

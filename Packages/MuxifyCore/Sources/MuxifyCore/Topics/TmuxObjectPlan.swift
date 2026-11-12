@@ -34,7 +34,7 @@ enum TmuxObjectPlan {
         return TopicEdit(record: nil, commands: [.tmuxMaking(arguments)], selection: .made)
     }
 
-    /// A No Topic Session. The name is free: the service chose it under the edit lock.
+    /// A No Topic Session. The name was free when the service read tmux; a Session that took it since makes tmux refuse.
     static func newSession(named name: String, in directory: String) -> TopicEdit {
         TopicEdit(record: nil, commands: [.tmuxMaking(["new-session", "-d", "-s", name, "-c", directory])], selection: .made)
     }

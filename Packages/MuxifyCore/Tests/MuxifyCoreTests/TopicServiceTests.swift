@@ -259,14 +259,22 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(server.snapshot().windows.count, sessions)
     }
 
-    func testTwoEditsAtOnceChooseDifferentNamesBecauseOneWaitsForTheOther() throws {
-        let service = service()
-        let responses = Responses()
-        DispatchQueue.concurrentPerform(iterations: 2) { _ in
-            responses.append(service.handle(EnvironmentRequest(.create(title: "Fix"))))
-        }
-        for response in responses.all { _ = try change(response) }
-        XCTAssertEqual(Set(try records().compactMap(\.slug)), ["fix", "fix-2"])
+    func testATagChangeDuringASettleOfTheSameTopicKeepsBothWrites() throws {
+        let backend = Tag(name: "backend")!
+        let id = try topicWithSession("Ship", at: sessionPath.folder.path, using: service())
+        let choices = try service().settleChoices(for: .topic(.id(id))).get()
+        let tagger = service()
+        let tagged = Responses()
+        // The Settle has read the records; the Tag change commits before the Settle plans from that read and writes.
+        let settler = EnvironmentService(paths: paths, server: Interleaving(server: server) {
+            tagged.append(tagger.handle(EnvironmentRequest(.tags(.add([backend])), target: .topic(.id(id)))))
+        }, sessionPaths: [sessionPath, tools])
+        _ = try change(settler.handle(EnvironmentRequest(.settle(choices: choices, outcome: "Done"), target: .topic(.id(id)))))
+        XCTAssertEqual(tagged.all.count, 1, "the Tag change ran inside the Settle")
+        for response in tagged.all { _ = try change(response) }
+        let record = try XCTUnwrap(records().first { $0.id == id })
+        XCTAssertNotNil(record.settledAt, "the Settle's write landed")
+        XCTAssertEqual(record.tags, [backend], "the Tag change's write landed")
     }
 
     func testMoveTakesAWholeSessionIntoTheTopicThatARefNames() throws {
@@ -390,20 +398,6 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(off.kind, .tagUndefined, "with Tags off, no Tag can be added")
         XCTAssertFalse(try records().contains { $0.title == "Untagged" }, "a refused New Topic writes no record")
     }
-
-    func testTheUpgradePutsASnoozedTopicAfterTheConfigsInPlayCards() throws {
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        for title in ["First", "Second", "Third"] { _ = try change(service().handle(EnvironmentRequest(.create(title: title)))) }
-        _ = try change(service().handle(EnvironmentRequest(.lock, target: .sessionName("notes"))))
-        let third = try XCTUnwrap(records().first { $0.title == "Third" }).id
-        try TopicStore(paths: paths).write { try $0.update(third) { $0.unknownFields["snoozed_until"] = .string("never") } }
-        let inPlay = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath],
-                                        topics: { var topics = Config.Topics(); topics.inPlay = 1; return topics }())
-        XCTAssertNil(inPlay.upgradeRecords())
-        XCTAssertEqual(try topicList(), ["First", "Third", "Second", "lock:notes"])
-        XCTAssertFalse(try TopicStore(paths: paths).read().needsUpgrade)
-    }
-
 
     func testALockedSessionThatGoesIntoATopicLosesItsLock() throws {
         try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
@@ -622,9 +616,10 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(made.topicID, try records().first { $0.title == "C" }?.id)
         XCTAssertEqual(try topicList(), ["A", "B", "C", "D"], "no other card goes to the Bench")
         XCTAssertEqual(try guests(), ["C"])
-        let stamp = TopicStore(paths: paths).stamp()
+        let observer = TopicStore(paths: paths)
+        let token = observer.changeToken()
         _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("C")))))
-        XCTAssertEqual(TopicStore(paths: paths).stamp(), stamp, "a Guest that is made a Guest again does not change")
+        XCTAssertEqual(observer.changeToken(), token, "a Guest that is made a Guest again does not change")
 
         _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("D")))))
         XCTAssertEqual(try topicList(), ["A", "B", "C", "D"])
@@ -810,9 +805,10 @@ final class TopicServiceTests: XCTestCase {
 
         XCTAssertNil(service(inPlay: 2).gatherGuests())
         XCTAssertEqual(try topicList(), ["A", "B", "lock:notes", "C"])
-        let stamp = TopicStore(paths: paths).stamp()
+        let observer = TopicStore(paths: paths)
+        let token = observer.changeToken()
         XCTAssertNil(service(inPlay: 2).gatherGuests())
-        XCTAssertEqual(TopicStore(paths: paths).stamp(), stamp, "a second gather writes nothing")
+        XCTAssertEqual(observer.changeToken(), token, "a second gather writes nothing")
 
         let created = try change(service(inPlay: 2).handle(EnvironmentRequest(.move(to: .newTopic(title: "Notes work")), target: .session(sessionID("notes")))))
         XCTAssertTrue(created.created)
@@ -855,7 +851,7 @@ final class TopicServiceTests: XCTestCase {
         defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: paths.state.path) }
         let denied = try failure(service().handle(EnvironmentRequest(.create(title: "X"))))
         XCTAssertEqual(denied.kind, .storeFailed)
-        XCTAssertEqual(denied.message, "Muxify could not read or write the Topic records in \(paths.state.path). Permission denied.")
+        XCTAssertEqual(denied.message, "Muxify could not read or write its state in \(paths.stateDatabase.path). SQLite: unable to open database file.")
         XCTAssertEqual(denied.phase.summary, "No changes were made.")
 
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: paths.state.path)
@@ -876,19 +872,8 @@ final class TopicServiceTests: XCTestCase {
         #endif
     }
 
-    func testAnEditWaitsForTheEditLockAndGivesUpAsStoreBusy() throws {
-        let holder = try hold(paths.editLock)
-        defer { if holder.isRunning { kill(holder.processIdentifier, SIGKILL) } }
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, tools], editLockTimeout: 0.3)
-        let busy = try failure(service.handle(EnvironmentRequest(.create(title: "Blocked"))))
-        XCTAssertEqual(busy.kind, .storeBusy)
-        XCTAssertEqual(busy.phase, .nothingChanged)
-        XCTAssertEqual(try records(), [])
-        guard case .topics = service.handle(EnvironmentRequest(.list)) else { return XCTFail("a list does not wait for an edit") }
-    }
-
     func testListGivesTheOpenTopicsWithTheirLabelsAndSkipsInvalidEntries() throws {
-        try paths.seedTopicRecords(entries: [
+        try paths.seedTopicRecordsFile(entries: [
             #"{"id":"a","title":"Fix"}"#, #"{"id":"b","slug":"fix-login"}"#, #"{"id":"c","title":""}"#,
             #"{"id":"d","title":"Done","settled_at":"2026-10-01T10:00:00Z"}"#,
             #"{"id":"e","title":7}"#, #"{"id":"a","title":"Twin"}"#,
@@ -900,10 +885,10 @@ final class TopicServiceTests: XCTestCase {
 
     func testTheSettlePreviewOffersEachLiveSessionAndChangesNothing() throws {
         let id = try topicWithSession("Ship", at: sessionPath.folder.path, using: service())
-        let before = try Data(contentsOf: paths.topicRecords)
+        let before = try paths.storedTopicRows()
         let choices = try service().settleChoices(for: .topic(.id(id))).get()
         XCTAssertEqual(choices.map(\.name), ["game/ship"])
-        XCTAssertEqual(try Data(contentsOf: paths.topicRecords), before)
+        XCTAssertEqual(try paths.storedTopicRows(), before)
     }
 
     /// A Topic with a Session in game and one in tools.
@@ -1652,9 +1637,8 @@ final class TopicServiceTests: XCTestCase {
     func testReopenFailsAndChangesNothingWhenTheRecordedBaseIsGone() throws {
         let app = try repository()
         let (id, base) = try settledWithGoneWorktree(of: app)
-        let file = paths.topicRecords
         let missing = String(repeating: "0", count: 40)
-        try String(contentsOf: file, encoding: .utf8).replacingOccurrences(of: base, with: missing).write(to: file, atomically: true, encoding: .utf8)
+        try paths.withStateDatabase { try $0.execute("UPDATE topics SET sessions = replace(sessions, ?, ?)", base, missing) }
         let before = try records()
         let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
         let worktree = paths.worktrees.appendingPathComponent("app/ship").path
@@ -1712,18 +1696,29 @@ final class TopicServiceTests: XCTestCase {
         }
         XCTFail("\(window) is not in \(path)")
     }
+}
 
-    /// A process that holds an exclusive flock on `url` until it is killed.
-    private func hold(_ url: URL) throws -> Process {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let holder = Process()
-        holder.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        holder.arguments = ["-e", #"use Fcntl ":flock"; open(F, ">>", $ARGV[0]) or die; flock(F, LOCK_EX) or die; $| = 1; print "held\n"; sleep 30"#, url.path]
-        let output = Pipe()
-        holder.standardOutput = output
-        try holder.run()
-        XCTAssertEqual(String(data: output.fileHandleForReading.availableData, encoding: .utf8), "held\n")
-        return holder
+/// The test's tmux server, which runs `during` once, when a request first reads tmux: after it read the records, before
+/// it plans and writes.
+private final class Interleaving: TmuxRunning, @unchecked Sendable {
+    private let server: TmuxServer
+    private let lock = NSLock()
+    private var during: (() -> Void)?
+
+    init(server: TmuxServer, during: @escaping () -> Void) {
+        self.server = server
+        self.during = during
+    }
+
+    func run(_ arguments: [String]) throws -> String { try server.run(arguments) }
+
+    func snapshot() throws -> TmuxSnapshot {
+        lock.lock()
+        let once = during
+        during = nil
+        lock.unlock()
+        once?()
+        return try server.snapshot()
     }
 }
 

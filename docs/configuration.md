@@ -294,8 +294,8 @@ Sidebar then shows every card.
 - When a card leaves an In Play place, by Settle, Forget, Pin or Bench,
   its place becomes an Open Place, a dashed card "Open Place". No Benched card
   moves up, and the other places keep their positions. The Topic records keep
-  the Open Place (`open_places` in the records file), so it stays after a
-  restart of Muxify or tmux, until you fill it. A click on an Open Place lists
+  the Open Place (the `open_places` table of the state database), so it stays
+  after a restart of Muxify or tmux, until you fill it. A click on an Open Place lists
   the Guest Topics, then the Benched Topics. The Topic that you choose takes
   the place, and a Guest loses its mark. `muxify topic fill-place` does the
   same. A Guest Session must become a Topic before it can take a place. When
@@ -1415,7 +1415,11 @@ worktrees:
 
 `root_path` is absolute or starts with `~/`, the home of the Environment's machine.
 Muxify removes only a Worktree it remembers, so a Worktree that it did not make
-stays, also inside `root_path`.
+stays, also inside `root_path`. It remembers each one in a row of the `worktrees` table
+of its state database on this Mac, `$XDG_STATE_HOME/muxify/muxify.db`, which also
+holds the records of the Worktrees on its Remote Environments. An older Muxify kept one `worktrees/<id>.json` file per Worktree; the
+first run after the update imports each file and renames it `<id>.json.migrated`.
+The Worktrees' folders stay where they are.
 
 A project sets up its new Worktrees in `.worktree.json`, in the checkout the Worktree
 starts from or in the main working tree. It is JSON with comments and trailing commas:
@@ -1496,16 +1500,20 @@ browser:
   history: false
 ```
 
-Muxify keeps Browser History in one file on this Mac,
-`$XDG_STATE_HOME/muxify/browser-history.json`. It does not record a page that a
-Browser command loads, a reload, or a URL whose query or fragment has a key such
-as `token`, `code` or `password`. While it is off, Muxify does not record pages,
-does not read the file, and the address field shows no Suggestions.
+Muxify keeps Browser History on this Mac, in its state database,
+`$XDG_STATE_HOME/muxify/muxify.db`. Two Muxify apps that run at once, such as a
+dev build beside the release app, each add their pages to it. It does not record
+a page that a Browser command loads, a reload, or a URL whose query or fragment
+has a key such as `token`, `code` or `password`. While it is off, Muxify does not
+record pages, does not read Browser History, and the address field shows no
+Suggestions. On its first launch after the update, Muxify imports the
+`browser-history.json` of an older Muxify and renames it to
+`browser-history.json.migrated`.
 
 The Command **Clear Browser History** asks for a time: Last hour, Last 6 hours,
 Last day, Last 3 days, Last 7 days, or All time. The row that you choose clears
 at once. Browser History then forgets each visit in that time, and a page with
-no visit left. All time removes the file. Esc changes nothing.
+no visit left. All time removes every page. Esc changes nothing.
 
 Configurable [Keybindings](keybindings.md) work throughout the app, including in
 Browser pages. The guide lists all actions, defaults, built-in shortcuts and a

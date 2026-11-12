@@ -1,4 +1,5 @@
 import AppKit
+import MuxifyCore
 import SwiftUI
 
 @main
@@ -17,6 +18,9 @@ struct MuxifyApp: App {
         PTYWatch.start()
         let configStore = ConfigStore(appliesAppSettings: true)
         configStore.start()
+        // The imports of the old Topic records, Muxify Worktree record and Browser History files name each entry they
+        // could not move in the Diagnostics log.
+        StateDatabase.reportProblem = { Diagnostics.report("state: \($0)") }
         let windows = AppWindows(configStore: configStore)
         _windows = State(initialValue: windows)
         _updater = State(initialValue: SparkleUpdater.startIfConfigured(update: configStore.config.update))

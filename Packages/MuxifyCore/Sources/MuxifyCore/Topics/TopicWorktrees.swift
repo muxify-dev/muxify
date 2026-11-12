@@ -12,23 +12,24 @@ enum TopicWorktrees {
 
     public static func isCreated(_ session: JSONValue) -> Bool { session[createdKey] == .bool(true) }
 
-    /// Whether Muxify made `worktree`: it sits inside Muxify's worktrees folder `root`, or a Muxify Worktree record in that
-    /// folder names it (ADR 0062), wherever `worktrees.root_path` put it. Settle never removes another Worktree, so the
-    /// user's own Worktrees, and those Muxify made before the folder existed, stay wherever they are.
-    public static func isInside(_ worktree: Folder, root: Folder) -> Bool {
+    /// Whether Muxify made `worktree`: it sits inside Muxify's worktrees folder in the state folder of `paths`, or a
+    /// Muxify Worktree record in its state database names it (ADR 0062), wherever `worktrees.root_path` put it. Settle
+    /// never removes another Worktree, so the user's own Worktrees, and those Muxify made before the folder existed, stay
+    /// wherever they are.
+    public static func isInside(_ worktree: Folder, paths: MuxifyPaths) -> Bool {
+        let root = Folder.local(paths.worktrees.path)
         if worktree != root && root.contains(worktree) { return true }
-        let records = (try? MuxifyWorktreeStore(folder: URL(fileURLWithPath: root.path)).all()) ?? []
+        let records = (try? MuxifyWorktreeStore(paths: paths).all()) ?? []
         return records.contains { $0.environment == nil && Folder.local($0.path) == worktree }
     }
 
-    /// The Worktrees Settle may remove: those inside `root` that the Topic created, with their branch merged.
-    public static func merged(in topic: TopicRecord, root: String) -> Set<Folder> {
-        let root = Folder.local(root)
+    /// The Worktrees Settle may remove: those Muxify made (`isInside`) that the Topic created, with their branch merged.
+    public static func merged(in topic: TopicRecord, paths: MuxifyPaths) -> Set<Folder> {
         return Set(topic.sessions.compactMap { session in
             guard isCreated(session), let sessionPath = session["repository_path"]?.string, let path = session["worktree_path"]?.string,
                   let branch = session["branch"]?.string else { return nil }
             let worktree = Folder.local(path)
-            guard isInside(worktree, root: root), isMerged(.init(repositoryPath: sessionPath, path: path, branch: branch)) else { return nil }
+            guard isInside(worktree, paths: paths), isMerged(.init(repositoryPath: sessionPath, path: path, branch: branch)) else { return nil }
             return worktree
         })
     }
@@ -143,10 +144,10 @@ enum TopicWorktrees {
     }
 
     /// `windows` are the live Windows of the tmux server whose Sessions may use the Worktree.
-    public static func removeMerged(_ worktree: TopicPlan.WorktreeSpec, root: String,
+    public static func removeMerged(_ worktree: TopicPlan.WorktreeSpec, paths: MuxifyPaths,
                               windows: [TmuxWindow], panes: [TmuxPane] = []) throws {
         let folder = Folder.local(worktree.path)
-        guard isInside(folder, root: .local(root)) else { throw Failure.notMuxifys }
+        guard isInside(folder, paths: paths) else { throw Failure.notMuxifys }
         guard isMerged(worktree) else { throw Failure.notMerged }
         guard !windows.contains(where: { $0.folders.contains(where: folder.contains) }),
               !panes.contains(where: { folder.contains(.local($0.path)) }) else { throw Failure.inUse }
@@ -154,9 +155,9 @@ enum TopicWorktrees {
         _ = try Shell.run("/usr/bin/git", ["worktree", "remove", worktree.path], directory: worktree.repositoryPath)
     }
 
-    public static func removeClean(_ worktree: TopicPlan.WorktreeSpec, root: String, windows: [TmuxWindow], panes: [TmuxPane] = []) throws {
+    public static func removeClean(_ worktree: TopicPlan.WorktreeSpec, paths: MuxifyPaths, windows: [TmuxWindow], panes: [TmuxPane] = []) throws {
         let folder = Folder.local(worktree.path)
-        guard isInside(folder, root: .local(root)) else { throw Failure.notMuxifys }
+        guard isInside(folder, paths: paths) else { throw Failure.notMuxifys }
         guard !windows.contains(where: { $0.folders.contains(where: folder.contains) }),
               !panes.contains(where: { folder.contains(.local($0.path)) }) else { throw Failure.inUse }
         try check([.removeCleanWorktree(worktree)])

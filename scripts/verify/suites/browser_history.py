@@ -5,12 +5,17 @@ check's pages share. The checks type into the address
 field with the driver's `set`, which gives the field its whole text at once, as a paste does, so a check that wants
 Inline completion sets one letter more than the text before. ↩ is the field's Submit accessibility action.
 
+The sandbox starts with a `browser-history.json` of an older Muxify, which the app imports into its state database at
+launch. The checks read Browser History from the `browser_history` table of `state/muxify/muxify.db` with Python's
+`sqlite3`, as another process reads it.
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.browser_history
 """
 
 import json
 import socket
+import sqlite3
 import subprocess
 import threading
 import time
@@ -22,7 +27,7 @@ from scripts.verify.sandbox import Sandbox, wait
 
 SHELL = '/bin/sh'
 PAGES = ('alpha', 'beta', 'gamma', 'agent', 'after-agent', 'cleared')
-# A page of the file that the app reads at launch, visited 10 days before the run.
+# A page of the file that the app imports at launch, visited 10 days before the run.
 OLD_PAGE = 'http://old.test/page'
 # Swift's JSONEncoder writes a Date as seconds since 2001-01-01.
 APPLE_EPOCH = 978307200
@@ -51,6 +56,7 @@ class BrowserHistory(unittest.TestCase):
         cls.site.mkdir()
         for name in PAGES:
             (cls.site/(name + '.html')).write_text('<!doctype html><title>%s page</title><p>%s</p>' % (name.title(), name))
+        cls.database = s.root/'state/muxify/muxify.db'
         cls.history_file = s.root/'state/muxify/browser-history.json'
         cls.history_file.parent.mkdir(parents=True, exist_ok=True)
         ten_days_ago = time.time() - APPLE_EPOCH - 10 * 86400
@@ -105,15 +111,28 @@ class BrowserHistory(unittest.TestCase):
         self.s.wait_rows(lambda rs: page.title() + ' page' in self.tab_titles(rs), 'the page %s did not finish loading' % page)
 
     def entries(self):
-        try:
-            return {entry['key']: entry for entry in json.loads(self.history_file.read_text())}
-        except (FileNotFoundError, json.JSONDecodeError):
+        """The History entries of the state database, by key, each a dict of its columns."""
+        if not self.database.exists():
             return {}
+        connection = sqlite3.connect('file:%s?mode=ro' % self.database, uri=True, timeout=10)
+        connection.row_factory = sqlite3.Row
+        try:
+            return {row['key']: dict(row) for row in connection.execute('SELECT * FROM browser_history')}
+        except sqlite3.OperationalError:
+            return {}
+        finally:
+            connection.close()
+
+    def test_the_file_of_an_older_muxify_is_imported_and_renamed(self):
+        wait(lambda: OLD_PAGE in self.entries(), 'the app did not import %s' % self.history_file.name)
+        self.assertEqual(self.entries()[OLD_PAGE]['title'], 'Old page')
+        self.assertFalse(self.history_file.exists(), 'the imported file stays as it was')
+        self.assertTrue(self.history_file.with_name(self.history_file.name + '.migrated').exists())
 
     def wait_recorded(self, *pages):
         keys = [self.url(page) for page in pages]
         wait(lambda: all(key in self.entries() for key in keys),
-             'Browser History did not record %s; the file has %s' % (pages, sorted(self.entries())), seconds=10)
+             'Browser History did not record %s; the database has %s' % (pages, sorted(self.entries())), seconds=10)
 
     @staticmethod
     def value(row):
@@ -191,7 +210,7 @@ class BrowserHistory(unittest.TestCase):
         self.s.act('press', 'palette-row-clear-Last hour')
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the choice did not close the palette')
         wait(lambda: self.url('cleared') not in self.entries(),
-             'Last hour did not forget the page; the file has %s' % sorted(self.entries()), seconds=10)
+             'Last hour did not forget the page; the database has %s' % sorted(self.entries()), seconds=10)
         self.assertIn(OLD_PAGE, self.entries(), 'Last hour forgot a visit of 10 days ago')
 
         # Another Window, so that the open Tab of the page is not a Suggestion.

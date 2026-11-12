@@ -59,7 +59,8 @@ final class CreatedWorktreeTests: XCTestCase {
         let work = path("work")
         _ = try git(["init", "-q", "-b", "main", work], in: root.path)
         try commit("init", in: work)
-        let inside = { (branch: String) in self.path("worktrees/work/" + branch) }
+        let paths = MuxifyPaths(environment: ["XDG_STATE_HOME": path("state")], home: "/nonexistent")
+        let inside = { (branch: String) in paths.worktrees.appendingPathComponent("work/" + branch).path }
         for (branch, folder) in [("created", inside("created")), ("picked", inside("picked")), ("legacy", inside("legacy")),
                                  ("outside", path("outside"))] {
             _ = try git(["worktree", "add", "-q", "-b", branch, folder], in: work)
@@ -72,7 +73,7 @@ final class CreatedWorktreeTests: XCTestCase {
         var topic = TopicRecord(id: "topic")
         topic.sessions = [session("created", inside("created"), created: .bool(true)), session("picked", inside("picked"), created: .bool(false)),
                           session("legacy", inside("legacy"), created: nil), session("outside", path("outside"), created: .bool(true))]
-        XCTAssertEqual(Set(TopicWorktrees.merged(in: topic, root: path("worktrees")).map(\.path)), [inside("created")],
+        XCTAssertEqual(Set(TopicWorktrees.merged(in: topic, paths: paths).map(\.path)), [inside("created")],
                        "a picked Worktree and one outside Muxify's folder are never removed")
     }
 }

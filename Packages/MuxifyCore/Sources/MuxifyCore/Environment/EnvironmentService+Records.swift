@@ -1,6 +1,6 @@
 import Foundation
 
-// The records lane: commands that take the record lock only. Each writes keys of Topic records, Agent options in tmux, or both.
+// The records lane: commands that need no plan. Each writes keys of Topic records, Agent options in tmux, or both.
 extension EnvironmentService {
     func changeRecords(_ request: EnvironmentRequest, client: String?) -> EnvironmentResponse {
         switch request.command {
@@ -17,23 +17,6 @@ extension EnvironmentService {
         case .markRead(let change, let scope): return markRead(request, change, scope: scope, client: client)
         case .markAllRead: return markRead(request, .read, scope: nil, client: client)
         default: preconditionFailure("\(request.command) is not in the records lane")
-        }
-    }
-
-    /// Upgrades the records that a Muxify with Snooze and Zen wrote, with this service's place for a returning Topic,
-    /// and sets the Locks it moved in tmux. Nil when it succeeded or had nothing to upgrade.
-    public func upgradeRecords(client: String? = nil) -> TopicFailure? {
-        var phase = TopicFailure.Phase.nothingChanged
-        do {
-            let contents = try store.read()
-            guard contents.needsUpgrade else { return nil }
-            let locks = SessionLock.locks(in: try server.snapshot().windows, records: contents.records)
-            let moved = try store.upgrade(locks: locks, arrival: topics.arrival)
-            phase = .recordSaved
-            try executor.run(moved.map { .tmux($0.command) }, client: client)
-            return nil
-        } catch {
-            return failure(error, phase: phase)
         }
     }
 
@@ -283,7 +266,7 @@ extension EnvironmentService {
         return (.lock(sessionID: window.sessionID), "The Locked Session " + window.sessionName, false)
     }
 
-    /// Tags are one key of one record, so a Tag change also takes only the record lock.
+    /// Tags are one column of one record, so a Tag change writes only that column.
     private func changeTags(_ request: EnvironmentRequest, _ change: TopicTagChange, client: String?) -> EnvironmentResponse {
         do {
             let records = try store.read().records

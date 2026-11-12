@@ -1,4 +1,5 @@
 import Foundation
+import MuxifyCore
 
 /// A host, or a host and path, that holds two or more History entries (ADR 0059). The prefix tree is not stored:
 /// `HistoryPrefix.all` makes it from the entries, and the score of a prefix is the sum of the scores of its entries.

@@ -164,14 +164,49 @@ final class MuxifyWorktreeTests: XCTestCase {
         XCTAssertEqual(try git(["status", "--porcelain"], in: made.path), "?? hook-ran")
     }
 
-    func testStoreKeepsOneFileForEachRecordBesideTheDefaultRootsFolders() throws {
-        let store = MuxifyWorktreeStore(folder: root)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("app/fix"), withIntermediateDirectories: true)
+    private var paths: MuxifyPaths { MuxifyPaths(environment: ["XDG_STATE_HOME": root.path], home: "/nonexistent") }
+
+    func testStoreKeepsOneRowForEachRecordAndLeavesTheDefaultRootsFolders() throws {
+        let store = MuxifyWorktreeStore(paths: paths)
+        XCTAssertEqual(try store.all(), [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.state.path), "a read creates no state folder")
+        let checkout = paths.worktrees.appendingPathComponent("app/fix")
+        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
         let record = MuxifyWorktreeRecord(environment: "box", repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "fix", base: "abc",
                                           createdAt: Date(timeIntervalSince1970: 1_700_000_000))
         try store.write(record)
         XCTAssertEqual(try store.all(), [record])
+        XCTAssertEqual(store.record(record.id), record)
+        XCTAssertEqual(try MuxifyWorktreeStore(paths: paths).all(), [record], "another store reads the same row")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: paths.worktrees.path), ["app"], "no record file")
         try store.remove(record.id)
         XCTAssertEqual(try store.all(), [])
+        XCTAssertNil(store.record(record.id))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: checkout.path))
+    }
+
+    func testAWriteOfAnExistingIDUpdatesItsRecord() throws {
+        let store = MuxifyWorktreeStore(paths: paths)
+        var record = MuxifyWorktreeRecord(environment: nil, repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "fix", base: "abc",
+                                          createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+        try store.write(record)
+        record.branch = "fix-2"
+        record.base = "def"
+        try store.write(record)
+        XCTAssertEqual(try store.all(), [record])
+    }
+
+    func testASecondRecordAtAPathThatHasOneFailsWithAnErrorNamingThePath() throws {
+        let store = MuxifyWorktreeStore(paths: paths)
+        let first = MuxifyWorktreeRecord(environment: nil, repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "fix", base: "abc",
+                                         createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+        try store.write(first)
+        let second = MuxifyWorktreeRecord(environment: nil, repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "other", base: "def")
+        XCTAssertThrowsError(try MuxifyWorktreeStore(paths: paths).write(second)) { error in
+            XCTAssertEqual(error as? MuxifyWorktreeError, .pathTaken("/src/trees/fix"))
+            XCTAssertTrue(String(describing: error).contains("/src/trees/fix"), String(describing: error))
+            XCTAssertEqual(EnvironmentService(paths: self.paths).failure(error, phase: .nothingChanged).kind, .worktreeExists)
+        }
+        XCTAssertEqual(try store.all(), [first], "the second record was not written")
     }
 }

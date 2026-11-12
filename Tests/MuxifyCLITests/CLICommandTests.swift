@@ -304,12 +304,12 @@ final class CLICommandTests: XCTestCase {
                            "TMUX_PANE not-a-pane is not a tmux Pane id; name the target with --topic <id|label>, --window <id> or --pane <id>")
             XCTAssertEqual((error as? CLIError)?.exitCode, 2)
         }
-        for (environment, topics) in [(["XDG_STATE_HOME": "/state"], "/state/muxify/topics.json"),
-                                      (["HOME": "/home/me"], "/home/me/.local/state/muxify/topics.json")] {
+        for (environment, topics) in [(["XDG_STATE_HOME": "/state"], "/state/muxify/muxify.db"),
+                                      (["HOME": "/home/me"], "/home/me/.local/state/muxify/muxify.db")] {
             guard case .request(let invocation) = try CLICommand(arguments: ["topic", "list"], environment: environment) else {
                 return XCTFail("\(environment): expected topic list")
             }
-            XCTAssertEqual(invocation.paths.topicRecords.path, topics)
+            XCTAssertEqual(invocation.paths.stateDatabase.path, topics)
         }
     }
 

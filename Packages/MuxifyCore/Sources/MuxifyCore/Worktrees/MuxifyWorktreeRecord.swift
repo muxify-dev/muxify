@@ -34,43 +34,34 @@ public struct MuxifyWorktreeRecord: Codable, Hashable, Sendable {
     }
 }
 
-/// The records, one file each in `$XDG_STATE_HOME/muxify/worktrees/<id>.json`, as Topics are. Two processes that make
-/// two Worktrees write two files, so no write merges another, and a write is atomic, so no reader sees half of one.
+/// The records in the state database: the `worktrees` table (`WorktreeTable`), one row for each record, on this Mac
+/// for its own Worktrees and those of its Remote Environments. It keeps no records of its own, so two processes that
+/// make two Worktrees each insert a row, and a second record at a path that has one fails.
 public struct MuxifyWorktreeStore: Sendable {
-    public let folder: URL
+    public let paths: MuxifyPaths
+    private let database: StateConnection
 
-    public init(paths: MuxifyPaths) { folder = paths.worktrees }
-    public init(folder: URL) { self.folder = folder }
+    public init(paths: MuxifyPaths) {
+        self.paths = paths
+        database = StateConnection(paths: paths)
+    }
 
-    /// Every record. A file that is not a record, such as one a newer Muxify wrote, is skipped. The folder also
-    /// holds the Worktrees of the default root, which are folders.
+    /// Every record, oldest first. Without a state folder there is nothing to read, and the read creates nothing.
     public func all() throws -> [MuxifyWorktreeRecord] {
-        guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "json" }
-            .compactMap { file in (try? Data(contentsOf: file)).flatMap { try? decoder.decode(MuxifyWorktreeRecord.self, from: $0) } }
-            .sorted { ($0.createdAt, $0.id) < ($1.createdAt, $1.id) }
+        try database.use(creating: false) { try WorktreeTable.records($0) } ?? []
     }
 
     public func record(_ id: String) -> MuxifyWorktreeRecord? {
-        try? all().first { $0.id == id }
+        (try? database.use(creating: false) { try WorktreeTable.records($0, id: id).first }) ?? nil
     }
 
+    /// Inserts the record, or updates the one with its id. A record at a path that another record has fails with
+    /// `MuxifyWorktreeError.pathTaken`, and writes nothing.
     public func write(_ record: MuxifyWorktreeRecord) throws {
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(record).write(to: file(record.id), options: .atomic)
+        _ = try database.use(creating: true) { try WorktreeTable.write(record, $0) }
     }
 
     public func remove(_ id: String) throws {
-        let file = file(id)
-        guard FileManager.default.fileExists(atPath: file.path) else { return }
-        try FileManager.default.removeItem(at: file)
+        _ = try database.use(creating: false) { try $0.execute("DELETE FROM worktrees WHERE id = ?", id) }
     }
-
-    private func file(_ id: String) -> URL { folder.appendingPathComponent(id + ".json") }
 }

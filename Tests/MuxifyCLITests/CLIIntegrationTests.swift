@@ -86,8 +86,8 @@ final class CLIIntegrationTests: XCTestCase {
     func testTopicListPrintsTheSameBytesForValidRecords() async throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-cli-golden-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: state) }
-        let topics = state.appendingPathComponent("muxify/topics")
-        try FileManager.default.createDirectory(at: topics, withIntermediateDirectories: true)
+        let folder = state.appendingPathComponent("muxify")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let records = [
             #"{"id":"a-null","title":"Settled null","settled_at":null}"#,
             #"{"id":"b-absent","title":"No settled field"}"#,
@@ -101,10 +101,9 @@ final class CLIIntegrationTests: XCTestCase {
             #"{"id":"café","title":"Crème brûlée"}"#,
             #"{"id":"日本","title":"東京 🚀","order":2,"sessions":[{"repository_path":"/p"}],"extra":{"k":1}}"#,
         ]
-        for text in records {
-            let id = try XCTUnwrap((try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any])?["id"] as? String)
-            try Data(text.utf8).write(to: topics.appendingPathComponent(id + ".json"))
-        }
+        // The first open of the state database imports them.
+        try Data("{\"records\":[\(records.joined(separator: ","))],\"open_places\":[]}".utf8)
+            .write(to: folder.appendingPathComponent("topics.json"))
         let binary = cli
         let result = try await run(binary, arguments: ["topic", "list"], environment: ["XDG_STATE_HOME": state.path])
         XCTAssertEqual(result.status, 0, result.output)
@@ -123,7 +122,7 @@ final class CLIIntegrationTests: XCTestCase {
             """.utf8))
     }
 
-    func testTopicListLeavesOutFilesThatAreNotValidRecords() async throws {
+    func testTopicListLeavesOutEntriesThatAreNotValidRecordsAndNamesEach() async throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-cli-invalid-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: state) }
         let binary = cli
@@ -132,19 +131,21 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(empty.output, "")
         XCTAssertFalse(FileManager.default.fileExists(atPath: state.path), "a list creates no state folder")
 
-        let topics = state.appendingPathComponent("muxify/topics")
-        try FileManager.default.createDirectory(at: topics, withIntermediateDirectories: true)
-        let files = [
-            "a.json": #"{"id":"a","title":"Valid"}"#,
-            "b.json": #"{"id":"other","title":"Renamed file"}"#,
-            "c.json": #"{"id":"c","title":"#,
-            "d.json": #"{"id":"d","title":7}"#,
-            "e.txt": #"{"id":"e","title":"Not a record"}"#,
-        ]
-        for (name, text) in files { try Data(text.utf8).write(to: topics.appendingPathComponent(name)) }
+        let folder = state.appendingPathComponent("muxify")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("topics.json")
+        try Data(#"{"records":[{"id":"a","title":"Valid"},{"id":"d","title":7},42,{"id":"a","title":"Twin"}],"open_places":[]}"#.utf8)
+            .write(to: file)
         let result = try await run(binary, arguments: ["topic", "list"], environment: ["XDG_STATE_HOME": state.path])
         XCTAssertEqual(result.status, 0, result.output)
-        XCTAssertEqual(result.output, "a\tValid\t\n")
+        XCTAssertEqual(result.stdout, "a\tValid\t\n")
+        let problems = result.stderr.split(separator: "\n").map(String.init)
+        XCTAssertEqual(problems.count, 3, result.stderr)
+        XCTAssertTrue(problems[0].hasPrefix("muxify: \(file.path): records[1] (id d) is not a valid Topic record"), problems[0])
+        XCTAssertTrue(problems[1].hasPrefix("muxify: \(file.path): records[2] is not a valid Topic record"), problems[1])
+        XCTAssertEqual(problems[2], "muxify: \(file.path): records[3] (id a) repeats the id of an earlier record, so Muxify did not import it")
+        let again = try await run(binary, arguments: ["topic", "list"], environment: ["XDG_STATE_HOME": state.path])
+        XCTAssertEqual(again.output, "a\tValid\t\n", "the import ran once")
     }
 
     func testTopicListExitsWithAnErrorWhenItCannotReadTheRecords() async throws {
@@ -156,12 +157,12 @@ final class CLIIntegrationTests: XCTestCase {
         }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         try Data(#"{"records":[{"id":"a","title":"Valid"}],"open_places":[]}"#.utf8).write(to: folder.appendingPathComponent("topics.json"))
-        // The read takes the record lock, and it cannot make the lock file in a read-only state folder.
+        // The read opens the state database, and it cannot make the database file in a read-only state folder.
         try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
         let binary = cli
         let result = try await run(binary, arguments: ["topic", "list"], environment: ["XDG_STATE_HOME": state.path])
         XCTAssertEqual(result.status, 1, result.output)
-        XCTAssertEqual(result.output, "muxify: Muxify could not read or write the Topic records in \(folder.path). Permission denied. No changes were made.\n")
+        XCTAssertEqual(result.output, "muxify: Muxify could not read or write its state in \(folder.path)/muxify.db. SQLite: unable to open database file. No changes were made.\n")
     }
 
     func testTopicNewThenAddSessionLeavesEveryClientWhereItWas() async throws {
@@ -1612,14 +1613,16 @@ private final class TopicSandbox {
         return String(line.dropFirst(tty.count + 1))
     }
 
-    /// The record files as JSON objects, as another reader of the state folder sees them.
-    /// The entries of `records` in the records file, in file order, as the CLI wrote them.
+    /// The Topic records in the state database, each as the JSON object of the record, in id order, as the CLI
+    /// wrote them.
     func records() throws -> [[String: Any]] {
-        let file = root.appendingPathComponent("state/muxify/topics.json")
-        guard let data = try? Data(contentsOf: file) else { return [] }
-        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let entries = object["records"] as? [[String: Any]] else { throw CLIError("\(file.path) is not a records file") }
-        return entries
+        let paths = MuxifyPaths(environment: ["XDG_STATE_HOME": root.appendingPathComponent("state").path], home: "/nonexistent")
+        return try TopicStore(paths: paths).read().records.map { record in
+            guard let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any] else {
+                throw CLIError("the record \(record.id) is not a JSON object")
+            }
+            return object
+        }
     }
 
     /// The remembered Session of `record` in `sessionPath`.

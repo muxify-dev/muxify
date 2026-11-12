@@ -203,7 +203,7 @@ One page in a Window's Browser, with its own back/forward history. "Tab" never m
 _Avoid_: page (when you mean the Tab itself), browser window
 
 **Browser History**:
-The pages that the user loaded in the Tabs of every Window, one History entry for each, kept in one file on the Mac. It is on by default; the Config key `browser.history: false` turns it off. It never records a page that a Browser command loads.
+The pages that the user loaded in the Tabs of every Window, one History entry for each, kept on the Mac. It is on by default; the Config key `browser.history: false` turns it off. It never records a page that a Browser command loads.
 _Avoid_: history (alone, which is also a Tab's back/forward history and Find in Pane's), visits
 
 **History entry**:

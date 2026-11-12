@@ -42,7 +42,7 @@ class WorktreesCli(unittest.TestCase):
         cls.config.write_text('sessions:\n  paths:\n    - path: ' + str(cls.projects) + '/*\n')
         s.tmux('new-session', '-d', '-s', 'base', '-c', str(s.root))
         cls.pane = s.tmux('display-message', '-p', '-t', '=base:', '#{pane_id}')
-        cls.records = s.root/'state/muxify/worktrees'
+        cls.worktrees = s.root/'state/muxify/worktrees'
         cls.store = TopicRecords(s.root/'state/muxify')
 
     def muxify(self, *args, cwd, pane=None):
@@ -70,14 +70,15 @@ class WorktreesCli(unittest.TestCase):
         return repository
 
     def records_of(self, name):
-        return [json.loads(f.read_text()) for f in self.records.glob('*.json') if json.loads(f.read_text())['name'] == name]
+        """The Muxify Worktree records with this name, from the `worktrees` table of the state database."""
+        return [record for record in self.store.worktrees() if record['name'] == name]
 
     def test_worktree_create_syncs_runs_post_create_and_makes_a_no_topic_session(self):
         repository = self.repository('wt-create')
         made = self.muxify('worktree', 'create', 'fix-login', '--no-open', '--json', cwd=repository)
         self.assertEqual(made.returncode, 0, made.stderr)
         change = json.loads(made.stdout)['changed']
-        worktree = self.records/'wt-create/fix-login'
+        worktree = self.worktrees/'wt-create/fix-login'
         self.assertEqual(change['session_name'], 'wt-create/fix-login', change)
         self.assertIn('skip copy (missing): missing.env', change['output'], change)
         self.assertEqual((worktree/'.envrc').read_text(), 'export SECRET=1\n', 'the setup did not copy .envrc')
@@ -99,9 +100,9 @@ class WorktreesCli(unittest.TestCase):
         first = self.muxify('worktree', 'create', 'first', '--no-open', cwd=repository)
         self.assertEqual(first.returncode, 0, first.stderr)
         # From inside a Muxify Worktree, the next one belongs to the same repository folder.
-        made = self.muxify('worktree', 'create', 'feature', '--no-open', cwd=self.records/'wt-branch/first')
+        made = self.muxify('worktree', 'create', 'feature', '--no-open', cwd=self.worktrees/'wt-branch/first')
         self.assertEqual(made.returncode, 0, made.stderr)
-        self.assertEqual(self.git('symbolic-ref', '--short', 'HEAD', cwd=self.records/'wt-branch/feature'), 'feature')
+        self.assertEqual(self.git('symbolic-ref', '--short', 'HEAD', cwd=self.worktrees/'wt-branch/feature'), 'feature')
 
     def test_worktree_list_shows_only_the_muxify_worktrees_of_the_repository(self):
         repository = self.repository('wt-list', setup=None)
@@ -122,7 +123,7 @@ class WorktreesCli(unittest.TestCase):
         repository = self.repository('wt-remove')
         made = self.muxify('worktree', 'create', 'remove-me', '--no-open', cwd=repository)
         self.assertEqual(made.returncode, 0, made.stderr)
-        worktree = self.records/'wt-remove/remove-me'
+        worktree = self.worktrees/'wt-remove/remove-me'
         wait(lambda: (worktree/'post-created.log').exists(), 'postCreate did not run', seconds=15)
 
         refused = self.muxify('worktree', 'remove', 'remove-me', cwd=repository)
@@ -133,7 +134,7 @@ class WorktreesCli(unittest.TestCase):
         removed = self.muxify('worktree', 'remove', 'remove-me', '--kill', cwd=repository)
         self.assertEqual(removed.returncode, 0, removed.stderr)
         self.assertFalse(worktree.exists(), 'Remove kept the Worktree')
-        self.assertEqual((self.records/'wt-remove/pre-deleted.log').read_text(), 'remove-me\n', 'preDelete did not run in the Worktree')
+        self.assertEqual((self.worktrees/'wt-remove/pre-deleted.log').read_text(), 'remove-me\n', 'preDelete did not run in the Worktree')
         self.assertNotEqual(self.s.tmux_ok('has-session', '-t', '=wt-remove/remove-me').returncode, 0, '--kill kept the Session')
         self.assertEqual(self.git('branch', '--list', 'remove-me', cwd=repository), 'remove-me', 'Remove deleted the branch')
         self.assertEqual(self.records_of('remove-me'), [], 'Remove kept the record')
@@ -143,7 +144,7 @@ class WorktreesCli(unittest.TestCase):
         made = self.muxify('worktree', 'create', 'dirty', '--no-open', cwd=repository)
         self.assertEqual(made.returncode, 0, made.stderr)
         self.s.tmux('kill-session', '-t', '=wt-force/dirty')
-        worktree = self.records/'wt-force/dirty'
+        worktree = self.worktrees/'wt-force/dirty'
         (worktree/'new.txt').write_text('change\n')
         changed = self.muxify('worktree', 'remove', 'dirty', cwd=repository)
         self.assertIn('uncommitted changes', changed.stderr)
@@ -174,7 +175,7 @@ class WorktreesCli(unittest.TestCase):
         topic_id = json.loads(made.stdout)['changed']['topic_id']
         added = self.muxify('topic', 'add-session', str(repository), '--worktree', '--topic', topic_id, cwd=repository)
         self.assertEqual(added.returncode, 0, added.stderr)
-        worktree = self.records/'wt-topic/worktree-topic'
+        worktree = self.worktrees/'wt-topic/worktree-topic'
         self.assertEqual((worktree/'.envrc').read_text(), 'export SECRET=1\n', 'the Topic Worktree did not get its sync')
         wait(lambda: (worktree/'post-created.log').exists(), 'postCreate did not run in the Topic Session', seconds=15)
         [record] = self.records_of('worktree-topic')
