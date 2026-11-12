@@ -18,6 +18,31 @@ architecture; `TEST_LINUX_PLATFORM=linux/amd64` picks another. When the host's
 resolver does not answer for the Ubuntu mirrors, add
 `TEST_LINUX_DOCKER_ARGS="--dns 1.1.1.1"`.
 
+## Tests run in parallel
+
+All three test bundles are parallelizable, locally and in CI, and xcodebuild
+picks the worker count. Test classes run at the same time in separate
+processes; the tests of one class run in order, in one process. So every test
+owns its state:
+
+- **Its tmux server.** Start it with an explicit socket (`-S`) and a
+  `TMUX_TMPDIR` in a unique folder, such as `TestDirectory()` or a
+  `/tmp/mx…-<UUID>` folder, and remove `TMUX` and `TMUX_PANE` from the
+  environment of every process it starts.
+- **Its temporary folder.** Make a new one with a UUID in its name, and remove
+  it when the test ends.
+- **Its UserDefaults suite.** Give the subject a fresh suite and remove it when
+  the test ends, as the `WorkspaceStore` and `AppWindows` tests do with
+  `isolatedDefaults()`. Do not save and restore keys of `UserDefaults.standard`:
+  another process can read them in between.
+
+A test never writes a fixed path that another test reads.
+
+A timing assert runs beside other test processes, so the machine can be busy.
+Give it a bound that the buggy behaviour cannot meet, not one tuned to an idle
+machine: "two 2 s runs at the same time" stays below the 4 s they take one after
+the other.
+
 ## Live SSH test
 
 The live tests (`LiveSSHTests` and `LiveHostCLITests`) skip unless
