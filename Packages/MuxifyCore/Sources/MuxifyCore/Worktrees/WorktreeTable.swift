@@ -82,9 +82,7 @@ enum WorktreeTable {
                 continue
             }
             try write(record, connection)
-            let migrated = file.appendingPathExtension("migrated")
-            try? FileManager.default.removeItem(at: migrated)
-            try FileManager.default.moveItem(at: file, to: migrated)
+            try StateDatabase.renameToMigrated(file)
         }
     }
 }

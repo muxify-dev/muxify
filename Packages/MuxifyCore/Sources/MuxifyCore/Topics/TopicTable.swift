@@ -213,8 +213,6 @@ enum TopicTable {
         case nil:
             break
         }
-        let migrated = url.appendingPathExtension("migrated")
-        try? FileManager.default.removeItem(at: migrated)
-        try FileManager.default.moveItem(at: url, to: migrated)
+        try StateDatabase.renameToMigrated(url)
     }
 }

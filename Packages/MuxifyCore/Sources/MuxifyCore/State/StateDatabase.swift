@@ -83,6 +83,14 @@ public enum StateDatabase {
     static func userVersion(_ connection: SQLiteConnection) throws -> Int {
         try connection.query("PRAGMA user_version") { $0.int(0) }.first ?? 0
     }
+
+    /// Renames a file that an import moved into the database to `<name>.migrated`, in the place of one an earlier
+    /// import left there, so the next open finds nothing to import and the old file stays readable.
+    static func renameToMigrated(_ file: URL) throws {
+        let migrated = file.appendingPathExtension("migrated")
+        try? FileManager.default.removeItem(at: migrated)
+        try FileManager.default.moveItem(at: file, to: migrated)
+    }
 }
 
 /// A store's one connection to the state database, opened at its first use. A lock keeps one use at a time, since a

@@ -294,8 +294,8 @@ Sidebar then shows every card.
 - When a card leaves an In Play place, by Settle, Forget, Pin or Bench,
   its place becomes an Open Place, a dashed card "Open Place". No Benched card
   moves up, and the other places keep their positions. The Topic records keep
-  the Open Place (`open_places` in the records file), so it stays after a
-  restart of Muxify or tmux, until you fill it. A click on an Open Place lists
+  the Open Place (the `open_places` table of the state database), so it stays
+  after a restart of Muxify or tmux, until you fill it. A click on an Open Place lists
   the Guest Topics, then the Benched Topics. The Topic that you choose takes
   the place, and a Guest loses its mark. `muxify topic fill-place` does the
   same. A Guest Session must become a Topic before it can take a place. When

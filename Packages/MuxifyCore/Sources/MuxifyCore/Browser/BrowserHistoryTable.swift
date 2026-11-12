@@ -96,9 +96,7 @@ enum BrowserHistoryTable {
             return
         }
         for entry in entries { try write(entry, replacing: false, connection) }
-        let migrated = url.appendingPathExtension("migrated")
-        try? FileManager.default.removeItem(at: migrated)
-        try FileManager.default.moveItem(at: url, to: migrated)
+        try StateDatabase.renameToMigrated(url)
     }
 }
 

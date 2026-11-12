@@ -18,7 +18,8 @@ struct MuxifyApp: App {
         PTYWatch.start()
         let configStore = ConfigStore(appliesAppSettings: true)
         configStore.start()
-        // The import of the old Topic records file names each entry it could not move in the Diagnostics log.
+        // The imports of the old Topic records, Muxify Worktree record and Browser History files name each entry they
+        // could not move in the Diagnostics log.
         StateDatabase.reportProblem = { Diagnostics.report("state: \($0)") }
         let windows = AppWindows(configStore: configStore)
         _windows = State(initialValue: windows)
