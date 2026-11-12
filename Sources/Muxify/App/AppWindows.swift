@@ -10,7 +10,7 @@ final class AppWindows {
     let configStore: ConfigStore
     /// Where the App Windows and their stores remember view state across launches. The app passes `.standard`;
     /// a test, a suite of its own.
-    @ObservationIgnored let defaults: UserDefaults
+    @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let initialEnvironmentName: String?
     private(set) var focusedID: UUID?
     @ObservationIgnored var openWindow: ((AppWindowRequest) -> Void)?

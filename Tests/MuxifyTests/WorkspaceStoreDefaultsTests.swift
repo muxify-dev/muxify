@@ -1,7 +1,7 @@
 import XCTest
 @testable import MuxifyCore
 
-/// A store keeps its view state in the UserDefaults it is given, so tests can run side by side in one process.
+/// A store keeps its view state in the UserDefaults it is given, so tests running at the same time never share it.
 @MainActor
 final class WorkspaceStoreDefaultsTests: XCTestCase {
     func testAStoreOnItsOwnSuiteKeepsItsSidebarModeAndOpenSessionCardsThereAndLeavesStandardAlone() {

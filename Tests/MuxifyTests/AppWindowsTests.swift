@@ -9,6 +9,8 @@ final class AppWindowsTests: XCTestCase {
         host: home.example
         username: test
     """
+    /// The UserDefaults suite of the App Windows that `withWindows` builds.
+    private var defaults: UserDefaults!
 
     @MainActor func testDefaultScenesHaveIndependentStoresAndTerminalHosts() throws {
         try withWindows { windows, _ in
@@ -44,8 +46,8 @@ final class AppWindowsTests: XCTestCase {
 
     @MainActor func testOnlyFirstDefaultSceneUsesTheRememberedEnvironment() throws {
         try withWindows { windows, _ in
-            windows.defaults.set("Home", forKey: "selectedEnvironment")
-            let remembered = AppWindows(configStore: windows.configStore, defaults: windows.defaults)
+            defaults.set("Home", forKey: "selectedEnvironment")
+            let remembered = AppWindows(configStore: windows.configStore, defaults: defaults)
             let first = remembered.defaultWindowRequest()
             XCTAssertEqual(first.environmentName, "Home")
             _ = remembered.store(for: first)
@@ -158,7 +160,7 @@ final class AppWindowsTests: XCTestCase {
             windows.selectEnvironment(named: "Home")
             XCTAssertEqual(remoteWindow.focusRequests, 1)
             XCTAssertTrue(windows.focusedStore === remote)
-            XCTAssertEqual(windows.defaults.string(forKey: "selectedEnvironment"), "Home")
+            XCTAssertEqual(defaults.string(forKey: "selectedEnvironment"), "Home")
             let wasVisible = remote.sidebarVisible
             windows.focusedStore?.toggleSidebar()
             XCTAssertEqual(remote.sidebarVisible, !wasVisible)
@@ -516,7 +518,7 @@ final class AppWindowsTests: XCTestCase {
             remote.agentsVisible = false
             let localState = (local.selectedWindowID, local.sidebarVisible, local.sessionsVisible, local.agentsVisible)
             let remoteState = (remote.selectedWindowID, remote.sidebarVisible, remote.sessionsVisible, remote.agentsVisible)
-            let expansion = windows.defaults.object(forKey: "expandedSessions") as? [String]
+            let expansion = defaults.object(forKey: "expandedSessions") as? [String]
             // The Sidebar view keeps its split in `@AppStorage`, which reads UserDefaults.standard.
             let split = UserDefaults.standard.object(forKey: "sidebarAgentsFraction") as? Double
 
@@ -537,7 +539,7 @@ final class AppWindowsTests: XCTestCase {
             XCTAssertEqual(remote.sessionsVisible, remoteState.2)
             XCTAssertEqual(remote.agentsVisible, remoteState.3)
             XCTAssertEqual(remote.environmentName, "Home")
-            XCTAssertEqual(windows.defaults.object(forKey: "expandedSessions") as? [String], expansion)
+            XCTAssertEqual(defaults.object(forKey: "expandedSessions") as? [String], expansion)
             XCTAssertEqual(UserDefaults.standard.object(forKey: "sidebarAgentsFraction") as? Double, split)
 
             try (Self.config + "\nui: [").write(toFile: path, atomically: true, encoding: .utf8)
@@ -566,7 +568,8 @@ final class AppWindowsTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("config.yaml").path
         try Self.config.write(toFile: path, atomically: true, encoding: .utf8)
-        let windows = AppWindows(configStore: ConfigStore(path: path), defaults: isolatedDefaults())
+        defaults = isolatedDefaults()
+        let windows = AppWindows(configStore: ConfigStore(path: path), defaults: defaults)
         defer {
             let finished = expectation(description: "fixture window cleanup")
             windows.shutdown { finished.fulfill() }
