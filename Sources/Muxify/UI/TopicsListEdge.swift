@@ -33,16 +33,17 @@ struct BenchLine: View {
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
-        let title = isBenchShown ? "Hide Bench" : "Bench"
+        let title = TopicsListLine.benchWord(isBenchShown: isBenchShown)
         Button(action: action) {
-            HStack(spacing: 8) {
-                Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
-                Text(title).font(fontSize.font(11, weight: .semibold)).lineLimit(1).fixedSize()
-                Image(systemName: isBenchShown ? "chevron.up" : "chevron.down").font(fontSize.font(9, weight: .bold))
-                Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
+            HStack(spacing: TopicsListLine.spacing) {
+                Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: TopicsListLine.ruleWidth)
+                Text(title).font(fontSize.font(TopicsListLine.fontSize, weight: .semibold)).lineLimit(1).fixedSize()
+                Image(systemName: TopicsListLine.benchChevron(isBenchShown: isBenchShown))
+                    .font(fontSize.font(TopicsListLine.chevronFontSize, weight: .bold))
+                Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: TopicsListLine.ruleWidth)
             }
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 8).frame(height: fontSize(20))
+            .padding(.horizontal, TopicsListLine.horizontalPadding).frame(height: fontSize(TopicsListLine.designHeight))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -78,22 +79,25 @@ struct OpenPlaceCard: View {
     @Environment(\.quickSwitchHints) private var hints
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 9, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: OpenPlaceMetrics.cornerRadius, style: .continuous)
         Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: "plus.circle").font(fontSize.font(11, weight: .semibold))
-                Text("Open Place").font(fontSize.font(12, weight: .medium))
+            HStack(spacing: OpenPlaceMetrics.spacing) {
+                Image(systemName: OpenPlaceMetrics.symbol).font(fontSize.font(OpenPlaceMetrics.symbolFontSize, weight: .semibold))
+                Text(OpenPlaceMetrics.word).font(fontSize.font(OpenPlaceMetrics.fontSize, weight: .medium))
                 CardHintSlot(target: .openPlace(place))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 10).frame(height: fontSize(32))
+            .padding(.horizontal, OpenPlaceMetrics.horizontalPadding).frame(height: fontSize(OpenPlaceMetrics.designHeight))
             .contentShape(shape)
-            .overlay { shape.strokeBorder(Color.secondary.opacity(0.5), style: StrokeStyle(lineWidth: 1, dash: [5, 4])) }
+            .overlay {
+                shape.strokeBorder(Color.secondary.opacity(OpenPlaceMetrics.borderOpacity),
+                                   style: StrokeStyle(lineWidth: OpenPlaceMetrics.borderWidth, dash: OpenPlaceMetrics.dash))
+            }
         }
         .buttonStyle(.plain)
         .takesFirstClick()
-        .accessibilityLabel("Open Place \(place)")
+        .accessibilityLabel(OpenPlaceMetrics.label(place: place))
         .accessibilityIdentifier("open-place-\(place)")
         // Outside the button's element, so the Hint is its own accessibility element, as on a Topic card.
         .cardHints(hints)

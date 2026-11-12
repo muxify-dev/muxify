@@ -199,3 +199,27 @@ glyphs, as in `topic-cards`.
   names as the hover label and not as accessibility help, so the AppKit Tags give them only as their tooltip.
 - The Settled group is SwiftUI under either list until task 10, and stands outside `topics-list`, so the gate reads no
   row of it: the shot of the Settled card is the picture that task 10 must keep.
+
+## bench
+
+Task 08 of the set `remove-swiftui`. Two shots, with `topics.in_play: 2`: `bench`, the block that sticks (two Pinned
+cards, Atlas In Play, an Open Place, the Guests line, the Guest Dune and the Bench line), the Bench just shown by a
+press on its line, and the open card of the Location's Topic Gale, the last Benched card, kept where it stood under the
+hidden Bench: the list moved by the arithmetic of `BenchedLocationPlace`, which both versions call; and
+`bench-scrolled`, the list scrolled to its end, with Gale's header stuck right under the block while its rows, Elm
+and Fir scroll under the block. The gate passes in both: every card, the lines and the Open Place stand on the same
+frames, Gale too, so both versions moved the list by the same distance. Side by side the pictures look the same but
+for the pills. The difference picture marks:
+
+- The pills "N more above" and "N more below", which only the SwiftUI picture shows: the AppKit list draws them from
+  task 09. They stand outside `topics-list` in both versions, so the gate reads no row of them. Where the SwiftUI
+  pill covers the bottom of Fir under the block, the AppKit picture shows Fir's details line.
+- The dashes of the Open Place's border, at their ends, by a fraction of a pixel after its first corner. Both borders
+  start at the middle of the right edge and run the same way, but the AppKit border's corners are circular arcs
+  (`CGPath(roundedRect:)`, as `DropSlotView` draws its dashed border), and SwiftUI's continuous corners are a little
+  longer, so the dashes after a corner start a little later. Each dash stands on the same pixels.
+- The fill of the open card, as in `topic-open`, and the many-coloured border and the edges of glyphs, as in
+  `topic-cards`.
+
+The scene turns card Hints off (`hints.cards`): the Open Place's Hint comes with task 14, and the AppKit Open Place
+keeps only its room for now.

@@ -21,6 +21,9 @@ action. `click` sends a mouse down and a mouse up to the App Window, which is no
 keeps the app behind the user's windows: it is a first click while Muxify is not the front app. The header follows
 both. The check of a press on a Locked card runs the same presses in both versions and compares what they did.
 
+The check of an Open Place presses it in the same two ways. `topics_bench_sidebar` checks the Bench line, the Guests
+line and the block that sticks over the Bench against either list.
+
 The pager hides the page that its mode does not show from accessibility, so no dump has the Topics list while
 Sessions shows; the driver's `topics-list` still finds the AppKit list then, as the page that does not show. The check
 of a held swipe holds the Sidebar at 0.400 from Topics, where the Topics page has moved and shrunk, and keeps a
@@ -455,6 +458,47 @@ class TopicsListSidebar(unittest.TestCase):
         self.assertTrue(self.s.has('card-' + header, rs), 'the No Topic card has no card row')
         self.s.act('click', 'topic-window-' + other)
         self.s.wait_shown(other)
+
+    def test_a_press_on_an_open_place_of_the_appkit_list_asks_which_topic_fills_it(self):
+        """With `topics.in_play: 1` and an Open Place first in the Topic order, the Open Place is the one In Play place, over
+        the Bench line, and the Topics wait on the Bench. Its row is a button `open-place-1` named "Open Place 1", as in
+        the SwiftUI list. A press and a first click on it start Fill Open Place, which offers the Benched Topics.
+
+        With `topics.in_play`, the app writes the order of the cards as the Sidebar shows them, the Guest first: the
+        clean-up gives the Topics and the Lock their orders of the fixture again."""
+        def restore():
+            self.store.set_open_places([])
+            self.config.write_text(CONFIG)
+            self.s.wait_rows(lambda rs: not self.s.has('topics-bench-line', rs), 'the Bench line stays')
+            orders = {topic: order for order, (topic, _) in enumerate(TOPICS)}
+            def reorder(data):
+                for record in data['records']:
+                    if isinstance(record, dict) and record.get('id') in orders:
+                        record['order'] = orders[record['id']]
+            self.store.change(reorder)
+            locked = self.keys[-1]
+            self.s.tmux('set-option', '-t', self.sessions[locked], '@muxify_lock', str(len(TOPICS)))
+            self.wait_cards()
+        self.show_list('appkit')
+        self.addCleanup(restore)
+        self.store.set_open_places([dict(id='list-place', order=-1)])
+        self.config.write_text(CONFIG + 'topics:\n  in_play: 1\n')
+        def place(rs):
+            ids = self.s.ids(rs)
+            return 'open-place-1' in ids and 'topics-bench-line' in ids and ids.index('open-place-1') < ids.index('topics-bench-line')
+        rs = self.s.wait_rows(place, lambda: 'the AppKit list shows no Open Place 1 over the Bench line: %s' % self.s.ids())
+        row = self.s.row('open-place-1', rs)
+        self.assertEqual((row.get('accessibilityRole'), row.get('accessibilityLabel')), ('AXButton', 'Open Place 1'))
+        def breadcrumb(rs):
+            row = self.s.row('palette-breadcrumb', rs)
+            return (row.get('accessibilityLabel') or '') + ' ' + (row.get('accessibilityValue') or '')
+        for command in PRESSES:
+            with self.subTest(command=command):
+                self.s.act(command, 'open-place-1')
+                self.s.wait_rows(lambda rs: 'Open Place 1' in breadcrumb(rs) and self.s.has('palette-row-topic-list-second', rs),
+                                 lambda: 'a %s on the Open Place did not offer the Benched Topics: %s' % (command, breadcrumb(self.s.rows())))
+                self.s.act('action', 'palette-search', 'Close')
+                self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close')
 
     def test_a_topic_that_comes_or_goes_changes_the_cards_of_the_appkit_list(self):
         self.show_list('appkit')

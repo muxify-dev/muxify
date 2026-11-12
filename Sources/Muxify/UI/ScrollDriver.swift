@@ -73,7 +73,7 @@ import SwiftUI
     func scroll(to offset: CGFloat) {
         guard let scrollView, let document = scrollView.documentView else { return }
         let clip = scrollView.contentView
-        let end = max(0, document.bounds.height - clip.bounds.height)
+        let end = scrollView.scrollEnd
         let y = min(max(0, offset), end)
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.2
@@ -85,21 +85,12 @@ import SwiftUI
 
     /// Moves the content `delta` points within its scroll range, and returns the part of `delta` it could not move.
     private func move(by delta: CGFloat) -> CGFloat {
-        guard let scrollView, let document = scrollView.documentView else { return 0 }
-        let clip = scrollView.contentView
-        let end = max(0, document.bounds.height - clip.bounds.height)
-        let offset = document.isFlipped ? clip.bounds.origin.y : end - clip.bounds.origin.y
-        let y = min(max(0, offset + delta), end)
-        clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: document.isFlipped ? y : end - y))
-        scrollView.reflectScrolledClipView(clip)
-        return offset + delta - y
+        scrollView?.move(by: delta) ?? 0
     }
 
     private func tick() {
-        guard let scrollView, let document = scrollView.documentView else { return }
-        let clip = scrollView.contentView
-        let end = max(0, document.bounds.height - clip.bounds.height)
-        let offset = document.isFlipped ? clip.bounds.origin.y : end - clip.bounds.origin.y
+        guard let scrollView else { return }
+        let offset = scrollView.scrollOffset, end = scrollView.scrollEnd
         let step = EdgeAutoScroll.step(pointer: pointer, in: area(offset), offset: offset, end: end)
         let delta = dwell.pass(step, at: ProcessInfo.processInfo.systemUptime)
         if delta != 0 { _ = move(by: delta) }

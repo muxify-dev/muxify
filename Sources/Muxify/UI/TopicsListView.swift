@@ -23,10 +23,16 @@ enum TopicsListVersion: String {
     #endif
 }
 
-/// The Sidebar's Topics list in AppKit (ADR 0075): a scroll view with a card for each Topic card and Locked card of the
-/// Topics model's list, the No Topic card and the Guests line, in the model's order, with the gaps and insets of the
-/// SwiftUI list. Its views lay out by frames, and it reads the store through `ObservedUpdate`. The header of an open
-/// card sticks to the top while the card's rows scroll under it. The SwiftUI Sidebar shows the Settled group under it.
+/// The Sidebar's Topics list in AppKit (ADR 0075): a scroll view with an item for each item of the Topics model's list,
+/// in its order: the Topic cards and Locked cards, the Open Places, the Guests line, the Bench line and the No Topic
+/// card, with the gaps and insets of the SwiftUI list. Its views lay out by frames, and it reads the store through
+/// `ObservedUpdate`. The header of an open card sticks to the top while the card's rows scroll under it. The SwiftUI
+/// Sidebar shows the Settled group under it.
+///
+/// With a Bench line, the items above the Bench (`TopicsModel.listParts`) are a block that sticks to the top on the
+/// chrome's background while the Benched cards scroll under it, and the header of an open Benched card sticks under the
+/// block, as `BenchGeometry` places them. When the Bench shows, the list moves its clip view so that the card of the
+/// Location stays where it stood (`BenchedLocationPlace`).
 final class TopicsListView: NSView, SidebarList {
     private let store: WorkspaceStore
     /// The values from the SwiftUI Sidebar. The list draws again when one changes.
@@ -36,16 +42,36 @@ final class TopicsListView: NSView, SidebarList {
         }
     }
     private let scrollView = NSScrollView()
-    private let document = FlippedView()
-    /// The cards and lines from the top of the list.
+    private let document = TopicsListDocumentView()
+    /// The items of the list, in its order.
     private var items: [NSView] = []
+    /// The frames of the items at rest, before the block sticks, in the document.
+    private var places: [NSRect] = []
+    /// How many of the items are the block that sticks; nil without a Bench line, when no item sticks.
+    private var blockCount: Int?
+    /// The chrome's background behind the block, over the Benched cards that scroll under it.
+    private let backdrop = TopicsBlockBackdropView()
+    /// Where the block and the Bench stand, from the last layout.
+    private var geometry = BenchGeometry(topHeight: 0, viewportHeight: 0)
+    /// The card of the Location while it is on the Bench, as the list last drew it: whether the Bench showed, and
+    /// whether Benched cards came before the card.
+    private var benchedLocation: (id: TopicGroupID, isBenchShown: Bool, hasCardsAbove: Bool)?
+    /// Where the card of the Location stood on the Bench at the last layout or scroll; nil while it is not on the Bench.
+    private var locationPlace: BenchedLocationPlace?
     /// The card of the No Topic Session the user opened, by Session ID.
     private var noTopicCard: SessionCardView?
+    /// The Open Places, by the ID of their records.
+    private var openPlaces: [String: OpenPlaceView] = [:]
     /// The cards whose "N more…" the user pressed: Topic and Locked cards by their ID, No Topic cards by Session ID.
     /// They show all their rows from then on.
     private var showingAllRows: Set<TopicGroupID> = []
     private var showingAllSessionRows: Set<String> = []
-    private lazy var guestsLine = TopicsLineView(id: TopicsModel.ListItem.guestsLineID, word: "Guests", identifier: "topics-guests-line")
+    private lazy var guestsLine = TopicsLineView.guests()
+    private lazy var benchLine: TopicsLineView = {
+        let line = TopicsLineView.bench()
+        line.onPress = { [weak self] in self?.store.toggleBench() }
+        return line
+    }()
     private lazy var update = ObservedUpdate { [weak self] in self?.render() }
 
     init(store: WorkspaceStore, environment: SidebarListEnvironment) {
@@ -77,14 +103,16 @@ final class TopicsListView: NSView, SidebarList {
         layOut()
     }
 
-    /// Makes the items the Topic cards, Locked cards, the No Topic card and the Guests line of the model's list, each
-    /// with what it shows now. When a card that already showed opens or closes, it glides to its new height and the
-    /// items below it move with it, with ease-out over `CardMotion.openDuration`, as the SwiftUI list animates them.
+    /// Makes the items the items of the model's list, each with what it shows now. When a card that already showed
+    /// opens or closes, it glides to its new height and the items below it move with it, with ease-out over
+    /// `CardMotion.openDuration`, as the SwiftUI list animates them. When the Bench shows, the list keeps the card of the
+    /// Location in its place.
     private func render() {
         let themed = environment.appearance
         if appearance?.name != themed?.name { appearance = themed }
         let model = store.topics
         var kept = Dictionary(items.compactMap { $0 as? TopicCardView }.map { ($0.cardID, $0) }, uniquingKeysWith: { first, _ in first })
+        var keptPlaces = openPlaces
         var opens = false
         var shown: [(view: NSView, show: () -> Void)] = []
         for item in model.list {
@@ -94,9 +122,16 @@ final class TopicsListView: NSView, SidebarList {
                 let card = kept.removeValue(forKey: row.id) ?? card(of: row.id)
                 opens = opens || (card.superview != nil && card.isOpen != content.header.isOpen)
                 shown.append((card, { [environment] in card.show(content, environment: environment) }))
+            case .openPlace(let id, let place):
+                let view = keptPlaces.removeValue(forKey: id) ?? OpenPlaceView(recordID: id)
+                view.onPress = { [weak self] in self?.store.presentFillOpenPlace(place) }
+                shown.append((view, { [environment] in view.show(place: place, environment: environment) }))
             case .guestsLine:
                 let line = guestsLine
                 shown.append((line, { [environment] in line.show(environment: environment) }))
+            case .benchLine(let isBenchShown):
+                let line = benchLine
+                shown.append((line, { [environment] in line.show(isBenchShown: isBenchShown, environment: environment) }))
             case .noTopicSession(let opened):
                 guard let session = store.sessions.first(where: { $0.id == opened.id.session }) else { continue }
                 let content = SessionCardContent(session, store: store, hints: environment.hints,
@@ -104,20 +139,28 @@ final class TopicsListView: NSView, SidebarList {
                 let card = noTopicCard?.sessionID == session.id ? noTopicCard! : makeNoTopicCard(of: session.id)
                 opens = opens || (card.superview != nil && card.isOpen != content.isOpen)
                 shown.append((card, { [environment] in card.show(content, environment: environment) }))
-            // The Open Places and the Bench line come with a later task of the set remove-swiftui.
-            case .openPlace, .benchLine:
-                continue
             }
         }
+        openPlaces = Dictionary(shown.compactMap { $0.view as? OpenPlaceView }.map { ($0.recordID, $0) }, uniquingKeysWith: { first, _ in first })
+        let parts = model.listParts
+        let blockCount = parts.bench == nil ? nil : parts.top.count
+        let location = model.benchedLocation.map { id in (id: id, isBenchShown: model.isBenchShown == true, hasCardsAbove: model.benchCardIDs.first != id) }
+        let before = locationPlace
         let change = { [self] in
+            benchedLocation = location
             for item in shown { item.show() }
             let views = shown.map(\.view)
-            // The order of the subviews is the order of the accessibility rows.
-            if items != views {
+            if items != views || self.blockCount != blockCount {
                 items = views
-                document.subviews = views
+                self.blockCount = blockCount
+                // The order of the subviews is the order of the drawing: the block over the Bench that scrolls under it.
+                // The order of the items is the order of the accessibility rows.
+                let block = blockCount.map { Array(views.prefix($0)) } ?? []
+                document.subviews = blockCount.map { Array(views.dropFirst($0)) + [backdrop] + block } ?? views
+                document.rows = views
             }
             layOut()
+            keepLocationInPlace(after: before)
         }
         if opens, let layer = document.layer {
             LayerGlide.run(under: layer, duration: CardMotion.openDuration, timing: CAMediaTimingFunction(name: .easeOut), change: change)
@@ -252,40 +295,114 @@ final class TopicsListView: NSView, SidebarList {
         }
     }
 
+    /// Lays the items out one under the other, from the top of the list, as the SwiftUI list's stack does. With a Bench
+    /// line, empty room after the last Benched card lets it scroll up to right under the block
+    /// (`BenchGeometry.tail`).
     private func layOut() {
         scrollView.frame = bounds
         let width = max(0, bounds.width - 2 * TopicsListMetrics.horizontalInset)
         var bottom = TopicsListMetrics.verticalInset
-        for (index, item) in items.enumerated() {
+        places = items.enumerated().map { index, item in
             let top = bottom + (index == 0 ? 0 : TopicsListMetrics.itemSpacing)
             let height = switch item {
             case let card as TopicCardView: card.height(width: width)
             case let card as SessionCardView: card.height(width: width)
             case let line as TopicsLineView: line.height
+            case let place as OpenPlaceView: place.height
             default: CGFloat(0)
             }
-            item.frame = NSRect(x: TopicsListMetrics.horizontalInset, y: top, width: width, height: height)
-            bottom = item.frame.maxY
+            bottom = top + height
+            return NSRect(x: TopicsListMetrics.horizontalInset, y: top, width: width, height: height)
+        }
+        for (item, place) in zip(items, places) { item.frame = place }
+        let blockBottom = blockCount.flatMap { $0 > 0 ? places[$0 - 1].maxY : nil } ?? TopicsListMetrics.verticalInset
+        geometry = BenchGeometry(topHeight: blockBottom - TopicsListMetrics.verticalInset, viewportHeight: bounds.height,
+                                 spacing: TopicsListMetrics.itemSpacing, inset: TopicsListMetrics.verticalInset,
+                                 fontSize: environment.fontSize)
+        if let blockCount, let last = places.last, places.count > blockCount {
+            // The SwiftUI list's stack has the empty room as one more item, after a gap.
+            bottom += TopicsListMetrics.itemSpacing + geometry.tail(afterCardOfHeight: last.height)
         }
         // The clip view keeps its offset when the content changes height, inside the new scroll range.
         document.setFrameSize(NSSize(width: bounds.width, height: bottom + TopicsListMetrics.verticalInset))
-        stickHeaders()
+        stick()
     }
 
-    /// The list scrolled: by the user, or because its content got shorter than the offset it had.
+    /// The list scrolled: by the user, by the list itself, or because its content got shorter than the offset it had.
     @objc private func clipDidMove() {
-        stickHeaders()
+        stick()
     }
 
-    /// Gives each card its top edge in the viewport, so the header of an open card sticks to the viewport's top.
-    private func stickHeaders() {
-        let top = scrollView.contentView.bounds.minY
-        for item in items {
+    /// Moves the block down as far as the list scrolled past its slack, so it stays at the top, with its background,
+    /// and gives each card its top edge in the viewport, so the header of an open card sticks: to the viewport's top in
+    /// the block or in a list without a Bench line, and under the block on the Bench. Keeps where the Location's card
+    /// now stands on the Bench.
+    private func stick() {
+        let offset = scrollView.contentView.bounds.minY
+        let shift = blockCount == nil ? 0 : geometry.stick(at: offset)
+        // Under the block on the Bench, and at the viewport's top elsewhere.
+        let benchInset = blockCount == nil ? 0 : geometry.areaTop
+        let blockItems = blockCount ?? 0
+        for (index, (item, place)) in zip(items, places).enumerated() {
+            let isBlock = index < blockItems
+            if isBlock { item.setFrameOrigin(NSPoint(x: place.minX, y: place.minY + shift)) }
+            let top = item.frame.minY - offset
             switch item {
-            case let card as TopicCardView: card.stick(cardTop: card.frame.minY - top)
-            case let card as SessionCardView: card.stick(cardTop: card.frame.minY - top)
+            case let card as TopicCardView: card.stick(cardTop: top, inset: isBlock ? 0 : benchInset)
+            case let card as SessionCardView: card.stick(cardTop: top)
             default: break
             }
         }
+        // As the SwiftUI list draws the chrome behind each item of the block: from the list's top to a gap under the
+        // block's last item, across the list's whole width.
+        backdrop.isHidden = blockItems == 0
+        if blockItems > 0 {
+            backdrop.frame = NSRect(x: 0, y: shift, width: bounds.width, height: places[blockItems - 1].maxY + TopicsListMetrics.itemSpacing)
+        }
+        backdrop.theme = environment.chromeTheme
+        locationPlace = currentLocationPlace()
     }
+
+    /// Where the card of the Location stands on the Bench now, in the viewport; nil while it is not on the Bench.
+    private func currentLocationPlace() -> BenchedLocationPlace? {
+        guard let location = benchedLocation,
+              let card = items.first(where: { ($0 as? TopicCardView)?.cardID == location.id }) else { return nil }
+        return BenchedLocationPlace(top: card.frame.minY - scrollView.contentView.bounds.minY, isBenchShown: location.isBenchShown,
+                                    hasCardsAbove: location.hasCardsAbove)
+    }
+
+    /// Keeps the Location's card on the Bench where it stood on the screen when the Bench shows, as the SwiftUI list's
+    /// `KeepsPlaceWhenBenchShows` does: the list moves at once by the distance the cards shown before it pushed it down,
+    /// less the band of the "more above" pill that those cards bring. Without a Benched Location nothing moves, and the
+    /// Bench opens at its top. `before` is where the card stood before the change.
+    private func keepLocationInPlace(after before: BenchedLocationPlace?) {
+        if let distance = currentLocationPlace()?.openingScroll(after: before, indicatorHeight: geometry.indicatorHeight) {
+            scrollView.move(by: distance)
+        }
+        locationPlace = currentLocationPlace()
+    }
+}
+
+/// The content of the AppKit Topics list. Its subviews are in the order they draw, the block over the Bench; its
+/// accessibility rows are the items in the list's order, as SwiftUI gives them.
+private final class TopicsListDocumentView: NSView {
+    /// The items in the list's order.
+    var rows: [NSView] = []
+
+    override var isFlipped: Bool { true }
+
+    override func accessibilityChildren() -> [Any]? { NSAccessibility.unignoredChildren(from: rows) }
+}
+
+/// The chrome's background behind the block of the Topics list that sticks, so the Benched cards that scroll under the
+/// block do not show through. As SwiftUI's background of the block, it takes the clicks that land on it, and does
+/// nothing with them.
+private final class TopicsBlockBackdropView: SidebarChromeView {
+    override func hitTest(_ point: NSPoint) -> NSView? { frame.contains(point) ? self : nil }
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func mouseDown(with event: NSEvent) {}
+
+    override func rightMouseDown(with event: NSEvent) {}
 }

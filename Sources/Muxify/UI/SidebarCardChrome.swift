@@ -292,20 +292,18 @@ private struct Oklab {
     }
 }
 
-/// The background of an open card's header while it sticks to the top of the list, so the rows that scroll under it
-/// do not show through: the chrome's background, as `chrome(theme:material:)` gives it to the Sidebar, a faint fill of
-/// the text colour over it, and a divider under it, as SwiftUI's `Divider` draws one.
-final class StuckHeaderBackdropView: NSView {
+/// The chrome's background, as `chrome(theme:material:)` gives it to the Sidebar: the colour of the Ghostty theme, or
+/// the system's Sidebar material without one.
+class SidebarChromeView: NSView {
     /// The Ghostty theme of the chrome, nil for the system's Sidebar material.
     var theme: TerminalTheme? {
         didSet {
             guard theme != oldValue else { return }
             material.isHidden = theme != nil
-            color()
+            LayerGlide.withoutActions { layer?.backgroundColor = theme?.chrome.cgColor }
         }
     }
     private let material = NSVisualEffectView()
-    private let tint = StuckHeaderTintView()
 
     init() {
         super.init(frame: .zero)
@@ -314,7 +312,7 @@ final class StuckHeaderBackdropView: NSView {
         material.material = .sidebar
         material.blendingMode = .behindWindow
         material.state = .followsWindowActiveState
-        subviews = [material, tint]
+        addSubview(material)
     }
 
     @available(*, unavailable)
@@ -322,16 +320,31 @@ final class StuckHeaderBackdropView: NSView {
 
     override var isFlipped: Bool { true }
 
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        material.frame = bounds
+    }
+}
+
+/// The background of an open card's header while it sticks to the top of the list, so the rows that scroll under it
+/// do not show through: the chrome's background, a faint fill of the text colour over it, and a divider under it, as
+/// SwiftUI's `Divider` draws one.
+final class StuckHeaderBackdropView: SidebarChromeView {
+    private let tint = StuckHeaderTintView()
+
+    override init() {
+        super.init()
+        addSubview(tint)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
-        material.frame = bounds
         tint.frame = bounds
-    }
-
-    private func color() {
-        LayerGlide.withoutActions { layer?.backgroundColor = theme?.chrome.cgColor }
     }
 }
 

@@ -421,6 +421,71 @@ class TopicTags:
                   lambda: 'the opened Settled card does not show its Tags: %r' % view.s.row('tags-' + card).get('accessibilityValue'))
 
 
+def bottom_of(view, key, rows):
+    """The bottom edge of the row in points from the top of the screen, as `top_of` measures; None without it."""
+    frame = rect(view.s.row(key, rows))
+    return None if frame is None else -frame[1]
+
+
+class Bench:
+    name = 'bench'
+    shows = ('With `topics.in_play: 2`, two Pinned cards, a card In Play and an Open Place, the Guests line, a Guest and '
+             'the Bench line, the block that sticks; the Bench just shown, with the open card of the Location\'s Topic, '
+             'the last Benched card, kept where it stood under the hidden Bench; then the list scrolled to its end, with '
+             'that card\'s header stuck under the block while its rows and the other Benched cards scroll under it.')
+
+    LINE = 'topics-bench-line'
+    # Card Hints do not show: the Open Place's Hint comes with task 14 of the set remove-swiftui.
+    CONFIG = 'topics:\n  in_play: 2\nhints:\n  cards: { always: false, hold: false }\n'
+
+    def fixture(self, s):
+        topic(s, 'atlas', 'Atlas', order=0)
+        topic(s, 'birch', 'Birch', order=1, pinned=True)
+        topic(s, 'cedar', 'Cedar', order=2, pinned=True)
+        topic(s, 'dune', 'Dune', order=3, guest=True)
+        topic(s, 'elm', 'Elm', order=4)
+        topic(s, 'fir', 'Fir', order=5)
+        # The Location's Window is the last of forty, so the open card lists them all and is taller than the Bench area.
+        self.session, self.windows = topic(s, 'gale', 'Gale', ['window-%02d' % number for number in range(1, 41)], order=6)
+        # The second In Play place, after Atlas.
+        TopicRecords(s.root/'state/muxify').set_open_places([dict(id='bench-place', order=0.5)])
+        self.block = ['topic-birch', 'topic-cedar', 'topic-atlas', 'open-place-2', 'topics-guests-line', 'topic-dune', self.LINE]
+
+    def shots(self):
+        return [('bench', self.shown), ('bench-scrolled', self.scrolled)]
+
+    def line(self, view, rows):
+        return view.s.row(self.LINE, rows).get('accessibilityLabel')
+
+    def shown(self, view):
+        s = view.s
+        view.launch(config(more=self.CONFIG))
+        view.go(self.windows[-1])
+        fresh_shell(s, self.windows[-1])
+        # Under the hidden Bench, the Location's card shows alone, open with all its rows.
+        alone = lambda rs: (self.line(view, rs) == 'Bench' and view.value('topic-gale', rs).startswith('expanded')
+                            and s.has('topic-window-' + self.windows[-1], rs) and all(s.has(key, rs) for key in self.block)
+                            and not s.has('topic-elm', rs) and not s.has('topic-fir', rs))
+        view.wait(alone, lambda: 'the list does not show the block and the Location\'s open card alone under the hidden Bench: %s'
+                  % s.ids())
+        view.rest()
+        s.act('press', self.LINE)
+        view.wait(lambda rs: self.line(view, rs) == 'Hide Bench' and s.has('topic-elm', rs) and s.has('topic-fir', rs),
+                  lambda: 'a press on the Bench line did not show the Bench: %s' % self.line(view, s.rows()))
+
+    def scrolled(self, view):
+        s = view.s
+        view.rest()
+        s.act('scroll', 'topics-list', from_end=0)
+        # The card's top has gone under the block, and its header stands right under the block.
+        def stuck(rs):
+            line, card, header = bottom_of(view, self.LINE, rs), top_of(view, 'card-topic-gale', rs), top_of(view, 'topic-gale', rs)
+            return None not in (line, card, header) and card < line - 100 and abs(header - line) <= 1
+        view.wait(stuck, lambda: 'the list did not scroll with the header of the open card stuck under the block: the line\'s '
+                  'bottom, the card\'s top and the header\'s top %s'
+                  % [f(view, key, s.rows()) for f, key in ((bottom_of, self.LINE), (top_of, 'card-topic-gale'), (top_of, 'topic-gale'))])
+
+
 # The launch arguments of every scene of the Topics list: the Sidebar shows, with Topics.
 TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics']
 
@@ -428,5 +493,5 @@ TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWor
 AREAS = [
     Area(name='topics', title='Topics list', list='topics-list', default=TOPICS_LIST_DEFAULT, args=TOPICS_ARGS,
          shown=lambda s: s.topics_list(), scenes=[TopicCards(), LockedCards(), TopicOpen(), NoTopicCard(), TopicsStuckHeader(),
-                                                    TopicTags()]),
+                                                    TopicTags(), Bench()]),
 ]
