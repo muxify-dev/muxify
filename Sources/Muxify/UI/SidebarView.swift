@@ -1525,25 +1525,15 @@ private struct PaneRow: View {
             HStack(spacing: 6) {
                 // The Agent mark takes the Pane icon's place, so the icon needs no slot of its own beside it.
                 ZStack {
-<<<<<<< Updated upstream
-                    Color.clear.frame(width: fontSize(10), height: fontSize(10))
-                    if let mark { AgentMarkView(mark: mark) }
-                }
-                .frame(width: fontSize(10), height: fontSize(10))
-                Image(systemName: row.pane.isActive ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
-                    .font(fontSize.font(10)).frame(width: fontSize(14))
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-=======
                     if let mark {
                         AgentMarkView(mark: mark)
                     } else {
                         Image(systemName: row.pane.isActive ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
-                            .font(.system(size: 10))
+                            .font(fontSize.font(10))
                             .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                     }
                 }
-                .frame(width: 14, height: 14)
->>>>>>> Stashed changes
+                .frame(width: fontSize(14), height: fontSize(14))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(formatted.title).font(fontSize.font(12)).hoverLabelTitle()
                     if !formatted.summary.isEmpty {

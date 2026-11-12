@@ -435,11 +435,8 @@ struct CardList<Heading: View, Row: View>: View {
     @ViewBuilder var row: (TopicsModel.SessionChildren.Item) -> Row
 
     @State private var windowDrag = ListDrag<String>(spacing: CardSpacing.row)
-<<<<<<< Updated upstream
     @Environment(\.interfaceFontSize) private var fontSize
-=======
     @Environment(\.cardRowLimit) private var rowLimit
->>>>>>> Stashed changes
 
     var body: some View {
         let total = blocks.reduce(0) { $0 + $1.items.count }
