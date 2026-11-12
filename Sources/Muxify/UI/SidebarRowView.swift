@@ -1,4 +1,5 @@
 import AppKit
+import MuxifyCore
 
 /// A part of an AppKit list that a click presses (ADR 0074): a card's header or a row. It takes every click on it, and
 /// its parts take none. A press works on the first click while Muxify is not the front app, and it ends where the mouse
@@ -120,4 +121,53 @@ class SidebarRowView: SidebarPressView {
     func height(width: CGFloat) -> CGFloat
     /// The row's accessibility rows, from the left.
     var accessibilityParts: [NSView] { get }
+}
+
+/// The views of the Window rows and Pane rows of the open cards in an AppKit list: a row that already showed keeps its
+/// view, by its Window or Pane ID, so its tint fades when the Location moves and a lifted row keeps the pointer. The
+/// Sessions list's Session card and the Topics list's cards make their rows here.
+@MainActor final class CardRowViews {
+    /// The rows are in the Topics list: a Window row is `topic-window-<id>`, one button to accessibility as the SwiftUI
+    /// Topics list gives it, where the Sessions list gives `session-window-<id>` to each of its parts.
+    private let inTopicsList: Bool
+    private var windows: [String: WindowRowView] = [:]
+    private var panes: [String: PaneRowView] = [:]
+    /// A click on a Window row.
+    var onSelectWindow: (TmuxWindow) -> Void = { _ in }
+    /// A press on a Pane row, with the Pane's ID.
+    var onSelectPane: (String) -> Void = { _ in }
+    /// The context menu of a Window row.
+    var windowMenu: (TmuxWindow) -> SidebarMenu? = { _ in nil }
+
+    init(inTopicsList: Bool) {
+        self.inTopicsList = inTopicsList
+    }
+
+    /// The views of the rows, from the top, each showing its content. A row that showed and has no content now goes.
+    /// The tint of a row that already showed fades when the Location comes or goes, unless `fades` is false.
+    func show(_ contents: [CardRowContent], environment: SidebarListEnvironment, fades: Bool) -> [CardRowView] {
+        var shownWindows = windows, shownPanes = panes
+        windows = [:]
+        panes = [:]
+        return contents.map { content -> CardRowView in
+            switch content {
+            case .window(let content):
+                let window = content.window
+                let row = shownWindows.removeValue(forKey: window.id)
+                    ?? WindowRowView(windowID: window.id, identifier: (inTopicsList ? "topic-window-" : "session-window-") + window.id,
+                                     isButton: inTopicsList)
+                row.onPress = { [weak self] in self?.onSelectWindow(window) }
+                row.menuItems = { [weak self] in self?.windowMenu(window) }
+                row.show(content, environment: environment, fades: fades)
+                windows[window.id] = row
+                return row
+            case .pane(let content):
+                let row = shownPanes.removeValue(forKey: content.paneID) ?? PaneRowView(paneID: content.paneID)
+                row.onPress = { [weak self] in self?.onSelectPane(content.paneID) }
+                row.show(content, environment: environment, fades: fades)
+                panes[content.paneID] = row
+                return row
+            }
+        }
+    }
 }

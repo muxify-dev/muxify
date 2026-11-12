@@ -6,9 +6,15 @@ list. A check stores it as a user does, with `defaults write` on the bundle id o
 argument hides the stored value from the app, so a check that stores the default first starts the app without that
 argument, also in a run with `TOPICS_LIST`.
 
-The AppKit list draws closed Topic cards and Locked cards as the SwiftUI list does; an open card lists no rows yet. So
-the check of the cards closes the Location's card first, and compares the rows of the cards and their headers in the
-two versions: their order, labels, values and help, and their frames.
+The check of the cards closes the Location's card first, and compares the rows of the cards and their headers in the
+two versions: their order, labels, values and help, and their frames. The compare run (`make compare AREA=topics`)
+compares open cards, the No Topic card and a header that sticks.
+
+The checks of an open Topic card in the AppKit list make their own Topic with live Sessions named as Muxify names
+them, `<base>/<Topic ID>`, and remove it at their end: a click on a Window row, a press on a Pane row, on a Session line
+and on "N more…", and a header that sticks to the top of the list and never passes the card's last row. The AppKit
+list glides a card that opens with Core Animation, whose frames a dump does not read, so the checks prove where the
+cards below come to rest; the glide is for the eye.
 
 The checks of a press on a card's header press it in two ways. `press` performs the header's default accessibility
 action. `click` sends a mouse down and a mouse up to the App Window, which is not the key window, because the run
@@ -191,6 +197,35 @@ class TopicsListSidebar(unittest.TestCase):
         self.assertTrue(len(first) == len(second) and all(abs(a - b) <= .5 for a, b in zip(first, second)),
                         '%s: %s and %s' % (message, first, second))
 
+    def topic_with(self, topic, sessions):
+        """A Topic, last in the Topic order, with a live Session `<base>/<topic>` for each (base, Window names) of
+        `sessions`. Returns {base: (Session id, Window ids)}. The check's cleanup removes them."""
+        self.store.put(dict(id=topic, title=topic.replace('-', ' ').capitalize(), slug=topic, order=100))
+        self.addCleanup(self.store.remove, topic)
+        found = {}
+        for base, windows in sessions:
+            session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', base + '/' + topic, '-n', windows[0], SHELL)
+            self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', session)
+            ids = [self.s.tmux('display-message', '-p', '-t', session + ':', '#{window_id}')]
+            ids += [self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', session + ':', '-n', window, SHELL)
+                    for window in windows[1:]]
+            self.s.tmux('set-option', '-t', session, '@muxify_topic', topic)
+            found[base] = (session, ids)
+        return found
+
+    def open_topic(self, topic, window):
+        """Moves the Location to the Window of the Topic, whose card then opens, and returns the rows."""
+        self.s.show(window)
+        self.wait_card('topic-' + topic, 'expanded', 'the card of the Topic %s did not open' % topic)
+        return self.s.rows()
+
+    def show_panes(self):
+        def restore():
+            self.config.write_text(CONFIG)
+            self.s.wait_rows(lambda rs: not any(key.startswith('pane-') for key in self.s.ids(rs)), 'the Pane rows stay')
+        self.addCleanup(restore)
+        self.config.write_text(CONFIG + '  panes: true\n')
+
     def test_without_the_default_the_sidebar_shows_the_swiftui_list(self):
         self.write_default(None)
         self.start()
@@ -284,6 +319,114 @@ class TopicsListSidebar(unittest.TestCase):
         for command in PRESSES:
             self.assertEqual(did['appkit', command], did['swiftui', command],
                              'a %s on the Locked card does not do in the AppKit list what it does in the SwiftUI list' % command)
+
+    def test_a_click_on_a_window_row_of_an_open_topic_card_goes_to_its_window(self):
+        self.show_list('appkit')
+        (_, (home, other)), = self.topic_with('open-rows', [('one', ['main', 'logs'])]).values()
+        self.open_topic('open-rows', home)
+        row = 'topic-window-' + other
+        rs = self.s.wait_rows(lambda rs: self.s.row(row, rs).get('accessibilityValue') == '',
+                              'the open card has no Window row %s that is not the Location\'s' % row)
+        self.assertEqual(self.s.row(row, rs).get('accessibilityRole'), 'AXButton', 'the Window row is not one button')
+        self.assertEqual(self.s.row(row, rs).get('accessibilityLabel'), 'logs, 1', 'the Window row does not name its title and Pane count')
+        self.s.act('click', row)
+        self.s.wait_shown(other)
+        self.s.wait_rows(lambda rs: self.s.row(row, rs).get('accessibilityValue') == 'selected'
+                         and self.s.row('topic-window-' + home, rs).get('accessibilityValue') == '',
+                         'the tint did not go to the Window row that the click went to')
+
+    def test_a_press_on_a_pane_row_of_an_open_topic_card_goes_to_that_pane(self):
+        self.show_list('appkit')
+        (_, (home, split)), = self.topic_with('open-panes', [('one', ['main', 'split'])]).values()
+        second = self.s.tmux('split-window', '-d', '-P', '-F', '#{pane_id}', '-t', split, SHELL)
+        self.show_panes()
+        self.open_topic('open-panes', home)
+        self.s.wait_rows(lambda rs: self.s.row('pane-' + second, rs).get('accessibilityValue') == '',
+                         'the open card has no row for the Pane %s that is not active' % second)
+        self.s.act('press', 'pane-' + second)
+        self.s.wait_shown(split)
+        wait(lambda: self.s.tmux('display-message', '-p', '-t', split, '#{pane_id}') == second,
+             'a press on its row did not make the Pane %s active' % second)
+        self.s.wait_rows(lambda rs: self.s.row('pane-' + second, rs).get('accessibilityValue') == 'active',
+                         'the row of the Pane %s does not show it active' % second)
+
+    def test_a_press_on_a_session_line_of_an_open_topic_card_goes_to_its_session(self):
+        self.show_list('appkit')
+        found = self.topic_with('open-lines', [('one', ['main']), ('two', ['main', 'logs'])])
+        (_, (home,)), (two, (_, logs)) = found['one'], found['two']
+        self.s.tmux('select-window', '-t', logs)
+        line = 'topic-open-lines-session-' + two
+        for command in PRESSES:
+            with self.subTest(command=command):
+                self.open_topic('open-lines', home)
+                rs = self.s.wait_rows(lambda rs: self.s.has(line, rs), 'the open card has no Session line %s' % line)
+                self.assertEqual((self.s.row(line, rs).get('accessibilityRole'), self.s.row(line, rs).get('accessibilityLabel')),
+                                 ('AXButton', 'two'), 'the Session line is not a button with the Session\'s name')
+                self.s.act(command, line)
+                self.s.wait_shown(logs)
+                self.assertEqual(self.location(), [two], 'a %s on the Session line did not go to its Session' % command)
+
+    def test_a_press_on_n_more_of_an_open_topic_card_shows_all_its_rows(self):
+        self.show_list('appkit')
+        (_, windows), = self.topic_with('open-more', [('one', ['w%d' % number for number in range(1, 8)])]).values()
+        self.open_topic('open-more', windows[0])
+        more = 'topic-open-more-more'
+        rs = self.s.wait_rows(lambda rs: self.s.row(more, rs).get('accessibilityLabel') == '2 more…',
+                              'the open card does not end with "2 more…"')
+        self.assertEqual([window for window in windows if self.s.has('topic-window-' + window, rs)], windows[:5],
+                         'the card lists other rows than the first five')
+        self.s.act('press', more)
+        rs = self.s.wait_rows(lambda rs: all(self.s.has('topic-window-' + window, rs) for window in windows),
+                              '"N more…" did not list the rows it held back')
+        self.assertFalse(self.s.has(more, rs), '"N more…" stays after every row shows')
+
+    def test_the_header_of_an_open_topic_card_sticks_to_the_top_and_never_passes_its_last_row(self):
+        # The top and bottom edges of a row, in points down from the top of the screen.
+        def edges(key, rs):
+            x, y, width, height = rect(self.s.row(key, rs))
+            return -(y + height), -y
+        def scroll(by):
+            self.s.act('scroll', 'topics-list', by=by, steps=1)
+        self.show_list('appkit')
+        (_, windows), = self.topic_with('open-sticky', [('one', ['w%02d' % number for number in range(1, 41)])]).values()
+        # Empty Topics after the card, so the list can scroll the card's end up to its top. They need only a record.
+        for number in range(16):
+            filler = 'open-filler-%02d' % number
+            self.store.put(dict(id=filler, title='Filler %02d' % number, slug=filler, order=200 + number))
+            self.addCleanup(self.store.remove, filler)
+        card, header = 'card-topic-open-sticky', 'topic-open-sticky'
+        # The Location on the card's last Window, so the card lists every row.
+        self.open_topic('open-sticky', windows[-1])
+        self.s.wait_rows(lambda rs: self.s.has('topic-window-' + windows[-1], rs) and self.s.has('topic-open-filler-15', rs),
+                         'the open card does not list all its rows above the Empty Topics')
+        rs = self.s.rows()
+        list_top = edges('topics-list', rs)[0]
+
+        scroll(edges(card, rs)[0] - list_top + 100)
+        rs = self.s.wait_rows(lambda rs: edges(card, rs)[0] < list_top - 50, 'the list did not scroll the card\'s top away')
+        self.assertLess(abs(edges(header, rs)[0] - list_top), .5, 'the header %s does not stick to the top of the list at %s'
+                        % (edges(header, rs), list_top))
+
+        scroll(edges(card, rs)[1] - list_top - 20)
+        rs = self.s.wait_rows(lambda rs: edges(card, rs)[1] < list_top + 40, 'the list did not scroll the card\'s end to its top')
+        card_bottom, (header_top, header_bottom) = edges(card, rs)[1], edges(header, rs)
+        self.assertLess(header_top, list_top - 1, 'the header did not leave the top with the card\'s end')
+        self.assertLessEqual(header_bottom, card_bottom - 8 + .5,
+                             'the header %s passed the card\'s last row, whose card ends at %s' % ((header_top, header_bottom), card_bottom))
+
+    def test_the_no_topic_card_lists_the_window_rows_of_its_session(self):
+        self.show_list('appkit')
+        session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'open-scratch', SHELL)
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', session)
+        home = self.s.tmux('display-message', '-p', '-t', session + ':', '#{window_id}')
+        other = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', session + ':', SHELL)
+        self.s.show(home)
+        header = 'no-topic-session-' + session
+        self.wait_card(header, 'expanded', 'the No Topic card of the Location did not open')
+        rs = self.s.wait_rows(lambda rs: self.s.has('topic-window-' + other, rs), 'the No Topic card does not list its Window rows')
+        self.assertTrue(self.s.has('card-' + header, rs), 'the No Topic card has no card row')
+        self.s.act('click', 'topic-window-' + other)
+        self.s.wait_shown(other)
 
     def test_a_topic_that_comes_or_goes_changes_the_cards_of_the_appkit_list(self):
         self.show_list('appkit')

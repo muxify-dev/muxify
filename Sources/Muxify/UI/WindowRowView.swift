@@ -15,6 +15,9 @@ struct WindowRowContent: Equatable {
     var usesMainWorkingCopy = false
     /// `sidebar.window_tooltips`: when the row opens its hover label.
     var tooltips = Config.Sidebar.WindowTooltips.always
+    /// The row is in the Topics list: it shows its Pane count also for one Pane, and no bell, as `WindowRow` does with
+    /// `topicsView`.
+    var inTopicsList = false
 }
 
 /// A Window row of the AppKit Sessions list (ADR 0074): `WindowRow` in SwiftUI. From the left: the room for a Hint,
@@ -23,13 +26,17 @@ struct WindowRowContent: Equatable {
 /// `HStack`. The row of the Location's Window has a soft tint, and a row under the pointer a faint fill. Its hover
 /// label shows the full title when the row cuts it off, and the Window's place and path, as `tooltips` says.
 ///
-/// The row is no accessibility element. As in SwiftUI, each of its parts is one, with the row's identifier and value,
-/// and the card lists them among its children. A click on the row goes to its Window, and a press that moves drags it
-/// through its card's `SessionCardDrag`, also on the first click while Muxify is not the front app.
+/// In the Sessions list the row is no accessibility element. As in SwiftUI, each of its parts is one, with the row's
+/// identifier and value, and the card lists them among its children. In the Topics list the row is one button, named by
+/// the labels of its parts, as the SwiftUI Topics list's button around the row gives it. A click on the row goes to its
+/// Window, and a press that moves drags it through its card's `SessionCardDrag`, also on the first click while Muxify is
+/// not the front app.
 final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
     let windowID: String
-    /// The row's identifier, which each of its parts has.
+    /// The row's identifier, which each of its parts has, or the row as one button.
     private let rowIdentifier: String
+    /// The row is one accessibility button, and its parts are none.
+    private let isButton: Bool
     private let logo = SidebarLogo()
     private let title = SidebarLabel()
     private let summary = SidebarLabel()
@@ -79,9 +86,10 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
         var height: CGFloat { parts.map(\.size.height).max() ?? 0 }
     }
 
-    init(windowID: String, identifier: String) {
+    init(windowID: String, identifier: String, isButton: Bool = false) {
         self.windowID = windowID
         rowIdentifier = identifier
+        self.isButton = isButton
         super.init(frame: .zero)
         wantsLayer = true
         summary.ink = .secondary
@@ -103,6 +111,11 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
         expose(tabCount, role: .staticText)
         expose(paneCount, role: .unknown, valued: false)
         subviews = [fill]
+        setAccessibilityElement(isButton)
+        if isButton {
+            setAccessibilityRole(.button)
+            setAccessibilityIdentifier(identifier)
+        }
     }
 
     @available(*, unavailable)
@@ -193,7 +206,7 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
             before.append(Child(parts: left.map { ($0, Self.size(of: $0)) }))
         }
         var after: [Child] = []
-        if window.hasBell { after.append(Child(parts: [(bell, bell.symbolSize)])) }
+        if window.hasBell && !content.inTopicsList { after.append(Child(parts: [(bell, bell.symbolSize)])) }
         if content.isGitViewOpen {
             after.append(Child(parts: [(gitView, NSSize(width: gitView.side, height: gitView.side))], help: WindowRowText.gitViewOpen))
         }
@@ -202,7 +215,7 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
                 after.append(Child(parts: [(tabSymbol, tabSymbol.symbolSize), (tabCount, tabCount.fit())],
                                    spacing: WindowRowMetrics.badgeSpacing, help: WindowRowText.tabs(content.tabCount)))
             }
-            if window.paneCount > 1 {
+            if content.inTopicsList || window.paneCount > 1 {
                 after.append(Child(parts: [(paneCount, paneCount.size)], help: window.isZoomed ? WindowRowText.zoomed : nil))
             }
         } else if !right.isEmpty {
@@ -322,11 +335,28 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
 
     // MARK: Accessibility
 
-    /// The parts that show, from the left, each a row of its own with the row's identifier.
-    var accessibilityParts: [NSView] { layout(width: bounds.width).parts.map(\.view) }
+    /// The parts that show, from the left, each a row of its own with the row's identifier; or the row as one button.
+    var accessibilityParts: [NSView] { isButton ? [self] : layout(width: bounds.width).parts.map(\.view) }
+
+    /// The button's label: the labels of the parts that show, from the left, as SwiftUI joins the texts of a button.
+    override func accessibilityLabel() -> String? {
+        guard isButton else { return super.accessibilityLabel() }
+        return layout(width: bounds.width).parts.compactMap { $0.view.accessibilityLabel() }.filter { !$0.isEmpty }.joined(separator: ", ")
+    }
+
+    override func accessibilityValue() -> Any? {
+        guard isButton else { return super.accessibilityValue() }
+        return content?.isSelected == true ? "selected" : ""
+    }
+
+    override func accessibilityChildren() -> [Any]? { isButton ? [] : super.accessibilityChildren() }
+
+    override func accessibilityActivationPoint() -> NSPoint {
+        isButton ? accessibilityFrame().centre : super.accessibilityActivationPoint()
+    }
 
     private func expose(_ view: NSView, role: NSAccessibility.Role, label: String? = nil, help: String? = nil, valued: Bool = true) {
-        view.setAccessibilityElement(true)
+        view.setAccessibilityElement(!isButton)
         view.setAccessibilityRole(role)
         view.setAccessibilityIdentifier(rowIdentifier)
         view.setAccessibilityLabel(label)

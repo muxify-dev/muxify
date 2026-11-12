@@ -1,3 +1,4 @@
+import CoreGraphics
 import MuxifyCore
 
 // What both versions of a Topic card and a Locked card read (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md):
@@ -28,6 +29,27 @@ enum TopicCardWords {
         case .settled(let outcome, _): return outcome.isEmpty ? nil : outcome
         }
     }
+}
+
+/// The Session line of an open Topic card, over the rows of its Session, for both versions of the card: the Session's
+/// name on one line, in a small bold text of the secondary colour, cut with "…" when it does not fit. The text's size is
+/// at 12 and grows with the Interface font size; the room around it does not.
+enum SessionLineMetrics {
+    static let fontSize: CGFloat = 11
+    static let leading: CGFloat = 8
+    static let trailing: CGFloat = 6
+    static let top: CGFloat = 4
+    static let bottom: CGFloat = 1
+    /// The room between the name and the space after it.
+    static let spacing: CGFloat = 6
+    /// The least room of the space after the name.
+    static let endGap: CGFloat = 4
+}
+
+/// The opacity of what an open Topic card lists while its Topic is not open, as a Settled Topic's: its Session lines
+/// fade, and its rows dim. For both versions of the card.
+enum TopicCardRowsOpacity {
+    static let notOpen = 0.5
 }
 
 /// The opacity a Topic card rests at, for both versions of the card.

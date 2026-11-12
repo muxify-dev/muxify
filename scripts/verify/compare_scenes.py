@@ -31,6 +31,7 @@ compare-notes.md.
 import re
 from typing import Callable, NamedTuple
 
+from scripts.verify.compare_gate import rect
 from scripts.verify.sandbox import TOPICS_LIST_DEFAULT, wait
 from scripts.verify.topic_records import TopicRecords
 
@@ -236,11 +237,137 @@ class LockedCards:
                   lambda: 'the Guests show no Guest mark or no Guests line: %s' % values(view.s.rows()))
 
 
+def member(s, topic_id, base, windows=('main',)):
+    """A Session of a Topic, named as Muxify names one, `<base>/<Topic ID>`, so its Session line shows `base`. Returns
+    (Session id, list of Window ids)."""
+    found = session(s, base + '/' + topic_id, windows)
+    s.tmux('set-option', '-t', found[0], '@muxify_topic', topic_id)
+    return found
+
+
+def split(s, window):
+    """Splits the Window's Pane in two, so it shows Pane rows with `sidebar.panes: true`. Returns the new Pane's id."""
+    return s.tmux('split-window', '-d', '-P', '-F', '#{pane_id}', '-t', window, '-c', str(project(s)), SHELL)
+
+
+def top_of(view, key, rows):
+    """The top edge of the row in points from the top of the screen, as the gate measures a frame; None without it."""
+    frame = rect(view.s.row(key, rows))
+    return None if frame is None else -(frame[1] + frame[3])
+
+
+class TopicOpen:
+    name = 'topic-open'
+    shows = ('The open card of the Location\'s Topic with three Sessions: their Session lines, Window rows with their '
+             'Pane counts and no bell, Pane rows under a split Window and in place of a Session\'s only Window, and '
+             '"N more…" beside Settle; then the same card once "N more…" was pressed. A closed card stands under it. Last, '
+             'the open card of an Empty Topic, which lists no Session and ends with the line for Settle.')
+
+    def fixture(self, s):
+        TopicRecords(s.root/'state/muxify').put(dict(id='atlas', title='Atlas', slug='atlas', order=0))
+        self.api, self.api_windows = member(s, 'atlas', 'api', ('main', 'logs'))
+        split(s, self.api_windows[1])
+        self.web, self.web_windows = member(s, 'atlas', 'web', ('main', 'build', 'tests'))
+        self.docs, (self.docs_window,) = member(s, 'atlas', 'docs')
+        split(s, self.docs_window)
+        topic(s, 'birch', 'Birch', order=1)
+        TopicRecords(s.root/'state/muxify').put(dict(id='cedar', title='Cedar', slug='cedar', order=2))
+        self.more = 'topic-atlas-more'
+
+    def shots(self):
+        return [('topic-open', self.open), ('topic-open-all-rows', self.all_rows), ('topic-open-empty', self.empty)]
+
+    def open(self, view):
+        view.launch(config(sidebar='  panes: true\n'))
+        # A bell in a Window that is not the Location's: a Window row in the Topics list shows none.
+        ring(view.s, self.web_windows[1])
+        view.go(self.api_windows[0])
+        fresh_shell(view.s, self.api_windows[0])
+        rows = ['topic-atlas-session-' + self.api, 'topic-window-' + self.api_windows[0], 'topic-window-' + self.api_windows[1],
+                'topic-atlas-session-' + self.web, 'topic-window-' + self.web_windows[0]]
+        view.wait(lambda rs: view.value('topic-atlas', rs).startswith('expanded') and all(view.s.has(key, rs) for key in rows)
+                  and view.s.row(self.more, rs).get('accessibilityLabel') == '4 more…',
+                  lambda: 'the open card does not list its first five rows under their Session lines with "4 more…": %s'
+                  % [key for key in rows + [self.more] if not view.s.has(key)])
+
+    def all_rows(self, view):
+        view.s.act('press', self.more)
+        rows = ['topic-window-' + window for window in self.web_windows] + ['topic-atlas-session-' + self.docs]
+        view.wait(lambda rs: all(view.s.has(key, rs) for key in rows) and not view.s.has(self.more, rs),
+                  lambda: 'a press on "N more…" did not list every row: it misses %s' % [key for key in rows if not view.s.has(key)])
+
+    def empty(self, view):
+        # A press on the card of the Empty Topic goes to it, and its card opens.
+        view.s.act('press', 'topic-cedar')
+        view.wait(lambda rs: view.value('topic-cedar', rs).startswith('expanded, Empty'),
+                  lambda: 'the card of the Empty Topic did not open: %s' % view.value('topic-cedar', view.s.rows()))
+
+
+class NoTopicCard:
+    name = 'no-topic-card'
+    shows = ('The No Topic card of a Session with no Topic that holds the Location, open with its Window rows and '
+             'Pane rows under the closed card of a Topic; then the same card closed.')
+
+    def fixture(self, s):
+        topic(s, 'atlas', 'Atlas', order=0)
+        self.session, self.windows = session(s, 'scratch', ('main', 'notes', 'logs'))
+        split(s, self.windows[2])
+        self.header = 'no-topic-session-' + self.session
+
+    def shots(self):
+        return [('no-topic-card', self.open), ('no-topic-card-closed', self.closed)]
+
+    def open(self, view):
+        view.launch(config(sidebar='  panes: true\n'))
+        view.go(self.windows[0])
+        fresh_shell(view.s, self.windows[0])
+        rows = [self.header] + ['topic-window-' + window for window in self.windows]
+        view.wait(lambda rs: view.value(self.header, rs).startswith('expanded') and all(view.s.has(key, rs) for key in rows),
+                  lambda: 'the No Topic card is not open with its Window rows: it misses %s' % [key for key in rows if not view.s.has(key)])
+
+    def closed(self, view):
+        view.close_card(self.header)
+        view.wait(lambda rs: not view.s.has('topic-window-' + self.windows[0], rs),
+                  'the closed No Topic card still lists its Window rows')
+
+
+class TopicsStuckHeader:
+    name = 'topics-stuck-header'
+    shows = ('The Topics list scrolled to its end, with the header of the open card of the Location\'s Topic, the last '
+             'card, stuck at the top of the list while the card\'s rows scroll under it.')
+
+    def fixture(self, s):
+        topic(s, 'atlas', 'Atlas', order=0)
+        topic(s, 'birch', 'Birch', order=1)
+        # The last card is open with all its rows: the Location's Window is its last, past the fifth row.
+        self.session, self.windows = topic(s, 'cedar', 'Cedar', ['window-%02d' % number for number in range(1, 61)], order=2)
+
+    def shots(self):
+        return [('topics-stuck-header', self.stuck)]
+
+    def stuck(self, view):
+        s = view.s
+        view.launch(config())
+        view.go(self.windows[-1])
+        fresh_shell(s, self.windows[-1])
+        card, header = 'card-topic-cedar', 'topic-cedar'
+        view.wait(lambda rs: view.value(header, rs).startswith('expanded') and s.has('topic-window-' + self.windows[-1], rs),
+                  'the card of the Location is not open with all its rows')
+        view.rest()
+        s.act('scroll', 'topics-list', from_end=0)
+        # The card's top has left the list at its top, and its header has not.
+        def stuck(rs):
+            top, card_top, header_top = (top_of(view, key, rs) for key in ('topics-list', card, header))
+            return None not in (top, card_top, header_top) and card_top < top - 100 and abs(header_top - top) <= 1
+        view.wait(stuck, lambda: 'the list did not scroll with the header of its open card stuck at the top: list, card '
+                  'and header tops %s' % [top_of(view, key, s.rows()) for key in ('topics-list', card, header)])
+
+
 # The launch arguments of every scene of the Topics list: the Sidebar shows, with Topics.
 TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics']
 
 # The areas that have two versions now.
 AREAS = [
     Area(name='topics', title='Topics list', list='topics-list', default=TOPICS_LIST_DEFAULT, args=TOPICS_ARGS,
-         shown=lambda s: s.topics_list(), scenes=[TopicCards(), LockedCards()]),
+         shown=lambda s: s.topics_list(), scenes=[TopicCards(), LockedCards(), TopicOpen(), NoTopicCard(), TopicsStuckHeader()]),
 ]

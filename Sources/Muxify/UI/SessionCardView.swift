@@ -32,10 +32,52 @@ struct SessionCardContent: Equatable {
     }
 }
 
-/// A row of an open Session card: a Window row, or a Pane row under its Window row or in its place.
+extension SessionCardContent {
+    /// What the card of the Session shows, read from the models as the SwiftUI Session card reads it: in the Sessions
+    /// list, and as the No Topic card of the Topics list with `inTopicsList`. An open card lists `CardRows.shownCount`
+    /// of its rows, or all of them with `showsAllRows`, in tmux's order.
+    @MainActor init(_ session: SessionGroup, store: WorkspaceStore, hints: HintPresentation, showsAllRows: Bool, inTopicsList: Bool = false) {
+        let model = store.topics
+        let isOpen = store.openSessionCards.contains(session.name)
+        let isLocked = model.lockedSessionIDs.contains(session.id)
+        let formatted = store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[session.id])
+        let items = isOpen ? model.sessionChildren[session.id]?.items ?? [] : []
+        let shown = CardRows.shownCount(items, selectedWindowID: store.selectedWindowID, showsAll: showsAllRows)
+        self.init(title: formatted.title, summary: formatted.summary, isOpen: isOpen,
+                  holdsSelection: SessionCardPress(store: store, session: session).holdsSelection,
+                  mark: model.sessionMarks[session.id].map(CardMark.agent), isLocked: isLocked,
+                  isGuest: isLocked && store.topicConfig.inPlay != nil, hasBell: session.windows.contains(where: \.hasBell),
+                  hint: CardHint(.session(session.id), in: hints),
+                  rows: items.prefix(shown).map { CardRowContent($0, store: store, inTopicsList: inTopicsList) },
+                  moreCount: items.count - shown, movesWindows: store.windowRowDrag.isEnabled)
+    }
+}
+
+/// A row of an open card: a Window row, or a Pane row under its Window row or in its place.
 enum CardRowContent: Equatable {
     case window(WindowRowContent)
     case pane(PaneRowContent)
+
+    /// What the row of the item shows, read from the models as the SwiftUI rows read them. `inTopicsList` gives a
+    /// Window row the look of the Topics list.
+    @MainActor init(_ item: TopicsModel.SessionChildren.Item, store: WorkspaceStore, inTopicsList: Bool = false) {
+        switch item {
+        case .window(let window):
+            self = .window(WindowRowContent(
+                window: window, formatted: store.sidebarWindowRow(window), isSelected: window.id == store.selectedWindowID,
+                tabCount: store.tabCount(for: window), isGitViewOpen: store.isGitViewOpen(in: window.id),
+                usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
+                    window, record: store.topicWatcher.records.first { $0.id == window.topicID }, sessionPaths: store.sessionPaths),
+                tooltips: store.config.sidebar.windowTooltips, inTopicsList: inTopicsList))
+        case .pane(let row):
+            let mark = store.topics.agentMarks[row.pane.id]
+            self = .pane(PaneRowContent(paneID: row.pane.id, text: store.sidebarText(.pane, context: store.sidebarFormatContexts.panes[row.pane.id]),
+                                        isActive: row.pane.isActive, isUnderWindowRow: row.isUnderWindowRow,
+                                        showsLocation: row.showsLocation(selectedWindowID: store.selectedWindowID), mark: mark,
+                                        accessibilityValue: row.accessibilityValue(mark: mark), hoverDetail: row.hoverDetail,
+                                        windowID: row.window.id))
+        }
+    }
 }
 
 /// The Hint of a card, in the place the header keeps for it after the title.
@@ -58,11 +100,13 @@ struct CardHint: Equatable {
     var showsBadge: Bool { !triggers.isEmpty }
 }
 
-/// A Session card of the AppKit Sessions list (ADR 0074). Closed, it is flat, with only its border; open, it is
-/// raised, with its Window and Pane rows under its header, and "N more…" after them when it holds rows back. A spine
-/// shows its mark, and the card that holds the Location's Window has the many-coloured border. It gives the
-/// accessibility rows of the SwiftUI card: `card-session-<id>` for the card, the parts of its Window rows, its Pane rows
-/// and "N more…", `session-<id>` for its header, and a row for each Hint: the card's and its Window rows'.
+/// A Session card of the AppKit Sessions list (ADR 0074), and the No Topic card of the AppKit Topics list
+/// (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md). Closed, it is flat, with only its border;
+/// open, it is raised, with its Window and Pane rows under its header, and "N more…" after them when it holds rows
+/// back. A spine shows its mark, and the card that holds the Location's Window has the many-coloured border. It gives
+/// the accessibility rows of the SwiftUI card: `card-<id>` for the card, its Window rows, its Pane rows and "N more…",
+/// `<id>` for its header, and a row for each Hint: the card's and its Window rows'. `<id>` is `session-<Session ID>` in
+/// the Sessions list and `no-topic-session-<Session ID>` in the Topics list.
 final class SessionCardView: NSView {
     let sessionID: String
     /// A press on the header.
@@ -91,6 +135,8 @@ final class SessionCardView: NSView {
     private let header: CardHeaderView
     /// The rows of an open card. A card that closes keeps them, so they fade where they stand.
     private let rows = CardRowsView()
+    /// The views of the Window and Pane rows.
+    private let rowViews: CardRowViews
     /// The Window and Pane rows from the top, and "N more…" after them when it shows.
     private var listed: [CardRowView] = []
     /// The Window and Pane rows from the top in their units: each Window row with the Pane rows under it, which a drag
@@ -113,10 +159,14 @@ final class SessionCardView: NSView {
     /// card's top has scrolled past it.
     private var viewportTop: CGFloat = 0
 
-    init(sessionID: String) {
+    /// `identifier` is the header's; nil for the Sessions list's `session-<Session ID>`. In the Topics list the Window
+    /// rows are its own (`CardRowViews`).
+    init(sessionID: String, identifier: String? = nil, inTopicsList: Bool = false) {
         self.sessionID = sessionID
-        header = CardHeaderView(identifier: "session-" + sessionID)
-        more = MoreRowView(identifier: "session-" + sessionID)
+        let identifier = identifier ?? "session-" + sessionID
+        header = CardHeaderView(identifier: identifier)
+        more = MoreRowView(identifier: identifier)
+        rowViews = CardRowViews(inTopicsList: inTopicsList)
         super.init(frame: .zero)
         wantsLayer = true
         // The SwiftUI card cuts nothing off.
@@ -126,7 +176,10 @@ final class SessionCardView: NSView {
         subviews = chrome
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityIdentifier("card-session-" + sessionID)
+        setAccessibilityIdentifier("card-" + identifier)
+        rowViews.onSelectWindow = { [weak self] in self?.onSelectWindow($0) }
+        rowViews.onSelectPane = { [weak self] in self?.onSelectPane($0) }
+        rowViews.windowMenu = { [weak self] in self?.windowMenu($0) }
     }
 
     @available(*, unavailable)
@@ -169,24 +222,7 @@ final class SessionCardView: NSView {
     /// Shows a row for each Window and Pane, from the top, and "N more…" after them for `more` rows held back. A row
     /// that already showed keeps its view, so its tint fades when the Location moves, unless `fades` is false.
     private func showRows(_ contents: [CardRowContent], more count: Int, fades: Bool) {
-        var windows = Dictionary(listed.compactMap { $0 as? WindowRowView }.map { ($0.windowID, $0) }, uniquingKeysWith: { first, _ in first })
-        var panes = Dictionary(listed.compactMap { $0 as? PaneRowView }.map { ($0.paneID, $0) }, uniquingKeysWith: { first, _ in first })
-        listed = contents.map { content -> CardRowView in
-            switch content {
-            case .window(let content):
-                let row = windows.removeValue(forKey: content.window.id)
-                    ?? WindowRowView(windowID: content.window.id, identifier: "session-window-" + content.window.id)
-                row.onPress = { [weak self] in self?.onSelectWindow(content.window) }
-                row.menuItems = { [weak self] in self?.windowMenu(content.window) }
-                row.show(content, environment: environment, fades: fades)
-                return row
-            case .pane(let content):
-                let row = panes.removeValue(forKey: content.paneID) ?? PaneRowView(paneID: content.paneID)
-                row.onPress = { [weak self] in self?.onSelectPane(content.paneID) }
-                row.show(content, environment: environment, fades: fades)
-                return row
-            }
-        }
+        listed = rowViews.show(contents, environment: environment, fades: fades)
         units = units(of: zip(contents, listed).map { ($0, $1) })
         for unit in units { unit.theme = environment.chromeTheme }
         let moves = movesWindows

@@ -187,8 +187,8 @@ final class PaneRowView: SidebarRowView, CardRowView {
     override func accessibilityActivationPoint() -> NSPoint { accessibilityFrame().centre }
 }
 
-/// The row that ends a long open card in the AppKit Sessions list (ADR 0074): "N more…", where N is the number of rows
-/// the card holds back. A press shows all rows of the card. To accessibility it is a button with the identifier of the
+/// The row that ends a long open card in the AppKit lists (ADR 0074): "N more…", where N is the number of rows the card
+/// holds back. A press shows all rows of the card. To accessibility it is a button with the identifier of the
 /// card's header and `-more`.
 final class MoreRowView: SidebarPressView, CardRowView {
     private let label = SidebarLabel()
@@ -207,9 +207,11 @@ final class MoreRowView: SidebarPressView, CardRowView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    /// Shows the number of rows the card holds back.
-    func show(count: Int, environment: SidebarListEnvironment) {
+    /// Shows the number of rows the card holds back. `value` is the row's accessibility value: in the Topics list, the
+    /// strongest Agent mark of the rows held back.
+    func show(count: Int, value: String = "", environment: SidebarListEnvironment) {
         self.environment = environment
+        setAccessibilityValue(value)
         label.text = MoreRowMetrics.text(count)
         label.font = .systemFont(ofSize: environment.fontSize(MoreRowMetrics.fontSize))
         label.scale = environment.displayScale

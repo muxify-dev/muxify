@@ -135,3 +135,45 @@ many-coloured border of the Location's card and the edges of glyphs, for the rea
 
 The AppKit list draws the Guests line from this task on, because a Guest shows only under it; the Bench line and the
 Open Places come with task 08.
+
+## topic-open
+
+Task 06 of the set `remove-swiftui`. Three shots: `topic-open`, the open card of the Location's Topic with three
+Sessions, five rows and "4 more…" beside Settle; `topic-open-all-rows`, the same card once "N more…" was pressed; and
+`topic-open-empty`, the open card of an Empty Topic, which lists no Session. The gate passes in all three, and side by
+side the pictures look the same: the Session lines, the dividers between the Sessions, the Window rows with their Pane
+counts and no bell for the Window that rang, the Pane rows under a split Window and in place of a Session's only
+Window, "N more…" and the footer line beside Settle stand on the same pixels. The difference picture marks:
+
+- The fill of the open card, one step of 255 lighter in red and green in the SwiftUI picture: 70, 74, 80 against
+  69, 73, 80. It is the pilot's difference (the note of its `cards` scene in the git history before task 01 of this
+  set): the AppKit card's fill is a layer with its shadow (`CardFillView`), and the shadow shows through a fill that
+  faint by one step; the driver's `snapshot` draws SwiftUI's fill with no shadow under it. One step cannot be seen,
+  but it marks the whole open card, its rows too, and so most of the share of pixels that differ.
+- The app icons of the Window rows, by at most 10 of 255 on their edge: `SidebarLogo` draws the logo's image with
+  AppKit, and SwiftUI's `Image` samples it in its own way, as the pilot measured.
+- The many-coloured border of the Location's card and the edges of glyphs, as in `topic-cards`.
+
+An Empty Topic's open card lists no Session, and SwiftUI still keeps the room between the empty stack of Sessions and
+the footer line: `TopicCardRowsView` keeps it too, so the card is 67 points high in both.
+
+## no-topic-card
+
+Task 06 of the set `remove-swiftui`. Two shots: `no-topic-card`, the open No Topic card of a Session with no Topic
+that holds the Location, with its Window rows and the Pane rows of a split Window; and `no-topic-card-closed`, the same
+card closed, with its Summary. The AppKit list draws it with the Sessions list's `SessionCardView`, whose Window rows
+are the Topics list's (`topic-window-<id>`, one button each). The gate passes in both, and side by side the pictures
+look the same. The difference picture marks the fill of the open card and the app icons, as in `topic-open`, and the
+many-coloured border and the edges of glyphs, as in `topic-cards`.
+
+## topics-stuck-header
+
+Task 06 of the set `remove-swiftui`. The list scrolled to its end, with the header of the open card of the Location's
+Topic, sixty Window rows long, stuck at the top over the rows that scroll under it. The gate passes, and side by side
+the pictures look the same: the stuck header's background and its divider, and the rows under it, stand on the same
+pixels. The difference picture marks the fill of the open card and the app icons, as in `topic-open`, and the
+many-coloured border and the edges of glyphs, as in `topic-cards`; the titles of the rows differ by at most 2 of 255.
+
+In one run the SwiftUI picture showed a row's hover label: the user's pointer rested on the App Window where that row
+stood while the SwiftUI list showed. The runs after it showed no label in either picture. See "What the user changes
+in a picture" in `README.md`.

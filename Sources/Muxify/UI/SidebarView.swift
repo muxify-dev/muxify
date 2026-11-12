@@ -569,7 +569,7 @@ private struct SessionHeading: View {
     var body: some View {
         line
             .takesFirstClick()
-            .opacity(topic.kind == .open ? 1 : 0.5)
+            .opacity(topic.kind == .open ? 1 : TopicCardRowsOpacity.notOpen)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isButton)
             .accessibilityAction(.default, go)
@@ -586,12 +586,13 @@ private struct SessionHeading: View {
 
     @ViewBuilder
     private var line: some View {
-        let label = HStack(spacing: 6) {
-            Text(session.baseName).font(fontSize.font(11, weight: .semibold)).lineLimit(1)
-            Spacer(minLength: 4)
+        let label = HStack(spacing: SessionLineMetrics.spacing) {
+            Text(session.baseName).font(fontSize.font(SessionLineMetrics.fontSize, weight: .semibold)).lineLimit(1)
+            Spacer(minLength: SessionLineMetrics.endGap)
         }
         .foregroundStyle(.secondary)
-        .padding(.leading, 8).padding(.trailing, 6).padding(.top, 4).padding(.bottom, 1)
+        .padding(.leading, SessionLineMetrics.leading).padding(.trailing, SessionLineMetrics.trailing)
+        .padding(.top, SessionLineMetrics.top).padding(.bottom, SessionLineMetrics.bottom)
         .contentShape(Rectangle())
         if let ordering {
             let id = session.id.session
@@ -641,7 +642,7 @@ private struct TopicItemRow: View {
                               window, record: store.topicWatcher.records.first { $0.id == window.topicID }, sessionPaths: store.sessionPaths))
             }
             .buttonStyle(.plain)
-            .opacity(isDimmed ? 0.5 : 1)
+            .opacity(isDimmed ? TopicCardRowsOpacity.notOpen : 1)
             .id("\(window.sessionID):\(window.id):\(window.topicID ?? "")")
             .accessibilityIdentifier("topic-window-\(window.id)")
             .accessibilityValue(window.id == store.selectedWindowID ? "selected" : "")
@@ -649,7 +650,7 @@ private struct TopicItemRow: View {
             .topicMembershipActions(store: store, source: .window(window))
         case .pane(let row):
             PaneRow(store: store, row: row)
-                .opacity(isDimmed ? 0.5 : 1)
+                .opacity(isDimmed ? TopicCardRowsOpacity.notOpen : 1)
         }
     }
 }

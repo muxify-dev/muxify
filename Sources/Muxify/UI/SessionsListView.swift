@@ -163,45 +163,7 @@ final class SessionsListView: NSView, SidebarList {
 
     /// What the card of the Session shows, read from the models as the SwiftUI card reads it.
     private func content(of session: SessionGroup) -> SessionCardContent {
-        let model = store.topics
-        let isOpen = store.openSessionCards.contains(session.name)
-        let isLocked = model.lockedSessionIDs.contains(session.id)
-        let formatted = store.sidebarText(.session, context: store.sidebarFormatContexts.sessions[session.id])
-        let rows = isOpen ? rows(of: session) : (shown: [], held: 0)
-        return SessionCardContent(title: formatted.title, summary: formatted.summary, isOpen: isOpen,
-                                  holdsSelection: SessionCardPress(store: store, session: session).holdsSelection,
-                                  mark: model.sessionMarks[session.id].map(CardMark.agent), isLocked: isLocked,
-                                  isGuest: isLocked && store.topicConfig.inPlay != nil,
-                                  hasBell: session.windows.contains(where: \.hasBell),
-                                  hint: CardHint(.session(session.id), in: environment.hints),
-                                  rows: rows.shown, moreCount: rows.held, movesWindows: store.windowRowDrag.isEnabled)
-    }
-
-    /// The rows that the Session's open card lists, in tmux's order, and the number it holds back, read from the models
-    /// as the SwiftUI list reads them.
-    private func rows(of session: SessionGroup) -> (shown: [CardRowContent], held: Int) {
-        let items = store.topics.sessionChildren[session.id]?.items ?? []
-        let shown = CardRows.shownCount(items, selectedWindowID: store.selectedWindowID, showsAll: showingAllRows.contains(session.id))
-        return (items.prefix(shown).map(row), items.count - shown)
-    }
-
-    private func row(_ item: TopicsModel.SessionChildren.Item) -> CardRowContent {
-        switch item {
-        case .window(let window):
-            return .window(WindowRowContent(
-                window: window, formatted: store.sidebarWindowRow(window), isSelected: window.id == store.selectedWindowID,
-                tabCount: store.tabCount(for: window), isGitViewOpen: store.isGitViewOpen(in: window.id),
-                usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
-                    window, record: store.topicWatcher.records.first { $0.id == window.topicID }, sessionPaths: store.sessionPaths),
-                tooltips: store.config.sidebar.windowTooltips))
-        case .pane(let row):
-            let mark = store.topics.agentMarks[row.pane.id]
-            return .pane(PaneRowContent(paneID: row.pane.id, text: store.sidebarText(.pane, context: store.sidebarFormatContexts.panes[row.pane.id]),
-                                        isActive: row.pane.isActive, isUnderWindowRow: row.isUnderWindowRow,
-                                        showsLocation: row.showsLocation(selectedWindowID: store.selectedWindowID), mark: mark,
-                                        accessibilityValue: row.accessibilityValue(mark: mark), hoverDetail: row.hoverDetail,
-                                        windowID: row.window.id))
-        }
+        SessionCardContent(session, store: store, hints: environment.hints, showsAllRows: showingAllRows.contains(session.id))
     }
 
     /// A press on a Pane row of the Session's card goes to that Pane, as the Session is now.

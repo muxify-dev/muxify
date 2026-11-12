@@ -428,7 +428,7 @@ struct CardList<Heading: View, Row: View>: View {
                 let view = blockView(block)
                     .overlay(alignment: .top) {
                         if index > 0 {
-                            Divider().padding(.horizontal, 6).offset(y: -5)
+                            Divider().padding(.horizontal, CardBlockDivider.inset).offset(y: -CardBlockDivider.rise)
                                 .opacity(movingBlock ? 0 : 1)
                                 .animation(.easeOut(duration: 0.15), value: movingBlock)
                         }

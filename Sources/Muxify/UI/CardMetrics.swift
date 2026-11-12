@@ -18,6 +18,15 @@ enum CardSpacing {
     static let block: CGFloat = 9
 }
 
+/// The divider over each Session block of an open card after the first, for both versions of the card: a line as high
+/// as SwiftUI's `Divider`, inset from the sides of the rows, in the room between two blocks.
+enum CardBlockDivider {
+    /// The room between the divider's ends and the sides of the rows.
+    static let inset: CGFloat = 6
+    /// How far above the block's top the divider's top stands.
+    static let rise: CGFloat = 5
+}
+
 /// A card's outline. The SwiftUI card and the AppKit card both read it, so the two cannot drift (ADR 0074).
 enum CardOutline {
     /// The radius of the card's continuous corners.
