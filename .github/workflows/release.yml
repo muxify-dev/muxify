@@ -46,6 +46,15 @@ jobs:
           path: vendor/ghostty
           key: ghostty-macos-26-arm64-xcode-26.6-${{ hashFiles('scripts/ghostty-version.env', 'scripts/setup-ghostty.sh', 'scripts/collect-notices.py') }}
 
+      # The Swift packages xcodebuild clones into the -clonedSourcePackagesDirPath that make test and
+      # package-release.sh pass. project.yml names the packages and the two Package.resolved files pin them; the
+      # generated xcodeproj is gitignored, so it cannot be in the key.
+      - name: Cache resolved Swift packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/SourcePackages
+          key: swift-packages-macos-26-arm64-${{ hashFiles('project.yml', 'Package.resolved', 'Packages/MuxifyCore/Package.resolved') }}
+
       - name: Test release tooling
         run: python3 -m unittest discover -s Tests/ReleaseTests -v
 
@@ -111,6 +120,24 @@ jobs:
         with:
           path: vendor/ghostty
           key: ghostty-macos-26-arm64-xcode-26.6-${{ hashFiles('scripts/ghostty-version.env', 'scripts/setup-ghostty.sh', 'scripts/collect-notices.py') }}
+
+      # The Swift packages xcodebuild clones into the -clonedSourcePackagesDirPath that make test and
+      # package-release.sh pass. project.yml names the packages and the two Package.resolved files pin them; the
+      # generated xcodeproj is gitignored, so it cannot be in the key.
+      - name: Cache resolved Swift packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/SourcePackages
+          key: swift-packages-macos-26-arm64-${{ hashFiles('project.yml', 'Package.resolved', 'Packages/MuxifyCore/Package.resolved') }}
+
+      # sign_update, generate_keys and sparkle.app, which make sparkle vendors. sparkle.app is built with the runner's
+      # Xcode, so the runner and Xcode are in the key. On a hit the setup script's stamp check skips the download and
+      # the sparkle-cli build. Only this job uses it.
+      - name: Cache pinned Sparkle tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor/sparkle
+          key: sparkle-macos-26-arm64-xcode-26.6-${{ hashFiles('scripts/sparkle-version.env', 'scripts/setup-sparkle.sh') }}
 
       - name: Prepare dependencies
         run: make setup
