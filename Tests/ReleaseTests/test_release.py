@@ -42,6 +42,12 @@ class ReleaseTests(unittest.TestCase):
         path.write_text(content)
         return path
 
+    def write_unfilled_public_key_file(self):
+        # The committed key file with its key left out, as it was before the secrets script filled it.
+        lines = (ROOT / "scripts/sparkle-public-key.env").read_text().splitlines(keepends=True)
+        return self.write("scripts/sparkle-public-key.env", "".join(
+            "SPARKLE_PUBLIC_ED_KEY=\n" if line.startswith("SPARKLE_PUBLIC_ED_KEY=") else line for line in lines))
+
     def run_script(self, name, *args):
         return subprocess.run(
             ["/bin/bash", str(self.root / "scripts" / name), *args],
@@ -242,12 +248,12 @@ if [ "$1" = -dvv ]; then echo "Authority=Muxify Release Signing" >&2; fi''')
 
     def test_package_refuses_an_empty_or_malformed_public_key_before_building(self):
         self.package_fixture()
-        shutil.copy(ROOT / "scripts/sparkle-public-key.env", self.root / "scripts/sparkle-public-key.env")
+        self.write_unfilled_public_key_file()
         self.assert_refused_before_building("tip", "holds no SPARKLE_PUBLIC_ED_KEY")
         self.write("scripts/sparkle-public-key.env", "SPARKLE_PUBLIC_ED_KEY='key</string>'\n")
         self.assert_refused_before_building("tip", "not a base64 Ed25519 public key")
 
-    def test_committed_public_key_file_is_empty_until_the_secrets_script_fills_it(self):
+    def test_committed_public_key_file_has_the_key_line_and_names_the_secrets_script(self):
         text = (ROOT / "scripts/sparkle-public-key.env").read_text()
         self.assertIn("\nSPARKLE_PUBLIC_ED_KEY=", "\n" + text)
         self.assertIn("secrets script fills it", text)
@@ -439,7 +445,7 @@ echo "sparkle:edSignature=\\"{self.SIGNATURE}\\" length=\\"$(wc -c < "${{@: -1}}
 
     def secrets_fixture(self):
         shutil.copy(ROOT / "scripts/make-release-secrets.sh", self.root / "scripts/make-release-secrets.sh")
-        shutil.copy(ROOT / "scripts/sparkle-public-key.env", self.root / "scripts/sparkle-public-key.env")
+        self.write_unfilled_public_key_file()
         (self.root / "tmp").mkdir()
         self.env["TMPDIR"] = str(self.root / "tmp")
         self.fake_tool("generate_keys", f'''
@@ -521,12 +527,12 @@ esac''')
 
     def test_secrets_script_stops_on_a_bad_public_key(self):
         self.secrets_fixture()
+        unfilled = (self.root / "scripts/sparkle-public-key.env").read_text()
         self.fake_tool("generate_keys", 'if [ "$3" = -p ]; then echo "ERROR: No existing signing key found!"; fi')
         result = self.run_script("make-release-secrets.sh")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("no base64 Ed25519 public key", result.stderr)
-        self.assertEqual((self.root / "scripts/sparkle-public-key.env").read_text(),
-                         (ROOT / "scripts/sparkle-public-key.env").read_text())
+        self.assertEqual((self.root / "scripts/sparkle-public-key.env").read_text(), unfilled)
 
     def test_collects_notices_and_font_mapping_in_stable_order(self):
         self.write("source/LICENSE", "MIT license\n")
