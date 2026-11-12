@@ -204,7 +204,7 @@ final class SessionCardView: NSView {
         header.show(content.header, environment: environment)
         if content.isOpen {
             showRows(content.rows, more: content.moreCount, fades: wasOpen)
-            drag.show(windowUnits.map(\.id))
+            drag.show()
         } else {
             drag.abandon()
         }
@@ -229,8 +229,7 @@ final class SessionCardView: NSView {
         for unit in units { unit.theme = environment.chromeTheme }
         let moves = movesWindows
         for case let row as WindowRowView in listed {
-            row.drag = drag
-            row.dragID = row.windowID
+            row.drag = drag.handle(row.windowID)
             row.isDraggable = moves
         }
         let views = [drag.slot] + units + (count > 0 ? [more] : [])

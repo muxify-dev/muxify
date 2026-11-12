@@ -138,7 +138,7 @@ final class TopicCardRowsView: NSView, TopicCardBody {
         footerHeight = reservesCorner ? CardCorner.footerHeight(environment.fontSize) : 0
         let views: [NSView] = dividers + [sessionDrag.slot] + blocks + (showsMore ? [more] : [])
         if subviews != views { subviews = views }
-        sessionDrag.show(blocks.map(\.id))
+        sessionDrag.show()
         layOut()
     }
 
@@ -152,8 +152,7 @@ final class TopicCardRowsView: NSView, TopicCardBody {
         line.actions = { [weak self] in self?.sessionActions(sessionID) }
         line.show(text, identifier: headerIdentifier + "-session-" + sessionID, environment: environment)
         line.alphaValue = content.fades ? TopicCardRowsOpacity.notOpen : 1
-        line.drag = content.isOrdered ? sessionDrag : nil
-        line.dragID = sessionID
+        line.drag = content.isOrdered ? sessionDrag.handle(sessionID) : nil
         line.isDraggable = content.isOrdered && movesSessions
         lines[sessionID] = line
         return line
@@ -293,12 +292,11 @@ final class SessionBlockView: DragUnitView {
         for unit in units { unit.theme = environment.chromeTheme }
         let lifts = liftsUnits
         for case let row as WindowRowView in self.rows {
-            row.drag = windowDrag
-            row.dragID = row.windowID
+            row.drag = windowDrag.handle(row.windowID)
             row.isDraggable = lifts
         }
         parts = (line.map { [$0] } ?? []) + [windowDrag.slot] + units
-        windowDrag.show(windowUnits.map(\.id))
+        windowDrag.show()
     }
 
     /// The units of Window rows, from the top.

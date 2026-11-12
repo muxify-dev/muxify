@@ -464,6 +464,163 @@ final class TopicOrderTests: XCTestCase {
         }
     }
 
+    /// Cards of fixed heights and a line between them, which the AppKit drag moves as the Topics list's cards: 6 points
+    /// apart, trading across the line, in a window, so the drag reads the pointer in window points as in the list.
+    @MainActor private final class Cards: NSView, StackDragList {
+        private final class Card: DragUnitView {
+            let fixed: CGFloat
+
+            init(id: String, height: CGFloat) {
+                fixed = height
+                super.init(id: id, cornerRadius: CardOutline.cornerRadius)
+            }
+
+            override func height(width: CGFloat) -> CGFloat { fixed }
+        }
+
+        private let holder = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 400), styleMask: .borderless,
+                                      backing: .buffered, defer: false)
+        private var cards: [String: Card] = [:]
+        private let heights: [StackSlot<String>: CGFloat]
+        private(set) var slots: [StackSlot<String>]
+        private(set) var traded: [[String]] = []
+        var onTrade: () -> Void = {}
+        lazy var drag = StackDrag<String>(host: self, spacing: 6, cornerRadius: CardOutline.cornerRadius, tradesAcross: ["line"])
+
+        init(_ slots: [(slot: StackSlot<String>, height: CGFloat)]) {
+            self.slots = slots.map(\.slot)
+            heights = Dictionary(uniqueKeysWithValues: slots.map { ($0.slot, $0.height) })
+            super.init(frame: NSRect(x: 0, y: 0, width: 200, height: 400))
+            wantsLayer = true
+            for (slot, height) in slots {
+                if let id = slot.item { cards[id] = Card(id: id, height: height) }
+            }
+            subviews = [drag.slot] + self.slots.compactMap { $0.item.flatMap { cards[$0] } }
+            holder.isReleasedWhenClosed = false
+            holder.contentView = self
+            layOutUnits()
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        override var isFlipped: Bool { true }
+
+        func close() { holder.contentView = nil }
+
+        /// The cards show in a new order.
+        func show(_ order: [StackSlot<String>]) {
+            slots = order
+            layOutUnits()
+            drag.show()
+        }
+
+        /// The point `y` below the top of the card, in window points.
+        func point(_ id: String, _ y: CGFloat) -> NSPoint { cards[id]!.convert(NSPoint(x: 20, y: y), to: nil) }
+
+        func dragSlots(around id: String) -> [StackSlot<String>] { slots }
+
+        func dragHeight(of slot: StackSlot<String>) -> CGFloat { heights[slot] ?? 0 }
+
+        func dragView(_ id: String) -> DragUnitView? { cards[id] }
+
+        var liftsUnits: Bool { true }
+
+        var reducesMotion: Bool { false }
+
+        func visibleTop(in clip: NSClipView) -> CGFloat { clip.bounds.minY }
+
+        func layOutUnits() {
+            var top: CGFloat = 0
+            for slot in slots {
+                if let id = slot.item, let card = cards[id] {
+                    card.place = top
+                    card.frame = NSRect(x: 0, y: top + drag.offset(of: slot), width: bounds.width, height: heights[slot] ?? 0)
+                }
+                top += (heights[slot] ?? 0) + 6
+            }
+            drag.placeSlot()
+        }
+
+        func drop(_ id: String, at placement: DropPlacement<String>) {}
+
+        func trade(_ id: String, with other: String) {
+            traded.append([id, other])
+            onTrade()
+        }
+    }
+
+    @MainActor func testTheAppKitDragOfACardAcrossTheLineTradesWithTheCardUnderThePointerAsTheStackLayoutGives() async {
+        let slots: [(slot: StackSlot<String>, height: CGFloat)] = [(.item("a"), 40), (.item("b"), 40), (.fixed("line"), 20),
+                                                                   (.item("c"), 40), (.item("d"), 40)]
+        let cards = Cards(slots)
+        defer { cards.close() }
+        let order = slots.map(\.slot)
+        let layout = StackLayout<String>(heights: Dictionary(uniqueKeysWithValues: slots.map { ($0.slot, $0.height) }), spacing: 6)
+        let start = cards.point("a", 20)
+        cards.drag.press("a", at: start)
+        // Window points count upward: the pointer moves 120 points down, past the line's middle at 102.
+        cards.drag.drag("a", to: NSPoint(x: start.x, y: start.y - 120))
+        let (_, landing) = layout.follow("a", moved: 120, grab: 20, in: order, dividers: ["line"])
+        XCTAssertEqual(landing, .across(trade: "c"), "the pointer at 140 passed the line and stands on c, which starts at 118")
+        XCTAssertEqual(cards.drag.landing, landing)
+        XCTAssertEqual(cards.drag.tradeTarget, "c")
+        XCTAssertNil(cards.drag.placement, "across the line no card makes room")
+        XCTAssertEqual(cards.drag.offset(of: "b"), 0)
+        XCTAssertEqual(cards.drag.offset(of: .fixed("line")), 0, "the line keeps its place")
+        XCTAssertEqual(cards.drag.tradeGhostOffset(of: "c"), -118, "c shows itself in a's place, 118 points above its own")
+        XCTAssertNil(cards.drag.tradeGhostOffset(of: "d"))
+
+        let traded = expectation(description: "the trade")
+        cards.onTrade = { traded.fulfill() }
+        cards.drag.release("a", onTap: { XCTFail("a drag is no click") })
+        XCTAssertEqual(cards.drag.phase, .trading("a", with: "c"))
+        XCTAssertEqual(cards.drag.offset(of: "a"), 118, "a goes down to c's place")
+        XCTAssertEqual(cards.drag.offset(of: "c"), -118, "c goes up to a's place")
+        XCTAssertEqual(cards.drag.offset(of: "b"), 0, "no other card moves")
+        XCTAssertTrue(cards.drag.raises(.item("c")), "the two pass above the others")
+        await fulfillment(of: [traded], timeout: 2)
+        XCTAssertEqual(cards.traded, [["a", "c"]], "once they passed each other, the host trades a with c")
+        cards.show(order)
+        XCTAssertEqual(cards.drag.phase, .trading("a", with: "c"), "it waits until the host shows a in c's place")
+        cards.show([.item("c"), .item("b"), .fixed("line"), .item("a"), .item("d")])
+        XCTAssertEqual(cards.drag.phase, .idle)
+        XCTAssertEqual(cards.drag.offset(of: "a"), 0)
+    }
+
+    @MainActor func testTheAppKitDragLandsAgainWhenTheAreaUnderTheLiftedCardScrolls() {
+        let cards = Cards([(.item("a"), 40), (.item("b"), 40), (.fixed("line"), 20), (.item("c"), 40), (.item("d"), 40)])
+        defer { cards.close() }
+        let start = cards.point("a", 20)
+        cards.drag.press("a", at: start)
+        cards.drag.drag("a", to: NSPoint(x: start.x, y: start.y - 85))
+        XCTAssertTrue(cards.drag.isAcross)
+        XCTAssertNil(cards.drag.tradeTarget, "the pointer at 105 is over no card")
+        cards.drag.scrollArea(by: 50)
+        XCTAssertEqual(cards.drag.tradeTarget, "c", "with no new pointer event, the scrolled Bench brought c under a")
+        cards.drag.release("a", onTap: {})
+    }
+
+    @MainActor func testAPointerThatRestsAtTheBottomEdgeScrollsTheListAfterTheDwell() async throws {
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 100, height: 200))
+        scrollView.documentView = FlippedDocument(frame: NSRect(x: 0, y: 0, width: 100, height: 1000))
+        let loop = EdgeAutoScrollLoop()
+        loop.scrollView = scrollView
+        loop.follow(pointer: 195) { _ in 0...200 }
+        try await Task.sleep(for: .seconds(EdgeAutoScroll.Dwell.delay / 2))
+        XCTAssertEqual(scrollView.scrollOffset, 0, "a pointer that only passes the edge does not scroll")
+        try await Task.sleep(for: .seconds(0.4))
+        let scrolled = scrollView.scrollOffset
+        XCTAssertGreaterThan(scrolled, 0, "the pointer rested in the bottom band")
+        loop.follow(pointer: nil) { _ in 0...200 }
+        try await Task.sleep(for: .seconds(0.1))
+        XCTAssertEqual(scrollView.scrollOffset, scrolled, "let go, the list no longer scrolls")
+    }
+
+    private final class FlippedDocument: NSView {
+        override var isFlipped: Bool { true }
+    }
+
     func testAPlacementMovesTheItemNextToItsAnchor() {
         XCTAssertEqual(DropPlacement.before("a").placing("c", in: ["a", "b", "c"]), ["c", "a", "b"])
         XCTAssertEqual(DropPlacement.after("c").placing("a", in: ["a", "b", "c"]), ["b", "c", "a"])

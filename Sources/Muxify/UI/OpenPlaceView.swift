@@ -4,10 +4,11 @@ import MuxifyCore
 /// An Open Place of the AppKit Topics list (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md): an In
 /// Play place that no card fills, as `OpenPlaceCard` draws it in SwiftUI. A plus in a circle and its word stand in the
 /// secondary text colour in a dashed border, and after the word the place keeps the room of its Hint. A press, also a
-/// first click, asks which Guest Topic or Benched Topic takes the place.
+/// first click, asks which Guest Topic or Benched Topic takes the place. The Hint stands in that room, as a Topic
+/// card's stands in its header (`CardHintViews`).
 ///
-/// To accessibility it is a group, as SwiftUI gives it, whose row is a button named by the place's number, "Open
-/// Place N", with the identifier `open-place-N`.
+/// To accessibility it is a group, as SwiftUI gives it, whose rows are a button named by the place's number, "Open
+/// Place N", with the identifier `open-place-N`, and the Hint, outside the button as on a Topic card.
 final class OpenPlaceView: NSView {
     /// The ID of the Open Place's record, which keeps its view while its number changes.
     let recordID: String
@@ -17,11 +18,12 @@ final class OpenPlaceView: NSView {
         set { button.onPress = newValue }
     }
     private let button = OpenPlaceButtonView()
+    private let hint = CardHintViews()
 
     init(recordID: String) {
         self.recordID = recordID
         super.init(frame: .zero)
-        addSubview(button)
+        subviews = [button] + hint.views
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
     }
@@ -34,20 +36,22 @@ final class OpenPlaceView: NSView {
     /// Shows the Open Place at its number, counted from 1, with the room of its Hint when the Hints show one.
     func show(place: Int, environment: SidebarListEnvironment) {
         button.show(place: place, environment: environment)
+        hint.show(CardHint(.openPlace(place), in: environment.hints), environment: environment)
+        hint.place(hintPlace)
     }
 
     var height: CGFloat { button.height }
 
     /// The room the Open Place keeps after its word for its Hint, in its own coordinates; nil while the Hints show none.
-    /// The Hint itself comes with a later task of the set remove-swiftui.
     var hintPlace: NSRect? { button.hintPlace }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         button.frame = bounds
+        hint.place(hintPlace)
     }
 
-    override func accessibilityChildren() -> [Any]? { [button] }
+    override func accessibilityChildren() -> [Any]? { [button] + hint.shown }
 }
 
 /// The button of an Open Place: its plus, its word and its border.

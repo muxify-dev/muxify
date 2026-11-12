@@ -236,8 +236,8 @@ difference picture marks:
 - The fill of the open card, as in `topic-open`, and the many-coloured border and the edges of glyphs, as in
   `topic-cards`.
 
-The scene turns card Hints off (`hints.cards`): the Open Place's Hint comes with task 14, and the AppKit Open Place
-keeps only its room for now.
+The scene turns card Hints off (`hints.cards`): the Hints of the cards and of the Open Place are compared with task
+14. The AppKit Open Place shows its Hint in its room since task 13, which the Bench suite's Open Place check needs.
 
 ## topic-overflow
 

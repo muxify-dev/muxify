@@ -34,8 +34,8 @@ final class ListDrag<ID: Hashable> {
     /// A pressed item sinks to this until it lifts or the press ends, so the handle shows it is ready to drag.
     static var pressScale: CGFloat { ListLift.pressScale }
     /// A lifted item over a trade target shrinks to this as it steps aside.
-    static var stepAsideScale: CGFloat { 0.94 }
-    static var tradeDuration: Double { 0.56 }
+    static var stepAsideScale: CGFloat { ListLift.stepAsideScale }
+    static var tradeDuration: Double { ListLift.tradeDuration }
 
     private(set) var phase: Phase = .idle
     /// How far the lifted item follows the pointer. Only the lifted item reads it, so the others do not draw again as the
@@ -119,7 +119,7 @@ final class ListDrag<ID: Hashable> {
     func tradePath(of id: ID) -> (from: CGFloat, to: CGFloat, side: CGFloat)? {
         guard case .trading(let dragged, let target) = phase, id == dragged || id == target else { return nil }
         let distance = layout.top(of: .item(target), in: order) - layout.top(of: .item(dragged), in: order)
-        return id == dragged ? (translation, distance, 26) : (0, -distance, -26)
+        return id == dragged ? (translation, distance, ListLift.tradeBow) : (0, -distance, -ListLift.tradeBow)
     }
 
     /// An item reports its place in the scroll view each time it changes. When the lifted item's place moves, as when
@@ -294,11 +294,12 @@ final class ListDrag<ID: Hashable> {
 
     private func trade(_ id: ID, with target: ID, onTrade: @escaping (ID) -> Void) {
         withTransaction(Transaction(animation: nil)) { tradeProgress = 0 }
-        withAnimation(.spring(duration: 0.25)) {
+        withAnimation(ListLift.stepAside.animation) {
             phase = .trading(id, with: target)
             landing = nil
         }
-        withAnimation(.timingCurve(0.45, 0, 0.2, 1, duration: Self.tradeDuration)) {
+        let curve = ListLift.tradeCurve
+        withAnimation(.timingCurve(curve.x1, curve.y1, curve.x2, curve.y2, duration: Self.tradeDuration)) {
             tradeProgress = 1
         } completion: { [weak self] in
             guard let self, phase == .trading(id, with: target) else { return }
@@ -444,16 +445,16 @@ private struct ListDragItem<ID: Hashable>: ViewModifier {
             .overlay {
                 if isTarget { TradeMark(cornerRadius: cornerRadius).transition(.opacity) }
             }
-            .animation(.spring(duration: 0.2), value: isTarget)
+            .animation(TradeLook.shows.animation, value: isTarget)
             .scaleEffect(drag.scale(of: id, reducesMotion: reduceMotion), anchor: ListDrag<ID>.liftAnchor)
-            .opacity(stepsAside ? 0.9 : 1)
+            .opacity(stepsAside ? ListLift.stepAsideOpacity : 1)
             .shadow(color: .black.opacity(isRaised ? ListLift.shadowOpacity : 0), radius: isRaised ? ListLift.shadowRadius : 0,
                     y: isRaised ? ListLift.shadowDrop : 0)
             .animation(ListLift.lift.animation, value: isLifted)
-            .animation(.spring(duration: 0.25), value: stepsAside)
+            .animation(ListLift.stepAside.animation, value: stepsAside)
             // Outside the lift's spring, which wins when the press becomes a lift.
             .animation(.easeOut(duration: ListLift.pressDuration), value: isPressed)
-            .offset(x: stepsAside ? 34 : 0)
+            .offset(x: stepsAside ? ListLift.stepAsideShift : 0)
             .offset(y: isLifted ? drag.translation : shift)
             // The lifted item stays under the pointer while the others slide; let go, it glides.
             .transaction { if isLifted { $0.animation = nil } }
@@ -573,19 +574,19 @@ private struct TradeMark: View {
         // Inside the card's frame: the In Play block covers the gap under the Bench line, and would cut a border that
         // reaches past the top Benched card.
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        shape.fill(Color.tradeMark.opacity(0.1))
-            .overlay { shape.strokeBorder(Color.tradeMark, style: StrokeStyle(lineWidth: 2, dash: [5, 4])) }
+        shape.fill(Color.tradeMark.opacity(TradeLook.fillOpacity))
+            .overlay { shape.strokeBorder(Color.tradeMark, style: StrokeStyle(lineWidth: TradeLook.borderWidth, dash: TradeLook.dash)) }
             .overlay(alignment: .topTrailing) {
-                Text("⇄ Trade")
-                    .font(fontSize.font(10, weight: .bold)).foregroundStyle(.white)
-                    .padding(.horizontal, 7).padding(.vertical, 1)
+                Text(TradeLook.word)
+                    .font(fontSize.font(TradeLook.fontSize, weight: .bold)).foregroundStyle(.white)
+                    .padding(.horizontal, TradeLook.wordPadding.horizontal).padding(.vertical, TradeLook.wordPadding.vertical)
                     .background(Capsule().fill(Color.tradeMark))
-                    .padding(.top, 6).padding(.trailing, 8)
+                    .padding(.top, TradeLook.wordInset.top).padding(.trailing, TradeLook.wordInset.trailing)
             }
             .allowsHitTesting(false)
             .accessibilityElement()
-            .accessibilityLabel("Trade")
-            .accessibilityIdentifier("list-drag-trade-target")
+            .accessibilityLabel(TradeLook.label)
+            .accessibilityIdentifier(TradeLook.identifier)
     }
 }
 
@@ -596,11 +597,11 @@ private struct TradeGhost<Content: View>: View {
 
     var body: some View {
         content
-            .opacity(0.45)
+            .opacity(TradeLook.ghostOpacity)
             .overlay(alignment: .bottomTrailing) {
-                Text("lands here")
-                    .font(fontSize.font(10, weight: .semibold)).foregroundStyle(Color.tradeMark)
-                    .padding(.bottom, 4).padding(.trailing, 8)
+                Text(TradeLook.ghostWord)
+                    .font(fontSize.font(TradeLook.ghostFontSize, weight: .semibold)).foregroundStyle(Color.tradeMark)
+                    .padding(.bottom, TradeLook.ghostWordInset.bottom).padding(.trailing, TradeLook.ghostWordInset.trailing)
             }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .allowsHitTesting(false)

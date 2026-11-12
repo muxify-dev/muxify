@@ -46,3 +46,43 @@ extension NSScrollView {
         DisplayLinkProbe.didStart(glide: name, in: window, duration: duration, from: from, to: to)
     }
 }
+
+/// Scrolls a list while a lifted item's pointer rests at an edge of its area, each tick, with no event to drive it: by
+/// `EdgeAutoScroll.step` once the pointer has rested in a band for `EdgeAutoScroll.Dwell.delay`. The SwiftUI Topics
+/// list's `ScrollDriver` and the AppKit Topics list both scroll their lists with it.
+@MainActor final class EdgeAutoScrollLoop {
+    /// The scroll view whose clip view the loop moves.
+    weak var scrollView: NSScrollView?
+    private var pointer: CGFloat?
+    private var area: (CGFloat) -> ClosedRange<CGFloat> = { _ in 0...0 }
+    private var dwell = EdgeAutoScroll.Dwell()
+    private var loop: Task<Void, Never>?
+
+    /// Follows a lifted item's pointer, its y in the visible part of the scroll view, until it is nil. `area` gives, for
+    /// a scroll offset, the part of the visible part whose edges scroll.
+    func follow(pointer: CGFloat?, area: @escaping (CGFloat) -> ClosedRange<CGFloat>) {
+        self.pointer = pointer
+        self.area = area
+        guard pointer != nil else {
+            loop?.cancel()
+            loop = nil
+            dwell = EdgeAutoScroll.Dwell()
+            return
+        }
+        guard loop == nil else { return }
+        loop = Task { [weak self] in
+            while !Task.isCancelled, let scroller = self {
+                scroller.tick()
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+    }
+
+    private func tick() {
+        guard let scrollView else { return }
+        let offset = scrollView.scrollOffset, end = scrollView.scrollEnd
+        let step = EdgeAutoScroll.step(pointer: pointer, in: area(offset), offset: offset, end: end)
+        let delta = dwell.pass(step, at: ProcessInfo.processInfo.systemUptime)
+        if delta != 0 { scrollView.move(by: delta) }
+    }
+}

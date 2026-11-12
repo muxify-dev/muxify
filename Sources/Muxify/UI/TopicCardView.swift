@@ -48,10 +48,13 @@ struct TopicCardCorner: Equatable {
 /// shows Settle in its corner, or in the Settled group Reopen, with how long ago it was Settled in its top-right corner.
 /// A card rests at its opacity, and its Hint shows whole.
 ///
+/// In the Topics list the card is a unit of the list's drag (`StackDrag`), whose handle is its header: a press that
+/// moves on the header lifts the card, on its plate, and a press let go before that is a click.
+///
 /// To accessibility the view is no element: its rows are the corner's link, then the card, `card-<id>`, whose rows are
 /// the rows of an open card, its header, `<id>`, its Tags, `tags-<id>`, the word in its top-right corner, and its Hint,
 /// as SwiftUI gives them. `<id>` is the card's `accessibilityID`, such as `topic-<Topic ID>` or `locked-<Session ID>`.
-final class TopicCardView: NSView {
+final class TopicCardView: DragUnitView {
     let cardID: TopicGroupID
     /// A press on the header, or on the Tags over it.
     var onPress: () -> Void = {} {
@@ -59,6 +62,16 @@ final class TopicCardView: NSView {
             header.onPress = onPress
             tags.onPress = onPress
         }
+    }
+    /// The drag that a press that moves on the header starts; nil in the Settled group, where a card does not move.
+    var drag: StackDragHandle? {
+        get { header.drag }
+        set { header.drag = newValue }
+    }
+    /// A press that moves on the header lifts the card: the open hand shows over it.
+    var isDraggable: Bool {
+        get { header.isDraggable }
+        set { header.isDraggable = newValue }
     }
     /// A press on the action in the corner.
     var onCorner: () -> Void = {} {
@@ -155,8 +168,7 @@ final class TopicCardView: NSView {
         header = CardHeaderView(identifier: cardID.accessibilityID)
         rows = TopicCardRowsView(identifier: cardID.accessibilityID)
         remembered = RememberedSessionsView(identifier: cardID.accessibilityID)
-        super.init(frame: .zero)
-        wantsLayer = true
+        super.init(id: cardID.accessibilityID, cornerRadius: CardOutline.cornerRadius)
         dimmed.wantsLayer = true
         // The SwiftUI card cuts nothing off.
         for view in [self, card, dimmed] { view.clipsToBounds = false }
@@ -164,7 +176,7 @@ final class TopicCardView: NSView {
         // its corner, the spines, the border, then the Tags over the header, the Hint and the corner's action.
         dimmed.subviews = [fill, rows, remembered, header, cornerLabel, unread, spine, outline, selection]
         card.subviews = [dimmed, tags] + hint.views
-        subviews = [card, corner]
+        parts = [card, corner]
         card.setAccessibilityIdentifier("card-" + cardID.accessibilityID)
         card.header = header
         // A row dragged up stops at the bottom of the header that sticks to the top, not under it.
@@ -197,6 +209,7 @@ final class TopicCardView: NSView {
         let wasOpen = isOpen
         self.content = content
         self.environment = environment
+        theme = environment.chromeTheme
         header.show(content.header, environment: environment)
         tags.show(content.header.tags, fontSize: environment.fontSize, scale: environment.displayScale, opacity: content.restingOpacity)
         cornerLabel.show(content.header.cornerLabel, environment: environment)
@@ -231,7 +244,7 @@ final class TopicCardView: NSView {
 
     /// The card's height at `width`: its header, and under the header of an open card its rows, which a Topic card's
     /// end with the room of its action.
-    func height(width: CGFloat) -> CGFloat {
+    override func height(width: CGFloat) -> CGFloat {
         header.height(width: width) + (isOpen ? CardRowsPadding.top + body.height(width: rowsWidth(width)) + CardRowsPadding.bottom : 0)
     }
 
@@ -262,12 +275,7 @@ final class TopicCardView: NSView {
         hint.place(header.hintPlace(width: bounds.width)?.offsetBy(dx: 0, dy: stuck))
     }
 
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        layOut()
-    }
-
-    private func layOut() {
+    override func layOutParts() {
         card.frame = bounds
         dimmed.frame = bounds
         fill.frame = bounds

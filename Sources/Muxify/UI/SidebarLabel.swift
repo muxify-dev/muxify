@@ -16,6 +16,8 @@ enum SidebarInk: Equatable {
     case note
     /// A colour of the Config, such as a Tag's, which can differ in the light and the dark appearance.
     case mark(MarkColor)
+    /// The trade colour of a list's drag (`NSColor.tradeMark`), and white on it.
+    case trade, onTrade
 
     /// The colour in the appearance that draws now.
     var color: NSColor {
@@ -28,6 +30,8 @@ enum SidebarInk: Equatable {
         case .disabledLink: return .disabledControlTextColor
         case .note: return .cardNote
         case .mark(let color): return color.nsColor(in: NSAppearance.currentDrawing())
+        case .trade: return .tradeMark
+        case .onTrade: return .white
         }
     }
 }

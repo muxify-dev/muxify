@@ -236,7 +236,7 @@ private struct TopicsSection: View {
                                                    indicatorHeight: geometry.indicatorHeight, driver: driver))
         case .openPlace(let id, let place):
             OpenPlaceCard(place: place) { store.presentFillOpenPlace(place) }
-                .listDragItem(TopicListID.openPlace(id), drag: drag, shown: model.dragSlots(around: item.id), cornerRadius: 9)
+                .listDragItem(TopicListID.openPlace(id), drag: drag, shown: model.dragSlots(around: item.id), cornerRadius: OpenPlaceMetrics.cornerRadius)
         case .guestsLine:
             GuestsLine().listDragFixed(item.id, drag: drag, shown: model.dragSlots(around: item.id))
         case .benchLine(let isBenchShown):
@@ -825,7 +825,7 @@ private struct CardItem: ViewModifier {
 
     func body(content: Content) -> some View {
         if let list, let listID {
-            content.listDragItem(listID, drag: list.drag, shown: list.order, cornerRadius: 9)
+            content.listDragItem(listID, drag: list.drag, shown: list.order, cornerRadius: CardOutline.cornerRadius)
         } else {
             content
         }
@@ -871,7 +871,7 @@ private struct LockedCard: View {
         } menu: {
             SidebarMenuButtons(TopicsListMenus.lockedCard(row, sessionID: sessionID, steps: steps, store: store))
         }
-        .listDragItem(id, drag: drag, shown: order, cornerRadius: 9)
+        .listDragItem(id, drag: drag, shown: order, cornerRadius: CardOutline.cornerRadius)
     }
 
     private var header: some View {

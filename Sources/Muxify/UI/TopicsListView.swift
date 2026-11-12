@@ -39,6 +39,14 @@ enum TopicsListVersion: String {
 /// the Bench area, count the cards past their edges, as `TopicsListScroll` counts them from each card's `EdgePlace`. A
 /// press on a pill, and a Jump To a Benched card out of view, glides the list's clip view to the card
 /// (`TopicsListScroll.revealOffset`), which then comes to rest.
+///
+/// A press that moves on the header of a Topic card or a Locked card lifts the card (`StackDrag`, as the SwiftUI list's
+/// `ListDrag`): it moves among the cards of its section, Pinned or not, and the lines, the Open Places and the No Topic
+/// card slide with the cards it passes. Across the Guests line or the Bench line it trades with the card under the
+/// pointer, which shows the trade mark, or fills the Open Place there; while an In Play card is across, the hidden Bench
+/// shows (`WorkspaceStore.benchPeek`). While the pointer rests near an edge of the list, or of the Bench under the
+/// block, the list scrolls its clip view (`EdgeAutoScrollLoop`), and the card stays under the pointer. No card lifts
+/// while a Topic change runs.
 final class TopicsListView: NSView, SidebarList {
     private let store: WorkspaceStore
     /// The values from the SwiftUI Sidebar. The list draws again when one changes.
@@ -91,6 +99,20 @@ final class TopicsListView: NSView, SidebarList {
         return line
     }()
     private lazy var update = ObservedUpdate { [weak self] in self?.render() }
+    /// The drag of the Topic cards and Locked cards, whose placeholder stands among the items.
+    private lazy var cardDrag = StackDrag<TopicListID>(host: self, spacing: TopicsListMetrics.itemSpacing,
+                                                       cornerRadius: CardOutline.cornerRadius,
+                                                       tradesAcross: [TopicsModel.ListItem.guestsLineID, TopicsModel.ListItem.benchLineID])
+    /// The model of the list as it shows now, whose slots a drag reaches.
+    private var shownModel: TopicsModel?
+    /// The slot of each item in the drag, in the list's order.
+    private var slots: [StackSlot<TopicListID>] = []
+    /// The trade target of the lifted card, with its trade mark over it and its ghost where the lifted card stood.
+    private var shownTrade: (target: TopicListID, mark: TradeMarkView, ghost: TradeGhostView)?
+    /// The drag's phase, and whether the lifted card was across a line, when the list last heard of the drag.
+    private var dragState: (phase: StackDrag<TopicListID>.Phase, across: Bool) = (.idle, false)
+    /// Scrolls the list while a lifted card's pointer rests at an edge.
+    private let edgeScroll = EdgeAutoScrollLoop()
     /// The groups under the list's scroll view.
     private lazy var groups: TopicGroupsView = {
         let groups = TopicGroupsView(store: store)
@@ -113,6 +135,7 @@ final class TopicsListView: NSView, SidebarList {
         // Over the list, outside its scroll view, as SwiftUI's overlays: the pills are no rows of `topics-list`.
         subviews = [scrollView, moreBelow, moreAbove, groups]
         for pill in [moreBelow, moreAbove] { pill.scrollView = scrollView }
+        edgeScroll.scrollView = scrollView
         moreBelow.onPress = { [weak self] in
             if let card = self?.hiddenBelow.first { self?.reveal(card) }
         }
@@ -146,31 +169,35 @@ final class TopicsListView: NSView, SidebarList {
         var kept = Dictionary(items.compactMap { $0 as? TopicCardView }.map { ($0.cardID, $0) }, uniquingKeysWith: { first, _ in first })
         var keptPlaces = openPlaces
         var opens = false
-        var shown: [(view: NSView, show: () -> Void)] = []
+        // A card's header lifts it while no Topic change runs, as the SwiftUI card's handle.
+        let lifts = !store.changingTopic
+        var shown: [(view: NSView, slot: StackSlot<TopicListID>, show: () -> Void)] = []
         for item in model.list {
             switch item {
             case .card(let row):
                 let content = content(of: row, activeTopic: model.activeTopic)
                 let card = kept.removeValue(forKey: row.id) ?? card(of: row.id)
                 opens = opens || (card.superview != nil && card.isOpen != content.header.isOpen)
-                shown.append((card, { [environment] in card.show(content, environment: environment) }))
+                card.drag = row.id.listID.map(cardDrag.handle)
+                card.isDraggable = lifts
+                shown.append((card, item.dragSlot, { [environment] in card.show(content, environment: environment) }))
             case .openPlace(let id, let place):
                 let view = keptPlaces.removeValue(forKey: id) ?? OpenPlaceView(recordID: id)
                 view.onPress = { [weak self] in self?.store.presentFillOpenPlace(place) }
-                shown.append((view, { [environment] in view.show(place: place, environment: environment) }))
+                shown.append((view, item.dragSlot, { [environment] in view.show(place: place, environment: environment) }))
             case .guestsLine:
                 let line = guestsLine
-                shown.append((line, { [environment] in line.show(environment: environment) }))
+                shown.append((line, item.dragSlot, { [environment] in line.show(environment: environment) }))
             case .benchLine(let isBenchShown):
                 let line = benchLine
-                shown.append((line, { [environment] in line.show(isBenchShown: isBenchShown, environment: environment) }))
+                shown.append((line, item.dragSlot, { [environment] in line.show(isBenchShown: isBenchShown, environment: environment) }))
             case .noTopicSession(let opened):
                 guard let session = store.sessions.first(where: { $0.id == opened.id.session }) else { continue }
                 let content = SessionCardContent(session, store: store, hints: environment.hints,
                                                  showsAllRows: showingAllSessionRows.contains(session.id), inTopicsList: true)
                 let card = noTopicCard?.sessionID == session.id ? noTopicCard! : makeNoTopicCard(of: session.id)
                 opens = opens || (card.superview != nil && card.isOpen != content.isOpen)
-                shown.append((card, { [environment] in card.show(content, environment: environment) }))
+                shown.append((card, item.dragSlot, { [environment] in card.show(content, environment: environment) }))
             }
         }
         openPlaces = Dictionary(shown.compactMap { $0.view as? OpenPlaceView }.map { ($0.recordID, $0) }, uniquingKeysWith: { first, _ in first })
@@ -190,17 +217,22 @@ final class TopicsListView: NSView, SidebarList {
             groups.show(shownGroups, activeTopic: model.activeTopic, environment: environment, now: Date())
             for item in shown { item.show() }
             let views = shown.map(\.view)
+            shownModel = model
+            slots = shown.map(\.slot)
             if items != views || self.blockCount != blockCount {
                 items = views
                 self.blockCount = blockCount
-                // The order of the subviews is the order of the drawing: the block over the Bench that scrolls under it.
-                // The order of the items is the order of the accessibility rows.
+                // The order of the subviews is the order of the drawing: the block over the Bench that scrolls under it,
+                // and the drag's placeholder behind the cards. The order of the items is the order of the accessibility
+                // rows.
                 let block = blockCount.map { Array(views.prefix($0)) } ?? []
-                document.subviews = blockCount.map { Array(views.dropFirst($0)) + [backdrop] + block } ?? views
+                document.subviews = [cardDrag.slot] + (blockCount.map { Array(views.dropFirst($0)) + [backdrop] + block } ?? views)
                 document.rows = views
             }
             layOut()
             keepLocationInPlace(after: before)
+            // A lifted card finds its places among the items again, and a dropped one lands once they show it there.
+            cardDrag.show()
         }
         if opens, let layer = document.layer {
             LayerGlide.run(under: layer, duration: CardMotion.openDuration, timing: CAMediaTimingFunction(name: .easeOut), change: change)
@@ -404,7 +436,8 @@ final class TopicsListView: NSView, SidebarList {
             bottom = top + height
             return NSRect(x: TopicsListMetrics.horizontalInset, y: top, width: width, height: height)
         }
-        for (item, place) in zip(items, places) { item.frame = place }
+        // `placeItems` puts them at their places.
+        for (item, place) in zip(items, places) { item.setFrameSize(place.size) }
         cardTops = Dictionary(zip(items, places).compactMap { item, place in Self.cardID(of: item).map { ($0, place.minY - TopicsListMetrics.verticalInset) } },
                               uniquingKeysWith: { first, _ in first })
         let blockBottom = blockCount.flatMap { $0 > 0 ? places[$0 - 1].maxY : nil } ?? TopicsListMetrics.verticalInset
@@ -425,26 +458,18 @@ final class TopicsListView: NSView, SidebarList {
         stick()
     }
 
-    /// Moves the block down as far as the list scrolled past its slack, so it stays at the top, with its background,
-    /// and gives each card its top edge in the viewport, so the header of an open card sticks: to the viewport's top in
-    /// the block or in a list without a Bench line, and under the block on the Bench. Keeps where the Location's card
-    /// now stands on the Bench.
+    /// Moves the block down as far as the list scrolled past its slack, so it stays at the top, with its background
+    /// (`placeItems`). A lifted card stays under the pointer, and finds where it lands among the cards that scrolled
+    /// under it. Keeps where the Location's card now stands on the Bench.
     private func stick() {
         let offset = scrollView.contentView.bounds.minY
         let shift = blockCount == nil ? 0 : geometry.stick(at: offset)
-        // Under the block on the Bench, and at the viewport's top elsewhere.
-        let benchInset = blockCount == nil ? 0 : geometry.areaTop
         let blockItems = blockCount ?? 0
-        for (index, (item, place)) in zip(items, places).enumerated() {
-            let isBlock = index < blockItems
-            if isBlock { item.setFrameOrigin(NSPoint(x: place.minX, y: place.minY + shift)) }
-            let top = item.frame.minY - offset
-            switch item {
-            case let card as TopicCardView: card.stick(cardTop: top, inset: isBlock ? 0 : benchInset)
-            case let card as SessionCardView: card.stick(cardTop: top)
-            default: break
-            }
-        }
+        placeItems()
+        // As the SwiftUI list's drag hears the scroll: the Bench scrolled under the block, and the lifted card's place
+        // moved in the viewport.
+        cardDrag.scrollArea(by: shift)
+        cardDrag.placeMoved()
         // As the SwiftUI list draws the chrome behind each item of the block: from the list's top to a gap under the
         // block's last item, across the list's whole width.
         backdrop.isHidden = blockItems == 0
@@ -454,6 +479,77 @@ final class TopicsListView: NSView, SidebarList {
         backdrop.theme = environment.chromeTheme
         locationPlace = currentLocationPlace()
         showPills(offset: offset)
+    }
+
+    /// Puts each item at its place: the block moved down as far as the list scrolled past its slack, so it stays at the
+    /// top, and each item moved by the drag's offset, the dragged card above the others. Gives each card its top edge
+    /// in the viewport, so the header of an open card sticks: to the viewport's top in the block or in a list without a
+    /// Bench line, and under the block on the Bench. Puts the drag's placeholder, and the marks of a trade.
+    private func placeItems() {
+        let offset = scrollView.contentView.bounds.minY
+        let shift = blockCount == nil ? 0 : geometry.stick(at: offset)
+        // Under the block on the Bench, and at the viewport's top elsewhere.
+        let benchInset = blockCount == nil ? 0 : geometry.areaTop
+        let blockItems = blockCount ?? 0
+        for (index, (item, place)) in zip(items, places).enumerated() {
+            let isBlock = index < blockItems
+            let top = place.minY + (isBlock ? shift : 0)
+            let slot = index < slots.count ? slots[index] : nil
+            (item as? DragUnitView)?.place = top
+            let origin = NSPoint(x: place.minX, y: top + (slot.map { cardDrag.offset(of: $0) } ?? 0))
+            if item.frame.origin != origin { item.setFrameOrigin(origin) }
+            // Above every other item, also above the block, as the SwiftUI list raises a card that the drag moves.
+            let z: CGFloat = slot.map(cardDrag.raises) == true ? 2 : 0
+            if let layer = item.layer, layer.zPosition != z { layer.zPosition = z }
+            let cardTop = item.frame.minY - offset
+            switch item {
+            case let card as TopicCardView: card.stick(cardTop: cardTop, inset: isBlock ? 0 : benchInset)
+            case let card as SessionCardView: card.stick(cardTop: cardTop)
+            default: break
+            }
+        }
+        cardDrag.placeSlot()
+        placeTrade()
+    }
+
+    /// The item of a card or an Open Place by its place in the drag.
+    private func item(of id: TopicListID) -> NSView? {
+        slots.firstIndex(of: .item(id)).flatMap { $0 < items.count ? items[$0] : nil }
+    }
+
+    /// Shows the trade mark over the card or the Open Place that the lifted card would trade with, and the target's
+    /// ghost where the lifted card stood, as the SwiftUI list's `TradeMark` and `TradeGhost` show them. Each target
+    /// has its own mark and ghost, which fade in at its place, and fade out there when the lifted card leaves it. The
+    /// mark draws just above its target, so the block covers it as it covers the target.
+    private func placeTrade() {
+        let id = cardDrag.tradeTarget
+        if shownTrade?.target != id {
+            if let old = shownTrade {
+                old.mark.show(false, environment: environment)
+                old.ghost.show(nil, environment: environment)
+                Task { [weak mark = old.mark, weak ghost = old.ghost] in
+                    try? await Task.sleep(for: .seconds(TradeLook.shows.duration * 2))
+                    mark?.removeFromSuperview()
+                    ghost?.removeFromSuperview()
+                }
+            }
+            shownTrade = id.flatMap { id in
+                item(of: id).map { target in
+                    let mark = TradeMarkView(cornerRadius: CardOutline.cornerRadius)
+                    let ghost = TradeGhostView(cornerRadius: CardOutline.cornerRadius)
+                    ghost.show(target, environment: environment)
+                    mark.show(true, environment: environment)
+                    return (id, mark, ghost)
+                }
+            }
+            document.tradeMark = shownTrade?.mark
+        }
+        guard let trade = shownTrade, let target = item(of: trade.target) else { return }
+        // A change to the items, such as the Bench that shows, gives the document its subviews anew.
+        if trade.mark.superview !== document { document.addSubview(trade.mark, positioned: .above, relativeTo: target) }
+        if trade.ghost.superview !== document { document.addSubview(trade.ghost) }
+        trade.mark.frame = target.frame
+        if let ghost = cardDrag.tradeGhostOffset(of: trade.target) { trade.ghost.frame = target.frame.offsetBy(dx: 0, dy: ghost) }
     }
 
     /// The card that the item shows: a Topic card or a Locked card by its ID, the No Topic card as No Topic; nil for a
@@ -529,15 +625,85 @@ final class TopicsListView: NSView, SidebarList {
     }
 }
 
+/// The drag of the Topic cards and Locked cards, as the SwiftUI list's `ListDrag`: the slots come from the model's
+/// `dragSlots`, so a card moves among the cards with its Pin, and passes the lines and the No Topic card.
+extension TopicsListView: StackDragList {
+    func dragSlots(around id: TopicListID) -> [StackSlot<TopicListID>] {
+        guard let model = shownModel, let item = model.list.first(where: { $0.dragSlot == .item(id) }) else { return [] }
+        let shown = Set(slots)
+        return model.dragSlots(around: item.id).filter(shown.contains)
+    }
+
+    func dragHeight(of slot: StackSlot<TopicListID>) -> CGFloat {
+        slots.firstIndex(of: slot).flatMap { $0 < places.count ? places[$0].height : nil } ?? 0
+    }
+
+    func dragView(_ id: TopicListID) -> DragUnitView? { item(of: id) as? DragUnitView }
+
+    var liftsUnits: Bool { !store.changingTopic }
+
+    var reducesMotion: Bool { environment.reduceMotion }
+
+    /// A lifted card stops at the top of the list's viewport, also on the Bench, as in the SwiftUI list.
+    func visibleTop(in clip: NSClipView) -> CGFloat { clip.bounds.minY }
+
+    func layOutUnits() { placeItems() }
+
+    /// As the SwiftUI card's handle drops it.
+    func drop(_ id: TopicListID, at placement: DropPlacement<TopicListID>) {
+        store.moveTopic(id, to: placement.topicPlacement)
+    }
+
+    /// As the SwiftUI card's handle trades it: with a card, or into an Open Place.
+    func trade(_ id: TopicListID, with other: TopicListID) {
+        store.tradeCard(id, with: other)
+    }
+
+    /// An In Play card that crosses a line opens the hidden Bench, so the user sees what it can trade with; when it goes
+    /// back above the line, the Bench hides again. What a drag showed of the hidden Bench folds into the line as soon as
+    /// the cards no longer need it: at the drop, while a card glides back, or once two traded cards are in their new
+    /// places. As the SwiftUI list's handlers of `isAcross` and `phase`. While a card is lifted, its pointer scrolls the
+    /// list at the edges of the Bench under the block, or of the whole list without a Bench line, as the SwiftUI list's
+    /// `EdgeAutoScroller` hands it to `ScrollDriver`.
+    func dragDidChange() {
+        let phase = cardDrag.phase, across = cardDrag.isAcross
+        let before = dragState
+        dragState = (phase, across)
+        if across != before.across {
+            if !across {
+                if case .lifted = phase, store.benchPeek == .all { store.benchPeek = nil }
+            } else if !store.benchShown, store.benchPeek != .all, let dragged = cardDrag.draggedID,
+                      shownModel?.split?.inPlay.contains(where: { $0.id.listID == dragged }) == true {
+                store.benchPeek = .all
+            }
+        }
+        if phase != before.phase {
+            switch phase {
+            case .lifted, .trading: break
+            default: if store.benchPeek != nil { store.benchPeek = nil }
+            }
+        }
+        let clip = scrollView.contentView
+        edgeScroll.follow(pointer: cardDrag.pointer.map { clip.convert($0, from: nil).y - clip.bounds.minY }) { [weak self] offset in
+            guard let self else { return 0...0 }
+            return blockCount == nil ? 0...scrollView.contentView.bounds.height : geometry.autoScrollRange(at: offset)
+        }
+    }
+}
+
 /// The content of the AppKit Topics list. Its subviews are in the order they draw, the block over the Bench; its
 /// accessibility rows are the items in the list's order, as SwiftUI gives them.
 private final class TopicsListDocumentView: NSView {
     /// The items in the list's order.
     var rows: [NSView] = []
+    /// The trade mark over the trade target of a lifted card, after the items.
+    weak var tradeMark: TradeMarkView?
 
     override var isFlipped: Bool { true }
 
-    override func accessibilityChildren() -> [Any]? { NSAccessibility.unignoredChildren(from: rows) }
+    override func accessibilityChildren() -> [Any]? {
+        NSAccessibility.unignoredChildren(from: rows + (tradeMark.map { [$0] } ?? []))
+    }
 }
 
 /// The chrome's background behind the block of the Topics list that sticks, so the Benched cards that scroll under the

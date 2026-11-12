@@ -9,29 +9,12 @@ import SwiftUI
 @MainActor final class ScrollDriver {
     private weak var scrollView: NSScrollView?
     private weak var document: NSView?
-    private var pointer: CGFloat?
-    private var area: (CGFloat) -> ClosedRange<CGFloat> = { _ in 0...0 }
-    private var dwell = EdgeAutoScroll.Dwell()
-    private var loop: Task<Void, Never>?
+    private let edges = EdgeAutoScrollLoop()
 
     /// Follows a lifted card's pointer, its y in the viewport, until it is nil. `area` gives, for a scroll offset, the
     /// part of the viewport whose edges scroll.
     func autoScroll(pointer: CGFloat?, area: @escaping (CGFloat) -> ClosedRange<CGFloat>) {
-        self.pointer = pointer
-        self.area = area
-        guard pointer != nil else {
-            loop?.cancel()
-            loop = nil
-            dwell = EdgeAutoScroll.Dwell()
-            return
-        }
-        guard loop == nil else { return }
-        loop = Task { [weak self] in
-            while !Task.isCancelled, let driver = self {
-                driver.tick()
-                try? await Task.sleep(for: .milliseconds(16))
-            }
-        }
+        edges.follow(pointer: pointer, area: area)
     }
 
     /// Moves the content `delta` points up. In the layout that makes the content taller, SwiftUI reports the new
@@ -57,6 +40,7 @@ import SwiftUI
     fileprivate func attach(_ scrollView: NSScrollView) {
         guard scrollView !== self.scrollView || scrollView.documentView !== document else { return }
         self.scrollView = scrollView
+        edges.scrollView = scrollView
         document = scrollView.documentView
         if let resizes { NotificationCenter.default.removeObserver(resizes) }
         document?.postsFrameChangedNotifications = true
@@ -81,13 +65,6 @@ import SwiftUI
         scrollView?.move(by: delta) ?? 0
     }
 
-    private func tick() {
-        guard let scrollView else { return }
-        let offset = scrollView.scrollOffset, end = scrollView.scrollEnd
-        let step = EdgeAutoScroll.step(pointer: pointer, in: area(offset), offset: offset, end: end)
-        let delta = dwell.pass(step, at: ProcessInfo.processInfo.systemUptime)
-        if delta != 0 { _ = move(by: delta) }
-    }
 }
 
 /// A view of no size in a scroll view's content that hands its scroll view to `driver`.

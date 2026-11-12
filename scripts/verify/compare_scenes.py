@@ -454,7 +454,7 @@ class Bench:
              'that card\'s header stuck under the block while its rows and the other Benched cards scroll under it.')
 
     LINE = 'topics-bench-line'
-    # Card Hints do not show: the Open Place's Hint comes with task 14 of the set remove-swiftui.
+    # Card Hints do not show: task 14 of the set remove-swiftui compares the Hints of the cards and the Open Place.
     CONFIG = 'topics:\n  in_play: 2\nhints:\n  cards: { always: false, hold: false }\n'
 
     def fixture(self, s):
