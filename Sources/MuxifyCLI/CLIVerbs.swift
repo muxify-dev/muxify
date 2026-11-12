@@ -447,6 +447,10 @@ enum CLIVerbs {
         },
     ]
 
+    /// The options of `topic move` that name another card. A command line gives one of them, or up or down.
+    private static let cardMoveOptions = ["--before", "--after", "--before-session", "--after-session", "--before-place", "--after-place",
+                                          "--trade-with", "--trade-with-session"]
+
     private static func upOrDown(_ parsed: ParsedArguments) throws -> Bool {
         guard parsed.operands.count == 1, ["up", "down"].contains(parsed.operands[0]) else { throw CLIError.usage }
         return parsed.operands[0] == "up"
@@ -592,8 +596,12 @@ enum CLIVerbs {
             guard parsed.operands.isEmpty else { throw CLIError.usage }
             return .pin(false)
         },
-        topicVerb(.topicMove, synopsis: "(up | down | --trade-with <id|label> | --trade-with-session <name|id>) \(topicTarget) [--json]",
-                  options: [.value("--trade-with"), .value("--trade-with-session")],
+        topicVerb(.topicMove, synopsis: """
+                  (up | down | (--before | --after | --trade-with) <id|label>
+                  | (--before-session | --after-session | --trade-with-session) <name|id>
+                  | (--before-place | --after-place) <id>) \(topicTarget) [--json]
+                  """,
+                  options: cardMoveOptions.map { .value($0) },
                   help: """
                   Moves the card of this Pane's Topic one place up or down among the cards that the
                   Topics list shows now, with the same Pin, as Move Topic Up and Down do. At the end
@@ -606,6 +614,13 @@ enum CLIVerbs {
                   A Guest Session cannot take a place, so it has no Up from the top of the Guests.
                   For a Session in no Topic that is not Locked, see `session move`.
                   The command acts as if the Bench shows.
+                  With --before or --after, the card goes next to the card that you name, as a drag
+                  inside one section does. A card keeps its Pin: next to a card with the other Pin,
+                  it goes to the edge of its own Pin group. The same command again changes nothing.
+                    --before <id|label>, --after <id|label>             next to this open Topic
+                    --before-session, --after-session <name|id>         next to this Locked Session
+                    --before-place <id>, --after-place <id>             next to this Open Place, by the
+                                                                        id that environment show gives
                   With --trade-with, the two cards change places, as a drag across the Guests line
                   or the Bench line does, and no other card moves. Neither card can be Pinned.
                   Each card takes the mark of its new section: a card that comes into the Guests
@@ -614,12 +629,13 @@ enum CLIVerbs {
                     --trade-with <id|label>            the open Topic to trade places with
                     --trade-with-session <name|id>     the Locked Session to trade places with
                   """) { parsed in
-            switch (try parsed.value("--trade-with"), try parsed.value("--trade-with-session")) {
-            case (nil, nil): return .moveCard(try upOrDown(parsed) ? .up : .down)
-            case (let topic?, nil) where !topic.isEmpty && parsed.operands.isEmpty: return .tradeCard(with: .topic(topic))
-            case (nil, let session?) where !session.isEmpty && parsed.operands.isEmpty: return .tradeCard(with: .session(session))
-            default: throw CLIError.usage
-            }
+            let named = parsed.values(of: cardMoveOptions)
+            guard let (option, value) = named.first else { return .moveCard(try upOrDown(parsed) ? .up : .down) }
+            guard named.count == 1, !value.isEmpty, parsed.operands.isEmpty else { throw CLIError.usage }
+            let card: RequestInvocation.CardName = option.hasSuffix("-session") ? .session(value)
+                : option.hasSuffix("-place") ? .openPlace(value) : .topic(value)
+            if option.hasPrefix("--trade-with") { return .tradeCard(with: card) }
+            return .placeCard(next: card, after: option.hasPrefix("--after"))
         },
         CLIVerb(path: .topicChooseInPlay, synopsis: "(--topic <id|label> | --session <name|id>)... [--json]",
                 options: [.value("--topic"), .value("--session"), .flag("--json")],

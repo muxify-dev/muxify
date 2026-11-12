@@ -65,6 +65,8 @@ struct RequestInvocation: Equatable {
         case note(String?)
         /// The Topic's card, one place up or down.
         case moveCard(CardMove)
+        /// The Topic's card next to another card, as a drag inside one section does.
+        case placeCard(next: CardName, after: Bool)
         /// The card that trades places with the Topic's card, as a drag across the Bench line does.
         case tradeCard(with: CardName)
         /// The cards In Play, in their order, and then the top of the Bench.
@@ -88,7 +90,7 @@ struct RequestInvocation: Equatable {
         var targets: [TargetOption] {
             switch self {
             case .new: return []
-            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .makeGuest, .benchTopic, .fillPlace, .moveCard, .tradeCard,
+            case .addSession, .settle, .forget, .show, .open, .exec, .status, .diff, .tag, .note, .rename, .pin, .makeGuest, .benchTopic, .fillPlace, .moveCard, .placeCard, .tradeCard,
                  .sortSessions:
                 return [.topic, .window, .pane]
             case .moveSession: return [.session, .pane]
@@ -124,7 +126,7 @@ struct RequestInvocation: Equatable {
         /// A Tag change needs no SessionPath, and a command that shows a Topic finds only the SessionPaths of its Sessions.
         var findsAllSessionPaths: Bool {
             switch self {
-            case .new, .environmentShow, .tag, .note, .lock, .pin, .makeGuest, .benchTopic, .fillPlace, .moveCard, .tradeCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
+            case .new, .environmentShow, .tag, .note, .lock, .pin, .makeGuest, .benchTopic, .fillPlace, .moveCard, .placeCard, .tradeCard, .chooseInPlay, .replaceFromBench, .moveSession, .sortSessions, .markRead, .markAllRead,
                  .forgetSettled, .placeWindow, .zoomPane, .createWorktree, .removeWorktree, .listWorktrees: return false
             default: return !showsTopic
             }
@@ -167,7 +169,7 @@ struct RequestInvocation: Equatable {
             case .makeGuest: return "topic make-guest"
             case .benchTopic: return "topic bench"
             case .fillPlace: return "topic fill-place"
-            case .moveCard, .tradeCard: return "topic move"
+            case .moveCard, .placeCard, .tradeCard: return "topic move"
             case .chooseInPlay: return "topic choose-in-play"
             case .replaceFromBench: return "topic replace-from-bench"
             case .moveSession: return "session move"
@@ -181,17 +183,19 @@ struct RequestInvocation: Equatable {
         }
     }
 
-    /// A card of the Topics list as a command line names it: an open Topic by id or label, or a Locked Session by name
-    /// or id.
+    /// A card of the Topics list as a command line names it: an open Topic by id or label, a Locked Session by name
+    /// or id, or an Open Place by id.
     enum CardName: Equatable {
         case topic(String)
         case session(String)
+        case openPlace(String)
 
         /// A Session name becomes its id here, because a card on the wire names a Locked Session by its id.
         var ref: TopicListRef {
             get throws {
                 switch self {
                 case .topic(let name): return .topic(.named(name))
+                case .openPlace(let id): return .openPlace(id)
                 case .session(let value):
                     guard let window = TmuxServer.local.snapshot().windows.first(where: { $0.sessionID == value || $0.sessionName == value }),
                           let id = SessionID(rawValue: window.sessionID) else {
@@ -512,6 +516,7 @@ extension RequestInvocation {
         case .benchTopic: return .benchTopic
         case .fillPlace(let place): return .fillOpenPlace(place: place)
         case .moveCard(let move): return .moveCard(move)
+        case .placeCard(let other, let after): return .moveCard(after ? .after(try other.ref) : .before(try other.ref))
         case .tradeCard(let other): return .moveCard(.trade(try other.ref))
         case .chooseInPlay(let cards): return .chooseInPlay(try cards.map { try $0.ref })
         case .replaceFromBench(let benched): return .replaceFromBench(with: try benched.ref)
