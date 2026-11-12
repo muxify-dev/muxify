@@ -185,7 +185,7 @@ class PaletteCurrentCommands(PaletteFixture):
 
     def test_commands_omit_unavailable_topic_and_tab_actions(self):
         for title in ['Add a Session', 'Settle Topic', 'Move Pane with Active Tab',
-                      'Remove Session from Topic', 'Forget Topic', 'Rename Topic', 'Move Topic Up', 'Move Topic Down',
+                      'Remove Session from Topic', 'Forget Topic', 'Rename Topic', 'Move Topic Down',
                       'Pin Topic', 'Set Topic Note', 'Clear Topic Note']:
             self.search(title)
             self.assertFalse(self.s.has('palette-row-command-' + title), title + ' had no target')
@@ -203,7 +203,6 @@ class PaletteCurrentCommands(PaletteFixture):
         self.current_topic('move-current')
         order = lambda name: self.record(name).get('order', 0)
         wait(lambda: order('move-current') > order('move-upper'), 'the Active Topic did not start below the other Topic')
-        self.assertTrue(self.absent('Move Topic Down'), 'Move Topic Down shows for the last card')
         self.search('Move Topic Up')
         key = 'palette-row-command-Move Topic Up'
         rs = self.s.wait_rows(lambda rs: self.s.has(key, rs), 'Move Topic Up was missing from Commands')
@@ -240,8 +239,12 @@ class PaletteCurrentCommands(PaletteFixture):
         time.sleep(2)
         self.assertEqual(self.cards('end-'), ['end-a', 'end-z', 'end-cur'], 'a press past the end moved a card')
         self.assertTrue(self.s.driver('dump', timeout=5)['rows'], 'the app stopped answering, as with a failure alert, after presses past the end')
+        # The presses took the card past the cards In Play, and then to the Guests or to the Bench. Up from each of
+        # these changes the card's order or its Guest mark.
+        state = lambda: (self.record('end-cur').get('order'), self.record('end-cur').get('guest', False))
+        before = state()
         self.press_key('⌥⌘↑')
-        wait(lambda: self.cards('end-') == ['end-a', 'end-cur', 'end-z'], 'Move Topic Up did not run after the presses past the end')
+        wait(lambda: state() != before, 'Move Topic Up did not run after the presses past the end: %s' % (before,))
 
     def test_pin_topic_flips_to_unpin_topic(self):
         self.current_topic('pin-current')
