@@ -1759,6 +1759,21 @@ sidebar:
 ```
 
 
+### Card rows
+
+An open Topic or Session card lists its first five Window and Pane rows, then
+"N more…", which lists the rest when you press it. A card also lists them all
+when the selected Window would be among the hidden rows. `sidebar.card_rows`
+sets how many rows a card lists before "N more…": a whole number of 1 or more,
+or `all` to list every row and never show "N more…". It defaults to `5`.
+Changes apply live. Any other value uses the default and appears in the Config
+problems banner.
+
+```yaml
+sidebar:
+  card_rows: all
+```
+
 ### Window tooltips
 
 `sidebar.window_tooltips` controls the hover label on Window rows in both Sessions

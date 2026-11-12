@@ -144,6 +144,8 @@ public struct Config: Equatable {
         /// `titles.wrap`: a Topic or Session card's title wraps onto as many lines as it needs.
         /// False keeps it on one line and cuts it with "…".
         public var wrapsTitles = true
+        /// `card_rows`: how many rows an open card lists before "N more…". Nil (`all`) lists every row.
+        public var cardRows: Int? = 5
         public var windowTooltips = WindowTooltips.always
         public var tagPlacement = TagPlacement.none
         public var sessionCards = SessionCards.any
@@ -466,6 +468,8 @@ public struct Config: Equatable {
         #   # it on one line and cuts it with "…" at the card's edge.
         #   titles:
         #     wrap: true
+        #   # Rows an open card lists before "N more…", or all to list every row.
+        #   card_rows: 5
         #   # Window hover labels: off, truncated (only when the title is cut off), or always.
         #   window_tooltips: always
         #   # Session cards open when the Location moves to their Session: one
@@ -1094,6 +1098,14 @@ private struct ConfigReader {
                         continue
                     }
                     config.sidebar.wrapsTitles = wraps
+                }
+            case "card_rows":
+                if value.scalar?.string == "all" {
+                    config.sidebar.cardRows = nil
+                } else if value.tag == Yams.Tag(.int), let rows = value.int, rows >= 1 {
+                    config.sidebar.cardRows = rows
+                } else {
+                    problem(at: value, "sidebar.card_rows: expected a whole number of 1 or more, or all")
                 }
             case "window_tooltips":
                 // YAML also tags the unquoted word off as a boolean; use the scalar's spelling.

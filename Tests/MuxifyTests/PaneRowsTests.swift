@@ -95,5 +95,8 @@ final class PaneRowsTests: XCTestCase {
         XCTAssertEqual(CardRows.shownCount(rows, selectedWindowID: "@3", showsAll: false), 7, "the selected Window would hide")
         XCTAssertEqual(CardRows.shownCount(rows, selectedWindowID: "@1", showsAll: true), 7)
         XCTAssertEqual(CardRows.shownCount(Array(rows.prefix(3)), selectedWindowID: nil, showsAll: false), 3)
+        XCTAssertEqual(CardRows.shownCount(rows, selectedWindowID: nil, showsAll: false, limit: 2), 2, "sidebar.card_rows: 2")
+        XCTAssertEqual(CardRows.shownCount(rows, selectedWindowID: "@2", showsAll: false, limit: 2), 7, "the selected Window would hide past 2")
+        XCTAssertEqual(CardRows.shownCount(rows, selectedWindowID: nil, showsAll: false, limit: nil), 7, "sidebar.card_rows: all")
     }
 }

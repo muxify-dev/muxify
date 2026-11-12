@@ -338,6 +338,25 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(Config.template.contains("#   panes: false"))
     }
 
+    func testCardRowsDefaultToFiveAndAcceptACountOrAll() throws {
+        XCTAssertEqual(try load("").sidebar.cardRows, 5)
+        XCTAssertTrue(Config.template.contains("#   card_rows: 5"))
+        let eight = try load("sidebar:\n  card_rows: 8")
+        XCTAssertEqual(eight.sidebar.cardRows, 8)
+        XCTAssertTrue(eight.problems.isEmpty, "\(eight.problems)")
+        for value in ["all", "'all'"] {
+            let config = try load("sidebar:\n  card_rows: \(value)")
+            XCTAssertNil(config.sidebar.cardRows, value)
+            XCTAssertTrue(config.problems.isEmpty, "\(value): \(config.problems)")
+        }
+        for value in ["0", "-1", "2.5", "'5'", "true", "null", "[]", "{}", "none"] {
+            let config = try load("sidebar:\n  card_rows: \(value)")
+            XCTAssertEqual(config.sidebar.cardRows, 5, value)
+            XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 2,
+                message: "sidebar.card_rows: expected a whole number of 1 or more, or all")], value)
+        }
+    }
+
     func testWindowTooltipsDefaultToAlwaysAndAcceptAllThreeModes() throws {
         XCTAssertEqual(try load("").sidebar.windowTooltips, .always)
         XCTAssertTrue(Config.template.contains("#   window_tooltips: always"))

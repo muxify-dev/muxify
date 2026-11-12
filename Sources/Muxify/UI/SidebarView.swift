@@ -20,6 +20,7 @@ struct SidebarView: View {
         content.sidebarSwipeArea(swipeArea)
             .environment(\.sidebarTypography, SidebarTypography(fontSize: fontSize, fontFamily: fontFamily))
             .environment(\.wrapsCardTitles, store.config.sidebar.wrapsTitles)
+            .environment(\.cardRowLimit, store.config.sidebar.cardRows)
     }
 
     @ViewBuilder
@@ -1522,7 +1523,9 @@ private struct PaneRow: View {
     var body: some View {
         Button { store.select(row) } label: {
             HStack(spacing: 6) {
+                // The Agent mark takes the Pane icon's place, so the icon needs no slot of its own beside it.
                 ZStack {
+<<<<<<< Updated upstream
                     Color.clear.frame(width: fontSize(10), height: fontSize(10))
                     if let mark { AgentMarkView(mark: mark) }
                 }
@@ -1530,6 +1533,17 @@ private struct PaneRow: View {
                 Image(systemName: row.pane.isActive ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
                     .font(fontSize.font(10)).frame(width: fontSize(14))
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+=======
+                    if let mark {
+                        AgentMarkView(mark: mark)
+                    } else {
+                        Image(systemName: row.pane.isActive ? "rectangle.split.2x1.fill" : "rectangle.split.2x1")
+                            .font(.system(size: 10))
+                            .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    }
+                }
+                .frame(width: 14, height: 14)
+>>>>>>> Stashed changes
                 VStack(alignment: .leading, spacing: 1) {
                     Text(formatted.title).font(fontSize.font(12)).hoverLabelTitle()
                     if !formatted.summary.isEmpty {
@@ -1539,6 +1553,7 @@ private struct PaneRow: View {
                 Spacer(minLength: 4)
             }
             .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+            // Under a Window row, the icon lines up with the Window's title: its 8 of padding, 14 of logo and 6 of spacing.
             .padding(.leading, row.isUnderWindowRow ? 28 : 8).padding(.trailing, 6).padding(.vertical, 3)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
