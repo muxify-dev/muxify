@@ -363,11 +363,70 @@ class TopicsStuckHeader:
                   'and header tops %s' % [top_of(view, key, s.rows()) for key in ('topics-list', card, header)])
 
 
+class TopicTags:
+    name = 'topic-tags'
+    shows = ('Tags on Topic cards in each placement of `sidebar.tag_placement`: Tag Marks in the corner, after a pin, '
+             'with a dimmed Mark for a Tag the Config no longer defines; the first chip and "+N" after the title, with a '
+             'long title of the open card wrapped under them, and chip texts from the `topic.tags` Format part; chips on '
+             'their own line, before Dormant, and a row of chips that does not fit ending with "+N"; last, an opened card '
+             'in the Settled group with its Tag Marks.')
+
+    # The Tags of the Config, in its order: `personal` and `research` take the colour Muxify makes from the name.
+    TAGS = ('topics:\n  tags:\n    work: {color: blue}\n    personal: {}\n    infrastructure: {color: purple}\n'
+            '    documentation: {color: teal}\n    research: {}\n')
+    LONG_TITLE = 'A Topic title long enough to wrap onto a second line in the Sidebar card'
+
+    def fixture(self, s):
+        self.session, self.windows = topic(s, 'atlas', self.LONG_TITLE, order=0, tags=['work', 'personal'])
+        topic(s, 'birch', 'Birch', order=1, pinned=True,
+              tags=['personal', 'gone', 'work', 'infrastructure', 'documentation', 'research'])
+        topic(s, 'cedar', 'Cedar', order=2)
+        records = TopicRecords(s.root/'state/muxify')
+        records.put(dict(id='elm', title='Elm', slug='elm', order=3, sessions=[remembered(s, 'elm')], tags=['research']))
+        records.put(dict(id='fir', title='Fir', slug='fir', settled_at='2026-01-01T00:00:00Z', sessions=[remembered(s, 'fir')],
+                         tags=['work', 'personal']))
+        self.values = {'atlas': 'work, personal', 'birch': 'work, personal, infrastructure, documentation, research, gone',
+                       'elm': 'research'}
+
+    def shots(self):
+        return [('topic-tags-corner', lambda view: self.placement(view, 'corner')),
+                ('topic-tags-title', lambda view: self.placement(view, 'title', "  formats:\n    topic:\n      tags: '#{T:@#{tag}}'\n")),
+                ('topic-tags-line', lambda view: self.placement(view, 'line')),
+                ('topic-tags-settled', self.settled)]
+
+    def placement(self, view, placement, formats=''):
+        """Starts the app with the placement, and the Location in Atlas, whose card is open."""
+        view.launch(config(sidebar='  tag_placement: %s\n%s' % (placement, formats), more=self.TAGS))
+        view.go(self.windows[0])
+        fresh_shell(view.s, self.windows[0])
+        prefix = '@' if formats else ''
+        want = {'tags-topic-' + name: ', '.join(prefix + tag for tag in value.split(', ')) for name, value in self.values.items()}
+        shown = lambda rows: {key: view.s.row(key, rows).get('accessibilityValue') for key in want}
+        view.wait(lambda rows: view.value('topic-atlas', rows).startswith('expanded') and shown(rows) == want
+                  and not view.s.has('tags-topic-cedar', rows),
+                  lambda: 'the cards do not show their Tags with tag_placement: %s: %s' % (placement, shown(view.s.rows())))
+
+    def settled(self, view):
+        """The Settled group open, with the card of the Settled Topic opened, in the corner placement."""
+        self.placement(view, 'corner')
+        group, card = 'settled-topics', 'topic-fir'
+        view.wait(lambda rows: view.s.has(group, rows), 'the Settled group does not show')
+        if view.value(group, view.s.rows()) != 'expanded':
+            view.s.act('press', group)
+        view.wait(lambda rows: view.s.has(card, rows), 'the Settled group did not open with the card of the Settled Topic')
+        if view.value(card, view.s.rows()).startswith('collapsed'):
+            view.s.act('press', card)
+        view.wait(lambda rows: view.value(card, rows).startswith('expanded')
+                  and view.s.row('tags-' + card, rows).get('accessibilityValue') == 'work, personal',
+                  lambda: 'the opened Settled card does not show its Tags: %r' % view.s.row('tags-' + card).get('accessibilityValue'))
+
+
 # The launch arguments of every scene of the Topics list: the Sidebar shows, with Topics.
 TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics']
 
 # The areas that have two versions now.
 AREAS = [
     Area(name='topics', title='Topics list', list='topics-list', default=TOPICS_LIST_DEFAULT, args=TOPICS_ARGS,
-         shown=lambda s: s.topics_list(), scenes=[TopicCards(), LockedCards(), TopicOpen(), NoTopicCard(), TopicsStuckHeader()]),
+         shown=lambda s: s.topics_list(), scenes=[TopicCards(), LockedCards(), TopicOpen(), NoTopicCard(), TopicsStuckHeader(),
+                                                    TopicTags()]),
 ]

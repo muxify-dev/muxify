@@ -220,8 +220,7 @@ struct CardHeader<Details: View>: View {
     /// `Text` cannot do: the title is cut into its first line and the rest.
     private var titleLines: (first: String, rest: String)? {
         guard wrapsTitle, tags?.placement == .title, titleLineWidth > 0 else { return nil }
-        // The gaps after the title, after the Hint and before the marks; 2 points against rounding.
-        let room = titleLineWidth - hintWidth - titleLineEnd - 3 * 5 - 2
+        let room = TitleLines.firstLineRoom(lineWidth: titleLineWidth, hintWidth: hintWidth, endWidth: titleLineEnd)
         return TitleLines.split(title, font: typography.nsFont(for: .session), width: room)
     }
 

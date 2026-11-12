@@ -1,5 +1,6 @@
 import AppKit
 import CoreText
+import MuxifyCore
 
 /// The colour of a text or a symbol in the AppKit Sessions list (ADR 0074): the text colour of the appearance that
 /// draws, as SwiftUI's primary and secondary styles.
@@ -13,6 +14,8 @@ enum SidebarInk: Equatable {
     case link, disabledLink
     /// The yellow of a Topic Note.
     case note
+    /// A colour of the Config, such as a Tag's, which can differ in the light and the dark appearance.
+    case mark(MarkColor)
 
     /// The colour in the appearance that draws now.
     var color: NSColor {
@@ -24,6 +27,7 @@ enum SidebarInk: Equatable {
         case .link: return .linkColor
         case .disabledLink: return .disabledControlTextColor
         case .note: return .cardNote
+        case .mark(let color): return color.nsColor(in: NSAppearance.currentDrawing())
         }
     }
 }

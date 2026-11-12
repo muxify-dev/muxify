@@ -22,6 +22,9 @@ struct CardHeaderContent: Equatable {
     var details: [String] = []
     /// The Topic Note, whole, on a line of its own.
     var note: String?
+    /// The Tags of a Topic card. The header keeps their place: at the end of the title's first line, after the pin, or
+    /// first in the details line, as their placement says. The card draws them over it.
+    var tags: CardTags?
     var hint: CardHint?
     /// Words for the accessibility value after the open state, such as "Pinned" or "Locked".
     var notes: [String] = []
@@ -31,13 +34,16 @@ struct CardHeaderContent: Equatable {
 }
 
 /// The header of a card in an AppKit list: the title, after it the place of the card's Hint and the pin, the Guest
-/// mark or the lock, under it the details line with the bell of a closed card, the Topic Note, and the Summary of a
-/// closed card. It lays its parts out as `CardHeader` does in SwiftUI. To accessibility it is one button, which hides
+/// mark or the lock, then the place of the Tags in the title line, under it the details line with the bell of a closed
+/// card or the place of the Tags on their own line, the Topic Note, and the Summary of a closed card. With Tag chips in
+/// the title line, a long title wraps under them at the full width of the header, as `CardHeader` cuts it. It lays its parts out as `CardHeader` does in SwiftUI. To accessibility it is one button, which hides
 /// its parts. A press on it works on the first click while Muxify is not the front app.
 final class CardHeaderView: SidebarPressView {
     /// The background of the header while it sticks to the top of the list.
     private let backdrop = StuckHeaderBackdropView()
     private let title = SidebarLabel()
+    /// The rest of a title that shares its first line with Tag chips, on the lines under them.
+    private let titleRest = SidebarLabel()
     private let guest = SidebarLabel()
     private let pin = SidebarSymbol(CardHeaderMark.pin)
     private let lock = SidebarSymbol(CardHeaderMark.lock)
@@ -61,6 +67,8 @@ final class CardHeaderView: SidebarPressView {
         var titleLine = NSRect.zero
         var hint: NSRect?
         var mark = NSRect.zero
+        var titleRest = NSRect.zero
+        var tags: NSRect?
         var details: [NSRect] = []
         var bell = NSRect.zero
         var pencil = NSRect.zero
@@ -78,7 +86,7 @@ final class CardHeaderView: SidebarPressView {
         note.ink = .note
         pencil.ink = .note
         backdrop.isHidden = true
-        subviews = [backdrop, title, guest, pin, lock, bell, pencil, note, summary]
+        subviews = [backdrop, title, titleRest, guest, pin, lock, bell, pencil, note, summary]
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityIdentifier(identifier)
@@ -100,6 +108,8 @@ final class CardHeaderView: SidebarPressView {
         title.text = content.title
         title.font = environment.typography.nsFont(for: .session)
         title.wraps = environment.wrapsCardTitles
+        titleRest.font = title.font
+        titleRest.wraps = true
         guest.font = .systemFont(ofSize: size(CardHeaderFont.mark), weight: .medium)
         for symbol in [pin, lock, bell] { symbol.pointSize = size(CardHeaderFont.mark) }
         showDetails(content.details, font: .systemFont(ofSize: size(CardHeaderFont.detail)), scale: scale)
@@ -108,7 +118,7 @@ final class CardHeaderView: SidebarPressView {
         pencil.pointSize = size(CardNote.fontSize)
         summary.text = content.summary
         summary.font = .systemFont(ofSize: size(CardHeaderFont.summary))
-        for part in [title, guest, note, summary] { part.scale = scale }
+        for part in [title, titleRest, guest, note, summary] { part.scale = scale }
         for part in [pin, lock, bell, pencil] { part.scale = scale }
         // A part that the card does not show now stays in its place, so it fades there when the card opens or closes.
         // The badge of the card's Hint takes the mark's place while it shows.
@@ -150,6 +160,9 @@ final class CardHeaderView: SidebarPressView {
     /// The place of the card's Hint in a header `width` wide, nil when the card has none.
     func hintPlace(width: CGFloat) -> NSRect? { frames(width: width).hint }
 
+    /// The place of the card's Tags in a header `width` wide, nil when the card shows none.
+    func tagsPlace(width: CGFloat) -> NSRect? { frames(width: width).tags }
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         layOut()
@@ -159,6 +172,7 @@ final class CardHeaderView: SidebarPressView {
         let frames = frames(width: bounds.width)
         backdrop.frame = bounds
         title.frame = frames.title
+        titleRest.frame = frames.titleRest
         (content.isPinned ? pin : content.isGuest ? guest : lock).frame = frames.mark
         for (label, frame) in zip(details, frames.details) { label.frame = frame }
         if showsBell { bell.frame = frames.bell }
@@ -183,17 +197,31 @@ final class CardHeaderView: SidebarPressView {
         var frames = Frames()
 
         let hintSize = content.hint.map { CardRestKeyView.size(key: $0.restKey, fontSize: environment.fontSize, scale: scale) }
+        let hasMark = content.isPinned || content.isGuest || content.isLocked
         let markSize = content.isPinned ? pin.symbolSize : content.isGuest ? guest.fit() : content.isLocked ? lock.symbolSize : NSSize.zero
+        let lineTags = content.tags.flatMap { $0.placement == .corner || $0.placement == .title ? $0 : nil }
+        let lineTagsSize = lineTags.map { CardTagsLayout($0, fontSize: environment.fontSize, scale: scale).size }
+        // The marks at the end of the line: the pin, the Guest mark or the lock, then the Tags.
+        let endParts = (hasMark ? [markSize.width] : []) + (lineTagsSize.map { [$0.width] } ?? [])
+        let endWidth = endParts.reduce(0, +) + CGFloat(max(0, endParts.count - 1)) * gap
         // A closed card with no Summary ends with its first line, which then stops before the corner's action.
         let lineRoom = max(0, room - (!content.isOpen && content.summary.isEmpty ? corner : 0))
         // The gaps: after the title, after the Hint, and on each side of the space that pushes the marks to the end.
-        let fixed = (hintSize.map { $0.width + gap } ?? 0) + 2 * gap + markSize.width
-        let titleSize = title.fit(width: max(0, lineRoom - fixed))
+        let fixed = (hintSize.map { $0.width + gap } ?? 0) + 2 * gap + endWidth
+        // With Tag chips in the title line, a long title wraps under them: its first line takes the words that fit.
+        let lines = environment.wrapsCardTitles && content.tags?.placement == .title && lineRoom > 0
+            ? TitleLines.split(content.title, font: title.font,
+                               width: TitleLines.firstLineRoom(lineWidth: lineRoom, hintWidth: hintSize?.width ?? 0, endWidth: endWidth))
+            : nil
+        title.text = lines?.first ?? content.title
+        title.wraps = lines == nil && environment.wrapsCardTitles
+        titleRest.text = lines?.rest ?? ""
+        let titleSize = lines == nil ? title.fit(width: max(0, lineRoom - fixed)) : title.fit()
         let firstLine = title.lineHeight
 
         // Each part's middle is on one line. The title's is the middle of its first line.
-        let middles = [firstLine / 2, (hintSize?.height ?? 0) / 2, markSize.height / 2]
-        let heights = [titleSize.height, hintSize?.height ?? 0, markSize.height]
+        let middles = [firstLine / 2, (hintSize?.height ?? 0) / 2, markSize.height / 2, (lineTagsSize?.height ?? 0) / 2]
+        let heights = [titleSize.height, hintSize?.height ?? 0, markSize.height, lineTagsSize?.height ?? 0]
         let above = middles.max() ?? 0
         let lineHeight = above + (zip(heights, middles).map { $0 - $1 }.max() ?? 0)
         let top = CardHeaderPadding.top
@@ -203,18 +231,34 @@ final class CardHeaderView: SidebarPressView {
         frames.title = NSRect(x: left, y: (top + above - firstLine / 2).rounded(toPixelsOf: scale), width: titleSize.width, height: titleSize.height)
         frames.titleLine = NSRect(x: left, y: top, width: room, height: lineHeight)
         frames.hint = hintSize.map { place($0, x: left + titleSize.width + gap) }
-        frames.mark = place(markSize, x: left + lineRoom - markSize.width)
+        frames.mark = place(markSize, x: left + lineRoom - endWidth)
+        frames.tags = lineTagsSize.map { place($0, x: left + lineRoom - $0.width) }
+        var bottom = top + lineHeight
 
-        // The details line: its words, then the bell of a closed card, each with its middle on the line's middle.
-        var bottom = top + lineHeight + CardHeaderSpacing.lines
+        // The rest of a title cut under its Tag chips, at the header's full width.
+        if !titleRest.text.isEmpty {
+            frames.titleRest = NSRect(origin: NSPoint(x: left, y: bottom + CardHeaderSpacing.lines), size: titleRest.fit(width: room))
+            bottom = frames.titleRest.maxY
+        }
+
+        // The details line: the Tags on their own line, its words, then the bell of a closed card, each with its middle on
+        // the line's middle.
+        bottom += CardHeaderSpacing.lines
         let words = details.prefix(content.details.count).map { $0.fit() }
-        let parts = words + (showsBell ? [bell.symbolSize] : [])
+        let ownLineTags = content.tags.flatMap { $0.placement == .line ? $0 : nil }
+        let ownLineTagsSize = ownLineTags.map {
+            CardTagsLayout($0, width: Self.tagsOffer($0, words: words, room: room, environment: environment), fontSize: environment.fontSize,
+                           scale: scale).size
+        }
+        let parts = (ownLineTagsSize.map { [$0] } ?? []) + words + (showsBell ? [bell.symbolSize] : [])
         let detailsHeight = parts.map(\.height).max() ?? 0
         var x = left
-        let placed = parts.map { size -> NSRect in
+        var placed = parts.map { size -> NSRect in
             defer { x += size.width + CardHeaderSpacing.details }
-            return NSRect(x: x, y: (bottom + (detailsHeight - size.height) / 2).rounded(toPixelsOf: scale), width: size.width, height: size.height)
+            return NSRect(x: x.rounded(toPixelsOf: scale), y: (bottom + (detailsHeight - size.height) / 2).rounded(toPixelsOf: scale),
+                          width: size.width, height: size.height)
         }
+        if ownLineTagsSize != nil { frames.tags = placed.removeFirst() }
         frames.details = Array(placed.prefix(words.count))
         if showsBell { frames.bell = placed[words.count] }
         bottom += detailsHeight
@@ -242,6 +286,24 @@ final class CardHeaderView: SidebarPressView {
         frames.height = bottom + CardHeaderPadding.bottom(isOpen: content.isOpen)
         arranged = (width, frames)
         return frames
+    }
+
+    /// The room the details line offers Tags on their own line, as SwiftUI's `HStack` shares out its width: the least
+    /// flexible part first, each part offered an even share of the room that is left. A word can give up all its width,
+    /// and the Tags the width between their widest row and "+N" alone.
+    private static func tagsOffer(_ tags: CardTags, words: [NSSize], room: CGFloat, environment: SidebarListEnvironment) -> CGFloat {
+        let widest = CardTagsLayout(tags, fontSize: environment.fontSize, scale: environment.displayScale).size.width
+        let narrowest = CardTagsLayout(tags, width: 0, fontSize: environment.fontSize, scale: environment.displayScale).size.width
+        // The parts by how far they can shrink, the Tags as nil.
+        let parts = ([(flexibility: widest - narrowest, width: nil)] + words.map { (flexibility: $0.width, width: Optional($0.width)) })
+            .enumerated().sorted { ($0.element.flexibility, $0.offset) < ($1.element.flexibility, $1.offset) }.map(\.element)
+        var left = room - CGFloat(words.count) * CardHeaderSpacing.details
+        for (index, part) in parts.enumerated() {
+            let offer = left / CGFloat(parts.count - index)
+            guard let width = part.width else { return max(0, offer) }
+            left -= min(width, offer)
+        }
+        return max(0, left)
     }
 
     // MARK: Accessibility

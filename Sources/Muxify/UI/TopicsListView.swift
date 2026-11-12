@@ -239,6 +239,7 @@ final class TopicsListView: NSView, SidebarList {
             let header = CardHeaderContent(title: text.title, summary: text.summary, isOpen: row.isExpanded, mark: row.mark,
                                            isPinned: row.isPinned, isGuest: row.isGuest,
                                            details: TopicCardWords.details(of: row, inList: true), note: row.note,
+                                           tags: store.cardTags(row),
                                            hint: topicID.flatMap { CardHint(.topic($0), in: environment.hints) },
                                            notes: TopicCardWords.notes(of: row), cornerWidth: CardCorner.designWidth)
             let rows = blocks(of: row, lines: true)

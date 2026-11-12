@@ -29,7 +29,8 @@ AREAS = {
         'PaneRowView', 'SessionsList', 'SidebarMenu', 'LayerColoredView', 'StackLayout', 'ListLift', 'CardMetrics',
         'HintMetrics', 'HintPresentation', 'RowHoverLabel', 'GitViewIconShape', 'SidebarList', 'SidebarListHost')],
     'Topics list': [UI + name + '.swift' for name in ('TopicsListView', 'TopicCardView', 'TopicsListMetrics', 'CardHeaderView',
-                                                       'TopicCardMetrics', 'TopicsLineView', 'TopicCardRows')],
+                                                       'TopicCardMetrics', 'TopicsLineView', 'TopicCardRows',
+                                                       'SidebarTagsView', 'CardTagsMetrics')],
 }
 # The files of an area that may import SwiftUI for now, each with the task or stage that removes the import. A task
 # is one of the task set remove-swiftui (.cook/tasks/remove-swiftui/), which is stage 1.

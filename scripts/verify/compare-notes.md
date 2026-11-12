@@ -177,3 +177,25 @@ many-coloured border and the edges of glyphs, as in `topic-cards`; the titles of
 In one run the SwiftUI picture showed a row's hover label: the user's pointer rested on the App Window where that row
 stood while the SwiftUI list showed. The runs after it showed no label in either picture. See "What the user changes
 in a picture" in `README.md`.
+
+## topic-tags
+
+Task 07 of the set `remove-swiftui`. Four shots, with the Tags of the Config `work`, `personal`, `infrastructure`,
+`documentation` and `research`: `topic-tags-corner`, Tag Marks in the corner of a Pinned card after its pin, with a
+dimmed Mark for `gone`, a Tag the Config no longer defines, and of the open card of the Location's Topic and a Dormant
+card; `topic-tags-title`, the first chip and "+N" after the title, chip texts from the Format part
+`tags: '#{T:@#{tag}}'`, and the long title of the open card cut into its first line and the rest under the chips;
+`topic-tags-line`, the chips on their own line, a row of six that ends with "+3", and a chip before "Dormant"; and
+`topic-tags-settled`, an opened card of the Settled group with its Tag Marks. The gate passes in all four, and side by
+side the pictures look the same: the Marks, the chips, "+N" and the title's lines stand on the same pixels. The
+difference picture marks the fill of the open card, as in `topic-open`, and the many-coloured border and the edges of
+glyphs, as in `topic-cards`.
+
+- The chip of the Dormant card stood out at first: its text was up to 9 of 255 darker in the AppKit picture. SwiftUI's
+  `opacity` dims each part of the card on its own, not the card as one picture, so the faint fill of a chip shows
+  through its text. `SidebarTagsView` now rests at the card's opacity part by part, outside the card's dimmed view, and
+  the chip's pixels are the same.
+- The Tags are one static text, "Tags", with the names as its value, in both versions. SwiftUI's `help` gives the
+  names as the hover label and not as accessibility help, so the AppKit Tags give them only as their tooltip.
+- The Settled group is SwiftUI under either list until task 10, and stands outside `topics-list`, so the gate reads no
+  row of it: the shot of the Settled card is the picture that task 10 must keep.

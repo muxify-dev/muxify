@@ -16,7 +16,7 @@ and on "N more…", and a header that sticks to the top of the list and never pa
 list glides a card that opens with Core Animation, whose frames a dump does not read, so the checks prove where the
 cards below come to rest; the glide is for the eye.
 
-The checks of a press on a card's header press it in two ways. `press` performs the header's default accessibility
+The checks of a press on a card's header, and on the Tags over it, press it in two ways. `press` performs the header's default accessibility
 action. `click` sends a mouse down and a mouse up to the App Window, which is not the key window, because the run
 keeps the app behind the user's windows: it is a first click while Muxify is not the front app. The header follows
 both. The check of a press on a Locked card runs the same presses in both versions and compares what they did.
@@ -295,6 +295,34 @@ class TopicsListSidebar(unittest.TestCase):
                 self.wait_card(other, 'expanded', 'a %s on the card of another Topic did not open it' % command)
                 self.s.wait_shown(self.windows[other])
                 self.assertEqual(self.location(), [self.sessions[other]], 'a press on the card of another Topic did not go to it')
+
+    def test_a_press_on_the_tags_of_another_card_opens_it_and_goes_to_its_topic(self):
+        """The Tags stand over the header's title line and take its clicks there: a press on them presses the card."""
+        home, other = self.keys[0], self.keys[2]
+        topic = other[len('topic-'):]
+        def tag(tags):
+            def apply(data):
+                for entry in data['records']:
+                    if isinstance(entry, dict) and entry.get('id') == topic:
+                        entry['tags'] = tags
+            self.store.change(apply)
+        self.config.write_text(CONFIG + '  tag_placement: corner\ntopics:\n  tags:\n    work: {}\n')
+        self.addCleanup(self.config.write_text, CONFIG)
+        tag(['work'])
+        self.addCleanup(tag, [])
+        self.show_list('appkit')
+        for command in PRESSES:
+            with self.subTest(command=command):
+                self.stand_on(other, opened=False)
+                self.stand_on(home, opened=True)
+                self.wait_card(other, 'collapsed', 'the other card did not stay closed')
+                # The app reads a changed Config only every two seconds.
+                self.s.wait_rows(lambda rs: self.s.row('tags-' + other, rs).get('accessibilityValue') == 'work',
+                                 'the other card does not show its Tag', seconds=10)
+                self.s.act(command, 'tags-' + other)
+                self.wait_card(other, 'expanded', 'a %s on the Tags of the card of another Topic did not open it' % command)
+                self.s.wait_shown(self.windows[other])
+                self.assertEqual(self.location(), [self.sessions[other]], 'a press on the Tags of another Topic\'s card did not go to it')
 
     def test_a_press_on_a_locked_card_does_what_it_does_in_the_swiftui_list(self):
         """From the open card of a Topic, a press on the Locked card goes to its Session and opens the card, a second

@@ -39,13 +39,16 @@ struct TopicCardCorner: Equatable {
 /// many-coloured border. A Topic card shows Settle in its corner. A card rests at its opacity, and its Hint shows whole.
 ///
 /// To accessibility the view is no element: its rows are the corner's link, then the card, `card-<id>`, whose rows are
-/// the rows of an open card, its header, `<id>`, and its Hint, as SwiftUI gives them. `<id>` is the card's
-/// `accessibilityID`, such as `topic-<Topic ID>` or `locked-<Session ID>`.
+/// the rows of an open card, its header, `<id>`, its Tags, `tags-<id>`, and its Hint, as SwiftUI gives them. `<id>` is
+/// the card's `accessibilityID`, such as `topic-<Topic ID>` or `locked-<Session ID>`.
 final class TopicCardView: NSView {
     let cardID: TopicGroupID
-    /// A press on the header.
+    /// A press on the header, or on the Tags over it.
     var onPress: () -> Void = {} {
-        didSet { header.onPress = onPress }
+        didSet {
+            header.onPress = onPress
+            tags.onPress = onPress
+        }
     }
     /// A press on the action in the corner.
     var onCorner: () -> Void = {} {
@@ -77,6 +80,9 @@ final class TopicCardView: NSView {
     private let dimmed = FlippedView()
     private let fill = CardFillView()
     private let header: CardHeaderView
+    /// The Tags of a Topic card, over the place that the header keeps for them. They rest at the card's opacity part
+    /// by part (`SidebarTagsView`), so they are no part of `dimmed`.
+    private let tags = SidebarTagsView()
     /// The rows of an open card. A card that closes keeps them, so they fade where they stand.
     private let rows: TopicCardRowsView
     private let unread = CardSpineView()
@@ -102,13 +108,15 @@ final class TopicCardView: NSView {
         // The SwiftUI card cuts nothing off.
         for view in [self, card, dimmed] { view.clipsToBounds = false }
         // From the back: the fill, the rows, the header, which stays above the rows that scroll under it, the spines,
-        // the border, then the Hint and the corner's action.
+        // the border, then the Tags over the header, the Hint and the corner's action.
         dimmed.subviews = [fill, rows, header, unread, spine, outline, selection]
-        card.subviews = [dimmed] + hint.views
+        card.subviews = [dimmed, tags] + hint.views
         subviews = [card, corner]
         card.setAccessibilityIdentifier("card-" + cardID.accessibilityID)
         card.header = header
-        card.rows = { [weak self] in self.map { ($0.isOpen ? $0.rows.accessibilityParts : []) + [$0.header] + $0.hint.shown } ?? [] }
+        card.rows = { [weak self] in
+            self.map { ($0.isOpen ? $0.rows.accessibilityParts : []) + [$0.header] + ($0.tags.isHidden ? [] : [$0.tags]) + $0.hint.shown } ?? []
+        }
     }
 
     @available(*, unavailable)
@@ -126,6 +134,7 @@ final class TopicCardView: NSView {
         self.content = content
         self.environment = environment
         header.show(content.header, environment: environment)
+        tags.show(content.header.tags, fontSize: environment.fontSize, scale: environment.displayScale, opacity: content.restingOpacity)
         if content.header.isOpen {
             rows.show(content.blocks, moreCount: content.moreCount, moreMark: content.moreMark, reservesCorner: content.corner != nil,
                       environment: environment, fades: wasOpen)
@@ -165,7 +174,7 @@ final class TopicCardView: NSView {
     }
 
     /// Puts the header at the top of the card, or as far down as it sticks, with the Unread spine over it and the
-    /// card's Hint on it.
+    /// card's Tags and Hint on it.
     private func placeHeader() {
         let height = header.height(width: bounds.width)
         let stuck = isOpen ? StuckHeader.offset(cardTop: viewportTop, cardHeight: bounds.height, headerHeight: height, inset: stickInset) : 0
@@ -173,7 +182,8 @@ final class TopicCardView: NSView {
         header.sticks = stuck > 0
         unread.frame = NSRect(x: CardSpine.leading, y: stuck + CardSpine.verticalInset, width: CardSpine.width,
                               height: max(0, height - 2 * CardSpine.verticalInset))
-        // The header keeps the Hint's place, and the card draws the Hint over it.
+        // The header keeps the places of the Tags and the Hint, and the card draws them over it.
+        tags.frame = header.tagsPlace(width: bounds.width)?.offsetBy(dx: 0, dy: stuck) ?? .zero
         hint.place(header.hintPlace(width: bounds.width)?.offsetBy(dx: 0, dy: stuck))
     }
 
@@ -210,7 +220,7 @@ final class TopicCardView: NSView {
 /// The card as one accessibility row: a group of its header and its Hint, though the Hint is no part of what rests at
 /// the card's opacity.
 private final class TopicCardGroupView: NSView {
-    /// The rows of the card: the rows of an open card, its header, then the Hint.
+    /// The rows of the card: the rows of an open card, its header, its Tags, then the Hint.
     var rows: () -> [NSView] = { [] }
     /// The card's header, which VoiceOver reads first.
     weak var header: NSView?
