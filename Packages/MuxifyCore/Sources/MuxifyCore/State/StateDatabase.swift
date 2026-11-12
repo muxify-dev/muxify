@@ -27,11 +27,13 @@ public enum StateDatabase {
     /// and columns it knows, so no step may rename, drop or tighten what an older build reads or writes.
     static let migrations: [Migration] = [
         TopicTable.migration,
+        WorktreeTable.migration,
     ]
 
     /// The one-time imports, run after `migrations` on every open.
     static let imports: [Import] = [
         TopicTable.importRecordsFile,
+        WorktreeTable.importRecordFiles,
     ]
 
     /// Where the problem lines of an import go. The app sends them to its Diagnostics log; anywhere else they go to
@@ -78,6 +80,27 @@ public enum StateDatabase {
 
     static func userVersion(_ connection: SQLiteConnection) throws -> Int {
         try connection.query("PRAGMA user_version") { $0.int(0) }.first ?? 0
+    }
+}
+
+/// A store's one connection to the state database, opened at its first use. A lock keeps one use at a time, since a
+/// transaction belongs to the connection. The copies of a store share it.
+final class StateConnection: @unchecked Sendable {
+    let paths: MuxifyPaths
+    private let lock = NSRecursiveLock()
+    private var connection: SQLiteConnection?
+
+    init(paths: MuxifyPaths) { self.paths = paths }
+
+    /// Nil without a connection when `creating` is false and there is no state folder yet, so a read creates nothing.
+    func use<T>(creating: Bool, _ body: (SQLiteConnection) throws -> T) throws -> T? {
+        lock.lock()
+        defer { lock.unlock() }
+        if connection == nil {
+            guard creating || FileManager.default.fileExists(atPath: paths.state.path) else { return nil }
+            connection = try StateDatabase.open(paths)
+        }
+        return try body(connection!)
     }
 }
 

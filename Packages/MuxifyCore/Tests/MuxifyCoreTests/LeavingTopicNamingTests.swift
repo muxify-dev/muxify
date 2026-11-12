@@ -33,7 +33,7 @@ final class LeavingTopicNamingTests: XCTestCase {
         return [
             "settle": names(TopicSettlePlan(topic: topic, snapshot: live, sessionPaths: sessionPaths, choices: [], outcome: "").edit.commands),
             "forget": names(TopicForgetPlan(topic: topic, snapshot: live, sessionPaths: sessionPaths, choices: [], worktrees: [],
-                                              root: "/trees").edit.commands),
+                                              paths: MuxifyPaths(environment: ["XDG_STATE_HOME": "/nonexistent-state"])).edit.commands),
             "remove": names(TopicMembershipPlan(removingSession: window, records: [topic], sessionPaths: sessionPaths,
                                                   windows: [window]).commands),
             "move": names(try TopicMembershipPlan(source: .session(window), destination: nil, records: [topic], windows: [window],

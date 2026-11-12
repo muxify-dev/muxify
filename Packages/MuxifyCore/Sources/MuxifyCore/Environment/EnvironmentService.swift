@@ -84,7 +84,7 @@ public struct EnvironmentService: Sendable {
             let topic = try openTopic(target, caller: nil, records: records, snapshot: snapshot, client: nil)
             let record = topic.remembering(snapshot, order: topics.sessionOrder) ?? topic
             return .success(TopicSettleSession.choices(topic: record, snapshot: snapshot, sessionPaths: sessionPaths,
-                                                       mergedWorktrees: TopicWorktrees.merged(in: record, root: paths.worktrees.path)))
+                                                       mergedWorktrees: TopicWorktrees.merged(in: record, paths: paths)))
         } catch {
             return .failure(failure(error, phase: .nothingChanged))
         }
@@ -105,7 +105,7 @@ public struct EnvironmentService: Sendable {
             let records = try store.read().records
             let snapshot = try server.snapshot()
             let topic = try forgetTopic(target, caller: nil, records: records, snapshot: snapshot, client: nil)
-            return .success(TopicForgetChoices(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, root: paths.worktrees.path))
+            return .success(TopicForgetChoices(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, paths: paths))
         } catch { return .failure(failure(error, phase: .nothingChanged)) }
     }
 
@@ -133,7 +133,7 @@ public struct EnvironmentService: Sendable {
 
     func madeWorktree(of window: TmuxWindow, topic: TopicRecord, snapshot: TmuxSnapshot) -> TopicForgetChoices.Worktree? {
         guard let worktree = topic.session(of: window)?["worktree_path"]?.string.map(Folder.local) else { return nil }
-        return TopicForgetChoices(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, root: paths.worktrees.path)
+        return TopicForgetChoices(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, paths: paths)
             .worktrees.first { Folder.local($0.spec.path) == worktree }
     }
 
@@ -152,7 +152,7 @@ public struct EnvironmentService: Sendable {
         return window
     }
 
-    var executor: TopicExecutor { TopicExecutor(server: server, worktreesRoot: paths.worktrees.path) }
+    var executor: TopicExecutor { TopicExecutor(server: server, paths: paths) }
 
     func list() -> EnvironmentResponse {
         do {
@@ -324,7 +324,7 @@ public struct EnvironmentService: Sendable {
             case .script: return .gitFailed
             case .setupInvalid: return .worktreeSetupInvalid
             case .hookFailed: return .hookFailed
-            case .exists: return .worktreeExists
+            case .exists, .pathTaken: return .worktreeExists
             case .unavailable: return .worktreeUnavailable
             case .ambiguous: return .worktreeAmbiguous
             case .inUse: return .worktreeInUse

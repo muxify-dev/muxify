@@ -1,5 +1,6 @@
 """The Topic records of a sandbox: the `topics` and `open_places` tables of `state/muxify/muxify.db`, read and
-written with Python's `sqlite3`, as another process writes them.
+written with Python's `sqlite3`, as another process writes them. `worktrees()` reads the Muxify Worktree records of
+the `worktrees` table.
 
 A record is a dict in the shape the old `topics.json` had: the columns by name, with `sessions` and `tags` as lists,
 `pinned`, `guest` and `unread` as `True` or left out, `session_order` as `'manual'` or left out, and every other
@@ -27,8 +28,11 @@ SCHEMA = [
         settled_at TEXT, session_order TEXT, pinned INTEGER NOT NULL DEFAULT 0, guest INTEGER NOT NULL DEFAULT 0,
         unread INTEGER NOT NULL DEFAULT 0, note TEXT, sessions TEXT NOT NULL DEFAULT '[]', tags TEXT NOT NULL DEFAULT '[]')''',
     '''CREATE TABLE IF NOT EXISTS open_places (id TEXT PRIMARY KEY NOT NULL, "order" REAL NOT NULL)''',
+    '''CREATE TABLE IF NOT EXISTS worktrees (
+        id TEXT PRIMARY KEY NOT NULL, environment TEXT, repository TEXT NOT NULL, name TEXT NOT NULL,
+        path TEXT NOT NULL UNIQUE, branch TEXT NOT NULL, base TEXT NOT NULL, created_at TEXT NOT NULL)''',
 ]
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class TopicRecords:
@@ -119,6 +123,19 @@ class TopicRecords:
 
     def open_places(self):
         return self.read()['open_places']
+
+    def worktrees(self):
+        """Every Muxify Worktree record, oldest first, as a dict in the shape the old `worktrees/<id>.json` had:
+        the columns by name, with `environment` left out when it is NULL."""
+        if not self.path.exists():
+            return []
+        with self._connection() as connection:
+            connection.row_factory = sqlite3.Row
+            try:
+                rows = connection.execute('SELECT * FROM worktrees ORDER BY created_at, id').fetchall()
+            finally:
+                connection.row_factory = None
+        return [{key: row[key] for key in row.keys() if row[key] is not None} for row in rows]
 
     # Changes.
 

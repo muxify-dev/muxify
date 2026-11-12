@@ -20,12 +20,12 @@ public struct TopicStore: Sendable {
     public let paths: MuxifyPaths
     /// The Config's `topics.in_play`. A write that takes a card out of an In Play place leaves an Open Place by it.
     public let inPlay: Int?
-    private let database: Database
+    private let database: StateConnection
 
     public init(paths: MuxifyPaths, inPlay: Int? = nil) {
         self.paths = paths
         self.inPlay = inPlay
-        database = Database(paths: paths)
+        database = StateConnection(paths: paths)
     }
 
     public enum Failure: Error, CustomStringConvertible {
@@ -80,27 +80,6 @@ public struct TopicStore: Sendable {
     static func check(_ record: TopicRecord) throws {
         guard TopicRecord.isValidID(record.id) else { throw Failure.invalidRecord(record.id, "the id must be a filename") }
         if let order = record.order, !order.isFinite { throw Failure.invalidRecord(record.id, "the order must be a finite number") }
-    }
-
-    /// The store's one connection, opened at its first use. A lock keeps one use at a time, since a transaction
-    /// belongs to the connection.
-    private final class Database: @unchecked Sendable {
-        let paths: MuxifyPaths
-        private let lock = NSRecursiveLock()
-        private var connection: SQLiteConnection?
-
-        init(paths: MuxifyPaths) { self.paths = paths }
-
-        /// Nil without a connection when `creating` is false and there is no state folder yet.
-        func use<T>(creating: Bool, _ body: (SQLiteConnection) throws -> T) throws -> T? {
-            lock.lock()
-            defer { lock.unlock() }
-            if connection == nil {
-                guard creating || FileManager.default.fileExists(atPath: paths.state.path) else { return nil }
-                connection = try StateDatabase.open(paths)
-            }
-            return try body(connection!)
-        }
     }
 }
 

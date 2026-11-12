@@ -220,4 +220,82 @@ final class StateDatabaseTests: XCTestCase {
         XCTAssertEqual(try TopicStore(paths: paths).read().records.map(\.id), ["a"])
         XCTAssertFalse(FileManager.default.fileExists(atPath: paths.topicRecords.path))
     }
+
+    // MARK: - The import of the Muxify Worktree record files
+
+    /// Writes `text` as `worktrees/<name>.json`, as an older Muxify wrote each record.
+    private func seedWorktreeFile(_ name: String, _ text: String) throws -> URL {
+        try FileManager.default.createDirectory(at: paths.worktrees, withIntermediateDirectories: true)
+        let file = paths.worktrees.appendingPathComponent(name + ".json")
+        try Data(text.utf8).write(to: file)
+        return file
+    }
+
+    private func worktreeFile(id: String, path: String, environment: String? = nil, createdAt: String = "2026-09-01T10:00:00Z") -> String {
+        let place = environment.map { #""environment":"\#($0)","# } ?? ""
+        return #"{"id":"\#(id)",\#(place)"repository":"/src/app","name":"fix","path":"\#(path)","branch":"fix","base":"abc","created_at":"\#(createdAt)"}"#
+    }
+
+    func testTheWorktreesTableHasAUniquePath() throws {
+        let (connection, _) = try open()
+        XCTAssertEqual(try connection.query("SELECT name FROM pragma_table_info('worktrees') ORDER BY cid") { $0.text(0) ?? "" },
+                       ["id", "environment", "repository", "name", "path", "branch", "base", "created_at"])
+        try connection.execute("INSERT INTO worktrees VALUES ('a', NULL, '/r', 'a', '/t/a', 'a', 'c', '2026-09-01T10:00:00Z')")
+        XCTAssertThrowsError(try connection.execute("INSERT INTO worktrees VALUES ('b', NULL, '/r', 'b', '/t/a', 'b', 'c', '2026-09-01T10:00:00Z')"))
+    }
+
+    func testTheImportMovesEachValidWorktreeRecordFileAndRenamesIt() throws {
+        let local = try seedWorktreeFile("one", worktreeFile(id: "one", path: "/src/trees/one", createdAt: "2026-09-02T10:00:00Z"))
+        let remote = try seedWorktreeFile("two", worktreeFile(id: "two", path: "/home/me/trees/two", environment: "box"))
+        let (_, problems) = try open()
+        XCTAssertEqual(problems, [])
+        for file in [local, remote] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path + ".migrated"), "the old file stays readable as <id>.json.migrated")
+        }
+        XCTAssertEqual(try MuxifyWorktreeStore(paths: paths).all(), [
+            MuxifyWorktreeRecord(id: "two", environment: "box", repository: "/src/app", name: "fix", path: "/home/me/trees/two", branch: "fix",
+                                 base: "abc", createdAt: Date(timeIntervalSince1970: 1_788_256_800)),
+            MuxifyWorktreeRecord(id: "one", environment: nil, repository: "/src/app", name: "fix", path: "/src/trees/one", branch: "fix",
+                                 base: "abc", createdAt: Date(timeIntervalSince1970: 1_788_343_200)),
+        ])
+    }
+
+    func testTheImportSkipsAnUndecodableWorktreeFileWithAProblemLineAndLeavesIt() throws {
+        let good = try seedWorktreeFile("good", worktreeFile(id: "good", path: "/src/trees/good"))
+        let bad = try seedWorktreeFile("bad", #"{"id":"bad","path":7}"#)
+        let twin = try seedWorktreeFile("twin", worktreeFile(id: "twin", path: "/src/trees/good"))
+        let (_, problems) = try open()
+        XCTAssertEqual(try MuxifyWorktreeStore(paths: paths).all().map(\.id), ["good"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: good.path + ".migrated"))
+        XCTAssertEqual(problems.count, 2, "\(problems)")
+        XCTAssertTrue(problems[0].hasPrefix("\(bad.path) is not a Muxify Worktree record"), problems[0])
+        XCTAssertTrue(problems[1].hasPrefix("\(twin.path) repeats the id or the path"), problems[1])
+        XCTAssertEqual(try Data(contentsOf: bad), Data(#"{"id":"bad","path":7}"#.utf8), "the file is left for the user")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: twin.path))
+    }
+
+    func testTheImportLeavesTheWorktreeCheckoutFoldersUntouched() throws {
+        let checkout = paths.worktrees.appendingPathComponent("app/fix")
+        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        try Data("work".utf8).write(to: checkout.appendingPathComponent("notes.json"))
+        let named = paths.worktrees.appendingPathComponent("odd.json", isDirectory: true)
+        try FileManager.default.createDirectory(at: named, withIntermediateDirectories: true)
+        _ = try seedWorktreeFile("one", worktreeFile(id: "one", path: checkout.path))
+        let (_, problems) = try open()
+        XCTAssertEqual(problems, [])
+        XCTAssertEqual(try Data(contentsOf: checkout.appendingPathComponent("notes.json")), Data("work".utf8))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: checkout.path), ["notes.json"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: named.path), "a folder named like a record file is a checkout")
+        XCTAssertEqual(try MuxifyWorktreeStore(paths: paths).all().map(\.id), ["one"])
+    }
+
+    func testASecondOpenImportsNoWorktreeRecord() throws {
+        _ = try seedWorktreeFile("one", worktreeFile(id: "one", path: "/src/trees/one"))
+        _ = try open()
+        try MuxifyWorktreeStore(paths: paths).remove("one")
+        let (_, problems) = try open()
+        XCTAssertEqual(problems, [])
+        XCTAssertEqual(try MuxifyWorktreeStore(paths: paths).all(), [], "the second open did not read the old file again")
+    }
 }

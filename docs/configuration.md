@@ -1415,7 +1415,11 @@ worktrees:
 
 `root_path` is absolute or starts with `~/`, the home of the Environment's machine.
 Muxify removes only a Worktree it remembers, so a Worktree that it did not make
-stays, also inside `root_path`.
+stays, also inside `root_path`. It remembers each one in a row of the `worktrees` table
+of its state database on this Mac, `$XDG_STATE_HOME/muxify/muxify.db`, which also
+holds the records of the Worktrees on its Remote Environments. An older Muxify kept one `worktrees/<id>.json` file per Worktree; the
+first run after the update imports each file and renames it `<id>.json.migrated`.
+The Worktrees' folders stay where they are.
 
 A project sets up its new Worktrees in `.worktree.json`, in the checkout the Worktree
 starts from or in the main working tree. It is JSON with comments and trailing commas:

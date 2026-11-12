@@ -139,13 +139,13 @@ extension EnvironmentService {
                 try? CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", PaneCommandLines.script]))
             }
             return Planned(edit: TopicSettlePlan(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, choices: choices, outcome: outcome,
-                                                 mergedWorktrees: TopicWorktrees.merged(in: topic, root: paths.worktrees.path),
+                                                 mergedWorktrees: TopicWorktrees.merged(in: topic, paths: paths),
                                                  order: topics.sessionOrder).edit)
         case .forget(let choices, let worktrees):
             let topic = try forgetTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             try checkMembership(request.expectedSessionIDs, choices: choices, topic: topic, snapshot: snapshot)
             return Planned(edit: TopicForgetPlan(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, choices: choices,
-                                                  worktrees: worktrees, root: paths.worktrees.path).edit)
+                                                  worktrees: worktrees, paths: paths).edit)
         case .move(let destination):
             if case .newWindow(let title) = destination {
                 if case .session = request.target { throw TopicRequestError.noTarget }

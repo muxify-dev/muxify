@@ -21,8 +21,8 @@ struct TmuxMade: Equatable {
 /// Runs a plan's commands on one tmux server, and finds the Pane or Window that a request or a plan names.
 struct TopicExecutor {
     let server: any TmuxRunning
-    /// Muxify's worktrees folder in the service's state folder. Settle removes a Worktree only inside it.
-    let worktreesRoot: String
+    /// The service's state folder. Settle removes a Worktree only inside its worktrees folder, or one its records name.
+    let paths: MuxifyPaths
 
     /// `client` is the tmux client that types the keys of `sendKeys` commands. A Session that a failed run
     /// reopened is killed again, so a failed Reopen leaves no half of the Topic behind. Returns what the plan's
@@ -45,13 +45,13 @@ struct TopicExecutor {
                     let snapshot = try server.snapshot()
                     guard snapshot.serverRunning else { throw TmuxError.notReady }
                     try preDelete(worktree)
-                    try TopicWorktrees.removeClean(worktree, root: worktreesRoot, windows: snapshot.windows, panes: snapshot.panes)
+                    try TopicWorktrees.removeClean(worktree, paths: paths, windows: snapshot.windows, panes: snapshot.panes)
                     try forgetRecord(of: worktree)
                 case .removeMergedWorktree(let worktree):
                     let snapshot = try server.snapshot()
                     guard snapshot.serverRunning else { throw TmuxError.notReady }
                     try preDelete(worktree)
-                    try TopicWorktrees.removeMerged(worktree, root: worktreesRoot, windows: snapshot.windows, panes: snapshot.panes)
+                    try TopicWorktrees.removeMerged(worktree, paths: paths, windows: snapshot.windows, panes: snapshot.panes)
                     try forgetRecord(of: worktree)
                 case .reopenSession(let name, let directory, let windowName):
                     let session = try TmuxMade(output: server.run(["new-session", "-d", "-P", "-F", TmuxMade.format, "-s", name, "-c", directory,
@@ -89,7 +89,7 @@ struct TopicExecutor {
 
     /// Topics are local, so their Worktree scripts run on this Mac.
     private var worktrees: MuxifyWorktrees { MuxifyWorktrees(scripts: LocalScripts()) }
-    private var records: MuxifyWorktreeStore { MuxifyWorktreeStore(folder: URL(fileURLWithPath: worktreesRoot)) }
+    private var records: MuxifyWorktreeStore { MuxifyWorktreeStore(paths: paths) }
 
     /// A Worktree that Reopen made again is a new folder: it gets its sync again, and the command that runs its
     /// postCreate hooks (ADR 0062). Its record stays.

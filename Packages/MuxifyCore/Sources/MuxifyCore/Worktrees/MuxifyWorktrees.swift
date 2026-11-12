@@ -275,6 +275,8 @@ public enum MuxifyWorktreeError: Error, Equatable, CustomStringConvertible {
     case inUse(path: String, sessions: [String])
     case hasChanges(String)
     case nameInvalid(String)
+    /// A record already names this path, so a second one was not written.
+    case pathTaken(String)
 
     public var description: String {
         switch self {
@@ -293,6 +295,7 @@ public enum MuxifyWorktreeError: Error, Equatable, CustomStringConvertible {
         case .hasChanges(let path):
             return "The Worktree \(path) has uncommitted changes or untracked files. --force removes it anyway."
         case .nameInvalid(let name): return "\(name) cannot name a Worktree: it is empty, starts with a dash or a dot, or has a space or a control character."
+        case .pathTaken(let path): return "A Muxify Worktree record already names \(path), so Muxify did not write a second one."
         }
     }
 }
