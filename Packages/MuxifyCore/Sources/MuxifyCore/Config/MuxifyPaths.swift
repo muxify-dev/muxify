@@ -19,6 +19,8 @@ public struct MuxifyPaths: Equatable, Sendable {
         }
     }
 
+    /// The state database (`StateDatabase`): one SQLite file that every Muxify process on this machine shares.
+    public var stateDatabase: URL { state.appendingPathComponent("muxify.db") }
     /// Every Topic record and the Open Places, in one file. A write replaces it with one rename.
     public var topicRecords: URL { state.appendingPathComponent("topics.json") }
     /// Where an older Muxify kept one file for each Topic. The first write after the update moves them into

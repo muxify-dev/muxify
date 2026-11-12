@@ -349,6 +349,7 @@ public struct EnvironmentService: Sendable {
             }
         case is TopicTransaction.Failure: return .topicUnavailable
         case is FileLock.Busy: return .storeBusy
+        case let error as SQLiteError where error.isBusy: return .storeBusy
         case is TmuxError: return .tmuxFailed
         case is ShellError: return .gitFailed
         default: return .storeFailed
