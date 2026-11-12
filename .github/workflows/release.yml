@@ -55,6 +55,18 @@ jobs:
           path: build/SourcePackages
           key: swift-packages-macos-26-arm64-${{ hashFiles('project.yml', 'Package.resolved', 'Packages/MuxifyCore/Package.resolved') }}
 
+      # Xcode's compilation cache, which the Test Muxify step turns on through XCODEBUILD_EXTRA_SETTINGS. Measured on
+      # 2026-11-12 in a scratch DerivedData, with the cache kept from a clean build and one app source touched, the
+      # Debug build-for-testing took 11 s against 36 s with caching off; the store was about 570 MB. The key ends in
+      # the run id, so every run saves a fresh copy and restores the newest. Debug and Release share nothing, so
+      # package keeps its own.
+      - name: Cache the Debug build-for-testing compilation cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/CompilationCache.noindex
+          key: compilation-cache-debug-macos-26-arm64-xcode-26.6-${{ github.run_id }}
+          restore-keys: compilation-cache-debug-macos-26-arm64-xcode-26.6-
+
       - name: Test release tooling
         run: python3 -m unittest discover -s Tests/ReleaseTests -v
 
@@ -69,6 +81,7 @@ jobs:
           NSUnbufferedIO: 'YES'
           # A test that needs tmux fails here when tmux is missing, and does not skip.
           MUXIFY_REQUIRE_TMUX: '1'
+          XCODEBUILD_EXTRA_SETTINGS: COMPILATION_CACHE_ENABLE_CACHING=YES
         run: make test
 
   # Starts with test, not after it, and publishes nothing: the publish jobs need both.
@@ -129,6 +142,18 @@ jobs:
         with:
           path: build/SourcePackages
           key: swift-packages-macos-26-arm64-${{ hashFiles('project.yml', 'Package.resolved', 'Packages/MuxifyCore/Package.resolved') }}
+
+      # Xcode's compilation cache, which the Package step turns on through XCODEBUILD_EXTRA_SETTINGS. Measured on
+      # 2026-11-12 in a scratch DerivedData, with the cache kept from a clean build and one app source touched, the
+      # Release build took 11 s against 93 s with caching off; the store was about 570 MB. The key ends in the run
+      # id, so every run saves a fresh copy and restores the newest. Debug and Release share nothing, so test keeps
+      # its own.
+      - name: Cache the Release compilation cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/CompilationCache.noindex
+          key: compilation-cache-release-macos-26-arm64-xcode-26.6-${{ github.run_id }}
+          restore-keys: compilation-cache-release-macos-26-arm64-xcode-26.6-
 
       # sign_update, generate_keys and sparkle.app, which make sparkle vendors. sparkle.app is built with the runner's
       # Xcode, so the runner and Xcode are in the key. On a hit the setup script's stamp check skips the download and
@@ -201,6 +226,7 @@ jobs:
       - name: Package the Tip Build or Release
         env:
           MUXIFY_RELEASE_IDENTITY: Muxify Release Signing
+          XCODEBUILD_EXTRA_SETTINGS: COMPILATION_CACHE_ENABLE_CACHING=YES
         run: ./scripts/package-release.sh "$PACKAGE_TAG"
 
       # sign_update needs macOS, so the feed is written here and the Linux publish jobs only upload it.

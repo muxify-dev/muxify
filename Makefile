@@ -12,6 +12,9 @@ MUXIFY_DEVELOPMENT_TEAM ?=
 # two variants of each module in build/ and fails with "unexpected variant
 # during dependency scanning". A fixed length makes the hash the same.
 XCODEBUILD_SETTINGS := diagnostic_message_length=0
+# More settings for the xcodebuild of make build and make test, empty unless the caller names some. CI turns on
+# Xcode's compilation cache with it.
+XCODEBUILD_EXTRA_SETTINGS ?=
 
 .PHONY: all setup tools project build test test-linux test-live-linux test-release test-update sparkle release-secrets verify verify-gate run install release host-cli host-cli-linux host-cli-darwin clean
 
@@ -35,13 +38,13 @@ project: setup
 
 build: project
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
-		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
+		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) $(XCODEBUILD_EXTRA_SETTINGS) -quiet CODE_SIGN_IDENTITY="$(MUXIFY_SIGN_IDENTITY)" DEVELOPMENT_TEAM="$(MUXIFY_DEVELOPMENT_TEAM)" build
 
 test: project
 	./scripts/check-folder-paths.sh
 	# xcodebuild gives a test only the variables named TEST_RUNNER_<name>, as <name>.
 	TEST_RUNNER_MUXIFY_REQUIRE_TMUX="$$MUXIFY_REQUIRE_TMUX" xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
-		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) test
+		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) $(XCODEBUILD_EXTRA_SETTINGS) test
 
 # swift test for the CLI and MuxifyCore on Linux, in Docker (OrbStack on a Mac) with the Swift image of make host-cli,
 # tmux and git, and MUXIFY_REQUIRE_TMUX=1. TEST_LINUX_PLATFORM=linux/amd64 picks another architecture than the host's.

@@ -80,11 +80,15 @@ if not Path("vendor/ghostty/notices/Ghostty.txt").is_file():
     sys.exit("Ghostty dependency notices are missing; rerun ./scripts/setup-ghostty.sh.")
 PY
 
+# More settings for xcodebuild, split on spaces and empty unless the caller names some. CI turns on Xcode's
+# compilation cache with it.
+read -r -a EXTRA_SETTINGS <<< "${XCODEBUILD_EXTRA_SETTINGS:-}"
 xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Release -destination "platform=macOS,arch=arm64" \
   -derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages \
   diagnostic_message_length=0 \
   MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual ENABLE_HARDENED_RUNTIME=NO \
+  ${EXTRA_SETTINGS[@]+"${EXTRA_SETTINGS[@]}"} \
   -quiet build
 
 BUILT_APP="$ROOT/build/Build/Products/Release/Muxify.app"
