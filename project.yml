@@ -15,8 +15,8 @@ packages:
     path: Packages/MuxifyCore
   MuxifyCLI:
     path: .
-  # Updates Muxify.app (docs/adr/0077-an-update-shows-in-the-header-not-in-the-palette.md). The version that
-  # scripts/sparkle-version.env pins, whose tools sign the feeds.
+  # Updates Muxify.app (docs/adr/0078-muxify-updates-itself-with-sparkle-from-feeds-in-a-github-release.md).
+  # The version that scripts/sparkle-version.env pins, whose tools sign the feeds.
   Sparkle:
     url: https://github.com/sparkle-project/Sparkle
     exactVersion: 2.10.1

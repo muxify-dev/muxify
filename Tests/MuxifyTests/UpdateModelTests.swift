@@ -367,7 +367,6 @@ import MuxifyCore
         model.apply(Config.Update())
         XCTAssertEqual(backgroundChecks, 1)
         XCTAssertEqual(checks, 0)
-        XCTAssertTrue(model.checksInBackground)
         XCTAssertEqual(logged, ["update: background checks on, every 24 hours, stable channel",
                                 "update: background check, stable channel"])
         // Sparkle's scheduled driver never says it is checking; the button stays hidden.
@@ -436,7 +435,6 @@ import MuxifyCore
         XCTAssertEqual(model.state, .idle)
         XCTAssertEqual(logged.last, "update: background check failed: An error occurred in retrieving update information."
                        + " (SUSparkleErrorDomain 2001)")
-        XCTAssertFalse(model.checksInBackground)
         // The driver's not-found and error calls in a background check are acknowledged at once, never shown.
         clock += 24 * 60 * 60
         model.backgroundCheckIfDue()
@@ -497,8 +495,10 @@ import MuxifyCore
         let busy = backgroundModel(starts: false)
         busy.apply(Config.Update())
         XCTAssertEqual(backgroundChecks, 1)
-        XCTAssertFalse(busy.checksInBackground)
         XCTAssertEqual(logged.last, "update: no background check, a check is running")
+        // The background check that did not start leaves the next check to show every state.
+        busy.checking()
+        XCTAssertEqual(busy.buttonText, "Checking for Updates…")
     }
 
     func testAConfigReloadTurnsBackgroundChecksOffAndOn() {

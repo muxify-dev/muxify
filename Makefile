@@ -56,8 +56,8 @@ test-live-linux:
 test-release:
 	python3 -m unittest discover -s Tests/ReleaseTests -v
 
-# Fetches the Sparkle 2 tools that scripts/sparkle-version.env pins into vendor/sparkle: sign_update,
-# generate_keys and sparkle-cli, built from the release's source.
+# Fetches the Sparkle 2 tools that scripts/sparkle-version.env pins into vendor/sparkle: sign_update and
+# generate_keys from the release's archive, and sparkle-cli, built from the release's source.
 sparkle:
 	./scripts/setup-sparkle.sh
 

@@ -37,7 +37,7 @@ enum UpdateChoice: Equatable {
 /// Where the updater checks: `MUXIFY_UPDATE_FEED_URL`, which a verify suite sets in any build, or the Update
 /// Channel's feed under the feed base URL that packaging stamps into a Release's or a Tip Build's Info.plist. Nil
 /// without either: a Debug or `make install` build has no updater
-/// (docs/adr/0077-an-update-shows-in-the-header-not-in-the-palette.md).
+/// (docs/adr/0078-muxify-updates-itself-with-sparkle-from-feeds-in-a-github-release.md).
 enum UpdateFeed: Equatable, CustomStringConvertible {
     /// `MUXIFY_UPDATE_FEED_URL`, whatever the channel.
     case fixed(URL)
@@ -113,7 +113,7 @@ final class UpdateModel {
     @ObservationIgnored private var settings: Config.Update?
     @ObservationIgnored private var lastBackgroundCheck: Date?
     /// A background check is running and has shown nothing yet: its result goes only to the Diagnostics log.
-    @ObservationIgnored private(set) var checksInBackground = false
+    @ObservationIgnored private var checksInBackground = false
     @ObservationIgnored private var schedule: Timer?
     @ObservationIgnored private var reply: ((UpdateChoice) -> Void)?
     @ObservationIgnored private var acknowledge: (() -> Void)?
