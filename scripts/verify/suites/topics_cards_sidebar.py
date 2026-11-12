@@ -38,32 +38,21 @@ class TopicsCardsSidebar(TopicsSidebar):
     def client_windows(self):
         return self.s.tmux('list-clients', '-F', '#{window_id}').split()
 
-    def test_new_topics_go_below_locked_sessions_by_default(self):
-        self.write_topic('insert-existing', 'Existing', self.beta, order=0)
-        sid = self.new_session('insert-lock', self.beta)
-        self.s.tmux('set-option', '-t', sid, '@muxify_lock', '2')
-        self.find('locked-' + sid)
-        record = self.create_topic('Inserted below Lock')
-        key = 'topic-' + record['id']
-        rs = self.s.wait_rows(lambda rs: self.s.has(key, rs) and self.s.has('locked-' + sid, rs)
-                             and frame(self.s.row('locked-' + sid, rs))[1] > frame(self.s.row(key, rs))[1],
-                             'the new Topic is not below the Locked Session')
-        self.assertGreater(record['order'], 2)
-        self.assertGreater(frame(self.s.row('locked-' + sid, rs))[1], frame(self.s.row(key, rs))[1])
-
-    def test_top_config_puts_a_new_topic_below_pinned_topics(self):
+    def test_a_new_topic_takes_the_next_in_play_place_above_a_guest_session(self):
         self.write_topic('insert-pin', 'Pinned', self.beta, order=0, pinned=True)
-        self.write_topic('insert-top', 'Existing', self.beta, order=0)
-        self.addCleanup(self.s.act, 'press', 'Reload Config')
-        self.addCleanup(self.config.write_text, self.config_text)
-        self.config.write_text(self.config_text + 'topics:\n  insert_position: top\n')
-        self.s.act('press', 'Reload Config')
-        record = self.create_topic('Inserted at top')
+        self.write_topic('insert-existing', 'Existing', self.beta, order=0)
+        sid = self.new_session('insert-guest', self.beta)
+        self.s.tmux('set-option', '-t', sid, '@muxify_lock', '2')
+        guest = 'locked-' + sid
+        self.find(guest)
+        record = self.create_topic('Inserted after the place')
         key = 'topic-' + record['id']
-        expected = ['topic-insert-pin', key, 'topic-insert-top']
-        rs = self.s.wait_rows(lambda rs: [row for row in self.topic_rows(rs) if row in expected] == expected,
-                             'the new Topic is not first below the Pinned Topics')
-        self.assertEqual([row for row in self.topic_rows(rs) if row in expected], expected)
+        expected = ['topic-insert-pin', 'topic-insert-existing', key, guest]
+        def shown(rs):
+            return [row for row in self.s.ids(rs) if row in expected]
+        rs = self.s.wait_rows(lambda rs: shown(rs) == expected,
+                              lambda: 'the new Topic is not after the last In Play place and above the Guest Session: %s' % shown(self.s.rows()))
+        self.assertLess(record['order'], 2, 'the new Topic has no order before the Guest Session: %s' % record)
 
     def test_window_moved_to_topic_keeps_its_panes_agent_and_browser(self):
         s = self.s

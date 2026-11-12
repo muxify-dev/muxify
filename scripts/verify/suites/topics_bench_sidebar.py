@@ -28,7 +28,6 @@ class TopicsBenchSidebar(TopicsSidebar):
         self.addCleanup(self.config.write_text, self.config_text)
         # An Open Place that a check leaves would take the In Play place of the next check.
         self.addCleanup(self.store.set_open_places, [])
-        self.config.write_text(self.config_text + 'topics:\n  in_play: %d\n' % in_play)
         windows = {}
         for order, name in enumerate(['a', 'b', 'c']):
             topic = '%s-%s' % (prefix, name)
@@ -38,9 +37,15 @@ class TopicsBenchSidebar(TopicsSidebar):
         for order in range(3, 3 + dormant):
             topic = '%s-t%02d' % (prefix, order)
             self.write_topic(topic, topic.capitalize(), self.beta, order=order)
+        # Without an in_play line the Config gives 5 places, so each of the three cards shows when the app has read its
+        # record. A cut of a list that the app has read only in part would put a card in the wrong section.
+        cards = ['topic-%s-%s' % (prefix, name) for name in 'abc']
+        self.s.wait_rows(lambda rs: all(self.s.has(card, rs) for card in cards),
+                         lambda: 'the Sidebar does not show %s: %s' % (cards, self.s.ids()))
+        self.config.write_text(self.config_text + 'topics:\n  in_play: %d\n' % in_play)
         # The app reads the Config a moment after the write. Until then the last check's in_play still cuts the list,
         # and an Action on a card acts on the wrong cut.
-        expected = ['topic-%s-%s' % (prefix, name) for name in 'abc'][:in_play]
+        expected = cards[:in_play]
         def in_play_cards(rs):
             ids = self.s.ids(rs)
             ids = ids[:ids.index(LINE)] if LINE in ids else ids
