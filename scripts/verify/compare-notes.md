@@ -208,12 +208,13 @@ press on its line, and the open card of the Location's Topic Gale, the last Benc
 hidden Bench: the list moved by the arithmetic of `BenchedLocationPlace`, which both versions call; and
 `bench-scrolled`, the list scrolled to its end, with Gale's header stuck right under the block while its rows, Elm
 and Fir scroll under the block. The gate passes in both: every card, the lines and the Open Place stand on the same
-frames, Gale too, so both versions moved the list by the same distance. Side by side the pictures look the same but
-for the pills. The difference picture marks:
+frames, Gale too, so both versions moved the list by the same distance. Side by side the pictures look the same. The
+difference picture marks:
 
-- The pills "N more above" and "N more below", which only the SwiftUI picture shows: the AppKit list draws them from
-  task 09. They stand outside `topics-list` in both versions, so the gate reads no row of them. Where the SwiftUI
-  pill covers the bottom of Fir under the block, the AppKit picture shows Fir's details line.
+- The pills "N more above" and "N more below", which the AppKit list draws from task 09: "2 more above" over Fir under
+  the block and "1 more below" in `bench`, "3 more above" in `bench-scrolled`. They stand outside `topics-list` in both
+  versions, so the gate reads no row of them; their rows in the two dumps are the same, with their labels and frames.
+  The pictures differ only at the ends of their capsules and in their shadows, as `topic-overflow` says.
 - The dashes of the Open Place's border, at their ends, by a fraction of a pixel after its first corner. Both borders
   start at the middle of the right edge and run the same way, but the AppKit border's corners are circular arcs
   (`CGPath(roundedRect:)`, as `DropSlotView` draws its dashed border), and SwiftUI's continuous corners are a little
@@ -223,3 +224,28 @@ for the pills. The difference picture marks:
 
 The scene turns card Hints off (`hints.cards`): the Open Place's Hint comes with task 14, and the AppKit Open Place
 keeps only its room for now.
+
+## topic-overflow
+
+Task 09 of the set `remove-swiftui`. Three shots of a Topics list longer than its view: `topic-overflow`, with
+`topics.in_play: 1`, the Bench shown and scrolled 300 points, with "5 more above" over the top of the Bench area and "9
+more below" over the bottom of the list, each over a card that it covers in part; `topic-overflow-slide`, the Bench
+scrolled 15 points, with the "more above" pill half come in from under the block; and `topic-overflow-end`, without In
+Play, the list 14 points from its end, with the "more below" pill gone 20 points down its band. The gate passes in all
+three. It reads no row of the pills, which stand outside `topics-list` in both versions, as SwiftUI's overlays do; in
+the two dumps their rows are the same: their roles, labels and frames. Side by side the pictures look the same. The
+difference picture marks:
+
+- The edges of the glyphs of the cards and of each pill's count, the many-coloured border of the Location's card and
+  "Settle", as in `topic-cards`. Each pill's arrow stands on the same pixels in both pictures.
+- The ends of each pill's capsule. SwiftUI's capsule has continuous corners (`Capsule(style: .continuous)`), a little
+  flatter at its ends than the circular capsule that the AppKit pill draws (`CGPath(roundedRect:)`, as the Open Place's
+  border in `bench`). Only the column of pixels at each end differs: SwiftUI's border tints it faintly along 11 points
+  of the capsule's height, the AppKit border along 5 points. AppKit has no public path of a continuous capsule. A
+  layer's continuous corners do not serve: the pill draws its capsule as a path so that the picture shows its shadow
+  (`CALayer.render(in:)`, which the driver's `snapshot` uses, draws no shadow of a layer without content), and a
+  layer's border with continuous corners was a pixel thicker near the ends than SwiftUI's `strokeBorder`, which
+  showed more than this.
+- The shadow under each pill, by one step of a colour part at most: one step stronger right under the capsule, and one
+  step weaker right over it. The AppKit pill draws it with Core Graphics, outside the capsule only, as SwiftUI's shadow
+  of the composited pill shows.

@@ -24,6 +24,12 @@ both. The check of a press on a Locked card runs the same presses in both versio
 The check of an Open Place presses it in the same two ways. `topics_bench_sidebar` checks the Bench line, the Guests
 line and the block that sticks over the Bench against either list.
 
+The check of the glide to a hidden card counts the glides in the Diagnostics log, as `sidebar_pager_scroll` counts the
+Sessions list's: the AppKit list glides its clip view by the view's animator, which starts no NSAnimation, so each glide
+logs itself as one `animation #` line named `TopicsListGlide` (`NSScrollView.glide`, DisplayLinkProbe.swift). The check
+fails when it reads no such line, so a change that removes the probe must give it another way to count them.
+`topics_overflow_sidebar` and `topics_bench_sidebar` check where the glides end.
+
 The pager hides the page that its mode does not show from accessibility, so no dump has the Topics list while
 Sessions shows; the driver's `topics-list` still finds the AppKit list then, as the page that does not show. The check
 of a held swipe holds the Sidebar at 0.400 from Topics, where the Topics page has moved and shrunk, and keeps a
@@ -38,6 +44,7 @@ Run from the repo root after `make build`:
 import os
 import re
 import subprocess
+import time
 import unittest
 from unittest.mock import patch
 
@@ -221,6 +228,26 @@ class TopicsListSidebar(unittest.TestCase):
         self.s.show(window)
         self.wait_card('topic-' + topic, 'expanded', 'the card of the Topic %s did not open' % topic)
         return self.s.rows()
+
+    def in_play(self, more=''):
+        """Puts the first card In Play, with `topics.in_play: 1`, and `more` lines in the Config. With `topics.in_play`,
+        the app writes the order of the cards as the Sidebar shows them, the Guest first: the clean-up gives the Topics
+        and the Lock their orders of the fixture again."""
+        def restore():
+            self.store.set_open_places([])
+            self.config.write_text(CONFIG)
+            self.s.wait_rows(lambda rs: not self.s.has('topics-bench-line', rs), 'the Bench line stays')
+            orders = {topic: order for order, (topic, _) in enumerate(TOPICS)}
+            def reorder(data):
+                for record in data['records']:
+                    if isinstance(record, dict) and record.get('id') in orders:
+                        record['order'] = orders[record['id']]
+            self.store.change(reorder)
+            locked = self.keys[-1]
+            self.s.tmux('set-option', '-t', self.sessions[locked], '@muxify_lock', str(len(TOPICS)))
+            self.wait_cards()
+        self.addCleanup(restore)
+        self.config.write_text(CONFIG + 'topics:\n  in_play: 1\n' + more)
 
     def show_panes(self):
         def restore():
@@ -465,24 +492,10 @@ class TopicsListSidebar(unittest.TestCase):
         the SwiftUI list. A press and a first click on it start Fill Open Place, which offers the Benched Topics.
 
         With `topics.in_play`, the app writes the order of the cards as the Sidebar shows them, the Guest first: the
-        clean-up gives the Topics and the Lock their orders of the fixture again."""
-        def restore():
-            self.store.set_open_places([])
-            self.config.write_text(CONFIG)
-            self.s.wait_rows(lambda rs: not self.s.has('topics-bench-line', rs), 'the Bench line stays')
-            orders = {topic: order for order, (topic, _) in enumerate(TOPICS)}
-            def reorder(data):
-                for record in data['records']:
-                    if isinstance(record, dict) and record.get('id') in orders:
-                        record['order'] = orders[record['id']]
-            self.store.change(reorder)
-            locked = self.keys[-1]
-            self.s.tmux('set-option', '-t', self.sessions[locked], '@muxify_lock', str(len(TOPICS)))
-            self.wait_cards()
+        clean-up gives the Topics and the Lock their orders of the fixture again (`in_play`)."""
         self.show_list('appkit')
-        self.addCleanup(restore)
         self.store.set_open_places([dict(id='list-place', order=-1)])
-        self.config.write_text(CONFIG + 'topics:\n  in_play: 1\n')
+        self.in_play()
         def place(rs):
             ids = self.s.ids(rs)
             return 'open-place-1' in ids and 'topics-bench-line' in ids and ids.index('open-place-1') < ids.index('topics-bench-line')
@@ -499,6 +512,59 @@ class TopicsListSidebar(unittest.TestCase):
                                  lambda: 'a %s on the Open Place did not offer the Benched Topics: %s' % (command, breadcrumb(self.s.rows())))
                 self.s.act('action', 'palette-search', 'Close')
                 self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close')
+
+    def test_a_reveal_and_a_jump_to_glide_the_appkit_list_once_and_then_nothing_scrolls(self):
+        """With a shown Bench much longer than the list, a press on "N more below" glides the list to the first card it
+        counts, and a Jump To the last Benched card, out of view, glides the list to that card. Each starts one glide in
+        the Diagnostics log, and after it no scroll starts for two seconds."""
+        log = self.s.root/'logs/muxify.log'
+        read = lambda: log.read_text(errors='replace') if log.exists() else ''
+        animations = lambda: [line for line in read().splitlines() if ' animation #' in line]
+        glides = lambda: [line for line in animations() if ' TopicsListGlide ' in line]
+        def edges(key, rs):
+            x, y, width, height = rect(self.s.row(key, rs))
+            return -(y + height), -y
+
+        self.show_list('appkit')
+        for number in range(20):
+            filler = 'rest-filler-%02d' % number
+            self.store.put(dict(id=filler, title='Rest filler %02d' % number, slug=filler, order=10 + number))
+            self.addCleanup(self.store.remove, filler)
+        (_, (last,)), = self.topic_with('rest-last', [('one', ['main'])]).values()
+        start = len(read())
+        self.in_play('diagnostics:\n  enabled: true\n')
+        wait(lambda: 'pid %d' % self.s.pid in read()[start:], 'Diagnostics did not start after the Config turned it on', 10)
+        self.s.show(self.windows['topic-list-first'])
+        rs = self.s.wait_rows(lambda rs: self.s.row('topics-bench-line', rs).get('accessibilityLabel') in ('Bench', 'Hide Bench'),
+                              'with topics.in_play: 1, the list shows no Bench line')
+        if self.s.row('topics-bench-line', rs).get('accessibilityLabel') == 'Bench':
+            self.s.act('press', 'topics-bench-line')
+        card = 'topic-rest-last'
+        out_of_view = lambda rs: self.s.has(card, rs) and edges(card, rs)[0] > edges('topics-list', rs)[1]
+        self.s.wait_rows(lambda rs: out_of_view(rs) and self.s.has('topics-more-below', rs),
+                         'the shown Bench does not end below the list with %s, under a "more below" pill' % card)
+
+        def glides_once(action, what):
+            before = len(glides())
+            action()
+            wait(lambda: len(glides()) > before, '%s started no glide of the Topics list in the Diagnostics log' % what, 10)
+            # The glide takes 0.2 s. Wait past it, then count what starts after it.
+            time.sleep(0.5)
+            settled = len(animations())
+            time.sleep(2)
+            later = animations()[settled:]
+            self.assertEqual(len(later), 0, 'the list still starts scrolls 2 s after %s: %d in 2 s; the last: %s'
+                             % (what, len(later), later[-1:]))
+            started = glides()[before:]
+            self.assertEqual(len(started), 1, '%s glided the list %d times, not once: %s' % (what, len(started), started))
+
+        glides_once(lambda: self.s.act('press', 'topics-more-below'), 'a press on "N more below"')
+        self.s.wait_rows(out_of_view, 'the press on "N more below" brought %s into view' % card)
+        glides_once(lambda: self.s.show(last), 'a Jump To %s' % card)
+        list_top, list_bottom = edges('topics-list', self.s.rows())
+        top, bottom = edges(card, self.s.rows())
+        self.assertTrue(list_top < top < list_bottom, 'after the Jump To, %s is not in view: %s, the list %s'
+                        % (card, (top, bottom), (list_top, list_bottom)))
 
     def test_a_topic_that_comes_or_goes_changes_the_cards_of_the_appkit_list(self):
         self.show_list('appkit')

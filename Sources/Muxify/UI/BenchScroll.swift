@@ -18,7 +18,7 @@ struct BenchGeometry: Equatable {
     var fontSize = InterfaceFontSize()
 
     /// The band at the top of the Bench area that the "more above" pill lies in while cards are above the area.
-    var indicatorHeight: CGFloat { EdgePill.height(fontSize) }
+    var indicatorHeight: CGFloat { EdgePillMetrics.height(fontSize) }
 
     /// The least Bench area at 12. It holds Benched cards, so it grows with the Interface font size.
     static let designLeastAreaHeight: CGFloat = 96

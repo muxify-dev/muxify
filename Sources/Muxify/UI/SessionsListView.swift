@@ -91,15 +91,7 @@ final class SessionsListView: NSView, SidebarList {
         guard clip.bounds.height > 0, let y = SessionsListScroll.offset(
             showing: card.frame.minY, to: card.frame.maxY, from: clip.bounds.minY, height: clip.bounds.height,
             end: document.frame.height - clip.bounds.height) else { return }
-        let from = clip.bounds.origin, to = NSPoint(x: from.x, y: y)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = SessionsListScroll.glideDuration
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            clip.animator().setBoundsOrigin(to)
-        }
-        scrollView.reflectScrolledClipView(clip)
-        // The animator starts no NSAnimation, so Diagnostics counts the glide from here (the `sidebar_pager_scroll` suite).
-        DisplayLinkProbe.didStart(glide: "SessionsListGlide", in: window, duration: SessionsListScroll.glideDuration, from: from, to: to)
+        scrollView.glide(to: y, duration: SessionsListScroll.glideDuration, timing: .easeOut, name: "SessionsListGlide")
     }
 
     /// The list scrolled: by the user, by a glide, or because its content got shorter than the offset it had.

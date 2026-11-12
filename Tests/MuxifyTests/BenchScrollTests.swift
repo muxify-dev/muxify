@@ -16,7 +16,7 @@ final class BenchScrollTests: XCTestCase {
     /// geometry follows them (ADR 0063, ADR 0068).
     func testAtALargerInterfaceFontSizeThePillsBandAndTheLeastBenchAreaGrowByTheFactor() {
         let size = InterfaceFontSize(18)
-        XCTAssertEqual(EdgePill.height(size), 45)
+        XCTAssertEqual(EdgePillMetrics.height(size), 45)
         let tall = BenchGeometry(topHeight: 700, viewportHeight: 600, fontSize: size)
         XCTAssertEqual(tall.indicatorHeight, 45, "the band of the \"more above\" pill is the scaled pill")
         XCTAssertEqual(tall.leastAreaHeight, 144)
@@ -124,6 +124,43 @@ final class BenchScrollTests: XCTestCase {
         XCTAssertEqual(place(500, 560), EdgePlace(isBelow: true, isOutOfView: true, isOverBottomIndicator: true))
         XCTAssertEqual(place(60, 560), EdgePlace(isAbove: true, isBelow: true, isUnderIndicator: true, isOverBottomIndicator: true),
                        "a card taller than the area counts both ways")
+    }
+
+    /// The pills of both versions of the list count through `TopicsListScroll`.
+    func testEachPillCountsTheCardsInItsBandOnlyWhileACardIsPastItsEdge() {
+        let (a, b, c) = (TopicGroupID.topic("a"), TopicGroupID.topic("b"), TopicGroupID.topic("c"))
+        func place(_ top: CGFloat, _ bottom: CGFloat) -> EdgePlace {
+            EdgePlace(top: top, bottom: bottom, visibleTop: 100, visibleBottom: 500, indicatorHeight: 30)
+        }
+        let below = [a: place(120, 300), b: place(310, 480), c: place(490, 600)]
+        XCTAssertEqual(TopicsListScroll.moreBelow([a, b, c], places: below), [b, c],
+                       "with c below the edge, the pill also counts b, whose bottom it covers")
+        XCTAssertEqual(TopicsListScroll.moreBelow([a, b], places: below), [], "a card in the band alone shows no pill")
+        let above = [a: place(60, 140), b: place(120, 300), c: place(310, 480)]
+        XCTAssertEqual(TopicsListScroll.moreAbove([a, b, c], places: above), [a, b],
+                       "with a above the edge, the pill also counts b, whose top it covers")
+        XCTAssertEqual(TopicsListScroll.moreAbove([b, c], places: above), [], "a card in the band alone shows no pill")
+    }
+
+    /// A card whose top is `top` below the first item stands at `top + inset - offset` in the viewport.
+    func testARevealPutsABenchedCardUnderTheLineOrThePillAndAnyOtherCardAtTheTop() {
+        func revealed(isBenched: Bool, hasCardsAbove: Bool) -> CGFloat {
+            900 + short.inset - TopicsListScroll.revealOffset(cardTop: 900, isBenched: isBenched, hasCardsAbove: hasCardsAbove,
+                                                              geometry: short)
+        }
+        XCTAssertEqual(revealed(isBenched: true, hasCardsAbove: false), short.areaTop + short.spacing)
+        XCTAssertEqual(revealed(isBenched: true, hasCardsAbove: true), short.areaTop + short.indicatorHeight + short.spacing)
+        XCTAssertEqual(revealed(isBenched: false, hasCardsAbove: false), 0, "a card that is not Benched goes to the top")
+    }
+
+    func testAJumpToScrollsOnlyToABenchedCardOutOfView() {
+        let card = TopicGroupID.topic("a")
+        let out = EdgePlace(top: 600, bottom: 640, visibleTop: 100, visibleBottom: 500, indicatorHeight: 30)
+        let partly = EdgePlace(top: 480, bottom: 520, visibleTop: 100, visibleBottom: 500, indicatorHeight: 30)
+        XCTAssertTrue(TopicsListScroll.revealsLocation(card, isBenched: true, places: [card: out]))
+        XCTAssertFalse(TopicsListScroll.revealsLocation(card, isBenched: true, places: [card: partly]), "a card partly in view stays")
+        XCTAssertFalse(TopicsListScroll.revealsLocation(card, isBenched: false, places: [card: out]), "a card In Play stays")
+        XCTAssertFalse(TopicsListScroll.revealsLocation(card, isBenched: true, places: [:]), "a card the list did not show stays")
     }
 
     func testThePointerScrollsOnlyAfterItRestsInTheBand() {

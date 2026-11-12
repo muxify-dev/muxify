@@ -68,7 +68,7 @@ CHIP_PADDING = 1 + 1
 CHIP_SIDES = 5 + 5
 # The room between the items of the Topics list (`TopicsSection.contentSpacing` in Sources/Muxify/UI/SidebarView.swift).
 SPACING = 6
-# The band of the "more above" pill at 12 (`EdgePill.designHeight` in Sources/Muxify/UI/TopicsListEdge.swift).
+# The band of the "more above" pill at 12 (`EdgePillMetrics.designHeight` in Sources/Muxify/UI/TopicsListMetrics.swift).
 PILL = 30
 LINE = 'topics-bench-line'
 # A frame is rounded to the display's pixels, so each height can be off by up to a point.

@@ -486,6 +486,69 @@ class Bench:
                   % [f(view, key, s.rows()) for f, key in ((bottom_of, self.LINE), (top_of, 'card-topic-gale'), (top_of, 'topic-gale'))])
 
 
+class TopicOverflow:
+    name = 'topic-overflow'
+    shows = ('A Topics list longer than its view. With `topics.in_play: 1`, the Bench shown and scrolled to its middle, '
+             'with the "N more above" pill over the top of the Bench area and the "N more below" pill over the bottom of '
+             'the list, each over the card it counts and covers; then the Bench scrolled 15 points, with the "more '
+             'above" pill half come in from under the block; last, without In Play, the list scrolled to 14 points '
+             'from its end, with the "more below" pill gone two thirds out with the end of the list.')
+
+    LINE = 'topics-bench-line'
+    COUNT = 24
+
+    def fixture(self, s):
+        self.session, self.windows = topic(s, 'atlas', 'Atlas', order=0)
+        records = TopicRecords(s.root/'state/muxify')
+        for order in range(1, self.COUNT + 1):
+            records.put(dict(id='more-%02d' % order, title='More %02d' % order, slug='more-%02d' % order, order=order))
+
+    def shots(self):
+        return [('topic-overflow', self.middle), ('topic-overflow-slide', self.slide), ('topic-overflow-end', self.end)]
+
+    def pills(self, view, above, below):
+        """Waits until the "more above" pill shows or not, as `above` says, and the "more below" pill too."""
+        s = view.s
+        shown = lambda rs: (s.has('topics-more-above', rs), s.has('topics-more-below', rs))
+        view.wait(lambda rs: shown(rs) == (above, below),
+                  lambda: 'the list shows the pills (more above, more below) %s, not %s' % (shown(s.rows()), (above, below)))
+
+    def middle(self, view):
+        s = view.s
+        view.launch(config(more='topics:\n  in_play: 1\n'))
+        view.go(self.windows[0])
+        fresh_shell(s, self.windows[0])
+        close_location(view, 'topic-atlas', ['topic-atlas'])
+        view.wait(lambda rs: s.row(self.LINE, rs).get('accessibilityLabel') in ('Bench', 'Hide Bench'), 'the list has no Bench line')
+        if s.row(self.LINE).get('accessibilityLabel') == 'Bench':
+            s.act('press', self.LINE)
+        view.wait(lambda rs: s.row(self.LINE, rs).get('accessibilityLabel') == 'Hide Bench' and s.has('topic-more-%02d' % self.COUNT, rs),
+                  'a press on the Bench line did not show the Bench')
+        view.rest()
+        # From the Bench's top, 300 points down: the Bench is longer than its area by far more.
+        s.act('scroll', 'topics-list', from_end=100000)
+        self.pills(view, above=False, below=True)
+        s.act('scroll', 'topics-list', by=300, steps=1)
+        self.pills(view, above=True, below=True)
+
+    def slide(self, view):
+        s = view.s
+        view.rest()
+        s.act('scroll', 'topics-list', from_end=100000)
+        self.pills(view, above=False, below=True)
+        s.act('scroll', 'topics-list', by=15, steps=1)
+        self.pills(view, above=True, below=True)
+
+    def end(self, view):
+        s = view.s
+        view.launch(config())
+        view.wait(lambda rs: not s.has(self.LINE, rs) and s.has('topic-more-%02d' % self.COUNT, rs),
+                  'without In Play, the list does not show every Topic with no Bench line')
+        view.rest()
+        s.act('scroll', 'topics-list', from_end=14)
+        self.pills(view, above=False, below=True)
+
+
 # The launch arguments of every scene of the Topics list: the Sidebar shows, with Topics.
 TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics']
 
@@ -493,5 +556,5 @@ TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWor
 AREAS = [
     Area(name='topics', title='Topics list', list='topics-list', default=TOPICS_LIST_DEFAULT, args=TOPICS_ARGS,
          shown=lambda s: s.topics_list(), scenes=[TopicCards(), LockedCards(), TopicOpen(), NoTopicCard(), TopicsStuckHeader(),
-                                                    TopicTags(), Bench()]),
+                                                    TopicTags(), Bench(), TopicOverflow()]),
 ]

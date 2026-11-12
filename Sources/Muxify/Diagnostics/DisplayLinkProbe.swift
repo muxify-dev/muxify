@@ -11,9 +11,11 @@ import ObjectiveC
 /// AppKit's private state, so remove it with another way for that suite to count. It numbers the animations
 /// from launch, so numbers go on after diagnostics is turned off and on.
 ///
-/// An animation of a view's animator starts no NSAnimation, so the hook does not see it. The AppKit Sessions list
-/// glides its clip view that way, and reports each glide to the probe with `didStart(glide:in:duration:from:to:)`,
-/// which logs it as another animation.
+/// An animation of a view's animator starts no NSAnimation, so the hook does not see it. The lists of the Sidebar
+/// glide their clip views that way (`NSScrollView.glide`), and each glide reports itself to the probe with
+/// `didStart(glide:in:duration:from:to:)`, which logs it as another animation: the Sessions list's glide to the
+/// Location's card, and the Topics list's glide to a card that a pill or a Jump To reveals, which the
+/// `topics_list_sidebar` suite counts.
 enum DisplayLinkProbe {
     private final class Tracked {
         let number: Int
@@ -108,8 +110,8 @@ enum DisplayLinkProbe {
         Diagnostics.write(line + " | " + Diagnostics.describe(window))
     }
 
-    /// Logs a scroll by a view's animator, such as the glide of the AppKit Sessions list to the Location's card, as
-    /// the hook logs an NSAnimation that starts: `name` names it, and `from` and `to` are the clip view's origins.
+    /// Logs a scroll by a view's animator, such as the glide of a Sidebar list to a card, as the hook logs an
+    /// NSAnimation that starts: `name` names it, and `from` and `to` are the clip view's origins.
     static func didStart(glide name: String, in window: NSWindow?, duration: TimeInterval, from: CGPoint, to: CGPoint) {
         guard sweepTimer != nil else { return }
         started += 1

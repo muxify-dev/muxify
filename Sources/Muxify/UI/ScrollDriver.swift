@@ -69,18 +69,11 @@ import SwiftUI
         }
     }
 
-    /// Glides the content to `offset` points from its top, within its scroll range, as a click on a pill does.
+    /// Glides the content to `offset` points from its top, within its scroll range, as a click on a pill does, with the
+    /// duration and curve of the AppKit Topics list's glide.
     func scroll(to offset: CGFloat) {
-        guard let scrollView, let document = scrollView.documentView else { return }
-        let clip = scrollView.contentView
-        let end = scrollView.scrollEnd
-        let y = min(max(0, offset), end)
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            clip.animator().setBoundsOrigin(NSPoint(x: clip.bounds.origin.x, y: document.isFlipped ? y : end - y))
-        }
-        scrollView.reflectScrolledClipView(clip)
+        scrollView?.glide(to: offset, duration: TopicsListScroll.revealDuration, timing: TopicsListScroll.revealTiming,
+                          name: "TopicsListGlide")
     }
 
     /// Moves the content `delta` points within its scroll range, and returns the part of `delta` it could not move.

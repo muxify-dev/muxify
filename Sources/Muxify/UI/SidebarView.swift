@@ -162,7 +162,7 @@ private struct TopicsSection: View {
             }
             .coordinateSpace(.named(Self.contentSpace))
             .background { ScrollDriverView(driver: driver) }
-            .onOverhangingBottomEdge(of: TopicCard.viewport, upTo: EdgePill.height(fontSize)) { scroll.listEnd = $0 }
+            .onOverhangingBottomEdge(of: TopicCard.viewport, upTo: EdgePillMetrics.height(fontSize)) { scroll.listEnd = $0 }
             // An In Play card that crosses a line opens the hidden Bench, so the user sees what it can trade with. When
             // it goes back above the line, the Bench hides again. A drop ends the drag in the phase handler below.
             .onChange(of: drag.isAcross) { _, across in
@@ -201,7 +201,8 @@ private struct TopicsSection: View {
         }
         .accessibilityIdentifier("topics-list")
         .onChange(of: model.activeTopic) { _, card in
-            guard let card, model.isBenched(card), scroll.places[card]?.isOutOfView == true else { return }
+            guard let card, TopicsListScroll.revealsLocation(card, isBenched: model.isBenched(card), places: scroll.places)
+            else { return }
             // On the next turn of the main queue, after the layout of the change that is in progress: the card
             // the user leaves can close then, and the block that sticks gets shorter with it.
             DispatchQueue.main.async { reveal(card) }
@@ -283,8 +284,8 @@ private struct TopicsSection: View {
     /// the cards before it are then above the area, and any other card at the top of the list.
     private func reveal(_ card: TopicGroupID) {
         guard let top = scroll.tops[card] else { return }
-        driver.scroll(to: model.isBenched(card) ? geometry.revealOffset(cardTop: top, hasCardsAbove: hasCardsAbove(card))
-                                                : top + Self.contentInset)
+        driver.scroll(to: TopicsListScroll.revealOffset(cardTop: top, isBenched: model.isBenched(card),
+                                                        hasCardsAbove: hasCardsAbove(card), geometry: geometry))
     }
 
     /// The No Topic Session the user opened, as the card Sessions mode shows. No Topic has no group row.
@@ -337,11 +338,7 @@ private struct MoreBelowPill: View {
     let reveal: (TopicGroupID) -> Void
 
     /// The cards under the pill, in list order.
-    private var hidden: [TopicGroupID] {
-        let cards = model.list.compactMap(\.cardID)
-        guard cards.contains(where: { scroll.places[$0]?.isBelow == true }) else { return [] }
-        return cards.filter { scroll.places[$0]?.isOverBottomIndicator == true }
-    }
+    private var hidden: [TopicGroupID] { TopicsListScroll.moreBelow(model.list.compactMap(\.cardID), places: scroll.places) }
 
     var body: some View {
         if let first = hidden.first {
@@ -364,11 +361,7 @@ private struct MoreAbovePill: View {
     let reveal: (TopicGroupID) -> Void
 
     /// The Benched cards under the pill, in list order.
-    private var hidden: [TopicGroupID] {
-        let bench = model.benchCardIDs
-        guard bench.contains(where: { scroll.places[$0]?.isAbove == true }) else { return [] }
-        return bench.filter { scroll.places[$0]?.isUnderIndicator == true }
-    }
+    private var hidden: [TopicGroupID] { TopicsListScroll.moreAbove(model.benchCardIDs, places: scroll.places) }
 
     var body: some View {
         if let last = hidden.last {
@@ -419,7 +412,7 @@ private struct TopicsListPart: ViewModifier {
             }
             .onGeometryChange(for: CGFloat?.self) { proxy in
                 guard isLastBenched, let visible = proxy.bounds(of: .named(TopicCard.viewport)) else { return nil }
-                return min(max(0, proxy.size.height - visible.maxY), EdgePill.height(geometry.fontSize))
+                return min(max(0, proxy.size.height - visible.maxY), EdgePillMetrics.height(geometry.fontSize))
             } action: { if let end = $0 { scroll.benchEnd = end } }
             .background {
                 if isTop {
@@ -457,7 +450,7 @@ private struct EdgeTracker: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onEdgePlace(of: TopicCard.viewport, visibleTop: scrollTopInset, indicatorHeight: EdgePill.height(fontSize)) {
+            .onEdgePlace(of: TopicCard.viewport, visibleTop: scrollTopInset, indicatorHeight: EdgePillMetrics.height(fontSize)) {
                 if scroll.places[id] != $0 { scroll.places[id] = $0 }
             }
             .onGeometryChange(for: CGFloat.self) { $0.frame(in: .named(TopicsSection.contentSpace)).minY } action: {

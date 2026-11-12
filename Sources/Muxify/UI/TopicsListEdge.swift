@@ -108,54 +108,45 @@ struct OpenPlaceCard: View {
 /// A pill over an edge of the Topics list that tells the user how many cards are past that edge: over the top of the
 /// Bench area for the cards above it, under the block that sticks, or over the bottom of the list for the cards below.
 /// A click scrolls the nearest hidden card into view. Near its edge it moves with the cards, so it slides in from under
-/// the block, or out under the last card, and does not come or go in one frame.
+/// the block, or out under the last card, and does not come or go in one frame. Its sizes are `EdgePillMetrics`, which
+/// the AppKit list's pill reads too.
 struct EdgePill: View {
-    enum Edge {
-        case top, bottom
-    }
+    typealias Edge = EdgePillMetrics.Edge
 
     let edge: Edge
     let count: Int
-    /// How far the pill has come in from its edge, which counts up to `height`: for the top, how far the Bench has
-    /// scrolled under the block; for the bottom, how far the end of the list is below the bottom edge.
+    /// How far the pill has come in from its edge, which counts up to its band's height: for the top, how far the Bench
+    /// has scrolled under the block; for the bottom, how far the end of the list is below the bottom edge.
     let slide: CGFloat
     let theme: TerminalTheme?
     let action: () -> Void
     @Environment(\.interfaceFontSize) private var fontSize
 
-    /// The band the pill lies in at 12: the pill and the room around it for its shadow. It holds the pill's text, so it
-    /// grows with the Interface font size; the Bench's geometry keeps a card it reveals under the band at that size.
-    static let designHeight: CGFloat = 30
-    /// The room around the pill for its shadow, which does not grow.
-    private static let margin: CGFloat = 4
-
-    static func height(_ size: InterfaceFontSize) -> CGFloat { size(designHeight) }
-
     var body: some View {
         let capsule = Capsule(style: .continuous)
-        let isTop = edge == .top
-        let height = Self.height(fontSize)
+        let height = EdgePillMetrics.height(fontSize)
         Button(action: action) {
-            HStack(spacing: 4) {
-                Image(systemName: isTop ? "arrow.up" : "arrow.down").font(fontSize.font(9, weight: .bold))
-                Text("\(count) more").font(fontSize.font(11, weight: .semibold)).lineLimit(1).fixedSize()
+            HStack(spacing: EdgePillMetrics.spacing) {
+                Image(systemName: EdgePillMetrics.symbol(edge)).font(fontSize.font(EdgePillMetrics.symbolFontSize, weight: .bold))
+                Text(EdgePillMetrics.text(count: count)).font(fontSize.font(EdgePillMetrics.fontSize, weight: .semibold))
+                    .lineLimit(1).fixedSize()
             }
             .foregroundStyle(.secondary)
-            .padding(.horizontal, 10).frame(height: height - 2 * Self.margin)
+            .padding(.horizontal, EdgePillMetrics.horizontalPadding).frame(height: height - 2 * EdgePillMetrics.margin)
             // The surface of an open card over the Sidebar's chrome, so the cards under it do not show through.
-            .background(Color.primary.opacity(0.08))
+            .background(Color.primary.opacity(EdgePillMetrics.fillOpacity))
             .chrome(theme: theme, material: .sidebar)
             .clipShape(capsule)
-            .overlay { capsule.strokeBorder(Color.primary.opacity(0.08), lineWidth: 1) }
+            .overlay { capsule.strokeBorder(Color.primary.opacity(EdgePillMetrics.borderOpacity), lineWidth: EdgePillMetrics.borderWidth) }
             .compositingGroup()
-            .shadow(color: .black.opacity(0.22), radius: 4, y: 1)
+            .shadow(color: .black.opacity(EdgePillMetrics.shadowOpacity), radius: EdgePillMetrics.shadowRadius, y: EdgePillMetrics.shadowDrop)
             .frame(maxWidth: .infinity).frame(height: height)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .offset(y: isTop ? min(slide, height) - height : height - min(slide, height))
+        .offset(y: EdgePillMetrics.offset(edge, slide: slide, height: height))
         .clipped()
-        .accessibilityLabel("\(count) more \(isTop ? "above" : "below")")
-        .accessibilityIdentifier(isTop ? "topics-more-above" : "topics-more-below")
+        .accessibilityLabel(EdgePillMetrics.label(edge, count: count))
+        .accessibilityIdentifier(EdgePillMetrics.identifier(edge))
     }
 }

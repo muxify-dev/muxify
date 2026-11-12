@@ -33,6 +33,11 @@ enum TopicsListVersion: String {
 /// chrome's background while the Benched cards scroll under it, and the header of an open Benched card sticks under the
 /// block, as `BenchGeometry` places them. When the Bench shows, the list moves its clip view so that the card of the
 /// Location stays where it stood (`BenchedLocationPlace`).
+///
+/// The "N more below" pill over the bottom of the list, and with a Bench line the "N more above" pill over the top of
+/// the Bench area, count the cards past their edges, as `TopicsListScroll` counts them from each card's `EdgePlace`. A
+/// press on a pill, and a Jump To a Benched card out of view, glides the list's clip view to the card
+/// (`TopicsListScroll.revealOffset`), which then comes to rest.
 final class TopicsListView: NSView, SidebarList {
     private let store: WorkspaceStore
     /// The values from the SwiftUI Sidebar. The list draws again when one changes.
@@ -58,6 +63,18 @@ final class TopicsListView: NSView, SidebarList {
     private var benchedLocation: (id: TopicGroupID, isBenchShown: Bool, hasCardsAbove: Bool)?
     /// Where the card of the Location stood on the Bench at the last layout or scroll; nil while it is not on the Bench.
     private var locationPlace: BenchedLocationPlace?
+    /// Where each card stands against the visible part of the list, at the last layout or scroll.
+    private var edgePlaces: [TopicGroupID: EdgePlace] = [:]
+    /// Each card's top below the top of the list's first item, at the last layout.
+    private var cardTops: [TopicGroupID: CGFloat] = [:]
+    /// The cards that each pill counts, in list order, at the last layout or scroll.
+    private var hiddenBelow: [TopicGroupID] = []
+    private var hiddenAbove: [TopicGroupID] = []
+    private let moreBelow = EdgePillView(edge: .bottom)
+    private let moreAbove = EdgePillView(edge: .top)
+    /// The card of the Location at the last update. When the Location moves to a Benched card out of view, the list
+    /// glides to it.
+    private var activeTopic: TopicGroupID?
     /// The card of the No Topic Session the user opened, by Session ID.
     private var noTopicCard: SessionCardView?
     /// The Open Places, by the ID of their records.
@@ -86,7 +103,15 @@ final class TopicsListView: NSView, SidebarList {
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.documentView = document
         scrollView.setAccessibilityIdentifier("topics-list")
-        addSubview(scrollView)
+        // Over the list, outside its scroll view, as SwiftUI's overlays: the pills are no rows of `topics-list`.
+        subviews = [scrollView, moreBelow, moreAbove]
+        for pill in [moreBelow, moreAbove] { pill.scrollView = scrollView }
+        moreBelow.onPress = { [weak self] in
+            if let card = self?.hiddenBelow.first { self?.reveal(card) }
+        }
+        moreAbove.onPress = { [weak self] in
+            if let card = self?.hiddenAbove.last { self?.reveal(card) }
+        }
         scrollView.contentView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(self, selector: #selector(clipDidMove), name: NSView.boundsDidChangeNotification,
                                                object: scrollView.contentView)
@@ -146,6 +171,11 @@ final class TopicsListView: NSView, SidebarList {
         let blockCount = parts.bench == nil ? nil : parts.top.count
         let location = model.benchedLocation.map { id in (id: id, isBenchShown: model.isBenchShown == true, hasCardsAbove: model.benchCardIDs.first != id) }
         let before = locationPlace
+        // Where the card stood before this change, as the SwiftUI list asks when the Location changes.
+        let jumpedTo = model.activeTopic.flatMap { card in
+            card != activeTopic && TopicsListScroll.revealsLocation(card, isBenched: model.isBenched(card), places: edgePlaces) ? card : nil
+        }
+        activeTopic = model.activeTopic
         let change = { [self] in
             benchedLocation = location
             for item in shown { item.show() }
@@ -167,6 +197,8 @@ final class TopicsListView: NSView, SidebarList {
         } else {
             change()
         }
+        // After the layout of the change, in which the card the user leaves closed and the block got shorter with it.
+        if let jumpedTo { reveal(jumpedTo) }
     }
 
     private func card(of id: TopicGroupID) -> TopicCardView {
@@ -315,6 +347,8 @@ final class TopicsListView: NSView, SidebarList {
             return NSRect(x: TopicsListMetrics.horizontalInset, y: top, width: width, height: height)
         }
         for (item, place) in zip(items, places) { item.frame = place }
+        cardTops = Dictionary(zip(items, places).compactMap { item, place in Self.cardID(of: item).map { ($0, place.minY - TopicsListMetrics.verticalInset) } },
+                              uniquingKeysWith: { first, _ in first })
         let blockBottom = blockCount.flatMap { $0 > 0 ? places[$0 - 1].maxY : nil } ?? TopicsListMetrics.verticalInset
         geometry = BenchGeometry(topHeight: blockBottom - TopicsListMetrics.verticalInset, viewportHeight: bounds.height,
                                  spacing: TopicsListMetrics.itemSpacing, inset: TopicsListMetrics.verticalInset,
@@ -361,6 +395,60 @@ final class TopicsListView: NSView, SidebarList {
         }
         backdrop.theme = environment.chromeTheme
         locationPlace = currentLocationPlace()
+        showPills(offset: offset)
+    }
+
+    /// The card that the item shows: a Topic card or a Locked card by its ID, the No Topic card as No Topic; nil for a
+    /// line or an Open Place.
+    private static func cardID(of item: NSView) -> TopicGroupID? {
+        switch item {
+        case let card as TopicCardView: card.cardID
+        case is SessionCardView: .noTopic
+        default: nil
+        }
+    }
+
+    /// The Benched cards, in list order: the cards after the block. Empty without a Bench line.
+    private var benchCards: [TopicGroupID] { blockCount.map { items.dropFirst($0).compactMap(Self.cardID(of:)) } ?? [] }
+
+    /// Keeps where each card stands against the visible part of the list at the scroll offset `offset`, from the
+    /// bottom of the block on the Bench and from the list's top elsewhere, and shows the pills that count the cards
+    /// past the edges, as the SwiftUI list's `MoreBelowPill` and `MoreAbovePill` do. The "more below" pill slides
+    /// out with the end of the list, or of the Bench; the "more above" pill slides in as the Bench scrolls under the
+    /// block.
+    private func showPills(offset: CGFloat) {
+        let viewport = scrollView.contentView.bounds.height, band = geometry.indicatorHeight
+        let blockItems = blockCount ?? 0
+        var places: [TopicGroupID: EdgePlace] = [:]
+        for (index, item) in items.enumerated() {
+            guard let id = Self.cardID(of: item) else { continue }
+            let top = item.frame.minY - offset
+            places[id] = EdgePlace(top: top, bottom: top + item.frame.height,
+                                   visibleTop: blockCount == nil || index < blockItems ? 0 : geometry.areaTop,
+                                   visibleBottom: viewport, indicatorHeight: band)
+        }
+        edgePlaces = places
+        hiddenBelow = TopicsListScroll.moreBelow(items.compactMap(Self.cardID(of:)), places: places)
+        hiddenAbove = blockCount == nil ? [] : TopicsListScroll.moreAbove(benchCards, places: places)
+        // With a Bench line, the end is the last Benched card's bottom, not the empty room after it.
+        let last = blockCount == nil ? items.last : items.count > blockItems ? items.last : nil
+        let end = last.map { min(max(0, $0.frame.maxY - offset - viewport), band) } ?? 0
+        moreBelow.frame = NSRect(x: 0, y: bounds.height - band, width: bounds.width, height: band)
+        moreBelow.show(count: hiddenBelow.count, slide: end, environment: environment)
+        moreAbove.frame = NSRect(x: 0, y: geometry.areaTop, width: bounds.width, height: band)
+        moreAbove.show(count: hiddenAbove.count, slide: geometry.stick(at: offset), environment: environment)
+    }
+
+    /// Glides the list to the card, as the SwiftUI list's `reveal` scrolls: a Benched card to directly under the line,
+    /// or under the "more above" pill when the Benched cards before it are then above the area, and any other card to
+    /// the top of the list. The glide has the SwiftUI list's duration and curve, and it stays inside the scroll range.
+    private func reveal(_ card: TopicGroupID) {
+        guard let top = cardTops[card] else { return }
+        let bench = benchCards
+        let offset = TopicsListScroll.revealOffset(cardTop: top, isBenched: bench.contains(card), hasCardsAbove: bench.first != card,
+                                                   geometry: geometry)
+        scrollView.glide(to: offset, duration: TopicsListScroll.revealDuration, timing: TopicsListScroll.revealTiming,
+                         name: "TopicsListGlide")
     }
 
     /// Where the card of the Location stands on the Bench now, in the viewport; nil while it is not on the Bench.
