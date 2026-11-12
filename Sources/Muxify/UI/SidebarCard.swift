@@ -429,13 +429,13 @@ struct CardList<Heading: View, Row: View>: View {
                         if index > 0 {
                             Divider().padding(.horizontal, CardBlockDivider.inset).offset(y: -CardBlockDivider.rise)
                                 .opacity(movingBlock ? 0 : 1)
-                                .animation(.easeOut(duration: 0.15), value: movingBlock)
+                                .animation(.easeOut(duration: CardBlockDivider.fadeDuration), value: movingBlock)
                         }
                     }
                 // A moving Window stays above the next block when it gives way past the end of its own.
                 let holdsMovingWindow = windowDrag.dragged.map { id in block.items.contains { $0.id == id } } ?? false
                 if let blockDrag {
-                    view.listDragItem(block.id, drag: blockDrag, shown: blockIDs, cornerRadius: 7)
+                    view.listDragItem(block.id, drag: blockDrag, shown: blockIDs, cornerRadius: CardBlockLift.cornerRadius)
                         .zIndex(blockDrag.dragged == block.id ? 30 : holdsMovingWindow ? 20 : 0)
                 } else {
                     view.zIndex(holdsMovingWindow ? 20 : 0)

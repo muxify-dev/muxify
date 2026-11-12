@@ -12,7 +12,9 @@ compares open cards, the No Topic card and a header that sticks.
 
 The checks of an open Topic card in the AppKit list make their own Topic with live Sessions named as Muxify names
 them, `<base>/<Topic ID>`, and remove it at their end: a click on a Window row, a press on a Pane row, on a Session line
-and on "N more…", and a header that sticks to the top of the list and never passes the card's last row. The AppKit
+and on "N more…", a drag on a Window row with its Pane rows, and a header that sticks to the top of the list and never
+passes the card's last row. The drag rests before it lets go and reads the `held` rows: the lifted row and its Pane rows
+move as one, and the row it passes slides aside. `topics_session_order_sidebar` checks the drag of a Session line. The AppKit
 list glides a card that opens with Core Animation, whose frames a dump does not read, so the checks prove where the
 cards below come to rest; the glide is for the eye.
 
@@ -437,6 +439,48 @@ class TopicsListSidebar(unittest.TestCase):
         rs = self.s.wait_rows(lambda rs: all(self.s.has('topic-window-' + window, rs) for window in windows),
                               '"N more…" did not list the rows it held back')
         self.assertFalse(self.s.has(more, rs), '"N more…" stays after every row shows')
+
+    def test_a_drag_on_a_window_row_of_an_open_topic_card_moves_it_with_its_pane_rows(self):
+        self.show_list('appkit')
+        (session, windows), = self.topic_with('open-drag', [('one', ['main', 'logs', 'split'])]).values()
+        # The dragged Window has two Panes, whose rows stand under its Window row and go with it.
+        self.s.tmux('split-window', '-d', '-t', windows[2], SHELL)
+        panes = ['pane-' + pane for pane in self.s.tmux('list-panes', '-t', windows[2], '-F', '#{pane_id}').split()]
+        self.show_panes()
+        self.open_topic('open-drag', windows[0])
+        rows = ['topic-window-' + window for window in windows]
+
+        def tops(rs):
+            """The top edge of each of the card's Window and Pane rows, in points down from the top of the screen."""
+            return {row['accessibilityIdentifier']: -(rect(row)[1] + rect(row)[3]) for row in rs
+                    if row.get('accessibilityIdentifier') in rows + panes}
+
+        def shown(rs):
+            """The rows from the top by their frames, and in the order of the dump; one list when the two agree."""
+            by_frame = sorted(tops(rs), key=tops(rs).get)
+            return by_frame if [key for key in self.s.ids(rs) if key in by_frame] == by_frame else None
+
+        def tmux_order():
+            return self.s.tmux('list-windows', '-t', session, '-F', '#{window_id}').split()
+
+        before = rows + panes
+        rs = self.s.wait_rows(lambda rs: shown(rs) == before, lambda: 'the open card does not list its Windows in tmux order '
+                              'with the Pane rows under the last: %s' % shown(self.s.rows()))
+        rest = tops(rs)
+        held = tops(self.s.act('drag', rows[2], rows[0], hold=0.5)['held'])
+        lifted = held[rows[2]] - rest[rows[2]]
+        self.assertLess(lifted, -10, 'the Window row did not follow the pointer up')
+        for pane in panes:
+            self.assertLess(abs(held[pane] - rest[pane] - lifted), .5, 'the Pane row %s did not move with its Window row' % pane)
+        self.assertGreater(held[rows[0]] - rest[rows[0]], 10, 'the first Window row did not slide aside for the lifted one')
+
+        moved = [windows[2], windows[0], windows[1]]
+        wait(lambda: tmux_order() == moved, lambda: 'tmux order after the drag: %s' % tmux_order())
+        after = [rows[2]] + panes + [rows[0], rows[1]]
+        self.s.wait_rows(lambda rs: shown(rs) == after,
+                         lambda: 'the card does not show the order of tmux after the drop: %s' % shown(self.s.rows()))
+        self.assertEqual(self.s.tmux('display-message', '-p', '-t', session, '#{window_id}'), windows[0],
+                         'the drag changed the Session\'s current Window')
 
     def test_the_header_of_an_open_topic_card_sticks_to_the_top_and_never_passes_its_last_row(self):
         # The top and bottom edges of a row, in points down from the top of the screen.

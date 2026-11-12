@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import MuxifyCore
 
@@ -333,6 +334,134 @@ final class TopicOrderTests: XCTestCase {
         XCTAssertEqual(drag.translation, -29.64, accuracy: 0.01, "d stops with its top at the top of the view")
         XCTAssertEqual(drag.landing, .place(.before("c")),
                        "the pointer, held on d, is at d's top, above c's middle, not on a card out of view")
+    }
+
+    // MARK: The AppKit drag
+
+    /// Units of fixed heights that the AppKit drag moves, stacked `CardSpacing.block` apart as an open Topic card of the
+    /// AppKit list stacks its Session blocks, in a window, so the drag reads the pointer in window points as it does in
+    /// the list.
+    @MainActor private final class Blocks: NSView, StackDragHost {
+        private final class Block: DragUnitView {
+            let fixed: CGFloat
+
+            init(id: String, height: CGFloat) {
+                fixed = height
+                super.init(id: id, cornerRadius: CardBlockLift.cornerRadius)
+            }
+
+            override func height(width: CGFloat) -> CGFloat { fixed }
+        }
+
+        private let units: [DragUnitView]
+        private let holder = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 300), styleMask: .borderless,
+                                      backing: .buffered, defer: false)
+        var liftsUnits = true
+        var reducesMotion = false
+        private(set) var dropped: [DropPlacement<String>] = []
+        var onDrop: () -> Void = {}
+        lazy var drag = StackDrag(host: self, spacing: CardSpacing.block, cornerRadius: CardBlockLift.cornerRadius)
+
+        init(_ heights: KeyValuePairs<String, CGFloat>) {
+            units = heights.map { Block(id: $0.key, height: $0.value) }
+            super.init(frame: NSRect(x: 0, y: 0, width: 200, height: 300))
+            wantsLayer = true
+            subviews = [drag.slot] + units
+            holder.isReleasedWhenClosed = false
+            holder.contentView = self
+            layOutUnits()
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+        override var isFlipped: Bool { true }
+
+        func close() { holder.contentView = nil }
+
+        func unit(_ id: String) -> DragUnitView { units.first { $0.id == id }! }
+
+        /// The point `y` below the top of the unit, in window points.
+        func point(_ id: String, _ y: CGFloat) -> NSPoint { unit(id).convert(NSPoint(x: 20, y: y), to: nil) }
+
+        var dragUnits: [DragUnitView] { units }
+
+        var unitsWidth: CGFloat { bounds.width }
+
+        func visibleTop(in clip: NSClipView) -> CGFloat { clip.bounds.minY }
+
+        func layOutUnits() {
+            var top: CGFloat = 0
+            for unit in units { top = drag.place(unit, at: top, width: bounds.width) + CardSpacing.block }
+            drag.placeSlot()
+        }
+
+        func drop(_ id: String, at placement: DropPlacement<String>) {
+            dropped.append(placement)
+            onDrop()
+        }
+    }
+
+    @MainActor func testTheAppKitDragOfASessionBlockLandsAndShiftsAsTheStackLayoutGives() async {
+        let blocks = Blocks(["a": 40, "b": 60, "c": 30])
+        defer { blocks.close() }
+        let order: [StackSlot<String>] = [.item("a"), .item("b"), .item("c")]
+        let layout = StackLayout<String>(heights: [.item("a"): 40, .item("b"): 60, .item("c"): 30], spacing: CardSpacing.block)
+        let start = blocks.point("c", 10)
+        blocks.drag.press("c", at: start)
+        // Window points count upward: the pointer moves 100 points up.
+        blocks.drag.drag("c", to: NSPoint(x: start.x, y: start.y + 100))
+        let (translation, landing) = layout.follow("c", moved: -100, grab: 10, in: order)
+        XCTAssertEqual(landing, .place(.before("b")), "the pointer at 28 passed b's middle at 79, not a's at 20")
+        XCTAssertEqual(blocks.drag.liftedID, "c")
+        XCTAssertEqual(blocks.unit("c").frame.minY, layout.top(of: .item("c"), in: order) + translation, "c follows the pointer")
+        XCTAssertEqual(blocks.drag.offset(of: "b"), layout.shift(of: .item("b"), moving: "c", to: .before("b"), in: order),
+                       "b slides aside to its place in the new order")
+        XCTAssertEqual(blocks.unit("b").frame.minY, 40 + CardSpacing.block + 30 + CardSpacing.block)
+        XCTAssertEqual(blocks.drag.offset(of: "a"), 0, "a keeps its place")
+        XCTAssertEqual(blocks.drag.slot.frame, NSRect(x: 0, y: 40 + CardSpacing.block, width: 200, height: 30),
+                       "the placeholder stands where c lands")
+
+        let dropped = expectation(description: "the drop")
+        blocks.onDrop = { dropped.fulfill() }
+        blocks.drag.release("c", onTap: { XCTFail("a drag is no click") })
+        XCTAssertEqual(blocks.drag.draggedID, "c", "let go, c glides to where it lands")
+        await fulfillment(of: [dropped], timeout: 2)
+        XCTAssertEqual(blocks.dropped, [.before("b")], "once it glided there, the host moves c before b")
+    }
+
+    @MainActor func testAPressOnTheAppKitDragIsAClickInPlaceAndNothingWhenItMovesWhileTheDragIsOff() {
+        let blocks = Blocks(["a": 40, "b": 60])
+        defer { blocks.close() }
+        var taps = 0
+        blocks.drag.press("b", at: blocks.point("b", 10))
+        blocks.drag.release("b", onTap: { taps += 1 })
+        XCTAssertEqual(taps, 1, "let go in place, the press is a click")
+
+        blocks.liftsUnits = false
+        let start = blocks.point("b", 10)
+        blocks.drag.press("b", at: start)
+        blocks.drag.drag("b", to: NSPoint(x: start.x, y: start.y + 30))
+        XCTAssertNil(blocks.drag.liftedID, "no block lifts while the drag is off")
+        blocks.drag.release("b", onTap: { taps += 1 })
+        XCTAssertEqual(taps, 1, "a press that moved while the drag is off is no click either")
+        XCTAssertEqual(blocks.dropped, [])
+    }
+
+    @MainActor func testWithReduceMotionABlockTheAppKitDragPressesAndLiftsNeitherSinksNorGrows() throws {
+        for reducesMotion in [false, true] {
+            let blocks = Blocks(["a": 40, "b": 60])
+            defer { blocks.close() }
+            blocks.reducesMotion = reducesMotion
+            let layer = try XCTUnwrap(blocks.unit("b").layer)
+            let start = blocks.point("b", 10)
+            blocks.drag.press("b", at: start)
+            XCTAssertEqual(layer.sublayerTransform.m11, reducesMotion ? 1 : ListLift.pressScale, "pressed, Reduce Motion \(reducesMotion)")
+            blocks.drag.drag("b", to: NSPoint(x: start.x, y: start.y + 30))
+            XCTAssertEqual(blocks.drag.liftedID, "b")
+            XCTAssertEqual(layer.sublayerTransform.m11, reducesMotion ? 1 : ListLift.scale, "lifted, Reduce Motion \(reducesMotion)")
+            blocks.drag.release("b", onTap: {})
+        }
     }
 
     func testAPlacementMovesTheItemNextToItsAnchor() {

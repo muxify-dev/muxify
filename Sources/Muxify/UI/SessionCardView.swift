@@ -144,9 +144,8 @@ final class SessionCardView: NSView {
     /// The Window and Pane rows from the top in their units: each Window row with the Pane rows under it, which a drag
     /// moves as one, and each Pane row in place of the only Window row.
     private var units: [WindowUnitView] = []
-    /// The place where a lifted unit would land.
-    private let slot = DropSlotView()
-    private lazy var drag = SessionCardDrag(card: self)
+    /// The drag of the Window units, whose placeholder stands among them.
+    private lazy var drag = StackDrag(host: self, spacing: CardSpacing.row, cornerRadius: WindowRowMetrics.cornerRadius)
     private let more: MoreRowView
     private let spine = CardSpineView()
     private let outline = CardOutlineView()
@@ -226,42 +225,20 @@ final class SessionCardView: NSView {
     /// that already showed keeps its view, so its tint fades when the Location moves, unless `fades` is false.
     private func showRows(_ contents: [CardRowContent], more count: Int, fades: Bool) {
         listed = rowViews.show(contents, environment: environment, fades: fades)
-        units = units(of: zip(contents, listed).map { ($0, $1) })
+        units = WindowUnitView.units(of: zip(contents, listed).map { ($0, $1) }, keeping: units)
         for unit in units { unit.theme = environment.chromeTheme }
         let moves = movesWindows
         for case let row as WindowRowView in listed {
             row.drag = drag
+            row.dragID = row.windowID
             row.isDraggable = moves
         }
-        let views = [slot] + units + (count > 0 ? [more] : [])
+        let views = [drag.slot] + units + (count > 0 ? [more] : [])
         if count > 0 {
             more.show(count: count, environment: environment)
             listed.append(more)
         }
         if rows.subviews != views { rows.subviews = views }
-    }
-
-    /// The rows in their units, as `WindowUnit` groups them in the SwiftUI list. A unit that already showed keeps its
-    /// view, so a lifted unit keeps the row the pointer presses.
-    private func units(of rows: [(content: CardRowContent, view: CardRowView)]) -> [WindowUnitView] {
-        var kept = Dictionary(units.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        var grouped: [(id: String, window: TmuxWindow?, rows: [CardRowView])] = []
-        for (content, view) in rows {
-            switch content {
-            case .window(let content):
-                grouped.append((content.window.id, content.window, [view]))
-            case .pane(let content) where content.isUnderWindowRow && grouped.last?.window?.id == content.windowID:
-                grouped[grouped.count - 1].rows.append(view)
-            case .pane(let content):
-                grouped.append((content.paneID, nil, [view]))
-            }
-        }
-        return grouped.map { group in
-            let unit = kept.removeValue(forKey: group.id) ?? WindowUnitView(id: group.id)
-            unit.tmuxWindow = group.window
-            unit.rows = group.rows
-            return unit
-        }
     }
 
     /// Shows the Hint of each Window row of an open card: the badge while the user holds its modifier, else its key at
@@ -341,15 +318,10 @@ final class SessionCardView: NSView {
         let width = rows.bounds.width
         var top: CGFloat = 0
         for unit in units {
-            unit.place = top
-            unit.frame = NSRect(x: 0, y: top + drag.offset(of: unit.id), width: width, height: unit.height(width: width))
-            unit.layOut()
-            // Above the others while it is lifted and while it glides to where it lands, and above the placeholder.
-            unit.layer?.zPosition = drag.draggedID == unit.id ? 2 : 0
-            top += unit.frame.height + CardSpacing.row
+            top = drag.place(unit, at: top, width: width) + CardSpacing.row
         }
         if listed.last === more { more.frame = NSRect(x: 0, y: top, width: width, height: more.height(width: width)) }
-        placeSlot()
+        drag.placeSlot()
         units.forEach(placeHints(of:))
     }
 
@@ -362,62 +334,12 @@ final class SessionCardView: NSView {
         }
     }
 
-    private func placeSlot() {
-        slot.layer?.zPosition = 1
-        guard let id = drag.liftedID, let offset = drag.slotOffset, let unit = unit(id) else { return }
-        slot.frame = NSRect(x: 0, y: unit.place + offset, width: unit.bounds.width, height: unit.bounds.height)
-    }
-
-    // MARK: The drag
-
     /// The units of Window rows, from the top.
-    var windowUnits: [WindowUnitView] { units.filter { $0.tmuxWindow != nil } }
-
-    func unit(_ id: String) -> WindowUnitView? { units.first { $0.id == id } }
+    private var windowUnits: [WindowUnitView] { units.filter { $0.tmuxWindow != nil } }
 
     /// A press that moves on a Window row lifts it: the store has not turned the drag off, and the card has more than
     /// one Window row.
-    var movesWindows: Bool { (content?.movesWindows ?? false) && windowUnits.count > 1 }
-
-    var reducesMotion: Bool { environment.reduceMotion }
-
-    func showLook(_ look: WindowUnitView.Look, of id: String, motion: LayerMotion) {
-        unit(id)?.show(look, reducesMotion: environment.reduceMotion, motion: motion)
-    }
-
-    /// How far the unit's top stands below the visible top of the list, or below the bottom of the card's header that
-    /// sticks there, and its bottom above the visible bottom, without the drag's offset. Nil outside a list.
-    func visiblePlace(of unit: WindowUnitView) -> (visibleTop: CGFloat, footroom: CGFloat)? {
-        guard let clip = enclosingScrollView?.contentView else { return nil }
-        let frame = rows.convert(NSRect(x: 0, y: unit.place, width: unit.bounds.width, height: unit.bounds.height), to: clip)
-        // A unit dragged up stops at the bottom of the header that sticks to the top, not under it.
-        let top = header.sticks ? convert(header.frame, to: clip).maxY : clip.bounds.minY
-        return (frame.minY - top, clip.bounds.maxY - frame.maxY)
-    }
-
-    /// Puts the units at their places and the drag's offsets. With `motion`, the units that move glide there, with
-    /// their Hints and the placeholder; the lifted unit and its Hints follow the pointer at once.
-    func placeUnits(motion: LayerMotion?) {
-        let appears = drag.liftedID != nil && !slot.shows
-        LayerGlide.withoutActions {
-            if let id = drag.liftedID, let unit = unit(id) {
-                unit.setFrameOrigin(NSPoint(x: 0, y: unit.place + drag.offset(of: id)))
-                placeHints(of: unit)
-            }
-            if appears { placeSlot() }
-        }
-        if let motion, let layer {
-            LayerGlide.run(under: layer, motion: motion, change: layOutRows)
-        } else {
-            LayerGlide.withoutActions(layOutRows)
-        }
-        slot.show(drag.liftedID != nil, motion: appears ? ListLift.lift.motion : motion)
-    }
-
-    func moveWindow(_ id: String, _ placement: DropPlacement<String>) {
-        guard let window = unit(id)?.tmuxWindow else { return }
-        onMoveWindow(window, placement)
-    }
+    private var movesWindows: Bool { (content?.movesWindows ?? false) && windowUnits.count > 1 }
 
     // MARK: The menu
 
@@ -448,6 +370,35 @@ final class SessionCardView: NSView {
     }
 
     override func accessibilityActivationPoint() -> NSPoint { accessibilityFrame().centre }
+}
+
+/// The drag of the Window units of an open card.
+extension SessionCardView: StackDragHost {
+    var dragUnits: [DragUnitView] { windowUnits }
+
+    var unitsWidth: CGFloat { rowsWidth }
+
+    var liftsUnits: Bool { movesWindows }
+
+    var reducesMotion: Bool { environment.reduceMotion }
+
+    /// A unit dragged up stops at the bottom of the header that sticks to the top, not under it.
+    func visibleTop(in clip: NSClipView) -> CGFloat {
+        header.sticks ? convert(header.frame, to: clip).maxY : clip.bounds.minY
+    }
+
+    /// The units, "N more…", the placeholder and the Hints of the Window rows, which glide with their units.
+    func layOutUnits() { layOutRows() }
+
+    /// The Hints of the lifted unit's Window rows follow it at once.
+    func dragWillPlaceUnits(lifted: DragUnitView?) {
+        if let unit = lifted as? WindowUnitView { placeHints(of: unit) }
+    }
+
+    func drop(_ id: String, at placement: DropPlacement<String>) {
+        guard let window = windowUnits.first(where: { $0.id == id })?.tmuxWindow else { return }
+        onMoveWindow(window, placement)
+    }
 }
 
 extension NSRect {

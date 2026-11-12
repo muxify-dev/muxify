@@ -23,6 +23,10 @@ struct TopicCardContent: Equatable {
     var moreCount = 0
     /// The strongest Agent mark of the rows held back, which "N more…" names.
     var moreMark: AgentMark?
+    /// A press that moves on the Session line of an ordered block lifts the block, and one on a Window row lifts the
+    /// row with its Pane rows: the store has not turned the drag off. Off, such a press is neither a click nor a drag.
+    var movesSessions = true
+    var movesWindows = true
     /// The Sessions that an open Settled card remembers, which it lists in place of `blocks`. Nil for a card that is not
     /// Settled.
     var remembered: [RememberedSessionContent]?
@@ -74,6 +78,16 @@ final class TopicCardView: NSView {
     var onSession: (String) -> Void {
         get { rows.onSession }
         set { rows.onSession = newValue }
+    }
+    /// A drag on a Session line let go: the Session moves before or after another Session of the Topic.
+    var onMoveSession: (String, DropPlacement<String>) -> Void {
+        get { rows.onMoveSession }
+        set { rows.onMoveSession = newValue }
+    }
+    /// A drag on a Window row let go: the Window moves, with its Pane rows, before or after another Window of its Session.
+    var onMoveWindow: (TmuxWindow, DropPlacement<String>) -> Void {
+        get { rows.onMoveWindow }
+        set { rows.onMoveWindow = newValue }
     }
     /// A press on "N more…".
     var onShowAllRows: () -> Void {
@@ -153,6 +167,11 @@ final class TopicCardView: NSView {
         subviews = [card, corner]
         card.setAccessibilityIdentifier("card-" + cardID.accessibilityID)
         card.header = header
+        // A row dragged up stops at the bottom of the header that sticks to the top, not under it.
+        rows.visibleListTop = { [weak self] clip in
+            guard let self, header.sticks else { return clip.bounds.minY }
+            return dimmed.convert(header.frame, to: clip).maxY
+        }
         card.rows = { [weak self] in
             self.map {
                 ($0.isOpen ? $0.body.accessibilityParts : []) + [$0.header] + ($0.tags.isHidden ? [] : [$0.tags])
@@ -186,7 +205,8 @@ final class TopicCardView: NSView {
                 self.remembered.show(remembered, environment: environment)
             } else {
                 rows.show(content.blocks, moreCount: content.moreCount, moreMark: content.moreMark, reservesCorner: content.corner != nil,
-                          environment: environment, fades: wasOpen)
+                          movesSessions: content.movesSessions, movesWindows: content.movesWindows, environment: environment,
+                          fades: wasOpen)
             }
         }
         for view in [rows, remembered] as [any TopicCardBody] {
@@ -224,6 +244,7 @@ final class TopicCardView: NSView {
         viewportTop = top
         stickInset = inset
         placeHeader()
+        rows.placeMoved()
     }
 
     /// Puts the header at the top of the card, or as far down as it sticks, with the Unread spine over it and the

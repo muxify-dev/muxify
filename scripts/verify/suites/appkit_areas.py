@@ -23,7 +23,7 @@ UI = 'Sources/Muxify/UI/'
 # The files of each area that moved, by the area's name.
 AREAS = {
     'Sessions list': [UI + name + '.swift' for name in (
-        'SessionsListView', 'SessionCardView', 'SessionCardDrag', 'SidebarCardChrome', 'SidebarLabel',
+        'SessionsListView', 'SessionCardView', 'StackDrag', 'SidebarCardChrome', 'SidebarLabel',
         'SidebarAgentMark', 'SidebarHintView', 'SidebarRowView', 'SidebarLogo', 'LayerGlide', 'ObservedUpdate',
         'AgentMarkMetrics', 'WindowRowMetrics', 'PaneRowMetrics', 'SessionsListMetrics', 'WindowRowView',
         'PaneRowView', 'SessionsList', 'SidebarMenu', 'LayerColoredView', 'StackLayout', 'ListLift', 'CardMetrics',

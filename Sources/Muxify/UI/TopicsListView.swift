@@ -221,6 +221,11 @@ final class TopicsListView: NSView, SidebarList {
         card.onSelectWindow = { [weak self] window in self?.store.windowRowDrag.select(window) }
         card.onSelectPane = { [weak self] paneID in self?.selectPane(paneID) }
         card.onSession = { [weak self] sessionID in self?.goToSession(sessionID, of: id) }
+        // As the drops of the SwiftUI card's `SessionHeading` and `CardList`.
+        card.onMoveSession = { [weak self] sessionID, drop in
+            if let placement = drop.sessionPlacement { self?.store.moveSession(sessionID, to: placement) }
+        }
+        card.onMoveWindow = { [weak self] window, placement in self?.store.windowRowDrag.move(window, placement) }
         card.onShowAllRows = { [weak self] in
             self?.showingAllRows.insert(id)
             self?.update.run()
@@ -307,6 +312,7 @@ final class TopicsListView: NSView, SidebarList {
 
     /// The blocks that an open card lists, as the SwiftUI list's `CardList` cuts them: each live Session's rows, the
     /// first `CardRows.shownCount` of the card's rows, and a block whose rows are all cut loses its Session line too.
+    /// A block whose line has a `SessionLineOrder` is ordered: a drag on its line moves it, as on the SwiftUI line.
     /// Returns the blocks, the number of rows held back and the strongest Agent mark among them.
     private func blocks(of row: TopicsModel.Row, lines: Bool) -> (blocks: [TopicCardBlock], held: Int, mark: AgentMark?) {
         guard row.isExpanded else { return ([], 0, nil) }
@@ -322,7 +328,8 @@ final class TopicsListView: NSView, SidebarList {
         for session in live {
             defer { start += session.items.count }
             guard start < shown else { break }
-            blocks.append(TopicCardBlock(sessionID: session.id, line: lines ? session.line : nil, fades: fades,
+            blocks.append(TopicCardBlock(sessionID: session.id, line: lines ? session.line : nil,
+                                         isOrdered: lines && SessionLineOrder(row, sessionID: session.id, store: store) != nil, fades: fades,
                                          rows: session.items.prefix(shown - start).map { CardRowContent($0, store: store, inTopicsList: true) }))
         }
         return (blocks, items.count - shown, items.dropFirst(shown).compactMap { row.agentSpines[$0.id] }.max())
@@ -349,7 +356,7 @@ final class TopicsListView: NSView, SidebarList {
                                            notes: [row.isGuest ? "Guest" : "Locked"])
             let rows = blocks(of: row, lines: false)
             return TopicCardContent(header: header, holdsSelection: holdsSelection, spine: row.mark, blocks: rows.blocks,
-                                    moreCount: rows.held, moreMark: rows.mark)
+                                    moreCount: rows.held, moreMark: rows.mark, movesWindows: store.windowRowDrag.isEnabled)
         case .topic, .noTopic:
             let text = store.sidebarText(.topic, context: store.sidebarFormatContexts.topics[row.id])
             let topicID: String? = if case .topic(let id) = row.id { id } else { nil }
@@ -365,7 +372,8 @@ final class TopicsListView: NSView, SidebarList {
                                     restingOpacity: TopicCardOpacity.resting(row, inList: true),
                                     corner: topicID.map { TopicCardCorner(title: "Settle", identifier: "settle-topic-" + $0,
                                                                           isEnabled: !store.changingTopic) },
-                                    blocks: rows.blocks, moreCount: rows.held, moreMark: rows.mark)
+                                    blocks: rows.blocks, moreCount: rows.held, moreMark: rows.mark,
+                                    movesSessions: !store.changingTopic, movesWindows: store.windowRowDrag.isEnabled)
         }
     }
 

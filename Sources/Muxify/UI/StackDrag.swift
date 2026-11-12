@@ -1,35 +1,69 @@
 import AppKit
 import MuxifyCore
 
-/// The drag of the Window rows of an open card in the AppKit Sessions list (ADR 0074): `ListDrag` with its handle in
-/// the SwiftUI list. A press on a Window row sinks the row, and a press that lets go before it moves `ListLift.slop`
-/// points is a click, which goes to the Window. A press that moves lifts the row with the Pane rows under it at once:
-/// the unit grows and gets its shadow, and follows the pointer up and down. The units it passes slide aside to leave a
-/// placeholder where it would land. Let go, it glides into the placeholder, the card's `onMoveWindow` moves the Window
-/// as the SwiftUI list moves it, and the unit stays there until the card shows the new order, so nothing jumps. If the
-/// card does not show it within `ListLift.settleLimit`, the units go back.
+/// The view whose units a `StackDrag` moves, in an open card of an AppKit list: the card's Window units in the Sessions
+/// list and the No Topic card (`SessionCardView`), a Session block's Window units (`SessionBlockView`), or an open Topic
+/// card's Session blocks (`TopicCardRowsView`). It stacks the units, and keeps the drag's placeholder among them.
+@MainActor protocol StackDragHost: NSView {
+    /// The units that a lifted unit can pass, from the top, as the host shows them.
+    var dragUnits: [DragUnitView] { get }
+    /// The width of the units.
+    var unitsWidth: CGFloat { get }
+    /// A press that moves on a unit lifts it. While this is false, a press that moves is neither a click nor a drag.
+    var liftsUnits: Bool { get }
+    var reducesMotion: Bool { get }
+    /// The top of the visible part of the list for the units, in `clip`: the bottom of the card's header while it
+    /// sticks there, or else the clip view's top. A lifted unit stops there, not under the header.
+    func visibleTop(in clip: NSClipView) -> CGFloat
+    /// Stacks the units at their places, each moved by the drag's offset (`StackDrag.place`), with what goes with them.
+    func layOutUnits()
+    /// The drag is about to place the units, with `lifted` the unit that follows the pointer: what stands on it, such as
+    /// its Hints, follows it at once, and what shows only while no unit is dragged starts to fade.
+    func dragWillPlaceUnits(lifted: DragUnitView?)
+    /// The unit `id` was let go at `placement`, and glided there.
+    func drop(_ id: String, at placement: DropPlacement<String>)
+}
+
+extension StackDragHost {
+    func dragWillPlaceUnits(lifted: DragUnitView?) {}
+}
+
+/// The drag of the units of a stack in an open card of the AppKit lists: `ListDrag` with its handle in the SwiftUI
+/// lists (ADR 0074, docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md). It moves a Window row with its
+/// Pane rows among the Windows of its Session, in the Sessions list and in the Topics list, and a Session block among
+/// the Sessions of its open Topic card. A view is the handle of a unit through `SidebarPressView.drag`.
+///
+/// A press on a handle sinks its unit, and a press that lets go before it moves `ListLift.slop` points is a click, which
+/// goes to the handle's `onPress`. A press that moves lifts the unit at once: the unit grows and gets its shadow, and
+/// follows the pointer up and down. The units it passes slide aside to leave a placeholder where it would land. Let go,
+/// it glides into the placeholder, the host's `drop` moves it as the SwiftUI list moves it, and the unit stays there
+/// until the host shows the new order, so nothing jumps. If the host does not show it within `ListLift.settleLimit`,
+/// the units go back.
 ///
 /// Where a unit lands and how far it may move come from `StackLayout` and `DropPlacement`, which the SwiftUI drag uses
-/// too. A row of a card with one Window does not lift, and no row lifts while the store turns the drag off.
-@MainActor final class SessionCardDrag {
+/// too. No unit lifts while the host's `liftsUnits` is false, such as in a card with one Window or while the store turns
+/// the drag off.
+@MainActor final class StackDrag {
     private enum Phase: Equatable {
         case idle
         case pressing(String)
         case lifted(String)
-        /// Let go: the unit glides to where it lands and stays there until the card shows the new order.
+        /// Let go: the unit glides to where it lands and stays there until the host shows the new order.
         case settling(String)
     }
 
-    /// The card whose Window units the drag moves.
-    private unowned let card: SessionCardView
+    /// The view whose units the drag moves.
+    private unowned let host: any StackDragHost
+    /// The place where a lifted unit would land. The host keeps it among the units, behind them.
+    let slot: DropSlotView
     private var phase = Phase.idle
     /// How far the lifted unit stands below its place.
     private var translation: CGFloat = 0
     /// Where the lifted unit would land; nil at its own place.
     private var placement: DropPlacement<String>?
-    /// The Window units' heights, with `CardSpacing.row` between two, as the card stacks them.
-    private var layout = StackLayout<String>(heights: [:], spacing: CardSpacing.row)
-    /// The Window units as the card shows them now: the places a lifted unit can reach.
+    /// The units' heights, with the stack's spacing between two, as the host stacks them.
+    private var layout: StackLayout<String>
+    /// The units as the host shows them now: the places a lifted unit can reach.
     private var order: [StackSlot<String>] = []
     /// How far the lifted unit may move up before its top leaves the visible part of the list, or passes under the
     /// card's header that sticks there, and down before its bottom leaves it.
@@ -50,8 +84,12 @@ import MuxifyCore
     private var cancelled = false
     private var timer: Task<Void, Never>?
 
-    init(card: SessionCardView) {
-        self.card = card
+    /// `spacing` is the room between two units in the host's stack, and `cornerRadius` the units' corners, for the
+    /// placeholder.
+    init(host: any StackDragHost, spacing: CGFloat, cornerRadius: CGFloat) {
+        self.host = host
+        layout = StackLayout(heights: [:], spacing: spacing)
+        slot = DropSlotView(cornerRadius: cornerRadius)
     }
 
     /// The unit that follows the pointer.
@@ -77,16 +115,22 @@ import MuxifyCore
 
     /// How far below the lifted unit's place the placeholder stands: at the unit's place in the new order. Nil when no
     /// unit is lifted.
-    var slotOffset: CGFloat? { liftedID.map { shift(of: $0, moving: $0) } }
+    private var slotOffset: CGFloat? { liftedID.map { shift(of: $0, moving: $0) } }
 
     private func shift(of id: String, moving dragged: String) -> CGFloat {
         guard let placement, order.contains(.item(dragged)), order.contains(.item(id)) else { return 0 }
         return layout.shift(of: .item(id), moving: dragged, to: placement, in: order)
     }
 
+    private func unit(_ id: String) -> DragUnitView? { host.dragUnits.first { $0.id == id } }
+
+    private func showLook(_ look: DragUnitView.Look, of id: String, motion: LayerMotion) {
+        unit(id)?.show(look, reducesMotion: host.reducesMotion, motion: motion)
+    }
+
     // MARK: The press
 
-    /// The mouse went down on the Window row `id` at `point` in the window.
+    /// The mouse went down on the handle of the unit `id` at `point` in the window.
     func press(_ id: String, at point: NSPoint) {
         timer?.cancel()
         cancelled = false
@@ -94,11 +138,11 @@ import MuxifyCore
         let wasDragged = draggedID != nil
         placement = nil
         phase = .pressing(id)
-        if wasDragged { card.placeUnits(motion: nil) }
-        card.showLook(.pressed, of: id, motion: .easeOut(ListLift.pressDuration))
+        if wasDragged { placeUnits(motion: nil) }
+        showLook(.pressed, of: id, motion: .easeOut(ListLift.pressDuration))
     }
 
-    /// The pointer moved to `point` in the window while it presses the Window row `id`.
+    /// The pointer moved to `point` in the window while it presses the handle of the unit `id`.
     func drag(_ id: String, to point: NSPoint) {
         guard !cancelled else { return }
         switch phase {
@@ -106,7 +150,7 @@ import MuxifyCore
             follow(id, to: point)
         case .pressing(id):
             guard hypot(point.x - start.x, point.y - start.y) > ListLift.slop else { return }
-            if card.movesWindows {
+            if host.liftsUnits {
                 lift(id)
                 follow(id, to: point)
             } else {
@@ -118,8 +162,8 @@ import MuxifyCore
         }
     }
 
-    /// The mouse came up on the Window row `id`: a click when the row did not lift, which `onTap` makes. A lifted unit
-    /// glides to where it lands, and the card moves its Window once it is there; with no placement it glides back.
+    /// The mouse came up on the handle of the unit `id`: a click when the unit did not lift, which `onTap` makes. A
+    /// lifted unit glides to where it lands, and the host moves it once it is there; with no placement it glides back.
     func release(_ id: String, onTap: () -> Void) {
         guard !cancelled else {
             cancelled = false
@@ -129,7 +173,7 @@ import MuxifyCore
         switch phase {
         case .pressing(id):
             phase = .idle
-            card.showLook(.resting, of: id, motion: .easeOut(ListLift.pressDuration))
+            showLook(.resting, of: id, motion: .easeOut(ListLift.pressDuration))
             onTap()
         case .lifted(id):
             NSCursor.pop()
@@ -137,16 +181,16 @@ import MuxifyCore
             phase = .settling(id)
             // The unit shrinks and loses its shadow on the lift's spring, as SwiftUI animates the end of the lift, and
             // glides into the placeholder on the landing's.
-            card.showLook(.resting, of: id, motion: ListLift.lift.motion)
-            card.placeUnits(motion: ListLift.land.motion)
+            showLook(.resting, of: id, motion: ListLift.lift.motion)
+            placeUnits(motion: ListLift.land.motion)
             timer = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(ListLift.land.duration))
                 guard let self, !Task.isCancelled, phase == .settling(id) else { return }
                 guard let placement else { return finish() }
                 NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
-                // The card shows the new order at once or after tmux answers; `show` then ends the drag.
-                card.moveWindow(id, placement)
-                waitForTheCard(of: id)
+                // The host shows the new order at once or after tmux answers; `show` then ends the drag.
+                host.drop(id, at: placement)
+                waitForTheHost(of: id)
             }
         default:
             break
@@ -155,27 +199,35 @@ import MuxifyCore
 
     /// The pressed unit moved far enough to be a drag.
     private func lift(_ id: String) {
-        guard phase == .pressing(id), let unit = card.unit(id) else { return }
+        guard phase == .pressing(id), let unit = unit(id) else { return }
         measure()
         placeShift = 0
         moved = 0
         grab = min(max(unit.convert(start, from: nil).y, 0), unit.bounds.height)
-        let place = card.visiblePlace(of: unit)
+        let place = visiblePlace(of: unit)
         visibleTop = place?.visibleTop
         fitRoom(place, of: unit)
         translation = 0
         phase = .lifted(id)
-        card.showLook(.lifted, of: id, motion: ListLift.lift.motion)
-        card.placeUnits(motion: nil)
+        showLook(.lifted, of: id, motion: ListLift.lift.motion)
+        placeUnits(motion: nil)
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         NSCursor.closedHand.push()
     }
 
     /// Grown by the lift, the unit's top stands a little higher than its place and its bottom a little lower. With
     /// Reduce Motion it does not grow.
-    private func fitRoom(_ place: (visibleTop: CGFloat, footroom: CGFloat)?, of unit: WindowUnitView) {
+    private func fitRoom(_ place: (visibleTop: CGFloat, footroom: CGFloat)?, of unit: DragUnitView) {
         (headroom, footroom) = ListLift.room(visibleTop: place?.visibleTop ?? .infinity, footroom: place?.footroom ?? .infinity,
-                                             height: unit.bounds.height, scale: card.reducesMotion ? 1 : ListLift.scale)
+                                             height: unit.bounds.height, scale: host.reducesMotion ? 1 : ListLift.scale)
+    }
+
+    /// How far the unit's top stands below the visible top of the list (`StackDragHost.visibleTop`), and its bottom
+    /// above the visible bottom, without the drag's offset. Nil outside a list.
+    private func visiblePlace(of unit: DragUnitView) -> (visibleTop: CGFloat, footroom: CGFloat)? {
+        guard let stack = unit.superview, let clip = stack.enclosingScrollView?.contentView else { return nil }
+        let frame = stack.convert(NSRect(x: unit.frame.minX, y: unit.place, width: unit.bounds.width, height: unit.bounds.height), to: clip)
+        return (frame.minY - host.visibleTop(in: clip), clip.bounds.maxY - frame.maxY)
     }
 
     /// The lifted unit follows the pointer, which is at `point` in the window.
@@ -190,9 +242,9 @@ import MuxifyCore
                                                    headroom: headroom, footroom: footroom)
         self.translation = translation
         let placement: DropPlacement<String>? = if case .place(let placement) = landing { placement } else { nil }
-        guard placement != self.placement else { return card.placeUnits(motion: nil) }
+        guard placement != self.placement else { return placeUnits(motion: nil) }
         self.placement = placement
-        card.placeUnits(motion: ListLift.land.motion)
+        placeUnits(motion: ListLift.land.motion)
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
 
@@ -200,13 +252,13 @@ import MuxifyCore
     private func cancel(_ id: String) {
         timer?.cancel()
         phase = .idle
-        card.showLook(.resting, of: id, motion: ListLift.cancel.motion)
+        showLook(.resting, of: id, motion: ListLift.cancel.motion)
     }
 
-    // MARK: The card
+    // MARK: The host
 
-    /// The card shows its rows anew: the Window units, from the top. A dropped unit's drag ends once they are in the
-    /// new order, and a drag whose unit went away ends.
+    /// The host shows its units anew, from the top. A dropped unit's drag ends once they are in the new order, and a
+    /// drag whose unit went away ends.
     func show(_ ids: [String]) {
         guard let id = phaseID else { return }
         guard ids.contains(id) else { return abandon(id) }
@@ -214,10 +266,10 @@ import MuxifyCore
         if case .settling = phase, let placement, placement.placing(id, in: ids) == ids { finish() }
     }
 
-    /// The card's place in the list moved, as when the list scrolled under a lifted unit: the unit keeps its place
+    /// The host's place in the list moved, as when the list scrolled under a lifted unit: the unit keeps its place
     /// under the pointer, and finds where it lands again.
     func placeMoved() {
-        guard let id = liftedID, let unit = card.unit(id), let place = card.visiblePlace(of: unit) else { return }
+        guard let id = liftedID, let unit = unit(id), let place = visiblePlace(of: unit) else { return }
         defer { visibleTop = place.visibleTop }
         guard let before = visibleTop, before != place.visibleTop else { return }
         placeShift += before - place.visibleTop
@@ -225,7 +277,7 @@ import MuxifyCore
         land(id)
     }
 
-    /// The card closed, or its rows went away: a lifted unit goes back.
+    /// The card closed, or the host went away: a lifted unit goes back.
     func abandon() {
         if let id = phaseID { abandon(id) }
     }
@@ -246,8 +298,8 @@ import MuxifyCore
             NSCursor.pop()
             phase = .idle
             placement = nil
-            card.showLook(.resting, of: id, motion: ListLift.lift.motion)
-            card.placeUnits(motion: ListLift.back.motion)
+            showLook(.resting, of: id, motion: ListLift.lift.motion)
+            placeUnits(motion: ListLift.back.motion)
         case .settling(id):
             finish()
         default:
@@ -255,31 +307,72 @@ import MuxifyCore
         }
     }
 
-    /// The order and the heights of the Window units as the card shows them.
+    /// The order and the heights of the units as the host shows them.
     private func measure() {
-        let units = card.windowUnits, width = card.rowsWidth
+        let units = host.dragUnits, width = host.unitsWidth
         order = units.map { .item($0.id) }
         layout.heights = Dictionary(units.map { (.item($0.id), $0.height(width: width)) }, uniquingKeysWith: { first, _ in first })
     }
 
-    /// The card shows the new order: the units stand at their places, where they already show.
+    /// The host shows the new order: the units stand at their places, where they already show.
     private func finish() {
         timer?.cancel()
         phase = .idle
         placement = nil
         translation = 0
         measure()
-        card.placeUnits(motion: nil)
+        placeUnits(motion: nil)
     }
 
-    private func waitForTheCard(of id: String) {
+    private func waitForTheHost(of id: String) {
         timer = Task { [weak self] in
             try? await Task.sleep(for: ListLift.settleLimit)
             guard let self, !Task.isCancelled, phase == .settling(id) else { return }
             phase = .idle
             placement = nil
-            card.placeUnits(motion: ListLift.back.motion)
+            placeUnits(motion: ListLift.back.motion)
         }
+    }
+
+    // MARK: The stack
+
+    /// Puts `unit` in the host's stack with its top at `top`, `width` wide, moved by the drag's offset: above the
+    /// others and the placeholder while it is lifted and while it glides to where it lands. Returns its bottom at its
+    /// place.
+    @discardableResult
+    func place(_ unit: DragUnitView, at top: CGFloat, width: CGFloat) -> CGFloat {
+        unit.place = top
+        unit.frame = NSRect(x: 0, y: top + offset(of: unit.id), width: width, height: unit.height(width: width))
+        unit.layOut()
+        unit.layer?.zPosition = draggedID == unit.id ? 2 : 0
+        return top + unit.frame.height
+    }
+
+    /// Puts the placeholder where the lifted unit would land, behind the units.
+    func placeSlot() {
+        slot.layer?.zPosition = 1
+        guard let id = liftedID, let offset = slotOffset, let unit = unit(id) else { return }
+        slot.frame = NSRect(x: unit.frame.minX, y: unit.place + offset, width: unit.bounds.width, height: unit.bounds.height)
+    }
+
+    /// Puts the units at their places and the drag's offsets. With `motion`, the units that move glide there, with
+    /// what goes with them and the placeholder; the lifted unit and what stands on it follow the pointer at once.
+    private func placeUnits(motion: LayerMotion?) {
+        let appears = liftedID != nil && !slot.shows
+        let lifted = liftedID.flatMap(unit)
+        LayerGlide.withoutActions {
+            if let id = liftedID, let lifted {
+                lifted.setFrameOrigin(NSPoint(x: lifted.frame.minX, y: lifted.place + offset(of: id)))
+            }
+            host.dragWillPlaceUnits(lifted: lifted)
+            if appears { placeSlot() }
+        }
+        if let motion, let layer = host.layer {
+            LayerGlide.run(under: layer, motion: motion, change: host.layOutUnits)
+        } else {
+            LayerGlide.withoutActions(host.layOutUnits)
+        }
+        slot.show(liftedID != nil, motion: appears ? ListLift.lift.motion : motion)
     }
 }
 
@@ -288,10 +381,10 @@ extension ListLift.Spring {
     var motion: LayerMotion { .spring(duration: duration, bounce: bounce) }
 }
 
-/// A Window row and the Pane rows under it, which a drag lifts as one; or a Pane row in place of its Session's only
-/// Window row, which does not move. It stands on a plate while it is pressed or lifted. It takes no click of its own:
-/// a click between its rows goes to the card, as before the rows had a unit.
-final class WindowUnitView: NSView {
+/// A unit that a `StackDrag` lifts as one: a Window row with the Pane rows under it (`WindowUnitView`), or a Session
+/// block of an open Topic card (`SessionBlockView`). It stands on a plate while it is pressed or lifted. It takes no
+/// click of its own: a click between its parts goes to the card.
+class DragUnitView: NSView {
     enum Look {
         case resting
         /// Pressed, the unit sinks and stands on its plate, so the press shows before the pointer moves.
@@ -300,25 +393,26 @@ final class WindowUnitView: NSView {
         case lifted
     }
 
-    /// The Window ID, or the Pane ID of a Pane row in place of the only Window row.
     let id: String
-    /// The Window of a Window row; nil for a Pane row in place of the only Window row.
-    var tmuxWindow: TmuxWindow?
-    /// Its top in the card's rows, without the drag's offset.
+    /// Its top in the host's stack, without the drag's offset.
     var place: CGFloat = 0
-    private let plate = LiftPlateView()
+    private let plate: LiftPlateView
     private var look = Look.resting
+    /// Reduce Motion is on: the unit's look keeps its size.
+    private var keepsSize = false
 
-    /// The rows from the top.
-    var rows: [CardRowView] = [] {
+    /// The views over the plate, from the back.
+    var parts: [NSView] = [] {
         didSet {
-            let views = [plate] + rows.map { $0 as NSView }
+            let views = [plate] + parts
             if subviews != views { subviews = views }
         }
     }
 
-    init(id: String) {
+    /// `cornerRadius` is the unit's corners, for its plate and its shadow.
+    init(id: String, cornerRadius: CGFloat) {
         self.id = id
+        plate = LiftPlateView(cornerRadius: cornerRadius)
         super.init(frame: .zero)
         wantsLayer = true
         plate.alphaValue = 0
@@ -340,34 +434,29 @@ final class WindowUnitView: NSView {
         set { plate.theme = newValue }
     }
 
-    /// The height of the rows in a unit `width` wide, with `CardSpacing.row` between two rows.
-    func height(width: CGFloat) -> CGFloat {
-        rows.map { $0.height(width: width) }.reduce(0, +) + CardSpacing.row * CGFloat(max(0, rows.count - 1))
-    }
+    /// The unit's height `width` wide.
+    func height(width: CGFloat) -> CGFloat { 0 }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         layOut()
     }
 
-    /// Stacks the rows from the top, and puts the plate under them.
-    func layOut() {
+    /// Puts the plate under the parts and lays the parts out (`layOutParts`), at the scale of the unit's look.
+    final func layOut() {
         plate.frame = bounds
-        var top: CGFloat = 0
-        for row in rows {
-            row.frame = NSRect(x: 0, y: top, width: bounds.width, height: row.height(width: bounds.width))
-            top = row.frame.maxY + CardSpacing.row
-        }
+        layOutParts()
         // The scale's point stays with the unit's size.
-        LayerGlide.withoutActions { layer?.sublayerTransform = transform(scale: scale(look, reducesMotion: reducesMotion)) }
+        LayerGlide.withoutActions { layer?.sublayerTransform = transform(scale: scale(look, reducesMotion: keepsSize)) }
     }
 
-    private var reducesMotion = false
+    /// Stacks the parts from the top.
+    func layOutParts() {}
 
     /// Shows the look, moving to it by `motion`. With Reduce Motion the unit does not sink or grow.
     func show(_ look: Look, reducesMotion: Bool, motion: LayerMotion) {
         self.look = look
-        self.reducesMotion = reducesMotion
+        keepsSize = reducesMotion
         if let layer {
             LayerGlide.set("sublayerTransform", of: layer, to: NSValue(caTransform3D: transform(scale: scale(look, reducesMotion: reducesMotion))),
                            motion: motion)
@@ -391,6 +480,61 @@ final class WindowUnitView: NSView {
     }
 }
 
+/// A Window row and the Pane rows under it, which a drag lifts as one; or a Pane row in place of its Session's only
+/// Window row, which does not move. Its rows stand `CardSpacing.row` apart.
+final class WindowUnitView: DragUnitView {
+    /// The Window of a Window row; nil for a Pane row in place of the only Window row.
+    var tmuxWindow: TmuxWindow?
+
+    /// The rows from the top.
+    var rows: [CardRowView] = [] {
+        didSet { parts = rows }
+    }
+
+    /// `id` is the Window ID, or the Pane ID of a Pane row in place of the only Window row.
+    init(id: String) {
+        super.init(id: id, cornerRadius: WindowRowMetrics.cornerRadius)
+    }
+
+    /// The rows in their units, as `WindowUnit` groups them in the SwiftUI list: each Window row with the Pane rows under
+    /// it, and each Pane row in place of the only Window row. A unit of `kept` keeps its view, so a lifted unit keeps the
+    /// row the pointer presses.
+    static func units(of rows: [(content: CardRowContent, view: CardRowView)], keeping kept: [WindowUnitView]) -> [WindowUnitView] {
+        var kept = Dictionary(kept.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var grouped: [(id: String, window: TmuxWindow?, rows: [CardRowView])] = []
+        for (content, view) in rows {
+            switch content {
+            case .window(let content):
+                grouped.append((content.window.id, content.window, [view]))
+            case .pane(let content) where content.isUnderWindowRow && grouped.last?.window?.id == content.windowID:
+                grouped[grouped.count - 1].rows.append(view)
+            case .pane(let content):
+                grouped.append((content.paneID, nil, [view]))
+            }
+        }
+        return grouped.map { group in
+            let unit = kept.removeValue(forKey: group.id) ?? WindowUnitView(id: group.id)
+            unit.tmuxWindow = group.window
+            unit.rows = group.rows
+            return unit
+        }
+    }
+
+    /// The height of the rows in a unit `width` wide, with `CardSpacing.row` between two rows.
+    override func height(width: CGFloat) -> CGFloat {
+        rows.map { $0.height(width: width) }.reduce(0, +) + CardSpacing.row * CGFloat(max(0, rows.count - 1))
+    }
+
+    /// Stacks the rows from the top.
+    override func layOutParts() {
+        var top: CGFloat = 0
+        for row in rows {
+            row.frame = NSRect(x: 0, y: top, width: bounds.width, height: row.height(width: bounds.width))
+            top = row.frame.maxY + CardSpacing.row
+        }
+    }
+}
+
 /// What a pressed or lifted unit stands on, so the rows it passes over do not show through it: the chrome's
 /// background, as `chrome(theme:material:)` gives it to the Sidebar, under a faint fill of the text colour, in a thin
 /// border, with the shadow of the lift under it. `ListDragItem`'s plate in SwiftUI.
@@ -404,18 +548,20 @@ private final class LiftPlateView: NSView {
             face.base = theme?.chrome
         }
     }
-    private let shade = LiftShadowView()
+    private let shade: LiftShadowView
     private let material = NSVisualEffectView()
-    private let face = LiftFaceView()
+    private let face: LiftFaceView
 
-    init() {
+    init(cornerRadius: CGFloat) {
+        shade = LiftShadowView(cornerRadius: cornerRadius)
+        face = LiftFaceView(cornerRadius: cornerRadius)
         super.init(frame: .zero)
         wantsLayer = true
         material.material = .sidebar
         material.blendingMode = .behindWindow
         material.state = .followsWindowActiveState
         material.wantsLayer = true
-        material.layer?.cornerRadius = WindowRowMetrics.cornerRadius
+        material.layer?.cornerRadius = cornerRadius
         material.layer?.cornerCurve = .continuous
         material.layer?.masksToBounds = true
         subviews = [shade, material, face]
@@ -443,8 +589,10 @@ private final class LiftPlateView: NSView {
 /// takes the shadow off the layer of a view.
 private final class LiftShadowView: NSView {
     private let shape = CALayer()
+    private let cornerRadius: CGFloat
 
-    init() {
+    init(cornerRadius: CGFloat) {
+        self.cornerRadius = cornerRadius
         super.init(frame: .zero)
         layer = CALayer()
         wantsLayer = true
@@ -467,8 +615,7 @@ private final class LiftShadowView: NSView {
         super.setFrameSize(newSize)
         LayerGlide.withoutActions {
             shape.frame = bounds
-            shape.shadowPath = CGPath(roundedRect: bounds, cornerWidth: WindowRowMetrics.cornerRadius,
-                                      cornerHeight: WindowRowMetrics.cornerRadius, transform: nil)
+            shape.shadowPath = CGPath(roundedRect: bounds, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
         }
     }
 
@@ -486,12 +633,12 @@ private final class LiftFaceView: LayerColoredView {
     private let under = CALayer()
     private let fill = CALayer()
 
-    init() {
+    init(cornerRadius: CGFloat) {
         super.init(frame: .zero)
         layer = CALayer()
         wantsLayer = true
         for shape in [under, fill] {
-            shape.cornerRadius = WindowRowMetrics.cornerRadius
+            shape.cornerRadius = cornerRadius
             shape.cornerCurve = .continuous
             layer?.addSublayer(shape)
         }
@@ -525,12 +672,15 @@ private final class LiftFaceView: LayerColoredView {
 final class DropSlotView: LayerColoredView {
     private let fill = CALayer()
     private let border = CAShapeLayer()
+    private let cornerRadius: CGFloat
 
-    init() {
+    /// `cornerRadius` is the corners of the units that land in it.
+    init(cornerRadius: CGFloat) {
+        self.cornerRadius = cornerRadius
         super.init(frame: .zero)
         layer = CALayer()
         wantsLayer = true
-        fill.cornerRadius = WindowRowMetrics.cornerRadius
+        fill.cornerRadius = cornerRadius
         fill.cornerCurve = .continuous
         border.fillColor = nil
         border.lineWidth = ListLift.slotBorderWidth
@@ -553,7 +703,7 @@ final class DropSlotView: LayerColoredView {
             fill.frame = bounds
             // Inside the slot, as SwiftUI's `strokeBorder` draws.
             let inset = bounds.insetBy(dx: ListLift.slotBorderWidth / 2, dy: ListLift.slotBorderWidth / 2)
-            let radius = max(0, WindowRowMetrics.cornerRadius - ListLift.slotBorderWidth / 2)
+            let radius = max(0, cornerRadius - ListLift.slotBorderWidth / 2)
             border.path = inset.width > 0 && inset.height > 0
                 ? CGPath(roundedRect: inset, cornerWidth: radius, cornerHeight: radius, transform: nil) : nil
         }

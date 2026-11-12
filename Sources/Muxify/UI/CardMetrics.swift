@@ -25,6 +25,14 @@ enum CardBlockDivider {
     static let inset: CGFloat = 6
     /// How far above the block's top the divider's top stands.
     static let rise: CGFloat = 5
+    /// The dividers hide while a drag moves a block, and show again after it, with ease-out over this.
+    static let fadeDuration = 0.15
+}
+
+/// A Session block of an open Topic card, which a drag on its Session line lifts, for both versions of the card.
+enum CardBlockLift {
+    /// The radius of the plate that a pressed or lifted block stands on, and of the placeholder where it would land.
+    static let cornerRadius: CGFloat = 7
 }
 
 /// A card's outline. The SwiftUI card and the AppKit card both read it, so the two cannot drift (ADR 0074).

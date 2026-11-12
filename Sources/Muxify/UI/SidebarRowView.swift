@@ -6,15 +6,33 @@ import MuxifyCore
 /// comes up, as a tap in SwiftUI. To accessibility, a part that is an element presses with its action.
 ///
 /// A Control-click is a right-click, as in SwiftUI: it opens the menu that a right-click opens there, and it presses
-/// nothing and starts no drag. A part that does more with a press than `onPress`, such as a drag, does it in
-/// `pressDown`, `pressMoved` and `pressUp`, which a Control-click never reaches.
+/// nothing and starts no drag. A part that does more with a press than `onPress` does it in `pressDown`, `pressMoved`
+/// and `pressUp`, which a Control-click never reaches.
+///
+/// A part with a `drag` is the handle of the unit `dragID` of that drag, as SwiftUI's `listDrag` makes a view the
+/// handle of a `ListDrag` item: a Window row of its Window unit, or a Session line of its Session block. A press that
+/// moves lifts the unit, and a press let go before that is a click, which the drag hands to `onPress`.
 class SidebarPressView: NSView {
     var onPress: () -> Void = {}
+    /// The drag of the unit that the part is the handle of, and the unit's ID. Without a drag, a click presses the part
+    /// where the mouse comes up.
+    weak var drag: StackDrag?
+    var dragID = ""
+    /// A press that moves lifts the unit: the pointer is the open hand over the part.
+    var isDraggable = false {
+        didSet {
+            if isDraggable != oldValue { window?.invalidateCursorRects(for: self) }
+        }
+    }
     /// The mouse went down on the part without Control and has not come up: the mouse's moves and its coming up
     /// belong to a press.
     private var pressing = false
 
     override var isFlipped: Bool { true }
+
+    override func resetCursorRects() {
+        if isDraggable { addCursorRect(bounds, cursor: .openHand) }
+    }
 
     /// The point is in the superview's coordinates.
     override func hitTest(_ point: NSPoint) -> NSView? { frame.contains(point) ? self : nil }
@@ -40,13 +58,19 @@ class SidebarPressView: NSView {
     }
 
     /// The mouse went down on the part at `point`, in the window.
-    func pressDown(at point: NSPoint) {}
+    func pressDown(at point: NSPoint) {
+        drag?.press(dragID, at: point)
+    }
 
     /// The mouse moved to `point` in the window while it presses the part.
-    func pressMoved(to point: NSPoint) {}
+    func pressMoved(to point: NSPoint) {
+        drag?.drag(dragID, to: point)
+    }
 
-    /// The mouse came up at `point` in the window: on the part, the part is pressed.
+    /// The mouse came up at `point` in the window: on the part, the part is pressed. A handle's drag decides whether
+    /// the press was a click.
     func pressUp(at point: NSPoint) {
+        if let drag { return drag.release(dragID, onTap: onPress) }
         if bounds.contains(convert(point, from: nil)) { onPress() }
     }
 
