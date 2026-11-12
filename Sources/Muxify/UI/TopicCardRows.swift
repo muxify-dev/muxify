@@ -12,6 +12,17 @@ struct TopicCardBlock: Equatable {
     var rows: [CardRowContent]
 }
 
+/// What an open card of the AppKit Topics list lists under its header: the rows of its Sessions, or the remembered
+/// Sessions of a Settled card. The card lays it out under its header and lists its accessibility rows.
+@MainActor protocol TopicCardBody: NSView {
+    /// The height of what it lists in a card `width` wide.
+    func height(width: CGFloat) -> CGFloat
+    /// The rows from the top, as the card lists them to accessibility.
+    var accessibilityParts: [NSView] { get }
+    /// False while the card is closed: the card keeps what it listed, which fades where it stands and takes no click.
+    var isOpen: Bool { get set }
+}
+
 /// What an open card of the AppKit Topics list lists under its header, as `CardList` lists it in SwiftUI
 /// (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md): the blocks of its Sessions, a divider over each
 /// block after the first, then "N more…" when the card holds rows back. A Topic card keeps room at the end for its
@@ -19,7 +30,7 @@ struct TopicCardBlock: Equatable {
 ///
 /// To accessibility the view is no element: the card lists its rows, each Session line, Window row, Pane row and
 /// "N more…" as one row.
-final class TopicCardRowsView: NSView {
+final class TopicCardRowsView: NSView, TopicCardBody {
     /// A press on a Session line, with the Session's ID.
     var onSession: (String) -> Void = { _ in }
     /// A press on "N more…".
@@ -152,6 +163,101 @@ final class TopicCardRowsView: NSView {
         blocks.flatMap { block in (block.line.map { [$0 as NSView] } ?? []) + block.rows.flatMap(\.accessibilityParts) }
             + (showsMore ? [more] : [])
     }
+}
+
+/// A Session that a Settled Topic's record remembers, as its open card lists it: its Session line, then a row for each of
+/// its remembered Windows.
+struct RememberedSessionContent: Equatable {
+    let sessionID: String
+    /// The Session line's text, the Session's name.
+    let line: String
+    var windows: [RememberedRowContent]
+}
+
+/// What an open Settled card lists under its header, as `RememberedSessions` lists it in SwiftUI
+/// (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md): for each remembered Session its Session line,
+/// faded as a Settled Topic's, then the rows of its remembered Windows, all `CardSpacing.row` apart, and at the end the
+/// room of the card's action, Reopen. A press on a Session line or a row does nothing: nothing of them is live.
+///
+/// To accessibility the view is no element: the card lists its Session lines and rows, each one row.
+final class RememberedSessionsView: NSView, TopicCardBody {
+    /// The card header's identifier.
+    private let headerIdentifier: String
+    /// The Session lines and the rows, from the top.
+    private var parts: [NSView] = []
+    private var lines: [String: SessionLineView] = [:]
+    private var rows: [String: RememberedRowView] = [:]
+    private var footerHeight: CGFloat = 0
+
+    /// `identifier` is the card header's, whose Session lines are `<identifier>-session-<Session ID>`.
+    init(identifier: String) {
+        headerIdentifier = identifier
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { true }
+
+    /// A closed card's rows take no click and no pointer, and their hover labels close.
+    var isOpen = false {
+        didSet {
+            for row in rows.values { row.isShown = isOpen }
+        }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard isOpen else { return nil }
+        let hit = super.hitTest(point)
+        return hit === self ? nil : hit
+    }
+
+    /// Shows the Sessions. A Session line or a row that already showed keeps its view.
+    func show(_ sessions: [RememberedSessionContent], environment: SidebarListEnvironment) {
+        var shownLines = lines, shownRows = rows
+        lines = [:]
+        rows = [:]
+        parts = sessions.flatMap { session -> [NSView] in
+            let line = shownLines.removeValue(forKey: session.sessionID) ?? SessionLineView()
+            line.show(session.line, identifier: headerIdentifier + "-session-" + session.sessionID, environment: environment)
+            line.alphaValue = TopicCardRowsOpacity.notOpen
+            lines[session.sessionID] = line
+            return [line] + session.windows.map { content -> NSView in
+                let row = shownRows.removeValue(forKey: content.windowID) ?? RememberedRowView(windowID: content.windowID)
+                row.show(content, environment: environment)
+                row.isShown = isOpen
+                rows[content.windowID] = row
+                return row
+            }
+        }
+        footerHeight = environment.fontSize(RememberedRowMetrics.designFooterHeight)
+        if subviews != parts { subviews = parts }
+        layOut()
+    }
+
+    func height(width: CGFloat) -> CGFloat { place(width: width, placing: false) }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        layOut()
+    }
+
+    private func layOut() { _ = place(width: bounds.width, placing: true) }
+
+    /// Stacks the Session lines and the rows from the top, `CardSpacing.row` apart, with the room of the card's action
+    /// after them. Returns the height; with `placing`, it also puts the views there.
+    private func place(width: CGFloat, placing: Bool) -> CGFloat {
+        var top: CGFloat = 0
+        for view in parts {
+            let height = (view as? SessionLineView)?.height(width: width) ?? (view as? RememberedRowView)?.height ?? 0
+            if placing { view.frame = NSRect(x: 0, y: top, width: width, height: height) }
+            top += height + CardSpacing.row
+        }
+        return top + footerHeight
+    }
+
+    var accessibilityParts: [NSView] { parts }
 }
 
 /// The Session line of an open Topic card, over the Session's rows: `SessionHeading` in SwiftUI. Its name on one line,

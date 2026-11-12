@@ -26,6 +26,13 @@ public enum SettledAge {
         }
     }
 
+    /// The first moment after `date` at which a label can change: the next midnight in `calendar`'s time zone, or the
+    /// first moment of that day where the clocks skip midnight. A Settled card's label counts days, so the Settled group
+    /// draws its cards again then.
+    public static func nextMidnight(after date: Date, calendar: Calendar) -> Date? {
+        calendar.nextDate(after: date, matching: DateComponents(hour: 0, minute: 0, second: 0), matchingPolicy: .nextTime)
+    }
+
     /// The Settled Topics that Forget Settled Older Than… forgets: Settled more than `days` days before `now`, in the
     /// days that `days(from:to:calendar:)` counts. With 14, a card that says "15 days ago" goes and one that says
     /// "14 days ago" stays. Oldest first.

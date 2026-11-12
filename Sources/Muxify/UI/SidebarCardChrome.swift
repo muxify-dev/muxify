@@ -137,13 +137,14 @@ final class CardSpineView: LayerColoredView {
 
 /// The ring of a card's border: opaque where the border is, `width` wide inside the card's rounded shape, to mask the
 /// colours of the border. The border of a view's own layer draws its round corners without smoothing in the driver's
-/// `snapshot`, and a ring that masks does not.
-private final class CardRing: CALayer {
-    init(width: CGFloat) {
+/// `snapshot`, and a ring that masks does not. Another rounded border, such as the Settled group's, gives its own
+/// `cornerRadius`.
+final class CardRing: CALayer {
+    init(width: CGFloat, cornerRadius radius: CGFloat = CardOutline.cornerRadius) {
         super.init()
         borderWidth = width
         borderColor = .black
-        cornerRadius = CardOutline.cornerRadius
+        cornerRadius = radius
         cornerCurve = .continuous
     }
 

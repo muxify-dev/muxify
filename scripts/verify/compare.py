@@ -11,7 +11,8 @@ Without a scene it runs every scene of the area, one after the other, each in it
 fixture once. Then, for each version, it starts the app with that version, shows each of its shots, and takes a
 picture of the App Window and a dump for it. `make compare` builds the Debug app first.
 
-**The gate** (compare_gate.py) matches the rows inside the area's list between the two versions, and compares the
+**The gate** (compare_gate.py) matches the rows inside the area's list, and inside its parts outside the list, between
+the two versions, and compares the
 named actions of the elements that a shot names. The run fails when a scene's gate fails, or when a scene cannot show
 a shot or measure it. It names each row that failed, with the
 values of both versions.
@@ -36,7 +37,7 @@ import time
 from typing import NamedTuple
 
 from scripts.verify import compare_report, gate
-from scripts.verify.compare_gate import judge, judge_actions, list_rows, rect
+from scripts.verify.compare_gate import area_rows, judge, judge_actions, rect
 from scripts.verify.compare_scenes import AREAS
 from scripts.verify.run import prepare_mac
 from scripts.verify.run_suite import write_json
@@ -235,7 +236,7 @@ def run_scene(area, scene, pair, out, self_run):
             difference = out/('%s-difference.png' % shot)
             entry['pixels'] = picture_diff(one['picture'], other['picture'], difference)
             entry['difference'] = difference.name
-            entry['gate'] = judge(list_rows(one['rows'], area.list), list_rows(other['rows'], area.list))
+            entry['gate'] = judge(area_rows(one['rows'], area.parts), area_rows(other['rows'], area.parts))
             entry['gate']['failed'] += judge_actions(one['actions'], other['actions'])
             entry['crop'], entry['window'] = crop([one['rows'], other['rows']])
             if entry['gate']['failed']:

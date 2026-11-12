@@ -122,15 +122,17 @@ private struct TopicsSection: View {
         GeometryReader { proxy in
             VStack(spacing: 0) {
                 if topicsListAppKit { SidebarListHost<TopicsListView>(store: store) } else { topicsList }
-                // The SwiftUI Settled group, also under the AppKit list, until the AppKit list draws its own.
-                if !model.groups.isEmpty {
-                    VStack(spacing: 4) {
+                // The SwiftUI Settled group, under the SwiftUI list: the AppKit list draws its own.
+                if !topicsListAppKit, !model.groups.isEmpty {
+                    VStack(spacing: TopicGroupMetrics.spacing) {
                         ForEach(model.groups) { group in
                             TopicGroupBlock(store: store, model: model, group: group, showingAllRows: $showingAllRows,
-                                            cardsLimit: proxy.size.height / 3)
+                                            cardsLimit: proxy.size.height * TopicGroupMetrics.cardsShare)
                         }
                     }
-                    .padding(.horizontal, 6).padding(.vertical, 4)
+                    .padding(.horizontal, TopicGroupMetrics.horizontalInset).padding(.vertical, TopicGroupMetrics.verticalInset)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier(TopicGroupMetrics.identifier)
                 }
             }
         }
@@ -520,22 +522,24 @@ private struct RememberedSessions: View {
             if case .remembered(let windows) = session.contents {
                 SessionHeading(store: store, topic: topic, session: session)
                 ForEach(windows) { window in
-                    HStack(spacing: 6) {
-                        Image(systemName: "clock.arrow.circlepath").font(fontSize.font(11)).frame(width: fontSize(14))
-                        Text(window.name).font(fontSize.font(12)).hoverLabelTitle()
-                        Spacer(minLength: 4)
+                    HStack(spacing: RememberedRowMetrics.spacing) {
+                        Image(systemName: RememberedRowMetrics.symbol).font(fontSize.font(RememberedRowMetrics.symbolFontSize))
+                            .frame(width: fontSize(RememberedRowMetrics.designSymbolWidth))
+                        Text(window.name).font(fontSize.font(RememberedRowMetrics.fontSize)).hoverLabelTitle()
+                        Spacer(minLength: RememberedRowMetrics.endGap)
                     }
                     .foregroundStyle(.secondary)
-                    .padding(.leading, 24).padding(.trailing, 6).padding(.vertical, 4)
+                    .padding(.leading, RememberedRowMetrics.leading).padding(.trailing, RememberedRowMetrics.trailing)
+                    .padding(.vertical, RememberedRowMetrics.vertical)
                     .accessibilityElement(children: .combine)
                     .hoverLabel(detail: Paths.tildify(window.directory),
                                 onlyWhenCutOff: store.config.sidebar.windowTooltips == .truncated,
                                 enabled: store.config.sidebar.windowTooltips != .off)
-                    .accessibilityIdentifier("remembered-window-\(window.id)")
+                    .accessibilityIdentifier(RememberedRowMetrics.identifier(window.id))
                 }
             }
         }
-        Color.clear.frame(height: fontSize(16))
+        Color.clear.frame(height: fontSize(RememberedRowMetrics.designFooterHeight))
     }
 }
 

@@ -197,8 +197,8 @@ glyphs, as in `topic-cards`.
   the chip's pixels are the same.
 - The Tags are one static text, "Tags", with the names as its value, in both versions. SwiftUI's `help` gives the
   names as the hover label and not as accessibility help, so the AppKit Tags give them only as their tooltip.
-- The Settled group is SwiftUI under either list until task 10, and stands outside `topics-list`, so the gate reads no
-  row of it: the shot of the Settled card is the picture that task 10 must keep.
+- Until task 10 the Settled group was SwiftUI under either list. Since then the AppKit list draws its own, and the gate
+  reads its rows in `topic-groups`, the area's part outside `topics-list` (see `settled-group`).
 
 ## bench
 
@@ -249,3 +249,19 @@ difference picture marks:
 - The shadow under each pill, by one step of a colour part at most: one step stronger right under the capsule, and one
   step weaker right over it. The AppKit pill draws it with Core Graphics, outside the capsule only, as SwiftUI's shadow
   of the composited pill shows.
+
+## settled-group
+
+Task 10 of the set `remove-swiftui`. Seventeen Settled Topics, a page of 15 and two more. Two shots: `settled-group`,
+the Settled group open under the list, with the card of the newest Settled Topic opened by a press, which shows its
+Reopen choice: its outcome, how long ago it was Settled, its two remembered Sessions with their Session lines and the
+rows of their remembered Windows with their clocks, and Reopen in its corner, over the closed Settled cards at their
+resting opacity; and `settled-group-end`, the group's own scroll view scrolled to its end, with "Show 2 more". The
+group stands outside `topics-list`, as SwiftUI puts it, so the area names its container, `topic-groups`, whose rows
+the gate compares too; the SwiftUI group has the same container. The gate passes in both shots, with the named action
+of the group's header, and side by side the pictures look the same: the header, the divider, the border, the cards,
+the ages, the rows and "Show 2 more" stand on the same pixels. The difference picture marks:
+
+- The fill of the open card, one step of 255, as in `topic-open`. It is most of the share of pixels that differ.
+- The many-coloured border of the card that holds the Location, which the press moved to the Settled card, and the
+  edges of the glyphs of "Settle" and "Reopen", as in `topic-cards`.

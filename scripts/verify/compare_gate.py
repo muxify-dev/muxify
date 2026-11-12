@@ -2,9 +2,10 @@
 
 It reads two dumps of the test driver, one of each version (scripts/verify/compare.py), and needs no app:
 
-    result = judge(list_rows(first_dump, area.list), list_rows(second_dump, area.list))
+    result = judge(area_rows(first_dump, area.parts), area_rows(second_dump, area.parts))
 
-`list_rows` keeps the rows with an identifier inside the area's list. `judge` matches them between the two versions
+`list_rows` keeps the rows with an identifier inside the area's list, and `area_rows` those inside each of the area's
+parts: its list, and its parts outside it. `judge` matches them between the two versions
 by identifier and role. SwiftUI gives a row's identifier to the row's parts, so several rows can share one identifier
 and one role: among these, the first of one version matches the first of the other, in the order of the dump.
 
@@ -62,6 +63,12 @@ def list_rows(rows, key):
         found.append(dict(identifier=row['accessibilityIdentifier'], role=row.get('accessibilityRole'), frame=frame,
                           **{name: row.get(key) for name, key in ATTRIBUTES.items()}))
     return found
+
+
+def area_rows(rows, keys):
+    """The rows of a dump that the gate compares for an area: `list_rows` of each element with an identifier in `keys`,
+    the area's list and its parts outside it, in that order."""
+    return [row for key in keys for row in list_rows(rows, key)]
 
 
 def describe(frame):

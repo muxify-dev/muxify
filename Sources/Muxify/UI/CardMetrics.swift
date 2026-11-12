@@ -179,6 +179,10 @@ enum CardCorner {
     static let designFooterHeight: CGFloat = 16
     /// The action's text size, at 12.
     static let fontSize: CGFloat = 11
+    /// The word in the card's top-right corner, such as how long ago a Topic was Settled: its text size at 12, and its
+    /// room to the card's right edge.
+    static let labelFontSize: CGFloat = 11
+    static let labelTrailing: CGFloat = 10
     /// The room between the action and the card's right and bottom edges.
     static let trailing: CGFloat = 10
     static let bottom: CGFloat = 6
@@ -187,4 +191,11 @@ enum CardCorner {
     static func groupWidth(_ size: InterfaceFontSize) -> CGFloat { size(designGroupWidth) }
     static func actionLineHeight(_ size: InterfaceFontSize) -> CGFloat { size(designActionLineHeight) }
     static func footerHeight(_ size: InterfaceFontSize) -> CGFloat { size(designFooterHeight) }
+}
+
+/// The word a card shows in its top-right corner, on the title's first line, above its action: how long ago a Topic in
+/// the Settled group was Settled, such as "Yesterday".
+struct CardCornerLabel: Equatable {
+    let text: String
+    let accessibilityID: String
 }

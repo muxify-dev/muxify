@@ -110,3 +110,87 @@ enum EdgePillMetrics {
         edge == .top ? min(slide, height) - height : height - min(slide, height)
     }
 }
+
+/// The Settled group under the Topics list, for both versions of the list: a block with a rounded border in the
+/// separator colour, its header, and while it is open a divider and its cards, which scroll on their own up to
+/// `cardsShare` of the height of the Topics list and its group. Its lengths that hold text are design sizes at 12,
+/// which grow with the Interface font size; its paddings, spacings and border do not.
+enum TopicGroupMetrics {
+    /// The groups under the Topics list, to accessibility: one container of their rows.
+    static let identifier = "topic-groups"
+    /// The room between the groups and the sides of the Topics list, and above and below them.
+    static let horizontalInset: CGFloat = 6
+    static let verticalInset: CGFloat = 4
+    /// The room between two groups.
+    static let spacing: CGFloat = 4
+    static let cornerRadius: CGFloat = 8
+    static let borderWidth: CGFloat = 1
+    /// The divider under the header of an open group, as high as SwiftUI's `Divider`.
+    static let dividerWidth: CGFloat = 1
+    /// The most height of an open group's cards, as a share of the height of the Topics list and its group, before
+    /// they scroll.
+    static let cardsShare: CGFloat = 1 / 3
+    /// The room around the cards in their scroll view, and between two cards.
+    static let cardsPadding: CGFloat = 6
+    static let cardSpacing: CGFloat = 6
+
+    /// The header: a chevron, the group's symbol and its title with its count, in the secondary text colour.
+    enum Header {
+        static let designHeight: CGFloat = 26
+        static let horizontalPadding: CGFloat = 8
+        /// The room between the chevron, the symbol and the title.
+        static let spacing: CGFloat = 6
+        /// The least room of the space after the title.
+        static let endGap: CGFloat = 4
+        /// The chevron is bold, at this size, in a box of `designChevronWidth`.
+        static let chevronFontSize: CGFloat = 10
+        static let designChevronWidth: CGFloat = 10
+        static let symbolFontSize: CGFloat = 11
+        /// The title is semibold, at this size.
+        static let fontSize: CGFloat = 13
+
+        static func chevron(isExpanded: Bool) -> String { isExpanded ? "chevron.down" : "chevron.right" }
+
+        /// The title and the count of the group's Topics, such as "Settled (17)".
+        static func title(_ group: TopicGroup, count: Int) -> String { "\(group.title) (\(count))" }
+    }
+
+    /// The symbol of a group.
+    static func symbol(_ group: TopicGroup) -> String {
+        switch group {
+        case .settled: "checkmark.circle"
+        }
+    }
+
+    /// "Show N more" after the shown pages of the Settled group, in the secondary text colour.
+    enum ShowMore {
+        static let identifier = "settled-show-more"
+        static let fontSize: CGFloat = 12
+        static let leading: CGFloat = 24
+        static let designHeight: CGFloat = 24
+
+        /// The words, for the Settled Topics after the shown pages, at most a page of them.
+        static func text(hiddenCount: Int) -> String { "Show \(min(hiddenCount, TopicGroupsState.pageSize)) more" }
+    }
+}
+
+/// A Window that a Settled Topic's card remembers, on its row under the remembered Session's line, for both versions
+/// of the card: a clock and the Window's name in the secondary text colour. A press on it does nothing. Its lengths that
+/// hold text are design sizes at 12; its paddings and spacings do not grow.
+enum RememberedRowMetrics {
+    static let symbol = "clock.arrow.circlepath"
+    static let symbolFontSize: CGFloat = 11
+    /// The clock stands in a box this wide.
+    static let designSymbolWidth: CGFloat = 14
+    static let fontSize: CGFloat = 12
+    /// The room between the clock and the name, and the least room of the space after the name.
+    static let spacing: CGFloat = 6
+    static let endGap: CGFloat = 4
+    static let leading: CGFloat = 24
+    static let trailing: CGFloat = 6
+    static let vertical: CGFloat = 4
+    /// The room at the end of an open Settled card's remembered Sessions, which holds Reopen in the card's corner.
+    static let designFooterHeight: CGFloat = 16
+
+    static func identifier(_ windowID: String) -> String { "remembered-window-" + windowID }
+}

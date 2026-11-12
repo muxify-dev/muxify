@@ -19,7 +19,7 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-from scripts.verify.compare_gate import judge, judge_actions, list_rows
+from scripts.verify.compare_gate import area_rows, judge, judge_actions, list_rows
 from scripts.verify.sandbox import BASE, OWNER, OWNERLESS_GRACE, REPO, Sandbox, alive, new_run_id, wait
 
 NAME = __name__.rsplit('.', 1)[-1]
@@ -326,6 +326,22 @@ class CompareGate(unittest.TestCase):
         self.assertIsNone(result['order'])
         # The list and its two rows: not the App Window, the row before the list or the row after it.
         self.assertEqual(result['rows'], [3, 3])
+
+    def test_the_rows_of_an_areas_part_outside_its_list_count_too(self):
+        # A part under the list, as the Settled group stands under the Topics list, with a row of its own.
+        part = [dict(depth='1', accessibilityRole='AXGroup', accessibilityIdentifier='made-up-part',
+                     accessibilityFrame='{{106, 210}, {248, 40}}'),
+                dict(depth='2', accessibilityRole='AXButton', accessibilityIdentifier='made-up-header',
+                     accessibilityLabel='Settled (2)', accessibilityFrame='{{106, 220}, {248, 26}}')]
+        first = self.dump(self.ALPHA) + part
+        moved = [dict(row, accessibilityFrame='{{106, 230}, {248, 26}}') if row['accessibilityIdentifier'] == 'made-up-header'
+                 else row for row in part]
+        keys = (self.KEY, 'made-up-part')
+        self.assertEqual([row['identifier'] for row in area_rows(first, keys)],
+                         [self.KEY, self.ALPHA[0], 'made-up-part', 'made-up-header'])
+        self.assertEqual(judge(area_rows(first, keys), area_rows(first, keys))['failed'], [])
+        failed = judge(area_rows(first, keys), area_rows(self.dump(self.ALPHA) + moved, keys))['failed']
+        self.assertEqual({row['row'] for row in failed}, {'made-up-header (AXButton)'})
 
     def test_a_row_with_no_match_fails_and_is_named_with_the_version_that_has_it(self):
         for first, second, has in (([self.ALPHA, self.BETA], [self.ALPHA], 'first'),

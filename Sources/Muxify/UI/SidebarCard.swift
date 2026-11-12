@@ -508,18 +508,12 @@ struct CardList<Heading: View, Row: View>: View {
     }
 }
 
-/// The word a card shows in its top-right corner, above its action.
-struct CardCornerLabel {
-    let text: String
-    let accessibilityID: String
-}
-
 private struct CardCornerLabelText: View {
     let label: CardCornerLabel
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
-        Text(label.text).font(fontSize.font(11)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+        Text(label.text).font(fontSize.font(CardCorner.labelFontSize)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
     }
 }
 
@@ -530,7 +524,7 @@ extension View {
         overlay(alignment: Alignment(horizontal: .trailing, vertical: .titleLine)) {
             if let label {
                 CardCornerLabelText(label: label)
-                    .padding(.trailing, 10)
+                    .padding(.trailing, CardCorner.labelTrailing)
                     .allowsHitTesting(false)
                     .accessibilityIdentifier(label.accessibilityID)
             }

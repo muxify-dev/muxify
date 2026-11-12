@@ -31,6 +31,10 @@ struct CardHeaderContent: Equatable {
     /// The room the action in the card's bottom-right corner takes, as a design size at 12: the last line of a closed
     /// card stops before it. 0 for a card with no action.
     var cornerWidth: CGFloat = 0
+    /// The word in the top-right corner, on the title's first line, such as how long ago a Topic was Settled. The
+    /// header keeps its place at the end of that line, and the card draws it there. A closed card then has a line
+    /// under its title for the action in its corner, unless a Note or the Summary gives one.
+    var cornerLabel: CardCornerLabel?
 }
 
 /// The header of a card in an AppKit list: the title, after it the place of the card's Hint and the pin, the Guest
@@ -69,6 +73,7 @@ final class CardHeaderView: SidebarPressView {
         var mark = NSRect.zero
         var titleRest = NSRect.zero
         var tags: NSRect?
+        var cornerLabel: NSRect?
         var details: [NSRect] = []
         var bell = NSRect.zero
         var pencil = NSRect.zero
@@ -163,6 +168,14 @@ final class CardHeaderView: SidebarPressView {
     /// The place of the card's Tags in a header `width` wide, nil when the card shows none.
     func tagsPlace(width: CGFloat) -> NSRect? { frames(width: width).tags }
 
+    /// The place of the word in the card's top-right corner in a header `width` wide, nil when the card has none.
+    func cornerLabelPlace(width: CGFloat) -> NSRect? { frames(width: width).cornerLabel }
+
+    /// The font of the word in the card's top-right corner.
+    static func cornerLabelFont(_ environment: SidebarListEnvironment) -> NSFont {
+        .systemFont(ofSize: environment.fontSize(CardCorner.labelFontSize))
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         layOut()
@@ -201,11 +214,15 @@ final class CardHeaderView: SidebarPressView {
         let markSize = content.isPinned ? pin.symbolSize : content.isGuest ? guest.fit() : content.isLocked ? lock.symbolSize : NSSize.zero
         let lineTags = content.tags.flatMap { $0.placement == .corner || $0.placement == .title ? $0 : nil }
         let lineTagsSize = lineTags.map { CardTagsLayout($0, fontSize: environment.fontSize, scale: scale).size }
-        // The marks at the end of the line: the pin, the Guest mark or the lock, then the Tags.
-        let endParts = (hasMark ? [markSize.width] : []) + (lineTagsSize.map { [$0.width] } ?? [])
+        let labelSize = content.cornerLabel.map { SidebarTextLayout($0.text, font: Self.cornerLabelFont(environment), scale: scale).size }
+        // The marks at the end of the line: the pin, the Guest mark or the lock, the Tags, then the place of the word in
+        // the corner.
+        let endParts = (hasMark ? [markSize.width] : []) + (lineTagsSize.map { [$0.width] } ?? []) + (labelSize.map { [$0.width] } ?? [])
         let endWidth = endParts.reduce(0, +) + CGFloat(max(0, endParts.count - 1)) * gap
-        // A closed card with no Summary ends with its first line, which then stops before the corner's action.
-        let lineRoom = max(0, room - (!content.isOpen && content.summary.isEmpty ? corner : 0))
+        // A closed card with no Summary ends with its first line, which then stops before the corner's action, unless
+        // the word in the corner puts the action on a line of its own.
+        let lineRoom = max(0, room - (!content.isOpen && content.summary.isEmpty && content.cornerLabel == nil ? corner : 0))
+        let labelRoom = labelSize.map { $0.width + gap } ?? 0
         // The gaps: after the title, after the Hint, and on each side of the space that pushes the marks to the end.
         let fixed = (hintSize.map { $0.width + gap } ?? 0) + 2 * gap + endWidth
         // With Tag chips in the title line, a long title wraps under them: its first line takes the words that fit.
@@ -220,8 +237,9 @@ final class CardHeaderView: SidebarPressView {
         let firstLine = title.lineHeight
 
         // Each part's middle is on one line. The title's is the middle of its first line.
-        let middles = [firstLine / 2, (hintSize?.height ?? 0) / 2, markSize.height / 2, (lineTagsSize?.height ?? 0) / 2]
-        let heights = [titleSize.height, hintSize?.height ?? 0, markSize.height, lineTagsSize?.height ?? 0]
+        let middles = [firstLine / 2, (hintSize?.height ?? 0) / 2, markSize.height / 2, (lineTagsSize?.height ?? 0) / 2,
+                       (labelSize?.height ?? 0) / 2]
+        let heights = [titleSize.height, hintSize?.height ?? 0, markSize.height, lineTagsSize?.height ?? 0, labelSize?.height ?? 0]
         let above = middles.max() ?? 0
         let lineHeight = above + (zip(heights, middles).map { $0 - $1 }.max() ?? 0)
         let top = CardHeaderPadding.top
@@ -232,7 +250,9 @@ final class CardHeaderView: SidebarPressView {
         frames.titleLine = NSRect(x: left, y: top, width: room, height: lineHeight)
         frames.hint = hintSize.map { place($0, x: left + titleSize.width + gap) }
         frames.mark = place(markSize, x: left + lineRoom - endWidth)
-        frames.tags = lineTagsSize.map { place($0, x: left + lineRoom - $0.width) }
+        frames.tags = lineTagsSize.map { place($0, x: left + lineRoom - labelRoom - $0.width) }
+        // At the header's trailing padding, as the card's overlay puts it.
+        frames.cornerLabel = labelSize.map { place($0, x: width - CardCorner.labelTrailing - $0.width) }
         var bottom = top + lineHeight
 
         // The rest of a title cut under its Tag chips, at the header's full width.
@@ -282,6 +302,11 @@ final class CardHeaderView: SidebarPressView {
             let size = summary.fit(width: max(0, room - corner))
             frames.summary = NSRect(x: left, y: bottom + CardHeaderSpacing.lines + CardHeaderSpacing.summaryTop, width: size.width, height: size.height)
             bottom = frames.summary.maxY
+        }
+        // The line of the corner's action under a closed card's title, when the word in the corner takes the room it
+        // has at the end of the title's line.
+        if content.cornerLabel != nil, !content.isOpen, content.note == nil, !showsSummary {
+            bottom += CardHeaderSpacing.lines + CardCorner.actionLineHeight(environment.fontSize)
         }
         frames.height = bottom + CardHeaderPadding.bottom(isOpen: content.isOpen)
         arranged = (width, frames)

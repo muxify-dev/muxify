@@ -53,6 +53,39 @@ final class SettledAgeTests: XCTestCase {
         XCTAssertEqual(label(at(2026, 11, 6, 9, 0)), "Today")
     }
 
+    // MARK: The midnight the Settled group waits for
+
+    /// The time from `now` to the moment the Settled group draws its cards again.
+    private func wait(from now: Date, calendar: Calendar? = nil) -> TimeInterval? {
+        SettledAge.nextMidnight(after: now, calendar: calendar ?? self.calendar).map { $0.timeIntervalSince(now) }
+    }
+
+    func testTheGroupWaitsUntilTheNextMidnightWhenTheLabelsChange() {
+        XCTAssertEqual(wait(from: now), 12 * 3600, "from noon, half a day")
+        let late = at(2026, 11, 4, 23, 59).addingTimeInterval(59)
+        XCTAssertEqual(wait(from: late), 1, "from a second before midnight, a second")
+        let next = SettledAge.nextMidnight(after: late, calendar: calendar)!
+        XCTAssertEqual(label(now, now: next.addingTimeInterval(-1)), "Today", "the label holds until midnight")
+        XCTAssertEqual(label(now, now: next), "Yesterday", "the label changes at the midnight the group waits for")
+    }
+
+    func testAtMidnightTheGroupWaitsForTheNextOne() {
+        XCTAssertEqual(wait(from: at(2026, 11, 5, 0, 0)), 24 * 3600, "a midnight is no moment after itself")
+    }
+
+    func testTheWaitFollowsTheClocksOnTheDayTheyChange() {
+        // Berlin turns its clocks back an hour on 2026-10-25, a day of 25 hours.
+        XCTAssertEqual(wait(from: at(2026, 10, 25, 0, 0)), 25 * 3600)
+        // Santiago skips from 00:00 to 01:00 on 2026-09-06: the day starts at 01:00, 12 hours after noon the day before.
+        var santiago = calendar
+        santiago.timeZone = TimeZone(identifier: "America/Santiago")!
+        let noon = santiago.date(from: DateComponents(year: 2026, month: 9, day: 5, hour: 12))!
+        let next = SettledAge.nextMidnight(after: noon, calendar: santiago)!
+        XCTAssertEqual(next, santiago.startOfDay(for: noon.addingTimeInterval(18 * 3600)), "the first moment of the next day")
+        XCTAssertEqual(santiago.component(.hour, from: next), 1)
+        XCTAssertEqual(next.timeIntervalSince(noon), 12 * 3600)
+    }
+
     private func settled(_ id: String, _ date: Date?) -> TopicRecord {
         var record = TopicRecord(id: id, title: id)
         record.settledAt = date.map { ISO8601DateFormatter().string(from: $0) }

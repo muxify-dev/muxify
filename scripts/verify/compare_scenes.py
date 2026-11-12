@@ -47,7 +47,8 @@ class Area(NamedTuple):
     compares. `default` is the user default that chooses the version: YES is the AppKit version, NO the SwiftUI one.
     `args` are the launch arguments every scene starts the app with, besides the default. `shown(sandbox)` answers
     which version the App Window shows, 'appkit' or 'swiftui', as the driver says it. `scenes` are its scenes, in
-    their order."""
+    their order. `others` are the identifiers of the area's parts outside its list, such as the Settled group under the
+    Topics list, whose rows the gate compares too."""
     name: str
     title: str
     list: str
@@ -55,6 +56,12 @@ class Area(NamedTuple):
     args: list
     shown: Callable
     scenes: list
+    others: tuple = ()
+
+    @property
+    def parts(self):
+        """The identifiers of the elements whose rows the gate compares: the list, then the others."""
+        return (self.list, *self.others)
 
 
 def config(sidebar='', ui='', more=''):
@@ -549,6 +556,66 @@ class TopicOverflow:
         self.pills(view, above=False, below=True)
 
 
+class SettledGroup:
+    name = 'settled-group'
+    shows = ('The Settled group open under the Topics list, with the card of its newest Settled Topic opened on its '
+             'remembered Sessions: their Session lines and the rows of the remembered Windows with their clocks, how long '
+             'ago the Topic was Settled, its outcome, and Reopen in the corner; the closed Settled cards under it at their '
+             'resting opacity; then the group scrolled to its end, with "Show N more" after its first page.')
+
+    GROUP, CARD = 'settled-topics', 'topic-fir'
+    # The Settled Topics: a page of 15, then 2 more.
+    COUNT = 17
+
+    def fixture(self, s):
+        self.session, self.windows = topic(s, 'atlas', 'Atlas', order=0)
+        records = TopicRecords(s.root/'state/muxify')
+        folder = project(s)
+        (folder/'api').mkdir(exist_ok=True)
+        docs = dict(id='saved:docs/fir', name='docs/fir', base_name='docs', directory=str(folder),
+                    windows=[dict(name='notes', directory=str(folder))])
+        records.put(dict(id='fir', title='Fir', slug='fir', settled_at='2026-01-20T10:00:00Z', outcome='Shipped the fix',
+                         sessions=[dict(remembered(s, 'fir'), windows=[dict(name='editor', directory=str(folder)),
+                                                                       dict(name='server', directory=str(folder/'api'))]),
+                                   docs]))
+        for number in range(1, self.COUNT):
+            records.put(dict(id='old-%02d' % number, title='Old %02d' % number, slug='old-%02d' % number,
+                             settled_at='2026-01-%02dT10:00:00Z' % (20 - number)))
+        self.remembered = ['remembered-window-fir-%s' % place for place in ('0-0', '0-1', '1-0')]
+
+    def shots(self):
+        return [('settled-group', self.opened), ('settled-group-end', self.end)]
+
+    def opened(self, view):
+        s = view.s
+        view.launch(config())
+        view.go(self.windows[0])
+        fresh_shell(s, self.windows[0])
+        close_location(view, 'topic-atlas', ['topic-atlas'])
+        view.wait(lambda rs: s.has(self.GROUP, rs), 'the Settled group does not show')
+        if not view.value(self.GROUP, s.rows()).startswith('expanded'):
+            s.act('press', self.GROUP)
+        view.wait(lambda rs: s.has(self.CARD, rs), 'the Settled group did not open with the card of the newest Settled Topic')
+        if view.value(self.CARD, s.rows()).startswith('collapsed'):
+            s.act('press', self.CARD)
+        shown = self.remembered + ['reopen-topic-fir', 'settled-age-fir', 'settled-show-more']
+        view.wait(lambda rs: view.value(self.CARD, rs).startswith('expanded') and all(s.has(key, rs) for key in shown),
+                  lambda: 'the opened Settled card does not show its remembered Windows, Reopen and its age, or the group '
+                  'has no "Show N more": it misses %s' % [key for key in shown if not s.has(key)])
+        view.read_actions(self.GROUP)
+
+    def end(self, view):
+        s = view.s
+        view.rest()
+        s.act('scroll', self.CARD, from_end=0)
+        def at_end(rs):
+            more, group = bottom_of(view, 'settled-show-more', rs), bottom_of(view, 'topic-groups', rs)
+            return None not in (more, group) and group - 20 <= more <= group
+        view.wait(at_end, lambda: 'the Settled group did not scroll to "Show N more" at its end: its bottom and the '
+                  'group\'s %s' % [bottom_of(view, key, s.rows()) for key in ('settled-show-more', 'topic-groups')])
+        view.read_actions(self.GROUP)
+
+
 # The launch arguments of every scene of the Topics list: the Sidebar shows, with Topics.
 TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics']
 
@@ -556,5 +623,6 @@ TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWor
 AREAS = [
     Area(name='topics', title='Topics list', list='topics-list', default=TOPICS_LIST_DEFAULT, args=TOPICS_ARGS,
          shown=lambda s: s.topics_list(), scenes=[TopicCards(), LockedCards(), TopicOpen(), NoTopicCard(), TopicsStuckHeader(),
-                                                    TopicTags(), Bench(), TopicOverflow()]),
+                                                    TopicTags(), Bench(), TopicOverflow(), SettledGroup()],
+         others=('topic-groups',)),
 ]

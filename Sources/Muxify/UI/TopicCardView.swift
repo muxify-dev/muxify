@@ -23,9 +23,13 @@ struct TopicCardContent: Equatable {
     var moreCount = 0
     /// The strongest Agent mark of the rows held back, which "N more…" names.
     var moreMark: AgentMark?
+    /// The Sessions that an open Settled card remembers, which it lists in place of `blocks`. Nil for a card that is not
+    /// Settled.
+    var remembered: [RememberedSessionContent]?
 }
 
-/// The Topic's own action in the bottom-right corner of its card, as a link: Settle in the Topics list.
+/// The Topic's own action in the bottom-right corner of its card, as a link: Settle in the Topics list, Reopen in the
+/// Settled group.
 struct TopicCardCorner: Equatable {
     let title: String
     let identifier: String
@@ -34,13 +38,15 @@ struct TopicCardCorner: Equatable {
 
 /// A card of the AppKit Topics list (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md): a Topic card
 /// or a Locked card, as `TopicCard` and `LockedCard` draw them in SwiftUI. Closed, it is flat, with only its border;
-/// open, it is raised, and lists its Sessions' rows under its header (`TopicCardRowsView`), whose header sticks to the
-/// top of the list while the rows scroll under it. A spine shows its mark, and the card that holds the Location has the
-/// many-coloured border. A Topic card shows Settle in its corner. A card rests at its opacity, and its Hint shows whole.
+/// open, it is raised, and lists its Sessions' rows under its header (`TopicCardRowsView`), or a Settled card its
+/// remembered Sessions (`RememberedSessionsView`), whose header sticks to the top of the list while the rows scroll
+/// under it. A spine shows its mark, and the card that holds the Location has the many-coloured border. A Topic card
+/// shows Settle in its corner, or in the Settled group Reopen, with how long ago it was Settled in its top-right corner.
+/// A card rests at its opacity, and its Hint shows whole.
 ///
 /// To accessibility the view is no element: its rows are the corner's link, then the card, `card-<id>`, whose rows are
-/// the rows of an open card, its header, `<id>`, its Tags, `tags-<id>`, and its Hint, as SwiftUI gives them. `<id>` is
-/// the card's `accessibilityID`, such as `topic-<Topic ID>` or `locked-<Session ID>`.
+/// the rows of an open card, its header, `<id>`, its Tags, `tags-<id>`, the word in its top-right corner, and its Hint,
+/// as SwiftUI gives them. `<id>` is the card's `accessibilityID`, such as `topic-<Topic ID>` or `locked-<Session ID>`.
 final class TopicCardView: NSView {
     let cardID: TopicGroupID
     /// A press on the header, or on the Tags over it.
@@ -83,8 +89,12 @@ final class TopicCardView: NSView {
     /// The Tags of a Topic card, over the place that the header keeps for them. They rest at the card's opacity part
     /// by part (`SidebarTagsView`), so they are no part of `dimmed`.
     private let tags = SidebarTagsView()
-    /// The rows of an open card. A card that closes keeps them, so they fade where they stand.
+    /// The rows of an open card, or the remembered Sessions of an open Settled card. A card that closes keeps them, so
+    /// they fade where they stand.
     private let rows: TopicCardRowsView
+    private let remembered: RememberedSessionsView
+    /// The word in the top-right corner, over the place the header keeps for it.
+    private let cornerLabel = CardCornerLabelView()
     private let unread = CardSpineView()
     private let spine = CardSpineView()
     private let outline = CardOutlineView()
@@ -102,20 +112,24 @@ final class TopicCardView: NSView {
         self.cardID = cardID
         header = CardHeaderView(identifier: cardID.accessibilityID)
         rows = TopicCardRowsView(identifier: cardID.accessibilityID)
+        remembered = RememberedSessionsView(identifier: cardID.accessibilityID)
         super.init(frame: .zero)
         wantsLayer = true
         dimmed.wantsLayer = true
         // The SwiftUI card cuts nothing off.
         for view in [self, card, dimmed] { view.clipsToBounds = false }
-        // From the back: the fill, the rows, the header, which stays above the rows that scroll under it, the spines,
-        // the border, then the Tags over the header, the Hint and the corner's action.
-        dimmed.subviews = [fill, rows, header, unread, spine, outline, selection]
+        // From the back: the fill, the rows, the header, which stays above the rows that scroll under it, the word in
+        // its corner, the spines, the border, then the Tags over the header, the Hint and the corner's action.
+        dimmed.subviews = [fill, rows, remembered, header, cornerLabel, unread, spine, outline, selection]
         card.subviews = [dimmed, tags] + hint.views
         subviews = [card, corner]
         card.setAccessibilityIdentifier("card-" + cardID.accessibilityID)
         card.header = header
         card.rows = { [weak self] in
-            self.map { ($0.isOpen ? $0.rows.accessibilityParts : []) + [$0.header] + ($0.tags.isHidden ? [] : [$0.tags]) + $0.hint.shown } ?? []
+            self.map {
+                ($0.isOpen ? $0.body.accessibilityParts : []) + [$0.header] + ($0.tags.isHidden ? [] : [$0.tags])
+                    + ($0.cornerLabel.isHidden ? [] : [$0.cornerLabel]) + $0.hint.shown
+            } ?? []
         }
     }
 
@@ -126,6 +140,9 @@ final class TopicCardView: NSView {
 
     var isOpen: Bool { content?.header.isOpen ?? false }
 
+    /// What the card lists under its header while it is open: its rows, or a Settled card's remembered Sessions.
+    private var body: any TopicCardBody { content?.remembered == nil ? rows : remembered }
+
     /// Shows the content. The colours of the border turn once when the Location comes to a card that already showed.
     func show(_ content: TopicCardContent, environment: SidebarListEnvironment) {
         guard content != self.content || environment != self.environment else { return }
@@ -135,12 +152,20 @@ final class TopicCardView: NSView {
         self.environment = environment
         header.show(content.header, environment: environment)
         tags.show(content.header.tags, fontSize: environment.fontSize, scale: environment.displayScale, opacity: content.restingOpacity)
+        cornerLabel.show(content.header.cornerLabel, environment: environment)
         if content.header.isOpen {
-            rows.show(content.blocks, moreCount: content.moreCount, moreMark: content.moreMark, reservesCorner: content.corner != nil,
-                      environment: environment, fades: wasOpen)
+            if let remembered = content.remembered {
+                self.remembered.show(remembered, environment: environment)
+            } else {
+                rows.show(content.blocks, moreCount: content.moreCount, moreMark: content.moreMark, reservesCorner: content.corner != nil,
+                          environment: environment, fades: wasOpen)
+            }
         }
-        rows.alphaValue = content.header.isOpen ? 1 : 0
-        rows.isOpen = content.header.isOpen
+        for view in [rows, remembered] as [any TopicCardBody] {
+            let shows = content.header.isOpen && view === body
+            view.alphaValue = shows ? 1 : 0
+            view.isOpen = shows
+        }
         fill.alphaValue = content.header.isOpen ? 1 : 0
         let moves = environment.pulses && !environment.reduceMotion
         spine.show(content.spine, colors: environment.agentColors, moves: moves)
@@ -159,7 +184,7 @@ final class TopicCardView: NSView {
     /// The card's height at `width`: its header, and under the header of an open card its rows, which a Topic card's
     /// end with the room of its action.
     func height(width: CGFloat) -> CGFloat {
-        header.height(width: width) + (isOpen ? CardRowsPadding.top + rows.height(width: rowsWidth(width)) + CardRowsPadding.bottom : 0)
+        header.height(width: width) + (isOpen ? CardRowsPadding.top + body.height(width: rowsWidth(width)) + CardRowsPadding.bottom : 0)
     }
 
     private func rowsWidth(_ width: CGFloat) -> CGFloat { max(0, width - 2 * CardRowsPadding.horizontal) }
@@ -182,8 +207,9 @@ final class TopicCardView: NSView {
         header.sticks = stuck > 0
         unread.frame = NSRect(x: CardSpine.leading, y: stuck + CardSpine.verticalInset, width: CardSpine.width,
                               height: max(0, height - 2 * CardSpine.verticalInset))
-        // The header keeps the places of the Tags and the Hint, and the card draws them over it.
+        // The header keeps the places of the Tags, the word in the corner and the Hint, and the card draws them over it.
         tags.frame = header.tagsPlace(width: bounds.width)?.offsetBy(dx: 0, dy: stuck) ?? .zero
+        cornerLabel.frame = header.cornerLabelPlace(width: bounds.width)?.offsetBy(dx: 0, dy: stuck) ?? .zero
         hint.place(header.hintPlace(width: bounds.width)?.offsetBy(dx: 0, dy: stuck))
     }
 
@@ -200,8 +226,10 @@ final class TopicCardView: NSView {
         selection.frame = bounds
         let headerHeight = header.height(width: bounds.width)
         let rowsWidth = rowsWidth(bounds.width)
-        rows.frame = NSRect(x: CardRowsPadding.horizontal, y: headerHeight + CardRowsPadding.top, width: rowsWidth,
-                            height: rows.height(width: rowsWidth))
+        for view in [rows, remembered] as [any TopicCardBody] {
+            view.frame = NSRect(x: CardRowsPadding.horizontal, y: headerHeight + CardRowsPadding.top, width: rowsWidth,
+                                height: view.height(width: rowsWidth))
+        }
         placeHeader()
         spine.frame = NSRect(x: CardSpine.leading, y: CardSpine.verticalInset, width: CardSpine.width,
                              height: max(0, bounds.height - 2 * CardSpine.verticalInset))
@@ -245,6 +273,45 @@ private final class TopicCardGroupView: NSView {
     }
 
     override func accessibilityActivationPoint() -> NSPoint { accessibilityFrame().centre }
+}
+
+/// The word in a card's top-right corner, such as how long ago a Topic was Settled, as SwiftUI's `cardCornerLabel`
+/// shows it: in the secondary text colour, over the header, and a click goes through it to the header. To accessibility
+/// it is one static text with the word as its value.
+private final class CardCornerLabelView: NSView {
+    private let label = SidebarLabel()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        label.ink = .secondary
+        addSubview(label)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.staticText)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { true }
+
+    /// Shows the word, or nothing for none.
+    func show(_ content: CardCornerLabel?, environment: SidebarListEnvironment) {
+        isHidden = content == nil
+        label.text = content?.text ?? ""
+        label.font = CardHeaderView.cornerLabelFont(environment)
+        label.scale = environment.displayScale
+        setAccessibilityIdentifier(content?.accessibilityID)
+        setAccessibilityValue(content?.text)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        label.frame = bounds
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func accessibilityChildren() -> [Any]? { [] }
 }
 
 /// The Topic's own action in its card's corner: a link in the text size of `CardCorner`, as SwiftUI's link button

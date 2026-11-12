@@ -26,8 +26,9 @@ enum TopicsListVersion: String {
 /// The Sidebar's Topics list in AppKit (ADR 0075): a scroll view with an item for each item of the Topics model's list,
 /// in its order: the Topic cards and Locked cards, the Open Places, the Guests line, the Bench line and the No Topic
 /// card, with the gaps and insets of the SwiftUI list. Its views lay out by frames, and it reads the store through
-/// `ObservedUpdate`. The header of an open card sticks to the top while the card's rows scroll under it. The SwiftUI
-/// Sidebar shows the Settled group under it.
+/// `ObservedUpdate`. The header of an open card sticks to the top while the card's rows scroll under it. Under the
+/// scroll view stand the groups, the Settled group (`TopicGroupsView`), with the room around them of the SwiftUI
+/// Sidebar's; an open group's cards scroll on their own, up to `TopicGroupMetrics.cardsShare` of the list's height.
 ///
 /// With a Bench line, the items above the Bench (`TopicsModel.listParts`) are a block that sticks to the top on the
 /// chrome's background while the Benched cards scroll under it, and the header of an open Benched card sticks under the
@@ -90,6 +91,12 @@ final class TopicsListView: NSView, SidebarList {
         return line
     }()
     private lazy var update = ObservedUpdate { [weak self] in self?.render() }
+    /// The groups under the list's scroll view.
+    private lazy var groups: TopicGroupsView = {
+        let groups = TopicGroupsView(store: store)
+        groups.onMidnight = { [weak self] in self?.update.run() }
+        return groups
+    }()
 
     init(store: WorkspaceStore, environment: SidebarListEnvironment) {
         self.store = store
@@ -104,7 +111,7 @@ final class TopicsListView: NSView, SidebarList {
         scrollView.documentView = document
         scrollView.setAccessibilityIdentifier("topics-list")
         // Over the list, outside its scroll view, as SwiftUI's overlays: the pills are no rows of `topics-list`.
-        subviews = [scrollView, moreBelow, moreAbove]
+        subviews = [scrollView, moreBelow, moreAbove, groups]
         for pill in [moreBelow, moreAbove] { pill.scrollView = scrollView }
         moreBelow.onPress = { [weak self] in
             if let card = self?.hiddenBelow.first { self?.reveal(card) }
@@ -176,8 +183,11 @@ final class TopicsListView: NSView, SidebarList {
             card != activeTopic && TopicsListScroll.revealsLocation(card, isBenched: model.isBenched(card), places: edgePlaces) ? card : nil
         }
         activeTopic = model.activeTopic
+        let shownGroups = model.groups
         let change = { [self] in
             benchedLocation = location
+            groups.isHidden = shownGroups.isEmpty
+            groups.show(shownGroups, activeTopic: model.activeTopic, environment: environment, now: Date())
             for item in shown { item.show() }
             let views = shown.map(\.view)
             if items != views || self.blockCount != blockCount {
@@ -331,7 +341,15 @@ final class TopicsListView: NSView, SidebarList {
     /// line, empty room after the last Benched card lets it scroll up to right under the block
     /// (`BenchGeometry.tail`).
     private func layOut() {
-        scrollView.frame = bounds
+        // The groups at the bottom, with their room around them, and the list in the room above them.
+        let scale = environment.displayScale
+        groups.cardsLimit = (bounds.height * TopicGroupMetrics.cardsShare).rounded(toPixelsOf: scale)
+        let groupsWidth = max(0, bounds.width - 2 * TopicGroupMetrics.horizontalInset)
+        let groupsHeight = groups.isHidden ? 0 : groups.height(width: groupsWidth)
+        let groupsRoom = groups.isHidden ? 0 : groupsHeight + 2 * TopicGroupMetrics.verticalInset
+        scrollView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - groupsRoom))
+        groups.frame = NSRect(x: TopicGroupMetrics.horizontalInset, y: scrollView.frame.maxY + TopicGroupMetrics.verticalInset,
+                              width: groupsWidth, height: groupsHeight)
         let width = max(0, bounds.width - 2 * TopicsListMetrics.horizontalInset)
         var bottom = TopicsListMetrics.verticalInset
         places = items.enumerated().map { index, item in
@@ -350,7 +368,7 @@ final class TopicsListView: NSView, SidebarList {
         cardTops = Dictionary(zip(items, places).compactMap { item, place in Self.cardID(of: item).map { ($0, place.minY - TopicsListMetrics.verticalInset) } },
                               uniquingKeysWith: { first, _ in first })
         let blockBottom = blockCount.flatMap { $0 > 0 ? places[$0 - 1].maxY : nil } ?? TopicsListMetrics.verticalInset
-        geometry = BenchGeometry(topHeight: blockBottom - TopicsListMetrics.verticalInset, viewportHeight: bounds.height,
+        geometry = BenchGeometry(topHeight: blockBottom - TopicsListMetrics.verticalInset, viewportHeight: scrollView.frame.height,
                                  spacing: TopicsListMetrics.itemSpacing, inset: TopicsListMetrics.verticalInset,
                                  fontSize: environment.fontSize)
         if let blockCount, let last = places.last, places.count > blockCount {
@@ -433,7 +451,7 @@ final class TopicsListView: NSView, SidebarList {
         // With a Bench line, the end is the last Benched card's bottom, not the empty room after it.
         let last = blockCount == nil ? items.last : items.count > blockItems ? items.last : nil
         let end = last.map { min(max(0, $0.frame.maxY - offset - viewport), band) } ?? 0
-        moreBelow.frame = NSRect(x: 0, y: bounds.height - band, width: bounds.width, height: band)
+        moreBelow.frame = NSRect(x: 0, y: scrollView.frame.maxY - band, width: bounds.width, height: band)
         moreBelow.show(count: hiddenBelow.count, slide: end, environment: environment)
         moreAbove.frame = NSRect(x: 0, y: geometry.areaTop, width: bounds.width, height: band)
         moreAbove.show(count: hiddenAbove.count, slide: geometry.stick(at: offset), environment: environment)
