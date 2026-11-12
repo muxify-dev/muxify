@@ -109,7 +109,29 @@ The checks reported as FLAKY in the full runs of task 11, three against each lis
 
 ## topic-cards
 
-Task 04 of the set `remove-swiftui` draws the AppKit Topics list's cards bare: each has its border and its title on
-one line, and its header has no value, no help and no default action. So in the AppKit version the press that closes
-the Location's card does nothing, and the gate fails on the headers' values and help and on the frames of the cards,
-which are lower than the SwiftUI cards. Task 05 draws the closed Topic card and the Locked card.
+Task 05 of the set `remove-swiftui` draws the closed Topic card. The gate passes, and side by side the two pictures
+look the same. The difference picture marks three things, none of which a person sees:
+
+- The many-coloured border of the Location's card. The SwiftUI border adds its saturation as a Core Animation filter
+  (`.saturation`), which the driver's `snapshot` does not draw, and the AppKit border bakes the same saturation into
+  its colours (`CardSelectionBorderView`). So the SwiftUI picture shows the colours unsaturated, such as `00b4ee` for
+  `00b9f9`. On the screen the two are the same, as the pilot measured with a capture of the screen.
+- The edges of the glyphs of the titles, the Summaries, the keys of the Hints and "Settle". Each glyph stands on the
+  same pixel in both pictures; its anti-aliased edge differs by one step of a colour part, such as `acadb1` for
+  `acadb0`.
+- Nothing else. The Topic Note stood half a point lower in the AppKit card at first: SwiftUI's `Text` draws its first
+  baseline where TextKit puts it, a whole point, and `SidebarLabel` drew it at the font's ascender, which is the same
+  place at a whole font size but not at the Note's 11.5 points. `SidebarTextLayout` now takes the baseline from TextKit.
+
+The Guest note of a Topic card shows only with `topics.in_play`, which also shows the Guests line: `locked-cards`
+shows it.
+
+## locked-cards
+
+Task 05 of the set `remove-swiftui`. Two shots: `locked-cards`, a Locked card with its lock and the bell of a Window
+that rang; and `guest-cards`, with `topics.in_play: 1`, the Guests line, a Guest Topic and the Locked Session as a
+Guest. The gate passes in both, and side by side the pictures look the same. The difference picture marks the
+many-coloured border of the Location's card and the edges of glyphs, for the reasons in `topic-cards`.
+
+The AppKit list draws the Guests line from this task on, because a Guest shows only under it; the Bench line and the
+Open Places come with task 08.

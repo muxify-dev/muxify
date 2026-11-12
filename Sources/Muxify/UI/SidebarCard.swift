@@ -262,7 +262,7 @@ struct CardHeader<Details: View>: View {
             if let rest = titleLines?.rest, !rest.isEmpty {
                 Text(rest).font(typography.font(for: .session)).fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 5) {
+            HStack(spacing: CardHeaderSpacing.details) {
                 if let tags, tags.placement == .line { CardTagsSlot(tags: tags) }
                 details()
             }
@@ -307,18 +307,16 @@ private struct NoteLine: View {
     let isOpen: Bool
     @Environment(\.interfaceFontSize) private var fontSize
 
-    private static let color = Color(nsColor: NSColor(name: nil) {
-        $0.isDark ? NSColor(red: 1, green: 0.765, blue: 0.361, alpha: 1) : NSColor(red: 0.698, green: 0.42, blue: 0, alpha: 1)
-    })
+    private static let color = Color(nsColor: .cardNote)
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Image(systemName: "pencil")
+        HStack(alignment: .firstTextBaseline, spacing: CardNote.spacing) {
+            Image(systemName: CardNote.symbol)
             Text(note).fixedSize(horizontal: false, vertical: true)
         }
-        .font(fontSize.font(11.5))
-        .foregroundStyle(Self.color.opacity(isOpen ? 1 : 0.6))
-        .padding(.top, 1)
+        .font(fontSize.font(CardNote.fontSize))
+        .foregroundStyle(Self.color.opacity(isOpen ? 1 : CardNote.closedOpacity))
+        .padding(.top, CardNote.top)
     }
 }
 
@@ -336,7 +334,7 @@ struct PinMark: View {
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
-        Image(systemName: "pin.fill").font(fontSize.font(CardHeaderFont.mark)).foregroundStyle(.secondary)
+        Image(systemName: CardHeaderMark.pin).font(fontSize.font(CardHeaderFont.mark)).foregroundStyle(.secondary)
     }
 }
 
@@ -361,6 +359,11 @@ struct LockMark: View {
 extension Animation {
     /// The glide of a card that opens or closes.
     static let cardOpens = Animation.easeOut(duration: CardMotion.openDuration)
+
+    /// Runs the change that opens or closes a card with the card's glide, as `TopicCardPress` asks.
+    static func opensCard(_ change: () -> Void) {
+        withAnimation(.cardOpens, change)
+    }
 }
 
 /// A Window row and the Pane rows under it, which move together; or a Pane row that stands in for its Session's only
@@ -463,7 +466,7 @@ struct CardList<Heading: View, Row: View>: View {
             .accessibilityIdentifier(identifier + "-more")
             .accessibilityValue(hiddenMark?.rawValue ?? "")
         } else if reservesCorner {
-            Color.clear.frame(height: fontSize(16))
+            Color.clear.frame(height: CardCorner.footerHeight(fontSize))
         }
     }
 
@@ -536,6 +539,6 @@ extension View {
     }
 
     func cardCorner<Action: View>(@ViewBuilder _ action: () -> Action) -> some View {
-        overlay(alignment: .bottomTrailing) { action().padding(.trailing, 10).padding(.bottom, 6) }
+        overlay(alignment: .bottomTrailing) { action().padding(.trailing, CardCorner.trailing).padding(.bottom, CardCorner.bottom) }
     }
 }

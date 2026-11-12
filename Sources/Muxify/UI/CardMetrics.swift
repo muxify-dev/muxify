@@ -78,6 +78,8 @@ enum CardHeaderSpacing {
     static let titleLine: CGFloat = 5
     /// More room above the Summary.
     static let summaryTop: CGFloat = 1
+    /// Between two parts of the details line, such as "Dormant" and the bell.
+    static let details: CGFloat = 5
 }
 
 /// The sizes of the small text and symbols of a card's header, for both versions of the card (ADR 0074). They are the
@@ -86,14 +88,33 @@ enum CardHeaderFont {
     static let summary: CGFloat = 11
     /// The lock, the pin, the bell and the Guest mark.
     static let mark: CGFloat = 9
+    /// The words of the details line, such as "Dormant".
+    static let detail: CGFloat = 10
 }
 
-/// The marks of a Session card's header, for both versions of the card (ADR 0074): the word of a Guest, and the
-/// system symbols of a Locked Session and of a bell.
+/// The marks of a card's header, for both versions of the card (ADR 0074): the word of a Guest, and the system symbols
+/// of a Pinned Topic, a Locked Session and a bell.
 enum CardHeaderMark {
     static let guest = "Guest"
+    static let pin = "pin.fill"
     static let lock = "lock.fill"
     static let bell = "bell.fill"
+}
+
+/// The Topic Note on a card, for both versions of the card: a pencil and the whole text, on a line of its own, in a
+/// yellow that reads on the light and the dark Sidebar. A closed card shows it softer.
+enum CardNote {
+    static let symbol = "pencil"
+    /// The size of the pencil and the text at 12, which grows with the Interface font size.
+    static let fontSize: CGFloat = 11.5
+    /// The room between the pencil and the text.
+    static let spacing: CGFloat = 4
+    /// More room above the line.
+    static let top: CGFloat = 1
+    static let closedOpacity = 0.6
+    /// The yellow on a light Sidebar, and on a dark one.
+    static let light: (red: Double, green: Double, blue: Double) = (0.698, 0.42, 0)
+    static let dark: (red: Double, green: Double, blue: Double) = (1, 0.765, 0.361)
 }
 
 /// The room around the rows of an open card, for both versions of the card (ADR 0074).
@@ -145,8 +166,16 @@ enum CardCorner {
     static let designGroupWidth: CGFloat = 60
     /// The line under the title that a closed card with a corner label and no other line adds for its action, at 12.
     static let designActionLineHeight: CGFloat = 12
+    /// The line that an open card's rows end with for the action, when no "N more…" takes it, at 12.
+    static let designFooterHeight: CGFloat = 16
+    /// The action's text size, at 12.
+    static let fontSize: CGFloat = 11
+    /// The room between the action and the card's right and bottom edges.
+    static let trailing: CGFloat = 10
+    static let bottom: CGFloat = 6
 
     static func width(_ size: InterfaceFontSize) -> CGFloat { size(designWidth) }
     static func groupWidth(_ size: InterfaceFontSize) -> CGFloat { size(designGroupWidth) }
     static func actionLineHeight(_ size: InterfaceFontSize) -> CGFloat { size(designActionLineHeight) }
+    static func footerHeight(_ size: InterfaceFontSize) -> CGFloat { size(designFooterHeight) }
 }

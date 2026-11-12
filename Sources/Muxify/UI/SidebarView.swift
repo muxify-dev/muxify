@@ -512,7 +512,7 @@ private struct TopicLink: ViewModifier {
     @Environment(\.interfaceFontSize) private var fontSize
 
     func body(content: Content) -> some View {
-        content.buttonStyle(.link).font(fontSize.font(11))
+        content.buttonStyle(.link).font(fontSize.font(CardCorner.fontSize))
     }
 }
 
@@ -691,11 +691,7 @@ struct TopicCard: View {
         return nil
     }
 
-    /// A closed card in a group is dimmed, as the group is what the user put aside.
-    private var restingOpacity: Double {
-        if list == nil, !topic.isExpanded { return 0.5 }
-        return topic.state == .dormant || topic.state == .empty ? 0.55 : 1
-    }
+    private var restingOpacity: Double { TopicCardOpacity.resting(topic, inList: list != nil) }
 
     var body: some View {
         #if DEBUG
@@ -770,14 +766,6 @@ struct TopicCard: View {
         store.sidebarText(.topic, context: store.sidebarFormatContexts.topics[topic.id])
     }
 
-    /// The outcome of a Settled Topic.
-    private var groupDetail: String? {
-        switch topic.kind {
-        case .open: return nil
-        case .settled(let outcome, _): return outcome.isEmpty ? nil : outcome
-        }
-    }
-
     /// How long ago a card in the Settled group was Settled, such as "Yesterday".
     private var settledAge: CardCornerLabel? {
         guard case .group(let now) = place, case .settled(_, let settledDate?) = topic.kind, case .topic(let id) = topic.id else { return nil }
@@ -788,23 +776,19 @@ struct TopicCard: View {
     private var header: some View {
         CardHeader(title: formatted.title, isOpen: topic.isExpanded, mark: topic.mark, isPinned: topic.isPinned, isGuest: topic.isGuest,
                    hintTarget: list == nil ? nil : namedTopicID.map { .topic($0) },
-                   notes: (topic.isPinned ? ["Pinned"] : []) + (topic.isGuest ? ["Guest"] : []) + (topic.usesRowMarks && topic.isUnread && topic.mark != .unread ? ["unread"] : []) + (groupDetail.map { [$0] } ?? []) + (topic.idleLabel.map { [$0] } ?? []),
+                   notes: TopicCardWords.notes(of: topic),
                    summary: list == nil ? "" : formatted.summary, cornerWidth: list == nil ? CardCorner.groupWidth(fontSize) : CardCorner.width(fontSize),
                    tags: tags, note: topic.note, cornerLabel: settledAge) {
-            if list != nil || topic.isExpanded {
-                if list == nil, let detail = groupDetail {
-                    Text(detail)
-                        .font(fontSize.font(10)).foregroundStyle(.secondary)
-                }
-                if let label = topic.idleLabel { Text(label).font(fontSize.font(10)).foregroundStyle(.secondary) }
+            ForEach(Array(TopicCardWords.details(of: topic, inList: list != nil).enumerated()), id: \.offset) { _, detail in
+                Text(detail).font(fontSize.font(CardHeaderFont.detail)).foregroundStyle(.secondary)
             }
         }
         .overlay(alignment: .leading) {
             if topic.usesRowMarks, topic.isUnread {
                 RowMarkSpine(mark: .unread)
-                    .frame(width: 3)
-                    .padding(.vertical, 8)
-                    .padding(.leading, 4)
+                    .frame(width: CardSpine.width)
+                    .padding(.vertical, CardSpine.verticalInset)
+                    .padding(.leading, CardSpine.leading)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -922,15 +906,7 @@ struct TopicCard: View {
     /// A press on the Active Topic's header opens or closes the card; on another Topic's header it goes to that Topic,
     /// whose card then opens as the Active Topic's. A Settled one shows its Reopen choice.
     private func press() {
-        guard !holdsSelection else { return toggle() }
-        store.updateTopicSelection()
-        withAnimation(.cardOpens) { store.topicSelection.setTopic(topic.id, open: true) }
-        store.goToTopic(topic.id)
-    }
-
-    private func toggle() {
-        store.updateTopicSelection()
-        withAnimation(.cardOpens) { store.topicSelection.setTopic(topic.id, open: !topic.isExpanded) }
+        TopicCardPress(store: store, id: topic.id, holdsSelection: holdsSelection, isOpen: topic.isExpanded)(opening: Animation.opensCard)
     }
 
     private var namedTopicID: String? {
@@ -1073,14 +1049,7 @@ private struct LockedCard: View {
 
     /// As on a Topic card: a press on the Active card opens or closes it; on another card it goes there.
     private func press() {
-        guard !holdsSelection else {
-            store.updateTopicSelection()
-            withAnimation(.cardOpens) { store.topicSelection.setTopic(row.id, open: !row.isExpanded) }
-            return
-        }
-        store.updateTopicSelection()
-        withAnimation(.cardOpens) { store.topicSelection.setTopic(row.id, open: true) }
-        store.goToTopic(row.id)
+        TopicCardPress(store: store, id: row.id, holdsSelection: holdsSelection, isOpen: row.isExpanded)(opening: Animation.opensCard)
     }
 }
 

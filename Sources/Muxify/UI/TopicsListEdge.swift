@@ -56,13 +56,13 @@ struct GuestsLine: View {
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
-        HStack(spacing: 8) {
-            Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
-            Text("Guests").font(fontSize.font(11, weight: .semibold)).lineLimit(1).fixedSize()
-            Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
+        HStack(spacing: TopicsListLine.spacing) {
+            Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: TopicsListLine.ruleWidth)
+            Text("Guests").font(fontSize.font(TopicsListLine.fontSize, weight: .semibold)).lineLimit(1).fixedSize()
+            Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: TopicsListLine.ruleWidth)
         }
         .foregroundStyle(.secondary)
-        .padding(.horizontal, 8).frame(height: fontSize(20))
+        .padding(.horizontal, TopicsListLine.horizontalPadding).frame(height: fontSize(TopicsListLine.designHeight))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Guests")
         .accessibilityIdentifier("topics-guests-line")

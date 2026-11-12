@@ -153,17 +153,37 @@ def close_cards(view, session):
     view.wait(closed, lambda: 'the list does not show closed cards only: it has %s' % cards(view.s.rows()))
 
 
+def remembered(s, topic_id):
+    """A Session that a Topic's record remembers, as Settle or a Dormant Topic keeps one, in the scene's folder."""
+    folder = project(s)
+    name = folder.name + '/' + topic_id
+    return dict(id='saved:' + name, name=name, base_name=folder.name, directory=str(folder))
+
+
+def close_location(view, header, headers):
+    """Closes the card of the Location, whose header is `header`, and waits until each of the headers is closed."""
+    view.close_card(header)
+    values = lambda rows: {key: view.value(key, rows) for key in headers}
+    view.wait(lambda rows: all(value.startswith('collapsed') for value in values(rows).values()),
+              lambda: 'the list does not show closed cards only: their headers have %s' % values(view.s.rows()))
+
+
 class TopicCards:
     name = 'topic-cards'
-    shows = 'Closed Topic cards and a Locked card, with the Location in the first Topic, whose card a press closed.'
+    shows = ('Closed Topic cards with every note of the Topics list: a Pinned Topic first, the Location\'s Topic with a '
+             'Topic Note, whose card a press closed, an Agent\'s spine, an Unread Topic, a Dormant and an Empty Topic.')
 
     def fixture(self, s):
-        self.session, self.windows = topic(s, 'atlas', 'Atlas', order=0)
-        topic(s, 'birch', 'Birch', order=1)
-        topic(s, 'cedar', 'Cedar', order=2)
-        lock, _ = locked(s, 'dune', 3)
-        # The headers of the cards, in the order of the list.
-        self.headers = ['topic-atlas', 'topic-birch', 'topic-cedar', 'locked-' + lock]
+        self.session, self.windows = topic(s, 'atlas', 'Atlas', order=0, note='Repro with seed 4411')
+        topic(s, 'birch', 'Birch', order=1, pinned=True)
+        _, cedar = topic(s, 'cedar', 'Cedar', order=2)
+        agent(s, cedar[0], 'working')
+        topic(s, 'dune', 'Dune', order=3, unread=True)
+        records = TopicRecords(s.root/'state/muxify')
+        records.put(dict(id='elm', title='Elm', slug='elm', order=4, sessions=[remembered(s, 'elm')]))
+        records.put(dict(id='fir', title='Fir', slug='fir', order=5))
+        # The headers of the cards, in the order of the list: the Pinned Topic first.
+        self.headers = ['topic-' + name for name in ('birch', 'atlas', 'cedar', 'dune', 'elm', 'fir')]
 
     def shots(self):
         return [('topic-cards', self.cards)]
@@ -172,10 +192,48 @@ class TopicCards:
         view.launch(config())
         view.go(self.windows[0])
         fresh_shell(view.s, self.windows[0])
-        view.close_card(self.headers[0])
-        values = lambda rows: {key: view.value(key, rows) for key in self.headers}
-        view.wait(lambda rows: all(value.startswith('collapsed') for value in values(rows).values()),
-                  lambda: 'the list does not show closed cards only: their headers have %s' % values(view.s.rows()))
+        close_location(view, 'topic-atlas', self.headers)
+        notes = {'topic-birch': 'Pinned', 'topic-atlas': 'Note: Repro with seed 4411', 'topic-cedar': 'working',
+                 'topic-dune': 'unread', 'topic-elm': 'Dormant', 'topic-fir': 'Empty'}
+        missing = lambda rows: {key: view.value(key, rows) for key, note in notes.items() if note not in view.value(key, rows)}
+        view.wait(lambda rows: not missing(rows), lambda: 'these headers miss their note: %s' % missing(view.s.rows()))
+
+
+class LockedCards:
+    name = 'locked-cards'
+    shows = ('A Locked card with its lock and the bell of a Window that rang, under the closed card of the Location\'s '
+             'Topic; then, with `topics.in_play: 1`, the Guests line, a Guest Topic and the Locked Session as a Guest.')
+
+    def fixture(self, s):
+        self.session, self.windows = topic(s, 'atlas', 'Atlas', order=0)
+        topic(s, 'birch', 'Birch', order=1, guest=True)
+        self.lock, self.locked_windows = session(s, 'dune', windows=('main', 'logs'))
+        s.tmux('set-option', '-t', self.lock, '@muxify_lock', '2')
+
+    def shots(self):
+        return [('locked-cards', self.locked), ('guest-cards', self.guests)]
+
+    def arrive(self, view, config_text, headers):
+        """Starts the app with the Config, moves the Location to Atlas and closes its card, with a bell in the Locked
+        Session's second Window."""
+        view.launch(config_text)
+        ring(view.s, self.locked_windows[1])
+        view.go(self.windows[0])
+        fresh_shell(view.s, self.windows[0])
+        close_location(view, 'topic-atlas', headers)
+
+    def locked(self, view):
+        header = 'locked-' + self.lock
+        self.arrive(view, config(), ['topic-atlas', 'topic-birch', header])
+        view.wait(lambda rows: view.value(header, rows) == 'collapsed, Locked',
+                  lambda: 'the Locked card has the value %r' % view.value(header, view.s.rows()))
+
+    def guests(self, view):
+        header = 'locked-' + self.lock
+        self.arrive(view, config(more='topics:\n  in_play: 1\n'), ['topic-atlas', 'topic-birch', header])
+        values = lambda rows: [view.value(key, rows) for key in ('topic-birch', header)]
+        view.wait(lambda rows: values(rows) == ['collapsed, Guest', 'collapsed, Guest'] and view.s.has('topics-guests-line', rows),
+                  lambda: 'the Guests show no Guest mark or no Guests line: %s' % values(view.s.rows()))
 
 
 # The launch arguments of every scene of the Topics list: the Sidebar shows, with Topics.
@@ -184,5 +242,5 @@ TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWor
 # The areas that have two versions now.
 AREAS = [
     Area(name='topics', title='Topics list', list='topics-list', default=TOPICS_LIST_DEFAULT, args=TOPICS_ARGS,
-         shown=lambda s: s.topics_list(), scenes=[TopicCards()]),
+         shown=lambda s: s.topics_list(), scenes=[TopicCards(), LockedCards()]),
 ]

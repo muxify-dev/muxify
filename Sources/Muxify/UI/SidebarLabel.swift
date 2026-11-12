@@ -9,6 +9,10 @@ enum SidebarInk: Equatable {
     case accent
     /// The text colour at an opacity, as `Color.primary.opacity`.
     case faded(Double)
+    /// The colour of a link, as SwiftUI's link button draws its title, and of a disabled one.
+    case link, disabledLink
+    /// The yellow of a Topic Note.
+    case note
 
     /// The colour in the appearance that draws now.
     var color: NSColor {
@@ -17,6 +21,9 @@ enum SidebarInk: Equatable {
         case .secondary: return .secondaryLabelColor
         case .accent: return .controlAccentColor
         case .faded(let opacity): return NSColor.labelColor.faded(opacity)
+        case .link: return .linkColor
+        case .disabledLink: return .disabledControlTextColor
+        case .note: return .cardNote
         }
     }
 }
@@ -85,7 +92,7 @@ struct SidebarTextLayout {
         }
         self.lines = lines
         lineHeight = Self.lineHeight(of: font, scale: scale)
-        baseline = font.ascender
+        baseline = Self.baseline(of: font)
         // A line counts the space it ends with, as far as its room goes.
         let widest = CGFloat(lines.map { CTLineGetTypographicBounds($0, nil, nil, nil) }.max() ?? 0)
         size = NSSize(width: min(widest.roundedUp(toPixelsOf: scale), max(0, width)), height: CGFloat(max(1, lines.count)) * lineHeight)
@@ -97,6 +104,13 @@ struct SidebarTextLayout {
         NSAttributedString(string: " ", attributes: [.font: font])
             .boundingRect(with: .zero, options: .usesLineFragmentOrigin).height.roundedUp(toPixelsOf: scale)
     }
+
+    /// Where SwiftUI's `Text` draws the first baseline under its top: where TextKit puts it in a line of the font, a
+    /// whole point. The font's ascender gives the same place at a whole font size, and half a point lower at some
+    /// others, such as the 11.5 points of a Topic Note.
+    static func baseline(of font: NSFont) -> CGFloat { typesetter.defaultBaselineOffset(for: font) }
+
+    private static let typesetter = NSLayoutManager()
 
     /// Draws the lines from `origin`, the top left corner of the text, in the current context of a flipped view.
     func draw(at origin: NSPoint, ink: NSColor) {
@@ -230,6 +244,13 @@ final class SidebarSymbol: NSView {
         let measures = image.alignmentRect
         let added = measures.height + 2 * measures.minY < image.size.height ? 1 - 1 / scale : 0
         return NSSize(width: measures.width.roundedUp(toPixelsOf: scale), height: image.size.height - added)
+    }
+
+    /// The symbol's baseline, from the top of the room it takes: SwiftUI stands it on a text's baseline in a row that
+    /// aligns their first baselines. The room under the baseline is the bottom of the symbol's measures.
+    var baseline: CGFloat {
+        guard let image else { return 0 }
+        return symbolSize.height - image.alignmentRect.minY
     }
 
     /// Where the glyph stands in the view: the room the symbol takes has some space around it. SwiftUI gives this as

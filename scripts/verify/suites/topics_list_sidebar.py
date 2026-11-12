@@ -6,16 +6,21 @@ list. A check stores it as a user does, with `defaults write` on the bundle id o
 argument hides the stored value from the app, so a check that stores the default first starts the app without that
 argument, also in a run with `TOPICS_LIST`.
 
-The AppKit list draws bare cards for now: a border and the title. So the checks compare what a bare card has with the
-SwiftUI card: the rows of the card and its header, their order and their titles, and where the cards start and how
-far apart they stand. A bare card is lower than a SwiftUI card.
+The AppKit list draws closed Topic cards and Locked cards as the SwiftUI list does; an open card lists no rows yet. So
+the check of the cards closes the Location's card first, and compares the rows of the cards and their headers in the
+two versions: their order, labels, values and help, and their frames.
+
+The checks of a press on a card's header press it in two ways. `press` performs the header's default accessibility
+action. `click` sends a mouse down and a mouse up to the App Window, which is not the key window, because the run
+keeps the app behind the user's windows: it is a first click while Muxify is not the front app. The header follows
+both. The check of a press on a Locked card runs the same presses in both versions and compares what they did.
 
 The pager hides the page that its mode does not show from accessibility, so no dump has the Topics list while
 Sessions shows; the driver's `topics-list` still finds the AppKit list then, as the page that does not show. The check
 of a held swipe holds the Sidebar at 0.400 from Topics, where the Topics page has moved and shrunk, and keeps a
 `snapshot` of each version in the run directory, `mid-swipe-swiftui.png` and `mid-swipe-appkit.png`, for a person to
 compare the fade. While the pager slides or Sessions shows, it takes the Topics page's clicks too (`allowsHitTesting`
-in SidebarPager.swift), and a bare card does nothing on a click, so no check clicks it.
+in SidebarPager.swift), so the checks click a card only while Topics shows.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_list_sidebar
@@ -37,6 +42,8 @@ ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView',
 APP_DEFAULT = 'swiftui'
 # The Topics of the fixture: (id, title), in the Topic order.
 TOPICS = [('list-first', 'List first'), ('list-second', 'List second'), ('list-third', 'List third')]
+# How a card's header is pressed: by its accessibility action, and by a first click.
+PRESSES = ('press', 'click')
 
 
 def rect(row):
@@ -52,12 +59,15 @@ class TopicsListSidebar(unittest.TestCase):
         cls.config = s.root/'config/muxify/config.yaml'
         cls.config.write_text(CONFIG)
         cls.store = TopicRecords(s.root/'state/muxify')
-        for order, (topic, title) in enumerate(TOPICS):
-            cls.topic(topic, title, order)
+        # The Session of each card's header.
+        cls.sessions = {'topic-' + topic: cls.topic(topic, title, order) for order, (topic, title) in enumerate(TOPICS)}
         locked = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'list-locked', SHELL)
         s.tmux('set-option', '-t', locked, '@muxify_lock', str(len(TOPICS)))
+        cls.sessions['locked-' + locked] = locked
         # The headers of the cards, in the Topic order: the Topics, then the Locked Session after them.
         cls.keys = ['topic-' + topic for topic, _ in TOPICS] + ['locked-' + locked]
+        # The Window of each card's header.
+        cls.windows = {key: s.tmux('list-windows', '-t', session, '-F', '#{window_id}') for key, session in cls.sessions.items()}
         # As every suite launches: with the list that TOPICS_LIST names, or the app's default.
         s.launch(ARGS)
         cls.argument = topics_list_option() is not None
@@ -147,6 +157,28 @@ class TopicsListSidebar(unittest.TestCase):
             return len(frames) >= 2 and frames[-1] is not None and frames[-2] == frames[-1]
         return rect(self.s.row(key, self.s.wait_rows(at_rest, lambda: '%s did not come to rest: %s' % (key, frames[-3:]))))
 
+    def card_value(self, key, rs=None):
+        return self.s.row(key, rs).get('accessibilityValue') or ''
+
+    def wait_card(self, key, state, message):
+        """Waits until the header has the state, `expanded` or `collapsed`, at the start of its value."""
+        self.s.wait_rows(lambda rs: self.card_value(key, rs).startswith(state),
+                         lambda: '%s: the value of its header is %r' % (message, self.card_value(key)))
+
+    def location(self):
+        """The Session of the Location: the one of the app's tmux client that is no control client."""
+        clients = self.s.tmux('list-clients', '-F', '#{client_control_mode} #{session_id}').splitlines()
+        return [line.split()[1] for line in clients if line.startswith('0 ')]
+
+    def stand_on(self, key, opened):
+        """Moves the Location to the Session of the card's header, and opens or closes the card. Only a press on the
+        card of the Location closes it."""
+        self.s.show(self.windows[key])
+        self.s.wait_rows(lambda rs: self.card_value(key, rs), 'the card %s has no state' % key)
+        if self.card_value(key).startswith('expanded') != opened:
+            self.s.act('press', key)
+        self.wait_card(key, 'expanded' if opened else 'collapsed', 'the card of the Location did not get ready')
+
     def require_motion(self):
         """The Sidebar follows a swipe only while it animates. Reduce Motion in System Settings stops that for every app."""
         if self.s.row('sidebar-swipe-input').get('accessibilityLabel', '').startswith('Sidebar swipe input instant'):
@@ -166,37 +198,92 @@ class TopicsListSidebar(unittest.TestCase):
         self.show_mode('topics')
         self.wait_cards()
 
-    def test_with_the_default_true_the_appkit_list_has_a_bare_card_for_each_topic_in_order(self):
+    def test_with_the_default_true_the_appkit_list_has_a_card_for_each_topic_in_order(self):
+        def header_rows(rs):
+            return [(row['accessibilityIdentifier'], row.get('accessibilityRole'), row.get('accessibilityLabel'),
+                     row.get('accessibilityValue'), row.get('accessibilityHelp')) for row in self.headers(rs)]
         self.show_list('swiftui')
+        self.stand_on(self.keys[0], opened=False)
         before = self.wait_cards()
         swiftui_list = self.settled('topics-list')
-        swiftui = [rect(self.s.row('card-' + key, before)) for key in self.keys]
+        swiftui = [self.settled('card-' + key) for key in self.keys]
 
         self.show_list('appkit')
         rs = self.wait_cards()
         self.assertEqual(self.s.row('topics-list', rs).get('accessibilityRole'), 'AXScrollArea')
         self.assert_close(self.settled('topics-list'), swiftui_list, 'the two lists do not take the same place')
-        self.assertEqual([(row['accessibilityIdentifier'], row.get('accessibilityLabel')) for row in self.headers(rs)],
-                         [(row['accessibilityIdentifier'], row.get('accessibilityLabel')) for row in self.headers(before)],
-                         'the AppKit cards are not the SwiftUI cards, in their order and with their titles')
+        self.assertEqual(header_rows(rs), header_rows(before),
+                         'the AppKit headers are not the SwiftUI headers, in their order, labels, values and help')
         self.assertEqual([row.get('accessibilityLabel') for row in self.headers(rs)][:len(TOPICS)],
                          [title for _, title in TOPICS], 'the cards do not have the titles of the Topics')
-        cards = []
-        for header in self.headers(rs):
-            card = self.s.row('card-' + header['accessibilityIdentifier'], rs)
-            self.assertEqual(card.get('accessibilityRole'), 'AXGroup', 'the card of %s is no group' % header['accessibilityIdentifier'])
-            self.assertEqual(header.get('accessibilityRole'), 'AXButton')
-            cards.append(rect(card))
-        # The same insets from the list's edges, and the same gaps between the cards. A bare card is lower than a
-        # SwiftUI card, so the cards under the first one start higher.
+        for key, frame in zip(self.keys, swiftui):
+            card = self.s.row('card-' + key, rs)
+            self.assertEqual(card.get('accessibilityRole'), 'AXGroup', 'the card of %s is no group' % key)
+            self.assert_close(rect(card), frame, 'the card of %s does not stand where the SwiftUI card stands' % key)
         top = lambda card: card[1] + card[3]
-        self.assert_close([cards[0][0], cards[0][2], top(cards[0])], [swiftui[0][0], swiftui[0][2], top(swiftui[0])],
-                          'the first card does not start where the SwiftUI card starts')
-        for side, name in ((cards, 'AppKit'), (swiftui, 'SwiftUI')):
-            gaps = [above[1] - top(below) for above, below in zip(side, side[1:])]
-            self.assert_close(gaps, [6] * (len(side) - 1), 'the gaps between the %s cards' % name)
-            self.assert_close([card[0] for card in side] + [card[2] for card in side],
-                              [side[0][0]] * len(side) + [side[0][2]] * len(side), 'the sides of the %s cards' % name)
+        gaps = [above[1] - top(below) for above, below in zip(swiftui, swiftui[1:])]
+        self.assert_close(gaps, [6] * (len(swiftui) - 1), 'the gaps between the cards')
+
+    def test_a_press_on_the_header_of_the_active_topics_card_closes_and_opens_it(self):
+        home, below = self.keys[0], self.keys[1]
+        def bottom(rs=None):
+            return top_of(self.s.row('card-' + below, rs))
+        top_of = lambda row: sum(rect(row)[1::2])
+        self.show_list('appkit')
+        self.stand_on(home, opened=True)
+        for command in PRESSES:
+            with self.subTest(command=command):
+                opened = bottom(self.wait_cards())
+                self.s.act(command, home)
+                self.wait_card(home, 'collapsed', 'a %s on the open card of the Active Topic did not close it' % command)
+                # A closed card shows its Summary under its title, and the card below stands under it.
+                self.assertTrue(self.s.row(home).get('accessibilityHelp'), 'the closed card has no Summary')
+                closed = self.settled('card-' + below)
+                self.assertNotEqual(closed[1] + closed[3], opened, 'the card below did not move when the card closed')
+                self.s.act(command, home)
+                self.wait_card(home, 'expanded', 'a %s on the closed card of the Active Topic did not open it' % command)
+                self.assertEqual(self.s.row(home).get('accessibilityHelp'), '', 'an open card has a Summary')
+                again = self.settled('card-' + below)
+                self.assertEqual(again[1] + again[3], opened, 'the card below did not go back when the card opened')
+                self.assertEqual(self.location(), [self.sessions[home]], 'a press on the Active Topic\'s card moved the Location')
+
+    def test_a_press_on_another_card_opens_it_and_goes_to_its_topic(self):
+        home, other = self.keys[0], self.keys[2]
+        self.show_list('appkit')
+        for command in PRESSES:
+            with self.subTest(command=command):
+                # The other card is closed, and the Location is not on it.
+                self.stand_on(other, opened=False)
+                self.stand_on(home, opened=True)
+                self.wait_card(other, 'collapsed', 'the other card did not stay closed')
+                self.s.act(command, other)
+                self.wait_card(other, 'expanded', 'a %s on the card of another Topic did not open it' % command)
+                self.s.wait_shown(self.windows[other])
+                self.assertEqual(self.location(), [self.sessions[other]], 'a press on the card of another Topic did not go to it')
+
+    def test_a_press_on_a_locked_card_does_what_it_does_in_the_swiftui_list(self):
+        """From the open card of a Topic, a press on the Locked card goes to its Session and opens the card, a second
+        press closes it, and a third opens it again."""
+        home, locked = self.keys[0], self.keys[-1]
+        did = {}
+        for version in ('swiftui', 'appkit'):
+            self.show_list(version)
+            for command in PRESSES:
+                with self.subTest(version=version, command=command):
+                    self.stand_on(home, opened=True)
+                    self.wait_card(locked, 'collapsed', 'the Locked card is open before the press')
+                    steps = []
+                    for state in ('expanded', 'collapsed', 'expanded'):
+                        self.s.act(command, locked)
+                        self.wait_card(locked, state, 'a %s on the Locked card did not leave it %s' % (command, state))
+                        self.s.wait_shown(self.windows[locked])
+                        steps.append((self.card_value(locked), self.location()))
+                    did[version, command] = steps
+                    self.assertEqual([location for _, location in steps], [[self.sessions[locked]]] * 3,
+                                     'a press on the Locked card did not go to its Session')
+        for command in PRESSES:
+            self.assertEqual(did['appkit', command], did['swiftui', command],
+                             'a %s on the Locked card does not do in the AppKit list what it does in the SwiftUI list' % command)
 
     def test_a_topic_that_comes_or_goes_changes_the_cards_of_the_appkit_list(self):
         self.show_list('appkit')
