@@ -347,6 +347,14 @@ _Avoid_: command (when you mean an Action on a thing), operation, menu item
 A short message at the bottom of an App Window that goes away after some seconds. A Confirmation Pill tells that a change ran, such as "Copied Path" or "Merged". An Explanation Pill tells why an Action changed nothing, or less than the user could expect. A Pill never takes Focus or clicks.
 _Avoid_: toast, banner, alert, Notification (when you mean the Pill)
 
+**Update Button**:
+The button in every App Window's header that shows an available update, or a check, download or install in progress, and opens the Update Popover. It shows nothing while Muxify is up to date, except for a few seconds after a check the user started. It is not a Pill.
+_Avoid_: update pill, badge, banner, Notification (when you mean the Update Button)
+
+**Update Popover**:
+The popover that the Update Button opens in its own App Window, with the update's version, size and release date and its choices: Skip, Later, and Install and Relaunch. Muxify never opens it by itself.
+_Avoid_: update dialog, update alert, update sheet
+
 **Command**:
 An entry in the Commands Source that starts an app operation or an Action on the current Pane, Window, Session, Topic or Tab. It uses the current item without requiring a search result first.
 _Avoid_: Action (when nothing is acted on), menu item, operation
@@ -440,3 +448,15 @@ _Avoid_: performance log, muxify.log (when you mean all of it), log (alone)
 **Burst**:
 A stretch of at least a few seconds in which the app uses a large share of a core. The Diagnostics log records each one with what the user did and what was moving during it.
 _Avoid_: spike, CPU spike, hot spot
+
+**Update Channel**:
+The feed that Muxify's updater reads: stable, which offers only Releases, or tip, which offers Tip Builds. The local Config sets it under `update.channel`. A beta is part of a Release's version name only, never an Update Channel.
+_Avoid_: beta channel, nightly, track, ring
+
+**Release**:
+A build of Muxify that CI publishes from a `v*` tag on master, for the stable Update Channel. Its version is the tag's, such as `0.1.0-beta.7` or `1.0.0`. Not every GitHub release is a Release: `tip`, `appcast` and `cli-latest` are not.
+_Avoid_: stable build, version (when you mean the build), beta (when you mean the channel)
+
+**Tip Build**:
+A build of Muxify that CI publishes from each push to master, for the tip Update Channel. Its version is the commit and its date, such as `a1b2c3d (2026-11-11)`.
+_Avoid_: nightly, dev build, canary, snapshot

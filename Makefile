@@ -13,7 +13,7 @@ MUXIFY_DEVELOPMENT_TEAM ?=
 # during dependency scanning". A fixed length makes the hash the same.
 XCODEBUILD_SETTINGS := diagnostic_message_length=0
 
-.PHONY: all setup tools project build test test-linux test-live-linux test-release verify verify-gate run install release host-cli host-cli-linux host-cli-darwin clean
+.PHONY: all setup tools project build test test-linux test-live-linux test-release test-update sparkle release-secrets verify verify-gate run install release host-cli host-cli-linux host-cli-darwin clean
 
 all: build
 
@@ -56,6 +56,21 @@ test-live-linux:
 test-release:
 	python3 -m unittest discover -s Tests/ReleaseTests -v
 
+# Fetches the Sparkle 2 tools that scripts/sparkle-version.env pins into vendor/sparkle: sign_update and
+# generate_keys from the release's archive, and sparkle-cli, built from the release's source.
+sparkle:
+	./scripts/setup-sparkle.sh
+
+# Makes the release certificate and the Sparkle EdDSA key pair in a fresh folder, writes the public key into
+# scripts/sparkle-public-key.env, and prints the gh secret set commands. Sets no secret. FORCE=1 replaces a key.
+release-secrets:
+	./scripts/make-release-secrets.sh $(if $(FORCE),--force)
+
+# Proves in a throwaway run directory that Sparkle's own installer updates a self-signed Release build to the
+# next build from a feed on localhost, and refuses a zip signed with another EdDSA key. Never launches Muxify.
+test-update:
+	./scripts/prove-update.sh
+
 SUITE ?= $(basename $(notdir $(wildcard scripts/verify/suites/*.py)))
 
 # Runs the suites, then the gate. With SUITE= it is a subset run, which never satisfies the gate.
@@ -83,8 +98,10 @@ host-cli-linux:
 host-cli-darwin:
 	./scripts/build-host-cli.sh darwin
 
+# TAG=tip (the default) packages a Tip Build, TAG=vX.Y.Z or vX.Y.Z-beta.N a Release, into build/releases/<tag>.
+# It signs with the identity MUXIFY_RELEASE_IDENTITY names, from the unlocked keychain MUXIFY_RELEASE_KEYCHAIN.
 release:
-	BUILD_NUMBER="$(or $(BUILD_NUMBER),1)" ./scripts/package-release.sh "$(TAG)"
+	./scripts/package-release.sh "$(or $(TAG),tip)"
 
 install: project
 	xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Release -destination "platform=macOS,arch=arm64" \

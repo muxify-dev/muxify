@@ -1,0 +1,189 @@
+import AppKit
+import MuxifyCore
+import Sparkle
+
+/// Muxify's updater: Sparkle's `SPUUpdater` with Muxify's own user driver, which reports every step to the app's one
+/// `UpdateModel`. Sparkle's own windows and its "check automatically?" prompt never show; the Update Button in each
+/// App Window's header does (docs/adr/0077-an-update-shows-in-the-header-not-in-the-palette.md).
+/// The unit tests do not link Sparkle, so only this file imports it.
+@MainActor final class SparkleUpdater: NSObject, SPUUpdaterDelegate {
+    let model: UpdateModel
+    private let feed: UpdateFeed
+    private let driver: UpdateUserDriver
+    private var updater: SPUUpdater!
+    private var started = false
+    /// A check the user asked for while the last session was still ending, such as Retry right after its OK.
+    private var checksWhenSessionEnds = false
+
+    /// The updater, when this build has a feed (`UpdateFeed`); it also sets `UpdateModel.shared`. The local Config's
+    /// `update` section then starts the background checks; `ConfigStore` applies it again at each reload.
+    static func startIfConfigured(update: Config.Update) -> SparkleUpdater? {
+        guard let feed = UpdateFeed(info: Bundle.main.infoDictionary, environment: ProcessInfo.processInfo.environment)
+        else { return nil }
+        let updater = SparkleUpdater(feed: feed, model: UpdateModel())
+        UpdateModel.shared = updater.model
+        updater.start()
+        updater.model.apply(update)
+        return updater
+    }
+
+    private init(feed: UpdateFeed, model: UpdateModel) {
+        self.feed = feed
+        self.model = model
+        driver = UpdateUserDriver(model: model)
+        super.init()
+        updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: driver, delegate: self)
+        model.startCheck = { [weak self] in self?.check() }
+        model.startBackgroundCheck = { [weak self] in self?.checkInBackground() ?? false }
+    }
+
+    private func start() {
+        do {
+            try updater.start()
+            started = true
+            Diagnostics.write("update: updater started, feed \(feed)")
+        } catch {
+            Diagnostics.report("update: the updater did not start: \(error.localizedDescription)")
+        }
+    }
+
+    /// A check that the user started, which shows every state and a skipped version too.
+    private func check() {
+        if !started {
+            start()
+            guard started else {
+                model.failed("The updater did not start.", acknowledge: { [weak self] in self?.model.dismissed() })
+                return
+            }
+        }
+        if updater.sessionInProgress {
+            // Sparkle shows an update it already offers again through showUpdateInFocus, which the Update Button
+            // already does; a session that is ending takes the check when it ends.
+            if case .available = model.state { return }
+            checksWhenSessionEnds = true
+            return
+        }
+        updater.checkForUpdates()
+    }
+
+    /// A check that Muxify starts by itself. Sparkle's scheduled driver shows no "not found" and no error until it
+    /// has shown an update, and leaves out a version the user skipped. Sparkle's own schedule stays off
+    /// (`SUEnableAutomaticChecks`); `UpdateModel` runs this at launch, every 24 hours and on a channel change.
+    private func checkInBackground() -> Bool {
+        guard started, !updater.sessionInProgress else { return false }
+        updater.checkForUpdatesInBackground()
+        return true
+    }
+
+    // MARK: SPUUpdaterDelegate
+
+    nonisolated func feedURLString(for updater: SPUUpdater) -> String? {
+        MainActor.assumeIsolated { feed.url(for: model.channel)?.absoluteString }
+    }
+
+    nonisolated func updater(_ updater: SPUUpdater, didFinishUpdateCycleFor updateCheck: SPUUpdateCheck, error: (any Error)?) {
+        MainActor.assumeIsolated {
+            // Before a check that waited for this session, which is the user's.
+            if updateCheck == .updatesInBackground { model.backgroundCheckFinished(error.map { $0 as NSError }) }
+            guard checksWhenSessionEnds else { return }
+            checksWhenSessionEnds = false
+            DispatchQueue.main.async { [weak self] in self?.check() }
+        }
+    }
+}
+
+/// Turns Sparkle's user-driver calls into `UpdateModel` events. Sparkle calls it on the main thread.
+private final class UpdateUserDriver: NSObject, SPUUserDriver {
+    private let model: UpdateModel
+
+    init(model: UpdateModel) {
+        self.model = model
+    }
+
+    private func onMain(_ body: @MainActor (UpdateModel) -> Void) {
+        MainActor.assumeIsolated { body(model) }
+    }
+
+    func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
+        // Info.plist turns the prompt off; the Config owns the checks.
+        reply(SUUpdatePermissionResponse(automaticUpdateChecks: false, sendSystemProfile: false))
+    }
+
+    func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {
+        onMain { $0.checking() }
+    }
+
+    func showUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState,
+                         reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        let offer = UpdateOffer(version: appcastItem.displayVersionString, build: appcastItem.versionString,
+                                size: appcastItem.contentLength > 0 ? appcastItem.contentLength : nil,
+                                released: appcastItem.date, notes: appcastItem.infoURL)
+        onMain {
+            $0.found(offer) { choice in
+                switch choice {
+                case .install: reply(.install)
+                case .skip: reply(.skip)
+                case .later: reply(.dismiss)
+                }
+            }
+        }
+    }
+
+    func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
+
+    func showUpdateReleaseNotesFailedToDownloadWithError(_ error: any Error) {}
+
+    func showUpdateNotFoundWithError(_ error: any Error, acknowledgement: @escaping () -> Void) {
+        onMain { $0.notFound(acknowledge: acknowledgement) }
+    }
+
+    /// A failed check, download or install, a zip whose signature does not verify, or a translocated or read-only
+    /// copy (`SURunningTranslocated`, `SURunningFromDiskImageError`).
+    func showUpdaterError(_ error: any Error, acknowledgement: @escaping () -> Void) {
+        onMain { $0.failed(error as NSError, acknowledge: acknowledgement) }
+    }
+
+    // The download starts only after Install and Relaunch: Info.plist turns Sparkle's automatic download off.
+    func showDownloadInitiated(cancellation: @escaping () -> Void) {
+        onMain { $0.downloadStarted() }
+    }
+
+    func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {
+        onMain { $0.downloadExpects(expectedContentLength) }
+    }
+
+    func showDownloadDidReceiveData(ofLength length: UInt64) {
+        onMain { $0.downloadReceived(length) }
+    }
+
+    func showDownloadDidStartExtractingUpdate() {
+        onMain { $0.preparingStarted() }
+    }
+
+    func showExtractionReceivedProgress(_ progress: Double) {
+        onMain { $0.preparing(progress) }
+    }
+
+    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        // The user chose Install and Relaunch already, so Muxify installs without asking again.
+        reply(.install)
+    }
+
+    /// Sparkle's installer then sends Muxify a quit Apple event, which goes through `applicationShouldTerminate`
+    /// and `AppDelegate.requestTermination` as ⌘Q does; Muxify never cancels it, so there is nothing to retry.
+    func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool,
+                              retryTerminatingApplication: @escaping () -> Void) {
+        onMain { $0.installStarted(applicationTerminated: applicationTerminated) }
+    }
+
+    func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) {
+        onMain { $0.installed(relaunched: relaunched) }
+        acknowledgement()
+    }
+
+    func showUpdateInFocus() {}
+
+    func dismissUpdateInstallation() {
+        onMain { $0.dismissed() }
+    }
+}

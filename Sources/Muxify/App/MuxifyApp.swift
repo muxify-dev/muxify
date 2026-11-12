@@ -5,6 +5,8 @@ import SwiftUI
 struct MuxifyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var windows: AppWindows
+    /// Nil in a build without a feed, such as Debug or `make install` (UpdateFeed).
+    @State private var updater: SparkleUpdater?
 
     init() {
         CommandLineToolForwarding.forwardIfNeeded()
@@ -13,10 +15,11 @@ struct MuxifyApp: App {
         #endif
         AppEnvironment.prepare()
         PTYWatch.start()
-        let configStore = ConfigStore(appliesDiagnostics: true)
+        let configStore = ConfigStore(appliesAppSettings: true)
         configStore.start()
         let windows = AppWindows(configStore: configStore)
         _windows = State(initialValue: windows)
+        _updater = State(initialValue: SparkleUpdater.startIfConfigured(update: configStore.config.update))
         GhosttyRuntime.shared.delegate = windows
     }
 

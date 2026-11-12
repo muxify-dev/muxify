@@ -75,6 +75,36 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(remote.problems.isEmpty)
     }
 
+    func testBackgroundUpdateChecksAreOnByDefaultOnTheStableChannel() throws {
+        XCTAssertEqual(try load("").update, Config.Update(check: true, channel: .stable))
+        XCTAssertTrue(Config.template.contains("# update:\n"))
+        XCTAssertTrue(Config.template.contains("#   check: true"))
+        XCTAssertTrue(Config.template.contains("#   channel: stable"))
+        let set = try load("update:\n  check: false\n  channel: tip")
+        XCTAssertEqual(set.update, Config.Update(check: false, channel: .tip))
+        XCTAssertTrue(set.problems.isEmpty)
+        XCTAssertEqual(try load("update:\n  channel: stable").update, Config.Update())
+    }
+
+    func testABadUpdateValueIsAProblemAndKeepsTheDefault() throws {
+        let invalid = try load("update:\n  check: yes please\n  channel: beta\n  interval: 12")
+        XCTAssertEqual(invalid.update, Config.Update())
+        XCTAssertEqual(invalid.problems.map(\.message), ["update.check: expected a boolean", "update.channel: expected stable or tip",
+                                                         "unknown key \"update.interval\""])
+        for value in ["1", "[tip]", "true", "Tip"] {
+            let wrong = try load("update:\n  channel: \(value)")
+            XCTAssertEqual(wrong.update.channel, .stable, value)
+            XCTAssertEqual(wrong.problems.map(\.message), ["update.channel: expected stable or tip"], value)
+        }
+        XCTAssertEqual(try load("update: true").problems.count, 1)
+    }
+
+    func testARemoteConfigsUpdateSectionIsIgnoredWithoutAProblem() throws {
+        let remote = try Config.load(path: root, isRemote: true) { _ in "update:\n  check: false\n  channel: tip\n  bad: 1" }.get()
+        XCTAssertEqual(remote.update, Config.Update())
+        XCTAssertTrue(remote.problems.isEmpty)
+    }
+
     func testDisplayLinksAreOffByDefaultAndTheLocalConfigTurnsThemOn() throws {
         let on = try load("diagnostics:\n  display_links: true")
         XCTAssertEqual(on.diagnostics, Config.Diagnostics(enabled: true, displayLinks: true))

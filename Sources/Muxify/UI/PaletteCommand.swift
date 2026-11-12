@@ -59,6 +59,7 @@ enum PaletteCommand: String, CaseIterable {
     case reloadConfig = "Reload Config"
     case installExtensions = "Install Extensions"
     case installCLI = "Install Command Line Tool"
+    case checkForUpdates = "Check for Updates"
     case newTab = "New Tab"
     case closeTab = "Close Tab"
     case reopenClosedTab = "Reopen Closed Tab"
@@ -161,6 +162,8 @@ enum PaletteCommand: String, CaseIterable {
             .noMirror("It removes a file of this Mac's app, which no Agent reads.")
         case .openConfig, .reloadConfig, .installExtensions, .installCLI:
             .noMirror("It sets up the app. An Agent edits the Config file directly.")
+        case .checkForUpdates:
+            .noMirror("It updates the app on this Mac, whose Update Button shows the result.")
         }
     }
 
@@ -218,6 +221,8 @@ extension CommandPalette {
             case .makeGuest: return canChangeTopics && store.currentGuestCard.map { store.guestState(of: $0) == false } == true
             case .bench: return canChangeTopics && store.currentGuestCard.map(store.canBench) == true
             case .installExtensions: return !store.isRemote
+            // Only a build with an updater has it (UpdateFeed); its result shows on the Update Button.
+            case .checkForUpdates: return UpdateModel.shared != nil
             case .newWorktree: return !store.changingTopic && store.sessionPaths.contains { !$0.layout.worktrees.isEmpty }
             case .removeWorktree: return !store.changingTopic
             case .nextSession, .previousSession, .nextTopic, .previousTopic:
@@ -323,6 +328,7 @@ extension CommandPalette {
         case .reloadConfig: store.reloadConfig()
         case .installExtensions: ExtensionInstaller.run()
         case .installCLI: CommandLineToolInstaller.run()
+        case .checkForUpdates: UpdateModel.shared?.check()
         case .newTab: store.browserCommand(opensBrowser: true) { $0.newTab() }
         case .closeTab: store.currentBrowser?.closeActiveTab()
         case .reopenClosedTab: store.currentBrowser?.reopenClosedTab()

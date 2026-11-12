@@ -15,6 +15,11 @@ packages:
     path: Packages/MuxifyCore
   MuxifyCLI:
     path: .
+  # Updates Muxify.app (docs/adr/0078-muxify-updates-itself-with-sparkle-from-feeds-in-a-github-release.md).
+  # The version that scripts/sparkle-version.env pins, whose tools sign the feeds.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.1
 targets:
   Muxify:
     type: application
@@ -53,6 +58,11 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoadsInWebContent: true
           NSAllowsLocalNetworking: true
+        # The Config owns the update checks, so Sparkle never asks whether to check automatically.
+        SUEnableAutomaticChecks: false
+        # Sparkle never downloads an update before the user chooses Install and Relaunch.
+        SUAutomaticallyUpdate: false
+        SUAllowsAutomaticUpdates: false
     settings:
       base:
         PRODUCT_NAME: Muxify
@@ -75,6 +85,7 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
     dependencies:
       - package: MuxifyCore
+      - package: Sparkle
       - target: MuxifyCLITool
         link: false
         embed: false
@@ -92,6 +103,10 @@ targets:
       - name: Bundle Ghostty resources
         script: "\"$PROJECT_DIR/scripts/bundle-ghostty-resources.sh\""
         basedOnDependencyAnalysis: false
+      # A Debug build carries the test public key, so its updater starts against a verify suite's local feed.
+      - name: Stamp the Debug update key
+        script: "\"$PROJECT_DIR/scripts/stamp-debug-update-key.sh\""
+        basedOnDependencyAnalysis: false
   # Compile app code directly into an unhosted test bundle. Native-window tests
   # do not start Ghostty or attach to the user's tmux.
   MuxifyTests:
@@ -99,7 +114,8 @@ targets:
     platform: macOS
     sources:
       - path: Sources/Muxify
-        excludes: [App/MuxifyApp.swift]
+        # The tests never link Sparkle: they drive the update model through the events its driver sends.
+        excludes: [App/MuxifyApp.swift, Updates/SparkleUpdater.swift]
       - path: Tests/MuxifyTests
     dependencies:
       - package: MuxifyCore

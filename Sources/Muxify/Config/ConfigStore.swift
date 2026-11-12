@@ -4,7 +4,8 @@ import UniformTypeIdentifiers
 import MuxifyCore
 
 /// The live Config. It loads the Ghostty config the Config names into
-/// libghostty, applies the Browser section to every Tab and to Browser History, turns Diagnostics on or off, and when the Config, a
+/// libghostty, applies the Browser section to every Tab and to Browser History, turns Diagnostics on or off, applies
+/// the `update` section to the updater, and when the Config, a
 /// Config Override it names or any Ghostty config file changes it reads the Config again and reloads the Ghostty config.
 @Observable
 final class ConfigStore {
@@ -19,12 +20,13 @@ final class ConfigStore {
 
     @ObservationIgnored private var filesStamp = ""
     @ObservationIgnored private var watcher: Timer?
-    /// Only the app's own store turns Diagnostics on or off, so a store in a test never starts it.
-    private let appliesDiagnostics: Bool
+    /// Only the app's own store turns Diagnostics on or off and applies `update`, so a store in a test never starts
+    /// either.
+    private let appliesAppSettings: Bool
 
-    init(path: String = MuxifyPaths().configFile.path, appliesDiagnostics: Bool = false) {
+    init(path: String = MuxifyPaths().configFile.path, appliesAppSettings: Bool = false) {
         self.path = path
-        self.appliesDiagnostics = appliesDiagnostics
+        self.appliesAppSettings = appliesAppSettings
         load()
         filesStamp = stampFiles()
     }
@@ -82,10 +84,15 @@ final class ConfigStore {
     private func load() {
         loaded.update(with: Config.load(path: path, read: Self.readFile))
         // Before the problems, so they reach the diagnostics log too.
-        if appliesDiagnostics {
+        if appliesAppSettings {
             Diagnostics.setEnabled(config.diagnostics.enabled, displayLinks: config.diagnostics.displayLinks)
         }
         for problem in loaded.problems { Diagnostics.report("config: \(problem)") }
+        if appliesAppSettings {
+            // Nil at launch, before the updater starts with this Config (SparkleUpdater.startIfConfigured).
+            let update = config.update
+            MainActor.assumeIsolated { UpdateModel.shared?.apply(update) }
+        }
         BrowserPageScripts.setVimKeys(config.browser.vimKeys)
         BrowserHistory.shared.setEnabled(config.browser.history)
     }

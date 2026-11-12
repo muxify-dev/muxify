@@ -1,0 +1,425 @@
+# Tests every push and pull request. A push to master publishes a Tip Build and the Host CLI; a v* tag on master
+# publishes a Release (docs/adr/0078-muxify-updates-itself-with-sparkle-from-feeds-in-a-github-release.md).
+name: Build, test and release
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag (for example v0.1.0 or v0.1.0-beta.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 90
+    outputs:
+      # Set once the tests pass and the Host CLI for macOS is uploaded, so publish-cli runs even when packaging fails.
+      cli-ready: ${{ steps.cli.outputs.ready }}
+      previous-tag: ${{ steps.validate.outputs.previous-tag }}
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      # What this run packages: tip on a master push, the tag on a v* tag or a manual run, and nothing otherwise.
+      PACKAGE_TAG: >-
+        ${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')) && (inputs.tag || github.ref_name)
+        || (github.event_name == 'push' && github.ref == 'refs/heads/master') && 'tip' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          # The build number is the commit count, and a tag's commit must be on master: both need the history.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate the tag, its commit and the toolchain
+        id: validate
+        run: |
+          if [[ -n "$PACKAGE_TAG" && "$PACKAGE_TAG" != tip ]]; then
+            [[ "$PACKAGE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.([1-9][0-9]*))?$ ]] \
+              || { echo "::error::$PACKAGE_TAG is not a release tag: use vX.Y.Z or vX.Y.Z-beta.N"; exit 1; }
+            git rev-parse --verify --quiet origin/master >/dev/null \
+              || { echo "::error::The checkout has no origin/master to check $PACKAGE_TAG against"; exit 1; }
+            # Build numbers count master's commits, so a Release off master could not be ordered against Tip Builds.
+            git merge-base --is-ancestor HEAD origin/master \
+              || { echo "::error::$PACKAGE_TAG is on commit $(git rev-parse HEAD), which is not on master"; exit 1; }
+            # The Release's generated notes start from the previous v* tag, never from a rolling tag.
+            previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude "$PACKAGE_TAG" HEAD 2>/dev/null || true)"
+            echo "previous-tag=$previous" >> "$GITHUB_OUTPUT"
+          fi
+          [[ "$(uname -m)" = arm64 ]]
+          xcodebuild -version
+
+      - name: Cache pinned Ghostty library, resources, and notices
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: vendor/ghostty
+          key: ghostty-macos-26-arm64-xcode-26.6-${{ hashFiles('scripts/ghostty-version.env', 'scripts/setup-ghostty.sh', 'scripts/collect-notices.py') }}
+
+      - name: Test release tooling
+        run: python3 -m unittest discover -s Tests/ReleaseTests -v
+
+      - name: Prepare dependencies
+        run: |
+          brew install tmux ripgrep
+          make setup
+
+      - name: Test Muxify
+        timeout-minutes: 10
+        env:
+          NSUnbufferedIO: 'YES'
+          # A test that needs tmux fails here when tmux is missing, and does not skip.
+          MUXIFY_REQUIRE_TMUX: '1'
+        run: make test
+
+      - name: Build the Host CLI for macOS
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          make host-cli-darwin
+          # The publish job runs on Linux and cannot run this binary, so it checks this line.
+          build/host-cli/muxify-darwin-arm64 --version > build/host-cli/muxify-darwin-arm64.printed
+
+      - name: Upload the Host CLI for macOS
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: host-cli-darwin
+          path: |
+            build/host-cli/muxify-darwin-arm64
+            build/host-cli/muxify-darwin-arm64.printed
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Mark the Host CLI ready to publish
+        id: cli
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      # Only a master push, a v* tag or a manual run reaches the secrets; a pull request never does.
+      - name: Import the release signing certificate into a temporary keychain
+        if: env.PACKAGE_TAG != ''
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+          MUXIFY_RELEASE_CERTIFICATE_P12: ${{ secrets.MUXIFY_RELEASE_CERTIFICATE_P12 }}
+          MUXIFY_RELEASE_CERTIFICATE_PASSWORD: ${{ secrets.MUXIFY_RELEASE_CERTIFICATE_PASSWORD }}
+        run: |
+          missing=false
+          for name in SPARKLE_ED_PRIVATE_KEY MUXIFY_RELEASE_CERTIFICATE_P12 MUXIFY_RELEASE_CERTIFICATE_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::The secret $name is not set: make the release secrets with make release-secrets"
+              missing=true
+            fi
+          done
+          [ "$missing" = false ] || exit 1
+          keychain="$RUNNER_TEMP/muxify-release.keychain-db"
+          password="$(openssl rand -base64 24)"
+          security create-keychain -p "$password" "$keychain"
+          # Locks after six hours, longer than the job may run.
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          (umask 077 && printf '%s' "$MUXIFY_RELEASE_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/release.p12")
+          security import "$RUNNER_TEMP/release.p12" -k "$keychain" -P "$MUXIFY_RELEASE_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign >/dev/null
+          rm -f "$RUNNER_TEMP/release.p12"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$password" "$keychain" >/dev/null
+          # codesign finds an identity only in a keychain on the search list.
+          keychains=()
+          while IFS= read -r line; do keychains+=("$line"); done \
+            < <(security list-keychains -d user | sed -E 's/^[[:space:]]*"(.*)"$/\1/')
+          security list-keychains -d user -s "$keychain" "${keychains[@]}"
+          echo "MUXIFY_RELEASE_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: Package the Tip Build or Release
+        if: env.PACKAGE_TAG != ''
+        env:
+          MUXIFY_RELEASE_IDENTITY: Muxify Release Signing
+        run: ./scripts/package-release.sh "$PACKAGE_TAG"
+
+      # sign_update needs macOS, so the feed is written here and the Linux publish jobs only upload it.
+      - name: Write the feed
+        if: env.PACKAGE_TAG != ''
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          make sparkle
+          dist="build/releases/$PACKAGE_TAG"
+          build="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["build"])' "$dist/build-info.json")"
+          version="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["short_version"])' "$dist/build-info.json")"
+          if [ "$PACKAGE_TAG" = tip ]; then
+            channel=tip
+            zip="Muxify-tip-$version-arm64.zip"
+            notes="https://github.com/$GITHUB_REPOSITORY/commit/$(git rev-parse HEAD)"
+          else
+            channel=stable
+            zip="Muxify-$version-arm64.zip"
+            notes="https://github.com/$GITHUB_REPOSITORY/releases/tag/$PACKAGE_TAG"
+          fi
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | scripts/write-feed.py --channel "$channel" --zip "$dist/$zip" \
+            --build "$build" --version "$version" --date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --download-url "https://github.com/$GITHUB_REPOSITORY/releases/download/$PACKAGE_TAG/$zip" \
+            --notes-url "$notes" --output "$dist/$channel.xml"
+
+      - name: Upload the package
+        if: env.PACKAGE_TAG != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: package
+          path: |
+            build/releases/${{ env.PACKAGE_TAG }}/*.zip
+            build/releases/${{ env.PACKAGE_TAG }}/*.xml
+            build/releases/${{ env.PACKAGE_TAG }}/SHA256SUMS
+            build/releases/${{ env.PACKAGE_TAG }}/build-info.json
+            build/releases/${{ env.PACKAGE_TAG }}/RELEASE-NOTES.md
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Delete the temporary keychain
+        if: always() && env.MUXIFY_RELEASE_KEYCHAIN != ''
+        run: security delete-keychain "$MUXIFY_RELEASE_KEYCHAIN"
+
+  test-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Test the CLI and MuxifyCore on Linux
+        run: make test-linux
+
+  host-cli-linux:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the Host CLI for Linux
+        run: make host-cli-linux
+
+      - name: Upload the Host CLI for Linux
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: host-cli-linux
+          path: |
+            build/host-cli/muxify-linux-aarch64
+            build/host-cli/muxify-linux-x86_64
+            build/host-cli/version
+            build/host-cli/install.sh
+          if-no-files-found: error
+          retention-days: 7
+
+  # Republishes the rolling prerelease cli-latest, from which the app installs the Host CLI
+  # (docs/adr/0076-the-app-installs-the-host-cli-from-a-rolling-github-prerelease.md).
+  # It needs the build job's tests and macOS binary, not its package, so a Sparkle problem never stops it.
+  publish-cli:
+    needs: [build, test-linux, host-cli-linux]
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/master'
+      && needs.build.outputs.cli-ready == 'true'
+      && needs.test-linux.result == 'success' && needs.host-cli-linux.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: cli-latest
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: cli-latest
+      RELEASE_TITLE: Muxify CLI (latest master)
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: host-cli-*
+          path: dist
+          merge-multiple: true
+
+      - name: Check that every binary prints the version line
+        run: |
+          sudo apt-get update -qq
+          # Newer Ubuntu images drop qemu-user-static; qemu-user is in every one. The binary is static (musl), so
+          # either emulator runs it.
+          sudo apt-get install -y -qq --no-install-recommends qemu-user >/dev/null
+          qemu="$(command -v qemu-aarch64-static || command -v qemu-aarch64)" \
+            || { echo "::error::qemu-user installed no qemu-aarch64"; exit 1; }
+          chmod +x dist/muxify-linux-*
+          expected="$(cat dist/version)"
+          read -r name sha time <<<"$expected"
+          [[ "$name" = muxify && "$GITHUB_SHA" = "$sha"* && "$time" =~ ^[0-9]+$ ]] \
+            || { echo "::error::version '$expected' does not name commit $GITHUB_SHA"; exit 1; }
+          check() {
+            local asset="$1" printed="$2"
+            [ "$printed" = "$expected" ] \
+              || { echo "::error::$asset --version printed '$printed', not '$expected'"; exit 1; }
+            echo "$asset: $printed"
+          }
+          check muxify-linux-x86_64 "$(dist/muxify-linux-x86_64 --version)"
+          check muxify-linux-aarch64 "$("$qemu" dist/muxify-linux-aarch64 --version)"
+          check muxify-darwin-arm64 "$(cat dist/muxify-darwin-arm64.printed)"
+
+      - name: Move the cli-latest tag to this commit
+        run: |
+          if gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+
+      - name: Publish the cli-latest prerelease
+        run: |
+          notes="The muxify CLI built from ${GITHUB_SHA}. Muxify installs it on a Remote Environment; it is replaced on every push to master."
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --prerelease --latest=false --title "$RELEASE_TITLE" --notes "$notes"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --prerelease --latest=false \
+              --title "$RELEASE_TITLE" --notes "$notes"
+          fi
+          # The binaries and install.sh go first and version last, so a Host that reads the new version finds the new
+          # binaries.
+          gh release upload "$RELEASE_TAG" --clobber \
+            dist/muxify-linux-aarch64 dist/muxify-linux-x86_64 dist/muxify-darwin-arm64 dist/install.sh
+          gh release upload "$RELEASE_TAG" --clobber dist/version
+
+  # Publishes the Tip Build to the rolling tip prerelease, then its feed to the rolling appcast prerelease
+  # (docs/adr/0078-muxify-updates-itself-with-sparkle-from-feeds-in-a-github-release.md).
+  publish-tip:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    # publish shares it, so only one job at a time rewrites an appcast asset.
+    concurrency:
+      group: appcast
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: tip
+      RELEASE_TITLE: Muxify Tip Builds
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: package
+          path: dist
+
+      - name: Move the tip tag to this commit
+        run: |
+          if gh api "repos/$GH_REPO/git/ref/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GH_REPO/git/refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          else
+            gh api "repos/$GH_REPO/git/refs" -f ref="refs/tags/$RELEASE_TAG" -f sha="$GITHUB_SHA" >/dev/null
+          fi
+
+      - name: Upload the Tip Build to the tip prerelease
+        run: |
+          notes="Tip Builds of Muxify, one from each push to master; the newest is from ${GITHUB_SHA}. Muxify offers them when the Config sets update.channel to tip."
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --prerelease --latest=false --title "$RELEASE_TITLE" --notes "$notes"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --prerelease --latest=false \
+              --title "$RELEASE_TITLE" --notes "$notes"
+          fi
+          gh release upload "$RELEASE_TAG" --clobber dist/Muxify-tip-*-arm64.zip
+
+      - name: Keep the ten newest Tip Builds
+        run: |
+          gh release view "$RELEASE_TAG" --json assets \
+            --jq '.assets[] | select(.name | test("^Muxify-tip-.*\\.zip$")) | [.createdAt, .name] | @tsv' |
+            sort -r | tail -n +11 | cut -f2 |
+            while IFS= read -r asset; do
+              echo "Deleting $asset"
+              gh release delete-asset "$RELEASE_TAG" "$asset" --yes
+            done
+
+      - name: Publish tip.xml to the appcast prerelease
+        run: |
+          # The appcast tag only names the release, so it is made once and never moved.
+          if ! gh api "repos/$GH_REPO/git/ref/tags/appcast" >/dev/null 2>&1; then
+            gh api "repos/$GH_REPO/git/refs" -f ref=refs/tags/appcast -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          notes="The update feeds Muxify reads: stable.xml lists the newest Release, tip.xml the newest Tip Build."
+          if gh release view appcast >/dev/null 2>&1; then
+            gh release edit appcast --prerelease --latest=false --title "Muxify update feeds" --notes "$notes"
+          else
+            gh release create appcast --verify-tag --prerelease --latest=false \
+              --title "Muxify update feeds" --notes "$notes"
+          fi
+          # The zip went first, so a copy that reads the new feed finds its zip.
+          gh release upload appcast --clobber dist/tip.xml
+
+  # Publishes a Release from a v* tag, then its feed to the rolling appcast prerelease.
+  publish:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    # publish-tip shares it, so only one job at a time rewrites an appcast asset.
+    concurrency:
+      group: appcast
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      PREVIOUS_TAG: ${{ needs.build.outputs.previous-tag }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: package
+          path: dist
+
+      - name: Publish the Release
+        run: |
+          # Do not replace an existing release or its already-downloaded assets.
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::A release for $RELEASE_TAG already exists: use a new tag"; exit 1
+          fi
+          # Only a plain vX.Y.Z becomes the repository's Latest release.
+          if [[ "$RELEASE_TAG" = *-beta.* ]]; then
+            kind=(--prerelease --latest=false)
+          else
+            kind=(--latest)
+          fi
+          # GitHub's generated notes go under the install section, from the previous v* tag when there is one.
+          since=()
+          [ -z "$PREVIOUS_TAG" ] || since=(--notes-start-tag "$PREVIOUS_TAG")
+          gh release create "$RELEASE_TAG" dist/*.zip dist/SHA256SUMS dist/build-info.json \
+            --verify-tag "${kind[@]}" --title "Muxify ${RELEASE_TAG#v}" \
+            --notes-file dist/RELEASE-NOTES.md --generate-notes "${since[@]}"
+
+      - name: Publish stable.xml to the appcast prerelease
+        run: |
+          # The appcast tag only names the release, so it is made once and never moved.
+          if ! gh api "repos/$GH_REPO/git/ref/tags/appcast" >/dev/null 2>&1; then
+            gh api "repos/$GH_REPO/git/refs" -f ref=refs/tags/appcast -f sha="$GITHUB_SHA" >/dev/null
+          fi
+          notes="The update feeds Muxify reads: stable.xml lists the newest Release, tip.xml the newest Tip Build."
+          if gh release view appcast >/dev/null 2>&1; then
+            gh release edit appcast --prerelease --latest=false --title "Muxify update feeds" --notes "$notes"
+          else
+            gh release create appcast --verify-tag --prerelease --latest=false \
+              --title "Muxify update feeds" --notes "$notes"
+          fi
+          # The Release's zip went first, so a copy that reads the new feed finds its zip.
+          gh release upload appcast --clobber dist/stable.xml
