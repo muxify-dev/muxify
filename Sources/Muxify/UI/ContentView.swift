@@ -176,17 +176,18 @@ private struct HeaderBar: View {
                 HeaderWindowSelector(store: store, current: window)
             }
             Spacer(minLength: 12)
+            // The app's one update model, so every App Window shows the same update. It leads the right side, so the
+            // Git button and the rest do not move when it shows.
+            if let updates = UpdateModel.shared {
+                UpdateButton(model: updates)
+                    .layoutPriority(2)
+            }
             if let window = store.selectedWindow, !store.showsEmptyPage {
                 HeaderGitButton(store: store, window: window,
                                 help: help(store.currentGitView?.isOpen == true ? "Hide Git View" : "Show Git View", .toggleGitView))
                     .id("\(window.sourceID):\(window.path)")
                     // Before the Window list and the Session name give way, the branch keeps its whole width up to
                     // its maximum; it is cut only when the header has no other room left.
-                    .layoutPriority(2)
-            }
-            // The app's one update model, so every App Window shows the same update.
-            if let updates = UpdateModel.shared {
-                UpdateButton(model: updates)
                     .layoutPriority(2)
             }
             EnvironmentSelector(environments: store.remoteEnvironments, activeEnvironment: store.activeEnvironment,
