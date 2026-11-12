@@ -1,5 +1,7 @@
 # In Play places stay open, and the Guests show in their own section
 
+> **Partly superseded by [ADR-0081](0081-in-play-is-the-only-topics-mode.md):** `topics.in_play` is always set. `muxify topic bench --session` ends a Guest Session, and `muxify session unlock` is gone.
+
 With `topics.in_play` set, a Settle of an In Play card pulled the top Benched card into In Play ([ADR 0054](0054-choose-in-play-and-replace-from-bench-replace-snooze-and-zen.md)). The user did not choose that card, and it often was not the next Topic they wanted. A Guest kept its position among the In Play cards ([ADR 0061](0061-a-guest-is-in-play-above-the-limit-and-keeps-its-position.md)), so a Guest could show between two regular cards, and Choose In Play had to skip the positions that Guests held. We change both rules.
 
 - **Three sections.** The Sidebar shows the Pinned Topics, then the N In Play places, then a "Guests" line and every Guest (Guest Topics and Guest Sessions), then the Bench line and the Bench. N is `topics.in_play`. A Guest never shows between two places. The Guests line shows only when there is a Guest. Make a Guest puts the card at the end of the Guests.

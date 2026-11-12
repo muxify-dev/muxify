@@ -210,23 +210,6 @@ Session of yours: the palette lists the remote home folder and the remote
 machine's Session Paths and Worktrees, as Muxify last found them there while
 connected, and ↩ connects again and starts the Session on that machine.
 
-## Position of new and returning Topics
-
-```yaml
-topics:
-  insert_position: bottom
-```
-
-`bottom` (the default) puts a new Topic below all Topics and Locked Sessions
-that are not Pinned. `top` puts it first below the Pinned Topics.
-Reopen and Start Fresh use this position when a Settled Topic returns.
-A Pinned Topic returns at the chosen end of the Pinned Topics.
-With `topics.in_play`, this option does nothing: a new or returning Topic goes
-to the top of the Bench (see [Topics In Play](#topics-in-play)).
-A Dormant Topic keeps its place, including when it is Pinned.
-A Topic made from a Locked Session takes that Lock's place.
-An unknown value uses `bottom` and appears in the Config problems banner.
-
 ## Reopen Dormant Topics at launch
 
 ```yaml
@@ -260,13 +243,20 @@ topics:
   in_play: 5
 ```
 
-`topics.in_play` limits how many Topics the Sidebar shows at one time. The
-Sidebar shows the Pinned Topics, the Guests and the first `in_play` other
-Topics. These cards are In Play. The other open Topics are the Bench. They keep their place in the list, their Sessions and
-their Agents, but they hide behind one line under the In Play cards. Without
-`topics.in_play` the Sidebar shows every card. The value is a whole number of
-1 or more. Any other value appears in the Config problems banner, and the
-Sidebar then shows every card.
+`topics.in_play` is the number of In Play places. The Sidebar shows the Pinned
+Topics, the Topics in these places and the Guests. These cards are In Play.
+The other open Topics are the Bench. They keep their place in the list, their
+Sessions and their Agents, but they hide behind one line under the In Play
+cards. The value is a whole number of 1 or more, and 5 when you do not set it.
+Any other value appears in the Config problems banner, and Muxify uses 5.
+
+In Play is the only way the Sidebar lists the Topics. An older Muxify showed
+every card in one list until you set `in_play`. The first time this Muxify
+runs, the first 5 Topics that are not Pinned take the places, each Locked
+Session becomes a Guest Session, and the other Topics go to the Bench. No
+Topic is lost: click the Bench line, or press ⇧⌘S, to show them.
+`topics.insert_position` is gone. A Config that sets it shows a Config
+problem, and you can remove the line.
 
 - Pinned Topics always show, and they do not count toward `in_play`.
 - The Sidebar shows the Pinned Topics, then the `in_play` In Play places, then
@@ -276,17 +266,14 @@ Sidebar then shows every card.
 - A Guest is a card In Play above the limit, with a "Guest" mark. Make a Guest
   (Sidebar menu, Command Palette, `muxify topic make-guest`) puts a Benched
   Topic or a No Topic Session at the end of the Guests, and no other card goes
-  to the Bench. A Session is a Guest through its Lock: with `in_play`, every
-  Locked Session is a Guest, Make a Guest and Bench take the place of Lock
-  Session and Unlock Session, and `muxify session lock` and `unlock` make and
-  end a Guest Session. When you set `in_play`, each Locked Session goes to the
-  end of the Guests. When you remove it, each Guest Session stays a Locked
-  Session at its place, and each Guest Topic keeps its mark for the next time.
+  to the Bench. A No Topic Session that you make a Guest is a Guest Session.
+  `muxify topic make-guest --session <name>` makes one too.
 - Bench (Sidebar menu, Command Palette) takes a card out of In Play. An In
   Play Topic or a Guest Topic goes to the top of the Bench, as `muxify topic
   bench` does. The Topic keeps its Sessions and Agents, and a Guest Topic loses
-  its mark. A Guest Session is Unlocked, as `muxify session unlock` does: it
-  waits in No Topic, because a Session has no record to keep it on the Bench.
+  its mark. A Guest Session stops being a Guest, as `muxify topic bench
+  --session <name>` does: it waits in No Topic, because a Session has no record
+  to keep it on the Bench.
 - When you Settle, Forget or Bench the card that you are on, Muxify opens the
   next card that shows. After the last card that shows, it opens the first In
   Play card. It never opens a Pinned Topic this way. After Bench, when no
@@ -313,8 +300,8 @@ Sidebar then shows every card.
   does not fill an Open Place. A Settled Topic that Reopen or Start Fresh brings
   back goes there too. When the
   list has fewer cards than `in_play`, it goes last. A Pinned Topic that
-  returns goes last among the Pinned Topics. `topics.insert_position` does not
-  apply.
+  returns goes last among the Pinned Topics. A Dormant Topic keeps its place.
+  A Topic made from a Guest Session takes that Guest's place.
 - Choose In Play… (`choose_in_play`, ⇧⌥⌘S) sets which cards are In Play, and
   in what order. It opens in the palette with a box on each open Topic that is
   not Pinned, and the In Play Topics and the Guest Topics start checked. A
@@ -334,7 +321,7 @@ Sidebar then shows every card.
   cards that you did not check keep their order under the checked cards.
   `muxify topic choose-in-play` does the same.
 - Replace from Bench… (`replace_from_bench`, ⌥⌘S) works on the card that you
-  are on while it is In Play, a Topic or a Locked Session. Choose a Benched card
+  are on while it is In Play, a Topic or a Guest Session. Choose a Benched card
   in the palette; a query such as `#work` narrows the rows. The card that you
   choose takes the place, your card goes to the end of the Bench, and you go to
   the card that you chose. On a Guest, the card that you choose gets the Guest
@@ -438,7 +425,7 @@ in the Config problems banner.
 
 A drag on a Window row moves the Window, with its Pane rows, within its
 Session, in any card. The Session keeps its current Window, and tmux keeps the
-new order. Topic cards and Locked Session cards move the same way among the
+new order. Topic cards and Guest Session cards move the same way among the
 cards with their pin.
 
 ## Header
@@ -1803,7 +1790,7 @@ sidebar:
 
 `sidebar.session_cards` sets which Session cards stay open when the
 Location moves to another Session. It acts on the Session cards of
-Sessions mode and on the No Topic and Locked Session cards of Topics mode, which
+Sessions mode and on the No Topic and Guest Session cards of Topics mode, which
 share one list of open cards. Topic cards are not affected: a new Active Topic
 always opens alone.
 
@@ -1828,13 +1815,13 @@ sidebar:
 | `line` | Chips on their own line under the title, before Dormant or Empty. When they do not all fit, the line ends with `+N`. |
 
 In `corner` and `title`, the title line is, from left to right: the title, the
-Hint, the Pin or Lock, and the Tags. Tag editing
+Hint, the Pin or the Guest mark, and the Tags. Tag editing
 does not depend on this setting: Edit Tags… and `#` in New Topic work whenever
 `topics.tags` exists.
 
 The hover label and the accessibility value of the Tags name every Tag. A
 closed card in the Settled group shows no Tags; an opened one shows
-them as an open card does. Locked Sessions and Session cards show no Tags.
+them as an open card does. Guest Sessions and Session cards show no Tags.
 
 ```yaml
 sidebar:

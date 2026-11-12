@@ -1,5 +1,7 @@
 # The Sidebar shows only the Topics In Play
 
+> **Partly superseded by [ADR-0081](0081-in-play-is-the-only-topics-mode.md):** the Sidebar always shows the Topics In Play. `topics.in_play` has 5 as its default, and a value that is not valid gives 5. The text below about a Config without `topics.in_play` does not apply.
+
 > **Update 2026-10-31:** The Sidebar no longer moves the card of the Location to the top of a shown Bench, and the Bench has its own scroll area ([ADR 0063](0063-the-bench-scrolls-alone-and-no-card-moves-when-it-shows.md)). The rules "The card of the Location always shows" and "The Bench is in the Topics list's scroll view" below are replaced where they say otherwise.
 
 > **Update 2026-10-30:** A Locked Session no longer counts toward N. With `topics.in_play`, every Locked Session is a Guest, a card In Play above the limit, and a Topic can be a Guest too ([ADR 0061](0061-a-guest-is-in-play-above-the-limit-and-keeps-its-position.md)). In Play is the Guests and the first N other cards. The rule "Locked Sessions count toward N" below is replaced. A Trade of a Guest gives its Guest mark to the card that comes In Play.

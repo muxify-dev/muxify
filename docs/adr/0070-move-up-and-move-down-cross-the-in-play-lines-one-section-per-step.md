@@ -1,5 +1,7 @@
 # Move Up and Move Down cross the In Play lines, one section per step
 
+> **Partly superseded by [ADR-0081](0081-in-play-is-the-only-topics-mode.md):** `topics.in_play` is always set, so Move Up and Move Down always cross the lines. The text below about a Config without `topics.in_play` does not apply.
+
 With `topics.in_play` set, the keyboard needed a different Command for each change of section: Bench, Make a Guest, Fill Place with its choose step, or Choose In Play. Only a Sidebar drag changed the section in one gesture. Move Topic Up and Move Topic Down stepped past the next card in list order, and the cut at the lines ([ADR-0064](0064-in-play-places-stay-open-and-guests-show-in-their-own-section.md)) then decided the section. Nobody designed that result.
 
 We make Move Up and Move Down section-aware. Inside a section, a step is a reorder, as before. A step that would cross the Guests line or the Bench line changes the card's section, one section per step, and each step goes back with the opposite key:

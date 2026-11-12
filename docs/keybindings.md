@@ -30,15 +30,14 @@ listed below.
 | `mark_read` | ⌘⇧R | Clear Unread for the Active Topic, or the current Session when there is no Active Topic |
 | `mark_unread` | ⌘⇧U | Mark the Active Topic Unread, or eligible Agents in the current Session when there is no Active Topic |
 | `mark_all_read` | Unbound | Clear Unread in the Active Environment |
-| `toggle_lock` | Unbound | Lock the current Session, which must be in No Topic, or Unlock it while it is Locked |
-| `move_topic_up` | ⌥⌘↑ | Move the card of the Active Topic, or of the current Locked Session, one card up among the cards with its Pin. With `topics.in_play`, a step past the Guests line or the Bench line changes the section of the card, one section for each step. It does nothing at the top, for No Topic, for a Settled Topic, and in Sessions mode |
-| `move_topic_down` | ⌥⌘↓ | Move the card of the Active Topic, or of the current Locked Session, one card down among the cards with its Pin, or into the next In Play section as for Move Topic Up. It does nothing at the bottom, for No Topic, for a Settled Topic, and in Sessions mode |
+| `move_topic_up` | ⌥⌘↑ | Move the card of the Active Topic, or of the current Guest Session, one card up among the cards with its Pin. A step past the Guests line or the Bench line changes the section of the card, one section for each step. It does nothing at the top, for No Topic, for a Settled Topic, and in Sessions mode |
+| `move_topic_down` | ⌥⌘↓ | Move the card of the Active Topic, or of the current Guest Session, one card down among the cards with its Pin, or into the next In Play section as for Move Topic Up. It does nothing at the bottom, for No Topic, for a Settled Topic, and in Sessions mode |
 | `toggle_pin_topic` | Unbound | Pin the Active Topic, or Unpin it while it is Pinned. It does nothing for a Settled Topic |
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
 | `toggle_sidebar_mode` | ⌥⌘T | Switch the Sidebar between Topics and Sessions, as the other Topics/Sessions button does. A hidden Sidebar shows in the other mode. While only one mode can show (`sidebar.topics` or `sidebar.sessions` is off, or a Remote App Window, which shows only Sessions), it changes nothing and an Explanation Pill says why. The Command and the View menu item are "Switch to Sessions" / "Switch to Topics" |
 | `toggle_bench` | ⇧⌘S | Show or hide the Bench, the Topics after the ones [In Play](configuration.md#topics-in-play). It does nothing while the Topics list has no Bench line |
-| `choose_in_play` | ⇧⌥⌘S | Open Choose In Play: check the cards to put [In Play](configuration.md#topics-in-play), then choose the card for each place. It does nothing without `topics.in_play` |
-| `replace_from_bench` | ⌥⌘S | Open Replace from Bench for the card you are on while it is [In Play](configuration.md#topics-in-play). Choose a Benched card. It takes the place, and your card goes to the end of the Bench. It does nothing without `topics.in_play` |
+| `choose_in_play` | ⇧⌥⌘S | Open Choose In Play: check the cards to put [In Play](configuration.md#topics-in-play), then choose the card for each place |
+| `replace_from_bench` | ⌥⌘S | Open Replace from Bench for the card you are on while it is [In Play](configuration.md#topics-in-play). Choose a Benched card. It takes the place, and your card goes to the end of the Bench |
 | `toggle_terminal` | ⌘J | Show or hide the current Window's Terminal. It does nothing while the Terminal is the only side shown |
 | `toggle_browser` | ⌘B | Show or hide the current Window's Browser. It does nothing while the Browser is the only side shown |
 | `toggle_git_view` | ⌘G | Show or hide the [Git View](configuration.md#git-view) of the current Window's repository |
@@ -85,7 +84,7 @@ select the next or previous Tab, so Windows and Tabs share their step keys.
 | --- | --- | --- |
 | `select_next_session` | Unbound | Go to the next Session the Sidebar shows, wrapping to the first. In Topics mode, only the Active Topic's Sessions take part; for No Topic, the No Topic Sessions |
 | `select_prev_session` | Unbound | Go to the previous Session the Sidebar shows, wrapping to the last. In Topics mode, only the Active Topic's Sessions take part |
-| `select_next_topic` | Unbound | Go to the Topic below in the Topics list, wrapping to the first. Locked Sessions take part in their place; No Topic and Benched cards that do not show do not. A Dormant Topic is Reopened. Works in both Sidebar modes |
+| `select_next_topic` | Unbound | Go to the Topic below in the Topics list, wrapping to the first. Guest Sessions take part in their place; No Topic and Benched cards that do not show do not. A Dormant Topic is Reopened. Works in both Sidebar modes |
 | `select_prev_topic` | Unbound | Go to the Topic above in the Topics list, wrapping to the last |
 
 The default [Command Palettes](configuration.md#command-palettes) are
@@ -102,13 +101,13 @@ Mark All as Read clears all Topic and Agent Unread marks in the Active Environme
 and appears when either kind of mark is set.
 
 Commands also lists Move Pane, Move Window, Move Session, Move Pane with Active
-Tab, Add a Session, Settle Topic, and Lock Session or Unlock Session. These use
+Tab, Add a Session, Settle Topic, and Make a Guest or Bench. These use
 the current item and appear when that item is available. Back returns from an input
 step to the Commands search.
 
 Commands also lists Move Topic Up and Move Topic Down, and Pin Topic or Unpin
 Topic. They run at once on the Active Topic, as their keybindings
-do. Move Topic Up and Move Topic Down also move the card of the current Locked
+do. Move Topic Up and Move Topic Down also move the card of the current Guest
 Session, and appear only when the card can move that way: among the cards with its Pin, or
 into the next In Play section.
 
@@ -206,7 +205,6 @@ keybindings:
   forget_topic: []
   rename_topic: []
   set_topic_note: []
-  toggle_lock: []
   move_topic_up: alt+cmd+up
   move_topic_down: alt+cmd+down
   toggle_pin_topic: []
@@ -361,10 +359,8 @@ conflict with the actions above:
 | `reveal_folder` | Unbound | Show the result's folder in Finder |
 | `kill_window` | Unbound | Confirm a kill of the highlighted Window |
 | `kill_session` | Unbound | Confirm a kill of the highlighted Session |
-| `lock_session` | Unbound | Lock the highlighted Session, which must be in No Topic |
-| `unlock_session` | Unbound | Unlock the highlighted Session |
-| `make_guest` | Unbound | Make the highlighted Benched Topic or No Topic Session a Guest, with `topics.in_play` |
-| `bench` | Unbound | Bench the highlighted In Play Topic, Guest Topic or Guest Session, with `topics.in_play` |
+| `make_guest` | Unbound | Make the highlighted Benched Topic or No Topic Session a Guest |
+| `bench` | Unbound | Bench the highlighted In Play Topic, Guest Topic or Guest Session |
 | `choose_pane` | ⌥1 | Select the Pane button in Move |
 | `choose_window` | ⌥2 | Select the Window button in Move |
 | `choose_session` | ⌥3 | Select the Session button in Move |

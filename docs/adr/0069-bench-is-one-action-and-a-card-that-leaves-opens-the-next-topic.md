@@ -1,5 +1,7 @@
 # Bench is one Action, and a card that leaves opens the Next Topic
 
+> **Partly superseded by [ADR-0081](0081-in-play-is-the-only-topics-mode.md):** `muxify topic bench` also takes a Guest Session, and `muxify session unlock` is gone. Lock Session and Unlock Session are gone.
+
 > Supersedes the End Guest part of [ADR-0064](0064-in-play-places-stay-open-and-guests-show-in-their-own-section.md).
 
 Two Actions took a card out of In Play. Bench Topic was for a Topic, and End Guest was for a Guest Session. In the Guests section, a Guest Topic and a Guest Session look the same, so the user had to remember the card kind to find the Action. Also, after Bench Topic the user stayed on the Benched Topic, which the Bench line now hid. Settle already opened the Next Topic.
