@@ -8,6 +8,9 @@ import Observation
 @MainActor @Observable
 final class AppWindows {
     let configStore: ConfigStore
+    /// Where the App Windows and their stores remember view state across launches. The app passes `.standard`;
+    /// a test, a suite of its own.
+    @ObservationIgnored let defaults: UserDefaults
     @ObservationIgnored private let initialEnvironmentName: String?
     private(set) var focusedID: UUID?
     @ObservationIgnored var openWindow: ((AppWindowRequest) -> Void)?
@@ -30,10 +33,11 @@ final class AppWindows {
         return (first.map { [$0] } ?? []) + stores.values.filter { $0 !== first && $0.activeEnvironment == nil }
     }
 
-    init(configStore: ConfigStore) {
+    init(configStore: ConfigStore, defaults: UserDefaults = .standard) {
         self.configStore = configStore
+        self.defaults = defaults
         settings = SettingsModel(configStore: configStore)
-        let remembered = UserDefaults.standard.string(forKey: "selectedEnvironment")
+        let remembered = defaults.string(forKey: "selectedEnvironment")
         let name = configStore.config.remoteEnvironments.first { $0.name == remembered }?.name
         initialEnvironmentName = name
         Diagnostics.moving = { [weak self] in self?.movingState() ?? MovingState() }
@@ -66,7 +70,7 @@ final class AppWindows {
     func store(for request: AppWindowRequest) -> WorkspaceStore {
         if let store = stores[request.id] { return store }
         let environment = configStore.config.remoteEnvironments.first { $0.name == request.environmentName }
-        let store = WorkspaceStore(configStore: configStore, environment: environment)
+        let store = WorkspaceStore(configStore: configStore, environment: environment, defaults: defaults)
         // SwiftUI can evaluate a closing scene again after its cleanup finishes.
         // Do not resurrect its reservation or connection.
         if isQuitting || closedIDs.contains(request.id) {
@@ -168,8 +172,8 @@ final class AppWindows {
     }
 
     private func remember(_ name: String?) {
-        if let name { UserDefaults.standard.set(name, forKey: "selectedEnvironment") }
-        else { UserDefaults.standard.removeObject(forKey: "selectedEnvironment") }
+        if let name { defaults.set(name, forKey: "selectedEnvironment") }
+        else { defaults.removeObject(forKey: "selectedEnvironment") }
     }
 
     private func close(_ id: UUID) {

@@ -44,8 +44,8 @@ final class AppWindowsTests: XCTestCase {
 
     @MainActor func testOnlyFirstDefaultSceneUsesTheRememberedEnvironment() throws {
         try withWindows { windows, _ in
-            UserDefaults.standard.set("Home", forKey: "selectedEnvironment")
-            let remembered = AppWindows(configStore: windows.configStore)
+            windows.defaults.set("Home", forKey: "selectedEnvironment")
+            let remembered = AppWindows(configStore: windows.configStore, defaults: windows.defaults)
             let first = remembered.defaultWindowRequest()
             XCTAssertEqual(first.environmentName, "Home")
             _ = remembered.store(for: first)
@@ -158,7 +158,7 @@ final class AppWindowsTests: XCTestCase {
             windows.selectEnvironment(named: "Home")
             XCTAssertEqual(remoteWindow.focusRequests, 1)
             XCTAssertTrue(windows.focusedStore === remote)
-            XCTAssertEqual(UserDefaults.standard.string(forKey: "selectedEnvironment"), "Home")
+            XCTAssertEqual(windows.defaults.string(forKey: "selectedEnvironment"), "Home")
             let wasVisible = remote.sidebarVisible
             windows.focusedStore?.toggleSidebar()
             XCTAssertEqual(remote.sidebarVisible, !wasVisible)
@@ -516,9 +516,9 @@ final class AppWindowsTests: XCTestCase {
             remote.agentsVisible = false
             let localState = (local.selectedWindowID, local.sidebarVisible, local.sessionsVisible, local.agentsVisible)
             let remoteState = (remote.selectedWindowID, remote.sidebarVisible, remote.sessionsVisible, remote.agentsVisible)
-            let defaults = UserDefaults.standard
-            let expansion = defaults.object(forKey: "expandedSessions") as? [String]
-            let split = defaults.object(forKey: "sidebarAgentsFraction") as? Double
+            let expansion = windows.defaults.object(forKey: "expandedSessions") as? [String]
+            // The Sidebar view keeps its split in `@AppStorage`, which reads UserDefaults.standard.
+            let split = UserDefaults.standard.object(forKey: "sidebarAgentsFraction") as? Double
 
             try (Self.config + "\nui:\n  font_size: 18\n  sidebar:\n    font_family: system\n")
                 .write(toFile: path, atomically: true, encoding: .utf8)
@@ -537,8 +537,8 @@ final class AppWindowsTests: XCTestCase {
             XCTAssertEqual(remote.sessionsVisible, remoteState.2)
             XCTAssertEqual(remote.agentsVisible, remoteState.3)
             XCTAssertEqual(remote.environmentName, "Home")
-            XCTAssertEqual(defaults.object(forKey: "expandedSessions") as? [String], expansion)
-            XCTAssertEqual(defaults.object(forKey: "sidebarAgentsFraction") as? Double, split)
+            XCTAssertEqual(windows.defaults.object(forKey: "expandedSessions") as? [String], expansion)
+            XCTAssertEqual(UserDefaults.standard.object(forKey: "sidebarAgentsFraction") as? Double, split)
 
             try (Self.config + "\nui: [").write(toFile: path, atomically: true, encoding: .utf8)
             windows.configStore.reload()
@@ -561,22 +561,12 @@ final class AppWindowsTests: XCTestCase {
 
     @MainActor private func withWindows(_ body: (AppWindows, String) throws -> Void) throws {
         _ = NSApplication.shared
-        let defaults = UserDefaults.standard
-        let keys = ["selectedEnvironment", "sidebarVisible", "sidebarWorkView", "sessionsVisible", "agentsVisible", "browserURLs", "browserVisible", "browserWidth"]
-        let saved = keys.map { ($0, defaults.object(forKey: $0)) }
-        defer {
-            for (key, value) in saved {
-                if let value { defaults.set(value, forKey: key) }
-                else { defaults.removeObject(forKey: key) }
-            }
-        }
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-window-tests-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("config.yaml").path
         try Self.config.write(toFile: path, atomically: true, encoding: .utf8)
-        defaults.removeObject(forKey: "selectedEnvironment")
-        let windows = AppWindows(configStore: ConfigStore(path: path))
+        let windows = AppWindows(configStore: ConfigStore(path: path), defaults: isolatedDefaults())
         defer {
             let finished = expectation(description: "fixture window cleanup")
             windows.shutdown { finished.fulfill() }
