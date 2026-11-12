@@ -127,6 +127,7 @@ jobs:
             build/host-cli/muxify-linux-aarch64
             build/host-cli/muxify-linux-x86_64
             build/host-cli/version
+            build/host-cli/install.sh
           if-no-files-found: error
           retention-days: 7
 
@@ -194,9 +195,10 @@ jobs:
             gh release create "$RELEASE_TAG" --verify-tag --prerelease --latest=false \
               --title "$RELEASE_TITLE" --notes "$notes"
           fi
-          # The binaries go first and version last, so a Host that reads the new version finds the new binaries.
+          # The binaries and install.sh go first and version last, so a Host that reads the new version finds the new
+          # binaries.
           gh release upload "$RELEASE_TAG" --clobber \
-            dist/muxify-linux-aarch64 dist/muxify-linux-x86_64 dist/muxify-darwin-arm64
+            dist/muxify-linux-aarch64 dist/muxify-linux-x86_64 dist/muxify-darwin-arm64 dist/install.sh
           gh release upload "$RELEASE_TAG" --clobber dist/version
 
   publish:

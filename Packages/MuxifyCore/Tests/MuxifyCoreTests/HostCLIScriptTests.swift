@@ -24,15 +24,20 @@ final class HostCLIScriptTests: XCTestCase {
     }
 
     /// A fresh HOME, tools folder and assets for one run.
-    private func reset(curl: Bool = true) throws {
+    /// With `slow`, every download waits a moment first, so two runs at once overlap.
+    private func reset(curl: Bool = true, slow: Bool = false) throws {
         let fm = FileManager.default
         for folder in [home, tools, assets] {
             try? fm.removeItem(atPath: folder)
             try fm.createDirectory(atPath: folder, withIntermediateDirectories: true)
         }
-        for tool in ["sh", "uname", "tr", "readlink", "mkdir", "rm", "mv", "chmod"] + (curl ? ["curl"] : []) {
+        for tool in ["sh", "uname", "tr", "readlink", "mkdir", "rm", "mv", "chmod", "find"] + (curl && !slow ? ["curl"] : []) {
             let real = try XCTUnwrap(Self.which(tool), "no \(tool)")
             try fm.createSymbolicLink(atPath: "\(tools)/\(tool)", withDestinationPath: real)
+        }
+        if curl && slow {
+            let real = try XCTUnwrap(Self.which("curl"), "no curl")
+            try write("#!/bin/sh\n/bin/sleep 0.3\nexec \(real) \"$@\"\n", to: "\(tools)/curl", mode: 0o755)
         }
         try write(published + "\n", to: "\(assets)/version")
         for asset in ["muxify-darwin-arm64", "muxify-linux-aarch64", "muxify-linux-x86_64"] {
@@ -72,7 +77,13 @@ final class HostCLIScriptTests: XCTestCase {
         try CommandRunner().run(CommandInvocation(executable: path, arguments: ["--version"])).trimmingCharacters(in: .newlines)
     }
 
-    private var leftover: Bool { FileManager.default.fileExists(atPath: installed + ".new") }
+    /// The run's temp files in `~/.local/bin`.
+    private var temps: [String] {
+        let dir = (installed as NSString).deletingLastPathComponent
+        return ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).filter { $0.hasPrefix("muxify.new") }.sorted()
+    }
+
+    private var leftover: Bool { !temps.isEmpty }
 
     func testNoMuxifyInstallsThePublishedOne() throws {
         for shell in shells {
@@ -81,6 +92,45 @@ final class HostCLIScriptTests: XCTestCase {
             XCTAssertEqual(try versionLine(installed), published, shell)
             XCTAssertFalse(leftover, shell)
         }
+    }
+
+    func testTwoInstallsAtOnceEachEndWithTheirOwnDownload() throws {
+        for shell in shells {
+            try reset(slow: true)
+            let outputs = Outputs()
+            DispatchQueue.concurrentPerform(iterations: 2) { index in
+                let arguments = ["-c", HostCLI.script, "muxify", "file://\(assets)/", bundled]
+                let output = (try? CommandRunner().run(CommandInvocation(executable: shell, arguments: arguments),
+                                                       environment: ["HOME": home, "PATH": tools])) ?? "threw"
+                outputs.set(index, output.trimmingCharacters(in: .newlines))
+            }
+            XCTAssertEqual(outputs.all, ["installed abc1234 200", "installed abc1234 200"], shell)
+            XCTAssertEqual(try versionLine(installed), published, shell)
+            XCTAssertEqual(temps, [], shell)
+        }
+    }
+
+    private final class Outputs: @unchecked Sendable {
+        private let lock = NSLock()
+        private var lines = ["", ""]
+        var all: [String] { lock.withLock { lines } }
+        func set(_ index: Int, _ line: String) { lock.withLock { lines[index] = line } }
+    }
+
+    func testAnotherRunsTempFileIsLeftAndOneOlderThanADayIsRemoved() throws {
+        let dir = (installed as NSString).deletingLastPathComponent
+        try reset()
+        try write("partial", to: "\(dir)/muxify.new.11111")
+        try write("partial", to: "\(dir)/muxify.new.22222")
+        try write("partial", to: "\(dir)/muxify.new")
+        let twoDaysAgo = Date().addingTimeInterval(-2 * 24 * 3600)
+        for old in ["muxify.new.22222", "muxify.new"] {
+            try FileManager.default.setAttributes([.modificationDate: twoDaysAgo], ofItemAtPath: "\(dir)/\(old)")
+        }
+        XCTAssertEqual(try run("/bin/sh"), "installed abc1234 200")
+        XCTAssertEqual(try versionLine(installed), published)
+        XCTAssertEqual(temps, ["muxify.new.11111"])
+        XCTAssertEqual(try String(contentsOfFile: "\(dir)/muxify.new.11111", encoding: .utf8), "partial")
     }
 
     func testAnOlderOneIsUpdated() throws {
