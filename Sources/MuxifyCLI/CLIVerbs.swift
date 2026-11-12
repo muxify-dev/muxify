@@ -893,7 +893,7 @@ enum CLIVerbs {
 
     // MARK: - read
 
-    private static let read: [CLIVerb] = readVerbs(.topic, synopsis: topicTarget, what: """
+    private static let read: [CLIVerb] = readVerbs(.topic, synopsis: "[--topic-only] " + topicTarget, what: """
         this Pane's Topic and each Agent in its Sessions
         """)
         + readVerbs(.session, synopsis: "[--session <name|id> | --window <id> | --pane <id>]", what: "each Agent in this Pane's Session")
@@ -906,15 +906,20 @@ enum CLIVerbs {
            }]
 
     /// Mark Read and Mark Unread of one scope. Each prints the id of each Topic and each Agent Pane that changed.
+    /// The Topic verbs also take `--topic-only`, which narrows the scope to `topicMark`.
     private static func readVerbs(_ scope: ReadScope, synopsis: String, what: String) -> [CLIVerb] {
         [ReadChange.read, .unread].map { change in
             let command = RequestInvocation.Command.markRead(change, scope: scope)
+            let topicOnly = scope == .topic
+            let help = (change == .read ? "Marks \(what) Read, as Mark Read does."
+                                        : "Marks \(what) Unread, as Mark Unread does.\nAn Agent that is working does not change.")
+                + (topicOnly ? "\n  --topic-only   only the Topic's own mark: the Agents in its Sessions do not change" : "")
             return CLIVerb(path: .markRead(change, scope: scope), synopsis: synopsis + " [--json]",
-                           options: [.flag("--json")], targets: command.targets,
-                           help: change == .read ? "Marks \(what) Read, as Mark Read does."
-                                                 : "Marks \(what) Unread, as Mark Unread does.\nAn Agent that is working does not change.") { parsed in
+                           options: [.flag("--json")] + (topicOnly ? [.flag("--topic-only")] : []), targets: command.targets,
+                           help: help) { parsed in
                 guard parsed.operands.isEmpty else { throw CLIError.usage }
-                return .request(try RequestInvocation(command, parsed: parsed))
+                let narrowed = parsed.flag("--topic-only") ? RequestInvocation.Command.markRead(change, scope: .topicMark) : command
+                return .request(try RequestInvocation(narrowed, parsed: parsed))
             }
         }
     }

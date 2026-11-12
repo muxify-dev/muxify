@@ -252,7 +252,7 @@ _Avoid_: unseen, new
 A Config behavior that preserves Unread during visits and Zoom changes. Agent updates become Unread even in shown Panes.
 
 **Mark Read**:
-An Action that clears Unread in its named target without changing Agent Status. Its Command and direct shortcut target the current Window or its Zoomed Pane, or the Topic mark on an Empty Topic page. When they change nothing, or leave Unread Agents in Panes that Zoom hides, they show an Explanation Pill.
+An Action that clears Unread in its named target without changing Agent Status. Its Command and direct shortcut target the current Window or its Zoomed Pane, or the Topic mark on an Empty Topic page. When they change nothing, or leave Unread Agents in Panes that Zoom hides, they show an Explanation Pill. `topic mark-read --topic-only` clears the Topic mark only, and the Agents in the Topic keep their Unread.
 _Avoid_: dismiss Status
 
 **Mark Unread**:

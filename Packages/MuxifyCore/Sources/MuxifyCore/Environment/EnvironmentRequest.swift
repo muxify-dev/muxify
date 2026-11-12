@@ -363,7 +363,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// loses its Guest mark. No other card moves. It needs `topics.in_play`.
     case fillOpenPlace(place: Int)
     /// Marks the `scope` of the target Read or Unread: the Topic Unread of a Topic, and each Agent there that
-    /// `change` applies to.
+    /// `change` applies to. `topicMark` changes only the Topic Unread.
     case markRead(ReadChange, scope: ReadScope)
     /// Marks every Topic and every Agent Read.
     case markAllRead

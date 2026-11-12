@@ -1518,6 +1518,28 @@ final class TopicServiceTests: XCTestCase {
                        .readChanged(TopicReadChange(paneIDs: [done])), "an Agent's Unread is in tmux, so it changes without Topics")
     }
 
+    func testTopicMarkChangesOnlyTheTopicUnreadAndASecondCallChangesNothing() throws {
+        let id = try topicWithSession("Mark only", at: sessionPath.folder.path, using: service())
+        let window = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })
+        let pane = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", window.id, "exec sleep 600"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try server.run(["set-option", "-p", "-t", pane, "@muxify_agent", "claude", ";", "set-option", "-p", "-t", pane, "@muxify_agent_status", "done",
+                        ";", "set-option", "-p", "-t", pane, "@muxify_agent_unread", "1"])
+        try TopicStore(paths: paths).write { try $0.update(id) { $0.isUnread = true } }
+        func unreadPanes() -> Set<String> { Set(server.snapshot().panes.filter(\.unread).map(\.id)) }
+        func topicUnread() throws -> Bool { try XCTUnwrap(records().first { $0.id == id }).isUnread }
+        let read = EnvironmentRequest(.markRead(.read, scope: .topicMark), target: .topic(.id(id)))
+
+        XCTAssertEqual(service().handle(read), .readChanged(TopicReadChange(topicIDs: [id])))
+        XCTAssertFalse(try topicUnread())
+        XCTAssertEqual(unreadPanes(), [pane], "the Agent keeps its Unread")
+        XCTAssertEqual(service().handle(read), .readChanged(TopicReadChange()), "a second call changes nothing and succeeds")
+
+        XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.unread, scope: .topicMark), target: .topic(.id(id)))),
+                       .readChanged(TopicReadChange(topicIDs: [id])))
+        XCTAssertTrue(try topicUnread())
+    }
+
     func testKillRunsOnlyWhileThePanesAreTheReviewedOnesAndTheLastSessionLeavesTheTopicEmpty() throws {
         let id = try topicWithSession("Stop it", at: sessionPath.folder.path, using: service())
         let window = try XCTUnwrap(server.snapshot().windows.first { $0.topicID == id })

@@ -6,6 +6,8 @@ public enum ReadScope: String, Codable, Hashable, Sendable {
     /// The target's Topic, open or Settled when the target names it, else the open Topic of the target's Pane: its
     /// Topic Unread and the Agents in its Sessions.
     case topic
+    /// Only the Topic Unread of the same Topic as `topic`. Its Agents keep their Unread.
+    case topicMark = "topic_mark"
     /// The Agents in the target's Session.
     case session
     /// The Agents in the target's Window.

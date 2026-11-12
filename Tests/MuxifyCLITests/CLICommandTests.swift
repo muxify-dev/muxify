@@ -214,6 +214,8 @@ final class CLICommandTests: XCTestCase {
         let cases: [([String], CLICommand)] = [
             (["topic", "mark-read"], read(.markRead(.read, scope: .topic))),
             (["topic", "mark-unread", "--topic", "Fix"], read(.markRead(.unread, scope: .topic), target: .topic(.named("Fix")))),
+            (["topic", "mark-read", "--topic-only", "--topic", "Fix"], read(.markRead(.read, scope: .topicMark), target: .topic(.named("Fix")))),
+            (["topic", "mark-unread", "--topic-only"], read(.markRead(.unread, scope: .topicMark))),
             (["session", "mark-read", "--session", "gs/fix"], read(.markRead(.read, scope: .session), target: .sessionName("gs/fix"))),
             (["window", "mark-unread", "--window", "@12"], read(.markRead(.unread, scope: .window), target: .window(WindowID(rawValue: "@12")!))),
             (["agent", "mark-read", "--pane", "%3"], read(.markRead(.read, scope: .pane), target: .pane(PaneID(rawValue: "%3")!))),
@@ -223,7 +225,7 @@ final class CLICommandTests: XCTestCase {
             XCTAssertEqual(try CLICommand(arguments: arguments, environment: inside), expected, "\(arguments)")
         }
         for arguments in [["agent", "mark-read", "--window", "@12"], ["window", "mark-read", "--session", "gs"], ["mark-all-read", "--pane", "%3"],
-                          ["topic", "mark-read", "now"]] {
+                          ["topic", "mark-read", "now"], ["session", "mark-read", "--topic-only"], ["mark-all-read", "--topic-only"]] {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
                 XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
             }

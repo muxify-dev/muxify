@@ -592,6 +592,14 @@ class TopicsCli(unittest.TestCase):
         self.assertEqual(json.loads(marked.stdout)['read_changed'], {'topic_ids': [topic_id], 'pane_ids': [done]}, marked.stdout)
         self.assertEqual(state(), (True, True, False, False), 'Mark Unread changes the Topic and each Agent in it that is not working')
 
+        for attempt in ('first', 'second'):
+            only = self.muxify('topic', 'mark-read', '--topic-only', '--topic', topic_id, '--json', pane='')
+            self.assertEqual(only.returncode, 0, only.stderr)
+            expected = {'topic_ids': [topic_id] if attempt == 'first' else [], 'pane_ids': []}
+            self.assertEqual(json.loads(only.stdout)['read_changed'], expected, attempt + ' --topic-only: ' + only.stdout)
+            self.assertEqual(state(), (False, True, False, False), '--topic-only changed an Agent, or left the Topic Unread')
+        self.assertEqual(self.muxify('topic', 'mark-unread', '--topic', topic_id, pane='').returncode, 0)
+
         read = self.muxify('agent', 'mark-read', pane=done)
         self.assertEqual(read.returncode, 0, read.stderr)
         self.assertEqual(state(), (True, False, False, False), 'agent mark-read changes only the Agent of its Pane')

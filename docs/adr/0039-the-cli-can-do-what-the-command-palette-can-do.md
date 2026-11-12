@@ -29,6 +29,8 @@ These Commands need no mirror:
 
 "No mirror required" does not mean "not allowed". A view Command can get a CLI verb when an Agent needs it to show the user something, such as `session open`, `topic open`, `window open` and `browser open`.
 
+A CLI write for a remote client, such as Muxify Mobile, needs no palette step when the Mac has no use for it. `topic mark-read --topic-only` and `topic mark-unread --topic-only` change the Topic mark only. The phone shows Topics but not the Agents in them, so a Read from the phone must leave each Agent Unread for the user to see on the Mac. On the Mac, the user sees the Agents, so no palette Action needs this form.
+
 Typing into the terminal counts as something the palette can do. After New tmux Window, the user types the command in the new Pane. So `window new -- <command>` needs no palette step.
 
 ## How a palette step maps to the command line
