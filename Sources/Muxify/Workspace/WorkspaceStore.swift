@@ -1272,6 +1272,7 @@ final class WorkspaceStore {
     @ObservationIgnored private let connectionCleanup = ConnectionCleanup()
     @ObservationIgnored var onSelectEnvironment: ((String?) -> Void)?
     @ObservationIgnored var onNewAppWindow: (() -> Void)?
+    @ObservationIgnored var onOpenSettings: (() -> Void)?
     @ObservationIgnored var onCloseAppWindow: (() -> Void)?
     @ObservationIgnored var shouldConsumeOpenRequests: (() -> Bool)?
     /// Starts serving Browser commands for the server whose socket it gets, and returns the path to publish.
@@ -2844,6 +2845,7 @@ final class WorkspaceStore {
     func perform(_ action: ConfigAction) {
         switch action {
         case .newAppWindow: onNewAppWindow?()
+        case .openSettings: onOpenSettings?()
         case .newTopic: if !isRemote { presentNewTopic() }
         case .movePane: if !isRemote { presentMovePane(nil) }
         case .moveWindow: presentMoveWindow()

@@ -6,6 +6,7 @@ struct AppWindowView: View {
     let windows: AppWindows
     @State private var identity = AppWindowIdentity()
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         let shown = identity.resolve(request, in: windows)
@@ -18,6 +19,8 @@ struct AppWindowView: View {
             .onAppear {
                 let action = openWindow
                 windows.openWindow = { action(id: "workspace", value: $0) }
+                let settings = openSettings
+                windows.openSettings = { settings() }
             }
             .onChange(of: shown.store.activeEnvironment) { _, _ in windows.updateEnvironment(for: shown.request.id) }
             #if DEBUG
@@ -41,7 +44,7 @@ struct AppWindowView: View {
     }
 }
 
-private struct AppWindowRegistration: NSViewRepresentable {
+struct AppWindowRegistration: NSViewRepresentable {
     let register: (NSWindow) -> Void
     func makeNSView(context: Context) -> RegistrationView { RegistrationView() }
     func updateNSView(_ view: RegistrationView, context: Context) { view.register = register; view.registerWindow() }

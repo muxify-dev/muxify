@@ -35,6 +35,7 @@ extension KeybindAction {
 /// What a Muxify keybind can do, anywhere in an App Window.
 public enum ConfigAction: String, KeybindAction {
     case newAppWindow = "new_app_window"
+    case openSettings = "open_settings"
     case newTopic = "new_topic"
     case movePane = "move_pane"
     case moveWindow = "move_window"
@@ -117,6 +118,7 @@ public enum ConfigAction: String, KeybindAction {
 
     public static let defaultSpelling: KeyValuePairs<ConfigAction, [String]> = [
         .newAppWindow: ["cmd+shift+n"],
+        .openSettings: ["cmd+comma"],
         .newTopic: ["cmd+n"],
         .movePane: ["cmd+shift+t"],
         .moveWindow: [],
