@@ -44,17 +44,8 @@ final class SidebarRenderingTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("config.yaml").path
-        let defaults = UserDefaults.standard
-        let keys = ["sidebarVisible", "sessionsVisible", "agentsVisible", "browserURLs", "browserVisible", "browserWidth"]
-        let saved = keys.map { ($0, defaults.object(forKey: $0)) }
-        defer {
-            for (key, value) in saved {
-                if let value { defaults.set(value, forKey: key) }
-                else { defaults.removeObject(forKey: key) }
-            }
-        }
         let config = ConfigStore(path: path)
-        let store = WorkspaceStore(configStore: config)
+        let store = WorkspaceStore(configStore: config, defaults: isolatedDefaults())
         store.sessionsVisible = true
         store.agentsVisible = false
         let host = NSHostingView(rootView: ConfiguredSidebar(store: store, config: config)

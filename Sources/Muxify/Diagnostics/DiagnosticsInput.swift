@@ -52,7 +52,8 @@ enum DiagnosticsInput {
         #if DEBUG
         if playsUserGesture { return count(kind) }
         #endif
-        guard let type = NSApp.currentEvent?.type, userEvents.contains(type) else { return }
+        // NSApp is nil in a test process where no test has made the shared application yet.
+        guard let type = NSApp?.currentEvent?.type, userEvents.contains(type) else { return }
         count(kind)
     }
 

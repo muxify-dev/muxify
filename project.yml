@@ -90,10 +90,14 @@ targets:
         link: false
         embed: false
     scheme:
+      # Test classes run at the same time in separate processes; docs/testing.md says what each test must own.
       testTargets:
-        - MuxifyTests
+        - name: MuxifyTests
+          parallelizable: true
         - package: MuxifyCore/MuxifyCoreTests
+          parallelizable: true
         - package: MuxifyCLI/MuxifyCLITests
+          parallelizable: true
     postBuildScripts:
       # Copy the CLI into Contents/Resources/bin/muxify; the app's
       # Install Command Line Tool action links it into ~/.local/bin.

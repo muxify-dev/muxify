@@ -6,7 +6,7 @@ import XCTest
 final class PaletteWorktreeTests: XCTestCase {
     private func store() -> WorkspaceStore {
         WorkspaceStore(configStore: ConfigStore(path: FileManager.default.temporaryDirectory
-            .appendingPathComponent("muxify-palette-worktree-\(UUID().uuidString).yaml").path))
+            .appendingPathComponent("muxify-palette-worktree-\(UUID().uuidString).yaml").path), defaults: isolatedDefaults())
     }
 
     private func summary(sessions: [String] = [], state: MuxifyWorktrees.State = .clean) -> MuxifyWorktreeSummary {

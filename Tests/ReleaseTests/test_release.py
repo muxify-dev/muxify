@@ -192,6 +192,16 @@ if [ "$1" = -dvv ]; then echo "Authority=Muxify Release Signing" >&2; fi''')
         self.assertIn("CURRENT_PROJECT_VERSION=987\n", (self.root / "xcode-args.txt").read_text())
         self.assertEqual(json.loads((dist / "build-info.json").read_text())["build"], "987")
 
+    def test_package_passes_extra_build_settings_only_when_asked(self):
+        self.package_fixture()
+        self.env.pop("XCODEBUILD_EXTRA_SETTINGS", None)
+        self.package("tip")
+        self.assertNotIn("COMPILATION_CACHE_ENABLE_CACHING", (self.root / "xcode-args.txt").read_text())
+        self.env["XCODEBUILD_EXTRA_SETTINGS"] = "COMPILATION_CACHE_ENABLE_CACHING=YES ONLY_ACTIVE_ARCH=YES"
+        self.package("tip")
+        args = (self.root / "xcode-args.txt").read_text()
+        self.assertIn("COMPILATION_CACHE_ENABLE_CACHING=YES\nONLY_ACTIVE_ARCH=YES\n-quiet\nbuild\n", args)
+
     def test_package_refuses_a_shallow_checkout_before_building(self):
         self.package_fixture()
         self.env["FAKE_SHALLOW"] = "true"

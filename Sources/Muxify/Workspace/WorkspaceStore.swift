@@ -29,7 +29,7 @@ final class WorkspaceStore {
 
     private(set) var newTopicFailure: String?
     /// When each Topic, Session and SessionPath was last looked at; the lists rank by it.
-    private(set) var visits = VisitLog(defaults: .standard)
+    private(set) var visits: VisitLog
     /// The SessionPaths on this App Window's Environment, as `refreshSessionPaths` found them last.
     private(set) var sessionPaths: [SessionPath] = []
     private(set) var sessionPathWarnings: [String] = []
@@ -670,10 +670,10 @@ final class WorkspaceStore {
         let key = "guestsGathered"
         guard !isRemote, topics.topicsEnabled else { return }
         guard topicConfig.inPlay != nil else {
-            if UserDefaults.standard.bool(forKey: key) { UserDefaults.standard.set(false, forKey: key) }
+            if defaults.bool(forKey: key) { defaults.set(false, forKey: key) }
             return
         }
-        guard !UserDefaults.standard.bool(forKey: key), !changingTopic else { return }
+        guard !defaults.bool(forKey: key), !changingTopic else { return }
         changingTopic = true
         let service = topicService()
         Task { [weak self] in
@@ -682,7 +682,7 @@ final class WorkspaceStore {
             self.changingTopic = false
             self.topicWatcher.reload()
             if let failure { NSLog("muxify: topics: gather Guests: \(failure.message)") }
-            else { UserDefaults.standard.set(true, forKey: key) }
+            else { self.defaults.set(true, forKey: key) }
         }
     }
 
@@ -977,7 +977,7 @@ final class WorkspaceStore {
         var log = visits
         guard log.record(window, group: group, sessionPaths: sessionPaths, folders: folders, at: Date()) else { return }
         visits = log
-        visits.save(to: .standard)
+        visits.save(to: defaults)
     }
 
     let topicWatcher = TopicWatcher()
@@ -1151,25 +1151,25 @@ final class WorkspaceStore {
     private(set) var theme: TerminalTheme?
 
     /// The Sidebar mode the user picked. `TopicsModel.mode` is the one shown, because the Config can turn a mode off.
-    var sidebarMode = SidebarMode(rawValue: UserDefaults.standard.string(forKey: "sidebarWorkView") ?? "") ?? .topics {
+    var sidebarMode: SidebarMode {
         didSet {
-            UserDefaults.standard.set(sidebarMode.rawValue, forKey: "sidebarWorkView")
+            defaults.set(sidebarMode.rawValue, forKey: "sidebarWorkView")
             if sidebarMode != oldValue { DiagnosticsInput.countUserAction(\.sidebarSwitches) }
         }
     }
     /// The open Session cards, by name (names survive tmux server restarts, ids don't). Sessions mode and the
     /// No Topic card in Topics mode share them, so a card opened in either is open in both.
-    var openSessionCards = Set(UserDefaults.standard.stringArray(forKey: "expandedSessions") ?? []) {
-        didSet { UserDefaults.standard.set(Array(openSessionCards), forKey: "expandedSessions") }
+    var openSessionCards: Set<String> {
+        didSet { defaults.set(Array(openSessionCards), forKey: "expandedSessions") }
     }
-    var sidebarVisible = UserDefaults.standard.object(forKey: "sidebarVisible") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(sidebarVisible, forKey: "sidebarVisible") }
+    var sidebarVisible: Bool {
+        didSet { defaults.set(sidebarVisible, forKey: "sidebarVisible") }
     }
     /// The sidebar's two sections, shown or hidden from the View menu.
-    var sessionsVisible = UserDefaults.standard.object(forKey: "sessionsVisible") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(sessionsVisible, forKey: "sessionsVisible") }
+    var sessionsVisible: Bool {
+        didSet { defaults.set(sessionsVisible, forKey: "sessionsVisible") }
     }
-    private var showAgents = ShowAgents()
+    private var showAgents: ShowAgents
     /// Show Agents for the Sidebar mode shown now; each mode keeps its own value.
     var agentsVisible: Bool {
         get { configStore.config.sidebar.agents[shownSidebarMode] ?? showAgents[shownSidebarMode] }
@@ -1187,8 +1187,8 @@ final class WorkspaceStore {
         get { configStore.config.sidebar.panes ?? showPanes }
         set { showPanes = newValue }
     }
-    private var showPanes = UserDefaults.standard.bool(forKey: "panesVisible") {
-        didSet { UserDefaults.standard.set(showPanes, forKey: "panesVisible") }
+    private var showPanes: Bool {
+        didSet { defaults.set(showPanes, forKey: "panesVisible") }
     }
 
     var selectedWindow: TmuxWindow? {
@@ -1285,10 +1285,22 @@ final class WorkspaceStore {
 
     /// Browser History of this Mac, for the Browsers of this App Window.
     let browserHistory: BrowserHistory
+    /// Where this store keeps the view state it remembers across launches: the Sidebar mode, the open Session
+    /// cards, what the Sidebar shows and the visit times. The app passes `.standard`; a test, a suite of its own.
+    @ObservationIgnored private let defaults: UserDefaults
 
-    init(configStore: ConfigStore, environment: RemoteEnvironment? = nil, browserHistory: BrowserHistory = .shared) {
+    init(configStore: ConfigStore, environment: RemoteEnvironment? = nil, browserHistory: BrowserHistory = .shared,
+         defaults: UserDefaults = .standard) {
         self.configStore = configStore
         self.browserHistory = browserHistory
+        self.defaults = defaults
+        visits = VisitLog(defaults: defaults)
+        sidebarMode = SidebarMode(rawValue: defaults.string(forKey: "sidebarWorkView") ?? "") ?? .topics
+        openSessionCards = Set(defaults.stringArray(forKey: "expandedSessions") ?? [])
+        sidebarVisible = defaults.object(forKey: "sidebarVisible") as? Bool ?? true
+        sessionsVisible = defaults.object(forKey: "sessionsVisible") as? Bool ?? true
+        showAgents = ShowAgents(defaults: defaults)
+        showPanes = defaults.bool(forKey: "panesVisible")
         activeEnvironment = environment
         palette.store = self
         #if DEBUG
@@ -1296,10 +1308,10 @@ final class WorkspaceStore {
         #endif
         // Browser state used to be kept here, keyed by window id; it now lives
         // on the tmux Windows (ADR 0003).
-        UserDefaults.standard.removeObject(forKey: "browserURLs")
-        UserDefaults.standard.removeObject(forKey: "browserVisible")
+        defaults.removeObject(forKey: "browserURLs")
+        defaults.removeObject(forKey: "browserVisible")
         // Replaced by browserShare, so the Browser scales with the window.
-        UserDefaults.standard.removeObject(forKey: "browserWidth")
+        defaults.removeObject(forKey: "browserWidth")
     }
 
     func start() {

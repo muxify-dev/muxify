@@ -3695,7 +3695,7 @@ final class GitViewKeysTests: XCTestCase {
     }
 
     func testAFailedHeadReadDoesNotMarkAFolderOutsideARepository() {
-        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"))
+        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"), defaults: isolatedDefaults())
         let folder = store.homeDirectory + "/notes"
         XCTAssertNil(store.isRepository(folder))
         store.recordHeadRead(.unknown, of: folder)
@@ -3718,7 +3718,7 @@ final class GitViewKeysTests: XCTestCase {
     }
 
     func testToggleGitViewWithNoWindowOpensNothingAndSaysNothing() {
-        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"))
+        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"), defaults: isolatedDefaults())
         store.toggleGitView()
         XCTAssertNil(store.currentGitView)
         XCTAssertNil(store.pills.shown)
@@ -3726,7 +3726,7 @@ final class GitViewKeysTests: XCTestCase {
     }
 
     func testEachWindowKeepsItsOwnGitView() {
-        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"))
+        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"), defaults: isolatedDefaults())
         let first = store.gitView(for: "@1")
         XCTAssertTrue(store.gitView(for: "@1") === first)
         XCTAssertFalse(store.gitView(for: "@2") === first)

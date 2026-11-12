@@ -9,14 +9,14 @@ final class PaletteCacheTests: XCTestCase {
         let palette = CommandPalette()
         palette.toggle(CommandPaletteConfig(name: "Commands", triggers: [], sources: [.commands]))
         XCTAssertTrue(palette.results.rows.isEmpty)
-        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify-cache-tests.yaml"))
+        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify-cache-tests.yaml"), defaults: isolatedDefaults())
         palette.store = store
         XCTAssertFalse(palette.results.rows.isEmpty)
         palette.close()
     }
 
     @MainActor func testTypingDoesNotInvalidateTheSessionPathRows() {
-        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify-cache-tests.yaml"))
+        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify-cache-tests.yaml"), defaults: isolatedDefaults())
         let changed = Change()
         withObservationTracking {
             _ = store.sessionPathRows
