@@ -290,6 +290,14 @@ public enum Tmux {
     public static let watchSessionName = "muxify-watch"
     /// A `-f` filter for `list-sessions` and `list-windows` that leaves out the Watch Session.
     public static let userSessionFilter = "#{!=:#{session_name},\(watchSessionName)}"
+    /// The control client's command line: it joins the Watch Session, or makes it, running `cat`, so no shell startup
+    /// file runs. It also turns tmux's `set-clipboard` from its default `external` to `on`: under `external` tmux drops
+    /// the OSC 52 copy of a program in a Pane, such as Claude Code over SSH, which Ghostty alone puts on the clipboard.
+    /// A user's `off` stays.
+    public static let watchClientArguments = ["-C", "new-session", "-A", "-s", watchSessionName,
+                                              "-f", "no-output,ignore-size", "cat", ";",
+                                              "if-shell", "-F", "#{==:#{set-clipboard},external}",
+                                              "set-option -s set-clipboard on"]
     // Pane options an Agent's Extension writes (ADR 0004).
     public static let agentOption = "@muxify_agent"
     public static let agentStatusOption = "@muxify_agent_status"

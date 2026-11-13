@@ -94,6 +94,11 @@ This records the attaching terminal, not which terminal is currently showing a
 Pane. It is not a per-client status-bar setting; tmux's `status` option belongs
 to the Session.
 
+A program in a Pane can copy to the clipboard with OSC 52, as Claude Code does
+over SSH. tmux's default `set-clipboard external` drops that copy, so Muxify
+sets `set-clipboard on` on the tmux server it shows. If your tmux config sets
+`set-clipboard off`, Muxify leaves it.
+
 ## Remote Environments
 
 Manage tmux on Linux or macOS over SSH. The remote needs **tmux 3.2+**, not
