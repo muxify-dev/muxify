@@ -10,6 +10,7 @@ Run from the repo root after `make build`:
 
 import json
 import os
+import socket
 import subprocess
 import time
 import unittest
@@ -174,6 +175,43 @@ class TopicsCli(unittest.TestCase):
         filled = unpinned()
         self.assertEqual([c.get('topic', {}).get('id') for c in filled['places']], [benched, before['places'][1]['topic']['id']], filled)
         self.assertEqual(filled['bench'], [], filled)
+
+    def broken_tmux_path(self):
+        """A PATH whose first tmux fails as a tmux of another release can fail on the server."""
+        bin_dir = self.s.root/'broken-tmux'
+        bin_dir.mkdir(exist_ok=True)
+        tmux = bin_dir/'tmux'
+        tmux.write_text('#!/bin/sh\necho "server exited unexpectedly" >&2\nexit 1\n')
+        tmux.chmod(0o755)
+        return bin_dir, str(bin_dir) + ':' + os.environ.get('PATH', '')
+
+    def test_environment_show_runs_the_binary_of_the_server_not_the_first_tmux_on_the_path(self):
+        _, path = self.broken_tmux_path()
+        shown = self.muxify('environment', 'show', '--json', pane='', env={'PATH': path})
+        self.assertEqual(shown.returncode, 0, shown.stdout + shown.stderr)
+        self.assertIn('base', [session['name'] for session in json.loads(shown.stdout)['sessions']], shown.stdout)
+
+    def test_environment_show_fails_naming_the_tmux_that_cannot_reach_a_server(self):
+        bin_dir, path = self.broken_tmux_path()
+        # An empty TMUX_TMPDIR of its own: no server runs there, so only the search finds a tmux.
+        alone = self.s.root/'no-server'
+        alone.mkdir(mode=0o700, exist_ok=True)
+        shown = self.muxify('environment', 'show', '--json', pane='', env={'PATH': path, 'TMUX_TMPDIR': str(alone)})
+        self.assertNotEqual(shown.returncode, 0, shown.stdout)
+        message = json.loads(shown.stdout)['failed']['message']
+        self.assertIn(str(bin_dir/'tmux'), message)
+        self.assertIn('server exited unexpectedly', message)
+
+    def test_environment_show_with_a_stale_socket_is_an_empty_environment(self):
+        # tmux answers a refused connection with "no server running", so a socket that nobody listens on is no server.
+        stale = self.s.root/'stale'/('tmux-%d' % os.getuid())
+        stale.mkdir(parents=True, mode=0o700, exist_ok=True)
+        (stale/'default').unlink(missing_ok=True)
+        with socket.socket(socket.AF_UNIX) as dead:
+            dead.bind(str(stale/'default'))
+        shown = self.muxify('environment', 'show', '--json', pane='', env={'TMUX_TMPDIR': str(stale.parent)})
+        self.assertEqual(shown.returncode, 0, shown.stdout + shown.stderr)
+        self.assertEqual(json.loads(shown.stdout)['sessions'], [], shown.stdout)
 
     def test_agent_list_shows_an_agent_with_its_status_unread_and_topic(self):
         (self.projects/'cli-agents').mkdir(parents=True)
