@@ -66,6 +66,8 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
         var parts: [(view: NSView, frame: NSRect)] = []
         var help: [(frame: NSRect, text: String)] = []
         var height: CGFloat = 0
+        /// How far the Pane count's frame stands from where SwiftUI puts its badge before it rounds frames to pixels.
+        var paneCountShift: CGFloat = 0
     }
 
     /// One child of the row's stack: its parts side by side, `spacing` apart, each with its middle on the child's.
@@ -182,6 +184,7 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
         fill.frame = bounds
         placeSpine()
         for (view, frame) in layout.parts { view.frame = frame }
+        paneCount.shift = layout.paneCountShift
         removeAllToolTips()
         for help in layout.help { addToolTip(help.frame, owner: self, userData: nil) }
     }
@@ -235,21 +238,27 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
 
         var layout = Layout()
         func middle(_ childHeight: CGFloat, in height: CGFloat, from top: CGFloat) -> CGFloat {
-            (top + (height - childHeight) / 2).rounded(toPixelsOf: scale)
+            top + (height - childHeight) / 2
         }
         var x = WindowRowMetrics.leading
         func place(_ child: Child) {
+            // SwiftUI rounds each part's frame where it stands in the row, once: a part takes its place in the child
+            // before the child's place is rounded.
             let top = middle(child.height, in: height, from: WindowRowMetrics.vertical)
             var partX = x
             for (view, size) in child.parts {
-                layout.parts.append((view, NSRect(x: partX, y: middle(size.height, in: child.height, from: top), width: size.width, height: size.height)))
+                let y = middle(size.height, in: child.height, from: top), rounded = y.rounded(toPixelsOf: scale)
+                if view === paneCount { layout.paneCountShift = y - rounded }
+                layout.parts.append((view, NSRect(x: partX, y: rounded, width: size.width, height: size.height)))
                 partX += size.width + child.spacing
             }
-            if let help = child.help { layout.help.append((NSRect(x: x, y: top, width: child.width, height: child.height), help)) }
+            if let help = child.help {
+                layout.help.append((NSRect(x: x, y: top.rounded(toPixelsOf: scale), width: child.width, height: child.height), help))
+            }
             x += child.width + WindowRowMetrics.spacing
         }
         before.forEach(place)
-        var lineY = middle(columnHeight, in: height, from: WindowRowMetrics.vertical)
+        var lineY = middle(columnHeight, in: height, from: WindowRowMetrics.vertical).rounded(toPixelsOf: scale)
         for (view, size) in lines {
             layout.parts.append((view, NSRect(origin: NSPoint(x: x, y: lineY), size: size)))
             lineY += size.height + WindowRowMetrics.lineSpacing
@@ -448,6 +457,13 @@ final class PaneCountView: NSView {
     private let symbol = SidebarSymbol(WindowRowMetrics.paneSymbol)
     private let count = SidebarLabel()
     private var isZoomed = false
+    /// How far the view stands from where SwiftUI puts the badge before it rounds frames to pixels: the symbol and the
+    /// count round their places from there, once, as SwiftUI rounds them where they stand in the row.
+    var shift: CGFloat = 0 {
+        didSet {
+            if shift != oldValue { layOut() }
+        }
+    }
 
     init() {
         super.init(frame: .zero)
@@ -492,9 +508,10 @@ final class PaneCountView: NSView {
     private func layOut() {
         let size = size, scale = count.scale
         let symbolSize = symbol.symbolSize, countSize = count.fit()
-        symbol.frame = NSRect(x: WindowRowMetrics.paneCountPadding, y: ((size.height - symbolSize.height) / 2).rounded(toPixelsOf: scale),
-                              width: symbolSize.width, height: symbolSize.height)
-        count.frame = NSRect(x: symbol.frame.maxX + WindowRowMetrics.badgeSpacing, y: ((size.height - countSize.height) / 2).rounded(toPixelsOf: scale),
+        // Half a pixel rounds down the row, also from a place above the view's top, as the row rounds a place in it.
+        func middle(_ height: CGFloat) -> CGFloat { ((shift + (size.height - height) / 2) * scale + 0.5).rounded(.down) / scale }
+        symbol.frame = NSRect(x: WindowRowMetrics.paneCountPadding, y: middle(symbolSize.height), width: symbolSize.width, height: symbolSize.height)
+        count.frame = NSRect(x: symbol.frame.maxX + WindowRowMetrics.badgeSpacing, y: middle(countSize.height),
                              width: countSize.width, height: countSize.height)
     }
 

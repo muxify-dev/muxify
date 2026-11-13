@@ -380,3 +380,73 @@ row. The records remember the Worktree Sessions with their Worktree and reposito
 The gate passes, and side by side the pictures look the same. The difference picture marks the fill of the open card,
 as in `topic-open`, and the many-coloured border, the app icons and the edges of the glyphs of "Settle", as in
 `topic-cards`.
+
+## topics-empty
+
+Task 16 of the set `remove-swiftui`. One shot, `topics-empty`: the app with no Topic, after the tmux server ended
+under its one Session, so the list has no card, no No Topic card and no group, and says "No Topics" in its middle, in
+the font of a Window row's title and the secondary text colour. Both versions read when to say it, its words and its
+font from `TopicsListEmptyState`. "No Topics" stands over the list, outside `topics-list`, as SwiftUI's overlay puts it,
+so the scene names it, `topics-list-empty`, as a part whose row the gate compares. The gate passes: the text has the
+same frame and value in both versions. Side by side the pictures look the same, and no pixel differs by more than 1 of
+255.
+
+The SwiftUI list showed "No Topics" one or two letters to a line, in a column 12 points wide at the left edge of the
+list: its scroll view took the width of its content, and with no card that was the two insets. Its content now takes
+the width of the list, which it already had with any card, as the pilot did for the Sessions list, so "No Topics"
+there has the room of the whole list, as in the AppKit list.
+
+## topics-sizes-and-light
+
+Task 16 of the set `remove-swiftui`. Twenty-four shots: each shot of `topic-cards`, `topic-open` and `bench` at
+Interface font size 18 and 24, at 12 in a light Ghostty theme, and at 12 with the Sidebar font family Georgia
+(`ui.sidebar.font_family`), named after the shot and the style, such as `bench-24`. The
+scene shows the three fixtures one after the other in its one Sandbox: the first shot of each stops the app and the
+tmux server, empties the app's state and makes the fixture again on a new server (`fresh` in `compare_scenes.py`), so
+the Sessions, Windows and Panes have the same ids in both versions. The gate passes in all twenty-four shots: every card,
+header, line, row, "Settle" and the Open Place stand on the same frames, within half a point, with the same texts, at
+18 and 24 as at 12, and so do the block over the shown Bench and Gale's header stuck under it. Side by side the pictures look the same: the titles, Summaries, Notes, Session lines, Window
+rows and Pane rows with their counts and symbols, "N more…", "Settle", the pins, the Guest note, the Guests and Bench
+lines, the Open Place and the pills grow by the same factor, and the paddings, spacings and app icons keep their size.
+The light theme gives both lists the same light ground, cards and text. In Georgia both lists draw the same texts in
+the family: the cards' titles, the Window rows' titles and their counts, and the same texts in the system font: the
+Session lines, the Summaries, the Pane rows, "N more…", "Settle", the notes and the lines.
+
+The count of a Window row's Pane badge in Georgia stood one device pixel, half a point, lower in the AppKit list at
+first. SwiftUI rounds each part of the row to pixels once, where it stands in the row; the AppKit row rounded the
+badge's place in the row and then the count's place in the badge, and each time a quarter of a point rounded down to
+the next pixel. In the system font the badge and its count have heights whose middles fall on pixels, so this showed only in
+another family. `WindowRowView` now places the parts of a badge from the badge's unrounded place, and `PaneCountView`
+rounds its symbol and count from there, so the count stands on the same pixels.
+
+The difference picture marks what it marks at 12, in the same places:
+
+- The many-coloured border of the Location's card, and the app icons of the Window rows, as in `topic-cards` and
+  `topic-open`.
+- The fill of the open card, as in `topic-open`: one step of 255 in the dark theme. In the light theme it is 4 steps,
+  217 against 213 in the AppKit picture, and the tint of the Location's Window row on it 3 to 4 steps: the driver's
+  `snapshot` draws no shadow under SwiftUI's fill, and on a light ground the AppKit card's shadow shows through the fill
+  of 8 % by 4 steps. The pilot measured the same in its `sizes-and-light` scene, and a capture of the screen showed the
+  same pixels for both cards. So most pixels of the light `topic-open` and `bench` shots differ, by at most 4 steps.
+- The glyphs of "Settle". From its second letter on, a glyph stands up to one device pixel, half a point, to the left
+  or right of SwiftUI's at 12, 18 and 24 alike: SwiftUI's link button and `SidebarLabel` put the glyphs of the word on
+  fractions of a pixel in their own ways.
+- The ends of the pills' capsules and their shadows, as in `topic-overflow`, and the dashes of the Open Place's border,
+  as in `bench`.
+
+## topics-mid-swipe
+
+Task 16 of the set `remove-swiftui`. One shot, `topics-mid-swipe`: the open card of the Location's Topic of
+`topic-open`, held with the Topics page at 0.400 of the way to Sessions by a partial swipe ("Begin swipe left"), where
+the page has moved left, shrunk and faded. Topics is still the Sidebar's view, so the dump has the list's rows, and the
+gate passes: its 21 rows stand on the same frames in both versions, within half a point, so the page stands at the same
+offset and scale. In the pictures the open card's edges, its rows and the cards under it stand on the same rows and
+columns of device pixels, and the page's fade is the same: the open card's fill differs by one step of 255, as at
+rest, and the Sidebar's ground not at all. The SwiftUI pager moves, scales and fades the hosted AppKit list as one
+layer, as it does the SwiftUI list.
+
+The difference picture marks the fill of the open card, the many-coloured border and the app icons, as in
+`topic-open`, and the edges of the glyphs: the page's scale puts them on fractions of a pixel, and SwiftUI's text and
+`SidebarLabel` share such a fraction out to the pixels differently, as the pilot's `mid-swipe` scene found.
+
+Held from Sessions, the Topics page stands wholly out of view, so the scene has no such shot.

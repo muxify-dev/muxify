@@ -163,7 +163,7 @@ class Sandbox:
         environment (TMUX_TMPDIR, CODEX_HOME) or as its working directory.
         """
         try:
-            self._stop_all()
+            self.stop()
         finally:
             self._keep_logs()
 
@@ -179,7 +179,9 @@ class Sandbox:
             kept.mkdir(parents=True, exist_ok=True)
             shutil.copy2(stall, kept/stall.name)
 
-    def _stop_all(self):
+    def stop(self):
+        """Stops every process this sandbox started, as `teardown` does, and leaves root as it is: a compare scene
+        that makes its fixture again on a new tmux server starts the app again after it."""
         app = self._app_pid()
         if app is not None:
             self._terminate([app])

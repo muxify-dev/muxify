@@ -12,6 +12,18 @@ enum TopicsListMetrics {
     static let verticalInset: CGFloat = 4
 }
 
+/// What the Topics list says in its middle while it lists nothing, for both versions of the list: "No Topics", in the
+/// font of a Window row's title, in the secondary text colour.
+enum TopicsListEmptyState {
+    static let role = SidebarTypography.Role.title
+    static let identifier = "topics-list-empty"
+
+    /// "No Topics" while the list has no card, no opened No Topic Session and no group. Nil while it has one.
+    static func text(_ model: TopicsModel) -> String? {
+        model.rows.isEmpty && model.openedNoTopicSession == nil && model.groups.isEmpty ? "No Topics" : nil
+    }
+}
+
 /// A line of the Topics list between its cards, the Guests line and the Bench line, for both versions of the list: a
 /// rule on each side of its word, and on the Bench line a chevron after the word. Its lengths are design sizes at 12,
 /// which grow with the Interface font size.

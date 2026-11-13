@@ -185,6 +185,9 @@ private struct TopicsSection: View {
                 default: if store.benchPeek != nil { store.benchPeek = nil }
                 }
             }
+            // As wide as the list also with no card: a scroll view takes the width of its content, and with none it
+            // was 12 points wide, so "No Topics" wrapped after each letter or two.
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, TopicsListMetrics.horizontalInset).padding(.vertical, Self.contentInset)
             // The drag hears the scroll from the action, not from this view's body: a lifted card reads where the
             // area scrolled to when it lands, and nothing reads it while no card is lifted.
@@ -210,8 +213,9 @@ private struct TopicsSection: View {
             DispatchQueue.main.async { reveal(card) }
         }
         .overlay {
-            if model.rows.isEmpty && model.openedNoTopicSession == nil && model.groups.isEmpty {
-                Text("No Topics").font(typography.font(for: .title)).foregroundStyle(.secondary)
+            if let empty = TopicsListEmptyState.text(model) {
+                Text(empty).font(typography.font(for: TopicsListEmptyState.role)).foregroundStyle(.secondary)
+                    .accessibilityIdentifier(TopicsListEmptyState.identifier)
             }
         }
         // An overlay, not a row under the list: a row would change the list's height each time it shows or goes,

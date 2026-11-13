@@ -39,6 +39,10 @@ of a held swipe holds the Sidebar at 0.400 from Topics, where the Topics page ha
 compare the fade. While the pager slides or Sessions shows, it takes the Topics page's clicks too (`allowsHitTesting`
 in SidebarPager.swift), so the checks click a card only while Topics shows.
 
+The check of a change of `ui.font_size` rewrites the Config while the app runs, waits for a closed card to grow, and
+reads that the open card with every row that "N more…" showed, the closed cards, the selected Window row and the
+Location stay as they were.
+
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_list_sidebar
 """
@@ -689,20 +693,45 @@ class TopicsListSidebar(unittest.TestCase):
             self.assertLess(held[version][0], rest[version][0] - 5, 'the swipe did not move the %s list' % version)
             self.assertLess(held[version][2], rest[version][2], 'the swipe did not shrink the %s list' % version)
 
-    def test_the_appkit_list_draws_again_when_the_interface_font_size_changes(self):
-        """The Interface font size is one of the values that the SwiftUI Sidebar hands to the AppKit list."""
+    def test_a_change_of_the_interface_font_size_draws_the_appkit_list_again_and_keeps_what_is_open_and_selected(self):
+        """The Interface font size is one of the values that the SwiftUI Sidebar hands to the AppKit list. A change of
+        `ui.font_size` in the Config applies at once, and changes nothing that is open or selected (ADR 0068): the open
+        card of the Location keeps every row that a press on its "N more…" showed, the other cards stay closed, and the
+        Location's Window row stays selected."""
+        closed = self.keys[1]
         def height(rs):
-            card = self.s.row('card-' + self.keys[1], rs)
+            card = self.s.row('card-' + closed, rs)
             return rect(card)[3] if card else None
         self.show_list('appkit')
-        before = height(self.wait_cards())
+        (session, windows), = self.topic_with('open-sizes', [('one', ['w%d' % number for number in range(1, 8)])]).values()
+        header, rows = 'topic-open-sizes', ['topic-window-' + window for window in windows]
+        def state(rs):
+            """The open state of each card, the Window rows that the list shows, and the selected ones among them."""
+            cards = {key: self.card_value(key, rs).split(',')[0] for key in self.keys + [header]}
+            listed = [key for key in self.s.ids(rs) if key.startswith('topic-window-')]
+            return cards, listed, [key for key in listed if self.s.row(key, rs).get('accessibilityValue') == 'selected']
+        designed = []
         def restore():
             self.config.write_text(CONFIG)
-            self.s.wait_rows(lambda rs: height(rs) == before, 'the cards did not go back to their height at 12')
+            if designed:
+                self.s.wait_rows(lambda rs: height(rs) == designed[0], 'the cards did not go back to their height at 12')
         self.addCleanup(restore)
-        self.config.write_text(CONFIG + 'ui:\n  font_size: 18\n')
-        self.s.wait_rows(lambda rs: (height(rs) or 0) > before + 5,
-                         lambda: 'a card is %s points high at ui.font_size: 18, and %s at 12' % (height(self.s.rows()), before))
+        # The Location on the second of seven Windows: the open card lists five rows and "2 more…" until a press on it.
+        self.open_topic('open-sizes', windows[1])
+        self.s.act('press', header + '-more')
+        rs = self.s.wait_rows(lambda rs: state(rs)[1] == rows, lambda: 'a press on "N more…" did not list every row of the '
+                              'open card: the list shows %s' % state(self.s.rows())[1])
+        shown = state(rs)
+        self.assertEqual(shown, ({**{key: 'collapsed' for key in self.keys}, header: 'expanded'}, rows, [rows[1]]),
+                         'the list did not get ready')
+        designed[:] = [height(rs)]
+        for size, grows in (('18', True), (None, False)):
+            self.config.write_text(CONFIG + ('ui:\n  font_size: %s\n' % size if size else ''))
+            rs = self.s.wait_rows(lambda rs: (height(rs) or 0) > designed[0] + 5 if grows else height(rs) == designed[0],
+                                  lambda: 'a card is %s points high at ui.font_size: %s, and %s at 12'
+                                  % (height(self.s.rows()), size or 12, designed[0]))
+            self.assertEqual(state(rs), shown, 'ui.font_size: %s changed the open cards or the selected row' % (size or 12))
+            self.assertEqual(self.location(), [session], 'a change of ui.font_size moved the Location')
 
     def test_the_appkit_list_stands_alone_when_sessions_are_off(self):
         def restore():

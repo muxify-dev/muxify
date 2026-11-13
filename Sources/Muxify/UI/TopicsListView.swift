@@ -29,6 +29,7 @@ enum TopicsListVersion: String {
 /// `ObservedUpdate`. The header of an open card sticks to the top while the card's rows scroll under it. Under the
 /// scroll view stand the groups, the Settled group (`TopicGroupsView`), with the room around them of the SwiftUI
 /// Sidebar's; an open group's cards scroll on their own, up to `TopicGroupMetrics.cardsShare` of the list's height.
+/// While the list has no item and no group, it says "No Topics" in its middle (`TopicsListEmptyState`).
 ///
 /// With a Bench line, the items above the Bench (`TopicsModel.listParts`) are a block that sticks to the top on the
 /// chrome's background while the Benched cards scroll under it, and the header of an open Benched card sticks under the
@@ -81,6 +82,9 @@ final class TopicsListView: NSView, SidebarList {
     private var hiddenAbove: [TopicGroupID] = []
     private let moreBelow = EdgePillView(edge: .bottom)
     private let moreAbove = EdgePillView(edge: .top)
+    /// "No Topics" in the middle of the list while it lists nothing. It stands over the scroll view, after it among the
+    /// accessibility rows, as the SwiftUI list's overlay does.
+    private let emptyState = SidebarLabel()
     /// The card of the Location at the last update. When the Location moves to a Benched card out of view, the list
     /// glides to it.
     private var activeTopic: TopicGroupID?
@@ -132,8 +136,14 @@ final class TopicsListView: NSView, SidebarList {
         scrollView.automaticallyAdjustsContentInsets = false
         scrollView.documentView = document
         scrollView.setAccessibilityIdentifier("topics-list")
-        // Over the list, outside its scroll view, as SwiftUI's overlays: the pills are no rows of `topics-list`.
-        subviews = [scrollView, moreBelow, moreAbove, groups]
+        // Over the list, outside its scroll view, as SwiftUI's overlays: "No Topics" and the pills are no rows of
+        // `topics-list`.
+        subviews = [scrollView, emptyState, moreBelow, moreAbove, groups]
+        emptyState.ink = .secondary
+        // Wraps where it does not fit, as SwiftUI's `Text` does.
+        emptyState.wraps = true
+        emptyState.setAccessibilityRole(.staticText)
+        emptyState.setAccessibilityIdentifier(TopicsListEmptyState.identifier)
         for pill in [moreBelow, moreAbove] { pill.scrollView = scrollView }
         edgeScroll.scrollView = scrollView
         moreBelow.onPress = { [weak self] in
@@ -211,8 +221,15 @@ final class TopicsListView: NSView, SidebarList {
         }
         activeTopic = model.activeTopic
         let shownGroups = model.groups
+        let empty = TopicsListEmptyState.text(model)
         let change = { [self] in
             benchedLocation = location
+            emptyState.text = empty ?? ""
+            emptyState.font = environment.typography.nsFont(for: TopicsListEmptyState.role)
+            emptyState.scale = environment.displayScale
+            emptyState.isHidden = empty == nil
+            emptyState.setAccessibilityElement(empty != nil)
+            emptyState.setAccessibilityValue(empty)
             groups.isHidden = shownGroups.isEmpty
             groups.show(shownGroups, activeTopic: model.activeTopic, environment: environment, now: Date())
             for item in shown { item.show() }
@@ -427,6 +444,11 @@ final class TopicsListView: NSView, SidebarList {
         scrollView.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - groupsRoom))
         groups.frame = NSRect(x: TopicGroupMetrics.horizontalInset, y: scrollView.frame.maxY + TopicGroupMetrics.verticalInset,
                               width: groupsWidth, height: groupsHeight)
+        // In the middle of the scroll view, on the nearest pixel, where SwiftUI draws the text of its overlay.
+        let empty = emptyState.fit(width: scrollView.frame.width), area = scrollView.frame
+        emptyState.frame = NSRect(origin: NSPoint(x: (area.minX + (area.width - empty.width) / 2).rounded(toPixelsOf: scale),
+                                                  y: (area.minY + (area.height - empty.height) / 2).rounded(toPixelsOf: scale)),
+                                  size: empty)
         let width = max(0, bounds.width - 2 * TopicsListMetrics.horizontalInset)
         var bottom = TopicsListMetrics.verticalInset
         places = items.enumerated().map { index, item in

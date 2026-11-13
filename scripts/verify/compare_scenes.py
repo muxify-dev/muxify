@@ -31,6 +31,7 @@ compare-notes.md.
 """
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Callable, NamedTuple
@@ -49,6 +50,9 @@ HOVER_DELAY = 0.4
 # example a window that fills the screen, and then the app's views get no hover (README, "Do not take focus").
 UNCOVER_WAIT = 60
 LONG_WINDOW = 'a-window-name-far-too-long-for-any-sidebar-row-to-show-whole'
+# Where a held swipe from Topics stands: SidebarPager's "Begin swipe left" sample moves the pager 0.4 of its width
+# (as in suites/sidebar_swipe.py and suites/topics_list_sidebar.py).
+SWIPE_FROM_TOPICS = '0.400'
 
 
 class Area(NamedTuple):
@@ -963,6 +967,127 @@ class TopicWorktrees:
 WINDOW_MAIN_WORKING_COPY = 'Main working copy'
 
 
+class TopicsEmpty:
+    name = 'topics-empty'
+    shows = '"No Topics" in the middle of the Topics list, with no Topic and no tmux server.'
+    # "No Topics" stands over the list, outside `topics-list`, as the SwiftUI list's overlay does.
+    others = ('topics-list-empty',)
+
+    def fixture(self, s):
+        """The shot makes its own Session, because it ends its server."""
+
+    def shots(self):
+        return [('topics-empty', self.empty)]
+
+    def empty(self, view):
+        s = view.s
+        # The shot of the first version ended the server. tmux starts a new one for the Session, with the same ids.
+        _, (window,) = session(s, 'only')
+        s.tmux('set-option', '-g', 'status', 'off')
+        view.launch(config())
+        view.go(window)
+        # The app stays when the server ends under a Session. Without a server it shows no Session, so no No Topic card.
+        socket = s.tmux('display-message', '-p', '#{socket_path}')
+        assert Path(socket).resolve().is_relative_to(s.root.resolve()), 'the tmux server %s is not the scene\'s' % socket
+        s.tmux('kill-server')
+        view.wait(lambda rows: s.row('topics-list-empty', rows).get('accessibilityValue') == 'No Topics'
+                  and not any(key.startswith(('topic-', 'no-topic-')) for key in s.ids(rows)),
+                  lambda: 'the Topics list does not say "No Topics" alone: %s' % s.ids())
+
+
+def fresh(view, fixture):
+    """Makes `fixture` again from nothing, for a scene that shows the fixtures of other scenes one after the other in
+    its one Sandbox: stops the app and the tmux server, empties the app's state, and makes the fixture on a new server,
+    which gives its Sessions, Windows and Panes the same ids in each version."""
+    s = view.s
+    s.stop()
+    state = s.root/'state/muxify'
+    shutil.rmtree(state)
+    state.mkdir()
+    fixture(s)
+    # The status line has a clock, and the picture of the App Window has the Terminal.
+    s.tmux('set-option', '-g', 'status', 'off')
+
+
+class Styled:
+    """A View whose launches add `ui` lines to the `ui` section of the Config they write, and with `theme` name that
+    Ghostty config file, whose colours the chrome takes. The arranges of other scenes then show their shots so."""
+
+    def __init__(self, view, ui='', theme=None):
+        self.view, self.ui, self.theme = view, ui, theme
+
+    def __getattr__(self, name):
+        return getattr(self.view, name)
+
+    def launch(self, text=None):
+        if text is not None:
+            assert '\nui:\n' in text, 'the Config has no ui section: %r' % text
+            text = text.replace('\nui:\n', '\nui:\n' + self.ui, 1)
+            if self.theme:
+                text += 'ghostty:\n  config_file: %s\n' % self.theme
+        self.view.launch(text)
+
+
+class TopicsSizesAndLight:
+    name = 'topics-sizes-and-light'
+    shows = ('The shots of the scenes topic-cards, topic-open and bench at Interface font size 18 and 24, in a light '
+             'theme, and with the Sidebar font family Georgia, each named after its shot and its style.')
+    LIGHT = 'background = #f4f4f2\nforeground = #1d1d1f\n'
+    # (name, lines of the Config's ui section, whether the chrome takes the light theme)
+    STYLES = (('18', '  font_size: 18\n', False), ('24', '  font_size: 24\n', False), ('light', '', True),
+              ('family', '  sidebar:\n    font_family: Georgia\n', False))
+
+    def __init__(self):
+        self.scenes = (TopicCards(), TopicOpen(), Bench())
+
+    def fixture(self, s):
+        """The first shot of each scene makes that scene's fixture, in each version (`fresh`)."""
+        self.theme = s.root/'config/light-theme.conf'
+        self.theme.write_text(self.LIGHT)
+
+    def shots(self):
+        found = []
+        for scene in self.scenes:
+            for index, (style, ui, light) in enumerate(self.STYLES):
+                for number, (shot, arrange) in enumerate(scene.shots()):
+                    def styled(view, scene=scene, arrange=arrange, ui=ui, light=light, first=index == number == 0):
+                        if first:
+                            fresh(view, scene.fixture)
+                        arrange(Styled(view, ui, self.theme if light else None))
+                    found.append(('%s-%s' % (shot, style), styled))
+        return found
+
+
+class TopicsMidSwipe:
+    name = 'topics-mid-swipe'
+    shows = ('The Topics page held partway to Sessions by a partial swipe, moved, shrunk and faded: the open card of '
+             'the Location\'s Topic of topic-open, with its Session lines, Window rows and Pane rows, and closed cards '
+             'under it.')
+
+    def __init__(self):
+        self.open = TopicOpen()
+
+    def fixture(self, s):
+        self.open.fixture(s)
+
+    def shots(self):
+        return [('topics-mid-swipe', self.held)]
+
+    def swipe(self, view, rows=None):
+        return view.s.row('sidebar-swipe-input', rows).get('accessibilityLabel', '')
+
+    def held(self, view):
+        self.open.open(view)
+        # The Sidebar follows a swipe only while it animates. Reduce Motion in System Settings stops that for every app.
+        assert not self.swipe(view).startswith('Sidebar swipe input instant'), (
+            'Reduce Motion is on, so the Sidebar does not follow a swipe')
+        # A swipe that begins while a card still opens holds the cards a fraction of a point from their places.
+        view.rest()
+        view.s.act('action', 'sidebar-swipe-input', 'Begin swipe left')
+        view.wait(lambda rows: self.swipe(view, rows).endswith(' ' + SWIPE_FROM_TOPICS),
+                  lambda: 'the Sidebar did not follow the swipe to %s: %s' % (SWIPE_FROM_TOPICS, self.swipe(view)))
+
+
 # The launch arguments of every scene of the Topics list: the Sidebar shows, with Topics.
 TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics']
 
@@ -971,6 +1096,7 @@ AREAS = [
     Area(name='topics', title='Topics list', list='topics-list', default=TOPICS_LIST_DEFAULT, args=TOPICS_ARGS,
          shown=lambda s: s.topics_list(), scenes=[TopicCards(), LockedCards(), TopicOpen(), NoTopicCard(), TopicsStuckHeader(),
                                                     TopicTags(), Bench(), TopicOverflow(), SettledGroup(), TopicsHints(),
-                                                    TopicsHover(), TopicAgents(), TopicUnread(), TopicWorktrees()],
+                                                    TopicsHover(), TopicAgents(), TopicUnread(), TopicWorktrees(),
+                                                    TopicsEmpty(), TopicsSizesAndLight(), TopicsMidSwipe()],
          others=('topic-groups',)),
 ]

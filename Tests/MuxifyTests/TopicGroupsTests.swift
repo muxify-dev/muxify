@@ -140,4 +140,21 @@ final class TopicGroupsTests: XCTestCase {
     private func date(_ stored: String) -> Date {
         ISO8601DateFormatter().date(from: stored)!
     }
+
+    // MARK: "No Topics"
+
+    func testTheListSaysNoTopicsOnlyWithNoCardNoNoTopicSessionAndNoGroup() {
+        XCTAssertEqual(TopicsListEmptyState.text(model([])), "No Topics")
+        XCTAssertNil(TopicsListEmptyState.text(model([TopicRecord(id: "open", title: "Open")])), "a Topic card shows")
+        XCTAssertNil(TopicsListEmptyState.text(model([settled("done", at: "2026-10-01T10:00:00Z")])), "the Settled group shows")
+        let loose = window("@1", session: "$1", topic: nil)
+        XCTAssertNil(TopicsListEmptyState.text(model([], windows: [loose], selection: selection(on: loose))),
+                     "the No Topic card of the Location's Session shows")
+    }
+
+    private func selection(on window: TmuxWindow) -> TopicSelection {
+        var selection = TopicSelection()
+        selection.select(windowID: window.id, activeTopic: .noTopic)
+        return selection
+    }
 }
