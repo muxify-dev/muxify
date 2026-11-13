@@ -81,6 +81,42 @@ final class SidebarHintView: NSView {
     override func accessibilityActivationPoint() -> NSPoint { accessibilityFrame().centre }
 }
 
+/// The Hints of the Window rows of an open card, as SwiftUI's `cardHints` shows a `WindowHint` on each Window row: the
+/// badge while the user holds its modifier, else its key at rest when the Config shows Window Hints at all times. Each
+/// stands in the room its row keeps before its icon, from the row's top left corner. The card shows them over its
+/// rows, so they rest at no opacity of the rows'.
+@MainActor final class WindowHintViews {
+    private var hints: [String: (row: WindowRowView, view: SidebarHintView)] = [:]
+
+    /// The Hints that show, by their Window IDs.
+    var views: [SidebarHintView] { hints.keys.sorted().compactMap { hints[$0]?.view } }
+
+    /// Shows the Hint of each row that has one. A row that kept its Hint keeps its view.
+    func show(_ rows: [WindowRowView], environment: SidebarListEnvironment) {
+        var kept = hints
+        hints = [:]
+        for row in rows {
+            let target = QuickSwitchTarget.window(row.windowID)
+            let look: SidebarHintView.Look
+            if !environment.hints[target].isEmpty { look = .badge(environment.hints[target]) }
+            else if let key = environment.hints.restKey(for: target) { look = .key(key) }
+            else { continue }
+            let view = kept.removeValue(forKey: row.windowID)?.view ?? SidebarHintView()
+            view.show(look, target: target, fontSize: environment.fontSize, scale: environment.displayScale)
+            hints[row.windowID] = (row, view)
+        }
+    }
+
+    /// Puts each Hint on its row, in the coordinates of `superview`, which shows the Hints. With `rows`, only the Hints
+    /// of these rows, such as those of a lifted unit, which follow it at once.
+    func place(in superview: NSView, rows: [any CardRowView]? = nil) {
+        for (row, view) in hints.values where rows.map({ $0.contains { $0 === row } }) ?? true {
+            let corner = row.convert(NSPoint.zero, to: superview)
+            view.frame = NSRect(origin: NSPoint(x: corner.x + WindowHintMetrics.inset, y: corner.y + WindowHintMetrics.inset), size: view.size)
+        }
+    }
+}
+
 /// The box of a Hint's badge: a dark fill with a light border inside it, in a rounded shape with SwiftUI's continuous
 /// corners. Its colours are the same in every appearance. The shapes are layers under the view's own: the driver's
 /// `snapshot` draws the corners of a view's own layer square.

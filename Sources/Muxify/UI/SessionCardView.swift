@@ -152,8 +152,8 @@ final class SessionCardView: NSView {
     private let selection = CardSelectionBorderView()
     /// The card's Hint: its key at rest, or the badge while the user holds the Hint's modifier.
     private let hint = CardHintViews()
-    /// The Hints of the Window rows of an open card, by Window ID.
-    private var windowHints: [String: SidebarHintView] = [:]
+    /// The Hints of the Window rows of an open card.
+    private let windowHints = WindowHintViews()
     private var content: SessionCardContent?
     private var environment = SidebarListEnvironment()
     /// The card's top edge in the list's viewport. The header of an open card sticks to the viewport's top once the
@@ -243,21 +243,8 @@ final class SessionCardView: NSView {
     /// Shows the Hint of each Window row of an open card: the badge while the user holds its modifier, else its key at
     /// rest when the Config shows Window Hints at all times. A closed card shows none.
     private func showWindowHints() {
-        var kept = windowHints
-        windowHints = [:]
-        if isOpen {
-            for case let row as WindowRowView in listed {
-                let target = QuickSwitchTarget.window(row.windowID)
-                let look: SidebarHintView.Look
-                if !environment.hints[target].isEmpty { look = .badge(environment.hints[target]) }
-                else if let key = environment.hints.restKey(for: target) { look = .key(key) }
-                else { continue }
-                let view = kept.removeValue(forKey: row.windowID) ?? SidebarHintView()
-                view.show(look, target: target, fontSize: environment.fontSize, scale: environment.displayScale)
-                windowHints[row.windowID] = view
-            }
-        }
-        let views = chrome + windowHints.keys.sorted().compactMap { windowHints[$0] }
+        windowHints.show(isOpen ? listed.compactMap { $0 as? WindowRowView } : [], environment: environment)
+        let views = chrome + windowHints.views
         if subviews != views { subviews = views }
     }
 
@@ -321,16 +308,7 @@ final class SessionCardView: NSView {
         }
         if listed.last === more { more.frame = NSRect(x: 0, y: top, width: width, height: more.height(width: width)) }
         drag.placeSlot()
-        units.forEach(placeHints(of:))
-    }
-
-    /// A Window row's Hint stands in the room the row keeps before its icon, from the row's top left corner.
-    private func placeHints(of unit: WindowUnitView) {
-        for case let row as WindowRowView in unit.rows {
-            guard let view = windowHints[row.windowID] else { continue }
-            let corner = row.convert(NSPoint.zero, to: self)
-            view.frame = NSRect(origin: NSPoint(x: corner.x + WindowHintMetrics.inset, y: corner.y + WindowHintMetrics.inset), size: view.size)
-        }
+        windowHints.place(in: self)
     }
 
     /// The units of Window rows, from the top.
@@ -357,7 +335,7 @@ final class SessionCardView: NSView {
     /// because the header hides its children. SwiftUI lists the header after the rows, which it draws above them, and
     /// the Hints by their identifiers.
     override func accessibilityChildren() -> [Any]? {
-        let hints = (hint.views + Array(windowHints.values)).filter { !$0.isHidden }
+        let hints = (hint.views + windowHints.views).filter { !$0.isHidden }
             .sorted { $0.accessibilityIdentifier() < $1.accessibilityIdentifier() }
         return (isOpen ? listed.flatMap(\.accessibilityParts) : []) + [header] + hints
     }
@@ -391,7 +369,7 @@ extension SessionCardView: StackDragHost {
 
     /// The Hints of the lifted unit's Window rows follow it at once.
     func dragWillPlaceUnits(lifted: DragUnitView?) {
-        if let unit = lifted as? WindowUnitView { placeHints(of: unit) }
+        if let unit = lifted as? WindowUnitView { windowHints.place(in: self, rows: unit.rows) }
     }
 
     func drop(_ id: String, at placement: DropPlacement<String>) {

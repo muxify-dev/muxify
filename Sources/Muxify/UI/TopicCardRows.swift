@@ -46,6 +46,9 @@ final class TopicCardRowsView: NSView, TopicCardBody {
     var onMoveWindow: (TmuxWindow, DropPlacement<String>) -> Void = { _, _ in }
     /// The top of the visible part of the list for the rows, in a clip view: under the card's header while it sticks.
     var visibleListTop: (NSClipView) -> CGFloat = { $0.bounds.minY }
+    /// The rows were put in place: all of them with nil, or only these, which follow a lifted block or Window row at
+    /// once. The card puts the Hints of the Window rows on them.
+    var didPlaceRows: ([any CardRowView]?) -> Void = { _ in }
     /// The context menu of a Session line, and its named accessibility actions, with the Session's ID.
     var sessionMenu: (String) -> SidebarMenu? = { _ in nil }
     var sessionActions: (String) -> SidebarMenu? = { _ in nil }
@@ -162,6 +165,7 @@ final class TopicCardRowsView: NSView, TopicCardBody {
         let block = SessionBlockView(sessionID: sessionID)
         block.onMoveWindow = { [weak self] in self?.onMoveWindow($0, $1) }
         block.visibleListTop = { [weak self] clip in self?.visibleListTop(clip) ?? clip.bounds.minY }
+        block.didPlaceRows = { [weak self] in self?.didPlaceRows($0) }
         return block
     }
 
@@ -207,8 +211,12 @@ final class TopicCardRowsView: NSView, TopicCardBody {
         } else {
             top += footerHeight
         }
+        if placing { didPlaceRows(nil) }
         return top
     }
+
+    /// The Window rows from the top.
+    var windowRows: [WindowRowView] { blocks.flatMap(\.rows).compactMap { $0 as? WindowRowView } }
 
     /// The card's place in the list moved, as when the list scrolled: a lifted block or Window row keeps its place
     /// under the pointer.
@@ -245,6 +253,7 @@ extension TopicCardRowsView: StackDragHost {
 
     /// The dividers stay with the blocks they top, so they hide while a block moves, as in the SwiftUI card.
     func dragWillPlaceUnits(lifted: DragUnitView?) {
+        if let block = lifted as? SessionBlockView { didPlaceRows(block.rows) }
         let shows = sessionDrag.draggedID == nil
         for case let layer? in dividers.map(\.layer) {
             LayerGlide.set("opacity", of: layer, to: Float(shows ? 1 : 0), motion: .easeOut(CardBlockDivider.fadeDuration))
@@ -266,6 +275,8 @@ final class SessionBlockView: DragUnitView {
     var onMoveWindow: (TmuxWindow, DropPlacement<String>) -> Void = { _, _ in }
     /// The top of the visible part of the list for the rows, in a clip view: under the card's header while it sticks.
     var visibleListTop: (NSClipView) -> CGFloat = { $0.bounds.minY }
+    /// The rows were put in place: all of them with nil, or only these, which follow a lifted Window row at once.
+    var didPlaceRows: ([any CardRowView]?) -> Void = { _ in }
     private(set) var line: SessionLineView?
     /// The Window and Pane rows from the top, and in their units.
     private(set) var rows: [CardRowView] = []
@@ -321,6 +332,7 @@ final class SessionBlockView: DragUnitView {
         }
         for unit in units { top = windowDrag.place(unit, at: top, width: width) + CardSpacing.row }
         windowDrag.placeSlot()
+        didPlaceRows(nil)
     }
 
     /// The block's place in the list moved: a lifted Window row keeps its place under the pointer.
@@ -341,6 +353,11 @@ extension SessionBlockView: StackDragHost {
     func visibleTop(in clip: NSClipView) -> CGFloat { visibleListTop(clip) }
 
     func layOutUnits() { layOutParts() }
+
+    /// The Hints of the lifted Window row and its Pane rows follow it at once.
+    func dragWillPlaceUnits(lifted: DragUnitView?) {
+        if let unit = lifted as? WindowUnitView { didPlaceRows(unit.rows) }
+    }
 
     func drop(_ id: String, at placement: DropPlacement<String>) {
         guard let window = windowUnits.first(where: { $0.id == id })?.tmuxWindow else { return }

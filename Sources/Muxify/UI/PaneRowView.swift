@@ -1,6 +1,5 @@
 import AppKit
 import MuxifyCore
-import SwiftUI
 
 extension TopicsModel.PaneRow {
     /// With no Window row above it, the active Pane row shows where the user is, for both versions of the row (ADR 0074).
@@ -109,8 +108,8 @@ final class PaneRowView: SidebarRowView, CardRowView {
         layOut()
         showsLocation = content.showsLocation
         showFill(fades: fades && tints)
-        // The label's title is the row's, in the font of the SwiftUI row's title.
-        hoverLabel.anchor.anchor(title, title: Text(title.text).font(size.font(PaneRowMetrics.titleSize)),
+        // The label's title is the row's, in the row's font.
+        hoverLabel.anchor.anchor(title, title: title.text, font: title.font,
                                  fullWidth: SidebarTextLayout(title.text, font: title.font, scale: environment.displayScale).size.width)
         hoverLabel.show(RowHoverLabel.Request(detail: content.hoverDetail, fontSize: size))
     }

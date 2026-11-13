@@ -1,6 +1,5 @@
 import AppKit
 import MuxifyCore
-import SwiftUI
 
 /// What the row of a Window that a Settled Topic remembers shows.
 struct RememberedRowContent: Equatable {
@@ -50,8 +49,8 @@ final class RememberedRowView: SidebarRowView {
         title.scale = environment.displayScale
         setAccessibilityValue(content.name)
         layOut()
-        // The label's title is the row's, in the font of the SwiftUI row's title.
-        hoverLabel.anchor.anchor(title, title: Text(content.name).font(size.font(RememberedRowMetrics.fontSize)),
+        // The label's title is the row's, in the row's font.
+        hoverLabel.anchor.anchor(title, title: content.name, font: title.font,
                                  fullWidth: SidebarTextLayout(content.name, font: title.font, scale: environment.displayScale).size.width)
         hoverLabel.show(RowHoverLabel.Request(detail: content.folder, onlyWhenCutOff: content.tooltips == .truncated,
                                               enabled: content.tooltips != .off, fontSize: size))

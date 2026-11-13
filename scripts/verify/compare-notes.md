@@ -236,8 +236,7 @@ difference picture marks:
 - The fill of the open card, as in `topic-open`, and the many-coloured border and the edges of glyphs, as in
   `topic-cards`.
 
-The scene turns card Hints off (`hints.cards`): the Hints of the cards and of the Open Place are compared with task
-14. The AppKit Open Place shows its Hint in its room since task 13, which the Bench suite's Open Place check needs.
+The scene turns card Hints off (`hints.cards`): `topics-hints` compares the Hints of the cards and of the Open Place.
 
 ## topic-overflow
 
@@ -281,3 +280,53 @@ the ages, the rows and "Show 2 more" stand on the same pixels. The difference pi
   edges of the glyphs of "Settle" and "Reopen", as in `topic-cards`.
 
 Task 11 reads the named actions of the opened Settled card and of its header in both shots: Forget Topic…, its menu.
+
+## topics-hints
+
+Task 14 of the set `remove-swiftui`. With `topics.in_play: 2` and card and Window Hints at all times, four shots: a
+Pinned card whose long title reaches its Hint, the open card of the Location's Topic Atlas with three Window rows, an
+Open Place, the Guests line, a Guest Topic and a Locked Session as a Guest. `at-all-times` shows the keys at rest of the
+cards, the Open Place and the Window rows; `control-held` the badges of the cards and the Open Place while Control is
+held; `command-held` the badges of the Window rows while Command is held; `no-topic-command-held` the Window rows'
+badges of the No Topic card of a Session with no Topic, which has no card Hint. The gate passes in all four: each Hint
+is a row with its target's identifier, its keys as its value and the same frame in both versions. Side by side the
+pictures look the same: each badge ends where its key at rest ends and covers the end of the long title, the title keeps
+its three lines, the badges stand in place of the Guest marks, and a Window row's key and badge stand in the room the
+row keeps before its icon. No pixel of a Hint differs by more than 4 of 255. The difference picture marks:
+
+- The fill of the open card, as in `topic-open`, and the many-coloured border, the app icons and the edges of the
+  glyphs of "Settle", as in `topic-cards`.
+- The dashes of the Open Place's border, as in `bench`.
+
+
+## topics-hover
+
+Task 14 of the set `remove-swiftui`. One shot, `topics-hover`: the open card of the Location's Topic Atlas, with the
+pointer on the Window row whose name is far too long for the row, and its hover label: the SwiftUI panel over the
+SwiftUI row, and the AppKit panel, `HoverLabelView`, over the AppKit row. The scene names the panel, `hover-label`, as a
+part of its own, so the gate compares its frame: the label's size and its place over the row. The gate passes: the
+panel has the same frame in both versions, and its title and detail are the same texts.
+
+The AppKit label takes the look of SwiftUI's regular material from `NSVisualEffectView` with the popover material,
+within its window and always active: the same colours over the same blends as the layers SwiftUI makes for the
+material, in the light and the dark appearance. Rendered offscreen side by side with the SwiftUI label at 12 and at
+18, with and without the title, the two labels had the same size, and the texts, the material and the border stood on
+the same pixels, within 5 of 255 at the edges of the glyphs.
+
+The first pictures showed the AppKit label half a point wider than the SwiftUI one, on its left, with its texts half a
+point to the left. The label's width is its texts' width on the pixel grid, such as 482.5 points; the panel rounds its
+size to whole points, and SwiftUI's hosting view sets its label in the middle of that room, on the pixel grid, while
+the AppKit label filled it. The AppKit label now stands at its own size in the middle of the panel in the same way.
+Side by side the pictures now look the same: the label's title covers the row's title on the same pixels, and the
+label ends at the same place past the Sidebar's edge. The texts and the material differ by at most 1 of 255. The
+difference picture marks:
+
+- The corners of the material, by up to 30 of 255. The AppKit label clips the material's layers by its own layer's
+  corner, continuous on the screen, and `CALayer.render(in:)`, which the driver's `snapshot` uses, draws that clip with
+  circular corners. A mask in its place would draw the material's layers as one group, whose blend with the Sidebar
+  under it differs everywhere.
+- "Settle" of the card under the label, by up to 36 of 255: the picture draws the panel over the App Window with the
+  material's own opacity, so the card's "Settle" shows through it, and its glyphs differ at their edges as in
+  `topic-cards`.
+- The fill of the open card, as in `topic-open`, and the many-coloured border, the app icons and the edges of the
+  glyphs of the rows, as in `topic-cards`.

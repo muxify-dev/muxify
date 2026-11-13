@@ -11,8 +11,8 @@ Without a scene it runs every scene of the area, one after the other, each in it
 fixture once. Then, for each version, it starts the app with that version, shows each of its shots, and takes a
 picture of the App Window and a dump for it. `make compare` builds the Debug app first.
 
-**The gate** (compare_gate.py) matches the rows inside the area's list, and inside its parts outside the list, between
-the two versions, and compares the
+**The gate** (compare_gate.py) matches the rows inside the area's list, and inside its parts outside the list and the
+scene's own (a scene's `others`), between the two versions, and compares the
 named actions of the elements that a shot names. The run fails when a scene's gate fails, or when a scene cannot show
 a shot or measure it. It names each row that failed, with the
 values of both versions.
@@ -236,7 +236,9 @@ def run_scene(area, scene, pair, out, self_run):
             difference = out/('%s-difference.png' % shot)
             entry['pixels'] = picture_diff(one['picture'], other['picture'], difference)
             entry['difference'] = difference.name
-            entry['gate'] = judge(area_rows(one['rows'], area.parts), area_rows(other['rows'], area.parts))
+            # A scene can name parts of its own outside the area's list, such as the hover label's panel.
+            parts = (*area.parts, *getattr(scene, 'others', ()))
+            entry['gate'] = judge(area_rows(one['rows'], parts), area_rows(other['rows'], parts))
             entry['gate']['failed'] += judge_actions(one['actions'], other['actions'])
             entry['crop'], entry['window'] = crop([one['rows'], other['rows']])
             if entry['gate']['failed']:

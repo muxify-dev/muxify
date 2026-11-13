@@ -1,6 +1,5 @@
 import AppKit
 import MuxifyCore
-import SwiftUI
 
 /// What a Window row shows, as the Sessions list reads it from the models.
 struct WindowRowContent: Equatable {
@@ -157,8 +156,8 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
         layOut()
         showsLocation = content.isSelected
         showFill(fades: fades && tints)
-        // The label's title is the row's, in the font of the SwiftUI row's title.
-        hoverLabel.anchor.anchor(title, title: Text(title.text).font(typography.font(for: .title)),
+        // The label's title is the row's, in the row's font.
+        hoverLabel.anchor.anchor(title, title: title.text, font: title.font,
                                  fullWidth: SidebarTextLayout(title.text, font: title.font, scale: environment.displayScale).size.width)
         hoverLabel.show(RowHoverLabel.Request(detail: WindowRowText.hoverDetail(window), onlyWhenCutOff: content.tooltips == .truncated,
                                               enabled: content.tooltips != .off, fontSize: size))

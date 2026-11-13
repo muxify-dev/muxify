@@ -155,6 +155,8 @@ final class TopicCardView: DragUnitView {
     private let outline = CardOutlineView()
     private let selection = CardSelectionBorderView()
     private let hint = CardHintViews()
+    /// The Hints of the Window rows of an open card, over the rows and the header, as SwiftUI's `cardHints` shows them.
+    private let windowHints = WindowHintViews()
     private let corner = TopicCardCornerView()
     private var content: TopicCardContent?
     private var environment = SidebarListEnvironment()
@@ -173,12 +175,16 @@ final class TopicCardView: DragUnitView {
         // The SwiftUI card cuts nothing off.
         for view in [self, card, dimmed] { view.clipsToBounds = false }
         // From the back: the fill, the rows, the header, which stays above the rows that scroll under it, the word in
-        // its corner, the spines, the border, then the Tags over the header, the Hint and the corner's action.
+        // its corner, the spines, the border, then the Tags over the header, the Hints and the corner's action.
         dimmed.subviews = [fill, rows, remembered, header, cornerLabel, unread, spine, outline, selection]
         card.subviews = [dimmed, tags] + hint.views
         parts = [card, corner]
         card.setAccessibilityIdentifier("card-" + cardID.accessibilityID)
         card.header = header
+        rows.didPlaceRows = { [weak self] rows in
+            guard let self else { return }
+            windowHints.place(in: card, rows: rows)
+        }
         // A row dragged up stops at the bottom of the header that sticks to the top, not under it.
         rows.visibleListTop = { [weak self] clip in
             guard let self, header.sticks else { return clip.bounds.minY }
@@ -187,7 +193,7 @@ final class TopicCardView: DragUnitView {
         card.rows = { [weak self] in
             self.map {
                 ($0.isOpen ? $0.body.accessibilityParts : []) + [$0.header] + ($0.tags.isHidden ? [] : [$0.tags])
-                    + ($0.cornerLabel.isHidden ? [] : [$0.cornerLabel]) + $0.hint.shown
+                    + ($0.cornerLabel.isHidden ? [] : [$0.cornerLabel]) + $0.hints
             } ?? []
         }
     }
@@ -236,6 +242,9 @@ final class TopicCardView: DragUnitView {
         selection.isHidden = !content.holdsSelection
         dimmed.alphaValue = content.restingOpacity
         hint.show(content.header.hint, environment: environment)
+        windowHints.show(content.header.isOpen && content.remembered == nil ? rows.windowRows : [], environment: environment)
+        let views = [dimmed, tags] + hint.views + windowHints.views
+        if card.subviews != views { card.subviews = views }
         corner.show(content.corner, environment: environment)
         corner.alphaValue = content.restingOpacity
         layOut()
@@ -246,6 +255,11 @@ final class TopicCardView: DragUnitView {
     /// end with the room of its action.
     override func height(width: CGFloat) -> CGFloat {
         header.height(width: width) + (isOpen ? CardRowsPadding.top + body.height(width: rowsWidth(width)) + CardRowsPadding.bottom : 0)
+    }
+
+    /// The Hints that show, the card's and those of its Window rows, by their identifiers, as SwiftUI lists them.
+    private var hints: [NSView] {
+        (hint.shown + windowHints.views).sorted { $0.accessibilityIdentifier() < $1.accessibilityIdentifier() }
     }
 
     private func rowsWidth(_ width: CGFloat) -> CGFloat { max(0, width - 2 * CardRowsPadding.horizontal) }
@@ -288,6 +302,7 @@ final class TopicCardView: DragUnitView {
                                 height: view.height(width: rowsWidth))
         }
         placeHeader()
+        windowHints.place(in: card)
         spine.frame = NSRect(x: CardSpine.leading, y: CardSpine.verticalInset, width: CardSpine.width,
                              height: max(0, bounds.height - 2 * CardSpine.verticalInset))
         // In the bottom-right corner, at the same offsets whether the card is open or closed.

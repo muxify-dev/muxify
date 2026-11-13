@@ -1,11 +1,14 @@
 import AppKit
 import MuxifyCore
-import SwiftUI
 
 /// A row's hover label: after the pointer rests on the row, a label opens over it with the row's full title, when the
 /// row cuts it off, and a small second line with more about the row. One label shows at a time, in a borderless panel
 /// that can reach past the Sidebar's edge. It never takes Focus or a click. The panel is outside the App Window's view
 /// tree, so the row passes its Interface font size in, and the label's detail grows with it.
+///
+/// The panel is AppKit (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md). It shows the label that
+/// the row's anchor makes: a row in AppKit gives a `RowHoverAnchor`, whose label is `HoverLabelView`, and a SwiftUI row
+/// keeps the SwiftUI label of `hoverLabel(detail:onlyWhenCutOff:enabled:)` until its area moves.
 @MainActor
 final class HoverLabels {
     static let shared = HoverLabels()
@@ -26,11 +29,11 @@ final class HoverLabels {
         panel.setAccessibilityIdentifier("hover-label")
         return panel
     }()
-    private var owner: HoverAnchor?
+    private var owner: (any HoverLabelAnchor)?
     private var pending: DispatchWorkItem?
     private var closedAt = Date.distantPast
 
-    func enter(_ anchor: HoverAnchor, detail: String, onlyWhenCutOff: Bool, fontSize: InterfaceFontSize) {
+    func enter(_ anchor: any HoverLabelAnchor, detail: String, onlyWhenCutOff: Bool, fontSize: InterfaceFontSize) {
         owner = anchor
         pending?.cancel()
         let show = { [weak self, weak anchor] in
@@ -46,7 +49,7 @@ final class HoverLabels {
         }
     }
 
-    func leave(_ anchor: HoverAnchor) {
+    func leave(_ anchor: any HoverLabelAnchor) {
         guard owner === anchor else { return }
         owner = nil
         pending?.cancel()
@@ -56,18 +59,17 @@ final class HoverLabels {
         panel.orderOut(nil)
     }
 
-    private func show(_ anchor: HoverAnchor, detail: String, onlyWhenCutOff: Bool, fontSize: InterfaceFontSize) {
-        guard let view = anchor.view, let window = view.window else { return }
+    private func show(_ anchor: any HoverLabelAnchor, detail: String, onlyWhenCutOff: Bool, fontSize: InterfaceFontSize) {
+        guard let view = anchor.titleView, let window = view.window else { return }
         let titleFrame = window.convertToScreen(view.convert(view.bounds, to: nil))
-        let cutOff = anchor.title != nil && anchor.fullWidth > titleFrame.width + 0.5
+        let cutOff = anchor.hasTitle && anchor.fullWidth > titleFrame.width + 0.5
         guard cutOff || (!onlyWhenCutOff && !detail.isEmpty) else { return }
-        let content = NSHostingView(rootView: HoverLabelView(title: cutOff ? anchor.title : nil, detail: detail)
-            .environment(\.interfaceFontSize, fontSize))
+        let content = anchor.label(showsTitle: cutOff, detail: detail, fontSize: fontSize, scale: window.backingScaleFactor)
         let size = content.fittingSize
         panel.contentView = content
         // The label's title sits on the row's title, so the row seems to open up in place.
-        let origin = NSPoint(x: titleFrame.minX - HoverLabelView.padding.leading,
-                             y: titleFrame.maxY + HoverLabelView.padding.top - size.height)
+        let origin = NSPoint(x: titleFrame.minX - HoverLabelMetrics.padding.left,
+                             y: titleFrame.maxY + HoverLabelMetrics.padding.top - size.height)
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
         if panel.parent !== window {
             panel.parent?.removeChildWindow(panel)
@@ -87,128 +89,139 @@ final class HoverLabels {
     }
 }
 
-private struct HoverLabelView: View {
-    static let padding = EdgeInsets(top: 4, leading: 7, bottom: 5, trailing: 8)
-
-    let title: Text?
-    let detail: String
-    @Environment(\.interfaceFontSize) private var fontSize
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if let title { title.lineLimit(1) }
-            if !detail.isEmpty { Text(detail).font(fontSize.font(10.5)).foregroundStyle(.secondary) }
-        }
-        .fixedSize()
-        .padding(Self.padding)
-        .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(.regularMaterial))
-        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.primary.opacity(0.12)))
-    }
-}
-
-/// A row's title as its hover label needs it: where the row draws it, the text it draws, and how wide that text is
-/// whole, so the label shows the title only when the row cuts it off.
+/// A row's title as its hover label needs it: where the row draws it, how wide the whole title is, and the label that
+/// shows it.
 @MainActor
-final class HoverAnchor {
-    fileprivate weak var view: NSView?
-    fileprivate var title: Text?
-    fileprivate var fullWidth: CGFloat = 0
-
-    /// For a row in AppKit, which has no `hoverLabelTitle()` (ADR 0074): `view` draws the row's title, `title` is that
-    /// title in its font, and `fullWidth` is how wide the whole title is on one line.
-    func anchor(_ view: NSView, title: Text, fullWidth: CGFloat) {
-        self.view = view
-        self.title = title
-        self.fullWidth = fullWidth
-    }
+protocol HoverLabelAnchor: AnyObject {
+    /// The view that draws the row's title. The label's title stands on it.
+    var titleView: NSView? { get }
+    /// The row has a title, which its label shows when the row cuts it off.
+    var hasTitle: Bool { get }
+    /// How wide the whole title is on one line.
+    var fullWidth: CGFloat { get }
+    /// The label: the row's title, with `showsTitle`, over `detail`. `scale` is the pixels in a point of the display.
+    func label(showsTitle: Bool, detail: String, fontSize: InterfaceFontSize, scale: CGFloat) -> NSView
 }
 
-private struct HoverAnchorView: NSViewRepresentable {
-    let anchor: HoverAnchor
-    let title: Text
-
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        updateNSView(view, context: context)
-        return view
-    }
-
-    func updateNSView(_ view: NSView, context: Context) {
-        anchor.view = view
-        anchor.title = title
-    }
+/// The look of a hover label, for the AppKit and the SwiftUI label. The sizes are at 12; the detail grows with the
+/// Interface font size, and the title is in the row's own font.
+enum HoverLabelMetrics {
+    /// The room around the texts.
+    static let padding = NSEdgeInsets(top: 4, left: 7, bottom: 5, right: 8)
+    /// The room between the title and the detail.
+    static let spacing: CGFloat = 2
+    static let cornerRadius: CGFloat = 6
+    /// The detail is in the system font, in the secondary text colour.
+    static let detailFontSize: CGFloat = 10.5
+    /// The border is the text colour at this opacity, one point wide inside the label's edge.
+    static let borderOpacity = 0.12
 }
 
-private struct HoverAnchorKey: EnvironmentKey {
-    static let defaultValue: HoverAnchor? = nil
-}
+/// A row's hover label in AppKit, as SwiftUI draws it for a SwiftUI row: the row's title on one line, in its font, over
+/// the detail, both whole, with the room of `HoverLabelMetrics` around them, on the regular material with continuous
+/// corners and a faint border. To accessibility each text is a static text with the text as its value.
+final class HoverLabelView: NSView {
+    private let material = NSVisualEffectView()
+    private let border = HoverLabelBorderView()
+    private let title = SidebarLabel()
+    private let detail = SidebarLabel()
+    private let scale: CGFloat
 
-extension EnvironmentValues {
-    fileprivate var hoverAnchor: HoverAnchor? {
-        get { self[HoverAnchorKey.self] }
-        set { self[HoverAnchorKey.self] = newValue }
-    }
-}
-
-private struct HoverLabelModifier: ViewModifier {
-    let detail: String
-    let onlyWhenCutOff: Bool
-    let enabled: Bool
-
-    @State private var anchor = HoverAnchor()
-    @State private var hovering = false
-    @Environment(\.interfaceFontSize) private var fontSize
-
-    func body(content: Content) -> some View {
-        content
-            .environment(\.hoverAnchor, anchor)
-            .onHover { inside in
-                hovering = inside
-                update()
-            }
-            .onChange(of: enabled) { _, _ in update() }
-            .onChange(of: onlyWhenCutOff) { _, _ in
-                HoverLabels.shared.leave(anchor)
-                update()
-            }
-            .onDisappear { HoverLabels.shared.leave(anchor) }
-    }
-
-    private func update() {
-        if hovering && enabled {
-            HoverLabels.shared.enter(anchor, detail: detail, onlyWhenCutOff: onlyWhenCutOff, fontSize: fontSize)
+    /// `title` is the row's title in its font, nil for a label without it.
+    init(title: (text: String, font: NSFont)?, detail: String, fontSize: InterfaceFontSize, scale: CGFloat) {
+        self.scale = scale
+        super.init(frame: .zero)
+        // SwiftUI's regular material: the popover's colours over what stands behind the label in its panel, active
+        // also while the panel is not the key window.
+        material.material = .popover
+        material.blendingMode = .withinWindow
+        material.state = .active
+        // Its corners clip the material's layers. A mask would draw the material's layers as one group, and its
+        // blend with what is under it would differ from SwiftUI's.
+        material.wantsLayer = true
+        material.layer?.cornerRadius = HoverLabelMetrics.cornerRadius
+        material.layer?.cornerCurve = .continuous
+        material.layer?.masksToBounds = true
+        for (label, text) in [(self.title, title?.text), (self.detail, detail)] {
+            label.text = text ?? ""
+            label.scale = scale
+            label.isHidden = label.text.isEmpty
+            label.setAccessibilityElement(true)
+            label.setAccessibilityRole(.staticText)
+            label.setAccessibilityValue(label.text)
         }
-        else { HoverLabels.shared.leave(anchor) }
+        if let title { self.title.font = title.font }
+        self.detail.font = .systemFont(ofSize: fontSize(HoverLabelMetrics.detailFontSize))
+        self.detail.ink = .secondary
+        subviews = [material, border, self.title, self.detail]
+        frame.size = fittingSize
+        layOut()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { true }
+
+    /// The texts that show, from the top.
+    private var texts: [SidebarLabel] { [title, detail].filter { !$0.isHidden } }
+
+    /// The texts whole, the room between them, and the padding around them.
+    override var fittingSize: NSSize {
+        let sizes = texts.map { $0.fit() }
+        let padding = HoverLabelMetrics.padding
+        let height = sizes.map(\.height).reduce(0, +) + HoverLabelMetrics.spacing * CGFloat(max(0, sizes.count - 1))
+        return NSSize(width: (sizes.map(\.width).max() ?? 0) + padding.left + padding.right,
+                      height: height + padding.top + padding.bottom)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        layOut()
+    }
+
+    /// The label stands at its fitting size in the middle of the view, on the pixel grid: the panel rounds its size
+    /// to whole points, and SwiftUI's hosting view sets its label in the middle of that room in the same way.
+    private func layOut() {
+        let size = fittingSize
+        let label = NSRect(x: ((bounds.width - size.width) / 2).rounded(toPixelsOf: scale),
+                           y: ((bounds.height - size.height) / 2).rounded(toPixelsOf: scale),
+                           width: size.width, height: size.height)
+        material.frame = label
+        border.frame = label
+        var top = label.minY + HoverLabelMetrics.padding.top
+        for text in texts {
+            text.frame = NSRect(origin: NSPoint(x: label.minX + HoverLabelMetrics.padding.left, y: top), size: text.fit())
+            top = text.frame.maxY + HoverLabelMetrics.spacing
+        }
     }
 }
 
-/// The title on one line, cut with "…". A hidden copy at its full width, laid out behind it, tells the anchor how wide
-/// the whole text is; the label compares that with the width the row gives the title.
-private struct HoverTitle: View {
-    let text: Text
-    @Environment(\.hoverAnchor) private var anchor
+/// The border of a hover label: the text colour at `HoverLabelMetrics.borderOpacity`, one point wide inside the edge,
+/// with continuous corners. The shape is a layer under the view's own: the driver's `snapshot` draws the corners of a
+/// view's own layer square.
+private final class HoverLabelBorderView: LayerColoredView {
+    private let ring = CALayer()
 
-    var body: some View {
-        text.lineLimit(1).truncationMode(.tail)
-            .background(alignment: .leading) {
-                text.lineLimit(1).fixedSize().hidden().allowsHitTesting(false).accessibilityHidden(true)
-                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { anchor?.fullWidth = $0 }
-            }
-            .background { if let anchor { HoverAnchorView(anchor: anchor, title: text).accessibilityHidden(true) } }
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        layer = CALayer()
+        wantsLayer = true
+        ring.borderWidth = 1
+        ring.cornerRadius = HoverLabelMetrics.cornerRadius
+        ring.cornerCurve = .continuous
+        layer?.addSublayer(ring)
     }
-}
 
-extension View {
-    /// Gives the row a hover label with `detail`, and with the row's full title over it when the row cuts the title
-    /// off. With `onlyWhenCutOff`, for a row that already shows its detail, the label opens only when the title is cut
-    /// off. `enabled: false` suppresses the label entirely. Draw the row's title with `hoverLabelTitle()`.
-    func hoverLabel(detail: String, onlyWhenCutOff: Bool = false, enabled: Bool = true) -> some View {
-        modifier(HoverLabelModifier(detail: detail, onlyWhenCutOff: onlyWhenCutOff, enabled: enabled))
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        LayerGlide.withoutActions { ring.frame = bounds }
     }
-}
 
-extension Text {
-    /// The title of a row with a `hoverLabel`, on one line and cut with "…". The label aligns with it, and shows this
-    /// same text, in its font, when the row cuts it off.
-    func hoverLabelTitle() -> some View { HoverTitle(text: self) }
+    override func colorLayers() {
+        ring.borderColor = NSColor.labelColor.faded(HoverLabelMetrics.borderOpacity).cgColor
+    }
 }

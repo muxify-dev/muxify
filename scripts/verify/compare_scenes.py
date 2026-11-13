@@ -11,6 +11,8 @@ A scene has a `name` for `make compare SCENE=`, a line `shows` for the report, a
 
 - `fixture(s)` makes what the scene needs in its Sandbox before the app starts: tmux Sessions, Topic records, folders.
   It runs once, for both versions.
+- `others`, when the scene has it, names parts outside the area's list whose rows the gate compares in this scene
+  only, such as the hover label's panel, `hover-label`.
 - `shots()` gives (name, arrange) pairs, in their order. The run calls `arrange(view)` for one version of the area
   (`View` in compare.py), then takes the picture and the dump of that shot. It calls every arrange again for the
   other version, so an arrange leaves tmux as it found it, or sets it again. The first arrange starts the app with
@@ -39,6 +41,12 @@ SHELL = '/bin/zsh -f'
 # What the Pane of an Agent runs. A Pane at a plain shell runs no Agent (`Agent.runs` in MuxifyCore), so the list shows
 # no mark for it.
 AGENT_PROGRAM = 'sleep 3600'
+# HoverLabels.delay in Sources/Muxify/UI/HoverLabel.swift.
+HOVER_DELAY = 0.4
+# How long a hover scene waits for its label. The user's windows can cover the App Window whole for a while, for
+# example a window that fills the screen, and then the app's views get no hover (README, "Do not take focus").
+UNCOVER_WAIT = 60
+LONG_WINDOW = 'a-window-name-far-too-long-for-any-sidebar-row-to-show-whole'
 
 
 class Area(NamedTuple):
@@ -454,7 +462,7 @@ class Bench:
              'that card\'s header stuck under the block while its rows and the other Benched cards scroll under it.')
 
     LINE = 'topics-bench-line'
-    # Card Hints do not show: task 14 of the set remove-swiftui compares the Hints of the cards and the Open Place.
+    # Card Hints do not show: `topics-hints` compares the Hints of the cards and of the Open Place.
     CONFIG = 'topics:\n  in_play: 2\nhints:\n  cards: { always: false, hold: false }\n'
 
     def fixture(self, s):
@@ -629,6 +637,134 @@ class SettledGroup:
         view.read_actions(self.GROUP, 'card-' + self.CARD, self.CARD)
 
 
+class TopicsHints:
+    name = 'topics-hints'
+    shows = ('Hints in the Topics list with `topics.in_play: 2`: a Pinned card with a long title, the open card of the '
+             'Location\'s Topic with its Window rows, an Open Place, a Guest Topic and a Locked Session as a Guest. First '
+             'the keys at rest, as the Config shows card and Window Hints at all times; then the badges while Control is '
+             'held, over the end of the long title and in place of the Guest marks; then the Window rows\' badges while '
+             'Command is held; last the Window rows of the No Topic card while Command is held.')
+    # A hold shows its Hints at once, so a shot does not wait out a delay.
+    CONFIG = ('topics:\n  in_play: 2\nhints:\n  hold_delay: 0\n  cards: { always: true, hold: true }\n'
+              '  windows: { always: true, hold: true }\n')
+
+    def fixture(self, s):
+        topic(s, 'birch', 'Birch, a Pinned Topic whose title is long enough to reach its Hint', order=0, pinned=True)
+        self.session, self.windows = topic(s, 'atlas', 'Atlas', ('one', 'two', 'three'), order=1)
+        # The second In Play place, after Atlas.
+        TopicRecords(s.root/'state/muxify').set_open_places([dict(id='hints-place', order=1.5)])
+        topic(s, 'cedar', 'Cedar', order=2, guest=True)
+        self.lock, _ = locked(s, 'dune', 3)
+        self.loose, self.loose_windows = session(s, 'loose', ('main', 'logs'))
+        self.cards = ['hint-topic-birch', 'hint-topic-atlas', 'hint-open-place-2', 'hint-topic-cedar', 'hint-locked-' + self.lock]
+
+    def shots(self):
+        return [('at-all-times', self.at_all_times), ('control-held', self.control_held),
+                ('command-held', self.command_held), ('no-topic-command-held', self.no_topic)]
+
+    def hold(self, view, modifier):
+        view.s.act('action', 'quick-switch-input', 'Release modifiers')
+        if modifier:
+            view.s.act('action', 'quick-switch-input', 'Hold ' + modifier)
+
+    def values(self, view, keys, rows):
+        return {key: view.value(key, rows) for key in keys}
+
+    def wait_hints(self, view, keys, shown, what):
+        view.wait(lambda rows: all(shown(value) for value in self.values(view, keys, rows).values()),
+                  lambda: '%s: their values are %s' % (what, self.values(view, keys, view.s.rows())))
+
+    def at_all_times(self, view):
+        view.launch(config(more=self.CONFIG))
+        view.go(self.windows[0])
+        fresh_shell(view.s, self.windows[0])
+        self.hold(view, None)
+        windows = ['hint-window-' + window for window in self.windows]
+        self.wait_hints(view, self.cards + windows, lambda value: value and not value.startswith(('⌃', '⌘')),
+                        'the cards, the Open Place and the Window rows do not show their keys at rest')
+        view.wait(lambda rows: view.value('topic-cedar', rows) == 'collapsed, Guest'
+                  and view.value('locked-' + self.lock, rows) == 'collapsed, Guest',
+                  lambda: 'the Guests are not closed Guests: %s' % self.values(view, ['topic-cedar', 'locked-' + self.lock], view.s.rows()))
+
+    def control_held(self, view):
+        # The cards' shortcuts are ⌃1 to ⌃9 (Keybinds.swift).
+        self.hold(view, 'Control')
+        self.wait_hints(view, self.cards, lambda value: value.startswith('⌃'),
+                        'the cards and the Open Place do not show their badges while Control is held')
+
+    def command_held(self, view):
+        # The Windows' shortcuts are ⌘1 to ⌘9.
+        self.hold(view, 'Command')
+        self.wait_hints(view, ['hint-window-' + window for window in self.windows], lambda value: value.startswith('⌘'),
+                        'the Window rows do not show their badges while Command is held')
+
+    def no_topic(self, view):
+        self.hold(view, None)
+        view.go(self.loose_windows[0])
+        fresh_shell(view.s, self.loose_windows[0])
+        header = 'no-topic-session-' + self.loose
+        view.wait(lambda rows: view.value(header, rows).startswith('expanded')
+                  and all(view.s.has('topic-window-' + window, rows) for window in self.loose_windows),
+                  'the No Topic card is not open with its Window rows')
+        self.hold(view, 'Command')
+        self.wait_hints(view, ['hint-window-' + window for window in self.loose_windows], lambda value: value.startswith('⌘'),
+                        'the Window rows of the No Topic card do not show their badges while Command is held')
+        self.hold(view, None)
+
+
+class TopicsHover:
+    name = 'topics-hover'
+    shows = ('A hovered Window row of the Location\'s open Topic card whose title is cut off, with its hover label: the '
+             'SwiftUI panel over the SwiftUI row, the AppKit panel over the AppKit row.')
+    # The gate compares the label's panel too: its frame is the label's size and place.
+    others = ('hover-label',)
+
+    def fixture(self, s):
+        self.session, (self.short, self.long) = topic(s, 'atlas', 'Atlas', ('short', LONG_WINDOW), order=0)
+
+    def shots(self):
+        return [('topics-hover', self.hover)]
+
+    def hover(self, view):
+        view.launch(config())
+        view.go(self.short)
+        fresh_shell(view.s, self.short)
+        key = 'topic-window-' + self.long
+        view.wait(lambda rs: view.s.has(key, rs), 'the list has no Window row to hover')
+        view.rest()
+        # A row that the list lays out again loses the pointer that the driver gave it, and opens no label. So the
+        # pointer goes to the row again, each time after the label had its time to open. The driver gives no pointer
+        # to an App Window that other windows cover whole, so the scene also waits here for the user to uncover it.
+        last = {}
+        def label_opens():
+            if view.s.has('hover-label'):
+                return True
+            last.update(error=None)
+            last.update(view.s.driver('hover', key))
+        wait(label_opens, lambda: 'no hover label opened over the Window row, in the %s list%s'
+             % (view.side.version, ': ' + last['error'] if last.get('error') else ''), seconds=UNCOVER_WAIT,
+             step=HOVER_DELAY + .6)
+        place = view.s.tmux('display-message', '-p', '-t', self.long, '#{session_name}:#{window_index}') + ' — '
+        texts = lambda rs: hover_label(view, rs) or []
+        view.wait(lambda rs: len(texts(rs)) == 2 and texts(rs)[0] == LONG_WINDOW and texts(rs)[1].startswith(place),
+                  lambda: 'the hover label does not show the whole title over the place: %s' % texts(view.s.rows()))
+
+
+def hover_label(view, rows):
+    """The texts of the open hover label, from the top; None when none is open."""
+    ids = view.s.ids(rows)
+    if 'hover-label' not in ids:
+        return None
+    texts = []
+    for row in rows[ids.index('hover-label') + 1:]:
+        if row.get('accessibilityRole') == 'AXWindow':
+            break
+        text = row.get('accessibilityValue') or row.get('accessibilityLabel')
+        if row.get('accessibilityRole') == 'AXStaticText' and text:
+            texts.append(text)
+    return texts
+
+
 # The launch arguments of every scene of the Topics list: the Sidebar shows, with Topics.
 TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics']
 
@@ -636,6 +772,7 @@ TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWor
 AREAS = [
     Area(name='topics', title='Topics list', list='topics-list', default=TOPICS_LIST_DEFAULT, args=TOPICS_ARGS,
          shown=lambda s: s.topics_list(), scenes=[TopicCards(), LockedCards(), TopicOpen(), NoTopicCard(), TopicsStuckHeader(),
-                                                    TopicTags(), Bench(), TopicOverflow(), SettledGroup()],
+                                                    TopicTags(), Bench(), TopicOverflow(), SettledGroup(), TopicsHints(),
+                                                    TopicsHover()],
          others=('topic-groups',)),
 ]
