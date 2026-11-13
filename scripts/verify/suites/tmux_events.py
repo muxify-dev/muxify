@@ -24,11 +24,15 @@ class TmuxEvents(unittest.TestCase):
     def setUpClass(cls):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(s.teardown)
-        # No tmux server at launch: the app starts one with its own Session.
+        # The app makes no Session on an empty server, it offers Start a Session…, and starts its control client
+        # only while the user has a Session.
+        s.tmux('new-session', '-d', '-s', 'main', '/bin/sh')
         s.launch()
 
     def setUp(self):
-        # A check that kills the app leaves the next one without it.
+        # A check that ends the Sessions or kills the app leaves the next one without them.
+        if self.s.tmux_ok('has-session', '-t', '=main').returncode:
+            self.s.tmux('new-session', '-d', '-s', 'main', '/bin/sh')
         if not alive(self.s.pid):
             self.s.launch()
 
