@@ -62,7 +62,7 @@ final class TmuxServerBinaryTests: XCTestCase {
         let server = TmuxServer(socketPath: socket)
         let executable = try server.invocation(["list-sessions"]).executable
         XCTAssertTrue(same(executable, copy), executable)
-        XCTAssertEqual(server.snapshot().windows.map(\.sessionName), ["work"])
+        XCTAssertEqual(try server.snapshot().windows.map(\.sessionName), ["work"])
     }
 
     func testTheLocalServerRunsTheBinaryOfTheDefaultSocketsServer() throws {
@@ -70,7 +70,7 @@ final class TmuxServerBinaryTests: XCTestCase {
         try startServer(from: copy, onSocket: false)
         XCTAssertTrue(same(TmuxServer.local.binary, copy), TmuxServer.local.binary ?? "nil")
         XCTAssertTrue(same(TmuxServer(configPath: "/dev/null").binary, copy))
-        XCTAssertEqual(TmuxServer.local.snapshot().windows.map(\.sessionName), ["work"])
+        XCTAssertEqual(try TmuxServer.local.snapshot().windows.map(\.sessionName), ["work"])
     }
 
     func testAClientInASessionOfAServerRunsThatServersBinary() throws {
@@ -106,5 +106,49 @@ final class TmuxServerBinaryTests: XCTestCase {
         }
         XCTAssertEqual(answers.count, 24)
         XCTAssertTrue(answers.allSatisfy { same($0, copy) }, "\(answers)")
+    }
+
+    func testWithNoSocketFileTheSnapshotIsEmptyAndTheSearchedBinaryRuns() throws {
+        let server = TmuxServer(socketPath: socket)
+        XCTAssertEqual(server.binary, Tmux.binary)
+        let snapshot = try server.snapshot()
+        XCTAssertFalse(snapshot.serverRunning)
+        XCTAssertTrue(snapshot.windows.isEmpty)
+    }
+
+    func testASocketFileThatNoServerListensOnIsNoServer() throws {
+        let copy = try copyOfTmux(named: "tmux")
+        try startServer(from: copy)
+        let pid = try XCTUnwrap(Int32(CommandRunner().run(CommandInvocation(executable: copy, arguments: ["-S", socket, "display-message", "-p", "#{pid}"]))
+            .trimmingCharacters(in: .whitespacesAndNewlines)))
+        // A killed server leaves its socket file behind. tmux answers a refused connection with "no server running".
+        kill(pid, SIGKILL)
+        let deadline = Date().addingTimeInterval(5)
+        while kill(pid, 0) == 0, Date() < deadline { usleep(10_000) }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: socket))
+
+        let server = TmuxServer(socketPath: socket)
+        XCTAssertEqual(server.binary, Tmux.binary)
+        let snapshot = try server.snapshot()
+        XCTAssertFalse(snapshot.serverRunning)
+        XCTAssertTrue(snapshot.windows.isEmpty)
+    }
+
+    func testAServerThatTmuxCannotReachMakesTheSnapshotFailNamingTheServersBinary() throws {
+        let copy = try copyOfTmux(named: "tmux")
+        try startServer(from: copy)
+        XCTAssertEqual(chmod(socket, 0), 0)
+
+        let server = TmuxServer(socketPath: socket)
+        do {
+            _ = try server.snapshot()
+            XCTFail("the snapshot did not throw")
+        } catch let TmuxError.serverFailed(binary, _, stderr) {
+            XCTAssertTrue(same(binary, copy), binary)
+            XCTAssertTrue(stderr.contains("Permission denied"), stderr)
+            XCTAssertTrue(TmuxError.serverFailed(binary: binary, status: 1, stderr: stderr).localizedDescription.contains(binary))
+        } catch {
+            XCTFail("\(error)")
+        }
     }
 }

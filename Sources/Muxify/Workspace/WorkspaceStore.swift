@@ -611,9 +611,15 @@ final class WorkspaceStore {
             let environment = generation
             let tty = clientTTY ?? surface?.ttyName
             Task {
-                let snapshot = await Task.detached { TmuxServer.app.snapshot() }.value
+                let read = await Task.detached { Result { try TmuxServer.app.snapshot() } }.value
                 guard generation == environment, palette.invocation == token,
                       case .move(let draft) = palette.flow else { return }
+                let snapshot: TmuxSnapshot
+                do { snapshot = try read.get() } catch {
+                    palette.close()
+                    showTopicFailure(error)
+                    return
+                }
                 let windowID = snapshot.clients.first { $0.tty == tty }?.windowID ?? window.id
                 guard var source = snapshot.windows.first(where: { $0.id == windowID }) else {
                     palette.close()
@@ -886,10 +892,13 @@ final class WorkspaceStore {
                     // A new tmux Window or Session names no Topic and leaves the Sidebar in its mode.
                     if change.topicID != nil { sidebarMode = .topics }
                     moveFocusIntoWindow()
-                    if surface == nil || surface?.processExited == true,
-                       let window = windows.first(where: { $0.id == id.rawValue })
-                        ?? TmuxServer.app.snapshot().windows.first(where: { $0.id == id.rawValue }) {
-                        route(.attach(id), target: Target(window))
+                    if surface == nil || surface?.processExited == true {
+                        do {
+                            if let window = try windows.first(where: { $0.id == id.rawValue })
+                                ?? TmuxServer.app.snapshot().windows.first(where: { $0.id == id.rawValue }) {
+                                route(.attach(id), target: Target(window))
+                            }
+                        } catch { showTopicFailure(error) }
                     }
                 case .emptyTopic?, nil:
                     break

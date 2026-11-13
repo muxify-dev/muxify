@@ -65,9 +65,18 @@ public struct TmuxServer: Sendable {
         return try CommandRunner().run(invocation(arguments), timeout: 120, environment: environment)
     }
 
-    /// The server's Windows, clients and Panes; an empty snapshot when the server does not run.
-    public func snapshot() -> TmuxSnapshot {
-        (try? Tmux.readSnapshot(using: run))
-            ?? TmuxSnapshot(windows: [], clients: [], panes: [], lastWindowID: nil, serverRunning: false)
+    /// The server's Windows, clients and Panes. A server with no Session, or none at all, gives an empty snapshot;
+    /// any other failure, such as a tmux of another version, throws with the tmux that failed.
+    public func snapshot() throws -> TmuxSnapshot { try snapshot(using: run) }
+
+    /// `snapshot()` with the caller's own way to run a tmux command on this server, such as the app's cancellable one.
+    public func snapshot(using run: ([String]) throws -> String) throws -> TmuxSnapshot {
+        do {
+            return try Tmux.readSnapshot(using: run)
+        } catch let error as TmuxError where error.indicatesNoSessions {
+            return TmuxSnapshot(windows: [], clients: [], panes: [], lastWindowID: nil, serverRunning: !error.indicatesNoServer)
+        } catch TmuxError.failed(let status, let stderr) {
+            throw TmuxError.serverFailed(binary: binary ?? "tmux", status: status, stderr: stderr)
+        }
     }
 }

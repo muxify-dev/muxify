@@ -19,7 +19,7 @@ struct SessionListInvocation: Equatable {
         let config = try await ConfigSessions.load(paths.configFile)
         let records = try TopicStore(paths: paths).read().records
         let labels = TopicLabels(records)
-        let windows = TmuxServer.local.snapshot().windows
+        let windows = try TmuxServer.local.snapshot().windows
         var names = Set<String>()
         var rows: [Entry] = []
         for window in windows where names.insert(window.sessionName).inserted {

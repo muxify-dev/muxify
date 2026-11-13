@@ -216,9 +216,12 @@ public struct TmuxSnapshot {
     public var agents: [Agent] { Agent.list(panes: panes, windows: windows) }
 }
 
-public enum TmuxError: Error, Equatable, CustomStringConvertible {
+public enum TmuxError: Error, Equatable, CustomStringConvertible, LocalizedError {
     case notInstalled
     case failed(status: Int32, stderr: String)
+    /// A read of the server failed with something other than "no server" or "no sessions". Names the tmux that ran, because the
+    /// usual cause is a tmux of another version than the server's.
+    case serverFailed(binary: String, status: Int32, stderr: String)
     case cancelled
     case timedOut
     case notReady
@@ -237,10 +240,13 @@ public enum TmuxError: Error, Equatable, CustomStringConvertible {
             || (message.contains("error connecting") && message.contains("no such file or directory"))
     }
 
+    public var errorDescription: String? { description }
+
     public var description: String {
         switch self {
         case .notInstalled: return "tmux was not found on this Mac"
         case .failed(let status, let stderr): return "tmux exited with \(status): \(stderr)"
+        case .serverFailed(let binary, let status, let stderr): return "\(binary) could not read the tmux server and exited with \(status): \(stderr)"
         case .cancelled: return "The Environment connection was closed"
         case .timedOut: return "The tmux command timed out"
         case .notReady: return "Waiting for the SSH connection and remote tmux client"
