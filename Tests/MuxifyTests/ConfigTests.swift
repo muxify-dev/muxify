@@ -59,18 +59,18 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(remote.browser.history)
     }
 
-    func testDiagnosticsAreOnByDefaultAndOnlyTheLocalConfigTurnsThemOff() throws {
-        XCTAssertEqual(try load("").diagnostics, Config.Diagnostics(enabled: true, displayLinks: false))
+    func testDiagnosticsAreOffByDefaultAndOnlyTheLocalConfigTurnsThemOn() throws {
+        XCTAssertEqual(try load("").diagnostics, Config.Diagnostics(enabled: false, displayLinks: false))
         XCTAssertTrue(Config.template.contains("# diagnostics:\n"))
-        XCTAssertTrue(Config.template.contains("#   enabled: true"))
+        XCTAssertTrue(Config.template.contains("#   enabled: false"))
         XCTAssertTrue(Config.template.contains("#   display_links: false"))
-        let off = try load("diagnostics:\n  enabled: false")
-        XCTAssertFalse(off.diagnostics.enabled)
-        XCTAssertTrue(off.problems.isEmpty)
+        let on = try load("diagnostics:\n  enabled: true")
+        XCTAssertTrue(on.diagnostics.enabled)
+        XCTAssertTrue(on.problems.isEmpty)
         let invalid = try load("diagnostics:\n  enabled: yes please\n  folder: /tmp")
-        XCTAssertTrue(invalid.diagnostics.enabled)
+        XCTAssertFalse(invalid.diagnostics.enabled)
         XCTAssertEqual(invalid.problems.map(\.message), ["diagnostics.enabled: expected a boolean", "unknown key \"diagnostics.folder\""])
-        let remote = try Config.load(path: root, isRemote: true) { _ in "diagnostics:\n  enabled: false\n  display_links: true" }.get()
+        let remote = try Config.load(path: root, isRemote: true) { _ in "diagnostics:\n  enabled: true\n  display_links: true" }.get()
         XCTAssertEqual(remote.diagnostics, Config.Diagnostics())
         XCTAssertTrue(remote.problems.isEmpty)
     }
@@ -107,7 +107,7 @@ final class ConfigTests: XCTestCase {
 
     func testDisplayLinksAreOffByDefaultAndTheLocalConfigTurnsThemOn() throws {
         let on = try load("diagnostics:\n  display_links: true")
-        XCTAssertEqual(on.diagnostics, Config.Diagnostics(enabled: true, displayLinks: true))
+        XCTAssertEqual(on.diagnostics, Config.Diagnostics(enabled: false, displayLinks: true))
         XCTAssertTrue(on.problems.isEmpty)
         for value in ["yes please", "1", "[true]"] {
             let invalid = try load("diagnostics:\n  display_links: \(value)")

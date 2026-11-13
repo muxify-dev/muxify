@@ -1,5 +1,7 @@
 # Diagnostics is on by default and keeps a week
 
+> **Default superseded by [ADR-0081](0081-diagnostics-is-off-until-the-config-turns-it-on.md):** `diagnostics.enabled` defaults to false again, and only the Local Config turns it on. The week of day files, the 3 days of raw samples and the size guards still apply while it is on.
+
 Diagnostics used to be off unless the Config turned it on, and was documented as costing nothing while off. It was off for both CPU problems the user hit: the Working marks that kept the app at 40–55% CPU at idle, and the Sidebar swipe that held it at about 42% in bursts (ADR 0074). Each one took a hand-run profiling session, with the user repeating the problem on cue, before anything explained it. Evidence that is only collected after someone notices a problem comes too late. So `diagnostics.enabled` now defaults to true, in Release builds too, and the Diagnostics log keeps one file per local day for 7 days. Its raw samples are kept for 3 days. An agent can then read any day back, through `muxify diagnostics summary`, and find what was costly and what the user was doing at the time.
 
 ## Considered Options

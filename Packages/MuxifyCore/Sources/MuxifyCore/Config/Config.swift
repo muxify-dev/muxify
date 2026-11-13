@@ -49,12 +49,12 @@ public struct Config: Equatable {
     /// The `diagnostics` section: the app logs freezes, CPU and errors to a file (docs/development.md). It is about
     /// the app on this Mac, so only the Local Config sets it.
     public struct Diagnostics: Equatable {
-        /// `diagnostics.enabled`: on by default.
-        public var enabled = true
+        /// `diagnostics.enabled`: off by default.
+        public var enabled = false
         /// `diagnostics.display_links`: the display-link probe, off by default, since it fills the log fast.
         public var displayLinks = false
 
-        public init(enabled: Bool = true, displayLinks: Bool = false) {
+        public init(enabled: Bool = false, displayLinks: Bool = false) {
             self.enabled = enabled
             self.displayLinks = displayLinks
         }
@@ -519,8 +519,8 @@ public struct Config: Equatable {
         # diagnostics:
         #   # Logs each freeze, with a sample of the app taken during it, CPU
         #   # and memory each minute, and errors to ~/Library/Logs/Muxify,
-        #   # one file a day, kept for 7 days. On by default.
-        #   enabled: true
+        #   # one file a day, kept for 7 days. Off by default.
+        #   enabled: false
         #   # Logs each AppKit animation and the display links it leaves
         #   # running. It fills the log fast, so it is off by default.
         #   display_links: false

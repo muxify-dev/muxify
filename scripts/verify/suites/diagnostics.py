@@ -1,4 +1,4 @@
-"""Diagnostics: on by default, the app logs into the sandbox's logs folder, one Diagnostics log file a day, with a
+"""Diagnostics: once the Config turns it on, the app logs into the sandbox's logs folder, one Diagnostics log file a day, with a
 `minute` record each minute, a `burst` record for each Burst and `digest` records for each sample
 (docs/development.md)."""
 
@@ -12,6 +12,8 @@ from scripts.verify.suites.sidebar_swipe import SwipeSteps
 from scripts.verify.topic_records import TopicRecords
 
 CONFIG = 'diagnostics:\n  enabled: %s\nsessions:\n  diagnostics_probe: 1\n'
+# Diagnostics is off by default, so every class here turns it on.
+ON = 'diagnostics:\n  enabled: true\n'
 CLI = DEBUG_APP/'Contents/Resources/bin/muxify'
 # The libraries of SwiftUI's view graph. A digest of SwiftUI-bound work leads with one of them.
 SWIFTUI = {'AttributeGraph', 'SwiftUI', 'SwiftUICore'}
@@ -223,7 +225,7 @@ class DiagnosticsBodies(SwipeSteps, unittest.TestCase):
         cls.logs = s.root/'logs'
         project = s.root/'project'
         project.mkdir()
-        (s.root/'config/muxify/config.yaml').write_text('sidebar:\n  agents: false\n  animate_switching: true\n')
+        (s.root/'config/muxify/config.yaml').write_text(ON + 'sidebar:\n  agents: false\n  animate_switching: true\n')
         store = TopicRecords(s.root/'state/muxify')
         for topic in cls.TOPICS:
             store.put(dict(id=topic, title='Bodies ' + topic[-1], slug=topic))
@@ -272,7 +274,7 @@ class DiagnosticsIdleCost(unittest.TestCase):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1] + '_idle')
         cls.addClassCleanup(s.teardown)
         cls.logs = s.root/'logs'
-        (s.root/'config/muxify/config.yaml').write_text('sidebar:\n  agents_scope:\n    topics: all\n    sessions: all\n')
+        (s.root/'config/muxify/config.yaml').write_text(ON + 'sidebar:\n  agents_scope:\n    topics: all\n    sessions: all\n')
         project = s.root/'projects/working'
         project.mkdir(parents=True)
         cls.panes = []
@@ -328,7 +330,7 @@ class DiagnosticsSwipeCost(SwipeSteps, unittest.TestCase):
         cls.logs = s.root/'logs'
         project = s.root/'project'
         project.mkdir()
-        (s.root/'config/muxify/config.yaml').write_text('sidebar:\n  agents: false\n  animate_switching: true\n')
+        (s.root/'config/muxify/config.yaml').write_text(ON + 'sidebar:\n  agents: false\n  animate_switching: true\n')
         store = TopicRecords(s.root/'state/muxify')
         cls.topics = ['swipe-cost-%02d' % number for number in range(SWIPE_CARDS)]
         for topic in cls.topics:

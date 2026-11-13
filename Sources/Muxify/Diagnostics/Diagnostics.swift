@@ -2,7 +2,7 @@ import AppKit
 import MuxifyCore
 import os
 
-/// On unless the Config's `diagnostics.enabled` is false. Then it writes to the Diagnostics log, one
+/// Off unless the Config's `diagnostics.enabled` is true. Then it writes to the Diagnostics log, one
 /// ~/Library/Logs/Muxify/muxify-YYYY-MM-DD.log a day (`DiagnosticsLog`), what helps explain a freeze, a crash or a
 /// slow app: each freeze, with a sample of the process taken during it; a `minute` record each minute (CPU, the
 /// main thread's busy share, memory, the same for its commands, WebKit and the tmux server, the user's input, the
