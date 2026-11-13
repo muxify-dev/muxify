@@ -39,8 +39,8 @@ class SidebarPagerScroll(unittest.TestCase):
     def setUpClass(cls):
         cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1])
         cls.addClassCleanup(s.teardown)
-        # Diagnostics is on by default; the display-link probe that writes the `animation #` lines is not.
-        (s.root/'config/muxify/config.yaml').write_text('diagnostics:\n  display_links: true\n')
+        # Diagnostics and the display-link probe that writes the `animation #` lines are both off by default.
+        (s.root/'config/muxify/config.yaml').write_text('diagnostics:\n  enabled: true\n  display_links: true\n')
         cls.logs = s.root/'logs'
         cls.sessions, cls.windows = [], []
         for number in range(SESSIONS):

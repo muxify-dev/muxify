@@ -169,15 +169,14 @@ matters only in shells outside that server. See
 
 ## Diagnostics
 
-Diagnostics is on by default, in Release builds too, so that the evidence for a
-freeze, a crash or too much CPU exists before anyone notices the problem. The
-Local Config can turn it off; a remote Config can neither turn it on nor off.
-Like the rest of the Config, it applies when you save the file, with no
-restart.
+Diagnostics is off by default. Turn it on in the Local Config to collect the
+evidence for a freeze, a crash or too much CPU (ADR 0081); a remote Config can
+neither turn it on nor off. Like the rest of the Config, it applies when you
+save the file, with no restart.
 
 ```yaml
 diagnostics:
-  enabled: false        # on by default
+  enabled: true         # off by default
   display_links: true   # off by default
 ```
 

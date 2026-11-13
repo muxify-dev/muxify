@@ -94,7 +94,9 @@ class SidebarSwipeBurst(SwipeSteps, unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         project = s.root/'project'
         project.mkdir()
-        (s.root/'config/muxify/config.yaml').write_text('sidebar:\n  agents: false\n  animate_switching: true\n')
+        # BodyCount counts only while Diagnostics is on, which it is not by default.
+        (s.root/'config/muxify/config.yaml').write_text('diagnostics:\n  enabled: true\n'
+                                                        'sidebar:\n  agents: false\n  animate_switching: true\n')
         store = TopicRecords(s.root/'state/muxify')
         cls.topics = ['burst-%02d' % number for number in range(BURST_SESSIONS)]
         for topic in cls.topics:

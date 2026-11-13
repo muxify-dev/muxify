@@ -57,8 +57,12 @@ def front_app():
     return match.group(1) if match else None
 
 
+# Each check and its result go to the Diagnostics log, which is off by default.
+DIAGNOSTICS = 'diagnostics:\n  enabled: true\n'
+
+
 def start_app(test_class, name, config):
-    """A Sandbox app on its own feed, with `config` as its Config."""
+    """A Sandbox app on its own feed, with Diagnostics on and `config` as the rest of its Config."""
     test_class.s = s = Sandbox(name)
     # Sparkle keeps a download and its installer's files under the run's own bundle id; after the teardown.
     for folder in ('Caches', 'HTTPStorages'):
@@ -67,7 +71,7 @@ def start_app(test_class, name, config):
     test_class.feed = FeedServer()
     test_class.feed.start()
     test_class.addClassCleanup(test_class.feed.stop)
-    (s.root/'config/muxify/config.yaml').write_text(config)
+    (s.root/'config/muxify/config.yaml').write_text(DIAGNOSTICS + config)
     s.app_env['MUXIFY_UPDATE_FEED_URL'] = test_class.feed.url
     s.tmux('new-session', '-d', '-s', 'update', '-c', str(s.root), '/bin/sh')
     test_class.front = front_app()
@@ -365,7 +369,7 @@ class Update(unittest.TestCase):
 
 
 class BackgroundCheck(unittest.TestCase):
-    """The default Config: a background check at launch, the first launch included, and on a channel change."""
+    """The default update Config: a background check at launch, the first launch included, and on a channel change."""
 
     @classmethod
     def setUpClass(cls):
@@ -417,7 +421,7 @@ class BackgroundCheck(unittest.TestCase):
         requests = self.feed.requests
         # The feed answers late, so "Checking for Updates…" would show if the check showed it.
         self.feed.delay = 3
-        (self.s.root/'config/muxify/config.yaml').write_text('update:\n  channel: tip\n')
+        (self.s.root/'config/muxify/config.yaml').write_text(DIAGNOSTICS + 'update:\n  channel: tip\n')
         shown = self.wait_button('Update Available: 0.2.0', seconds=30)
         self.assertEqual([text for text in shown if text is not None], ['Update Available: 0.2.0'], shown)
         self.assertGreater(self.feed.requests, requests, 'the channel change read no feed')

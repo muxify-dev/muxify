@@ -10,7 +10,7 @@ Run from the repo root after `make build`:
 import time
 import unittest
 
-from scripts.verify.sandbox import frame
+from scripts.verify.sandbox import frame, wait
 from scripts.verify.topics_sidebar import TopicsSidebar
 
 LINE = 'topics-bench-line'
@@ -23,6 +23,15 @@ REST_LIMIT = 20
 
 
 class TopicsBenchScrollSidebar(TopicsSidebar):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # BodyCount counts only while Diagnostics is on, which it is not by default.
+        cls.config_text += 'diagnostics:\n  enabled: true\n'
+        cls.config.write_text(cls.config_text)
+        wait(lambda: any('on: pid %d' % cls.s.pid in path.read_text(errors='replace')
+                         for path in (cls.s.root/'logs').glob('muxify-*.log')), 'Diagnostics did not turn on', 10)
+
     def long_bench(self, prefix):
         """A shown Bench of BENCHED closed cards under one card In Play, scrolled to its top. Returns the identifiers of
         the Benched cards in list order."""
