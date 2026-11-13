@@ -1,5 +1,7 @@
 # In Play is the only Topics mode
 
+> **Amended:** the default of `topics.in_play` is now 3. A Config that does not set it, or sets a value that is not valid, gets 3.
+
 `topics.in_play` was optional, and it was off by default. So the Topics list had two modes. Without the key, the Sidebar showed every card in one list, a Locked Session kept a place among the Topics, and `topics.insert_position` chose where a new Topic went. With the key, the Sidebar showed the In Play places, the Guests and the Bench ([ADR-0055](0055-the-sidebar-shows-only-the-topics-in-play.md), [ADR-0064](0064-in-play-places-stay-open-and-guests-show-in-their-own-section.md)). Each rule of the list had two answers, and each new rule had to give both. The phone showed both layouts too.
 
 We make In Play the only mode. The Topics list always has places, Guests and a Bench.

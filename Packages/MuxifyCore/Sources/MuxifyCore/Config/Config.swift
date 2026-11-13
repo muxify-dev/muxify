@@ -107,7 +107,7 @@ public struct Config: Equatable {
         public var sessionOrder = SessionOrder.oldestFirst
         /// Nil: Tags are off, and `#` in New Topic is plain title text.
         public var tags: ConfigTags?
-        public static let defaultInPlay = 5
+        public static let defaultInPlay = 3
         /// The number of In Play places. The other regular cards that are not Pinned wait on the Bench.
         public var inPlay = defaultInPlay
         /// The days that Forget Settled Older Than… offers first. It forgets nothing by itself.
@@ -549,7 +549,7 @@ public struct Config: Equatable {
         #   # the Topics in these places and the Guests. The other Topics wait on
         #   # the Bench, behind one line that shows them. New and returning
         #   # Settled Topics go to the top of the Bench.
-        #   in_play: 5
+        #   in_play: 3
         #   # The number of days that Forget Settled Older Than… offers first.
         #   # It forgets the Settled Topics that were Settled more days ago.
         #   # Muxify never forgets a Topic by itself.

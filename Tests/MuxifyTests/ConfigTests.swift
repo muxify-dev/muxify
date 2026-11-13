@@ -1396,13 +1396,13 @@ final class ConfigTests: XCTestCase {
         XCTAssertNil(config.paletteKeybinds.action(for: trigger("alt+8")))
     }
 
-    func testTopicsInPlayTakesAWholeNumberOfOneOrMoreAndIsFiveWhenAbsent() throws {
-        XCTAssertEqual(try load("").topics.inPlay, 5)
-        XCTAssertEqual(try load("topics:\n  in_play: 3").topics.inPlay, 3)
-        XCTAssertEqual(try load("topics:\n  in_play:").topics.inPlay, 5)
+    func testTopicsInPlayTakesAWholeNumberOfOneOrMoreAndIsThreeWhenAbsent() throws {
+        XCTAssertEqual(try load("").topics.inPlay, 3)
+        XCTAssertEqual(try load("topics:\n  in_play: 4").topics.inPlay, 4)
+        XCTAssertEqual(try load("topics:\n  in_play:").topics.inPlay, 3)
         for value in ["0", "-2", "2.5", "three", "true"] {
             let bad = try load("topics:\n  in_play: " + value)
-            XCTAssertEqual(bad.topics.inPlay, 5, "a bad value does not turn In Play off: " + value)
+            XCTAssertEqual(bad.topics.inPlay, 3, "a bad value does not turn In Play off: " + value)
             XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "topics.in_play: expected a whole number of 1 or more")], value)
         }
     }
