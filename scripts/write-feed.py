@@ -4,9 +4,9 @@
 The EdDSA private key comes on this script's standard input and goes on to `sign_update --ed-key-file -`
 the same way, so it never reaches an argument, the environment or a file. For example:
 
-    printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | scripts/write-feed.py --channel tip --zip Muxify-tip-a1b2c3d-arm64.zip \\
+    printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | scripts/write-feed.py --channel tip --zip Muxify-tip-01234-a1b2c3d-arm64.zip \\
         --build 1234 --version a1b2c3d --date 2026-11-11T09:30:00Z \\
-        --download-url https://github.com/muxify-dev/muxify/releases/download/tip/Muxify-tip-a1b2c3d-arm64.zip \\
+        --download-url https://github.com/muxify-dev/muxify/releases/download/tip/Muxify-tip-01234-a1b2c3d-arm64.zip \\
         --notes-url https://github.com/muxify-dev/muxify/commit/<sha> --output tip.xml
 
 A failing `sign_update` fails the script and writes no feed.

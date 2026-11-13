@@ -47,7 +47,8 @@ COMMIT="$(git rev-parse HEAD)"
 SHORT_SHA="$(git rev-parse --short=7 HEAD)"
 if [ "$KIND" = tip ]; then
   VERSION="$SHORT_SHA"
-  ZIP="Muxify-tip-$SHORT_SHA-arm64.zip"
+  # GitHub lists a release's assets by name, so the zero-padded build number lists Tip Builds in build order.
+  ZIP="$(printf 'Muxify-tip-%05d-%s-arm64.zip' "$BUILD_NUMBER" "$SHORT_SHA")"
 else
   VERSION="${TAG#v}"
   ZIP="Muxify-$VERSION-arm64.zip"
@@ -155,17 +156,18 @@ Third-party license notices are inside
 \`Muxify.app/Contents/Resources/ThirdPartyNotices\`.
 NOTES
 
-python3 - "$DIST/build-info.json" "$TAG" "$KIND" "$BUILD_NUMBER" "$VERSION" "$IDENTITY_NAME" "$COMMIT" "$GHOSTTY_COMMIT" <<'PY'
+python3 - "$DIST/build-info.json" "$TAG" "$KIND" "$BUILD_NUMBER" "$VERSION" "$ZIP" "$IDENTITY_NAME" "$COMMIT" "$GHOSTTY_COMMIT" <<'PY'
 import json
 import subprocess
 import sys
 from pathlib import Path
-path, tag, kind, build, version, signing, commit, ghostty = sys.argv[1:]
+path, tag, kind, build, version, zip_name, signing, commit, ghostty = sys.argv[1:]
 metadata = {
     "tag": tag,
     "kind": kind,
     "build": build,
     "short_version": version,
+    "zip": zip_name,
     "commit": commit,
     "source_dirty": bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip()),
     "ghostty_commit": ghostty,

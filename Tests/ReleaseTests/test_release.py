@@ -161,6 +161,7 @@ if [ "$1" = -dvv ]; then echo "Authority=Muxify Release Signing" >&2; fi''')
         self.assertEqual(metadata["kind"], "release")
         self.assertEqual(metadata["build"], "1234")
         self.assertEqual(metadata["short_version"], "1.2.3")
+        self.assertEqual(metadata["zip"], "Muxify-1.2.3-arm64.zip")
         self.assertEqual(metadata["signing"], "Muxify Release Signing")
         self.assertEqual(metadata["commit"], "abcdef1234567890abcdef1234567890abcdef12")
         self.assertFalse(metadata["source_dirty"])
@@ -173,15 +174,16 @@ if [ "$1" = -dvv ]; then echo "Authority=Muxify Release Signing" >&2; fi''')
         self.assertIn("MARKETING_VERSION=1.2.3-beta.4\n", (self.root / "xcode-args.txt").read_text())
         self.assertEqual(json.loads((dist / "build-info.json").read_text())["short_version"], "1.2.3-beta.4")
 
-    def test_package_names_a_tip_build_by_its_short_sha(self):
+    def test_package_names_a_tip_build_by_its_padded_build_number_and_short_sha(self):
         self.package_fixture()
         dist = self.package("tip")
-        self.assertEqual([path.name for path in dist.glob("*.zip")], ["Muxify-tip-abcdef1-arm64.zip"])
+        self.assertEqual([path.name for path in dist.glob("*.zip")], ["Muxify-tip-01234-abcdef1-arm64.zip"])
         args = (self.root / "xcode-args.txt").read_text()
         self.assertIn("MARKETING_VERSION=abcdef1\n", args)
         self.assertIn("CURRENT_PROJECT_VERSION=1234\n", args)
         metadata = json.loads((dist / "build-info.json").read_text())
         self.assertEqual((metadata["tag"], metadata["kind"], metadata["short_version"]), ("tip", "tip", "abcdef1"))
+        self.assertEqual(metadata["zip"], "Muxify-tip-01234-abcdef1-arm64.zip")
         self.assertIn("# Muxify tip build abcdef1", (dist / "RELEASE-NOTES.md").read_text())
 
     def test_build_number_is_the_commit_count_whatever_build_number_says(self):
@@ -331,7 +333,7 @@ if [ "$1" = -dvv ]; then echo "Authority=Muxify Release Signing" >&2; printf "%2
     def feed_fixture(self):
         shutil.copy(ROOT / "scripts/write-feed.py", self.root / "scripts/write-feed.py")
         shutil.copy(ROOT / "scripts/sparkle-version.env", self.root / "scripts/sparkle-version.env")
-        self.zip = self.write("dist/Muxify-tip-abcdef1-arm64.zip", "zip fixture\n")
+        self.zip = self.write("dist/Muxify-tip-01234-abcdef1-arm64.zip", "zip fixture\n")
         # Records what sign_update got, and prints its signing line as the real one does.
         self.fake_tool("sign_update", f'''
 printf "%s\\n" "$@" > sign-update-args.txt
@@ -343,7 +345,7 @@ echo "sparkle:edSignature=\\"{self.SIGNATURE}\\" length=\\"$(wc -c < "${{@: -1}}
         options = {
             "channel": channel, "zip": str(self.zip), "build": "1234", "version": version,
             "date": "2026-11-11T09:30:00Z",
-            "download-url": "https://github.com/muxify-dev/muxify/releases/download/tip/Muxify-tip-abcdef1-arm64.zip",
+            "download-url": "https://github.com/muxify-dev/muxify/releases/download/tip/Muxify-tip-01234-abcdef1-arm64.zip",
             "notes-url": "https://github.com/muxify-dev/muxify/commit/abcdef1234567890abcdef1234567890abcdef12",
             "output": str(self.root / "feeds/tip.xml"),
         }
@@ -373,7 +375,7 @@ echo "sparkle:edSignature=\\"{self.SIGNATURE}\\" length=\\"$(wc -c < "${{@: -1}}
                          "https://github.com/muxify-dev/muxify/commit/abcdef1234567890abcdef1234567890abcdef12")
         enclosure = item.find("enclosure")
         self.assertEqual(enclosure.get("url"),
-                         "https://github.com/muxify-dev/muxify/releases/download/tip/Muxify-tip-abcdef1-arm64.zip")
+                         "https://github.com/muxify-dev/muxify/releases/download/tip/Muxify-tip-01234-abcdef1-arm64.zip")
         self.assertEqual(enclosure.get(f"{s}edSignature"), self.SIGNATURE)
         self.assertEqual(enclosure.get("length"), str(self.zip.stat().st_size))
         # No delta, phased rollout, critical update, major upgrade, or release notes that Sparkle would download.

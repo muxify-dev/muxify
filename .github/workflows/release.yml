@@ -238,13 +238,12 @@ jobs:
           dist="build/releases/$PACKAGE_TAG"
           build="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["build"])' "$dist/build-info.json")"
           version="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["short_version"])' "$dist/build-info.json")"
+          zip="$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["zip"])' "$dist/build-info.json")"
           if [ "$PACKAGE_TAG" = tip ]; then
             channel=tip
-            zip="Muxify-tip-$version-arm64.zip"
             notes="https://github.com/$GITHUB_REPOSITORY/commit/$(git rev-parse HEAD)"
           else
             channel=stable
-            zip="Muxify-$version-arm64.zip"
             notes="https://github.com/$GITHUB_REPOSITORY/releases/tag/$PACKAGE_TAG"
           fi
           printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | scripts/write-feed.py --channel "$channel" --zip "$dist/$zip" \
@@ -414,14 +413,17 @@ jobs:
 
       - name: Upload the Tip Build to the tip prerelease
         run: |
-          notes="Tip Builds of Muxify, one from each push to master; the newest is from ${GITHUB_SHA}. Muxify offers them when the Config sets update.channel to tip."
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release edit "$RELEASE_TAG" --prerelease --latest=false --title "$RELEASE_TITLE" --notes "$notes"
-          else
+          zip="$(jq -r .zip dist/build-info.json)"
+          url="https://github.com/$GH_REPO/releases/download/$RELEASE_TAG/$zip"
+          # GitHub lists assets by name, so the zero-padded build numbers list Tip Builds oldest first, and the notes
+          # above them link the newest. The notes change after the upload, so the link never points at a missing zip.
+          notes="**Newest: [$zip]($url)**, from ${GITHUB_SHA::7}."$'\n\n'"Tip Builds of Muxify, one from each push to master, listed oldest first. Muxify offers them when the Config sets update.channel to tip."
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --verify-tag --prerelease --latest=false \
               --title "$RELEASE_TITLE" --notes "$notes"
           fi
-          gh release upload "$RELEASE_TAG" --clobber dist/Muxify-tip-*-arm64.zip
+          gh release upload "$RELEASE_TAG" --clobber "dist/$zip"
+          gh release edit "$RELEASE_TAG" --prerelease --latest=false --title "$RELEASE_TITLE" --notes "$notes"
 
       - name: Keep the ten newest Tip Builds
         run: |

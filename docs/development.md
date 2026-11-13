@@ -355,7 +355,9 @@ for the updater:
 
 - `tip` packages a **Tip Build**. Its short version
   (`CFBundleShortVersionString`) is the short commit SHA, and its ZIP is
-  `Muxify-tip-<short-sha>-arm64.zip`.
+  `Muxify-tip-<build>-<short-sha>-arm64.zip`, with the build number padded to
+  five digits. GitHub lists a release's assets by name, so the padding lists
+  Tip Builds oldest first.
 - `vX.Y.Z` or `vX.Y.Z-beta.N` packages a **Release**. Its short version is the
   tag without the `v`, and its ZIP is `Muxify-<version>-arm64.zip`.
 
@@ -501,7 +503,8 @@ publish it:
 
 - **A Tip Build** comes from every push to `master`. `publish-tip` uploads its
   ZIP to the rolling `tip` prerelease, moves the `tip` tag to the commit,
-  deletes all but the ten newest `Muxify-tip-*` ZIPs, then uploads `tip.xml` to
+  points the release notes at the new ZIP, deletes all but the ten newest
+  `Muxify-tip-*` ZIPs, then uploads `tip.xml` to
   the rolling `appcast` prerelease. It is independent of `publish-cli`, which
   publishes the Host CLI to `cli-latest` (ADR 0076) as long as the tests pass,
   even when packaging fails.
