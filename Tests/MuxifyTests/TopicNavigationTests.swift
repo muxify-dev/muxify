@@ -9,8 +9,11 @@ final class TopicNavigationTests: XCTestCase {
                    storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, sessionPath: "/work/app")
     }
 
-    private func model(_ records: [TopicRecord], _ windows: [TmuxWindow], _ selection: TopicSelection) -> TopicsModel {
-        TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
+    private func model(_ records: [TopicRecord], _ windows: [TmuxWindow], _ selection: TopicSelection,
+                       inPlay: Int = Config.Topics.defaultInPlay) -> TopicsModel {
+        var config = Config()
+        config.topics.inPlay = inPlay
+        return TopicsModel(records: records, windows: windows, config: config, selection: selection,
                         location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window))
     }
 
@@ -71,7 +74,7 @@ final class TopicNavigationTests: XCTestCase {
             record.order = Double(index)
             return record
         }
-        let result = model(records, [], TopicSelection())
+        let result = model(records, [], TopicSelection(), inPlay: 5)
         XCTAssertEqual(result.nextTopic(after: .topic("b"), skipping: ["c", "d"]), .topic("e"), "the nearest row below that stays")
         XCTAssertEqual(result.nextTopic(after: .topic("d"), skipping: ["e", "c"]), .topic("a"), "else the first In Play card that stays")
         XCTAssertEqual(result.nextTopic(after: .topic("a"), skipping: ["b", "c", "d", "e"]), .noTopic)

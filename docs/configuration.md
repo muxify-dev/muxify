@@ -240,15 +240,15 @@ banner.
 
 ```yaml
 topics:
-  in_play: 5
+  in_play: 3
 ```
 
 `topics.in_play` is the number of In Play places. The Sidebar shows the Pinned
 Topics, the Topics in these places and the Guests. These cards are In Play.
 The other open Topics are the Bench. They keep their place in the list, their
 Sessions and their Agents, but they hide behind one line under the In Play
-cards. The value is a whole number of 1 or more, and 5 when you do not set it.
-Any other value appears in the Config problems banner, and Muxify uses 5.
+cards. The value is a whole number of 1 or more, and 3 when you do not set it.
+Any other value appears in the Config problems banner, and Muxify uses 3.
 
 In Play is the only way the Sidebar lists the Topics. An older Muxify showed
 every card in one list until you set `in_play`. The first time this Muxify
