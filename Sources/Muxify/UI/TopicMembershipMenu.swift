@@ -20,7 +20,7 @@ import MuxifyCore
 
     /// The Topic membership items for the source: Move to Topic…, New Topic from this Session or Window, for a Window
     /// New Topic from this Pane, and for a Session in a Topic Remove from Topic and Remove from Topic and Kill…. They
-    /// are off while a Topic change runs. The AppKit Sessions list lists them too (ADR 0074).
+    /// are off while a Topic change runs.
     @MainActor static func items(store: WorkspaceStore, source: TopicMembershipPlan.Source) -> [SidebarMenuItem] {
         let menu = TopicMembershipMenu(store: store, source: source)
         let enabled = !store.changingTopic

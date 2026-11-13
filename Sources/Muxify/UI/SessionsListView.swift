@@ -126,11 +126,7 @@ final class SessionsListView: NSView, SidebarList {
             }
             layOut()
         }
-        if opens, let layer = document.layer {
-            LayerGlide.run(under: layer, duration: CardMotion.openDuration, timing: CAMediaTimingFunction(name: .easeOut), change: change)
-        } else {
-            change()
-        }
+        LayerGlide.run(under: document.layer, opensCard: opens, change: change)
     }
 
     private func card(of sessionID: String) -> SessionCardView {

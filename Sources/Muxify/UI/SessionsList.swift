@@ -37,9 +37,9 @@ import SwiftUI
     }
 }
 
-/// The context menus of the Sessions list and the named accessibility actions they give. The SwiftUI Session card of the
-/// Topics list reads the card's and the header's too (ADR 0074). Each item starts what it names; Rename Window…, the Move items and the two Kill items open their step in
-/// the palette's view (ADR 0014).
+/// The context menus of the Sessions list and the named accessibility actions they give. The No Topic card of both
+/// Topics lists reads the card's and the header's too (ADR 0074). Each item starts what it names; Rename Window…, the
+/// Move items and the two Kill items open their step in the palette's view (ADR 0014).
 @MainActor enum SessionsListMenus {
     /// The menu of a Session card, which is also the card's named actions: Go to Session, the Topic membership items
     /// for a Session, and the lock item.

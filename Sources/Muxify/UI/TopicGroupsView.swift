@@ -186,11 +186,7 @@ private final class TopicGroupBlockView: NSView {
             if document.subviews != views { document.subviews = views }
             layOutCards()
         }
-        if opens, let layer = document.layer {
-            LayerGlide.run(under: layer, duration: CardMotion.openDuration, timing: CAMediaTimingFunction(name: .easeOut), change: change)
-        } else {
-            change()
-        }
+        LayerGlide.run(under: document.layer, opensCard: opens, change: change)
     }
 
     private func card(of id: TopicGroupID) -> TopicCardView {

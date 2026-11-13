@@ -255,11 +255,7 @@ final class TopicsListView: NSView, SidebarList {
             // A lifted card finds its places among the items again, and a dropped one lands once they show it there.
             cardDrag.show()
         }
-        if opens, let layer = document.layer {
-            LayerGlide.run(under: layer, duration: CardMotion.openDuration, timing: CAMediaTimingFunction(name: .easeOut), change: change)
-        } else {
-            change()
-        }
+        LayerGlide.run(under: document.layer, opensCard: opens, change: change)
         // After the layout of the change, in which the card the user leaves closed and the block got shorter with it.
         if let jumpedTo { reveal(jumpedTo) }
     }

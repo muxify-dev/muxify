@@ -18,6 +18,14 @@ enum LayerGlide {
         run(under: root, motion: .curve(duration: duration, timing: timing), change: change)
     }
 
+    /// Makes `change`, which opens or closes a card of an AppKit list when `opensCard`. Then the layers under `root`
+    /// glide as the card opens, with ease-out over `CardMotion.openDuration`, as SwiftUI's `Animation.cardOpens` moves
+    /// them. Otherwise, or with no layer, the change shows at once.
+    static func run(under root: CALayer?, opensCard: Bool, change: () -> Void) {
+        guard opensCard, let root else { return change() }
+        run(under: root, duration: CardMotion.openDuration, timing: CAMediaTimingFunction(name: .easeOut), change: change)
+    }
+
     /// `run` with the layers moving by `motion`, such as a spring.
     static func run(under root: CALayer, motion: LayerMotion, change: () -> Void) {
         var before: [ObjectIdentifier: Place] = [:]
