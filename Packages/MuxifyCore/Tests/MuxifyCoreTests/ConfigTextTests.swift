@@ -136,8 +136,10 @@ final class ConfigSettingTests: XCTestCase {
         XCTAssertTrue(check.isDefault)
         let channel = try XCTUnwrap(setting("update.channel"))
         XCTAssertEqual(channel.choices, ["stable", "tip"])
-        XCTAssertTrue(channel.isDefault)
+        // Unset, it is the build's own channel, so the menu shows Not set and stable is only an example.
+        XCTAssertFalse(channel.isDefault)
         XCTAssertTrue(channel.help.contains("tip offers every Tip Build"))
+        XCTAssertTrue(channel.help.contains("Unset, a Release reads stable and a Tip"))
     }
 
     func testAnExampleIsNotADefault() throws {

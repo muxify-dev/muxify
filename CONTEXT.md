@@ -454,7 +454,7 @@ A stretch of at least a few seconds in which the app uses a large share of a cor
 _Avoid_: spike, CPU spike, hot spot
 
 **Update Channel**:
-The feed that Muxify's updater reads: stable, which offers only Releases, or tip, which offers Tip Builds. The local Config sets it under `update.channel`. A beta is part of a Release's version name only, never an Update Channel.
+The feed that Muxify's updater reads: stable, which offers only Releases, or tip, which offers Tip Builds. The local Config sets it under `update.channel`; without it, a Tip Build reads tip and a Release reads stable. A beta is part of a Release's version name only, never an Update Channel.
 _Avoid_: beta channel, nightly, track, ring
 
 **Release**:

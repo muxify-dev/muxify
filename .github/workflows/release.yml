@@ -417,7 +417,7 @@ jobs:
           url="https://github.com/$GH_REPO/releases/download/$RELEASE_TAG/$zip"
           # GitHub lists assets by name, so the zero-padded build numbers list Tip Builds oldest first, and the notes
           # above them link the newest. The notes change after the upload, so the link never points at a missing zip.
-          notes="**Newest: [$zip]($url)**, from ${GITHUB_SHA::7}."$'\n\n'"Tip Builds of Muxify, one from each push to master, listed oldest first. Muxify offers them when the Config sets update.channel to tip."
+          notes="**Newest: [$zip]($url)**, from ${GITHUB_SHA::7}."$'\n\n'"Tip Builds of Muxify, one from each push to master, listed oldest first. A Tip Build offers the next one; a Release offers them when the Config sets update.channel to tip."
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --verify-tag --prerelease --latest=false \
               --title "$RELEASE_TITLE" --notes "$notes"

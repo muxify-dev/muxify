@@ -20,7 +20,8 @@ import Sparkle
     static func startIfConfigured(update: Config.Update) -> SparkleUpdater? {
         guard let feed = UpdateFeed(info: Bundle.main.infoDictionary, environment: ProcessInfo.processInfo.environment)
         else { return nil }
-        let updater = SparkleUpdater(feed: feed, model: UpdateModel())
+        let info = Bundle.main.infoDictionary
+        let updater = SparkleUpdater(feed: feed, model: UpdateModel(buildChannel: UpdateFeed.buildChannel(info: info)))
         UpdateModel.shared = updater.model
         updater.start()
         updater.model.apply(update)

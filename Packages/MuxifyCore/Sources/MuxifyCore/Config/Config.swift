@@ -68,15 +68,16 @@ public struct Config: Equatable {
         /// `update.check`: a background check at launch and every 24 hours. On by default; Check for Updates
         /// works either way.
         public var check = true
-        /// `update.channel`: which feed the updater reads.
-        public var channel = Channel.stable
+        /// `update.channel`: which feed the updater reads. Nil reads the build's own channel: a Release reads
+        /// stable and a Tip Build tip (`UpdateFeed.buildChannel`).
+        public var channel: Channel?
 
         /// The Update Channel: Releases only, or every Tip Build too.
         public enum Channel: String, Equatable {
             case stable, tip
         }
 
-        public init(check: Bool = true, channel: Channel = .stable) {
+        public init(check: Bool = true, channel: Channel? = nil) {
             self.check = check
             self.channel = channel
         }
@@ -530,8 +531,9 @@ public struct Config: Equatable {
         #   # way. On by default.
         #   check: true
         #   # stable offers Releases; tip offers every Tip Build, a build of
-        #   # each commit on master. Moving back to stable keeps a Tip Build
-        #   # until a Release is newer.
+        #   # each commit on master. Unset, a Release reads stable and a Tip
+        #   # Build reads tip. Moving to stable keeps a Tip Build until a
+        #   # Release is newer.
         #   channel: stable
         #
         # notifications:

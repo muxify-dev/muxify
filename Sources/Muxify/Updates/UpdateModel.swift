@@ -46,6 +46,13 @@ enum UpdateFeed: Equatable, CustomStringConvertible {
 
     static let environmentKey = "MUXIFY_UPDATE_FEED_URL"
     static let baseURLKey = "MuxifyUpdateFeedBaseURL"
+    static let channelKey = "MuxifyUpdateChannel"
+
+    /// The channel that packaging stamps into the build: tip in a Tip Build, stable in a Release. A build without
+    /// the stamp reads stable. It is the channel when the Config leaves `update.channel` unset.
+    static func buildChannel(info: [String: Any]?) -> Config.Update.Channel {
+        (info?[channelKey] as? String).flatMap(Config.Update.Channel.init(rawValue:)) ?? .stable
+    }
 
     init?(info: [String: Any]?, environment: [String: String]) {
         if let override = environment[Self.environmentKey], !override.isEmpty {
@@ -122,8 +129,11 @@ final class UpdateModel {
     /// Each "No Updates Available" gets its own number, so a late timer leaves a newer one alone.
     @ObservationIgnored private var notFoundShown = 0
     @ObservationIgnored private let log: (String) -> Void
+    /// The build's own channel, which a Config without `update.channel` reads.
+    private let buildChannel: Config.Update.Channel
 
-    init(log: @escaping (String) -> Void = { Diagnostics.write($0) }) {
+    init(buildChannel: Config.Update.Channel = .stable, log: @escaping (String) -> Void = { Diagnostics.write($0) }) {
+        self.buildChannel = buildChannel
         self.log = log
     }
 
@@ -216,25 +226,26 @@ final class UpdateModel {
 
     // MARK: Background checks
 
-    /// The Update Channel whose feed the updater reads.
-    var channel: Config.Update.Channel { settings?.channel ?? .stable }
+    /// The Update Channel whose feed the updater reads: the Config's, or else the build's own.
+    var channel: Config.Update.Channel { settings?.channel ?? buildChannel }
 
     /// The local Config's `update` section, at launch and at each Config reload. With `check` on, a background check
-    /// runs at once and then every 24 hours; turning it off stops them. A changed channel checks at once.
+    /// runs at once and then every 24 hours; turning it off stops them. A changed channel checks at once; setting
+    /// the build's own channel changes nothing.
     func apply(_ update: Config.Update) {
-        let previous = settings
+        let previous = settings.map { (check: $0.check, channel: channel) }
         settings = update
-        guard update != previous else { return }
+        guard previous?.check != update.check || previous?.channel != channel else { return }
         guard update.check else {
-            log("update: background checks off, \(update.channel.rawValue) channel")
+            log("update: background checks off, \(channel.rawValue) channel")
             schedule?.invalidate()
             schedule = nil
             return
         }
         if previous?.check == true {
-            log("update: channel \(update.channel.rawValue)")
+            log("update: channel \(channel.rawValue)")
         } else {
-            log("update: background checks on, every 24 hours, \(update.channel.rawValue) channel")
+            log("update: background checks on, every 24 hours, \(channel.rawValue) channel")
             schedule = Timer.scheduledTimer(withTimeInterval: 60 * 60, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.backgroundCheckIfDue() }
             }

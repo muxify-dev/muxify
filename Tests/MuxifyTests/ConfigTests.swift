@@ -75,15 +75,15 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(remote.problems.isEmpty)
     }
 
-    func testBackgroundUpdateChecksAreOnByDefaultOnTheStableChannel() throws {
-        XCTAssertEqual(try load("").update, Config.Update(check: true, channel: .stable))
+    func testBackgroundUpdateChecksAreOnByDefaultOnTheBuildsOwnChannel() throws {
+        XCTAssertEqual(try load("").update, Config.Update(check: true, channel: nil))
         XCTAssertTrue(Config.template.contains("# update:\n"))
         XCTAssertTrue(Config.template.contains("#   check: true"))
         XCTAssertTrue(Config.template.contains("#   channel: stable"))
         let set = try load("update:\n  check: false\n  channel: tip")
         XCTAssertEqual(set.update, Config.Update(check: false, channel: .tip))
         XCTAssertTrue(set.problems.isEmpty)
-        XCTAssertEqual(try load("update:\n  channel: stable").update, Config.Update())
+        XCTAssertEqual(try load("update:\n  channel: stable").update, Config.Update(channel: .stable))
     }
 
     func testABadUpdateValueIsAProblemAndKeepsTheDefault() throws {
@@ -93,7 +93,7 @@ final class ConfigTests: XCTestCase {
                                                          "unknown key \"update.interval\""])
         for value in ["1", "[tip]", "true", "Tip"] {
             let wrong = try load("update:\n  channel: \(value)")
-            XCTAssertEqual(wrong.update.channel, .stable, value)
+            XCTAssertNil(wrong.update.channel, value)
             XCTAssertEqual(wrong.problems.map(\.message), ["update.channel: expected stable or tip"], value)
         }
         XCTAssertEqual(try load("update: true").problems.count, 1)

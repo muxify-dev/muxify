@@ -214,11 +214,19 @@ if [ "$1" = -dvv ]; then echo "Authority=Muxify Release Signing" >&2; fi''')
         dist = self.package("v1.2.3")
         info = self.zipped_info(dist / "Muxify-1.2.3-arm64.zip")
         self.assertEqual(info["MuxifyUpdateFeedBaseURL"], self.FEED_BASE_URL)
+        self.assertEqual(info["MuxifyUpdateChannel"], "stable")
         self.assertEqual(info["SUPublicEDKey"], self.PUBLIC_KEY)
         # make install builds this same product, so it must stay without the stamps.
         built = plistlib.loads((self.root / self.BUILT_APP / "Contents/Info.plist").read_bytes())
         self.assertNotIn("MuxifyUpdateFeedBaseURL", built)
+        self.assertNotIn("MuxifyUpdateChannel", built)
         self.assertNotIn("SUPublicEDKey", built)
+
+    def test_a_tip_build_reads_the_tip_channel_by_default(self):
+        self.package_fixture()
+        dist = self.package("tip")
+        info = self.zipped_info(next(dist.glob("Muxify-tip-*-arm64.zip")))
+        self.assertEqual(info["MuxifyUpdateChannel"], "tip")
 
     def test_debug_and_install_builds_carry_no_update_stamps(self):
         for name in ["project.yml", "Makefile"]:
@@ -226,6 +234,7 @@ if [ "$1" = -dvv ]; then echo "Authority=Muxify Release Signing" >&2; fi''')
             with self.subTest(name=name):
                 self.assertNotIn("SUPublicEDKey", text)
                 self.assertNotIn("MuxifyUpdateFeedBaseURL", text)
+                self.assertNotIn("MuxifyUpdateChannel", text)
 
     def stamp_fixture(self, configuration):
         plist = self.root / "products/Muxify.app/Contents/Info.plist"
