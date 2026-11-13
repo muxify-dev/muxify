@@ -27,14 +27,15 @@ AREAS = {
         'SidebarAgentMark', 'SidebarHintView', 'SidebarRowView', 'SidebarLogo', 'LayerGlide', 'ObservedUpdate',
         'AgentMarkMetrics', 'WindowRowMetrics', 'PaneRowMetrics', 'SessionsListMetrics', 'WindowRowView',
         'PaneRowView', 'SessionsList', 'SidebarMenu', 'LayerColoredView', 'StackLayout', 'ListLift', 'CardMetrics',
-        'HintMetrics', 'HintPresentation', 'RowHoverLabel', 'HoverLabel', 'GitViewIconShape', 'SidebarList',
-        'SidebarListHost')],
-    'Topics list': [UI + name + '.swift' for name in ('TopicsListView', 'TopicCardView', 'TopicsListMetrics', 'CardHeaderView',
-                                                       'TopicCardMetrics', 'TopicsLineView', 'TopicCardRows',
-                                                       'SidebarTagsView', 'CardTagsMetrics', 'OpenPlaceView',
-                                                       'NSScrollView+Moves', 'BenchScroll', 'EdgePillView',
-                                                       'TopicsListScroll', 'TopicGroupsView', 'RememberedRowView',
-                                                       'TopicsListMenus')],
+        'HintMetrics', 'HintPresentation', 'GitViewIconShape', 'SidebarList', 'SidebarListHost')],
+    'Topics list': [UI + name + '.swift' for name in (
+        'TopicsListView', 'TopicCardView', 'TopicsListMetrics', 'CardHeaderView', 'TopicCardMetrics', 'TopicsLineView',
+        'TopicCardRows', 'SidebarTagsView', 'CardTagsMetrics', 'OpenPlaceView', 'NSScrollView+Moves', 'BenchScroll',
+        'EdgePillView', 'TopicsListScroll', 'TopicGroupsView', 'RememberedRowView', 'TopicsListMenus',
+        'TopicMembershipMenu', 'DropPlacement+Topics')],
+    # The panel of the hover labels of the AppKit rows, in both lists. The SwiftUI rows of the areas that have not
+    # moved keep their SwiftUI label, HoverLabelModifier.swift, which is no file of an area.
+    'Hover label panel': [UI + name + '.swift' for name in ('HoverLabel', 'RowHoverLabel')],
 }
 # The files of an area that may import SwiftUI for now, each with the task or stage that removes the import. A task
 # is one of the task set remove-swiftui (.cook/tasks/remove-swiftui/), which is stage 1.

@@ -494,8 +494,9 @@ class GitViewChanges(GitViewFixture):
         self.key('1')
         self.git('reset', '-q')
         self.addCleanup(self.git, 'add', 'staged.txt')
-        self.key('shift+r')
-        time.sleep(2)
+        # shift+a reads what is staged from the snapshot the Git View read last. Under load a read after R took longer
+        # than a fixed wait of 2 seconds, and shift+a found staged.txt still staged and asked.
+        self.wait_change('staged.txt', lambda row: self.status(row) == ' M', 'Changes still show staged.txt staged')
         self.key('shift+a')
         rs = self.s.wait_rows(lambda rs: self.s.has('git-write-error', rs), 'shift+a did not say why')
         self.assertIn('Nothing is staged', self.s.row('git-write-error', rs).get('accessibilityValue', ''))

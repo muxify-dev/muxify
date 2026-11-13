@@ -1,8 +1,9 @@
-import AppKit
-import SwiftUI
 import MuxifyCore
 
-struct TopicMembershipMenu: View {
+/// The Topic membership items of a Session or a Window, for the menus and named actions of the Sidebar's lists. Both
+/// Topics lists and the Sessions list read them through `TopicsListMenus` and `SessionsListMenus`, so the file needs no
+/// SwiftUI (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md).
+@MainActor struct TopicMembershipMenu {
     let store: WorkspaceStore
     let source: TopicMembershipPlan.Source
 
@@ -49,19 +50,8 @@ struct TopicMembershipMenu: View {
         return SidebarMenuItem(title: menu.moveTitle + "…", isEnabled: isEnabled) { menu.openMove() }
     }
 
-    var body: some View {
-        SidebarMenuButtons(SidebarMenu([Self.items(store: store, source: source)]))
-    }
-
     fileprivate func openMove() {
         store.palette.openMove(currentSource.window, scope: isSession ? .session : .window)
     }
 
-}
-
-extension View {
-    /// The named action of a Window row in the Topics list, which the AppKit list gives too (`TopicsListMenus`).
-    func topicMembershipActions(store: WorkspaceStore, window: TmuxWindow) -> some View {
-        accessibilityActions { SidebarMenuButtons(TopicsListMenus.windowActions(window, store: store)) }
-    }
 }

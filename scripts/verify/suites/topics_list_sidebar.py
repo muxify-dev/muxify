@@ -1,7 +1,7 @@
 """The Sidebar's two Topics lists: the SwiftUI list, and the AppKit list that replaces it
 (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md).
 
-The user default `topicsListAppKit` chooses the list: missing or false is the SwiftUI list, and true is the AppKit
+The user default `topicsListAppKit` chooses the list: missing or true is the AppKit list, and false is the SwiftUI
 list. A check stores it as a user does, with `defaults write` on the bundle id of this run's app copy. A launch
 argument hides the stored value from the app, so a check that stores the default first starts the app without that
 argument, also in a run with `TOPICS_LIST`.
@@ -61,7 +61,7 @@ SHELL = '/bin/zsh -f'
 CONFIG = 'sidebar:\n  agents: false\n'
 ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics']
 # What the app shows when nothing sets the user default.
-APP_DEFAULT = 'swiftui'
+APP_DEFAULT = 'appkit'
 # The Topics of the fixture: (id, title), in the Topic order.
 TOPICS = [('list-first', 'List first'), ('list-second', 'List second'), ('list-third', 'List third')]
 # How a card's header is pressed: by its accessibility action, and by a first click.
@@ -262,10 +262,17 @@ class TopicsListSidebar(unittest.TestCase):
         self.addCleanup(restore)
         self.config.write_text(CONFIG + '  panes: true\n')
 
-    def test_without_the_default_the_sidebar_shows_the_swiftui_list(self):
+    def test_without_the_default_the_sidebar_shows_the_appkit_list(self):
         self.write_default(None)
         self.start()
         self.assertEqual(self.s.topics_list(), APP_DEFAULT, 'a launch with no user default shows another Topics list')
+        self.show_mode('topics')
+        self.wait_cards()
+
+    def test_with_the_default_false_a_launch_shows_the_swiftui_list(self):
+        self.write_default(False)
+        self.start()
+        self.assertEqual(self.s.topics_list(), 'swiftui', 'a launch with the user default false shows another Topics list')
         self.show_mode('topics')
         self.wait_cards()
 
@@ -634,7 +641,9 @@ class TopicsListSidebar(unittest.TestCase):
         self.wait_list(APP_DEFAULT)
         self.show_mode('topics')
         app = self.s.pid
-        for value, version in ((True, 'appkit'), (False, 'swiftui'), (True, 'appkit'), (None, APP_DEFAULT)):
+        # False brings the SwiftUI list back, and a default that goes away brings the AppKit list again.
+        for value, version in ((False, 'swiftui'), (None, APP_DEFAULT), (False, 'swiftui'), (True, 'appkit'),
+                               (False, 'swiftui'), (None, APP_DEFAULT)):
             with self.subTest(default=value):
                 self.store_default(value)
                 self.wait_list(version)

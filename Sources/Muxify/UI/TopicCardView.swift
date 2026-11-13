@@ -209,8 +209,14 @@ final class TopicCardView: DragUnitView {
     private var body: any TopicCardBody { content?.remembered == nil ? rows : remembered }
 
     /// Shows the content. The colours of the border turn once when the Location comes to a card that already showed.
+    /// The same content in the same environment changes nothing, so a card draws again only when what it shows changed.
     func show(_ content: TopicCardContent, environment: SidebarListEnvironment) {
         guard content != self.content || environment != self.environment else { return }
+        #if DEBUG
+        // As the SwiftUI card's body counts itself: the driver's `counts` reads it, so a check proves that a scroll of
+        // the Bench draws no card again in either list.
+        BodyCount.tick("TopicCard")
+        #endif
         let came = self.content.map { !$0.holdsSelection && content.holdsSelection } ?? false
         let wasOpen = isOpen
         self.content = content

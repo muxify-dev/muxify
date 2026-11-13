@@ -116,8 +116,11 @@ class TopicsGroupsSidebar(TopicsSidebar):
         self.s.act('press', 'reopen-topic-group-settled')
         self.wait_session('alpha/group-settled')
         self.addCleanup(self.end_session, self.s.tmux('display-message', '-p', '-t', '=alpha/group-settled:', '#{session_id}'))
-        self.assertFalse(self.s.has('reopen-choice-reopen'), 'the Reopen link showed the Reopen choice')
+        # Once the App Window shows the new Session. The Empty Topic page offers the Reopen choice only while the app has
+        # not read the Topic's live Session yet, and tmux has the Session before the app's next read of it: under load a
+        # dump taken right after tmux had it still showed that page.
         self.s.wait_shown('=alpha/group-settled:')
+        self.assertFalse(self.s.has('reopen-choice-reopen'), 'the Reopen link showed the Reopen choice')
         latency, rs = self.rows_until(lambda rs: self.s.has('topic-group-settled', rs)
                                       and not self.grouped('topic-group-settled', 'settled-topics', rs))
         self.assertIsNotNone(latency, 'Reopen did not return the Topic to the Topics list; Topic rows %s' % self.topic_rows(rs))

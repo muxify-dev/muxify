@@ -6,7 +6,7 @@ import MuxifyCore
 enum TopicsListVersion: String {
     case swiftui, appkit
 
-    /// The user default that chooses the version: true is the AppKit list; missing or false is the SwiftUI list. It is
+    /// The user default that chooses the version: missing or true is the AppKit list; false is the SwiftUI list. It is
     /// not a Config key, because it goes away with the SwiftUI list.
     static let defaultsKey = "topicsListAppKit"
 
@@ -173,6 +173,10 @@ final class TopicsListView: NSView, SidebarList {
     /// `CardMotion.openDuration`, as the SwiftUI list animates them. When the Bench shows, the list keeps the card of the
     /// Location in its place.
     private func render() {
+        #if DEBUG
+        // As the SwiftUI list's body counts itself, so a check can wait until either list comes to rest.
+        BodyCount.tick("TopicsList")
+        #endif
         let themed = environment.appearance
         if appearance?.name != themed?.name { appearance = themed }
         let model = store.topics

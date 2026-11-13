@@ -1,7 +1,15 @@
-"""A long shown Bench scrolls smoothly: a scroll draws no Benched card again.
+"""A long shown Bench scrolls smoothly: a scroll draws no Benched card again, in either Topics list.
 
 The driver's `scroll` with `by` and `steps` moves the Topics list down in steps, one each tick, as a wheel does, and
 `counts` reads how often each counted view's body ran since the last reset (`BodyCount` in App/BodyCount.swift).
+
+The SwiftUI list counts the body of each Topic card, `TopicCard`, and of the list, `TopicsList`. The AppKit list has
+no bodies, so it counts under the same names where it does the same work: the list each time it shows the model again
+(`TopicsListView.render`), and a card each time it takes content that changed and lays itself out again
+(`TopicCardView.show`, past its guard for the same content). A card that only moves with the scroll, or whose header
+the list places again, does not count: in SwiftUI that is the geometry the list reads, not the card's body. So against
+either list the check proves the same: a scroll of the Bench makes no Benched card draw what it shows again. A change
+of one card's title after the scroll must count that card, so a count that never ticks cannot pass the check.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.topics_bench_scroll_sidebar
@@ -82,3 +90,10 @@ class TopicsBenchScrollSidebar(TopicsSidebar):
             cards, 2,
             'a scroll of %d points in %d steps ran TopicCard.body %d times (%.1f each step) over %d cards, in %.2f s; '
             'bodies each step: %s' % (BY, STEPS, cards, cards / STEPS, BENCHED + 1, scrolled['seconds'], per_step))
+        # The count counts: a new title of the last Benched card, which the scroll brought into view, draws that card again.
+        topic = bench[-1].removeprefix('topic-')
+        self.store.put(dict(id=topic, title='Renamed', slug=topic, order=BENCHED))
+        s.wait_rows(lambda rs: s.row(bench[-1], rs).get('accessibilityLabel') == 'Renamed',
+                    'the last Benched card did not take its new title')
+        self.assertGreaterEqual(s.driver('counts')['counts'].get('TopicCard', 0), 1,
+                                'a new title of a Benched card counted no TopicCard: the count does not count this list')

@@ -3,10 +3,255 @@
 The notes of the compare run (`make compare`, see `README.md` in this folder). The report shows each scene's section
 under the scene's pictures.
 
-The first section is the record of the pilot. Then each scene of an area that has two versions has one section, under
-the scene's name. A task that leaves a difference between the two versions in a scene writes it there, and why it
+The first two sections are the records of stage 1 and of the pilot. Then each scene of an area that has two versions
+has one section, under the scene's name. A task that leaves a difference between the two versions in a scene writes it there, and why it
 stays. A section with no text means no known difference. When the user signs an area off and its SwiftUI version is
 deleted, the sections of its scenes go with its scenes.
+
+## The record of stage 1: what the Topics list cost
+
+Stage 1 of ADR 0075 is the task set `remove-swiftui`: it retired the SwiftUI Sessions list, tied up the pilot's loose
+ends, and moved the Topics list and the hover label panel to AppKit. Task 17 made the AppKit Topics list the default;
+the user's sign-off, task 18, says go or no-go for stage 2. This note stays as the record of what the stage took. It is
+no scene's section, and the report does not show it.
+
+The lines were counted on the tree of task 17 by a one-off script, as the pilot's were counted (below). A "line" is
+every line of a file or of a declaration, with its doc comments and its blank lines. A "code line" is a line that is
+neither blank nor only a comment. A declaration runs from its top-level `struct`, `class`, `enum`, `extension` or
+`protocol` line, with the doc comments and attributes above it, to the next one. In a file that was there before the
+set, the lines written are the lines that `git diff` adds against the set's base, `cc306a5`.
+
+The AppKit code written for the Topics list: 4,631 lines, 3,330 of them code, in 12 new files, and changes to the
+pilot's views:
+
+- `StackDrag.swift` 1,123, `TopicsListView.swift` 751, `TopicCardRows.swift` 538, `TopicGroupsView.swift` 482,
+  `TopicCardView.swift` 454, `CardHeaderView.swift` 397, `SidebarTagsView.swift` 241, `EdgePillView.swift` 182,
+  `OpenPlaceView.swift` 154, `TopicsLineView.swift` 123, `RememberedRowView.swift` 98, `NSScrollView+Moves.swift` 88.
+- `StackDrag.swift` is the pilot's `SessionCardDrag.swift` (615 lines, 453 code), made the one drag of the Session
+  cards, the Session lines, the Window rows and the Topic cards, with the trades across the Guests and Bench lines.
+  The pilot's file is deleted.
+- The pilot's views changed to serve both lists: +521 lines (359 code) and −647 (505 code) in `SessionCardView`,
+  `SidebarRowView`, `WindowRowView`, `SidebarCardChrome`, `SessionsListView`, `SidebarHintView`, `SidebarLabel`,
+  `PaneRowView` and `SidebarAgentMark`. Most of the lines removed are the Session card's header, which became
+  `CardHeaderView`, the header of all three kinds of card.
+- Two small owners for every AppKit list: `SidebarList.swift` 34, the protocol and the values that the Sidebar hands
+  down, and `LayerColoredView.swift` 29, the one owner of the colouring of layers.
+
+The AppKit code written for the hover label panel: 161 lines, 113 code. `HoverLabelView` 80 and `HoverLabelBorderView`
+28 draw the label in the look of SwiftUI's material; `HoverLabelAnchor` 14 and `HoverLabelMetrics` 14 stand beside
+them in `HoverLabel.swift`, and `RowHoverAnchor` 25 in `RowHoverLabel.swift`. The panel itself, `HoverLabels`, was
+AppKit before the set; it now shows either label.
+
+Beside it, 1,193 lines (713 code) are the definitions that both versions read, in files without SwiftUI:
+`CardMetrics.swift` 226, `TopicsListMenus.swift` 218, `TopicsListMetrics.swift` 208, `StackLayout.swift` 159,
+`ListLift.swift` 94, `TopicCardMetrics.swift` 85, `CardTagsMetrics.swift` 73, `HintMetrics.swift` 42,
+`GitViewIconShape.swift` 22, and 66 lines added to `TopicsListScroll`, `AgentMarkMetrics` and five more. Task 03 moved
+the pilot's shared definitions from SwiftUI files into `CardMetrics`, `StackLayout`, `ListLift`, `HintMetrics` and
+`GitViewIconShape`, so these hold older lines too. The models changed by 7 lines (`SettledAge.nextMidnight`). The unit
+tests: +835 −796 lines in `Tests/`; task 02 deleted the tests that read accessors only tests used, and the new tests
+check arithmetic and menus that have no view.
+
+The SwiftUI code that the AppKit code mirrors: 1,781 lines, 1,400 of them code. These are the declarations that draw
+the SwiftUI Topics list and that the pilot did not count:
+
+- `SidebarView.swift`: `TopicsSection`, `TopicCard`, `LockedCard`, `TopicsListPart`, `SessionHeading`,
+  `KeepsPlaceWhenBenchShows`, `RememberedSessions`, `TopicItemRow`, `MoreAbovePill`, `MoreBelowPill`, `EdgeTracker`,
+  `CardHandle`, `EdgeAutoScroller`, `CardItem`, `TopicLink`, `SessionOrdering`, `TopicListPlace`, `TopicCardPlace` and
+  three `View` extensions, 824.
+- `ListDrag.swift`: the drag's model `ListDrag`, the trades' `TradeMark`, `TradeGhost` and `TradeArc`, and the
+  drag's environment keys and `View` extensions, 480.
+- `TopicsListEdge.swift` 152 (the Bench and Guests lines, the Open Place, the pill), `CardTags.swift` 129,
+  `TopicGroupBlock.swift` 101 (the Settled group) and `ScrollDriver.swift` 95.
+- For the hover label panel, the SwiftUI label: `HoverLabelView` in `HoverLabel.swift` at the base, 19 lines (16
+  code), now `SwiftUIHoverLabelView` in `HoverLabelModifier.swift`.
+
+At the base the declarations of `SidebarView.swift` above were 968 lines (806 code): the set moved their menus, sizes
+and arithmetic into the shared definitions. The AppKit Topics list also draws what the shared SwiftUI card and rows
+draw (`SidebarCard`, `CardHeader`, `CardList`, `WindowRow`, `PaneRow` and the rest of the pilot's 1,291 lines) through
+the pilot's views. So the AppKit Topics list takes about 2.4 code lines for each SwiftUI code line that only it
+mirrors, against 2.6 in the pilot. The spec estimated about 1,500 lines of SwiftUI for the Topics list.
+
+The harness, the driver and the compare run, as lines added and removed by the set (`git diff --numstat` against
+`cc306a5`):
+
+- The option `TOPICS_LIST` for the two Topics lists, in place of the pilot's `SESSIONS_LIST`: `sandbox.py` +25 −23,
+  `run.py` +9 −9, `report.py` +2 −2, `Makefile` +10 −8. Together +46 −42.
+- The compare run's areas, the parts of an area that stand outside its list, and the seventeen Topics scenes in place
+  of the thirteen Sessions scenes: `compare_scenes.py` +860 −335, `compare.py` +91 −52, `compare_gate.py` +18 −12,
+  `compare_report.py` +9 −12. Together +978 −411, and these notes.
+- The driver: `TestDriver.swift` +4 −4 (the command `topics-list` in place of `sessions-list`),
+  `DisplayLinkProbe.swift` +7 −5 (one glide for every list), and `BodyCount.swift` +2 −1 (the AppKit count).
+- The checks: the new suites `topics_list_sidebar.py`, 758 lines, and `appkit_areas.py`, 87; `sessions_list_sidebar.py`
+  +218 −331 for the one Sessions list left; `harness.py` +44 −13; `README.md` +33 −30; the new count of
+  `topics_bench_scroll_sidebar`, +16 −1; and the repairs of `topics_bench_sidebar`, `session_paths_palette`,
+  `git_view_remotes`, `git_view_changes` and `topics_groups_sidebar` below, +38 −9.
+
+The attempts of each task, from the set's `manifest.json` and the journal in `attempts/` and `progress.txt`:
+
+- 01 retire the SwiftUI Sessions list: 1. 03 one colouring owner and shared definitions without SwiftUI: 1.
+- 02 Control-click and no accessors only tests read: 2. The first failed: the screen was locked, so
+  `hover_labels_sidebar` could not run.
+- 04 the switch and bare Topic cards, 05 closed Topic cards and Locked cards, 06 open Topic cards and the No Topic card,
+  07 Tags, 08 the Bench, 09 the pills and the scroll to a hidden card, 10 the Settled group, 11 context menus and named
+  actions, 12 the drag of Session lines and Window rows, 13 the drag of Topic cards: 1 each.
+- 14 Hints, hover labels and the hover label panel: 2. The first failed: the screen was locked from 18:50, so the hover
+  checks and the scene `topics-hover` could not run; the second finished on the first's work.
+- 15 Agent marks, Unread and worktrees, 16 No Topics, sizes, the theme and the slide: 1 each.
+- 17 both versions pass, and AppKit is the default: 1, this attempt.
+- 18 the sign-off: the user's.
+
+So 16 tasks took 18 attempts, and both attempts that failed failed on the screen, not on the code.
+
+Harder than expected:
+
+- Sameness in the picture again needed rules that only SwiftUI's own output shows: `Text` puts its first baseline
+  where TextKit puts it, which is not the ascender at 11.5 points; `opacity` dims each part of a card on its own, so a
+  dimmed chip's fill shows through its text; SwiftUI rounds each part of a row to pixels once, so a badge rounded twice
+  stood half a point low in another font family; the hosting view sets a label of fractional width in the middle of
+  the panel on the pixel grid. AppKit has no public path of a continuous corner, so the ends of the pills' capsules and
+  the dashes of the Open Place's border still differ by a column of pixels.
+- The drag: one drag for every stack in both lists, with trades across two lines, the edge scrolling and the Bench that
+  shows under a lifted card, is a quarter of the AppKit code (`StackDrag.swift`).
+- The Bench: the block that sticks over the Benched cards, the header that sticks under the block, the Location's card
+  kept in place as the Bench shows, the pills that count the cards past each edge and the glide to a hidden card. Each
+  is arithmetic that the SwiftUI list read from its geometry, and both lists now call it (`BenchGeometry`,
+  `BenchedLocationPlace`, `TopicsListScroll`).
+- The named actions of a Topic card's header differ from its menu in SwiftUI, and the AppKit list had to give the same
+  difference, so that the dumps match.
+- The screen, again, cost the two attempts that failed and most of the reruns: the lock screen or a full-screen window
+  covers the App Window, and then no hover check and no hover scene can run.
+
+Easier than expected:
+
+- 14 of the 16 tasks took one attempt.
+- The pilot's parts served as they were: `SessionCardView` draws the No Topic card, the pilot's rows draw the Topic
+  rows, `SidebarListHost` hosts either list, and `ObservedUpdate` reads the models. No model changed but for one
+  date function.
+- SwiftUI's pager moves, shrinks, fades and hides the hosted AppKit Topics list with no change, as it did the Sessions
+  list.
+- The compare run needed only an area, the parts of an area that stand outside its list, and a helper that makes a
+  fixture again on a new tmux server; its gate, report and picture diff stayed as they were.
+- The suites that drive the Topics list pass against the AppKit list with no change to a check but the count of
+  `topics_bench_scroll_sidebar` (see "Suites that changed" below).
+
+What stage 2 would reuse as it is:
+
+- The whole AppKit Topics list, and with it the pilot's cards and rows, `StackDrag`, `ObservedUpdate`, `LayerGlide`,
+  `LayerColoredView`, `SidebarMenu` with `TopicsListMenus` and `SessionsListMenus`, and every shared definition.
+- The AppKit hover label panel, which the Agents section's rows can take through `RowHoverAnchor` once they are
+  AppKit.
+- The guard `appkit_areas`, the compare run with its areas and parts, the option `TOPICS_LIST` as the pattern of a
+  switch's option, and the driver's commands.
+
+What stage 2 would need on top:
+
+- Deleting the SwiftUI Topics list and its switch: the declarations counted above, the SwiftUI Session card, Window
+  row and Pane row, `ScrollDriver`, `ListDrag`'s SwiftUI side, the scenes of `topics`, and the three exceptions of
+  `appkit_areas` (`SessionCardPress`'s `withAnimation`, `SidebarListHost`, `SidebarMenuButtons`).
+- The rest of the Sidebar in AppKit: its shell (`SidebarView`, `WorkSection`), the control and the pager between Topics
+  and Sessions with the swipe (`SidebarPager.swift`, 435 lines), the Agents section (`AgentsSection`, `AgentRow`, about
+  100 lines, with its hover labels and Agent marks) and the resize handle between the sections (`SectionResizeHandle`,
+  49 lines). Then an AppKit owner hands the lists what the SwiftUI Sidebar hands them now (`SidebarListEnvironment`),
+  and the App Window hosts the AppKit Sidebar until stage 3.
+- `SidebarTypography.Role.weight` is a SwiftUI `Font.Weight` that the AppKit lists read through `nsFont(for:)`: it
+  moves to a file without SwiftUI.
+- A new area of the compare run with the scenes of the Agents section and the pager, and a new switch; the swipe and
+  the slide are motion, for the eye.
+
+Suites that changed. One check changed for the move, because it measured SwiftUI itself:
+
+- `topics_bench_scroll_sidebar` counted the bodies of the SwiftUI `TopicCard` during a scroll of the Bench, and an
+  AppKit card has no body. The AppKit list now counts under the same names where it does the same work: the list each
+  time it shows the model again (`TopicsListView.render`, `TopicsList`), and a card each time it takes content that
+  changed and lays itself out again (`TopicCardView.show` past its guard for the same content, `TopicCard`). A card
+  that only moves with the scroll, or whose header the list places again, does not count, as SwiftUI's geometry does
+  not run a body. The check still proves, against either list, that a scroll of 600 points in 20 steps draws at most
+  2 cards again; it measured 0 in the AppKit list and 0 `TopicCard` bodies in the SwiftUI one. It now also proves that
+  the count counts: a new title of the last Benched card counts that card (1 in the AppKit list, 82 bodies in the
+  SwiftUI one), so a count that never ticks cannot pass it.
+- `topics_list_sidebar` is new, and checks the switch: a missing `topicsListAppKit` shows the AppKit list at launch,
+  false shows the SwiftUI list at launch, and a change while the app runs, to false, to missing, to true and back,
+  changes the list without a new start. With them it checks the presses, clicks, drags, glides, the header that
+  sticks, the swipe and the font size of the AppKit list against the SwiftUI one.
+- `appkit_areas` is new: the guard. `sessions_list_sidebar` checks the one Sessions list that is left. `harness` gained
+  the gate's checks of the parts outside a list.
+- `interface_font_size`, `topics_bench_sidebar` and `sidebar_pager_scroll` changed only comments for the move, to name
+  where a size or a glide is now defined.
+
+No other check changed for the move. Task 17 repaired the timing of five checks that failed by chance with either list,
+and of one part of the palette: `session_paths_palette`, `git_view_remotes`, `git_view_changes`, `topics_bench_sidebar`
+(its helper `act_until`), `topics_groups_sidebar`, and `CommandPalette.query` for `palette_tags`. Each still proves what
+it proved; the next list gives each cause.
+
+The checks that failed or were FLAKY in the runs of task 17, and their causes. None is in the AppKit Topics list or
+comes from its code: each is a check that acted before the app had read a change, or a part of the app outside the
+Topics list.
+
+- The hover checks of `hover_labels_sidebar` (8) and `interface_font_size` (3) failed in the first full run against
+  each list, also alone, and the scene `topics-hover` failed its gate in the first compare run: the user's full-screen
+  windows covered the App Window whole, so its views got no hover. Once a part of it showed, `hover_labels_sidebar`,
+  `interface_font_size` and `quick_switch_hints` passed with both lists, and `topics-hover` passed its gate; a hover
+  check that ran while the user covered the App Window again passed in its rerun.
+- `palette_tags`, a pasted line break in New Topic: failed against the AppKit list, alone too, and in a probe against
+  either list in about two launches of five, most often on the first paste after a launch. The palette turns the line
+  break into a space in its model on the next turn of the main queue, but while the field is edited SwiftUI's
+  `TextField` does not always write a value that its binding changed back into the field editor: a probe logged the
+  model with the space and the field editor still with the line break. The palette now gives the field editor the
+  line too when it still holds the pasted text (`CommandPalette.query`); ten fresh launches then passed. It is the
+  palette's bug, not the set's.
+- `session_paths_palette`, the saved Session Paths after a restart: FLAKY in the first full run against each list, as
+  on `master` and in the pilot. The checks of a suite run in their order, and a rerun runs only the one that failed.
+  The check before it starts a Session in `saved-repo` through Start a Session and left it running, and Go to… lists a
+  folder that has a live Session as that Session, not as a Session Path (a probe found `palette-row-session:$0` in
+  place of the row), so the check could not find its row; alone it passed. That check now gives the server back as the
+  fixture made it, and the suite passes in its order.
+- `git_view_remotes`, the pull that waits in the write queue: FLAKY in the first full run against each list, as in
+  the pilot, which did not find the cause. The check before it stages `new.txt` in the app, and its clean-up unstages
+  it behind the app's back. Each check opens the Git View again, which shows the snapshot it read last and reads the
+  repository after it; the check's wait for the upstream passes on that old snapshot. Under the load of the parallel
+  pass the new read came late, so space acted on `new.txt` as staged and queued an unstage, and nothing was staged
+  after the pull. The check now waits until the Git View shows `new.txt` untracked before it stages it.
+- `git_view_changes`, shift+a with nothing staged: FLAKY once, in the second full run against the AppKit list. The
+  check unstages `staged.txt` behind the app's back, presses R and waited a fixed 2 seconds; shift+a reads what is
+  staged from the snapshot the Git View read last, so under load it found `staged.txt` still staged and asked, and the
+  banner never said "Nothing is staged". The check now waits until the Git View shows `staged.txt` unstaged.
+- `topics_groups_sidebar`, the Reopen link of a Settled card: FLAKY once, in the second full run against the SwiftUI
+  list. The check read the dump at once after tmux had the rebuilt Session. The Empty Topic page offers the Reopen
+  choice only while the app has not read a Topic's live Session, and the app reads tmux once a second, so under load
+  the dump still had the choice. The check now reads it once the App Window shows the new Session; it still fails when
+  the link asks instead of rebuilding.
+- `topics_bench_sidebar`, Bench on a card In Play: FLAKY in a run of eleven suites against the AppKit list, and failed
+  the same way in two runs of the pilot, before the set. Its helper ran the card's named action again each second
+  until the written order was right; under load the app wrote the first Bench's order more than a second later, so a
+  second Bench moved the card that was now on top of the Bench down: `_ b a c`. The helper now runs an action again
+  only when the last one changed nothing within 5 seconds.
+- The other checks that were FLAKY in one full run each, against the SwiftUI list unless named, all of them outside
+  the AppKit Topics list, each failed once in the 24 to 28 runs that `build/verify/runs/` keeps, and passed in its
+  rerun: `git_view_merge_rebase`'s conflicting merge (the merge menu did not open after R, on a Git View that had not
+  read the repository yet, as in `git_view_changes`), `header_navigation`'s click on the Git button, `topics_bench_sidebar`'s
+  drop next to an Open Place (the list did not show the second card In Play within 20 seconds of the Config's
+  change), `sessions_list_sidebar`'s click on "N more…" of the AppKit Sessions list, and `quick_switch_hints`' Hint at rest
+  while the App Window was covered. Their causes were not found: none failed again, alone or in its rerun.
+- `interface_font_size`, the Find in Pane bar and the Git View's commit box at 18: FLAKY in four runs late in the
+  day, with both lists. Each measured a part before it followed the new size: the Find bar was 51 points high at
+  12, its height at 18, right after the Sidebar had taken its width at 12, and the commit box's summary was 23
+  points high at 18, not 27. The check's `settled` takes two dumps in a row with the same heights as rest, and under
+  load two dumps came before the part's new layout. Both parts are outside the Topics list (stages 3 and 6), and
+  each rerun passed.
+- In the third full runs, while 10 suites ran beside each other at a load average near 90, the App Window of
+  `topics_tags_sidebar` stopped showing the Terminal's Session from one check on, with both lists: tmux had the
+  Terminal's Client on `base`, and the App Window showed no Session for the rest of the suite. `local_session_end`
+  failed in the same minutes against the AppKit list, in its rerun too, because the Terminal's tmux Client did not
+  attach. It is the failure that the pilot recorded for `local_session_end` and `attachments_terminal` late in the
+  parallel pass. Both suites pass alone with both lists, and the set does not touch the Terminal; the cause was not
+  found.
+
+The full runs of task 17, with `make verify TOPICS_LIST=appkit` and `TOPICS_LIST=swiftui`, three of each: every suite
+passed with both lists but the hover checks, which the covered App Window failed, and the checks above. The hover
+suites passed with both lists in runs of their own once the App Window showed.
+`make compare AREA=topics` passed its gate in every scene, `topics-hover` once a part of the App Window showed, and
+`make compare AREA=topics SELF=1` passed with no pixel that differs in any scene. The pictures differ only where each
+scene's section says: this task changed nothing that draws.
 
 ## The record of the pilot: what the Sessions list cost
 

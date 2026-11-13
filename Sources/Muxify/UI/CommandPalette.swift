@@ -45,7 +45,19 @@ final class CommandPalette {
         didSet {
             if query.contains(where: \.isNewline) {
                 let pasted = query, line = String(query.map { $0.isNewline ? " " : $0 })
-                DispatchQueue.main.async { [weak self] in if self?.query == pasted { self?.query = line } }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, query == pasted else { return }
+                    query = line
+                    // While the field is edited, SwiftUI's TextField does not always write a value that its binding
+                    // changed back into the field editor, which then kept the line break that the model no longer
+                    // has. The editor takes the line too, with its caret where it was.
+                    if let editor = store?.terminalHost.window?.firstResponder as? NSTextView, editor.isFieldEditor,
+                       editor.string == pasted {
+                        let caret = editor.selectedRange()
+                        editor.string = line
+                        editor.setSelectedRange(NSRange(location: min(caret.location, line.utf16.count), length: 0))
+                    }
+                }
             }
             if query != oldValue {
                 selectedID = nil

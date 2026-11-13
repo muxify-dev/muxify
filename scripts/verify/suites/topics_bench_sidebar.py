@@ -18,6 +18,8 @@ LINE = 'topics-bench-line'
 GUESTS = 'topics-guests-line'
 # The band of the "more above" pill at 12 (`EdgePillMetrics.designHeight` in UI/TopicsListMetrics.swift).
 PILL = 30
+# How long a card's action may take to change the written order before a check runs the action again.
+ACTION_WRITE = 5
 
 
 class TopicsBenchSidebar(TopicsSidebar):
@@ -382,14 +384,22 @@ class TopicsBenchSidebar(TopicsSidebar):
         return ' '.join(name for _, name in sorted(cards))
 
     def act_until(self, key, action, prefix, expected, message):
-        """Runs the card's accessibility action until the written order is `expected`. While another change of the
-        Topics runs, as the last check's clean-up, the card's actions are disabled."""
-        def done():
-            if self.layout(prefix) == expected:
+        """Runs the card's accessibility action until the written order changes, then waits until it is `expected`.
+        While another change of the Topics runs, as the last check's clean-up, the card's actions are disabled, so a run
+        can change nothing, and the next run tries again. A run that changed the order is never repeated: under load
+        the app writes the order more than a second after the action, and the same action again acts on the card where
+        the first one put it, such as a second Bench, which moves a Benched card down."""
+        before = self.layout(prefix)
+        def acted():
+            if before == expected:
                 return True
             self.s.driver('action', key, action)
-            return False
-        wait(done, message, seconds=15, step=1)
+            try:
+                return wait(lambda: self.layout(prefix) != before, 'no change', seconds=ACTION_WRITE, step=.2)
+            except AssertionError:
+                return False
+        wait(acted, message, seconds=3 * ACTION_WRITE, step=0)
+        wait(lambda: self.layout(prefix) == expected, message, seconds=15)
 
     def cards(self, prefix, rs):
         """The cards of the check's Topics and the Bench line, in Sidebar order."""

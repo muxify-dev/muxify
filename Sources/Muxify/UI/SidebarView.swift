@@ -90,9 +90,9 @@ private struct TopicsSection: View {
     @Environment(\.interfaceFontSize) private var fontSize
     let store: WorkspaceStore
     let model: TopicsModel
-    /// Which Topics list shows (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md): the SwiftUI list
-    /// unless the user default is true. The Sidebar follows a change of the user default while the app runs.
-    @AppStorage(TopicsListVersion.defaultsKey) private var topicsListAppKit = false
+    /// Which Topics list shows (docs/adr/0075-muxify-leaves-swiftui-entirely-one-area-at-a-time.md): the AppKit list
+    /// unless the user default is false. The Sidebar follows a change of the user default while the app runs.
+    @AppStorage(TopicsListVersion.defaultsKey) private var topicsListAppKit = true
     @State private var drag = ListDrag<TopicListID>(spacing: TopicsListMetrics.itemSpacing,
                                                     tradesAcross: [TopicsModel.ListItem.guestsLineID, TopicsModel.ListItem.benchLineID])
     /// The cards whose "N more…" the user pressed.
@@ -1332,5 +1332,12 @@ struct Logo: View {
         }
         .foregroundStyle(.primary)
         .frame(width: size, height: size)
+    }
+}
+
+extension View {
+    /// The named action of a Window row in the Topics list, which the AppKit list gives too (`TopicsListMenus`).
+    func topicMembershipActions(store: WorkspaceStore, window: TmuxWindow) -> some View {
+        accessibilityActions { SidebarMenuButtons(TopicsListMenus.windowActions(window, store: store)) }
     }
 }
