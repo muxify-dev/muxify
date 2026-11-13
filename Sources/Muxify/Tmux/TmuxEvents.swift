@@ -32,11 +32,15 @@ final class TmuxEvents {
     /// Notifications cover every Session, so the client hears the user's
     /// Sessions from there, and their Panes never share a Session with it.
     /// The Session runs `cat`, not a shell, so no shell startup file runs in it.
-    /// Call on the main thread.
+    /// It also turns tmux's `set-clipboard` from its default `external` to `on`: under `external` tmux drops the
+    /// OSC 52 copy of a program in a Pane, such as Claude Code over SSH, which Ghostty alone puts on the clipboard.
+    /// A user's `off` stays. Call on the main thread.
     func start(invocation: ([String]) throws -> CommandInvocation) {
         guard !isRunning, Date() >= nextStart,
               let invocation = try? invocation(["-C", "new-session", "-A", "-s", Tmux.watchSessionName,
-                                                "-f", "no-output,ignore-size", "cat"])
+                                                "-f", "no-output,ignore-size", "cat", ";",
+                                                "if-shell", "-F", "#{==:#{set-clipboard},external}",
+                                                "set-option -s set-clipboard on"])
         else { return }
         stop()
         let token = UUID()

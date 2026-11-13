@@ -60,6 +60,21 @@ class TmuxEvents(unittest.TestCase):
         shown = [key for key in self.s.ids(rows) if any(key.endswith('-window-' + w) for w in watch)]
         self.assertEqual(shown, [], 'the Sidebar shows the Watch Session')
 
+    def test_a_program_in_a_pane_copies_to_the_clipboard_with_osc_52(self):
+        # Claude Code over SSH copies a selection with OSC 52 from inside its Pane. tmux's default, set-clipboard
+        # external, drops it there, so nothing reached the clipboard. The app turns it on.
+        # The app starts its control client only while the user has a Session.
+        self.addCleanup(lambda: self.s.tmux_ok('kill-session', '-t', '=osc52'))
+        self.s.tmux_ok('new-session', '-d', '-s', 'osc52')
+        wait(lambda: '1 muxify-watch' in self.clients_by_session(), 'no control client on muxify-watch')
+        # A Window made with -d is no Client's current Window, so tmux keeps the copy in a buffer and does not pass
+        # it to the app's Terminal, which would write the user's own clipboard.
+        self.s.tmux_ok('new-window', '-d', '-t', '=osc52:',
+                       "printf '\\033]52;c;%s\\a' $(printf copied-in-a-pane | base64); sleep 30")
+        wait(lambda: 'copied-in-a-pane' in self.s.tmux('list-buffers', '-F', '#{buffer_sample}'),
+             lambda: 'tmux dropped the Pane\'s OSC 52: set-clipboard is %r'
+             % self.s.tmux('show-options', '-sv', 'set-clipboard'))
+
     def test_the_watch_session_does_not_keep_the_server_running_after_the_last_session_closes(self):
         wait(lambda: '1 muxify-watch' in self.clients_by_session(), 'no control client on muxify-watch')
         server = int(self.s.tmux('display-message', '-p', '#{pid}'))
