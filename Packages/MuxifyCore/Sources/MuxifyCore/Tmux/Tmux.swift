@@ -296,18 +296,18 @@ public enum Tmux {
 
     public static let separator = "\u{241F}"
 
+    /// The tmux for a caller with no server to ask: the first on `$PATH`, so the user's own choice wins, then the
+    /// usual folders for an app that starts with a short `$PATH`. `TmuxServer.binary` prefers the server's own.
     private static func locateBinary() -> String? {
-        var candidates = [
+        let onPath = (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map { "\($0)/tmux" }
+        let usual = [
             "/opt/homebrew/bin/tmux",
             "/usr/local/bin/tmux",
             "/run/current-system/sw/bin/tmux",
             "\(NSHomeDirectory())/.nix-profile/bin/tmux",
             "/usr/bin/tmux",
         ]
-        if let path = ProcessInfo.processInfo.environment["PATH"] {
-            candidates += path.split(separator: ":").map { "\($0)/tmux" }
-        }
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        return (onPath + usual).first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
     /// The `send-keys` arguments that type `keys` into the target's pane as the client `client`, or as no
