@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Packages a Tip Build (`tip`) or a Release (`vX.Y.Z` or `vX.Y.Z-beta.N`) for the updater, locally or in CI.
-# It signs with MUXIFY_RELEASE_IDENTITY from MUXIFY_RELEASE_KEYCHAIN and stamps the feed base URL and the
-# release public key into the packaged copy only, so a Debug or make install build never updates itself.
+# It signs with MUXIFY_RELEASE_IDENTITY from MUXIFY_RELEASE_KEYCHAIN and stamps the feed base URL, the build's
+# Update Channel and the release public key into the packaged copy only, so a Debug or make install build never updates itself.
 # It never installs or launches the app.
 set -euo pipefail
 
@@ -10,8 +10,10 @@ TAG="${1:-}"
 FEED_BASE_URL="https://github.com/muxify-dev/muxify/releases/download/appcast/"
 if [ "$TAG" = tip ]; then
   KIND=tip
+  CHANNEL=tip
 elif [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-beta\.([1-9][0-9]*))?$ ]]; then
   KIND=release
+  CHANNEL=stable
 else
   echo "Usage: $0 tip | vMAJOR.MINOR.PATCH | vMAJOR.MINOR.PATCH-beta.N (for example v0.1.0 or v0.1.0-beta.1)" >&2
   exit 1
@@ -102,6 +104,8 @@ mkdir -p "$DIST" "$STAGE"
 # The stamps go into a copy, so the Release product that make install also builds stays without them.
 ditto "$BUILT_APP" "$APP"
 plutil -replace MuxifyUpdateFeedBaseURL -string "$FEED_BASE_URL" "$APP/Contents/Info.plist"
+# The channel a Config without update.channel reads, so a Tip Build offers the next Tip Build.
+plutil -replace MuxifyUpdateChannel -string "$CHANNEL" "$APP/Contents/Info.plist"
 plutil -replace SUPublicEDKey -string "$SPARKLE_PUBLIC_ED_KEY" "$APP/Contents/Info.plist"
 # Signing after the stamps seals them. Every build signed with the same certificate keeps one
 # designated requirement, so macOS grants and Sparkle's signature check survive updates.

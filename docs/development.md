@@ -410,7 +410,9 @@ or `<base>tip.xml`, which Sparkle asks for through its delegate at each check;
 `MUXIFY_UPDATE_FEED_URL` replaces either. `ConfigStore` applies the section at
 each reload: turning `check` off stops the schedule, turning it on starts it
 with a check, and a changed channel checks at once. A remote Config's `update`
-is ignored. Moving from `tip` to `stable` keeps the Tip Build until a Release
+is ignored. Without `update.channel`, the updater reads the build's own channel,
+`MuxifyUpdateChannel` in Info.plist, which `scripts/package-release.sh` stamps:
+`tip` in a Tip Build, `stable` in a Release and in a build without it. Moving from `tip` to `stable` keeps the Tip Build until a Release
 has a higher build number, since Sparkle never offers a lower one.
 
 An update downloads only after Install and Relaunch: `SUAutomaticallyUpdate`

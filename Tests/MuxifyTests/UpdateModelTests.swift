@@ -6,8 +6,8 @@ import MuxifyCore
     private var logged: [String] = []
     private var checks = 0
 
-    private func model() -> UpdateModel {
-        let model = UpdateModel(log: { [unowned self] in logged.append($0) })
+    private func model(buildChannel: Config.Update.Channel = .stable) -> UpdateModel {
+        let model = UpdateModel(buildChannel: buildChannel, log: { [unowned self] in logged.append($0) })
         model.startCheck = { [unowned self] in checks += 1 }
         return model
     }
@@ -341,13 +341,22 @@ import MuxifyCore
         XCTAssertNil(UpdateModel.shared)
     }
 
+    func testPackagingStampsTheBuildsOwnChannel() {
+        XCTAssertEqual(UpdateFeed.buildChannel(info: ["MuxifyUpdateChannel": "tip"]), .tip)
+        XCTAssertEqual(UpdateFeed.buildChannel(info: ["MuxifyUpdateChannel": "stable"]), .stable)
+        // A build from before the stamp, or a Debug build, reads stable.
+        XCTAssertEqual(UpdateFeed.buildChannel(info: ["CFBundleVersion": "1"]), .stable)
+        XCTAssertEqual(UpdateFeed.buildChannel(info: ["MuxifyUpdateChannel": "nightly"]), .stable)
+        XCTAssertEqual(UpdateFeed.buildChannel(info: nil), .stable)
+    }
+
     // MARK: Background checks
 
     private var backgroundChecks = 0
     private var clock = Date(timeIntervalSince1970: 1_790_000_000)
 
-    private func backgroundModel(starts: Bool = true) -> UpdateModel {
-        let model = model()
+    private func backgroundModel(starts: Bool = true, buildChannel: Config.Update.Channel = .stable) -> UpdateModel {
+        let model = model(buildChannel: buildChannel)
         model.startBackgroundCheck = { [unowned self] in
             backgroundChecks += 1
             return starts
@@ -532,5 +541,26 @@ import MuxifyCore
         model.apply(Config.Update(check: false, channel: .stable))
         XCTAssertEqual(model.channel, .stable)
         XCTAssertEqual(backgroundChecks, 2)
+    }
+
+    func testATipBuildReadsTipUnlessTheConfigSetsAChannel() {
+        let model = backgroundModel(buildChannel: .tip)
+        XCTAssertEqual(model.channel, .tip)
+        model.apply(Config.Update())
+        XCTAssertEqual(logged, ["update: background checks on, every 24 hours, tip channel",
+                                "update: background check, tip channel"])
+        model.backgroundCheckFinished(noUpdate)
+        // Naming the build's own channel changes nothing, so it checks nothing.
+        model.apply(Config.Update(channel: .tip))
+        XCTAssertEqual(backgroundChecks, 1)
+        model.apply(Config.Update(channel: .stable))
+        XCTAssertEqual(model.channel, .stable)
+        XCTAssertEqual(backgroundChecks, 2)
+        model.backgroundCheckFinished(noUpdate)
+        // Removing the key goes back to the build's channel.
+        model.apply(Config.Update())
+        XCTAssertEqual(model.channel, .tip)
+        XCTAssertEqual(backgroundChecks, 3)
+        XCTAssertEqual(logged.suffix(2), ["update: channel tip", "update: background check, tip channel"])
     }
 }
