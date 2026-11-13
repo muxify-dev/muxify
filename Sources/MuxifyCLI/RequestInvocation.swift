@@ -194,7 +194,7 @@ struct RequestInvocation: Equatable {
                 case .topic(let name): return .topic(.named(name))
                 case .openPlace(let id): return .openPlace(id)
                 case .session(let value):
-                    guard let window = TmuxServer.local.snapshot().windows.first(where: { $0.sessionID == value || $0.sessionName == value }),
+                    guard let window = try TmuxServer.local.snapshot().windows.first(where: { $0.sessionID == value || $0.sessionName == value }),
                           let id = SessionID(rawValue: window.sessionID) else {
                         throw CLIError(TopicRequestError.sessionUnavailable(value).description)
                     }
@@ -418,7 +418,7 @@ extension RequestInvocation {
         } catch {
             throw CLIError("Muxify could not read the Topic records in \(paths.state.path). \(error.localizedDescription)")
         }
-        let conversations = record?.agentConversations(in: TmuxServer.local.snapshot()) ?? []
+        let conversations = try record?.agentConversations(in: TmuxServer.local.snapshot()) ?? []
         switch output {
         case .json:
             let encoder = JSONEncoder()
@@ -521,7 +521,7 @@ extension RequestInvocation {
         case .removeWindowFromTopic(nil): return .move(to: .newSession(topic: nil))
         case .removeWindowFromTopic(let name?):
             let records = try TopicStore(paths: paths).read().records
-            guard let window = TmuxServer.local.snapshot().windows.first(where: { $0.sessionID == name || $0.sessionName == name }),
+            guard let window = try TmuxServer.local.snapshot().windows.first(where: { $0.sessionID == name || $0.sessionName == name }),
                   let id = SessionID(rawValue: window.sessionID) else { throw CLIError(TopicRequestError.sessionUnavailable(name).description) }
             if let topic = records.first(where: { $0.id == window.topicID && $0.settledAt == nil }) {
                 throw CLIError("The Session \(window.sessionName) is in the Topic \(TopicLabels(records).label(of: topic)). Name a No Topic Session, "

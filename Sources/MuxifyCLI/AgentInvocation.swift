@@ -27,7 +27,7 @@ extension AgentInvocation {
             throw CLIError(error.description)
         }
         // No tmux server gives no Panes, so no Agents.
-        let rows = AgentRow.list(snapshot: TmuxServer.local.snapshot(), records: records).filter { row in
+        let rows = AgentRow.list(snapshot: try TmuxServer.local.snapshot(), records: records).filter { row in
             (topicID == nil || row.topic?.id == topicID)
                 && (status == nil || row.agent.status == status)
                 && (!unreadOnly || row.agent.unread)
@@ -273,7 +273,7 @@ extension AgentConversationInvocation {
         let conversation: AgentConversation
         switch source {
         case .pane(let pane):
-            guard let tmuxPane = TmuxServer.local.snapshot().panes.first(where: { $0.id == pane.rawValue }) else {
+            guard let tmuxPane = try TmuxServer.local.snapshot().panes.first(where: { $0.id == pane.rawValue }) else {
                 throw CLIError("No tmux Pane \(pane.rawValue).")
             }
             guard let found = AgentConversation(in: tmuxPane) else {

@@ -45,6 +45,10 @@ _Avoid_: split, terminal
 A terminal attached to a tmux server, showing one of its Sessions. Each App Window's Terminal is one Client; Ghostty.app or another terminal attached to the same server is another.
 _Avoid_: attachment, connection, viewer
 
+**Server binary**:
+The tmux program that a running tmux server was started from. Muxify and the `muxify` command run it for every command on that server, because a tmux of another release can fail on the server. With no server, they run the first tmux on `$PATH`, then one in the usual folders.
+_Avoid_: tmux path, tmux version setting
+
 **Watch Session**:
 The Session `muxify-watch`, where Muxify's control-mode Client listens for tmux changes. Muxify makes it while you have a Session of your own and kills it after your last one closes. It has no Window you can see in the Sidebar, the Command Palette or the CLI, and no Terminal attaches to it.
 _Avoid_: listener Session, infra Session, hidden Session

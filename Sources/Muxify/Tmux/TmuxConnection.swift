@@ -172,12 +172,7 @@ final class TmuxConnection: @unchecked Sendable {
     }
 
     func snapshot() throws -> TmuxSnapshot {
-        guard let remote else {
-            do { return stamped(try Tmux.readSnapshot(using: run)) }
-            catch let error as TmuxError where error.indicatesNoSessions {
-                return TmuxSnapshot(windows: [], clients: [], panes: [], lastWindowID: nil, serverRunning: !error.indicatesNoServer)
-            }
-        }
+        guard let remote else { return stamped(try TmuxServer.app.snapshot(using: run)) }
         guard (try? runner.run(remote.control("check"), timeout: 1)) != nil else { throw TmuxError.notReady }
         let marker = try run(["show-option", "-sqv", remote.markerOption])
             .trimmingCharacters(in: .newlines).components(separatedBy: Tmux.separator)
