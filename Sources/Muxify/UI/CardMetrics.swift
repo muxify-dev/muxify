@@ -77,6 +77,23 @@ enum CardSpine {
     static let cornerRadius: CGFloat = 2
 }
 
+/// The spine of a row: the bar of an Agent mark along the left edge of a row of the Active Topic's open card, and of its
+/// "N more…" for the strongest mark of the rows it holds back, for both versions of the card (ADR 0074). Its corners
+/// are the card spine's.
+enum RowSpine {
+    static let width: CGFloat = 3
+    /// The room above and below the bar.
+    static let verticalInset: CGFloat = 3
+
+    /// The identifier of the spine of the row with this Window or Pane ID.
+    static func accessibilityID(_ rowID: String) -> String { "topic-agent-mark-" + rowID }
+
+    /// The bar's frame in a row of `size`, from its top left corner.
+    static func frame(in size: CGSize) -> CGRect {
+        CGRect(x: 0, y: verticalInset, width: width, height: max(0, size.height - 2 * verticalInset))
+    }
+}
+
 /// The room around the lines of a card's header, for both versions of the card (ADR 0074).
 enum CardHeaderPadding {
     static let leading: CGFloat = 13

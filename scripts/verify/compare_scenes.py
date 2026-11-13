@@ -31,6 +31,8 @@ compare-notes.md.
 """
 
 import re
+import subprocess
+from pathlib import Path
 from typing import Callable, NamedTuple
 
 from scripts.verify.compare_gate import rect
@@ -765,6 +767,202 @@ def hover_label(view, rows):
     return texts
 
 
+def pane_of(s, window):
+    """The id of the Window's first Pane, before a split adds another."""
+    return s.tmux('display-message', '-p', '-t', window, '#{pane_id}')
+
+
+# Agents keep their Notifications while their Windows show: no visit reads them between the two versions.
+MANUAL_READ = 'notifications:\n  manual_read: true\n'
+
+
+class TopicAgents:
+    name = 'topic-agents'
+    shows = ('Agent marks in the Topics list, with the Working mark standing still (`ui.pulse: false`). The open card of '
+             'the Location\'s Topic: a Window row with a Working spine and its Pane rows under it, one with the Working '
+             'mark; a Window row with a failed spine; and "N more…" with the blocked spine of the Pane rows it holds back. '
+             'Closed cards under it with a failed and a done spine. Then the same card once "N more…" was pressed: the '
+             'Pane rows in place of a Session\'s only Window row, each with its spine and its Notification dot.')
+
+    def fixture(self, s):
+        TopicRecords(s.root/'state/muxify').put(dict(id='atlas', title='Atlas', slug='atlas', order=0))
+        self.api, self.api_windows = member(s, 'atlas', 'api', ('main', 'build', 'tests'))
+        self.working = pane_of(s, self.api_windows[1])
+        self.build_shell = split(s, self.api_windows[1])
+        agent(s, self.working, 'working')
+        agent(s, pane_of(s, self.api_windows[2]), 'failed', unread=True)
+        # The only Window of `web`, split in two: its Pane rows stand in place of its Window row, after the fifth row.
+        self.web, (web_window,) = member(s, 'atlas', 'web')
+        self.done = pane_of(s, web_window)
+        self.blocked = split(s, web_window)
+        agent(s, self.done, 'done', unread=True)
+        agent(s, self.blocked, 'blocked')
+        _, birch = topic(s, 'birch', 'Birch', order=1)
+        agent(s, pane_of(s, birch[0]), 'failed', unread=True)
+        _, cedar = topic(s, 'cedar', 'Cedar', order=2)
+        agent(s, pane_of(s, cedar[0]), 'done', unread=True)
+        self.more = 'topic-atlas-more'
+
+    def shots(self):
+        return [('topic-agents', self.marks), ('topic-agents-all-rows', self.all_rows)]
+
+    def marks(self, view):
+        s = view.s
+        view.launch(config(sidebar='  panes: true\n', more=MANUAL_READ))
+        view.go(self.api_windows[0])
+        fresh_shell(s, self.api_windows[0])
+        spines = {'topic-agent-mark-' + self.api_windows[1]: 'working', 'topic-agent-mark-' + self.api_windows[2]: 'failed'}
+        values = {'topic-birch': 'failed', 'topic-cedar': 'done', self.more: 'blocked', 'pane-' + self.working: 'working'}
+        def shown(rows):
+            return (view.value('topic-atlas', rows).startswith('expanded')
+                    and all(s.row(key, rows).get('accessibilityLabel') == mark for key, mark in spines.items())
+                    and all(mark in view.value(key, rows) for key, mark in values.items())
+                    and s.has('pane-' + self.build_shell, rows) and not s.has('topic-agent-mark-' + self.build_shell, rows))
+        view.wait(shown, lambda: 'the open card does not show its Window rows\' spines, its Pane rows\' marks and the '
+                  'blocked "N more…", or the closed cards miss their marks: %s'
+                  % {key: (s.row(key).get('accessibilityLabel'), view.value(key, s.rows())) for key in [*spines, *values]})
+
+    def all_rows(self, view):
+        s = view.s
+        s.act('press', self.more)
+        spines = {'topic-agent-mark-' + self.done: 'done', 'topic-agent-mark-' + self.blocked: 'blocked'}
+        view.wait(lambda rows: all(s.row(key, rows).get('accessibilityLabel') == mark for key, mark in spines.items())
+                  and not s.has(self.more, rows),
+                  lambda: 'a press on "N more…" did not list the Pane rows with their spines: %s'
+                  % {key: s.row(key).get('accessibilityLabel') for key in spines})
+
+
+class TopicUnread:
+    name = 'topic-unread'
+    shows = ('Topic Unread in the Topics list. The open card of the Location\'s Unread Topic, with the Unread spine over '
+             'its header and the done and blocked spines of its Window rows; closed cards of a live Unread Topic whose '
+             'Agent works, an Empty and a Dormant Unread Topic; and the Settled group open on a Settled Unread Topic. '
+             'Then the same list with no tmux server: every Topic shows from its record.')
+
+    def fixture(self, s):
+        self.records = TopicRecords(s.root/'state/muxify')
+        self.live(s)
+        self.records.put(dict(id='cedar', title='Cedar', slug='cedar', order=2, unread=True))
+        self.records.put(dict(id='dune', title='Dune', slug='dune', order=3, unread=True, sessions=[remembered(s, 'dune')]))
+        self.records.put(dict(id='fir', title='Fir', slug='fir', unread=True, settled_at='2026-01-20T10:00:00Z',
+                              sessions=[remembered(s, 'fir')]))
+        # The records as the app finds them at its first launch. The app adds the live Sessions to their Topics'
+        # records, and the second version starts from these again.
+        self.saved = self.records.read()
+
+    def live(self, s):
+        """The Sessions of the live Topics: Atlas, the Location's, with a done and a blocked Agent, and Birch with a
+        Working Agent."""
+        self.session, self.windows = topic(s, 'atlas', 'Atlas', ('main', 'review', 'deploy'), order=0, unread=True)
+        agent(s, pane_of(s, self.windows[1]), 'done', unread=True)
+        agent(s, pane_of(s, self.windows[2]), 'blocked')
+        _, birch = topic(s, 'birch', 'Birch', order=1, unread=True)
+        agent(s, pane_of(s, birch[0]), 'working')
+        s.tmux_ok('set-option', '-g', 'status', 'off')
+
+    def shots(self):
+        return [('topic-unread', self.unread), ('topic-unread-no-server', self.no_server)]
+
+    def unread(self, view):
+        s = view.s
+        # The last shot of the first version stopped the server. A new server gives the same ids to the same Sessions.
+        if s.tmux_ok('list-sessions').returncode != 0:
+            self.records.change(lambda data: (data.clear(), data.update(self.saved)))
+            self.live(s)
+        view.launch(config(more=MANUAL_READ))
+        view.go(self.windows[0])
+        fresh_shell(s, self.windows[0])
+        view.wait(lambda rows: s.has('settled-topics', rows), 'the Settled group does not show')
+        if not view.value('settled-topics', s.rows()).startswith('expanded'):
+            s.act('press', 'settled-topics')
+        spines = {'topic-agent-mark-' + self.windows[1]: 'done', 'topic-agent-mark-' + self.windows[2]: 'blocked'}
+        headers = ['topic-' + name for name in ('atlas', 'birch', 'cedar', 'dune', 'fir')]
+        def shown(rows):
+            return (view.value('topic-atlas', rows).startswith('expanded')
+                    and all(s.row(key, rows).get('accessibilityLabel') == mark for key, mark in spines.items())
+                    and all('unread' in view.value(key, rows) for key in headers))
+        view.wait(shown, lambda: 'the list does not show every Unread mark and the Window rows\' spines: %s'
+                  % {key: view.value(key, s.rows()) for key in headers + list(spines)})
+
+    def no_server(self, view):
+        s = view.s
+        socket = s.tmux('display-message', '-p', '#{socket_path}')
+        assert Path(socket).resolve().is_relative_to(s.root.resolve()), 'the tmux server %s is not the scene\'s' % socket
+        s.tmux('kill-server')
+        headers = ['topic-' + name for name in ('atlas', 'birch', 'cedar', 'dune')]
+        view.wait(lambda rows: not any(key.startswith(('topic-window-', 'topic-agent-mark-')) for key in s.ids(rows))
+                  and all('unread' in view.value(key, rows) for key in headers),
+                  lambda: 'the list still shows live rows, or a Topic lost its Unread mark: %s'
+                  % {key: view.value(key, s.rows()) for key in headers})
+        # Both versions close the Settled group when the server stops.
+        view.wait(lambda rows: s.has('settled-topics', rows), 'the Settled group does not show')
+        if not view.value('settled-topics', s.rows()).startswith('expanded'):
+            s.act('press', 'settled-topics')
+        view.wait(lambda rows: 'unread' in view.value('topic-fir', rows),
+                  lambda: 'the Settled Topic shows no Unread mark: %r' % view.value('topic-fir', s.rows()))
+
+
+class TopicWorktrees:
+    name = 'topic-worktrees'
+    shows = ('The open card of the Location\'s Topic with Sessions in a git repository: a Session in a Worktree, whose '
+             'Session line names the repository and the Worktree, with a Window row in the Worktree and one that left it '
+             'for the main working copy; a Session in the main checkout; and a Session in a second Worktree whose only '
+             'Window is split, with Pane rows in place of its Window row.')
+
+    def fixture(self, s):
+        self.repository = project(s)/'repo'
+        git = ['/usr/bin/git', '-C', str(self.repository), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid',
+               '-c', 'commit.gpgSign=false']
+        subprocess.run(['/usr/bin/git', 'init', '-q', '-b', 'main', str(self.repository)], check=True)
+        (self.repository/'README').write_text('repo\n')
+        subprocess.run(git + ['add', 'README'], check=True)
+        subprocess.run(git + ['commit', '-q', '-m', 'init'], check=True)
+        trees = project(s)/'trees'
+        sessions = []
+        for branch in ('fix-login', 'release'):
+            subprocess.run(git + ['worktree', 'add', '-q', str(trees/branch), '-b', branch], check=True)
+            name = 'repo/%s/atlas' % branch
+            sessions.append(dict(id='saved:' + name, name=name, base_name='repo/' + branch, directory=str(trees/branch),
+                                 repository_path=str(self.repository), worktree_path=str(trees/branch), branch=branch,
+                                 worktree_created=True))
+        TopicRecords(s.root/'state/muxify').put(dict(id='atlas', title='Atlas', slug='atlas', order=0, sessions=sessions))
+        # The Worktree's Session: a Window in the Worktree, and one in the repository's main working copy.
+        self.fix, self.fix_windows = session(s, 'repo/fix-login/atlas', ('editor',), folder=trees/'fix-login')
+        self.fix_windows.append(s.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', self.fix + ':', '-n', 'server',
+                                       '-c', str(self.repository), SHELL))
+        self.main, self.main_windows = session(s, 'repo/atlas', ('checkout',), folder=self.repository)
+        self.release, (release_window,) = session(s, 'repo/release/atlas', ('tests',), folder=trees/'release')
+        self.release_panes = [pane_of(s, release_window), s.tmux('split-window', '-d', '-P', '-F', '#{pane_id}', '-t', release_window,
+                                                                 '-c', str(trees/'release'), SHELL)]
+        for sid, saved in ((self.fix, sessions[0]), (self.main, None), (self.release, sessions[1])):
+            s.tmux('set-option', '-t', sid, '@muxify_topic', 'atlas')
+            if saved:
+                s.tmux('set-option', '-t', sid, '@muxify_session_id', saved['id'])
+        topic(s, 'birch', 'Birch', order=1)
+
+    def shots(self):
+        return [('topic-worktrees', self.worktrees)]
+
+    def worktrees(self, view):
+        s = view.s
+        view.launch(config(sidebar='  panes: true\n'))
+        view.go(self.fix_windows[0])
+        fresh_shell(s, self.fix_windows[0])
+        lines = {'topic-atlas-session-' + self.fix: 'repo/fix-login', 'topic-atlas-session-' + self.main: 'repo',
+                 'topic-atlas-session-' + self.release: 'repo/release'}
+        rows = ['topic-window-' + window for window in self.fix_windows + self.main_windows] + ['pane-' + pane for pane in self.release_panes]
+        def shown(rs):
+            return (view.value('topic-atlas', rs).startswith('expanded') and all(s.has(key, rs) for key in rows)
+                    and all(s.row(key, rs).get('accessibilityLabel') == line for key, line in lines.items())
+                    and WINDOW_MAIN_WORKING_COPY in (s.row('topic-window-' + self.fix_windows[1], rs).get('accessibilityLabel') or ''))
+        view.wait(shown, lambda: 'the open card does not show the Worktree Sessions\' lines and rows, or the Window in the '
+                  'main working copy does not say so: %s' % {key: s.row(key).get('accessibilityLabel') for key in [*lines, *rows]})
+
+
+# WindowRowText.mainWorkingCopy in Sources/Muxify/UI/WindowRowMetrics.swift.
+WINDOW_MAIN_WORKING_COPY = 'Main working copy'
+
+
 # The launch arguments of every scene of the Topics list: the Sidebar shows, with Topics.
 TOPICS_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics']
 
@@ -773,6 +971,6 @@ AREAS = [
     Area(name='topics', title='Topics list', list='topics-list', default=TOPICS_LIST_DEFAULT, args=TOPICS_ARGS,
          shown=lambda s: s.topics_list(), scenes=[TopicCards(), LockedCards(), TopicOpen(), NoTopicCard(), TopicsStuckHeader(),
                                                     TopicTags(), Bench(), TopicOverflow(), SettledGroup(), TopicsHints(),
-                                                    TopicsHover()],
+                                                    TopicsHover(), TopicAgents(), TopicUnread(), TopicWorktrees()],
          others=('topic-groups',)),
 ]

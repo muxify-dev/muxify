@@ -455,8 +455,8 @@ struct CardList<Heading: View, Row: View>: View {
             .overlay(alignment: .leading) {
                 if let mark = hiddenMark {
                     AgentMarkSpine(mark: mark)
-                        .frame(width: 3)
-                        .padding(.vertical, 3)
+                        .frame(width: RowSpine.width)
+                        .padding(.vertical, RowSpine.verticalInset)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
@@ -473,11 +473,11 @@ struct CardList<Heading: View, Row: View>: View {
         row(item).overlay(alignment: .leading) {
             if let mark = agentSpines[item.id] {
                 AgentMarkSpine(mark: mark)
-                    .frame(width: 3)
-                    .padding(.vertical, 3)
+                    .frame(width: RowSpine.width)
+                    .padding(.vertical, RowSpine.verticalInset)
                     .allowsHitTesting(false)
                     .accessibilityLabel(mark.rawValue)
-                    .accessibilityIdentifier("topic-agent-mark-" + item.id)
+                    .accessibilityIdentifier(RowSpine.accessibilityID(item.id))
             }
         }
     }

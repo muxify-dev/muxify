@@ -127,6 +127,36 @@ import XCTest
         XCTAssertEqual(more.height(width: 240), 20)
     }
 
+    func testNMoreInTheTopicsListShowsTheStrongestMarkOfTheRowsHeldBackAsItsSpineAndItsValue() throws {
+        let more = MoreRowView(identifier: "topic-atlas")
+        more.show(count: 2, mark: .blocked, environment: SidebarListEnvironment())
+        more.frame = NSRect(x: 0, y: 0, width: 240, height: more.height(width: 240))
+        XCTAssertEqual(more.accessibilityValue() as? String, "blocked")
+        XCTAssertEqual(more.accessibilityChildren()?.count, 0, "the spine is no accessibility row, as SwiftUI hides it")
+        let spine = try XCTUnwrap(more.subviews.first { $0 is CardSpineView })
+        XCTAssertFalse(spine.isHidden)
+        XCTAssertEqual(spine.frame, NSRect(x: 0, y: RowSpine.verticalInset, width: RowSpine.width, height: 20 - 2 * RowSpine.verticalInset))
+        more.show(count: 2, environment: SidebarListEnvironment())
+        XCTAssertTrue(spine.isHidden, "\"N more…\" with no mark shows no spine")
+        XCTAssertEqual(more.accessibilityValue() as? String, "")
+    }
+
+    // MARK: The spine of a row
+
+    func testARowOfTheActiveTopicsOpenCardListsTheSpineOfItsMarkAfterItselfAlongItsLeftEdge() throws {
+        var marked = content(mark: .done)
+        marked.spine = .done
+        let row = paneRow(marked)
+        XCTAssertEqual(row.accessibilityParts.map { $0.accessibilityIdentifier() }, ["pane-%3", "topic-agent-mark-%3"])
+        let spine = try XCTUnwrap(row.accessibilityParts.last)
+        XCTAssertTrue(spine.isAccessibilityElement())
+        XCTAssertEqual(spine.accessibilityLabel(), "done")
+        XCTAssertEqual(spine.frame, NSRect(x: 0, y: RowSpine.verticalInset, width: RowSpine.width,
+                                           height: row.bounds.height - 2 * RowSpine.verticalInset))
+        XCTAssertTrue(row.hitTest(NSPoint(x: 1, y: 10)) === row, "a click on the spine presses the row")
+        XCTAssertEqual(paneRow(content(mark: .done)).accessibilityParts.count, 1, "a row with no spine lists only itself")
+    }
+
     func testAnOpenCardListsItsRowsThenNMoreThenItsHeader() throws {
         let window = TmuxWindow(id: "@1", sessionID: "$1", sessionName: "atlas", index: 0, name: "editor", paneTitle: "editor",
                                 path: "/work/app", command: "zsh", isActive: true, paneCount: 2, hasBell: false,

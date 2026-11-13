@@ -17,6 +17,9 @@ struct WindowRowContent: Equatable {
     /// The row is in the Topics list: it shows its Pane count also for one Pane, and no bell, as `WindowRow` does with
     /// `topicsView`.
     var inTopicsList = false
+    /// The Agent mark of the spine along the row's left edge: in the Topics list, the strongest mark of the Window's
+    /// Panes in the Active Topic's open card (`TopicsModel.Row.agentSpines`).
+    var spine: AgentMark?
 }
 
 /// A Window row of the AppKit Sessions list (ADR 0074): `WindowRow` in SwiftUI. From the left: the room for a Hint,
@@ -153,6 +156,7 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
             view.setAccessibilityValue(content.isSelected ? "selected" : "")
         }
         arranged = nil
+        showSpine(content.spine, rowID: window.id, environment: environment)
         layOut()
         showsLocation = content.isSelected
         showFill(fades: fades && tints)
@@ -173,9 +177,10 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
     private func layOut() {
         guard content != nil else { return }
         let layout = layout(width: bounds.width)
-        let views = [fill] + layout.parts.map(\.view)
+        let views = [fill] + layout.parts.map(\.view) + [spine]
         if subviews != views { subviews = views }
         fill.frame = bounds
+        placeSpine()
         for (view, frame) in layout.parts { view.frame = frame }
         removeAllToolTips()
         for help in layout.help { addToolTip(help.frame, owner: self, userData: nil) }
@@ -315,7 +320,7 @@ final class WindowRowView: SidebarRowView, CardRowView, NSViewToolTipOwner {
     // MARK: Accessibility
 
     /// The parts that show, from the left, each a row of its own with the row's identifier; or the row as one button.
-    var accessibilityParts: [NSView] { isButton ? [self] : layout(width: bounds.width).parts.map(\.view) }
+    var accessibilityParts: [NSView] { (isButton ? [self] : layout(width: bounds.width).parts.map(\.view)) + spineParts }
 
     /// The button's label: the labels of the parts that show, from the left, as SwiftUI joins the texts of a button.
     override func accessibilityLabel() -> String? {

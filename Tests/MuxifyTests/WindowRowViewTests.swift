@@ -18,6 +18,21 @@ import XCTest
         return row
     }
 
+    func testAWindowRowOfTheTopicsListListsTheSpineOfItsMarkAfterItsButton() throws {
+        let row = WindowRowView(windowID: window.id, identifier: "topic-window-" + window.id, isButton: true)
+        var content = WindowRowContent(window: window, formatted: SidebarFormats.WindowRowContent(text: .init(title: "editor", summary: ""),
+                                                                                                 left: nil, right: nil), inTopicsList: true)
+        content.spine = .working
+        row.show(content, environment: SidebarListEnvironment())
+        row.frame = NSRect(x: 0, y: 0, width: 240, height: row.height(width: 240))
+        XCTAssertEqual(row.accessibilityParts.map { $0.accessibilityIdentifier() }, ["topic-window-@1", "topic-agent-mark-@1"])
+        XCTAssertEqual(row.accessibilityParts.last?.accessibilityLabel(), "working")
+        XCTAssertTrue(row.subviews.last is CardSpineView, "the spine stands over the row's fill and parts")
+        content.spine = nil
+        row.show(content, environment: SidebarListEnvironment())
+        XCTAssertEqual(row.accessibilityParts.map { $0.accessibilityIdentifier() }, ["topic-window-@1"])
+    }
+
     func testTheRowTakesTheClicksOnItsPartsAndTheFirstClick() {
         let row = row()
         XCTAssertTrue(row.hitTest(NSPoint(x: 15, y: 10)) === row)

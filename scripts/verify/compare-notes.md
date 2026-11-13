@@ -330,3 +330,53 @@ difference picture marks:
   `topic-cards`.
 - The fill of the open card, as in `topic-open`, and the many-coloured border, the app icons and the edges of the
   glyphs of the rows, as in `topic-cards`.
+
+## topic-agents
+
+Task 15 of the set `remove-swiftui`. Two shots, with `ui.pulse: false`, so the Working marks stand still:
+`topic-agents`, the open card of the Location's Topic with a Window row whose Pane works, its two Pane rows under it,
+a Window row with a failed Agent, and "2 more…" for the two Pane rows it holds back, with the blocked spine of the
+stronger of their marks; under it the closed cards of a Topic with a failed and one with a done Agent. Then
+`topic-agents-all-rows`, the same card once "N more…" was pressed: the two Pane rows in place of the only Window row
+of `web`, each with its spine and its Notification dot, done and blocked.
+
+The gate passes in both shots. The AppKit list draws a row's spine (`SidebarRowView.spine`) and the spine of
+"N more…" (`MoreRowView`) where the SwiftUI `CardList` draws its overlays, at the sizes of `RowSpine`, and gives a
+row's spine the SwiftUI element: `topic-agent-mark-<Window or Pane ID>`, `AXUnknown`, named by the mark. Side by side
+the pictures look the same: the spines of the rows, of "N more…" and of the closed cards, the Working mark of the Pane
+row, the Notification dots and the cards' outlines stand on the same pixels, with the same colours. The difference
+picture marks:
+
+- The fill of the open card, as in `topic-open`. The Working mark's pixels are translucent over it, so they differ
+  by one or two steps too, such as `74757a` for `72747a`.
+- The many-coloured border of the Location's card, the app icon of the Window row and the edges of the glyphs of
+  "Settle", as in `topic-cards` and `topic-open`.
+
+## topic-unread
+
+Task 15 of the set `remove-swiftui`. Two shots: `topic-unread`, the open card of the Location's Unread Topic, with the
+Unread spine over its header (the card's own spine gives way to its rows' marks) and the done and blocked spines of
+its Window rows, the closed cards of a live Unread Topic whose Agent works, of an Empty and of a Dormant Unread Topic,
+each with the Unread spine, and the Settled group open on an Unread Settled Topic; then `topic-unread-no-server`, the
+same Topics once the scene stopped the tmux server: the live Topics show from their records as Dormant, and every
+card still has its Unread spine. Both versions close the Settled group when the server stops, and the scene opens it
+again. The first shot of the second version starts a new server with the same Sessions, which then have the same
+ids, from the records the first version found.
+
+The gate passes in both shots, and side by side the pictures look the same: the spines of the header, the rows and
+the cards, open or closed, at their resting opacity, stand on the same pixels. The difference picture marks the fill
+of the open card, as in `topic-open`, the many-coloured border, the app icon and the edges of the glyphs of "Settle"
+and "Reopen", as in `topic-cards`, and the edges of the circles of the cards' keys at rest, by at most 3 of 255.
+
+## topic-worktrees
+
+Task 15 of the set `remove-swiftui`. One shot, `topic-worktrees`: the open card of the Location's Topic with three
+Sessions of one git repository. A Session in the Worktree `fix-login`, named as Muxify names one, whose Session line
+says `repo/fix-login`, with a Window row in the Worktree and one whose Window left the Worktree for the repository's
+main working copy, which says "Main working copy" under its title; a Session in the main checkout, whose line says
+`repo`; and a Session in the Worktree `release`, whose only Window is split, with its Pane rows in place of its Window
+row. The records remember the Worktree Sessions with their Worktree and repository, as New Worktree writes them.
+
+The gate passes, and side by side the pictures look the same. The difference picture marks the fill of the open card,
+as in `topic-open`, and the many-coloured border, the app icons and the edges of the glyphs of "Settle", as in
+`topic-cards`.

@@ -136,7 +136,7 @@ final class TopicCardRowsView: NSView, TopicCardBody {
         while dividers.count < max(0, blocks.count - 1) { dividers.append(CardBlockDividerView()) }
         dividers.removeLast(max(0, dividers.count - max(0, blocks.count - 1)))
         showsMore = moreCount > 0
-        if showsMore { more.show(count: moreCount, value: moreMark?.rawValue ?? "", environment: environment) }
+        if showsMore { more.show(count: moreCount, mark: moreMark, environment: environment) }
         cornerWidth = reservesCorner ? CardCorner.width(environment.fontSize) : 0
         footerHeight = reservesCorner ? CardCorner.footerHeight(environment.fontSize) : 0
         let views: [NSView] = dividers + [sessionDrag.slot] + blocks + (showsMore ? [more] : [])

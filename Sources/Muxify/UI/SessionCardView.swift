@@ -59,8 +59,8 @@ enum CardRowContent: Equatable {
     case pane(PaneRowContent)
 
     /// What the row of the item shows, read from the models as the SwiftUI rows read them. `inTopicsList` gives a
-    /// Window row the look of the Topics list.
-    @MainActor init(_ item: TopicsModel.SessionChildren.Item, store: WorkspaceStore, inTopicsList: Bool = false) {
+    /// Window row the look of the Topics list. `spine` is the Agent mark of the spine along the row's left edge.
+    @MainActor init(_ item: TopicsModel.SessionChildren.Item, store: WorkspaceStore, inTopicsList: Bool = false, spine: AgentMark? = nil) {
         switch item {
         case .window(let window):
             self = .window(WindowRowContent(
@@ -68,14 +68,14 @@ enum CardRowContent: Equatable {
                 tabCount: store.tabCount(for: window), isGitViewOpen: store.isGitViewOpen(in: window.id),
                 usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
                     window, record: store.topicWatcher.records.first { $0.id == window.topicID }, sessionPaths: store.sessionPaths),
-                tooltips: store.config.sidebar.windowTooltips, inTopicsList: inTopicsList))
+                tooltips: store.config.sidebar.windowTooltips, inTopicsList: inTopicsList, spine: spine))
         case .pane(let row):
             let mark = store.topics.agentMarks[row.pane.id]
             self = .pane(PaneRowContent(paneID: row.pane.id, text: store.sidebarText(.pane, context: store.sidebarFormatContexts.panes[row.pane.id]),
                                         isActive: row.pane.isActive, isUnderWindowRow: row.isUnderWindowRow,
                                         showsLocation: row.showsLocation(selectedWindowID: store.selectedWindowID), mark: mark,
-                                        accessibilityValue: row.accessibilityValue(mark: mark), hoverDetail: row.hoverDetail,
-                                        windowID: row.window.id))
+                                        spine: spine, accessibilityValue: row.accessibilityValue(mark: mark),
+                                        hoverDetail: row.hoverDetail, windowID: row.window.id))
         }
     }
 }

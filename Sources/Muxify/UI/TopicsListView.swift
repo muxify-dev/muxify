@@ -345,8 +345,11 @@ final class TopicsListView: NSView, SidebarList {
     /// The blocks that an open card lists, as the SwiftUI list's `CardList` cuts them: each live Session's rows, the
     /// first `CardRows.shownCount` of the card's rows, and a block whose rows are all cut loses its Session line too.
     /// A block whose line has a `SessionLineOrder` is ordered: a drag on its line moves it, as on the SwiftUI line.
-    /// Returns the blocks, the number of rows held back and the strongest Agent mark among them.
-    private func blocks(of row: TopicsModel.Row, lines: Bool) -> (blocks: [TopicCardBlock], held: Int, mark: AgentMark?) {
+    /// `spines` are the Agent marks beside the rows, by Window or Pane ID: a Topic card's `agentSpines`, and none on a
+    /// Locked card, as the SwiftUI `LockedCard` gives its `CardList` none. Returns the blocks, the number of rows held
+    /// back and the strongest Agent mark among them.
+    private func blocks(of row: TopicsModel.Row, lines: Bool,
+                        spines: [String: AgentMark]) -> (blocks: [TopicCardBlock], held: Int, mark: AgentMark?) {
         guard row.isExpanded else { return ([], 0, nil) }
         let live = row.sessions.compactMap { session -> (id: String, line: String, items: [TopicsModel.SessionChildren.Item])? in
             guard case .live(let children) = session.contents else { return nil }
@@ -362,9 +365,11 @@ final class TopicsListView: NSView, SidebarList {
             guard start < shown else { break }
             blocks.append(TopicCardBlock(sessionID: session.id, line: lines ? session.line : nil,
                                          isOrdered: lines && SessionLineOrder(row, sessionID: session.id, store: store) != nil, fades: fades,
-                                         rows: session.items.prefix(shown - start).map { CardRowContent($0, store: store, inTopicsList: true) }))
+                                         rows: session.items.prefix(shown - start).map { item in
+                                             CardRowContent(item, store: store, inTopicsList: true, spine: spines[item.id])
+                                         }))
         }
-        return (blocks, items.count - shown, items.dropFirst(shown).compactMap { row.agentSpines[$0.id] }.max())
+        return (blocks, items.count - shown, items.dropFirst(shown).compactMap { spines[$0.id] }.max())
     }
 
     /// A press on the header of the card, as the card is now.
@@ -386,7 +391,7 @@ final class TopicsListView: NSView, SidebarList {
                                            hasBell: row.sessions.flatMap(\.windows).contains(where: \.hasBell),
                                            hint: CardHint(.locked(sessionID), in: environment.hints),
                                            notes: [row.isGuest ? "Guest" : "Locked"])
-            let rows = blocks(of: row, lines: false)
+            let rows = blocks(of: row, lines: false, spines: [:])
             return TopicCardContent(header: header, holdsSelection: holdsSelection, spine: row.mark, blocks: rows.blocks,
                                     moreCount: rows.held, moreMark: rows.mark, movesWindows: store.windowRowDrag.isEnabled)
         case .topic, .noTopic:
@@ -398,7 +403,7 @@ final class TopicsListView: NSView, SidebarList {
                                            tags: store.cardTags(row),
                                            hint: topicID.flatMap { CardHint(.topic($0), in: environment.hints) },
                                            notes: TopicCardWords.notes(of: row), cornerWidth: CardCorner.designWidth)
-            let rows = blocks(of: row, lines: true)
+            let rows = blocks(of: row, lines: true, spines: row.agentSpines)
             return TopicCardContent(header: header, holdsSelection: holdsSelection, spine: row.usesRowMarks ? nil : row.mark,
                                     unreadOverHeader: row.usesRowMarks && row.isUnread,
                                     restingOpacity: TopicCardOpacity.resting(row, inList: true),

@@ -105,7 +105,30 @@ class SidebarRowView: SidebarPressView {
         }
     }
 
+    /// The bar of the row's Agent mark along its left edge, over the fill and the row's parts, as the SwiftUI `CardList`
+    /// marks a row of the Active Topic's open card (`RowSpine`). Hidden without a mark. A row lists it among its
+    /// subviews and its accessibility rows (`spineParts`), where it is a row of its own, named by the mark.
+    let spine = CardSpineView()
+
     private var fillState: RowFillView.Fill { showsLocation ? .tint : hovering ? .hover : .clear }
+
+    /// Shows the spine of `mark`, nil for none, as the spine of the row with this Window or Pane ID. The Working mark's
+    /// bar fades in and out unless Reduce Motion or `ui.pulse: false` stills it.
+    func showSpine(_ mark: AgentMark?, rowID: String, environment: SidebarListEnvironment) {
+        spine.show(mark.map(CardMark.agent), colors: environment.agentColors, moves: environment.pulses && !environment.reduceMotion)
+        spine.setAccessibilityElement(mark != nil)
+        // As SwiftUI gives a shape with a label.
+        spine.setAccessibilityRole(.unknown)
+        spine.setAccessibilityIdentifier(RowSpine.accessibilityID(rowID))
+        spine.setAccessibilityLabel(mark?.rawValue)
+        placeSpine()
+    }
+
+    /// The spine as an accessibility row after the row's own, while it shows.
+    var spineParts: [NSView] { spine.isHidden ? [] : [spine] }
+
+    /// Puts the spine along the row's left edge.
+    func placeSpine() { spine.frame = RowSpine.frame(in: bounds.size) }
 
     /// Shows the fill of the row's state. With `fades`, the tint fades from where it shows now.
     func showFill(fades: Bool) { fill.show(fillState, fades: fades) }

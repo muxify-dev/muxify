@@ -29,6 +29,9 @@ struct PaneRowContent: Equatable {
     /// The row stands in for the Location's Window row: `TopicsModel.PaneRow.showsLocation`.
     var showsLocation = false
     var mark: AgentMark?
+    /// The Agent mark of the spine along the row's left edge: in the Topics list, the mark of a row in place of its
+    /// Window row in the Active Topic's open card (`TopicsModel.Row.agentSpines`).
+    var spine: AgentMark?
     /// The value of the accessibility row: `TopicsModel.PaneRow.accessibilityValue`.
     var accessibilityValue = ""
     /// The detail line of the hover label: `TopicsModel.PaneRow.hoverDetail`.
@@ -71,7 +74,7 @@ final class PaneRowView: SidebarRowView, CardRowView {
         super.init(frame: .zero)
         wantsLayer = true
         summary.ink = .secondary
-        subviews = [fill, mark, activeIcon, icon, title, summary]
+        subviews = [fill, mark, activeIcon, icon, title, summary, spine]
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityIdentifier("pane-" + paneID)
@@ -90,6 +93,7 @@ final class PaneRowView: SidebarRowView, CardRowView {
         let size = environment.fontSize
         mark.show(content.mark, colors: environment.agentColors, moves: environment.pulses && !environment.reduceMotion,
                   fontSize: size, scale: environment.displayScale)
+        showSpine(content.spine, rowID: content.paneID, environment: environment)
         for symbol in [activeIcon, icon] {
             symbol.pointSize = size(PaneRowMetrics.iconSize)
             symbol.ink = content.showsLocation ? .accent : .secondary
@@ -116,7 +120,7 @@ final class PaneRowView: SidebarRowView, CardRowView {
 
     func height(width: CGFloat) -> CGFloat { layout(width: width).height }
 
-    var accessibilityParts: [NSView] { [self] }
+    var accessibilityParts: [NSView] { [self] + spineParts }
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
@@ -127,6 +131,7 @@ final class PaneRowView: SidebarRowView, CardRowView {
         guard content != nil else { return }
         let layout = layout(width: bounds.width)
         fill.frame = bounds
+        placeSpine()
         mark.frame = layout.mark
         activeIcon.frame = layout.icon
         icon.frame = layout.icon
@@ -187,16 +192,18 @@ final class PaneRowView: SidebarRowView, CardRowView {
 }
 
 /// The row that ends a long open card in the AppKit lists (ADR 0074): "N more…", where N is the number of rows the card
-/// holds back. A press shows all rows of the card. To accessibility it is a button with the identifier of the
-/// card's header and `-more`.
+/// holds back. In the Topics list, the strongest Agent mark of the rows it holds back shows as a spine along its left
+/// edge (`RowSpine`), as on the SwiftUI row. A press shows all rows of the card. To accessibility it is a button with
+/// the identifier of the card's header and `-more`, whose value names that mark; the spine is no element.
 final class MoreRowView: SidebarPressView, CardRowView {
     private let label = SidebarLabel()
+    private let spine = CardSpineView()
     private var environment = SidebarListEnvironment()
 
     init(identifier: String) {
         super.init(frame: .zero)
         label.ink = .secondary
-        subviews = [label]
+        subviews = [label, spine]
         setAccessibilityElement(true)
         setAccessibilityRole(.button)
         setAccessibilityIdentifier(identifier + "-more")
@@ -206,11 +213,12 @@ final class MoreRowView: SidebarPressView, CardRowView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
 
-    /// Shows the number of rows the card holds back. `value` is the row's accessibility value: in the Topics list, the
-    /// strongest Agent mark of the rows held back.
-    func show(count: Int, value: String = "", environment: SidebarListEnvironment) {
+    /// Shows the number of rows the card holds back, and in the Topics list `mark`, the strongest Agent mark of the rows
+    /// held back: its spine, and its name as the row's accessibility value.
+    func show(count: Int, mark: AgentMark? = nil, environment: SidebarListEnvironment) {
         self.environment = environment
-        setAccessibilityValue(value)
+        setAccessibilityValue(mark?.rawValue ?? "")
+        spine.show(mark.map(CardMark.agent), colors: environment.agentColors, moves: environment.pulses && !environment.reduceMotion)
         label.text = MoreRowMetrics.text(count)
         label.font = .systemFont(ofSize: environment.fontSize(MoreRowMetrics.fontSize))
         label.scale = environment.displayScale
@@ -232,8 +240,9 @@ final class MoreRowView: SidebarPressView, CardRowView {
         layOut()
     }
 
-    /// The text after its room, with its middle on the row's middle.
+    /// The text after its room, with its middle on the row's middle, and the spine along the left edge.
     private func layOut() {
+        spine.frame = RowSpine.frame(in: bounds.size)
         let size = label.fit(width: room(bounds.width))
         label.frame = NSRect(x: MoreRowMetrics.leading, y: ((bounds.height - size.height) / 2).rounded(toPixelsOf: environment.displayScale),
                              width: size.width, height: size.height)
