@@ -613,12 +613,16 @@ final class HostEnvironmentLink: EnvironmentLink {
         if let error = error as? ProtocolError {
             if let failure = error.topicFailure { return failure }
             if error.code == .unavailable, changes {
-                return TopicFailure(kind: .disconnected, phase: .changesStarted,
-                                    message: "\(environmentName) disconnected before \(action) finished. It may or may not have happened.")
+                return TopicFailure(kind: .disconnected, phase: .changesStarted, message: disconnected(before: action))
             }
             return TopicFailure(kind: .unsupported, phase: .nothingChanged, message: error.message)
         }
         return TopicFailure(kind: .tmuxFailed, phase: .nothingChanged, message: String(describing: error))
+    }
+
+    /// What a change whose channel ended before its answer says: it is never retried.
+    private func disconnected(before action: String) -> String {
+        "\(environmentName) disconnected before \(action) finished. It may or may not have happened."
     }
 
     // MARK: Git
@@ -652,7 +656,7 @@ final class HostEnvironmentLink: EnvironmentLink {
             return try await client.call(HostRequest.gitWrite(write), as: GitWritten.self).output
         } catch let error as ProtocolError {
             if error.code == .unavailable {
-                throw GitViewError(message: "\(environmentName) disconnected before \(write.action) finished. It may or may not have happened.")
+                throw GitViewError(message: disconnected(before: write.action))
             }
             throw GitViewError(message: error.message)
         }
@@ -674,7 +678,7 @@ final class HostEnvironmentLink: EnvironmentLink {
             switch error.code {
             case .cancelled: throw TmuxError.cancelled
             case .unavailable:
-                throw GitViewError(message: "\(environmentName) disconnected before \(network.action) finished. It may or may not have happened.")
+                throw GitViewError(message: disconnected(before: network.action))
             case .unsupported, .invalid, .failed: throw GitViewError(message: error.message)
             }
         }

@@ -431,7 +431,7 @@ final class HostEnvironment: @unchecked Sendable {
     /// Runs an `EnvironmentRequest` with the Host's Config, as the App Window's own Client, then reads, so the
     /// events of what it changed go out before its answer.
     func run(_ environmentRequest: EnvironmentRequest, for request: ProtocolIncomingRequest, nonce: String?) {
-        let reads: Bool = if case .read = environmentRequest.command.lane { true } else { false }
+        let reads = environmentRequest.command.onlyReads
         Task {
             let config: Config
             do { config = try await context.config() } catch {

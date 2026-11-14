@@ -206,7 +206,7 @@ protocol EnvironmentLink: AnyObject {
     func environmentService(sessionPaths: [SessionPath], topics: Config.Topics, notifications: Config.Notifications,
                             worktreesRoot: String?) -> EnvironmentService?
 
-    // MARK: Git
+    // MARK: Environment requests
 
     /// Runs an Environment request on the Environment's machine. `local` is the service the store built from its
     /// Config through `environmentService`; nil when the link can run none.

@@ -100,7 +100,7 @@ import MuxifyCore
 
     private func fileItems() -> [NSMenuItem] {
         let store = self.store
-        /// Topics live on this Mac, so only a Local App Window offers them.
+        /// Only an App Window whose Environment serves Topics offers them.
         let topicsAvailable = store.map { $0.link.features.contains(.topics) && !$0.changingTopic } ?? false
         let topicsEnabled = store?.topics.topicsEnabled == true
         let hasWindow = store?.selectedWindow != nil

@@ -794,8 +794,7 @@ final class WorkspaceStore {
         Task { [weak self] in
             await self?.flushTopicMemory()
             for command in browserCommands + before { _ = try? await link.view(command) }
-            let response = await link.run(request, client: client, local: service)
-                ?? .failed(TopicFailure(kind: .tmuxFailed, phase: .nothingChanged, message: "The Environment is not connected."))
+            let response = await link.run(request, client: client, local: service) ?? .failed(Self.notConnected)
             guard let self else { return }
             await self.link.topicsReloaded()
             guard self.generation == environment else {

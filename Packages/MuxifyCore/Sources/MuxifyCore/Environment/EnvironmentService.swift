@@ -396,7 +396,8 @@ extension EnvironmentCommand {
     public var needsRecords: Bool {
         switch self {
         case .newWindow, .newSession, .renameSession, .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession: return false
-        // A Remote Environment's Muxify Worktrees have no Topic; on this Mac the request also updates the Topics.
+        // A Muxify Worktree request is refused on its own where the Worktrees are unavailable (ADR 0088); where they
+        // are served, it also updates the Topics.
         case .createWorktree, .removeWorktree, .listWorktrees: return false
         // Agent Unread is in tmux. Only a Topic's Read state is in its record; Mark All as Read leaves the records
         // out where there are none.
