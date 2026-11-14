@@ -246,7 +246,6 @@ final class PaletteCatalogTests: XCTestCase {
     func testTypingKeepsSectionsAndMarksWhatMatched() {
         var settled = topic("s", "Game settled")
         settled.settledAt = "2026-01-01T00:00:00Z"
-        settled.outcome = "Shipped the GS reward cap"
         let records = [topic("a", "Fix game drops"), settled]
         let windows = [window("@1", session: "game/fix", directory: "/work/game/main", topic: "a"),
                        window("@2", session: "game-scratch", directory: "/tmp/scratch")]
@@ -254,11 +253,11 @@ final class PaletteCatalogTests: XCTestCase {
         let list = catalog.list(goTo, query: "game", rules: .standard)
         XCTAssertEqual(list.sections.map(\.title), ["Topics", "Sessions"])
         XCTAssertEqual(list.sections[0].rows.map(\.id), ["topic-a", "topic-s"], "on an equal score, the open Topic goes first")
-        XCTAssertEqual(list.sections[0].rows[1].detail.text, "Shipped the GS reward cap")
+        XCTAssertEqual(list.sections[0].rows[1].detail.text, ISO8601DateFormatter().date(from: "2026-01-01T00:00:00Z")!.formatted(date: .abbreviated, time: .omitted))
         XCTAssertEqual(list.sections[1].rows.first?.id, "session:$game/fix", "all running Sessions, including Topic members, are searchable")
-        let byOutcome = catalog.list(goTo, query: "sett gs", rules: .standard)
-        XCTAssertEqual(ids(byOutcome), ["topic-s"], "one word on the type word, one on the outcome")
-        XCTAssertEqual(byOutcome.rows[0].title.marks, [5, 6, 7, 8])
+        let byTwoWords = catalog.list(goTo, query: "sett gam", rules: .standard)
+        XCTAssertEqual(ids(byTwoWords), ["topic-s"], "both words match the title")
+        XCTAssertEqual(byTwoWords.rows[0].title.marks, [0, 1, 2, 5, 6, 7, 8])
     }
 
     func testATopicRowShowsButNeverMatchesTheBaseNamesOfItsSessions() {

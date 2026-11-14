@@ -191,16 +191,15 @@ class CommandPalette(unittest.TestCase):
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close after ↩')
         self.assertFalse(self.s.has('reopen-choice-reopen'), '↩ on a Dormant row showed the Reopen choice')
 
-    def test_typing_sett_finds_a_settled_topic_by_its_outcome_and_return_shows_its_reopen_choice(self):
-        self.write_topic('sw-settled', 'Sw settled', self.alpha, settled_at='2031-01-01T10:00:00Z', outcome='Shipped proof',
+    def test_typing_sett_finds_a_settled_topic_by_its_title_and_return_shows_its_reopen_choice(self):
+        self.write_topic('sw-settled', 'Sw settled', self.alpha, settled_at='2031-01-01T10:00:00Z',
                          sessions=[remembered_session(self.alpha, 'sw-settled', windows=[dict(directory=str(self.alpha), name='shell')])])
         key = 'palette-row-topic-sw-settled'
         self.open_palette()
-        rs = self.search('sett proof', key)
+        rs = self.search('sett sw', key)
         ids = self.s.ids(rs)
         self.assertNotIn('palette-section-settled', ids, 'a query still lists Settled Topics under their own header')
         self.assertLess(ids.index('palette-section-topics'), ids.index(key), 'the Settled row is not among the Topics')
-        self.assertIn('Shipped proof', self.describe(key, rs), 'the row does not show the outcome that matched')
         self.s.act('press', key)
         self.assertIn('settled_at', self.records()['sw-settled'], 'the Reopen choice changed the record')
         self.choose_reopen('alpha/sw-settled')

@@ -9,10 +9,9 @@ final class TopicGroupsTests: XCTestCase {
                    sessionPath: "/work/app")
     }
 
-    private func settled(_ id: String, at: String, outcome: String? = nil) -> TopicRecord {
+    private func settled(_ id: String, at: String) -> TopicRecord {
         var record = TopicRecord(id: id, title: id.capitalized)
         record.settledAt = at
-        record.outcome = outcome
         record.sessions = [.object(["id": .string("saved"), "name": .string("app/fix-links"), "base_name": .string("app/fix-links"), "directory": .string("/work/app"),
                                     "windows": .array([.object(["name": .string("server"), "directory": .string("/work/app/srv")]),
                                                        .object(["name": .string("shell")])])])]
@@ -64,14 +63,14 @@ final class TopicGroupsTests: XCTestCase {
         XCTAssertEqual(topics.rows.map(\.isPinned), [true, false])
     }
 
-    func testSettledRowsShowNewestFirstWithOutcomeAndSettleDateAndRememberedSessions() {
-        let records = [settled("older", at: "2026-10-01T10:00:00Z"), settled("newer", at: "2026-10-05T10:00:00Z", outcome: "Shipped")]
+    func testSettledRowsShowNewestFirstAndSettleDateAndRememberedSessions() {
+        let records = [settled("older", at: "2026-10-01T10:00:00Z"), settled("newer", at: "2026-10-05T10:00:00Z")]
         var selection = TopicSelection()
         selection.setTopic(.topic("newer"), open: true)
         let group = model(records, selection: selection).groups.first { $0.kind == .settled }!
         XCTAssertEqual(group.topics.map(\.id), [.topic("newer"), .topic("older")])
-        XCTAssertEqual(group.topics[0].kind, .settled(outcome: "Shipped", settledDate: date("2026-10-05T10:00:00Z")))
-        XCTAssertEqual(group.topics[1].kind, .settled(outcome: "", settledDate: date("2026-10-01T10:00:00Z")))
+        XCTAssertEqual(group.topics[0].kind, .settled(settledDate: date("2026-10-05T10:00:00Z")))
+        XCTAssertEqual(group.topics[1].kind, .settled(settledDate: date("2026-10-01T10:00:00Z")))
         XCTAssertTrue(group.topics[0].isExpanded)
         XCTAssertNotEqual(group.topics[0].state, .dormant, "a Settled Topic is not Dormant, it is done")
         let session = group.topics[0].sessions[0]

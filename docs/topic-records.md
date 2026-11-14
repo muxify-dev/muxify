@@ -20,7 +20,7 @@ bytes.
 | `id` | text | The Topic id. |
 | `title` | text or NULL | The Topic's title. |
 | `slug` | text or NULL | The slug of its Session names. Not unique. |
-| `outcome` | text or NULL | What Settle recorded. |
+| `outcome` | text or NULL | No build writes it now. Settle once recorded a note here. It stays because the schema never drops a column. |
 | `order` | real or NULL | Its place in the Topics list. |
 | `created_at`, `settled_at` | text or NULL | ISO 8601 times. |
 | `session_order` | text or NULL | `manual`, or NULL. |
@@ -44,7 +44,6 @@ prints it and as the old `topics.json` held it:
   "slug": "reward-drop",
   "created_at": "2026-10-06T20:00:00Z",
   "settled_at": null,
-  "outcome": null,
   "order": 0,
   "session_order": "manual",
   "tags": ["backend", "release"],

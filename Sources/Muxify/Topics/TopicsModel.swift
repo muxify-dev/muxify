@@ -253,8 +253,8 @@ struct TopicsModel {
     struct Row: Identifiable, Equatable {
         enum Kind: Equatable {
             case open
-            /// `outcome` is empty when the user gave none. `settledDate` is nil when the record's date does not parse.
-            case settled(outcome: String, settledDate: Date?)
+            /// `settledDate` is nil when the record's date does not parse.
+            case settled(settledDate: Date?)
         }
 
         let id: TopicGroupID
@@ -702,7 +702,6 @@ struct TopicsModel {
     static func settledRow(_ record: TopicRecord, labels: TopicLabels, sessionPaths: [SessionPath], tags: ConfigTags?,
                            expanded: Set<TopicGroupID>) -> Row {
         let id = TopicGroupID.topic(record.id)
-        let outcome = record.outcome?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let settledDate = record.settledDate
         let sessions = record.sessions.enumerated().compactMap { index, session -> Session? in
             guard let path = session["directory"]?.string, let savedID = session["id"]?.string else { return nil }
@@ -714,7 +713,7 @@ struct TopicsModel {
             return Session(id: identity, baseName: session["base_name"]?.string ?? session["name"]?.string ?? "Session",
                            contents: .remembered(windows))
         }
-        return Row(id: id, title: labels.label(of: record), kind: .settled(outcome: outcome, settledDate: settledDate),
+        return Row(id: id, title: labels.label(of: record), kind: .settled(settledDate: settledDate),
                    mark: CardMark(unread: record.isUnread, agent: nil), isPinned: record.isPinned, sessions: sessions,
                    isExpanded: expanded.contains(id), state: nil, tags: tags?.shown(record.tags) ?? [], note: record.note)
     }

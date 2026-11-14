@@ -119,23 +119,23 @@ final class TopicStoreTests: XCTestCase {
             try transaction.create(TopicRecord(id: "t", title: "T"))
             try transaction.update("t") { record in
                 record.order = 0.30000000000000004
-                record.outcome = "none"
+                record.slug = "none"
             }
         }
         let readByA = try XCTUnwrap(records(a).first)
         let readByB = try XCTUnwrap(records(b).first)
         var mine = readByA, theirs = readByB
-        mine.outcome = "mine"
-        theirs.outcome = "theirs"
+        mine.slug = "mine"
+        theirs.slug = "theirs"
         theirs.note = "Bisect"
         try b.write { try $0.apply(TopicRecordChange(before: readByB, after: theirs)) }
         try a.write { try $0.apply(TopicRecordChange(before: readByA, after: mine)) }
         let merged = try XCTUnwrap(records(TopicStore(paths: paths)).first)
-        XCTAssertEqual(merged.outcome, "mine", "the last write wins for a field both writers changed")
+        XCTAssertEqual(merged.slug, "mine", "the last write wins for a field both writers changed")
         XCTAssertEqual(merged.note, "Bisect", "a field only the other writer changed stays")
         XCTAssertEqual(merged.order, 0.30000000000000004, "a number stays exact")
-        try a.write { try $0.update("t") { $0.outcome = nil } }
-        XCTAssertNil(try records(b).first?.outcome, "a field set to nothing is NULL for every reader")
+        try a.write { try $0.update("t") { $0.slug = nil } }
+        XCTAssertNil(try records(b).first?.slug, "a field set to nothing is NULL for every reader")
     }
 
     func testTheChangeTokenMovesWhenAnotherConnectionCommitsAndStaysOtherwise() throws {
@@ -187,7 +187,7 @@ final class TopicStoreTests: XCTestCase {
     }
 
     func testRecordRoundTripKeepsUnknownSessionValuesAndLargeIntegers() throws {
-        let data = Data(#"{"id":"test","title":"Before","slug":"test","created_at":"2026-10-06T20:00:00Z","settled_at":null,"outcome":null,"order":2,"sessions":[{"repository_path":"/work/app","future_session":42,"large":18446744073709551615,"windows":[{"future_window":{"key":"kept","items":[true,null,0.125]}}]}]}"#.utf8)
+        let data = Data(#"{"id":"test","title":"Before","slug":"test","created_at":"2026-10-06T20:00:00Z","settled_at":null,"order":2,"sessions":[{"repository_path":"/work/app","future_session":42,"large":18446744073709551615,"windows":[{"future_window":{"key":"kept","items":[true,null,0.125]}}]}]}"#.utf8)
         let record = try JSONDecoder().decode(TopicRecord.self, from: data)
         let store = TopicStore(paths: paths)
         try seed(record)
@@ -342,7 +342,7 @@ final class TopicStoreTests: XCTestCase {
 
         let topic = try XCTUnwrap(records(store).first { $0.id == "t" })
         let settle = TopicSettlePlan(topic: topic, snapshot: TmuxSnapshot(windows: [], clients: [], panes: [], serverRunning: true),
-                                     sessionPaths: [], choices: [], outcome: "").edit
+                                     sessionPaths: [], choices: []).edit
         try store.write { try $0.apply(TopicRecordChange(before: topic, after: XCTUnwrap(settle.record))) }
         XCTAssertEqual(try shown(store), ["p", "a"])
         let settled = try XCTUnwrap(records(store).first { $0.id == "t" })
@@ -367,7 +367,7 @@ final class TopicStoreTests: XCTestCase {
 
         let topic = try XCTUnwrap(records(store).first)
         let settle = TopicSettlePlan(topic: topic, snapshot: TmuxSnapshot(windows: [], clients: [], panes: [], serverRunning: true),
-                                     sessionPaths: [], choices: [], outcome: "").edit
+                                     sessionPaths: [], choices: []).edit
         try store.write { try $0.apply(TopicRecordChange(before: topic, after: XCTUnwrap(settle.record))) }
         let settled = try XCTUnwrap(records(store).first)
         XCTAssertNil(settled.note, "Settle clears the Note")

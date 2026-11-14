@@ -17,7 +17,7 @@ final class TopicWireTests: XCTestCase {
             .addSession(sessionPath: "/work", workingCopy: .newWorktree(from: "/work")), .addSession(sessionPath: "/work", workingCopy: .worktree(path: "/w")),
             .move(to: .session(session)), .move(to: .newSession(topic: .id("fix"))),
             .move(to: .newSession(topic: nil)), .move(to: .newTopic(title: "Fix")),
-            .settle(choices: [], outcome: "Done"), .forget(choices: [], worktrees: []),
+            .settle(choices: []), .forget(choices: [], worktrees: []),
             .removeFromTopic, .removeAndKill(worktrees: []), .rename(title: "Next"), .reopen, .startFresh,
             .moveSession(to: .before(session)), .moveSession(to: .up), .moveSession(to: .down), .sortSessions,
             .tags(.set([Tag(name: "backend")!])), .note("Bisect"), .note(nil),

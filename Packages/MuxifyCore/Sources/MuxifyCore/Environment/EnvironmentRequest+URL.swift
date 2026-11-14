@@ -45,7 +45,7 @@ extension EnvironmentRequest {
             self.init(.addSession(sessionPath: try sessionPath(values["sessionPath"]), workingCopy: .directory), target: try pane(values["pane"]))
         case "/settle":
             try keys(["pane"])
-            self.init(.settle(choices: [], outcome: ""), target: try pane(values["pane"]))
+            self.init(.settle(choices: []), target: try pane(values["pane"]))
         case "/forget":
             if Set(values.keys) == ["topic"] {
                 self.init(.forget(choices: [], worktrees: []), target: .topic(.named(values["topic"]!)))

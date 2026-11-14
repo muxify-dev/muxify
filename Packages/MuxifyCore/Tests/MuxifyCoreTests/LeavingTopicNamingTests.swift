@@ -31,7 +31,7 @@ final class LeavingTopicNamingTests: XCTestCase {
         let sessionPaths = sessionPaths ?? self.sessionPaths
         let live = TmuxSnapshot(windows: [window], clients: [], panes: [], serverRunning: true)
         return [
-            "settle": names(TopicSettlePlan(topic: topic, snapshot: live, sessionPaths: sessionPaths, choices: [], outcome: "").edit.commands),
+            "settle": names(TopicSettlePlan(topic: topic, snapshot: live, sessionPaths: sessionPaths, choices: []).edit.commands),
             "forget": names(TopicForgetPlan(topic: topic, snapshot: live, sessionPaths: sessionPaths, choices: [], worktrees: [],
                                               paths: MuxifyPaths(environment: ["XDG_STATE_HOME": "/nonexistent-state"])).edit.commands),
             "remove": names(TopicMembershipPlan(removingSession: window, records: [topic], sessionPaths: sessionPaths,

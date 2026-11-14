@@ -7,7 +7,7 @@ struct SearchField: Equatable {
         case title
         /// "topic", "settled", ...; shown in the detail line only when it matched.
         case typeWord
-        /// Always in the detail line: a Settled Topic's outcome, a directory in New Topic.
+        /// Always in the detail line: a directory in New Topic.
         case detail
         /// Always in the detail line, never matched: a Topic's repo/folder per Session.
         case label

@@ -160,8 +160,7 @@ enum PaletteFlow {
         case .text: "Untitled"
         case .confirm(let draft):
             switch draft.target {
-            case .settle: "Outcome note (optional)"
-            case .forget, .forgetSettled, .killWindow, .killSession, .removeAndKill, .removeWorktree: "Review and confirm"
+            case .settle, .forget, .forgetSettled, .killWindow, .killSession, .removeAndKill, .removeWorktree: "Review and confirm"
             }
         }
     }
@@ -714,7 +713,7 @@ extension CommandPalette {
         case (.confirm(let draft), .accept):
             guard case .ready(let sessions, let worktrees) = draft.choices else { return }
             switch draft.target {
-            case .settle(let topic): store.settleTopic(topic.id, choices: sessions, outcome: query)
+            case .settle(let topic): store.settleTopic(topic.id, choices: sessions)
             case .forget(let topic):
                 let removed = worktrees.filter { draft.removedWorktrees.contains($0.id) && $0.canRemove(sessions: sessions) }.map(\.id)
                 store.forgetTopic(topic.id, choices: sessions, worktrees: removed)

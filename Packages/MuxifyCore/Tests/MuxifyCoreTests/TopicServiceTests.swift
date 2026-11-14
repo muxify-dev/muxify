@@ -73,7 +73,7 @@ final class TopicServiceTests: XCTestCase {
             _ = try change(service().handle(EnvironmentRequest(.addSession(sessionPath: tools.folder.path, workingCopy: .directory), target: .topic(.id(id)))))
             let before = try records()
             let windows = try server.snapshot().windows
-            for command in [EnvironmentCommand.settle(choices: reviewed, outcome: "Done"), .forget(choices: reviewed, worktrees: [])] {
+            for command in [EnvironmentCommand.settle(choices: reviewed), .forget(choices: reviewed, worktrees: [])] {
                 try assertThrowawayServer()
                 let failed = try failure(service().handle(EnvironmentRequest(command, target: .topic(.id(id)), expectedSessionIDs: reviewed.map(\.id))))
                 XCTAssertEqual(failed.kind, .topicMembershipChanged)
@@ -103,7 +103,7 @@ final class TopicServiceTests: XCTestCase {
             }
             let before = try records()
             let panes = Set(try server.snapshot().panes.map(\.id))
-            for command in [EnvironmentCommand.settle(choices: choices, outcome: "Done"), .forget(choices: choices, worktrees: [])] {
+            for command in [EnvironmentCommand.settle(choices: choices), .forget(choices: choices, worktrees: [])] {
                 try assertThrowawayServer()
                 let failed = try failure(service().handle(EnvironmentRequest(command, target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id))))
                 XCTAssertEqual(failed.kind, .topicMembershipChanged)
@@ -113,7 +113,7 @@ final class TopicServiceTests: XCTestCase {
             }
             var refreshed = try service().settleChoices(for: .topic(.id(id))).get()
             for index in refreshed.indices { refreshed[index].disposition = .kill }
-            _ = try change(service().handle(EnvironmentRequest(.settle(choices: refreshed, outcome: "Reviewed again"),
+            _ = try change(service().handle(EnvironmentRequest(.settle(choices: refreshed),
                                                         target: .topic(.id(id)), expectedSessionIDs: refreshed.map(\.id))))
             XCTAssertFalse(try server.snapshot().windows.contains { $0.sessionID == session.id })
         }
@@ -125,7 +125,7 @@ final class TopicServiceTests: XCTestCase {
             _ = try change(service().handle(EnvironmentRequest(.addSession(sessionPath: tools.folder.path, workingCopy: .directory), target: .topic(.id(id)))))
             var choices = try service().settleChoices(for: .topic(.id(id))).get()
             for index in choices.indices { choices[index].disposition = .keep }
-            let command: EnvironmentCommand = forget ? .forget(choices: choices, worktrees: []) : .settle(choices: choices, outcome: "Done")
+            let command: EnvironmentCommand = forget ? .forget(choices: choices, worktrees: []) : .settle(choices: choices)
             try assertThrowawayServer()
             _ = try change(service().handle(EnvironmentRequest(command, target: .topic(.id(id)), expectedSessionIDs: choices.reversed().map(\.id))))
             let windows = try server.snapshot().windows
@@ -201,7 +201,7 @@ final class TopicServiceTests: XCTestCase {
         try assertThrowawayServer()
         var killed = try service.settleChoices(for: .topic(.id(id))).get()
         for index in killed.indices { killed[index].disposition = .kill }
-        _ = try change(service.handle(EnvironmentRequest(.settle(choices: killed, outcome: "Done"), target: .topic(.id(id)))))
+        _ = try change(service.handle(EnvironmentRequest(.settle(choices: killed), target: .topic(.id(id)))))
         let choices = try service.forgetChoices(for: .topic(.id(id))).get()
         XCTAssertTrue(choices.sessions.isEmpty)
         XCTAssertEqual(choices.worktrees.map(\.id), [path])
@@ -269,7 +269,7 @@ final class TopicServiceTests: XCTestCase {
         let settler = EnvironmentService(paths: paths, server: Interleaving(server: server) {
             tagged.append(tagger.handle(EnvironmentRequest(.tags(.add([backend])), target: .topic(.id(id)))))
         }, sessionPaths: [sessionPath, tools])
-        _ = try change(settler.handle(EnvironmentRequest(.settle(choices: choices, outcome: "Done"), target: .topic(.id(id)))))
+        _ = try change(settler.handle(EnvironmentRequest(.settle(choices: choices), target: .topic(.id(id)))))
         XCTAssertEqual(tagged.all.count, 1, "the Tag change ran inside the Settle")
         for response in tagged.all { _ = try change(response) }
         let record = try XCTUnwrap(records().first { $0.id == id })
@@ -366,7 +366,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertNil(try current().note, "an empty Note clears it")
 
         _ = try change(service().handle(EnvironmentRequest(.note("Bisect from v2"), target: .topic(.id(id)))))
-        _ = try change(service().handle(EnvironmentRequest(.settle(choices: [], outcome: ""), target: .topic(.id(id)))))
+        _ = try change(service().handle(EnvironmentRequest(.settle(choices: []), target: .topic(.id(id)))))
         XCTAssertNil(try current().note, "Settle clears the Note")
         let settled = try failure(service().handle(EnvironmentRequest(.note("Later"), target: .topic(.id(id)))))
         XCTAssertEqual(settled.kind, .topicUnavailable)
@@ -942,16 +942,15 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try failure(step(.up, .sessionName("chores"))).kind, .cardGuest, "a Guest Session takes no In Play place")
     }
 
-    func testSettleSavesTheOutcomeAndKillsOrKeepsEachSessionAsChosen() throws {
+    func testSettleKillsOrKeepsEachSessionAsChosen() throws {
         let id = try twoSessionPathTopic("Ship")
         var choices = try service().settleChoices(for: .topic(.id(id))).get()
         XCTAssertEqual(choices.map(\.disposition), [.kill, .kill])
         let toolsIndex = try XCTUnwrap(choices.firstIndex { $0.name == "tools/ship" })
         choices[toolsIndex].disposition = .keep
-        _ = try change(service().handle(EnvironmentRequest(.settle(choices: choices, outcome: " Shipped 1.2 "), target: .topic(.id(id)))))
+        _ = try change(service().handle(EnvironmentRequest(.settle(choices: choices), target: .topic(.id(id)))))
         let record = try XCTUnwrap(records().first { $0.id == id })
         XCTAssertNotNil(record.settledAt)
-        XCTAssertEqual(record.outcome, "Shipped 1.2")
         XCTAssertEqual(record.sessions.compactMap { $0["directory"]?.string }, [sessionPath.folder.path, tools.folder.path])
         let names = try server.snapshot().windows.map(\.sessionName)
         XCTAssertFalse(names.contains("game/ship"), "the killed Session is gone")
@@ -977,7 +976,7 @@ final class TopicServiceTests: XCTestCase {
         try server.run(["new-window", "-d", "-t", "=game/ship:", "-n", "logs", "-c", root.path])
         try waitForPath(sessionPath.folder.path, of: "=game/ship:notes")
         try waitForPath(root.path, of: "=game/ship:logs")
-        _ = try change(service().handle(EnvironmentRequest(.settle(choices: [], outcome: "Paused"), target: .topic(.id(id)))))
+        _ = try change(service().handle(EnvironmentRequest(.settle(choices: []), target: .topic(.id(id)))))
         XCTAssertEqual(try sessions(of: id), [])
         let reopened = try change(service().handle(EnvironmentRequest(.reopen, target: .topic(.id(id)))))
         XCTAssertEqual(reopened.topicID, id)
@@ -1290,7 +1289,7 @@ final class TopicServiceTests: XCTestCase {
         var choices = try service.settleChoices(for: .topic(.id(id))).get()
         for index in choices.indices { choices[index].disposition = .kill; choices[index].removeWorktree = true }
         try git(["update-ref", "refs/heads/main", commit], in: app.folder.path)
-        _ = try change(service.handle(EnvironmentRequest(.settle(choices: choices, outcome: ""), target: .topic(.id(id)))))
+        _ = try change(service.handle(EnvironmentRequest(.settle(choices: choices), target: .topic(.id(id)))))
         XCTAssertFalse(FileManager.default.fileExists(atPath: worktree), "Settle kept the merged Worktree that Muxify made")
         XCTAssertEqual(try git(["rev-parse", "feature/hover"], in: app.folder.path), commit, "the branch stays")
     }
@@ -1602,7 +1601,7 @@ final class TopicServiceTests: XCTestCase {
         let id = try XCTUnwrap(records().first?.id)
         let base = try XCTUnwrap(session["base"]?.string)
         let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
-        _ = try change(service.handle(EnvironmentRequest(.settle(choices: [], outcome: "Paused"), target: .topic(.id(id)))))
+        _ = try change(service.handle(EnvironmentRequest(.settle(choices: []), target: .topic(.id(id)))))
         try git(["worktree", "remove", "--force", paths.worktrees.appendingPathComponent("app/ship").path], in: app.folder.path)
         try git(["branch", "-D", "ship"], in: app.folder.path)
         try git(["commit", "-q", "--allow-empty", "-m", "third"], in: app.folder.path)
@@ -1652,7 +1651,7 @@ final class TopicServiceTests: XCTestCase {
         choices[0].removeWorktree = true
         choices[0].disposition = .kill
         let before = try records()
-        let failed = try failure(service.handle(EnvironmentRequest(.settle(choices: choices, outcome: "Done"), target: .topic(.id(id)))))
+        let failed = try failure(service.handle(EnvironmentRequest(.settle(choices: choices), target: .topic(.id(id)))))
         XCTAssertEqual(failed, TopicFailure(kind: .gitFailed, phase: .nothingChanged,
                                             message: "The Worktree \(worktree) has uncommitted changes. Commit or remove them, or keep the Worktree."))
         XCTAssertEqual(try records(), before, "the Topic is not Settled")
@@ -1669,7 +1668,7 @@ final class TopicServiceTests: XCTestCase {
         var choices = try service.settleChoices(for: .topic(.id(id))).get()
         choices[0].removeWorktree = true
         choices[0].disposition = .kill
-        guard case .changed = service.handle(EnvironmentRequest(.settle(choices: choices, outcome: "Done"), target: .topic(.id(id)))) else {
+        guard case .changed = service.handle(EnvironmentRequest(.settle(choices: choices), target: .topic(.id(id)))) else {
             return XCTFail("Settle failed")
         }
         XCTAssertFalse(FileManager.default.fileExists(atPath: worktree), "Settle kept the Worktree")

@@ -670,7 +670,7 @@ These follow the size:
 - The whole Sidebar. That is every text in it: Topic and Session cards with
   their titles, Summaries, Topic Notes, the Guest mark, "N more…", a Settled
   Topic's age and the Settle and Reopen links; the Session headings and the
-  outcome and idle labels of a Topic; Window, Pane and Agent rows with their
+  idle labels of a Topic; Window, Pane and Agent rows with their
   Summaries and custom parts; remembered Windows; Tag chips and Tag Marks; the
   Bench and Guests lines, the "N more" pills over the list's edges and Open
   Places; the Settled group's header and "Show N more"; the Topics/Sessions
@@ -1263,7 +1263,7 @@ Results stay in sections, one or more for each source. With `order: ranked` on
 a palette, they show in one list without headers, and a query ranks the rows of
 every source together. Words match in any order, fzf style, on the name, a type word (`topic`, `dormant`,
 `settled`, `session`, `worktree`, `window`), the details under the
-name, or a Settled Topic's outcome, and the matched letters are marked. A word
+name, and the matched letters are marked. A word
 must match at least 55% as well as it matches itself, so its letters spread
 over a long path do not match. A word of one letter matches anywhere. A word
 that starts after a space, `/` or `-` earns the same bonus, as in fzf's history
