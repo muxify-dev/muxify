@@ -222,7 +222,7 @@ final class RemoteSSHTests: XCTestCase {
         let fake = directory.url.appendingPathComponent("ssh")
         let ssh = try RemoteSSH(environment: RemoteEnvironment(name: "fake", host: "unused", username: "unused"),
                                 temporaryDirectory: directory.url, sshExecutable: fake.path)
-        let report = "Muxify snapshot \(ssh.nonce)\n/home/test\(Tmux.separator)host\nempty\nMuxify snapshot end \(ssh.nonce)\n"
+        let report = "Muxify snapshot \(ssh.nonce)\n" + hex("/home/test\(Tmux.separator)host\nempty\n") + "Muxify snapshot end \(ssh.nonce)\n"
         try ("#!/bin/sh\nprintf pane-output\nprintf '%s' " + Tmux.shellQuote("\n" + report) + "\n")
             .write(to: fake, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
@@ -241,9 +241,32 @@ final class RemoteSSHTests: XCTestCase {
         let directory = try TestDirectory()
         let ssh = try remote(in: directory)
         try "0".write(to: ssh.directory.appendingPathComponent("exit"), atomically: true, encoding: .utf8)
-        try "Muxify snapshot \(ssh.nonce)\n/home/test\(Tmux.separator)host\nempty\n"
+        try ("Muxify snapshot \(ssh.nonce)\n" + hex("/home/test\(Tmux.separator)host\nempty\n"))
             .write(to: ssh.directory.appendingPathComponent("snapshot"), atomically: true, encoding: .utf8)
         XCTAssertNil(ssh.closedSnapshot)
+    }
+
+    func testSnapshotDecodesFromHexAndRejectsBrokenHex() throws {
+        let text = "/home/✳\(Tmux.separator)host\nempty\n"
+        XCTAssertEqual(RemoteSSH.text(hex: hex(text).replacingOccurrences(of: "\n", with: "")), text)
+        XCTAssertNil(RemoteSSH.text(hex: "e29"))
+        XCTAssertNil(RemoteSSH.text(hex: "zz"))
+        XCTAssertNil(RemoteSSH.text(hex: "e29c"), "Half a UTF-8 character")
+    }
+
+    func testOnlyTheListenerRecordsItsPid() throws {
+        let directory = try TestDirectory()
+        let ssh = try remote(in: directory)
+        XCTAssertTrue(ssh.command(["-C", "new-session", "-A", "-s", Tmux.watchSessionName]).arguments.last!.contains(ssh.listenerOption))
+        XCTAssertFalse(ssh.command(["list-sessions"]).arguments.last!.contains(ssh.listenerOption))
+        XCTAssertTrue(ssh.bootstrap().contains(ssh.listenerOption))
+    }
+
+    /// The report as `od -An -v -tx1 | tr -d ' '` writes it.
+    private func hex(_ text: String) -> String {
+        let digits = Array(text.utf8).map { String(format: "%02x", $0) }
+        return stride(from: 0, to: digits.count, by: 16)
+            .map { digits[$0..<min($0 + 16, digits.count)].joined() + "\n" }.joined()
     }
 
     func testRecoveryDoesNotCreateMainAutomatically() throws {

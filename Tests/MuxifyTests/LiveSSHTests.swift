@@ -178,10 +178,13 @@ final class LiveSSHTests: XCTestCase {
         XCTAssertEqual(try connection.snapshot().windows.first { $0.id == windowID }?.name, "renamed")
         XCTAssertFalse(try connection.snapshot().windows.contains { $0.id == disposable })
 
-        events.stop()
+        // The listener still runs over the master, as in the app: the bootstrap must end it, or SSH never exits.
+        XCTAssertTrue(events.isRunning)
         _ = try connection.run(["detach-client", "-t", tty])
         stopAfterExit(terminal)
         XCTAssertEqual(connection.remote?.exitStatus, 0)
+        XCTAssertEqual(connection.closedSnapshot?.windows.first { $0.id == windowID }?.name, "renamed")
+        events.stop()
         XCTAssertFalse(connection.remote?.shouldReconnect ?? true)
         connection.retire()
         XCTAssertThrowsError(try runner.run(try XCTUnwrap(connection.remote).command(["list-sessions"]), timeout: 3)) {

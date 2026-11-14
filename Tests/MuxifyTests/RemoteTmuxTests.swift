@@ -258,10 +258,42 @@ final class RemoteTmuxTests: XCTestCase {
 
         let (second, secondTerminal) = try connect(target: otherTarget, picksLatestSession: false)
         _ = try ready(second)
+        // A UTF-8 name holds bytes that Ghostty reads as C1 controls; the report must not break out of its DCS.
+        _ = try raw(["rename-window", "-t", started.id, "✳ agent"])
+        // The listener stays attached to the Watch Session, so only the bootstrap can end it. Over real SSH the
+        // master, and so the Terminal, waits for it.
+        let listener = Process()
+        let listenerCommand = second.command(["-C", "new-session", "-A", "-s", Tmux.watchSessionName,
+                                              "-f", "no-output,ignore-size", "cat"])
+        listener.executableURL = URL(fileURLWithPath: listenerCommand.executable)
+        listener.arguments = listenerCommand.arguments
+        listener.environment = environment
+        let listenerInput = Pipe()
+        listener.standardInput = listenerInput
+        listener.standardOutput = FileHandle.nullDevice
+        listener.standardError = FileHandle.nullDevice
+        try listener.run()
+        defer { stop(listener); withExtendedLifetime(listenerInput) {} }
+        let listening = Date().addingTimeInterval(5)
+        while Date() < listening, !((try? ready(second))?.clients.contains(where: \.isControl) ?? false) {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        XCTAssertTrue(try ready(second).clients.contains(where: \.isControl), "The listener attached")
         _ = try raw(["kill-pane", "-t", otherTarget])
         try exited(secondTerminal, owner: second)
+        let listenerEnd = Date().addingTimeInterval(5)
+        while listener.isRunning, Date() < listenerEnd { Thread.sleep(forTimeInterval: 0.02) }
+        XCTAssertFalse(listener.isRunning, "The bootstrap ends its listener when its Terminal Client ends")
+        XCTAssertEqual(try raw(["show-option", "-sqv", second.listenerOption]).trimmingCharacters(in: .newlines), "")
+        // Muxify kills the Watch Session itself once no Session of the user's is left.
+        _ = try raw(["kill-session", "-t", Tmux.watchSessionName])
         let survivors = try XCTUnwrap(second.closedSnapshot)
         XCTAssertEqual(survivors.windows.map(\.sessionName), ["project"])
+        XCTAssertEqual(survivors.windows.map(\.name), ["✳ agent"])
+        let terminalOutput = try Data(contentsOf: try XCTUnwrap(logs[secondTerminal.processIdentifier]))
+        let reportStart = try XCTUnwrap(terminalOutput.range(of: Data("\u{1B}Pmuxify;".utf8)))
+        let reportBytes = terminalOutput[reportStart.upperBound...]
+        XCTAssertFalse(reportBytes.contains { (0x80...0x9F).contains($0) }, "No C1 byte inside the report's DCS")
         XCTAssertTrue(survivors.windows.allSatisfy(\.isRemote))
         XCTAssertEqual(survivors.windows.first?.homeDirectory, home.path)
         XCTAssertFalse(try String(contentsOf: second.directory.appendingPathComponent("snapshot"), encoding: .utf8).contains("[exited]"))

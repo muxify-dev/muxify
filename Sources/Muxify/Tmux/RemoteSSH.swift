@@ -12,6 +12,8 @@ final class RemoteSSH {
     private var ownsDirectory = false
     var socketPath: String { directory.appendingPathComponent("s").path }
     var markerOption: String { "@muxify_client_\(nonce)" }
+    /// The PID of this connection's control-mode listener (`tmux -C`).
+    var listenerOption: String { "@muxify_listener_\(nonce)" }
     private var exitFile: URL { directory.appendingPathComponent("exit") }
     private var errorFile: URL { directory.appendingPathComponent("stderr") }
     private var snapshotFile: URL { directory.appendingPathComponent("snapshot") }
@@ -77,6 +79,11 @@ final class RemoteSSH {
                 done)
                 if [ "$actual" != "$expected" ]; then echo 'Muxify: remote tmux client changed.' >&2; exit 75; fi
                 """
+            }
+            if args.first == "-C" {
+                // Recorded before the marker check, so the bootstrap, which clears the marker first, always sees a
+                // listener that can still start. `exec` keeps the PID for the tmux client.
+                checks = "tmux -u set-option -sq \(Tmux.shellQuote(listenerOption)) \"$$\" || exit $?\n" + checks
             }
         }
         let script = Self.remotePath + "\n" + checks + "\nexec tmux -u " + args.map(Tmux.shellQuote).joined(separator: " ")
@@ -164,16 +171,26 @@ final class RemoteSSH {
         let snapshotCommand = "tmux -u " + Tmux.snapshotArguments.map(Tmux.shellQuote).joined(separator: " ")
         // An unsupported DCS is ignored by the renderer, so the handoff does
         // not flash raw Session/Browser records in the terminal before exit.
+        // The records go in hex: Ghostty takes any byte 0x80-0x9F as a C1
+        // control even inside a DCS, and UTF-8 such as ␟ or ✳ holds those
+        // bytes, so plain text would end the DCS and print the rest.
+        let report = """
+        report() {
+            printf '\\033Pmuxify;\\n%s\\n' \(Tmux.shellQuote(snapshotStart)) >&2
+            od -An -v -tx1 | tr -d ' ' >&2
+            printf '%s\\n\\033\\\\' \(Tmux.shellQuote(snapshotEnd)) >&2
+        }
+        """
         let reportSnapshot = """
         if snapshot=$(\(snapshotCommand) 2>/dev/null); then
             reports=$(printf '%s\\n' "$snapshot" | /bin/sh -c \(Tmux.shellQuote(Tmux.codexReportsForInventoryScript)))
-            printf '\\033Pmuxify;\\n%s\\n%s\\n%s\\n%s\\n%s\\n\\033\\\\' \(Tmux.shellQuote(snapshotStart)) "${HOME}\(Tmux.separator)$(uname -n)" "$snapshot" "$reports" \(Tmux.shellQuote(snapshotEnd)) >&2
+            printf '%s\\n%s\\n%s\\n' "${HOME}\(Tmux.separator)$(uname -n)" "$snapshot" "$reports" | report
         elif absence=$(tmux -u has-session 2>&1); then
             :
         else
             case "$absence" in
                 *"no server running"*|*"no sessions"*|*"error connecting"*"No such file or directory"*)
-                    printf '\\033Pmuxify;\\n%s\\n%s\\nempty\\n%s\\n\\033\\\\' \(Tmux.shellQuote(snapshotStart)) "${HOME}\(Tmux.separator)$(uname -n)" \(Tmux.shellQuote(snapshotEnd)) >&2 ;;
+                    printf '%s\\nempty\\n' "${HOME}\(Tmux.separator)$(uname -n)" | report ;;
             esac
         fi
         """
@@ -187,7 +204,7 @@ final class RemoteSSH {
             """
         } ?? """
         if ! tmux -u list-sessions -f "$user_sessions" -F . 2>/dev/null | grep -q .; then
-        \(reportSnapshot)
+            \(reportSnapshot)
             exit 0
         fi
         """
@@ -205,6 +222,7 @@ final class RemoteSSH {
         return """
         \(Self.remotePath)
         unset TMUX TMUX_PANE
+        \(report)
         if ! command -v tmux >/dev/null 2>&1; then
             echo 'Muxify: tmux was not found on the remote machine.' >&2
             exit 127
@@ -245,7 +263,14 @@ final class RemoteSSH {
         /bin/sh -c \(Tmux.shellQuote(attachment)) muxify "$client_tty" "$target"
         status=$?
         tmux -u set-option -su \(Tmux.shellQuote(markerOption)) 2>/dev/null
+        listener=$(tmux -u show-option -sqv \(Tmux.shellQuote(listenerOption)) 2>/dev/null)
+        tmux -u set-option -su \(Tmux.shellQuote(listenerOption)) 2>/dev/null
         \(reportSnapshot)
+        # The SSH master stays until every channel over it closes, and the listener attached to the Watch Session
+        # outlives this client. End it, or the Terminal never sees SSH exit and never goes on to the next Session.
+        if [ -n "$listener" ] && tmux -u list-clients -F '#{client_pid}' 2>/dev/null | grep -qx "$listener"; then
+            kill -HUP "$listener" 2>/dev/null
+        fi
         exit "$status"
         """
     }
@@ -268,10 +293,14 @@ final class RemoteSSH {
         guard exitStatus == 0, let text = try? String(contentsOf: snapshotFile, encoding: .utf8) else { return nil }
         let lines = text.components(separatedBy: .newlines)
         guard let start = lines.lastIndex(of: snapshotStart),
-              let end = lines[(start + 1)...].firstIndex(of: snapshotEnd), end > start + 2 else { return nil }
-        let metadata = lines[start + 1].components(separatedBy: Tmux.separator)
+              let end = lines[(start + 1)...].firstIndex(of: snapshotEnd),
+              let decoded = Self.text(hex: lines[(start + 1)..<end].joined()) else { return nil }
+        var records = decoded.components(separatedBy: "\n")
+        if records.last == "" { records.removeLast() }
+        guard records.count >= 2 else { return nil }
+        let metadata = records[0].components(separatedBy: Tmux.separator)
         guard metadata.count == 2 else { return nil }
-        let payload = lines[(start + 2)..<end].joined(separator: "\n")
+        let payload = records[1...].joined(separator: "\n")
         var snapshot = payload == "empty"
             ? TmuxSnapshot(windows: [], clients: [], panes: [], lastWindowID: nil, serverRunning: false)
             : Tmux.parseSnapshot(payload)
@@ -283,6 +312,28 @@ final class RemoteSSH {
             snapshot.windows[index].isRemote = true
         }
         return snapshot
+    }
+
+    /// The text that `od -An -v -tx1` wrote as hex digits, or nil when they are not whole bytes of UTF-8.
+    static func text(hex: String) -> String? {
+        let digits = Array(hex.utf8)
+        guard digits.count % 2 == 0 else { return nil }
+        var bytes = [UInt8]()
+        bytes.reserveCapacity(digits.count / 2)
+        for index in stride(from: 0, to: digits.count, by: 2) {
+            guard let high = hexValue(digits[index]), let low = hexValue(digits[index + 1]) else { return nil }
+            bytes.append(high << 4 | low)
+        }
+        return String(bytes: bytes, encoding: .utf8)
+    }
+
+    private static func hexValue(_ digit: UInt8) -> UInt8? {
+        switch digit {
+        case UInt8(ascii: "0")...UInt8(ascii: "9"): digit - UInt8(ascii: "0")
+        case UInt8(ascii: "a")...UInt8(ascii: "f"): digit - UInt8(ascii: "a") + 10
+        case UInt8(ascii: "A")...UInt8(ascii: "F"): digit - UInt8(ascii: "A") + 10
+        default: nil
+        }
     }
 
     var shouldReconnect: Bool {
