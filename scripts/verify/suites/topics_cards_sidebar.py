@@ -312,12 +312,9 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.assertIn('Agent working', s.row('palette-row-session-' + working, rs).get('accessibilityLabel', ''))
         self.choose_keep(working)
         s.wait_rows(lambda rs: not agents(rs), 'the Agent row stayed after its Session turned to Keep')
-        s.act('focus', 'palette-search')
-        s.act('set', 'palette-search', 'Shipped from the palette')
         s.act('press', 'palette-accept')
         s.wait_rows(lambda rs: not s.has('palette-accept', rs), 'Settle palette did not close after saving')
         wait(lambda: self.records()[topic].get('settled_at'), 'Settle did not save the settle date')
-        self.assertEqual(self.records()[topic].get('outcome'), 'Shipped from the palette')
         wait(lambda: s.tmux_ok('has-session', '-t', idle).returncode != 0, 'Settle did not kill the idle Session')
         def kept_without_topic():
             options = s.tmux_ok('show-options', '-t', working)

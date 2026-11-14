@@ -282,7 +282,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// Adds a Session for `sessionPath` to the target's Topic.
     case addSession(sessionPath: String, workingCopy: TopicWorkingCopyChoice, name: String? = nil)
     /// Empty `choices` take the default choice for each Session.
-    case settle(choices: [TopicSettleSession], outcome: String)
+    case settle(choices: [TopicSettleSession])
     case forget(choices: [TopicSettleSession], worktrees: [String])
     /// Forgets every Settled Topic that was Settled more than `olderThan` days before `asOf`, as `SettledAge` counts
     /// days, with one write of the records. It keeps their Worktrees, and a Settled Topic has no live Session to stop.

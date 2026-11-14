@@ -4,7 +4,8 @@ import Foundation
 /// maps to a row, and the one-time import of `topics.json`.
 enum TopicTable {
     /// One row for each Topic, keyed by its id. Each scalar field has a column; `sessions` and `tags` are JSON text,
-    /// written whole. The slug is not UNIQUE: two Topics made at the same moment may share one.
+    /// written whole. The slug is not UNIQUE: two Topics made at the same moment may share one. No build writes
+    /// `outcome` now, and it stays because an older build still reads it.
     static let migration = StateDatabase.Migration(
         """
         CREATE TABLE topics (
@@ -33,7 +34,7 @@ enum TopicTable {
     )
 
     /// The columns of a record besides `id`, in the order `values(of:)` gives them.
-    static let columns = ["title", "slug", "outcome", "order", "created_at", "settled_at", "session_order",
+    static let columns = ["title", "slug", "order", "created_at", "settled_at", "session_order",
                           "pinned", "guest", "unread", "note", "sessions", "tags"]
 
     private static let quoted = columns.map { "\"\($0)\"" }
@@ -45,7 +46,6 @@ enum TopicTable {
         [
             "title": SQLiteValue(record.title),
             "slug": SQLiteValue(record.slug),
-            "outcome": SQLiteValue(record.outcome),
             "order": SQLiteValue(record.order),
             "created_at": SQLiteValue(record.createdAt),
             "settled_at": SQLiteValue(record.settledAt),
@@ -63,7 +63,6 @@ enum TopicTable {
     /// that is not a Tag is left out, so a row that `sqlite3` changed by hand still reads.
     static func record(id: String, _ values: [String: SQLiteValue]) -> TopicRecord {
         var record = TopicRecord(id: id, title: values["title"]?.text, slug: values["slug"]?.text)
-        record.outcome = values["outcome"]?.text
         record.order = values["order"]?.real
         record.createdAt = values["created_at"]?.text
         record.settledAt = values["settled_at"]?.text

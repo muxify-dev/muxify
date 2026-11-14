@@ -32,7 +32,7 @@ final class TopicRequestURLTests: XCTestCase {
     func testMembershipAndLifecycleRequests() throws {
         XCTAssertEqual(try request("muxify://topic/add?pane=%257&sessionPath=%2Fwork%2Ftools"),
                        EnvironmentRequest(.addSession(sessionPath: "/work/tools", workingCopy: .directory), target: pane7))
-        XCTAssertEqual(try request("muxify://topic/settle?pane=%257"), EnvironmentRequest(.settle(choices: [], outcome: ""), target: pane7))
+        XCTAssertEqual(try request("muxify://topic/settle?pane=%257"), EnvironmentRequest(.settle(choices: []), target: pane7))
         XCTAssertEqual(try request("muxify://topic/move?pane=%257&topic=Fix%20reward"),
                        EnvironmentRequest(.move(to: .topic(.named("Fix reward"))), target: pane7))
     }

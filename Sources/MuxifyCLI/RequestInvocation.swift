@@ -456,12 +456,12 @@ extension RequestInvocation {
             // The palette defaults to Kill behind ⌘↩; the CLI stops a Session only with an explicit flag (ADR 0039).
             // Choices that fail to load leave the defaults, so the request itself reports why the Topic cannot settle.
             guard let settled = target ?? caller.map(EnvironmentTarget.pane),
-                  var choices = try? service.settleChoices(for: settled).get() else { return .settle(choices: [], outcome: "") }
+                  var choices = try? service.settleChoices(for: settled).get() else { return .settle(choices: []) }
             for index in choices.indices {
                 choices[index].disposition = kill ? .kill : .keep
                 choices[index].removeWorktree = remove && choices[index].worktree != nil
             }
-            return .settle(choices: choices, outcome: "")
+            return .settle(choices: choices)
         case .markRead(let change, let scope): return .markRead(change, scope: scope)
         case .markAllRead: return .markAllRead
         case .createWorktree(let name, let from, let start, let open): return .createWorktree(name: name, from: from, start: start, open: open)

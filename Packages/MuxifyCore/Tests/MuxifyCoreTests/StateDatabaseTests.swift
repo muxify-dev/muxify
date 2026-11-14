@@ -133,7 +133,9 @@ final class StateDatabaseTests: XCTestCase {
     func testTheTopicsTableHoldsAColumnForEachFieldAndTheSlugIsNotUnique() throws {
         let (connection, _) = try open()
         let columns = try connection.query("SELECT name FROM pragma_table_info('topics') ORDER BY cid") { $0.text(0) ?? "" }
-        XCTAssertEqual(columns, ["id"] + TopicTable.columns)
+        var expected = ["id"] + TopicTable.columns
+        expected.insert("outcome", at: 3)
+        XCTAssertEqual(columns, expected, "the dead outcome column stays, since a migration never drops one")
         XCTAssertEqual(try connection.query("SELECT name FROM pragma_table_info('open_places') ORDER BY cid") { $0.text(0) ?? "" },
                        ["id", "order"])
         try connection.execute("INSERT INTO topics (id, slug) VALUES ('a', 'same'), ('b', 'same')")
@@ -158,7 +160,6 @@ final class StateDatabaseTests: XCTestCase {
         a.isUnread = true
         a.isGuest = true
         a.settledAt = "2026-10-01T00:00:00Z"
-        a.outcome = "Done"
         a.createdAt = "2026-09-01T00:00:00Z"
         a.sessions = [.object(["id": .string("s"), "future": .object(["large": .unsignedInteger(UInt64.max)])])]
         var b = TopicRecord(id: "b", title: "B")

@@ -15,7 +15,7 @@ import sqlite3
 from pathlib import Path
 
 # The columns of `topics` besides `id`.
-TEXT = ['title', 'slug', 'outcome', 'created_at', 'settled_at', 'session_order', 'note']
+TEXT = ['title', 'slug', 'created_at', 'settled_at', 'session_order', 'note']
 FLAGS = ['pinned', 'guest', 'unread']
 LISTS = ['sessions', 'tags']
 COLUMNS = TEXT + ['order'] + FLAGS + LISTS

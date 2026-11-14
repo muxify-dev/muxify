@@ -684,8 +684,8 @@ final class WorkspaceStore {
                 presenting: .leave(nextCard(leaving: .topic(id))))
     }
 
-    func settleTopic(_ id: String, choices: [TopicSettleSession], outcome: String) {
-        perform(EnvironmentRequest(.settle(choices: choices, outcome: outcome), target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id)),
+    func settleTopic(_ id: String, choices: [TopicSettleSession]) {
+        perform(EnvironmentRequest(.settle(choices: choices), target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id)),
                 presenting: .leave(nextCard(leaving: .topic(id))))
     }
 

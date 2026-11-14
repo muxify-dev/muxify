@@ -169,14 +169,13 @@ struct PaletteCatalog {
     private func settledCandidate(_ record: TopicRecord) -> PickCandidate<PaletteItem> {
         let row = TopicsModel.settledRow(record, labels: topics?.labels ?? TopicLabels(records), sessionPaths: sessionPaths,
                                           tags: topics?.tags, expanded: [])
-        let outcome = record.outcome?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         var settledOn: String?
-        if outcome.isEmpty, case .settled(_, let settledDate) = row.kind {
+        if case .settled(let settledDate) = row.kind {
             settledOn = settledDate?.formatted(date: .abbreviated, time: .omitted) ?? record.settledAt
         }
         return PickCandidate(
             id: row.id.accessibilityID, kind: .settled, symbol: "✓", title: row.title,
-            fields: [.typeWord("settled")] + (outcome.isEmpty ? [] : [.detail(outcome)]) + SearchField.tags(row.tags),
+            fields: [.typeWord("settled")] + SearchField.tags(row.tags),
             note: [row.note, settledOn].compactMap { $0 }.joined(separator: " · "),
             trailing: ["Reopen", age(.topic(row.id))].compactMap { $0 }.joined(separator: " · "), mark: row.mark,
             lastVisit: visits.last(.topic(row.id)), isSetAside: true,

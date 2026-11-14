@@ -795,17 +795,9 @@ struct TopicCard: View, Equatable {
 
     private var formatted: SidebarFormats.Text { state.formatted }
 
-    /// The outcome of a Settled Topic.
-    private var groupDetail: String? {
-        switch topic.kind {
-        case .open: return nil
-        case .settled(let outcome, _): return outcome.isEmpty ? nil : outcome
-        }
-    }
-
     /// How long ago a card in the Settled group was Settled, such as "Yesterday".
     private var settledAge: CardCornerLabel? {
-        guard case .group(let now) = place, case .settled(_, let settledDate?) = topic.kind, case .topic(let id) = topic.id else { return nil }
+        guard case .group(let now) = place, case .settled(let settledDate?) = topic.kind, case .topic(let id) = topic.id else { return nil }
         return CardCornerLabel(text: SettledAge.label(settled: settledDate, now: now, calendar: .autoupdatingCurrent),
                                accessibilityID: "settled-age-" + id)
     }
@@ -813,14 +805,10 @@ struct TopicCard: View, Equatable {
     private var header: some View {
         CardHeader(title: formatted.title, isOpen: topic.isExpanded, mark: topic.mark, isPinned: topic.isPinned, isGuest: topic.isGuest,
                    hintTarget: list == nil ? nil : namedTopicID.map { .topic($0) },
-                   notes: (topic.isPinned ? ["Pinned"] : []) + (topic.isGuest ? ["Guest"] : []) + (topic.usesRowMarks && topic.isUnread && topic.mark != .unread ? ["unread"] : []) + (groupDetail.map { [$0] } ?? []) + (topic.idleLabel.map { [$0] } ?? []),
+                   notes: (topic.isPinned ? ["Pinned"] : []) + (topic.isGuest ? ["Guest"] : []) + (topic.usesRowMarks && topic.isUnread && topic.mark != .unread ? ["unread"] : []) + (topic.idleLabel.map { [$0] } ?? []),
                    summary: list == nil ? "" : formatted.summary, cornerWidth: list == nil ? CardCorner.groupWidth(fontSize) : CardCorner.width(fontSize),
                    tags: tags, note: topic.note, cornerLabel: settledAge) {
             if list != nil || topic.isExpanded {
-                if list == nil, let detail = groupDetail {
-                    Text(detail)
-                        .font(fontSize.font(10)).foregroundStyle(.secondary)
-                }
                 if let label = topic.idleLabel { Text(label).font(fontSize.font(10)).foregroundStyle(.secondary) }
             }
         }

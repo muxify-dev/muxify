@@ -130,14 +130,14 @@ extension EnvironmentService {
             let sessionPath = try sessionPath(at: repositoryPath)
             return Planned(edit: try TopicSessionPlan(topic: topic, sessionPath: sessionPath, workingCopy: workingCopy(choice, of: sessionPath),
                                                       windows: snapshot.windows, sessionPaths: sessionPaths, order: topics.sessionOrder, baseName: name).edit)
-        case .settle(let choices, let outcome):
+        case .settle(let choices):
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             try checkMembership(request.expectedSessionIDs, choices: choices, topic: topic, snapshot: snapshot)
             var snapshot = snapshot
             snapshot.commandLines = PaneCommandLines().updating(for: snapshot) {
                 try? CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", PaneCommandLines.script]))
             }
-            return Planned(edit: TopicSettlePlan(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, choices: choices, outcome: outcome,
+            return Planned(edit: TopicSettlePlan(topic: topic, snapshot: snapshot, sessionPaths: sessionPaths, choices: choices,
                                                  mergedWorktrees: TopicWorktrees.merged(in: topic, paths: paths),
                                                  order: topics.sessionOrder).edit)
         case .forget(let choices, let worktrees):

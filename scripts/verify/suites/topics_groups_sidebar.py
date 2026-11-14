@@ -99,12 +99,11 @@ class TopicsGroupsSidebar(TopicsSidebar):
                     'going to a Topic in the Topics list did not close the Settled group')
 
     def test_settled_group_lists_settled_topic_with_remembered_windows_and_its_reopen_link_rebuilds_it_at_once(self):
-        self.write_topic('group-settled', 'Group settled', self.alpha, settled_at='2031-01-01T10:00:00Z', outcome='Shipped proof',
+        self.write_topic('group-settled', 'Group settled', self.alpha, settled_at='2031-01-01T10:00:00Z',
                          sessions=[dict(id='saved', name='alpha/group-settled', base_name='alpha', directory=str(self.alpha), windows=[dict(directory=str(self.alpha), name='shell')])])
         self.expand('settled-topics')
         latency, rs = self.rows_until(lambda rs: self.grouped('topic-group-settled', 'settled-topics', rs))
         self.assertIsNotNone(latency, 'Topic is not in the Settled group; Topic rows %s' % self.topic_rows(rs))
-        self.assertIn('Shipped proof', self.describe('topic-group-settled', rs), 'row does not show its outcome')
 
         self.expand('topic-group-settled')
         key = 'remembered-window-group-settled-0-0'

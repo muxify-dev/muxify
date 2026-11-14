@@ -54,7 +54,6 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     public var slug: String?
     public var createdAt: String?
     public var settledAt: String?
-    public var outcome: String?
     public var order: Double?
     public var sessions: [JSONValue] = []
     /// The user ordered the Sessions by hand, so `sessions` gives their order (`session_order: manual`).
@@ -76,7 +75,7 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, slug, outcome, order, sessions
+        case id, title, slug, order, sessions
         case createdAt = "created_at", settledAt = "settled_at"
         case sessionOrder = "session_order", pinned, guest, unread, tags, note
     }
@@ -91,7 +90,6 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         slug = try values.decodeIfPresent(String.self, forKey: .slug)
         createdAt = try values.decodeIfPresent(String.self, forKey: .createdAt)
         settledAt = try values.decodeIfPresent(String.self, forKey: .settledAt)
-        outcome = try values.decodeIfPresent(String.self, forKey: .outcome)
         order = try values.decodeIfPresent(Double.self, forKey: .order)
         sessions = try values.decodeIfPresent([JSONValue].self, forKey: .sessions) ?? []
         hasManualSessionOrder = (try? values.decodeIfPresent(String.self, forKey: .sessionOrder)) == "manual"
@@ -117,7 +115,6 @@ public struct TopicRecord: Codable, Equatable, Identifiable, Sendable {
         try values.encodeIfPresent(slug, forKey: .slug)
         try values.encodeIfPresent(createdAt, forKey: .createdAt)
         try values.encodeIfPresent(settledAt, forKey: .settledAt)
-        try values.encodeIfPresent(outcome, forKey: .outcome)
         try values.encodeIfPresent(order, forKey: .order)
         try values.encode(sessions, forKey: .sessions)
         if hasManualSessionOrder { try values.encode("manual", forKey: .sessionOrder) }

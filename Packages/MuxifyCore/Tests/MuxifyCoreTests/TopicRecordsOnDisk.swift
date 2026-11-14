@@ -23,10 +23,10 @@ extension MuxifyPaths {
             for record in records {
                 func json<T: Encodable>(_ value: T) throws -> String { String(decoding: try JSONEncoder().encode(value), as: UTF8.self) }
                 try connection.execute("""
-                    INSERT INTO topics (id, title, slug, outcome, "order", created_at, settled_at, session_order, pinned, guest,
+                    INSERT INTO topics (id, title, slug, "order", created_at, settled_at, session_order, pinned, guest,
                                         unread, note, sessions, tags)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, record.id, record.title, record.slug, record.outcome, record.order, record.createdAt, record.settledAt,
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, record.id, record.title, record.slug, record.order, record.createdAt, record.settledAt,
                     record.hasManualSessionOrder ? "manual" : nil, record.isPinned, record.isGuest, record.isUnread, record.note,
                     try json(record.sessions), try json(record.tags.sorted().map(\.name)))
             }

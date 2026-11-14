@@ -20,7 +20,7 @@ final class TopicLifecycleTests: XCTestCase {
         let choices = TopicSettleSession.choices(topic: topic, snapshot: live, sessionPaths: [])
         XCTAssertEqual(choices.map(\.disposition), [.kill, .kill])
         XCTAssertTrue(choices.allSatisfy { !$0.removeWorktree })
-        let edit = TopicSettlePlan(topic: topic, snapshot: live, sessionPaths: [], choices: [], outcome: "Done").edit
+        let edit = TopicSettlePlan(topic: topic, snapshot: live, sessionPaths: [], choices: []).edit
         XCTAssertNotNil(edit.record?.settledAt)
         XCTAssertEqual(edit.record?.sessions.count, 2)
         XCTAssertTrue(edit.commands.contains(.tmux(["rename-session", "-t", "$1", "debug"])))
@@ -31,7 +31,7 @@ final class TopicLifecycleTests: XCTestCase {
         let live = snapshot([window()])
         var choices = TopicSettleSession.choices(topic: topic, snapshot: live, sessionPaths: [])
         choices[0].disposition = .kill
-        let edit = TopicSettlePlan(topic: topic, snapshot: live, sessionPaths: [], choices: choices, outcome: "").edit
+        let edit = TopicSettlePlan(topic: topic, snapshot: live, sessionPaths: [], choices: choices).edit
         XCTAssertEqual(edit.commands, [.tmux(["kill-session", "-t", "$1"])])
         XCTAssertEqual(edit.record?.sessions.first?["name"], .string("debug/fix"))
     }
@@ -102,7 +102,7 @@ final class TopicLifecycleTests: XCTestCase {
 
     func testReopenAfterKeepCreatesNewIdentityInsteadOfAliasingTheStillRunningOriginal() throws {
         let live = snapshot([window()])
-        let settled = try XCTUnwrap(TopicSettlePlan(topic: topic, snapshot: live, sessionPaths: [], choices: [], outcome: "").edit.record)
+        let settled = try XCTUnwrap(TopicSettlePlan(topic: topic, snapshot: live, sessionPaths: [], choices: []).edit.record)
         var kept = window(name: "debug")
         kept.topicID = nil
         let edit = try TopicReopenPlan(topic: settled, records: [settled], windows: [kept], sessionPaths: [], existingDirectories: ["/work/game"]).edit
