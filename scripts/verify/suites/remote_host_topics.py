@@ -1,6 +1,6 @@
 """A Remote App Window shows its Host's Topics, and runs with its Host's Config, through the Host Server, `muxify
-server` on a channel of the attachment's SSH connection, and its Git View reads the Host's repository through the
-same server.
+server` on a channel of the attachment's SSH connection, and its Git View reads and changes the Host's repository
+through the same server.
 
 The SSH fixture runs remote commands locally, as remote_session_end's does: the Host's tmux server is the Sandbox
 server, the Host's home is `remote-home`, and the Host's Topics are in `remote-home/.local/state/muxify/muxify.db`,
@@ -268,17 +268,20 @@ exec /bin/sh -c "$command"
         return subprocess.run(['/usr/bin/git', '-C', str(repo), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid',
                                '-c', 'commit.gpgsign=false', *args], check=True, capture_output=True, text=True).stdout
 
-    def test_the_git_view_shows_the_hosts_changes_and_diff_and_follows_a_change_on_the_host(self):
-        self.use('serving')
-        self.topic_row(self.before_launch, 'the Host Server does not serve the Remote App Window')
-        repo = self.projects/'host-repo'
+    def host_repository(self, name):
+        """A repository on the Host with one commit of host.txt, and host.txt changed since."""
+        repo = self.projects/name
         repo.mkdir()
         self.host_git(repo, 'init', '-q', '-b', 'main')
         (repo/'host.txt').write_text('first line\n')
         self.host_git(repo, 'add', 'host.txt')
         self.host_git(repo, 'commit', '-q', '-m', 'first')
         (repo/'host.txt').write_text('first line\nchanged on the host\n')
-        session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'host-repo', '-c', str(repo), '/bin/sh')
+        return repo
+
+    def open_git_view(self, repo):
+        """Shows a new Session in the repository in the Remote App Window, and opens its Git View there."""
+        session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', repo.name, '-c', str(repo), '/bin/sh')
         window = self.s.tmux('display-message', '-p', '-t', session + ':', '#{window_id}')
         tty = next(line.split()[1] for line in self.s.tmux('list-clients', '-F', '#{client_control_mode} #{client_tty}').splitlines()
                    if line.startswith('0 '))
@@ -292,6 +295,16 @@ exec /bin/sh -c "$command"
             self.s.driver('press', 'Show Git View')
             return self.s.has('git-view')
         wait(opened, 'the Git View did not open in the Remote App Window', seconds=20, step=.5)
+
+    def close_git_view(self):
+        self.s.act('action', 'git-view', 'q')
+        wait(lambda: not self.s.has('git-view'), 'the Git View did not close', seconds=10)
+
+    def test_the_git_view_shows_the_hosts_changes_and_diff_and_follows_a_change_on_the_host(self):
+        self.use('serving')
+        self.topic_row(self.before_launch, 'the Host Server does not serve the Remote App Window')
+        repo = self.host_repository('host-repo')
+        self.open_git_view(repo)
         # Changes open on the first file, so its diff shows the line written on the Host.
         self.s.wait_rows(lambda rs: self.s.has('git-row-change:host.txt', rs), 'the Git View does not list the Host\'s change',
                          seconds=20)
@@ -302,8 +315,36 @@ exec /bin/sh -c "$command"
         (repo/'z-written-on-host.txt').write_text('later\n')
         self.s.wait_rows(lambda rs: self.s.has('git-row-change:z-written-on-host.txt', rs),
                          'the Git View did not follow a change on the Host', seconds=8)
-        self.s.act('action', 'git-view', 'q')
-        wait(lambda: not self.s.has('git-view'), 'the Git View did not close', seconds=10)
+        self.close_git_view()
+
+    def test_stage_and_commit_from_the_git_view_change_the_hosts_repository(self):
+        self.use('serving')
+        self.topic_row(self.before_launch, 'the Host Server does not serve the Remote App Window')
+        repo = self.host_repository('commit-repo')
+        self.open_git_view(repo)
+        # Changes open on the only change, unstaged.
+        def unstaged(rs):
+            value = self.s.row('git-row-change:host.txt', rs).get('accessibilityValue', '')
+            return 'selected=1' in value and 'status=" M"' in value
+        self.s.wait_rows(unstaged, 'the Git View does not select the Host\'s change', seconds=20)
+        # Space stages it: the Host Server runs the stage in the Host's repository.
+        self.s.act('action', 'git-view', 'space')
+        wait(lambda: self.host_git(repo, 'status', '--porcelain') == 'M  host.txt\n',
+             'space in the Git View did not stage host.txt in the Host\'s repository', seconds=15)
+        # The Git View reads the stage back from the Host, and only then has something to commit.
+        self.s.wait_rows(lambda rs: 'status="M "' in self.s.row('git-row-change:host.txt', rs).get('accessibilityValue', ''),
+                         'the Git View does not show host.txt staged', seconds=10)
+        # c opens the commit box; its Commit commits on the Host, and the change leaves the Git View by itself.
+        self.s.act('action', 'git-view', 'c')
+        self.s.wait_rows(lambda rs: self.s.has('git-commit-box', rs), 'c did not open the commit box', seconds=10)
+        self.s.act('set', 'git-commit-summary', 'Committed from the Mac')
+        self.s.act('action', 'git-commit-box', 'Commit')
+        wait(lambda: self.host_git(repo, 'log', '-1', '--format=%s').strip() == 'Committed from the Mac',
+             'the commit box did not commit in the Host\'s repository', seconds=15)
+        self.assertEqual(self.host_git(repo, 'status', '--porcelain'), '', 'the commit left a change in the Host\'s repository')
+        self.s.wait_rows(lambda rs: not self.s.has('git-commit-box', rs) and not self.s.has('git-row-change:host.txt', rs),
+                         'the committed change stays in the Git View', seconds=10)
+        self.close_git_view()
 
     def test_a_host_whose_muxify_has_no_server_mode_shows_sessions_only_and_why(self):
         self.use('old')

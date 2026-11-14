@@ -620,6 +620,21 @@ final class HostEnvironmentLink: EnvironmentLink {
         }
     }
 
+    /// The Git View's writes run in the Host Server. One whose channel ends before its answer is never sent again:
+    /// it may or may not have happened, and says so.
+    func writeGit(_ write: GitWrite) async throws -> String {
+        guard serving, let client else { return try await inner.writeGit(write) }
+        lastSent = Date()
+        do {
+            return try await client.call(HostRequest.gitWrite(write), as: GitWritten.self).output
+        } catch let error as ProtocolError {
+            if error.code == .unavailable {
+                throw GitViewError(message: "\(environmentName) disconnected before \(write.action) finished. It may or may not have happened.")
+            }
+            throw GitViewError(message: error.message)
+        }
+    }
+
     /// The server's `repository` subscription. Its events stop when the channel ends; the store subscribes again when
     /// the link's features change.
     func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription {

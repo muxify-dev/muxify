@@ -16,13 +16,15 @@ public struct HostServerContext: @unchecked Sendable {
     public var socketID: String
     /// Runs the Git View's reads on the Host.
     public var git: GitReader
+    /// Runs the Git View's writes that need no network on the Host.
+    public var gitWriter: GitWriter
 
     public init(paths: MuxifyPaths = MuxifyPaths(), tmux: TmuxServer = .local,
                 config: (@Sendable () async throws -> Config)? = nil,
                 startControlClient: @escaping TmuxControlClientStart = PipeControlClient.start,
                 home: String = NSHomeDirectory(),
                 socketID: String = String(getpid()),
-                git: GitReader = GitReader()) {
+                git: GitReader = GitReader(), gitWriter: GitWriter = GitWriter()) {
         self.paths = paths
         self.tmux = tmux
         self.home = home
@@ -30,6 +32,7 @@ public struct HostServerContext: @unchecked Sendable {
         self.startControlClient = startControlClient
         self.socketID = socketID
         self.git = git
+        self.gitWriter = gitWriter
     }
 
     /// The Config file alone, without finding SessionPaths.
@@ -43,8 +46,9 @@ public struct HostServerContext: @unchecked Sendable {
 
 /// `muxify server`: the Host Server's requests (ADR 0085). It serves `ping` and `shutdown`, the `environment`,
 /// `config` and `repository` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and
-/// Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open` and the Git View's reads. Programs on the
-/// Host reach its Mac through its own socket, whose requests it sends the Mac as `MacRequest`s (ADR 0089).
+/// Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open` and the Git View's reads and writes.
+/// Programs on the Host reach its Mac through its own socket, whose requests it sends the Mac as `MacRequest`s
+/// (ADR 0089).
 public enum HostServer {
     /// A server on these handles that serves `HostRequest` against `context`.
     public static func make(input: FileHandle, output: FileHandle, build: String, silence: TimeInterval = HostProtocol.serverSilence,
@@ -155,6 +159,8 @@ public enum HostServer {
                 request.finish()
             case .git(let read):
                 host.git(read, for: request)
+            case .gitWrite(let write):
+                host.gitWrite(write, for: request)
             }
         } catch let error as ProtocolError {
             request.fail(error)
@@ -314,6 +320,19 @@ final class HostEnvironment: @unchecked Sendable {
             case .remote(let remote): request.finish(remote)
             case .text(let text):
                 if request.stream(Data(text.utf8)) { request.finish() }
+            }
+        }
+    }
+
+    /// One of the Git View's writes. The `repository` watch sees what it changed and pushes it.
+    func gitWrite(_ write: GitWrite, for request: ProtocolIncomingRequest) {
+        let writer = context.gitWriter
+        Task {
+            do {
+                let output = try await Self.background { try writer.run(write) }
+                request.finish(GitWritten(output: output))
+            } catch {
+                request.fail(ProtocolError(.failed, GitReader.message(for: error)))
             }
         }
     }

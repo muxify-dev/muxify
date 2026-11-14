@@ -265,6 +265,52 @@ final class HostEnvironmentLinkTests: XCTestCase {
         XCTAssertFalse(try TopicStore(paths: paths).read().records.contains { $0.title == "Lost" })
         XCTAssertEqual(alerts.count, 1)
     }
+
+    func testAGitWriteWhoseChannelEndsBeforeItsAnswerMayOrMayNotHaveHappened() async throws {
+        let paths = paths!, tmux = tmux!
+        let stalled = StalledScripts()
+        defer { stalled.release() }
+        let link = link { _ in HostServerContext(paths: paths, tmux: tmux, config: { Config() }, gitWriter: GitWriter(scripts: stalled)) }
+        try link.connect()
+        link.startServer()
+        try await wait("the server did not answer") { link.features.contains(.git) }
+
+        let write = Task { try await link.writeGit(.commit(root: directory.path, message: "Lost")) }
+        try await wait("the server did not start the commit") { stalled.started }
+        try serverOutputs[0].close()
+        do {
+            _ = try await write.value
+            XCTFail("a commit whose channel ended answered")
+        } catch {
+            XCTAssertEqual(GitView.message(for: error), "box disconnected before Commit finished. It may or may not have happened.")
+        }
+        XCTAssertEqual(stalled.runs, 1, "the commit was sent again")
+    }
+}
+
+/// Scripts that wait until the test releases them, so a write is still running when its channel ends.
+private final class StalledScripts: ScriptRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private let gate = DispatchSemaphore(value: 0)
+    private var count = 0
+
+    var started: Bool { runs > 0 }
+
+    var runs: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    func runScript(_ script: String, arguments: [String], timeout: TimeInterval) throws -> String {
+        lock.lock()
+        count += 1
+        lock.unlock()
+        _ = gate.wait(timeout: .now() + 10)
+        throw TmuxError.timedOut
+    }
+
+    func release() { gate.signal() }
 }
 
 extension HostEnvironmentLinkTests {

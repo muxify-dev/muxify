@@ -1793,6 +1793,8 @@ private struct GitCommitBox: View {
                 card(staged: staged)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("git-commit-box")
+                    // ⌘↩, so scripts/verify can commit without typing.
+                    .accessibilityAction(named: Text(verbatim: "Commit")) { gitView.commit() }
                     .frame(width: GitPopupMetrics.width(GitPopupMetrics.designCommitBoxWidth, in: proxy.size.width, size: fontSize))
                     .padding(.top, max(20, proxy.size.height * 0.1))
                     .scaleEffect(isShown ? 1 : 0.97, anchor: .top)

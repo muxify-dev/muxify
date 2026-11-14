@@ -14,6 +14,7 @@ final class GitTestRepository {
     let environment: [String: String]
     var path: String { directory.appendingPathComponent("repo").path }
     var reader: GitReader { GitReader(scripts: Scripts(environment: environment)) }
+    var writer: GitWriter { GitWriter(scripts: Scripts(environment: environment)) }
 
     /// Runs the scripts with the private HOME, as the app's `LocalScripts` runs them with the user's.
     struct Scripts: ScriptRunning {
@@ -310,7 +311,7 @@ final class Events: @unchecked Sendable {
     }
 }
 
-/// The Git View's reads and the `repository` subscription through a pair of pipes: a protocol client and `HostServer`
+/// The Git View's reads and writes and the `repository` subscription through a pair of pipes: a protocol client and `HostServer`
 /// in this process, against a temporary repository.
 final class HostServerGitTests: XCTestCase {
     private var repository: GitTestRepository!
@@ -342,7 +343,7 @@ final class HostServerGitTests: XCTestCase {
         let context = HostServerContext(paths: MuxifyPaths(environment: ["XDG_STATE_HOME": directory.appendingPathComponent("state").path],
                                                            home: "/nonexistent"),
                                         tmux: TmuxServer(socketPath: directory.appendingPathComponent("no-tmux").path, configPath: "/dev/null"),
-                                        git: repository.reader)
+                                        git: repository.reader, gitWriter: repository.writer)
         let server = HostServer.make(input: up.fileHandleForReading, output: down.fileHandleForWriting, build: "server", context: context)
         server.start()
         servers.append(server)
@@ -371,6 +372,36 @@ final class HostServerGitTests: XCTestCase {
             XCTAssertEqual(events.all.last?.changed, true, what)
             XCTAssertEqual(events.all.last?.head, "master", what)
         }
+    }
+
+    func testACommitRunsOnTheServerAndRepositoryPushesAfterIt() async throws {
+        let client = try await connect()
+        let events = Events()
+        let stream = client.subscribe(HostRequest.subscribe(.repository(RepositorySubscription(path: repository.path))), as: RepositoryEvent.self)
+        consumers.append(Task {
+            do { for try await event in stream { events.add(event) } } catch {}
+        })
+        try events.wait("no first event") { $0.count == 1 }
+        let before = try repository.run("cd \"$1\" && git rev-list --count HEAD")
+
+        let written = try await client.call(HostRequest.gitWrite(.commit(root: repository.path, message: "Over the wire")), as: GitWritten.self)
+        let head = try repository.run("cd \"$1\" && git log -1 --format='%h %s'").trimmingCharacters(in: .whitespacesAndNewlines)
+        XCTAssertEqual(head, written.output.trimmingCharacters(in: .whitespacesAndNewlines) + " Over the wire",
+                       "the answer is the new commit's short hash")
+        XCTAssertNotEqual(try repository.run("cd \"$1\" && git rev-list --count HEAD"), before)
+        try events.wait("repository pushed nothing after the commit", seconds: 6) { $0.count > 1 }
+        XCTAssertEqual(events.all.last, RepositoryEvent(head: "master", repository: true, changed: true))
+
+        // A write git refuses ends failed with git's words, and changes nothing.
+        do {
+            _ = try await client.call(HostRequest.gitWrite(.deleteBranch(root: repository.path, branch: "feature", force: false)),
+                                      as: GitWritten.self)
+            XCTFail("an unmerged branch was deleted without force")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .failed)
+            XCTAssertTrue(error.message.hasPrefix(GitWrites.branchNotMergedMarker), error.message)
+        }
+        XCTAssertTrue(try repository.run("cd \"$1\" && git branch --list feature").contains("feature"))
     }
 
     func testADiffLargerThan64KiBArrivesAsChunks() async throws {

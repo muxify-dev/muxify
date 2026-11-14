@@ -167,6 +167,9 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// One of the Git View's reads, run by the Host's `GitReader`. A snapshot, log or remote answers as its value; a
     /// diff streams its text as chunks. A failure ends `failed` with the Git View's message.
     case git(GitRead)
+    /// One of the Git View's writes that need no network, run by the Host's `GitWriter`, answered as `GitWritten`. A
+    /// failure ends `failed` with git's words. It is never sent again: a channel that ends first leaves it unknown.
+    case gitWrite(GitWrite)
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case ping, shutdown, subscribe, environment
@@ -178,6 +181,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case claimOpen = "claim_open"
         case releaseOpen = "release_open"
         case git
+        case gitWrite = "git_write"
     }
 
     public init(from decoder: Decoder) throws {
@@ -200,6 +204,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .claimOpen: self = .claimOpen
         case .releaseOpen: self = .releaseOpen
         case .git: self = .git(try values.decode(GitRead.self, forKey: key))
+        case .gitWrite: self = .gitWrite(try values.decode(GitWrite.self, forKey: key))
         }
     }
 
@@ -218,6 +223,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .claimOpen: try values.encode(ProtocolEmpty(), forKey: .claimOpen)
         case .releaseOpen: try values.encode(ProtocolEmpty(), forKey: .releaseOpen)
         case .git(let read): try values.encode(read, forKey: .git)
+        case .gitWrite(let write): try values.encode(write, forKey: .gitWrite)
         }
     }
 }

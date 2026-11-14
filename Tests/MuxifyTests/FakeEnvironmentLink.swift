@@ -95,6 +95,17 @@ final class FakeEnvironmentLink: EnvironmentLink {
         return try gitAnswer(read)
     }
 
+    /// What `writeGit` answers; nil throws `unsupported`, as a link without `.git` does.
+    var gitWriteAnswer: ((GitWrite) throws -> String)?
+    /// Every write the store sent.
+    private(set) var gitWrites: [GitWrite] = []
+
+    func writeGit(_ write: GitWrite) async throws -> String {
+        gitWrites.append(write)
+        guard let gitWriteAnswer else { throw EnvironmentLinkError.unsupported("The Git View") }
+        return try gitWriteAnswer(write)
+    }
+
     /// The folders of every `repository` subscription the store made.
     private(set) var watchedRepositories: [String] = []
 

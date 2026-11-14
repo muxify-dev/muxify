@@ -244,6 +244,10 @@ protocol EnvironmentLink: AnyObject {
     /// Runs one of the Git View's reads on the repository's machine (ADR 0085). A link without `.git` throws
     /// `unsupported`.
     func git(_ read: GitRead) async throws -> GitAnswer
+    /// Runs one of the Git View's writes that need no network on the repository's machine (ADR 0085), and answers
+    /// what git printed. It is never sent again: one whose answer the link lost may or may not have happened. A link
+    /// without `.git` throws `unsupported`.
+    func writeGit(_ write: GitWrite) async throws -> String
     /// The `repository` subscription of a folder: its first event is the whole state, then one comes whenever HEAD,
     /// the index or the working tree changed. Events come on the main thread. A link without `.git` sends none.
     func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription
@@ -339,6 +343,12 @@ enum EnvironmentLinks {
     static func readGit(_ read: GitRead) async throws -> GitAnswer {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async { continuation.resume(with: Result { try GitReader().run(read) }) }
+        }
+    }
+
+    static func writeGit(_ write: GitWrite) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async { continuation.resume(with: Result { try GitWriter().run(write) }) }
         }
     }
 

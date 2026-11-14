@@ -99,6 +99,10 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
         try await EnvironmentLinks.readGit(read)
     }
 
+    func writeGit(_ write: GitWrite) async throws -> String {
+        try await EnvironmentLinks.writeGit(write)
+    }
+
     /// ADR 0072's FSEvents watcher, with the HEAD read of each change.
     func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription {
         let watch = LocalRepositoryWatch(path: path, onEvent: onEvent)

@@ -2704,6 +2704,20 @@ final class WorkspaceStore {
         }, completion: completion)
     }
 
+    /// Runs one of the Git View's writes on the repository's machine through the link, and calls back with what git
+    /// printed. Its reply belongs to the link that sent it; a write is never sent again.
+    func writeGit(_ write: GitWrite, completion: @escaping (Result<String, Error>) -> Void) {
+        if let message = gitViewUnavailableMessage {
+            completion(.failure(GitViewError(message: message)))
+            return
+        }
+        guard isLinked, !isTransitioning, link.isOnThisMac || isConnected else {
+            completion(.failure(GitViewError(message: "Not connected to \(environmentName).")))
+            return
+        }
+        send({ try await $0.writeGit(write) }, completion: completion)
+    }
+
     /// The `repository` subscription of a folder through the link. Its events belong to the link that sends them: a
     /// new link, or new features, need a new subscription, as `repositoryLink` tells a view.
     func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription {

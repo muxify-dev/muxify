@@ -446,8 +446,8 @@ final class GitView {
     @ObservationIgnored private var logWork: DispatchWorkItem?
     /// Git commands that change the repository, run one at a time.
     @ObservationIgnored private var writes: [Write] = []
-    /// The arguments of the writes waiting or running, for tests, which have no store to run them.
-    var queuedWriteArguments: [[String]] { writes.map(\.arguments) }
+    /// The writes waiting or running, for tests, which have no store to run them.
+    var queuedWrites: [WriteCommand] { writes.map(\.command) }
     /// The arguments of the network commands started, for tests, which have no store to run them.
     private(set) var networkArguments: [[String]] = []
     /// The branch and commit whose history is being read.
@@ -1459,7 +1459,7 @@ final class GitView {
             return
         }
         noteStaging(staging.stage)
-        write(staging.stage ? GitRepository.stageScript : GitRepository.unstageScript, arguments: [snapshot.root] + staging.paths)
+        write(staging.stage ? .stage(root: snapshot.root, paths: staging.paths) : .unstage(root: snapshot.root, paths: staging.paths))
     }
 
     /// a: stages every change, or once they all are, unstages them.
@@ -1467,7 +1467,7 @@ final class GitView {
         guard let snapshot, !snapshot.changes.isEmpty else { return }
         let staging = Self.staging(snapshot.changes, path: ".")
         noteStaging(staging.stage)
-        write(staging.stage ? GitRepository.stageScript : GitRepository.unstageScript, arguments: [snapshot.root] + staging.paths)
+        write(staging.stage ? .stage(root: snapshot.root, paths: staging.paths) : .unstage(root: snapshot.root, paths: staging.paths))
     }
 
     /// Whether to stage or unstage a file or folder with these changes, and
@@ -1480,7 +1480,7 @@ final class GitView {
     /// Lines picked in a change's diff, as git takes them: the files all
     /// of whose changed lines are picked, whole, and a patch of the rest.
     struct LineWrite: Equatable {
-        enum Mode: String { case stage, unstage, discard }
+        typealias Mode = GitWrite.PatchMode
 
         /// Files to stage, unstage or discard the unstaged changes of, and
         /// the paths renamed files came from.
@@ -1694,56 +1694,14 @@ final class GitView {
             keepCursor()
             return write(lines, .discard, root: snapshot.root)
         }
-        write(option == .all ? GitRepository.discardScript : GitRepository.discardUnstagedScript,
-              arguments: [snapshot.root] + discard.paths(option))
+        let paths = discard.paths(option)
+        write(option == .all ? .discard(root: snapshot.root, paths: paths) : .discardUnstaged(root: snapshot.root, paths: paths))
     }
 
     // MARK: Resetting the working tree
 
-    /// lazygit's reset options for the working tree, for D, by the argument the reset script takes.
-    enum WorkingTreeReset: String, CaseIterable {
-        case nuke, unstaged, untracked, staged, soft, mixed, hard
-
-        var title: String {
-            switch self {
-            case .nuke: "Nuke working tree"
-            case .unstaged: "Discard unstaged changes"
-            case .untracked: "Discard untracked files"
-            case .staged: "Discard staged changes"
-            case .soft: "Soft reset"
-            case .mixed: "Mixed reset"
-            case .hard: "Hard reset"
-            }
-        }
-
-        /// lazygit's key for it in the menu.
-        var key: String {
-            switch self {
-            case .nuke: "x"
-            case .unstaged: "u"
-            case .untracked: "c"
-            case .staged: "shift+s"
-            case .soft: "s"
-            case .mixed: "m"
-            case .hard: "h"
-            }
-        }
-
-        var note: String {
-            switch self {
-            case .nuke: "Back to the last commit. New and untracked files are deleted."
-            case .unstaged: "Tracked files go back to what's staged. Untracked files stay."
-            case .untracked: "Deletes the files git doesn't track. Ignored files stay."
-            case .staged: "Takes what's staged out of the files too; the rest stays. Needs git 2.35."
-            case .soft: "Every change stays as it is, staged or not."
-            case .mixed: "Unstages everything. The files keep their changes."
-            case .hard: "Tracked files go back to the last commit. Untracked files stay."
-            }
-        }
-
-        /// Soft and mixed change no file's content.
-        var isDestructive: Bool { self != .soft && self != .mixed }
-    }
+    /// lazygit's reset options for the working tree, for D.
+    typealias WorkingTreeReset = GitWrite.WorkingTreeReset
 
     /// Why this reset of the working tree would do nothing, else nil.
     func nothingToReset(_ reset: WorkingTreeReset) -> String? {
@@ -1788,7 +1746,7 @@ final class GitView {
 
     private func resetWorkingTree(_ reset: WorkingTreeReset) {
         guard let snapshot else { return }
-        write(GitRepository.resetWorkingTreeScript, arguments: [snapshot.root, reset.rawValue])
+        write(.resetWorkingTree(root: snapshot.root, option: reset))
     }
 
     // MARK: Stashing
@@ -1851,24 +1809,14 @@ final class GitView {
         guard let snapshot else { return }
         let message = message.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
         guardFiles("Stash changes", subject: .text(kind.title), symbol: "archivebox", confirm: "Stash them") { [weak self] in
-            self?.write(GitRepository.stashScript, arguments: [snapshot.root, kind.rawValue, message])
+            self?.write(.stash(root: snapshot.root, kind: kind, message: message))
         }
     }
 
     // MARK: Stash entries
 
     /// What lazygit's Stash panel does with the stash selected.
-    enum StashEntryAction: String {
-        /// space: the stash stays.
-        case apply
-        /// g: applies it and drops it, unless it conflicts.
-        case pop
-        /// d.
-        case drop
-
-        var verb: String { rawValue }
-        var symbol: String { self == .drop ? "trash" : self == .apply ? "tray.and.arrow.down" : "tray.and.arrow.up" }
-    }
+    typealias StashEntryAction = GitWrite.StashAction
 
     /// space, g or d on a stash: confirms in a menu of one choice, as lazygit does. Apply and pop change files, so
     /// the menu also lists the Agents working there; drop doesn't.
@@ -1889,7 +1837,7 @@ final class GitView {
 
     private func stashEntry(_ action: StashEntryAction, _ stash: GitStash) {
         guard let snapshot else { return }
-        write(GitRepository.stashEntryScript, arguments: [snapshot.root, action.rawValue, stash.ref, stash.sha])
+        write(.stashEntry(root: snapshot.root, action: action, ref: stash.ref, sha: stash.sha))
     }
 
     // MARK: Checking out
@@ -1920,13 +1868,13 @@ final class GitView {
             case .previous: "-"
             }
         }
-        var kind: String {
+        var kind: GitWrite.CheckoutKind {
             switch self {
-            case .branch: "branch"
-            case .commit: "commit"
-            case .remote: "remote"
-            case .newBranch: "new"
-            case .previous: "previous"
+            case .branch: .branch
+            case .commit: .commit
+            case .remote: .remote
+            case .newBranch: .new
+            case .previous: .previous
             }
         }
     }
@@ -1970,9 +1918,9 @@ final class GitView {
 
     private func runCheckout(_ target: CheckoutTarget, autostash: Bool) {
         guard let snapshot else { return }
-        var arguments = [snapshot.root, target.kind, target.ref, autostash ? "1" : "0"]
-        if case .newBranch(_, let base) = target { arguments.append(base) }
-        write(GitRepository.checkoutScript, arguments: arguments) { [weak self] result in
+        var base: String?
+        if case .newBranch(_, let from) = target { base = from }
+        write(.checkout(root: snapshot.root, kind: target.kind, target: target.ref, autostash: autostash, base: base)) { [weak self] result in
             self?.finishCheckout(target, result)
         }
     }
@@ -1980,7 +1928,7 @@ final class GitView {
     /// A checkout ended: says what went wrong, or, when only Changes were in the way, asks about stashing them.
     func finishCheckout(_ target: CheckoutTarget, _ result: Result<String, Error>) {
         guard case .failure(let error) = result else { return }
-        if case TmuxError.failed(_, let stderr) = error, stderr.hasPrefix(GitRepository.checkoutBlockedMarker) {
+        if Self.message(for: error).hasPrefix(GitWrites.checkoutBlockedMarker) {
             open(GitMenu(
                 id: "autostash", title: "Autostash?", subject: .text(target.name), symbol: "archivebox",
                 choices: [GitMenu.Choice(key: "y", title: "Stash, check out and pop",
@@ -2016,7 +1964,7 @@ final class GitView {
                        submitTitle: "Rename") { [weak self] typed in
             guard let self, let snapshot = self.snapshot else { return }
             let name = Self.branchName(typed)
-            if name != branch.name { self.write(GitRepository.renameBranchScript, arguments: [snapshot.root, branch.name, name]) }
+            if name != branch.name { self.write(.renameBranch(root: snapshot.root, branch: branch.name, name: name)) }
         })
     }
 
@@ -2183,7 +2131,7 @@ final class GitView {
 
     private func deleteBranch(_ branch: GitBranch, force: Bool) {
         guard let snapshot else { return }
-        write(GitRepository.deleteBranchScript, arguments: [snapshot.root, branch.name, force ? "1" : "0"]) { [weak self] result in
+        write(.deleteBranch(root: snapshot.root, branch: branch.name, force: force)) { [weak self] result in
             self?.finishDeleteBranch(branch, result)
         }
     }
@@ -2191,7 +2139,7 @@ final class GitView {
     /// A delete ended: asks to force when git refused for the branch not being fully merged, else says what went wrong.
     func finishDeleteBranch(_ branch: GitBranch, _ result: Result<String, Error>) {
         guard case .failure(let error) = result else { return }
-        if case TmuxError.failed(_, let stderr) = error, stderr.hasPrefix(GitRepository.branchNotMergedMarker) {
+        if Self.message(for: error).hasPrefix(GitWrites.branchNotMergedMarker) {
             open(deleteBranchMenu(
                 id: "force-delete-branch", title: "Force delete branch", branch,
                 choice: GitMenu.Choice(key: "y", title: "Force delete",
@@ -2287,15 +2235,14 @@ final class GitView {
 
     private func write(_ lines: LineWrite, _ mode: LineWrite.Mode, root: String) {
         if !lines.paths.isEmpty {
-            let script = switch mode {
-            case .stage: GitRepository.stageScript
-            case .unstage: GitRepository.unstageScript
-            case .discard: GitRepository.discardUnstagedScript
+            switch mode {
+            case .stage: write(.stage(root: root, paths: lines.paths))
+            case .unstage: write(.unstage(root: root, paths: lines.paths))
+            case .discard: write(.discardUnstaged(root: root, paths: lines.paths))
             }
-            write(script, arguments: [root] + lines.paths)
         }
         if !lines.patch.isEmpty {
-            write(GitRepository.applyPatchScript, arguments: [root, mode.rawValue, lines.patch] + (mode == .stage ? lines.newFiles : []))
+            write(.applyPatch(root: root, mode: mode, patch: lines.patch, newFiles: mode == .stage ? lines.newFiles : []))
         }
     }
 
@@ -2350,17 +2297,7 @@ final class GitView {
         asksToContinue = true
     }
 
-    private enum OperationStep: String {
-        case `continue`, skip, abort
-
-        var past: String {
-            switch self {
-            case .continue: "Continued"
-            case .skip: "Skipped"
-            case .abort: "Aborted"
-            }
-        }
-    }
+    typealias OperationStep = GitWrite.OperationStep
 
     /// m: lazygit's menu of what to do with the merge, rebase, cherry-pick, revert or `git am` in progress, through the
     /// Agent guard, for each of them changes files.
@@ -2404,8 +2341,8 @@ final class GitView {
     }
 
     private func run(_ step: OperationStep, noun: String, command: String?) {
-        guard let snapshot, let command else { return }
-        write(GitRepository.operationScript, arguments: [snapshot.root, command, step.rawValue], timeout: 600) { [weak self] result in
+        guard let snapshot, let command = command.flatMap(GitWrite.OperationCommand.init(rawValue:)) else { return }
+        write(.operation(root: snapshot.root, command: command, step: step)) { [weak self] result in
             switch result {
             case .success:
                 self?.store?.pills.show(Pill(.confirmation, title: step.past, value: noun))
@@ -2416,9 +2353,7 @@ final class GitView {
     }
 
     /// How M merges, by the argument the merge script takes.
-    enum MergeKind: String {
-        case fastForward = "ff", mergeCommit = "no-ff", squashAndCommit = "squash", squashAndLeave = "squash-leave"
-    }
+    typealias MergeKind = GitWrite.MergeKind
 
     /// M in Branches: lazygit's merge menu, on a branch other than the one you're on, through the Agent guard, for a
     /// merge changes files. A merge, rebase or the like already in progress is to be concluded or aborted first.
@@ -2450,7 +2385,7 @@ final class GitView {
 
     private func merge(_ branch: GitBranch, into: String, _ kind: MergeKind) {
         guard let snapshot else { return }
-        write(GitRepository.mergeScript, arguments: [snapshot.root, branch.name, kind.rawValue, into], timeout: 600) { [weak self] result in
+        write(.merge(root: snapshot.root, branch: branch.name, kind: kind, into: into)) { [weak self] result in
             switch result {
             case .success:
                 self?.store?.pills.show(Pill(.confirmation, title: "Merged", value: branch.name))
@@ -2485,7 +2420,7 @@ final class GitView {
 
     private func rebase(onto branch: GitBranch, head: String) {
         guard let snapshot else { return }
-        write(GitRepository.rebaseScript, arguments: [snapshot.root, branch.name, head], timeout: 600) { [weak self] result in
+        write(.rebase(root: snapshot.root, onto: branch.name, head: head)) { [weak self] result in
             switch result {
             case .success:
                 self?.store?.pills.show(Pill(.confirmation, title: "Rebased", value: head))
@@ -2549,7 +2484,7 @@ final class GitView {
 
     private func cherryPick(_ shas: [String]) {
         guard let snapshot, let key = copiedKey else { return }
-        write(GitRepository.cherryPickScript, arguments: [snapshot.root] + shas, timeout: 600) { [weak self] result in
+        write(.cherryPick(root: snapshot.root, commits: shas)) { [weak self] result in
             switch result {
             case .success:
                 self?.copiedStore.remove(shas, in: key)
@@ -2563,9 +2498,7 @@ final class GitView {
     // MARK: Resetting
 
     /// How g resets, by the argument the reset script takes.
-    enum ResetKind: String {
-        case soft, mixed, hard
-    }
+    typealias ResetKind = GitWrite.ResetKind
 
     /// g on a commit or a branch: lazygit's Reset menu, which moves the branch you're on to it. Soft and mixed run at
     /// once, as they change no file's content; a hard reset asks again (ADR 0041).
@@ -2606,7 +2539,7 @@ final class GitView {
 
     private func reset(to target: String, named name: String, _ kind: ResetKind) {
         guard let snapshot else { return }
-        write(GitRepository.resetScript, arguments: [snapshot.root, kind.rawValue, target]) { [weak self] result in
+        write(.reset(root: snapshot.root, kind: kind, target: target)) { [weak self] result in
             switch result {
             case .success:
                 self?.store?.pills.show(Pill(.confirmation, title: "Reset (\(kind.rawValue))", value: name))
@@ -2643,7 +2576,7 @@ final class GitView {
 
     private func amend() {
         guard let snapshot else { return }
-        write(GitRepository.amendScript, arguments: [snapshot.root], timeout: 600) { [weak self] result in
+        write(.amend(root: snapshot.root)) { [weak self] result in
             switch result {
             case .success(let output):
                 self?.store?.pills.show(Pill(.confirmation, title: "Amended", value: output.trimmingCharacters(in: .whitespacesAndNewlines)))
@@ -2672,9 +2605,7 @@ final class GitView {
         let description = commitDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         isCommitting = true
         commitError = nil
-        write(GitRepository.makeCommitScript,
-              arguments: [snapshot.root, description.isEmpty ? summary : summary + "\n\n" + description],
-              timeout: 600) { [weak self] result in
+        write(.commit(root: snapshot.root, message: description.isEmpty ? summary : summary + "\n\n" + description)) { [weak self] result in
             guard let self else { return }
             self.isCommitting = false
             switch result {
@@ -2695,22 +2626,36 @@ final class GitView {
     }
 
     /// A git command that changes the repository.
+    enum WriteCommand {
+        /// Runs on the repository's machine through the link (ADR 0085).
+        case git(GitWrite)
+        /// Talks to a remote, such as a pull, in a pseudo-terminal; the toolbar names it.
+        case network(script: String, arguments: [String], activity: String, cancelled: String)
+    }
+
     private struct Write {
-        let script: String
-        let arguments: [String]
-        let timeout: TimeInterval
+        let command: WriteCommand
         let completion: ((Result<String, Error>) -> Void)?
-        /// A command that talks to a remote, such as a pull, runs in a pseudo-terminal; the toolbar names it.
-        var network: (activity: String, cancelled: String)?
+
+        var cancelled: String? {
+            if case .network(_, _, _, let cancelled) = command { cancelled } else { nil }
+        }
     }
 
     /// Runs commands that change the repository one at a time, so they
     /// don't race for its index, and reads it again after the last.
-    private func write(_ script: String, arguments: [String], timeout: TimeInterval = 30,
-                       network: (activity: String, cancelled: String)? = nil,
-                       completion: ((Result<String, Error>) -> Void)? = nil) {
+    private func write(_ change: GitWrite, completion: ((Result<String, Error>) -> Void)? = nil) {
+        enqueue(Write(command: .git(change), completion: completion))
+    }
+
+    /// A network command that changes files, such as a pull, in the same queue.
+    private func writeNetwork(_ script: String, arguments: [String], activity: String, cancelled: String) {
+        enqueue(Write(command: .network(script: script, arguments: arguments, activity: activity, cancelled: cancelled), completion: nil))
+    }
+
+    private func enqueue(_ write: Write) {
         writeError = nil
-        writes.append(Write(script: script, arguments: arguments, timeout: timeout, completion: completion, network: network))
+        writes.append(write)
         runNextWrite()
     }
 
@@ -2724,15 +2669,15 @@ final class GitView {
             if let completion = write.completion {
                 completion(result)
             } else if case .failure(let error) = result {
-                self.writeError = Self.message(for: error, cancelled: write.network?.cancelled)
+                self.writeError = Self.message(for: error, cancelled: write.cancelled)
             }
             if self.writes.isEmpty { self.refresh() } else { self.runNextWrite() }
         }
-        if let network = write.network {
-            runNetwork(write.script, arguments: write.arguments, activity: network.activity, cancelled: network.cancelled,
-                       refreshing: false, completion: finish)
-        } else {
-            store.runGitScript(write.script, arguments: write.arguments, timeout: write.timeout, completion: finish)
+        switch write.command {
+        case .git(let change):
+            store.writeGit(change, completion: finish)
+        case .network(let script, let arguments, let activity, let cancelled):
+            runNetwork(script, arguments: arguments, activity: activity, cancelled: cancelled, refreshing: false, completion: finish)
         }
     }
 
@@ -2798,8 +2743,8 @@ final class GitView {
     private func guardedPull(_ mode: PushMode, _ remote: String = "", _ branch: String = "") {
         guardFiles("Pull", subject: .text(snapshot?.head ?? ""), symbol: "arrow.down.circle", confirm: "Pull it") { [weak self] in
             guard let self, let root = self.snapshot?.root else { return }
-            self.write(GitRepository.pullScript, arguments: [root, mode.rawValue, remote, branch], timeout: 120,
-                       network: (Self.pulling, "Pull cancelled."))
+            self.writeNetwork(GitRepository.pullScript, arguments: [root, mode.rawValue, remote, branch],
+                              activity: Self.pulling, cancelled: "Pull cancelled.")
         }
     }
 
@@ -3637,4 +3582,64 @@ final class GitView {
         }
     }
     #endif
+}
+
+/// How the D menu shows each reset option.
+extension GitWrite.WorkingTreeReset {
+    var title: String {
+        switch self {
+        case .nuke: "Nuke working tree"
+        case .unstaged: "Discard unstaged changes"
+        case .untracked: "Discard untracked files"
+        case .staged: "Discard staged changes"
+        case .soft: "Soft reset"
+        case .mixed: "Mixed reset"
+        case .hard: "Hard reset"
+        }
+    }
+
+    /// lazygit's key for it in the menu.
+    var key: String {
+        switch self {
+        case .nuke: "x"
+        case .unstaged: "u"
+        case .untracked: "c"
+        case .staged: "shift+s"
+        case .soft: "s"
+        case .mixed: "m"
+        case .hard: "h"
+        }
+    }
+
+    var note: String {
+        switch self {
+        case .nuke: "Back to the last commit. New and untracked files are deleted."
+        case .unstaged: "Tracked files go back to what's staged. Untracked files stay."
+        case .untracked: "Deletes the files git doesn't track. Ignored files stay."
+        case .staged: "Takes what's staged out of the files too; the rest stays. Needs git 2.35."
+        case .soft: "Every change stays as it is, staged or not."
+        case .mixed: "Unstages everything. The files keep their changes."
+        case .hard: "Tracked files go back to the last commit. Untracked files stay."
+        }
+    }
+
+    /// Soft and mixed change no file's content.
+    var isDestructive: Bool { self != .soft && self != .mixed }
+}
+
+/// What lazygit's Stash panel does with the stash selected: space applies, g pops and d drops.
+extension GitWrite.StashAction {
+    var verb: String { rawValue }
+    var symbol: String { self == .drop ? "trash" : self == .apply ? "tray.and.arrow.down" : "tray.and.arrow.up" }
+}
+
+/// How m's menu says each step was taken.
+extension GitWrite.OperationStep {
+    var past: String {
+        switch self {
+        case .continue: "Continued"
+        case .skip: "Skipped"
+        case .abort: "Aborted"
+        }
+    }
 }

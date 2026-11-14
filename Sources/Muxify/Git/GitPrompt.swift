@@ -1,4 +1,5 @@
 import Foundation
+import MuxifyCore
 
 /// A Git View prompt: a one-line field inside the Git View for one value, as
 /// lazygit's prompts are. ↩ submits and ⎋ cancels with no change. It can
@@ -48,9 +49,9 @@ struct GitPrompt {
 
 /// lazygit's stash options, for `S`: what `git stash push` takes, and the
 /// key each has in the menu.
-enum GitStashKind: String, CaseIterable {
-    case all, untracked, staged, unstaged, keepIndex = "keepindex"
+typealias GitStashKind = GitWrite.StashKind
 
+extension GitWrite.StashKind {
     var title: String {
         switch self {
         case .all: "Stash all changes"
