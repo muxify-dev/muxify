@@ -182,8 +182,9 @@ No other check changed for the move. Task 17 repaired the timing of five checks 
 and of one part of the palette: `session_paths_palette`, `git_view_remotes`, `git_view_changes`, `topics_bench_sidebar`
 (its helper `act_until`), `topics_groups_sidebar`, and `CommandPalette.query` for `palette_tags`. Task 19 repaired the
 fixture of `session_identity` and the helper `bench_topics` of `topics_bench_sidebar` in the same way, and found that
-task 17's repair of `act_until` had not reached its cause. Each still proves what it proved; the next list gives each
-cause.
+task 17's repair of `act_until` had not reached its cause. Task 20 repaired the helper `porcelain` of the Git View
+suites, the fake ssh of `git_view_remotes`, `command_palette`'s visit order and `topics_groups_sidebar`'s Settled now.
+Each still proves what it proved; the next list gives each cause.
 
 The checks that failed or were FLAKY in the runs of task 17 and in the Verifier's runs after it, and their causes. None is in the AppKit Topics list or
 comes from its code: each is a check that acted before the app had read a change, or a part of the app outside the
@@ -288,6 +289,51 @@ Topics list.
   `agent_session` in `topics_sidebar.py` does, the name was `debug+2/…` 4 times in 4: tmux runs the whole command before
   it tells the control client. The check's fixture now does that. The Topic record is written before the Session
   starts and read four times a second; the probe's late option alone was enough for the failure.
+- `git_view_remotes`, the passphrase check, f fetches all remotes, and shift+p on a diverged branch: FLAKY together in
+  the Verifier's full run against the AppKit list (20261114-160837-a72448), and failed together at `cc306a56` before
+  the set (20261111-165736-27a084, with the pull and the other two push checks). Each rerun passed. The first to fail
+  was the passphrase check, at "space did not stage while the fetch ran". The check waited for the staging with
+  `porcelain`, a `git status` every 0.1 seconds, and a plain `git status` holds `index.lock` while it runs: the app's
+  `git add` that starts in that moment fails with "Unable to create '…/index.lock': File exists", the Git View shows
+  that in its banner, and nothing is staged. A probe that pressed space 60 times while it polled `git status` every
+  0.05 seconds saw 7 spaces stage or unstage nothing, each with that banner, and none in 60 with
+  `GIT_OPTIONAL_LOCKS=0`, which the app's own reads use. The check failed before it let its fake ssh go on, so the
+  fetch waited on the ssh until the app's timeout of 120 seconds, and the app starts no fetch while one runs
+  (`GitView.fetch`): the f of the next two fetch checks did nothing, and each failed at its wait for the counts. shift+p
+  that pushes the branch passed, because its counts come from `push -u`. A probe that ended a check while its fetch
+  waited on the fake ssh saw the next check's f fail the same way, "f did not fetch, or the counts did not update"; with
+  the repair below, it fetched. At `cc306a56` the passphrase check failed later, at "the banner does not say the fetch
+  was cancelled", after ⎋ on the prompt, and the fetch that went on waiting failed the checks after it in the same way;
+  why ⎋ did not end that fetch within 10 seconds was not found. `porcelain` (`git_view_fixture.py`) now reads with
+  `--no-optional-locks`, which also covers `git_view_changes` and the pull check's wait for the staging after the pull,
+  the symptom that the pilot recorded without a cause. The fake ssh that still waits for `go` now exits once the
+  check's clean-up has run, so a check that fails before `go` fails alone. The causes are in the checks; the Git View is outside the Topics list, and
+  the set did not change it.
+- `command_palette`, the visit order across an app restart (`test_visit_order_survives_an_app_restart`): FLAKY in the
+  Verifier's second full run against the AppKit list (20261114-163734-119575), before the restart, with the order first,
+  second. The app counts a visit for a Topic only when it has read the Topic's record (`recordVisit`), which it does four
+  times a second (`TopicWatcher`); before that, a visit counts for No Topic. A visit is recorded at a move and at each
+  read of tmux, so the record that comes later counts only if the Window is still shown at the next read. The check
+  wrote each record just before its Session and stayed on each Window for less than a quarter of a second: the whole
+  check took 0.75 seconds. A probe that wrote the second record only after the visit to its Window found the order
+  first, second in 2 tries of 3. The check now waits until the Sidebar shows both Topics' cards, which the app builds
+  from the records it has read, before the visits. In the probe without the parallel pass, 10 runs of the steps as they
+  were and 10 of the repaired steps all gave the order second, first. The cause is the check's timing and the app's
+  read of the records, both outside the Topics list, and the set changed neither.
+  `test_topic_palette_ranks_other_live_topics_by_visits…` visits in the same way and has not failed.
+- `topics_groups_sidebar`, Settled now (`test_a_topic_settled_now_shows_today_above_its_reopen_choice`), "Settle did not
+  save the settle date": FLAKY in round 1 of the Verifier's run of 12 suites with `--repeat 2` against the AppKit list
+  (20261114-162943-67c79a), and before the set in 20261110-124347-d5351c at `b81e694`. The Settle step shows Accept
+  before it has read the Topic's Sessions (`PaletteFlow.loadFlow`), and Accept does nothing until it has (`canAccept`):
+  the step then waits for another press. The check pressed Accept as soon as the step showed. A probe found no Session
+  row in the first dump with Accept in 16 tries of 16, with and without load, though each time the step had read the
+  Sessions before the press arrived. With the Sandbox's tmux server held for 3 seconds around the press of Settle, so
+  that the step's read waited, a press of Accept saved nothing in 3 tries of 3: 6 seconds later the step still showed,
+  with the Session, until a second press. The check now presses Accept once the step lists the Topic's Session, as the
+  Settle check of `topics_cards_sidebar` does. The cause is the check; the Settle step is the palette's, and the set did
+  not change it. After task 20's repairs, `git_view_remotes`, `command_palette`, `topics_groups_sidebar` and
+  `git_view_changes` passed with no FLAKY check against the AppKit list (20261114-170905-f21e3d) and the SwiftUI list
+  (20261114-171037-388f81).
 - The other checks that were FLAKY in one full run each, against the SwiftUI list unless named, all of them outside
   the AppKit Topics list, each failed once in the 24 to 28 runs that `build/verify/runs/` keeps, and passed in its
   rerun: `git_view_merge_rebase`'s conflicting merge (the merge menu did not open after R, on a Git View that had not

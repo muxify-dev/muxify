@@ -623,6 +623,11 @@ class CommandPalette(unittest.TestCase):
         for name in ['sw-first', 'sw-second']:
             self.write_topic(name, 'Sw ' + name[3:], self.beta)
             windows[name] = self.window_of(self.new_session('beta/' + name, self.beta, topic=name))
+        # A visit counts for its Topic only once the app has read the Topic's record, which it does four times a
+        # second, and the check stays on each Window for less. The Sidebar shows a card for each record it has read.
+        for name in windows:
+            wait(lambda: self.s.has('topic-' + name, self.s.driver('dump', 'topic-' + name, reveal=True)['rows']),
+                 'the Sidebar does not show the Topic ' + name)
         self.select_window(windows['sw-first'])
         self.select_window(windows['sw-second'])
         self.select_window(self.base_window)

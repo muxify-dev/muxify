@@ -49,12 +49,14 @@ class GitViewRemotes(GitViewFixture):
 
     def fake_ssh(self, name):
         """An ssh for git's core.sshCommand that, once the file `go` exists, asks for a passphrase on its terminal as
-        ssh does, writes the answer to `answers`, and serves the repository only for the answer `right`."""
+        ssh does, writes the answer to `answers`, and serves the repository only for the answer `right`. A check that
+        ends before `go` lets it fail: a fetch still waiting on it would make the f of the next checks do nothing."""
         folder = self.s.root/name
         folder.mkdir()
-        go, answers, ssh = folder/'go', folder/'answers', folder/'ssh'
+        go, stop, answers, ssh = folder/'go', folder/'stop', folder/'answers', folder/'ssh'
+        self.addCleanup(stop.touch)
         ssh.write_text('#!/bin/sh\n'
-                       f'while [ ! -e {shlex.quote(str(go))} ]; do sleep .1; done\n'
+                       f'while [ ! -e {shlex.quote(str(go))} ]; do [ -e {shlex.quote(str(stop))} ] && exit 255; sleep .1; done\n'
                        'printf "Enter passphrase for key \'/fake/id\': " > /dev/tty\n'
                        'IFS= read -r answer < /dev/tty\n'
                        f'printf \'%s\\n\' "$answer" >> {shlex.quote(str(answers))}\n'

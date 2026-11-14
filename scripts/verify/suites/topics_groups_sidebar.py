@@ -130,10 +130,12 @@ class TopicsGroupsSidebar(TopicsSidebar):
         s = self.s
         topic = 'age-today'
         self.write_topic(topic, 'Age today', self.beta)
-        self.new_session('age-today', self.beta, topic=topic)
+        sid = self.new_session('age-today', self.beta, topic=topic)
         self.find('settle-topic-' + topic)
         s.act('press', 'settle-topic-' + topic)
-        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Settle did not open the Settle palette')
+        # Accept is disabled until the step has read the Topic's Sessions, and a press before that does nothing.
+        s.wait_rows(lambda rs: s.has('palette-accept', rs) and s.has('palette-row-session-' + sid, rs),
+                    'Settle did not open the Settle palette with the Topic\'s Session')
         s.act('press', 'palette-accept')
         wait(lambda: self.records()[topic].get('settled_at'), 'Settle did not save the settle date')
         self.expand('settled-topics')
