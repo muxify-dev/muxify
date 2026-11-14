@@ -3,7 +3,7 @@ import Foundation
 /// Find in Pane through tmux copy mode (ADR 0051): the commands that search a Pane's history, and the place in
 /// its matches that tmux reports. tmux finds and highlights the matches and scrolls the Pane to each one.
 public enum PaneSearch {
-    public enum Step: Equatable, Sendable {
+    public enum Step: String, Codable, Hashable, Sendable {
         /// A new query. tmux searches up from where the search began, so the newest match comes first.
         case query
         /// The next match up, in older output. It wraps to the newest.
@@ -39,7 +39,7 @@ public enum PaneSearch {
     }
 
     /// The highlight of the matches, as `copy-mode-match-style` and `copy-mode-current-match-style` take it.
-    public struct Styles: Equatable, Sendable {
+    public struct Styles: Codable, Hashable, Sendable {
         public let match: String
         public let current: String
 
@@ -97,7 +97,7 @@ public enum PaneSearch {
 
     /// The text from the current match's line to the bottom of the Pane, for `index`.
     public static func capture(_ status: Status) -> [String] {
-        ["capture-pane", "-p", "-J", "-t", status.pane, "-S", String(status.line), "-E", "-"]
+        ViewCommandExecutor.arguments(for: .capturePane(pane: status.pane, fromLine: status.line))
     }
 
     /// The current match's place, 0 for the newest, from the `capture` text below it. tmux counts the `total`

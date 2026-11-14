@@ -170,7 +170,7 @@ final class WorkspaceStore {
             showGoFailure("No Window is selected.")
             return
         }
-        runAsync(Tmux.sendKeysArguments(target: pane, keys: [text], literal: true, client: clientTTY ?? surface?.ttyName)) { [weak self] result in
+        sendView(.sendKeys(target: pane, keys: [text], literal: true, client: clientTTY ?? surface?.ttyName)) { [weak self] result in
             if case .failure(let error) = result { self?.showGoFailure(String(describing: error)) }
         }
     }
@@ -764,11 +764,11 @@ final class WorkspaceStore {
     /// The one path for every Topic edit that the user asks for in the app. The app's unsaved memory goes to disk and to tmux first,
     /// so the service reads the same truth as any other process. A request runs on the server that the App Window
     /// shows, through its link.
-    /// `before` runs on the same server first, in one tmux call, so the request reads what those commands wrote.
-    /// False when the request did not start, because an edit runs or the server is gone.
+    /// The pending Browser state and then `before` go to the same server first, as view commands, so the request
+    /// reads what they wrote. False when the request did not start, because an edit runs or the server is gone.
     @discardableResult
     func perform(_ request: EnvironmentRequest, presenting presentation: TopicPresentation = .edit,
-                 before: [[String]] = []) -> Bool {
+                 before: [ViewCommand] = []) -> Bool {
         guard !changingTopic else { return false }
         let browserCommands = pendingBrowserCommands
         changingTopic = true
@@ -780,12 +780,12 @@ final class WorkspaceStore {
         guard let service = environmentService() else { changingTopic = false; return false }
         let environment = generation
         let invocation = palette.invocation
+        let link = self.link
         Task { [weak self] in
             await self?.flushTopicMemory()
+            for command in browserCommands + before { _ = try? await link.view(command) }
             let response = await Task.detached(priority: .userInitiated) {
-                for arguments in browserCommands { _ = try? service.server.run(arguments) }
-                if !before.isEmpty { _ = try? service.server.run(Array(before.joined(separator: [";"]))) }
-                return service.handle(request, client: client)
+                service.handle(request, client: client)
             }.value
             guard let self else { return }
             await self.link.topicsReloaded()
@@ -1284,7 +1284,7 @@ final class WorkspaceStore {
         }
         installKeyMonitor()
         terminalHost.onFirstResponderChange = { [weak self] in self?.readFocusedPanel() }
-        paneFinder.tmux = { [weak self] args, completion in self?.runAsync(args, completion: completion) ?? false }
+        paneFinder.view = { [weak self] command, completion in self?.sendView(command, completion: completion) ?? false }
         paneFinder.windowID = { [weak self] in self?.selectedWindowID }
         paneFinder.styles = { [weak self] in self?.findStyles ?? PaneSearch.Styles(match: "", current: "") }
         // Coming back to Muxify reads the Agents in the Window on screen.
@@ -1494,10 +1494,11 @@ final class WorkspaceStore {
         }
     }
 
+    /// Sends one of the App Window's own tmux commands through the link. False when it cannot send one now.
     @discardableResult
-    private func runAsync(_ args: [String], completion: ((Result<String, Error>) -> Void)? = nil) -> Bool {
+    private func sendView(_ command: ViewCommand, completion: ((Result<String, Error>) -> Void)? = nil) -> Bool {
         guard isLinked, !isTransitioning, link.isOnThisMac || isConnected else { return false }
-        send({ try await $0.tmux(args) }) { result in
+        send({ try await $0.view(command) }) { result in
             if case .failure(let error) = result { Diagnostics.report("tmux command failed: \(error)") }
             completion?(result)
         }
@@ -1671,7 +1672,7 @@ final class WorkspaceStore {
                 if !link.isListening { link.startListening() }
             } else if let watch = snapshot.watchSessionID {
                 link.stopListening()
-                runAsync(["kill-session", "-t", watch])
+                sendView(.killSession(session: watch))
             }
         }
 
@@ -1704,7 +1705,7 @@ final class WorkspaceStore {
     private func rememberSelection() {
         guard let selectedWindowID, selectedWindowID != rememberedWindowID else { return }
         rememberedWindowID = selectedWindowID
-        runAsync(["set-option", "-gq", Tmux.lastWindowOption, selectedWindowID])
+        sendView(.setLastWindow(window: selectedWindowID))
     }
 
     // MARK: - Terminal
@@ -1822,7 +1823,7 @@ final class WorkspaceStore {
     /// with the Agent already focused.
     func select(_ agent: Agent) {
         guard agents.contains(where: { $0.id == agent.id && $0.sourceID == agent.sourceID }) else { return }
-        runAsync(["select-pane", "-t", agent.paneID])
+        sendView(.selectPane(target: agent.paneID))
         if let window = windows.first(where: { $0.id == agent.windowID }) {
             select(window)
         } else {
@@ -1832,7 +1833,7 @@ final class WorkspaceStore {
 
     /// Shows the Pane's Window with that Pane active.
     func select(_ pane: TopicsModel.PaneRow) {
-        runAsync(["select-pane", "-t", pane.pane.id])
+        sendView(.selectPane(target: pane.pane.id))
         select(pane.window)
     }
 
@@ -1885,7 +1886,7 @@ final class WorkspaceStore {
         }
         // Earlier visits must not clear a later explicit mark, so they go to tmux before the request. They go also
         // when the request cannot start, because `unreadChanges` already counts them as written.
-        if !perform(request, before: visits), !visits.isEmpty { writeUnread(visits) }
+        if !perform(request, before: visits.isEmpty ? [] : [.setAgentUnread(visits)]), !visits.isEmpty { writeUnread(visits) }
     }
 
     func readActiveTopicOnEntry() {
@@ -1911,11 +1912,11 @@ final class WorkspaceStore {
         }
     }
 
-    private func writeUnread(_ commands: [[String]]) {
+    private func writeUnread(_ changes: [PaneUnread]) {
         readGeneration += 1
         pendingReads += 1
         readSnapshotPending = true
-        runAsync(Array(commands.joined(separator: [";"]))) { [weak self] _ in
+        sendView(.setAgentUnread(changes)) { [weak self] _ in
             guard let self else { return }
             self.pendingReads -= 1
             self.readGeneration += 1
@@ -1956,28 +1957,28 @@ final class WorkspaceStore {
         }
     }
 
-    private func unreadChanges(_ panes: [TmuxPane]) -> [[String]] {
+    private func unreadChanges(_ panes: [TmuxPane]) -> [PaneUnread] {
         let scope = shownReadScope
         let viewed = observesTerminal ? scope?.paneIDs(in: panes) ?? [] : []
         let visited = router.intent == nil && pendingReadNavigations.isEmpty
             ? readVisits.consume(showing: scope, panes: panes, observing: observesTerminal) : []
-        var commands: [[String]] = []
+        var changes: [PaneUnread] = []
         for pane in panes {
             let reading: AgentReading = visited.contains(pane.id) ? .visiting : viewed.contains(pane.id) ? .viewing : .away
             let change = AgentUnread.change(for: pane, previousStatus: agentStatuses[pane.id],
                                             reading: reading, manualRead: config.notifications.manualRead)
             agentStatuses[pane.id] = pane.agentStatus
-            if let unread = change { commands.append(AgentUnread.command(unread, paneID: pane.id)) }
+            if let unread = change { changes.append(PaneUnread(pane: pane.id, unread: unread)) }
         }
         let live = Set(panes.map(\.id))
         agentStatuses = agentStatuses.filter { live.contains($0.key) }
-        return commands
+        return changes
     }
 
     private func updateUnread(_ panes: [TmuxPane]) -> Bool {
-        let commands = unreadChanges(panes)
-        guard !commands.isEmpty else { return false }
-        writeUnread(commands)
+        let changes = unreadChanges(panes)
+        guard !changes.isEmpty else { return false }
+        writeUnread(changes)
         return true
     }
 
@@ -2070,7 +2071,7 @@ final class WorkspaceStore {
         clientTTY = tty
         let navigation = UUID()
         pendingReadNavigations.insert(navigation)
-        runAsync(["switch-client", "-Z", "-c", tty, "-t", target.tmuxTarget]) { [weak self] result in
+        sendView(.switchClient(client: tty, target: target.tmuxTarget)) { [weak self] result in
             guard let self, self.pendingReadNavigations.remove(navigation) != nil else { return }
             switch result {
             case .success:
@@ -2283,8 +2284,8 @@ final class WorkspaceStore {
                       move: { [weak self] in self?.moveWindow($0, to: $1) })
     }
 
-    /// Runs a tmux command against the pane our client currently has focused.
-    private func runOnCurrentPane(_ makeArgs: @escaping (_ paneID: String, _ windowID: String) -> [String]) {
+    /// Runs a view command against the pane our client currently has focused.
+    private func runOnCurrentPane(_ makeCommand: @escaping (_ paneID: String, _ windowID: String) -> ViewCommand) {
         // display-message's -c is a message recipient, not a dependable format
         // context. Another client (including the event listener) may otherwise
         // supply its current Pane. Window selection is queued before this call.
@@ -2297,12 +2298,12 @@ final class WorkspaceStore {
             readGeneration += 1
             refresh()
         }
-        let submitted = runAsync(["display-message", "-p", "-t", windowID, "#{pane_id} #{window_id}"]) { [weak self] result in
+        let submitted = sendView(.activePane(window: windowID)) { [weak self] result in
             guard let self else { return }
             guard case .success(let output) = result else { finished(); return }
             let ids = output.split(separator: " ").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             guard ids.count == 2 else { finished(); return }
-            if !self.runAsync(makeArgs(ids[0], ids[1]), completion: { _ in finished() }) { finished() }
+            if !self.sendView(makeCommand(ids[0], ids[1]), completion: { _ in finished() }) { finished() }
         }
         if !submitted { finished() }
     }
@@ -2397,8 +2398,7 @@ final class WorkspaceStore {
         guard let sessionID = selectedWindow?.sessionID ?? windows.first?.sessionID else { return }
         // Run by tmux's default shell, which may be fish: plain words only.
         let editor = "sh -c " + Tmux.shellQuote("exec \"${VISUAL:-${EDITOR:-vi}}\" \"$1\"") + " sh " + Tmux.shellQuote(path)
-        let args = ["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "\(sessionID):", "-c", homeDirectory, editor]
-        runAsync(args) { [weak self] result in
+        sendView(.newWindow(target: "\(sessionID):", after: false, directory: homeDirectory, command: editor)) { [weak self] result in
             guard let self, case .success(let output) = result else { return }
             let windowID = output.trimmingCharacters(in: .whitespacesAndNewlines)
             self.switchClient(to: Target(sessionID: sessionID, windowID: windowID, path: nil))
@@ -2416,9 +2416,8 @@ final class WorkspaceStore {
         let origin = windows.first(where: { $0.id == windowID })
         guard let sessionID = origin?.sessionID ?? selectedWindow?.sessionID else { return }
         let command = config.gitView.editorShellCommand(file: file, line: line)
-        let place = origin.map { ["-a", "-t", "\(sessionID):\($0.id)"] } ?? ["-t", "\(sessionID):"]
-        let args = ["new-window", "-d", "-P", "-F", "#{window_id}"] + place + ["-c", directory, command]
-        runAsync(args) { [weak self] result in
+        let target = origin.map { "\(sessionID):\($0.id)" } ?? "\(sessionID):"
+        sendView(.newWindow(target: target, after: origin != nil, directory: directory, command: command)) { [weak self] result in
             guard let self, case .success(let output) = result, self.selectedWindowID == windowID else { return }
             let editorID = output.trimmingCharacters(in: .whitespacesAndNewlines)
             self.switchClient(to: Target(sessionID: sessionID, windowID: editorID, path: nil))
@@ -2727,7 +2726,7 @@ final class WorkspaceStore {
             for request in window.openRequests {
                 if let url = Omnibox.url(for: request) { openInBrowser(url, windowID: window.id) }
             }
-            runAsync(["set-option", "-wqu", "-t", window.id, Tmux.openOption]) { [weak self] _ in
+            sendView(.clearOpenRequests(window: window.id)) { [weak self] _ in
                 self?.consumingOpen.remove(window.id)
             }
         }
@@ -2740,7 +2739,7 @@ final class WorkspaceStore {
         guard link.isOnThisMac, snapshot.serverRunning, shouldConsumeOpenRequests?() ?? true, let socket = snapshot.socketPath,
               let path = serveBrowserAgent?(socket), snapshot.browserSocket != path else { return }
         publishedBrowserSocket = true
-        runAsync(["set-option", "-sq", BrowserAgentChannel.option, path])
+        sendView(.setBrowserSocket(path: path))
     }
 
     /// Writes Browser state onto its tmux Window, coalescing bursts of
@@ -2754,7 +2753,7 @@ final class WorkspaceStore {
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.generation == current, let browser = self.browsers[id] else { return }
             self.persistWork[id] = nil
-            self.runAsync(browser.stored.setOptionArgs(windowID: id)) { [weak self] result in
+            self.sendView(.setBrowser(window: id, browser: browser.stored)) { [weak self] result in
                 guard let self, case .success = result, self.dirtyBrowsers[id] == revision else { return }
                 self.dirtyBrowsers[id] = nil
             }
@@ -2763,9 +2762,9 @@ final class WorkspaceStore {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
     }
 
-    var pendingBrowserCommands: [[String]] {
-        dirtyBrowsers.keys.sorted().compactMap { id in browsers[id]?.stored.setOptionArgs(windowID: id) }
-            + (publishedBrowserSocket ? [["set-option", "-squ", BrowserAgentChannel.option]] : [])
+    var pendingBrowserCommands: [ViewCommand] {
+        dirtyBrowsers.keys.sorted().compactMap { id in browsers[id].map { .setBrowser(window: id, browser: $0.stored) } }
+            + (publishedBrowserSocket ? [.setBrowserSocket(path: nil)] : [])
     }
 
     private func rememberTopics(in snapshot: TmuxSnapshot) {
@@ -2860,10 +2859,10 @@ final class WorkspaceStore {
         case .focusBrowser: focus(.browser)
         case .toggleFocus: toggleFocus()
         case .toggleZoomPane: toggleZoomOfCurrentPane()
-        case .resizePaneLeft: resizeCurrentPane("-L")
-        case .resizePaneRight: resizeCurrentPane("-R")
-        case .resizePaneUp: resizeCurrentPane("-U")
-        case .resizePaneDown: resizeCurrentPane("-D")
+        case .resizePaneLeft: resizeCurrentPane(.left)
+        case .resizePaneRight: resizeCurrentPane(.right)
+        case .resizePaneUp: resizeCurrentPane(.up)
+        case .resizePaneDown: resizeCurrentPane(.down)
         case .findInPane: showFindInPane()
         case .findInPage: browserCommand { $0.activeTab?.showFind() }
         case .selectNextTab: browserCommand { $0.selectTab(offset: 1) }
@@ -2946,12 +2945,12 @@ final class WorkspaceStore {
     }
 
     func toggleZoomOfCurrentPane() {
-        runOnCurrentPane { pane, _ in ["resize-pane", "-Z", "-t", pane] }
+        runOnCurrentPane { pane, _ in .resizePane(target: pane, by: .zoom) }
     }
 
     /// Moves the current Pane's border by 10 cells, as Ghostty's resize_split does.
-    private func resizeCurrentPane(_ direction: String) {
-        runOnCurrentPane { pane, _ in ["resize-pane", direction, "-t", pane, "10"] }
+    private func resizeCurrentPane(_ direction: PaneDirection) {
+        runOnCurrentPane { pane, _ in .resizePane(target: pane, by: .border(direction, cells: 10)) }
     }
 
     /// The Config's keybinds, which act before the terminal, Browser and menu
@@ -3118,24 +3117,23 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
     func ghosttyNewWindow() { onNewAppWindow?() }
 
     func ghosttyNewSplit(_ direction: ghostty_action_split_direction_e) {
-        let flags: [String]
-        switch direction {
-        case GHOSTTY_SPLIT_DIRECTION_LEFT: flags = ["-h", "-b"]
-        case GHOSTTY_SPLIT_DIRECTION_DOWN: flags = ["-v"]
-        case GHOSTTY_SPLIT_DIRECTION_UP: flags = ["-v", "-b"]
-        default: flags = ["-h"]
+        let side: PaneDirection = switch direction {
+        case GHOSTTY_SPLIT_DIRECTION_LEFT: .left
+        case GHOSTTY_SPLIT_DIRECTION_DOWN: .down
+        case GHOSTTY_SPLIT_DIRECTION_UP: .up
+        default: .right
         }
-        runOnCurrentPane { pane, _ in ["split-window"] + flags + ["-t", pane, "-c", "#{pane_current_path}"] }
+        runOnCurrentPane { pane, _ in .splitPane(target: pane, side: side) }
     }
 
     func ghosttyGotoSplit(_ direction: ghostty_action_goto_split_e) {
         switch direction {
-        case GHOSTTY_GOTO_SPLIT_PREVIOUS: runOnCurrentPane { _, window in ["select-pane", "-t", "\(window).-"] }
-        case GHOSTTY_GOTO_SPLIT_NEXT: runOnCurrentPane { _, window in ["select-pane", "-t", "\(window).+"] }
-        case GHOSTTY_GOTO_SPLIT_UP: runOnCurrentPane { pane, _ in ["select-pane", "-U", "-t", pane] }
-        case GHOSTTY_GOTO_SPLIT_DOWN: runOnCurrentPane { pane, _ in ["select-pane", "-D", "-t", pane] }
-        case GHOSTTY_GOTO_SPLIT_LEFT: runOnCurrentPane { pane, _ in ["select-pane", "-L", "-t", pane] }
-        default: runOnCurrentPane { pane, _ in ["select-pane", "-R", "-t", pane] }
+        case GHOSTTY_GOTO_SPLIT_PREVIOUS: runOnCurrentPane { _, window in .selectPane(target: window, move: .previous) }
+        case GHOSTTY_GOTO_SPLIT_NEXT: runOnCurrentPane { _, window in .selectPane(target: window, move: .next) }
+        case GHOSTTY_GOTO_SPLIT_UP: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: .up) }
+        case GHOSTTY_GOTO_SPLIT_DOWN: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: .down) }
+        case GHOSTTY_GOTO_SPLIT_LEFT: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: .left) }
+        default: runOnCurrentPane { pane, _ in .selectPane(target: pane, move: .right) }
         }
     }
 
@@ -3143,7 +3141,7 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
     func ghosttyStartSearch() { showFindInPane() }
 
     func ghosttyEqualizeSplits() {
-        runOnCurrentPane { pane, _ in ["select-layout", "-E", "-t", pane] }
+        runOnCurrentPane { pane, _ in .selectLayout(target: pane) }
     }
 
     func ghosttyGotoTab(_ tab: Int32) {

@@ -112,7 +112,7 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         // Retiring flushes nothing and runs no tmux here: there are no commands and no Client marker.
         link.retire(flushing: [])
         do {
-            _ = try await link.tmux(["list-sessions"])
+            _ = try await link.view(.activePane(window: "@1"))
             XCTFail("a retired link ran a request")
         } catch {
             XCTAssertEqual(error as? TmuxError, .cancelled)

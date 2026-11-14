@@ -106,8 +106,8 @@ protocol EnvironmentLink: AnyObject {
 
     // MARK: Sessions
 
-    /// Runs one tmux command, in the order asked.
-    func tmux(_ arguments: [String]) async throws -> String
+    /// Runs one of the App Window's own tmux commands, in the order asked, and returns tmux's answer.
+    func view(_ command: ViewCommand) async throws -> String
     /// Reads the whole server; with `commandLines`, the Panes' command lines too.
     func snapshot(updating commandLines: PaneCommandLines?) async throws -> TmuxSnapshot
     /// `snapshot` for a caller that must answer before it returns.
@@ -159,7 +159,7 @@ protocol EnvironmentLink: AnyObject {
 
     /// Ends every waiting request `cancelled` and every subscription, and flushes `commands`, which must be
     /// idempotent. Called off the main thread.
-    nonisolated func retire(flushing commands: [[String]])
+    nonisolated func retire(flushing commands: [ViewCommand])
     /// Removes what the transport left on this Mac. Called off the main thread, after `retire`.
     nonisolated func cleanup()
 }
@@ -195,6 +195,9 @@ class TmuxConnectionLink {
     let events = EnvironmentEvents()
     private let tmuxEvents = TmuxEvents()
     private let makeConnection: () throws -> TmuxConnection
+    /// The App Window's own Client on this Mac's server, which a view command acting as a Client must still name.
+    /// Nil for a Remote Environment, whose `RemoteSSH` checks each such command against its marker.
+    private var ownClient: ViewCommandExecutor.Client?
 
     init(makeConnection: @escaping () throws -> TmuxConnection) {
         self.makeConnection = makeConnection
@@ -218,10 +221,11 @@ class TmuxConnectionLink {
         return connection
     }
 
-    func tmux(_ arguments: [String]) async throws -> String {
+    func view(_ command: ViewCommand) async throws -> String {
         let connection = try connected()
+        let ownClient = self.ownClient
         return try await withCheckedThrowingContinuation { continuation in
-            connection.runAsync(arguments) { continuation.resume(with: $0) }
+            connection.view(command, ownClient: ownClient) { continuation.resume(with: $0) }
         }
     }
 
@@ -250,7 +254,7 @@ class TmuxConnectionLink {
     func pasteAttachments(_ attachments: TerminalAttachments, client: String) async throws -> String {
         let connection = try connected()
         return try await withCheckedThrowingContinuation { continuation in
-            connection.pasteAttachments(attachments, client: client) { continuation.resume(with: $0) }
+            connection.pasteAttachments(attachments, client: client, ownClient: ownClient) { continuation.resume(with: $0) }
         }
     }
 
@@ -261,6 +265,8 @@ class TmuxConnectionLink {
 
     func updateLocalClient(_ client: TmuxClient?) {
         connection?.updateLocalClient(client)
+        guard connection?.isOnThisMac == true else { return }
+        ownClient = client.flatMap { $0.isControl || $0.pid <= 0 ? nil : ViewCommandExecutor.Client(tty: $0.tty, pid: $0.pid) }
     }
 
     var isListening: Bool { tmuxEvents.isRunning }
@@ -300,8 +306,8 @@ class TmuxConnectionLink {
         return connection.startTerminalScript(script, arguments: arguments, timeout: timeout, onPrompt: onPrompt, completion: completion)
     }
 
-    nonisolated func retire(flushing commands: [[String]]) {
-        connection?.retire(flushing: commands)
+    nonisolated func retire(flushing commands: [ViewCommand]) {
+        connection?.retire(flushing: commands.map(ViewCommandExecutor.arguments(for:)))
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated { self?.didRetire() }
         }

@@ -51,10 +51,13 @@ final class TmuxConnection: @unchecked Sendable {
         return try runner.run(invocation(args))
     }
 
-    func runAsync(_ args: [String], completion: ((Result<String, Error>) -> Void)? = nil) {
+    /// Runs a view command on the tmux queue, in the order asked. `ownClient` is the Client that a command acting as
+    /// a Client must still find at its tty; a Remote Environment's `RemoteSSH` checks that itself against its marker.
+    func view(_ command: ViewCommand, ownClient: ViewCommandExecutor.Client?,
+              completion: @escaping (Result<String, Error>) -> Void) {
         queue.async {
-            let result = Result { try self.run(args) }
-            if let completion { DispatchQueue.main.async { completion(result) } }
+            let result = Result { try ViewCommandExecutor(ownClient: ownClient, run: self.run).run(command) }
+            DispatchQueue.main.async { completion(result) }
         }
     }
 
@@ -87,11 +90,11 @@ final class TmuxConnection: @unchecked Sendable {
 
     /// Resolve the actual Pane of this Client before the upload, independently
     /// of the Sidebar's polling snapshot. A slow upload never blocks tmux reads.
-    func pasteAttachments(_ attachments: TerminalAttachments, client: String,
+    func pasteAttachments(_ attachments: TerminalAttachments, client: String, ownClient: ViewCommandExecutor.Client? = nil,
                           completion: @escaping (Result<String, Error>) -> Void) {
+        let executor = ViewCommandExecutor(ownClient: ownClient, run: run)
         queue.async {
-            let target = Result { try self.run(["display-message", "-p", "-c", client, "#{pane_id}"])
-                .trimmingCharacters(in: .newlines) }
+            let target = Result { try executor.run(.clientPane(client: client)).trimmingCharacters(in: .newlines) }
             self.attachmentQueue.async {
                 let result = Result {
                     defer { if !self.isOnThisMac { attachments.removeLocalCopy() } }
@@ -111,10 +114,7 @@ final class TmuxConnection: @unchecked Sendable {
                                          ? Tmux.shellQuote(path) : GhosttyInput.shellEscape(path))
                         }
                     }
-                    let buffer = "muxify-paste-" + UUID().uuidString
-                    defer { _ = try? self.run(["delete-buffer", "-b", buffer]) }
-                    _ = try self.run(["set-buffer", "-b", buffer, "--", words.joined(separator: " "), ";",
-                                      "paste-buffer", "-d", "-p", "-b", buffer, "-t", pane])
+                    try executor.run(.paste(pane: pane, text: words.joined(separator: " ")))
                     return pane
                 }
                 DispatchQueue.main.async { completion(result) }

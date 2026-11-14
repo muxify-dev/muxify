@@ -101,7 +101,7 @@ public struct TmuxWindow: Identifiable, Hashable {
 /// are space-separated (URLs never contain spaces); an empty Tab is
 /// `about:blank`. `@muxify_browser` holds the toggles (`off`: the Terminal,
 /// `on`: both, `only`: the Browser) and `@muxify_maximize` the Maximized side.
-public struct StoredBrowser: Hashable {
+public struct StoredBrowser: Hashable, Sendable {
     public var tabURLs: [String] = []
     public var activeTab = 0
     public var layout = PanelLayout()

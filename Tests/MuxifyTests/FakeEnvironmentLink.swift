@@ -11,7 +11,7 @@ final class FakeEnvironmentLink: EnvironmentLink {
     var initial: [EnvironmentEvent] = []
     private(set) var isConnected = false
     /// Every tmux command the store sent, in order.
-    private(set) var commands: [[String]] = []
+    private(set) var commands: [ViewCommand] = []
     /// Every subscriber, kept after it cancels, so `send` can deliver late as a retired link's transport might.
     private var subscribers: [(EnvironmentEvent) -> Void] = []
     private var listening = false
@@ -42,8 +42,8 @@ final class FakeEnvironmentLink: EnvironmentLink {
         return EnvironmentSubscription {}
     }
 
-    func tmux(_ arguments: [String]) async throws -> String {
-        commands.append(arguments)
+    func view(_ command: ViewCommand) async throws -> String {
+        commands.append(command)
         return ""
     }
 
@@ -85,7 +85,7 @@ final class FakeEnvironmentLink: EnvironmentLink {
 
     func makeGitWatcher(run: @escaping GitRemoteProbe.Run) -> GitWatcher { GitFileWatcher() }
 
-    nonisolated func retire(flushing commands: [[String]]) {
+    nonisolated func retire(flushing commands: [ViewCommand]) {
         lock.lock()
         retired = true
         lock.unlock()

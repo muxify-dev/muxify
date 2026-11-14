@@ -279,7 +279,7 @@ final class AppWindowsTests: XCTestCase {
             XCTAssertTrue(first.pendingBrowserCommands.isEmpty)
             XCTAssertTrue(second.pendingBrowserCommands.isEmpty)
             firstBrowser.newTab()
-            XCTAssertEqual(first.pendingBrowserCommands, [firstBrowser.stored.setOptionArgs(windowID: "@1")])
+            XCTAssertEqual(first.pendingBrowserCommands, [.setBrowser(window: "@1", browser: firstBrowser.stored)])
             XCTAssertTrue(second.pendingBrowserCommands.isEmpty)
         }
     }

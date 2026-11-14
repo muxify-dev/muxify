@@ -2,15 +2,15 @@
 /// sides are shown and never hide both. Maximize shows one side alone, with
 /// the Sidebar hidden, without changing the toggles; on Restore, the toggles
 /// show again.
-public struct PanelLayout: Hashable {
-    public enum Side: Hashable {
+public struct PanelLayout: Hashable, Sendable {
+    public enum Side: String, Codable, Hashable, Sendable {
         case terminal, browser
 
         public var other: Side { self == .terminal ? .browser : .terminal }
     }
 
     /// The sides the toggles show.
-    public enum Shown: Hashable {
+    public enum Shown: String, Codable, Hashable, Sendable {
         case terminal, both, browser
 
         init(alone side: Side) {
