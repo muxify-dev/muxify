@@ -103,6 +103,11 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
         try await EnvironmentLinks.writeGit(write)
     }
 
+    /// Opens a one-off socket for the command, whose path the bundled CLI's askpass helper gets.
+    func runGitNetwork(_ network: GitNetwork, ask: @escaping GitAsk) async throws -> String {
+        try await EnvironmentLinks.runGitNetwork(network, ask: ask)
+    }
+
     /// ADR 0072's FSEvents watcher, with the HEAD read of each change.
     func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription {
         let watch = LocalRepositoryWatch(path: path, onEvent: onEvent)

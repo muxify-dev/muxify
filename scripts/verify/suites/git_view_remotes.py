@@ -48,17 +48,17 @@ class GitViewRemotes(GitViewFixture):
         self.assertFalse(self.s.has('git-write-error'), 'the fetch failed')
 
     def fake_ssh(self, name):
-        """An ssh for git's core.sshCommand that, once the file `go` exists, asks for a passphrase on its terminal as
-        ssh does, writes the answer to `answers`, and serves the repository only for the answer `right`. A check that
-        ends before `go` lets it fail: a fetch still waiting on it would make the f of the next checks do nothing."""
+        """An ssh for git's core.sshCommand that, once the file `go` exists, asks for a passphrase through SSH_ASKPASS
+        as ssh does under SSH_ASKPASS_REQUIRE=force, writes the answer to `answers`, and serves the repository only for
+        the answer `right`. A question that askpass cancels stops it. A check that ends before `go` lets it fail: a
+        fetch still waiting on it would make the f of the next checks do nothing."""
         folder = self.s.root/name
         folder.mkdir()
         go, stop, answers, ssh = folder/'go', folder/'stop', folder/'answers', folder/'ssh'
         self.addCleanup(stop.touch)
         ssh.write_text('#!/bin/sh\n'
                        f'while [ ! -e {shlex.quote(str(go))} ]; do [ -e {shlex.quote(str(stop))} ] && exit 255; sleep .1; done\n'
-                       'printf "Enter passphrase for key \'/fake/id\': " > /dev/tty\n'
-                       'IFS= read -r answer < /dev/tty\n'
+                       'answer=$("$SSH_ASKPASS" "Enter passphrase for key \'/fake/id\': ") || exit 255\n'
                        f'printf \'%s\\n\' "$answer" >> {shlex.quote(str(answers))}\n'
                        '[ "$answer" = right ] || { echo "Permission denied (publickey)." >&2; exit 255; }\n'
                        'for last; do :; done\n'

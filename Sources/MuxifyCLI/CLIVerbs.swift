@@ -397,6 +397,17 @@ enum CLIVerbs {
             } ?? HostProtocol.serverSilence
             return .server(silence: silence, paths: parsed.paths)
         },
+        CLIVerb(path: .askpass, synopsis: "<prompt>", options: [], afterDashes: .operands,
+                help: """
+                The askpass helper of the Git View's fetch, push and pull, which git runs as
+                GIT_ASKPASS and ssh as SSH_ASKPASS: asks the prompt in the Git View that
+                started the command and prints the answer. Exits 1 at once when the question
+                is cancelled or Muxify cannot be reached, so git stops.
+                """) { parsed in
+            guard !parsed.operands.isEmpty else { throw CLIError.usage }
+            let names = [GitAskpass.socketVariable, GitAskpass.operationVariable]
+            return .askpass(prompt: parsed.operands.joined(separator: " "), environment: parsed.environment.filter { names.contains($0.key) })
+        },
     ]
 
     // MARK: - topic

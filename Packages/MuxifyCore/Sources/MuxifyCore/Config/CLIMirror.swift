@@ -70,6 +70,7 @@ public enum CLIVerbPath: String, CaseIterable, Sendable {
     case environmentShow = "environment show"
     case diagnosticsSummary = "diagnostics summary"
     case server = "server"
+    case askpass = "askpass"
 
     public var words: [String] { rawValue.split(separator: " ").map(String.init) }
 }

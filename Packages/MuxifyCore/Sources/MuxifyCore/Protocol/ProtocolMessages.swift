@@ -170,6 +170,10 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// One of the Git View's writes that need no network, run by the Host's `GitWriter`, answered as `GitWritten`. A
     /// failure ends `failed` with git's words. It is never sent again: a channel that ends first leaves it unknown.
     case gitWrite(GitWrite)
+    /// One of the Git View's commands that talk to a remote, run by the Host's `GitNetworkRunner`, answered as
+    /// `GitWritten`. Each of git's and ssh's questions comes to the Mac as an `ask` of its operation while it runs. A
+    /// cancelled question ends it `cancelled`; any other failure `failed` with git's words. It is never sent again.
+    case gitNetwork(GitNetworkRequest)
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case ping, shutdown, subscribe, environment
@@ -182,6 +186,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case releaseOpen = "release_open"
         case git
         case gitWrite = "git_write"
+        case gitNetwork = "git_network"
     }
 
     public init(from decoder: Decoder) throws {
@@ -205,6 +210,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .releaseOpen: self = .releaseOpen
         case .git: self = .git(try values.decode(GitRead.self, forKey: key))
         case .gitWrite: self = .gitWrite(try values.decode(GitWrite.self, forKey: key))
+        case .gitNetwork: self = .gitNetwork(try values.decode(GitNetworkRequest.self, forKey: key))
         }
     }
 
@@ -224,6 +230,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .releaseOpen: try values.encode(ProtocolEmpty(), forKey: .releaseOpen)
         case .git(let read): try values.encode(read, forKey: .git)
         case .gitWrite(let write): try values.encode(write, forKey: .gitWrite)
+        case .gitNetwork(let network): try values.encode(network, forKey: .gitNetwork)
         }
     }
 }
@@ -237,8 +244,12 @@ public enum MacRequest: Codable, Equatable, Sendable {
     case browser(BrowserAgentRequest)
     /// A view verb: the App Window shows the target and comes to the front. Answers `{}`.
     case select(SelectRequest)
+    /// git's or ssh's question from the askpass helper of a `git_network` request's operation, asked in the Git View
+    /// that started it. Answers `AskAnswer`; a cancelled question ends `cancelled`, and an `ask` that no operation waits
+    /// for ends `unavailable`.
+    case ask(AskRequest)
 
-    private enum CodingKeys: String, CodingKey, CaseIterable { case browser, select }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case browser, select, ask }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: ProtocolKey.self)
@@ -250,6 +261,7 @@ public enum MacRequest: Codable, Equatable, Sendable {
         switch known {
         case .browser: self = .browser(try values.decode(BrowserAgentRequest.self, forKey: key))
         case .select: self = .select(try values.decode(SelectRequest.self, forKey: key))
+        case .ask: self = .ask(try values.decode(AskRequest.self, forKey: key))
         }
     }
 
@@ -258,6 +270,7 @@ public enum MacRequest: Codable, Equatable, Sendable {
         switch self {
         case .browser(let request): try values.encode(request, forKey: .browser)
         case .select(let request): try values.encode(request, forKey: .select)
+        case .ask(let request): try values.encode(request, forKey: .ask)
         }
     }
 }

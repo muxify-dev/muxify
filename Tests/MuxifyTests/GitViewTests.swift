@@ -1104,34 +1104,34 @@ final class GitScriptTests: XCTestCase {
         try prepareRemote()
         try run("cd \"$1\" && git checkout -q -b topic && git commit -q --allow-empty -m topic", repository)
         XCTAssertThrowsError(try git("rev-parse --abbrev-ref topic@{upstream}"))
-        try run(GitRepository.pushScript, repository, "upstream", "origin", "topic")
+        try run(GitNetwork.pushScript, repository, "upstream", "origin", "topic")
         XCTAssertEqual(try git("rev-parse --abbrev-ref topic@{upstream}"), "origin/topic\n")
         XCTAssertEqual(try run("git -C \"$1/origin.git\" rev-parse topic", directory.url.path),
                        try git("rev-parse topic"))
         // To another name: the remote branch has it, and the upstream follows.
-        try run(GitRepository.pushScript, repository, "upstream", "origin", "renamed")
+        try run(GitNetwork.pushScript, repository, "upstream", "origin", "renamed")
         XCTAssertEqual(try git("rev-parse --abbrev-ref topic@{upstream}"), "origin/renamed\n")
     }
 
     func testAPlainPushSendsNewCommitsAndAForcePushNeedsTheLeaseToHold() throws {
         try prepareRemote()
         try run("cd \"$1\" && git branch -q --set-upstream-to=origin/master && git commit -q --allow-empty -m mine", repository)
-        try run(GitRepository.pushScript, repository, "plain", "", "")
+        try run(GitNetwork.pushScript, repository, "plain", "", "")
         XCTAssertEqual(try run("git -C \"$1/origin.git\" rev-parse master", directory.url.path), try git("rev-parse HEAD"))
         // The remote moved on: a plain push is rejected, with git's message.
         try pushFromOther("o.txt", "o")
         try run("cd \"$1\" && git commit -q --allow-empty -m more", repository)
-        XCTAssertThrowsError(try run(GitRepository.pushScript, repository, "plain", "", "")) { error in
+        XCTAssertThrowsError(try run(GitNetwork.pushScript, repository, "plain", "", "")) { error in
             XCTAssertTrue(stderr(of: error).contains("rejected"), stderr(of: error))
         }
         // The lease is on what the last fetch saw: a remote that moved since is not overwritten.
-        XCTAssertThrowsError(try run(GitRepository.pushScript, repository, "force", "", "")) { error in
+        XCTAssertThrowsError(try run(GitNetwork.pushScript, repository, "force", "", "")) { error in
             XCTAssertTrue(stderr(of: error).contains("stale info") || stderr(of: error).contains("rejected"), stderr(of: error))
         }
         XCTAssertNotEqual(try run("git -C \"$1/origin.git\" rev-parse master", directory.url.path), try git("rev-parse HEAD"))
         // After a fetch the lease holds, and the force push wins.
         try run("cd \"$1\" && git fetch -q", repository)
-        try run(GitRepository.pushScript, repository, "force", "", "")
+        try run(GitNetwork.pushScript, repository, "force", "", "")
         XCTAssertEqual(try run("git -C \"$1/origin.git\" rev-parse master", directory.url.path), try git("rev-parse HEAD"))
     }
 
@@ -1139,14 +1139,14 @@ final class GitScriptTests: XCTestCase {
         try prepareRemote()
         try pushFromOther("o.txt", "o")
         // No upstream: the one given is pulled from, and becomes the upstream.
-        XCTAssertThrowsError(try run(GitRepository.pullScript, repository, "plain", "", ""))
-        try run(GitRepository.pullScript, repository, "upstream", "origin", "master")
+        XCTAssertThrowsError(try run(GitNetwork.pullScript, repository, "plain", "", ""))
+        try run(GitNetwork.pullScript, repository, "upstream", "origin", "master")
         XCTAssertEqual(try git("show -s --format=%s HEAD"), "other o.txt\n")
         XCTAssertEqual(try git("rev-parse --abbrev-ref master@{upstream}"), "origin/master\n")
         // With `pull.rebase`, the local commit goes on top of the remote's, as it does for git.
         try run("cd \"$1\" && git commit -q --allow-empty -m mine && git config pull.rebase true", repository)
         try pushFromOther("p.txt", "p")
-        try run(GitRepository.pullScript, repository, "plain", "", "")
+        try run(GitNetwork.pullScript, repository, "plain", "", "")
         XCTAssertEqual(try git("log --format=%s -3"), "mine\nother p.txt\nother o.txt\n")
     }
 
@@ -1155,13 +1155,13 @@ final class GitScriptTests: XCTestCase {
         try run("cd \"$1\" && git branch -q --set-upstream-to=origin/master && git config pull.rebase false", repository)
         try pushFromOther("a.swift", "let a = 7")
         try run("cd \"$1\" && printf 'let a = 8\\n' > a.swift && git commit -q -am mine", repository)
-        XCTAssertThrowsError(try run(GitRepository.pullScript, repository, "plain", "", "")) { error in
+        XCTAssertThrowsError(try run(GitNetwork.pullScript, repository, "plain", "", "")) { error in
             XCTAssertTrue(stderr(of: error).contains("merge is in progress"), stderr(of: error))
         }
         XCTAssertTrue(try status().contains("UU a.swift"))
         // A rebase says so too.
         try run("cd \"$1\" && git merge --abort && git config pull.rebase true", repository)
-        XCTAssertThrowsError(try run(GitRepository.pullScript, repository, "plain", "", "")) { error in
+        XCTAssertThrowsError(try run(GitNetwork.pullScript, repository, "plain", "", "")) { error in
             XCTAssertTrue(stderr(of: error).contains("rebase is in progress"), stderr(of: error))
         }
         XCTAssertTrue(try status().contains("UU a.swift"))
@@ -3189,8 +3189,11 @@ extension GitView {
         queuedWrites.map { command in
             switch command {
             case .git(let write): write.script.arguments
-            case .network(_, let arguments, _, _): arguments
+            case .network(let network, _, _): network.script.arguments
             }
         }
     }
+
+    /// The network commands started, by the arguments their scripts take.
+    var networkArguments: [[String]] { networkCommands.map(\.script.arguments) }
 }

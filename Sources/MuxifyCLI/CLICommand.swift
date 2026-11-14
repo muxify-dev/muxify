@@ -22,6 +22,8 @@ enum CLICommand: Equatable {
     case diagnosticsSummary(DiagnosticsSummaryInvocation)
     /// The Host Server on stdin and stdout, which exits after `silence` seconds with no frame.
     case server(silence: TimeInterval, paths: MuxifyPaths)
+    /// git's or ssh's question, asked through the socket that a Git View command names in `environment`.
+    case askpass(prompt: String, environment: [String: String])
 
     static var usage: String { CLIVerbs.usage }
 
@@ -138,6 +140,10 @@ enum CLICommand: Equatable {
             let window = result.output.components(separatedBy: "\n").first ?? ""
             guard result.status == 0, !window.isEmpty else { throw CLIError("no tmux Window or Pane '\(target)'") }
             try Self.select(.window(window), using: runner)
+        case .askpass(let prompt, let environment):
+            do { print(try GitAskpass.ask(prompt, environment: environment)) }
+            catch BrowserAgentChannel.Failure.unreachable(let reason) { throw CLIError("muxify askpass: cannot reach Muxify: \(reason)") }
+            catch BrowserAgentChannel.Failure.broken(let reason) { throw CLIError("muxify askpass: \(reason)") }
         case .request(let invocation): return try await invocation.run()
         case .sessionList(let invocation): try await invocation.run()
         case .topicSessionPaths(let invocation): try await invocation.run()
@@ -146,9 +152,10 @@ enum CLICommand: Equatable {
         case .diagnosticsSummary(let invocation): try invocation.run()
         case .server(let silence, let paths):
             // The Host's Config, with its SessionPaths found as `topic session-paths` finds them, read for each request.
+            // This executable is the askpass helper of the Git View's network commands.
             let context = HostServerContext(paths: paths, config: {
                 try await ConfigSessions.load(paths.configFile, cache: SessionPathCache(file: paths.sessionPathCache(remote: nil)))
-            })
+            }, gitNetwork: GitNetworkRunner(helper: executableURL.path, scratch: paths.state))
             return await HostServer.run(build: BuildStamp.versionLine, silence: silence, context: context).exitCode
         }
         return 0

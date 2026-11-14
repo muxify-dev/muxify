@@ -448,8 +448,8 @@ final class GitView {
     @ObservationIgnored private var writes: [Write] = []
     /// The writes waiting or running, for tests, which have no store to run them.
     var queuedWrites: [WriteCommand] { writes.map(\.command) }
-    /// The arguments of the network commands started, for tests, which have no store to run them.
-    private(set) var networkArguments: [[String]] = []
+    /// The network commands started, for tests, which have no store to run them.
+    private(set) var networkCommands: [GitNetwork] = []
     /// The branch and commit whose history is being read.
     @ObservationIgnored private var readingLog: String?
     @ObservationIgnored private var shownScope = Scope.all
@@ -2103,7 +2103,7 @@ final class GitView {
     /// goes after it, under the rules of a local delete; a failed remote delete leaves the local branch.
     private func deleteRemote(_ branch: GitBranch, andLocal: Bool) {
         guard let root = snapshot?.root else { return }
-        runNetwork(GitRepository.deleteRemoteBranchScript, arguments: [root, branch.name], activity: Self.deletingRemote,
+        runNetwork(.deleteRemoteBranch(root: root, branch: branch.name), activity: Self.deletingRemote,
                    cancelled: "Delete cancelled.", refreshing: !andLocal) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -2629,8 +2629,8 @@ final class GitView {
     enum WriteCommand {
         /// Runs on the repository's machine through the link (ADR 0085).
         case git(GitWrite)
-        /// Talks to a remote, such as a pull, in a pseudo-terminal; the toolbar names it.
-        case network(script: String, arguments: [String], activity: String, cancelled: String)
+        /// Talks to a remote, such as a pull, on the repository's machine; the toolbar names it.
+        case network(GitNetwork, activity: String, cancelled: String)
     }
 
     private struct Write {
@@ -2638,7 +2638,7 @@ final class GitView {
         let completion: ((Result<String, Error>) -> Void)?
 
         var cancelled: String? {
-            if case .network(_, _, _, let cancelled) = command { cancelled } else { nil }
+            if case .network(_, _, let cancelled) = command { cancelled } else { nil }
         }
     }
 
@@ -2649,8 +2649,8 @@ final class GitView {
     }
 
     /// A network command that changes files, such as a pull, in the same queue.
-    private func writeNetwork(_ script: String, arguments: [String], activity: String, cancelled: String) {
-        enqueue(Write(command: .network(script: script, arguments: arguments, activity: activity, cancelled: cancelled), completion: nil))
+    private func writeNetwork(_ network: GitNetwork, activity: String, cancelled: String) {
+        enqueue(Write(command: .network(network, activity: activity, cancelled: cancelled), completion: nil))
     }
 
     private func enqueue(_ write: Write) {
@@ -2676,8 +2676,8 @@ final class GitView {
         switch write.command {
         case .git(let change):
             store.writeGit(change, completion: finish)
-        case .network(let script, let arguments, let activity, let cancelled):
-            runNetwork(script, arguments: arguments, activity: activity, cancelled: cancelled, refreshing: false, completion: finish)
+        case .network(let network, let activity, let cancelled):
+            runNetwork(network, activity: activity, cancelled: cancelled, refreshing: false, completion: finish)
         }
     }
 
@@ -2687,7 +2687,7 @@ final class GitView {
     /// repository is read again after it.
     func fetch() {
         guard !networkActivity.contains(Self.fetching), let root = snapshot?.root else { return }
-        runNetwork(GitRepository.fetchScript, arguments: [root], activity: Self.fetching, cancelled: "Fetch cancelled.")
+        runNetwork(.fetch(root: root), activity: Self.fetching, cancelled: "Fetch cancelled.")
     }
 
     static let fetching = "Fetching…"
@@ -2717,12 +2717,11 @@ final class GitView {
         }
     }
 
-    enum PushMode: String { case plain, upstream, force }
+    typealias PushMode = GitNetwork.Mode
 
     private func runPush(_ mode: PushMode, _ remote: String = "", _ branch: String = "") {
         guard let root = snapshot?.root, !networkActivity.contains(Self.pushing) else { return }
-        runNetwork(GitRepository.pushScript, arguments: [root, mode.rawValue, remote, branch], activity: Self.pushing,
-                   cancelled: "Push cancelled.")
+        runNetwork(.push(root: root, mode: mode, remote: remote, branch: branch), activity: Self.pushing, cancelled: "Push cancelled.")
     }
 
     /// p: pulls the branch you're on, following the user's git config, such as `pull.rebase`. It waits in the write
@@ -2743,7 +2742,7 @@ final class GitView {
     private func guardedPull(_ mode: PushMode, _ remote: String = "", _ branch: String = "") {
         guardFiles("Pull", subject: .text(snapshot?.head ?? ""), symbol: "arrow.down.circle", confirm: "Pull it") { [weak self] in
             guard let self, let root = self.snapshot?.root else { return }
-            self.writeNetwork(GitRepository.pullScript, arguments: [root, mode.rawValue, remote, branch],
+            self.writeNetwork(.pull(root: root, mode: mode, remote: remote, branch: branch),
                               activity: Self.pulling, cancelled: "Pull cancelled.")
         }
     }
@@ -2762,29 +2761,28 @@ final class GitView {
         })
     }
 
-    /// Runs a command that talks to a remote, such as a fetch, in a pseudo-terminal beside the write queue, and
-    /// asks git's and ssh's questions for credentials in Git View prompts. The toolbar shows `activity` while it
-    /// runs; a failure shows git's message, and a cancelled question `cancelled`.
-    private func runNetwork(_ script: String, arguments: [String], activity: String, cancelled: String,
+    /// Runs a command that talks to a remote, such as a fetch, on the repository's machine beside the write queue, and
+    /// asks git's and ssh's questions for credentials, which come through askpass, in Git View prompts. The toolbar
+    /// shows `activity` while it runs; a failure shows git's message, and a cancelled question `cancelled`.
+    private func runNetwork(_ network: GitNetwork, activity: String, cancelled: String,
                             refreshing: Bool = true, completion: ((Result<String, Error>) -> Void)? = nil) {
-        networkArguments.append(arguments)
+        networkCommands.append(network)
         guard let store else { return }
         writeError = nil
         networkActivity.append(activity)
         let running = RunningCommand()
-        running.command = store.runGitNetworkScript(script, arguments: arguments, onPrompt: { [weak self] question in
-            guard let self else {
-                // The Git View is gone with its Window, so nobody can answer the question.
-                running.command?.cancel()
-                return
+        store.runGitNetwork(network, ask: { [weak self] question in
+            // The Git View is gone with its Window, so nobody can answer the question.
+            guard let self else { return nil }
+            return await withCheckedContinuation { continuation in
+                let answer = running.wait(continuation)
+                self.ask(Self.credentialPrompt(question, id: running.id, answer: { answer($0) }, cancel: { answer(nil) }))
             }
-            self.ask(Self.credentialPrompt(question, id: running.id, answer: { running.command?.answer($0) },
-                                           cancel: { running.command?.cancel() }))
         }, completion: { [weak self] result in
-            running.command = nil
+            // A question the command no longer waits for is refused.
+            running.finish()
             guard let self else { return }
             if let index = self.networkActivity.firstIndex(of: activity) { self.networkActivity.remove(at: index) }
-            // A question the command no longer waits for goes.
             self.waitingPrompts.removeAll { $0.id == running.id }
             if self.prompt?.id == running.id { self.closePrompt() }
             if let completion {
@@ -2796,10 +2794,27 @@ final class GitView {
         })
     }
 
-    /// Holds a network command for its questions; its prompts have its id.
+    /// The questions of one network command, which have its id. Each is answered once: by the user, by ⎋, or refused
+    /// when the command ends first.
+    @MainActor
     private final class RunningCommand {
         let id = "credential-" + UUID().uuidString
-        var command: TerminalCommand?
+        private var waiting: [Int: CheckedContinuation<String?, Never>] = [:]
+        private var nextID = 0
+
+        /// Holds a question's continuation, and answers what resumes it.
+        func wait(_ continuation: CheckedContinuation<String?, Never>) -> (String?) -> Void {
+            let key = nextID
+            nextID += 1
+            waiting[key] = continuation
+            return { [weak self] answer in self?.waiting.removeValue(forKey: key)?.resume(returning: answer) }
+        }
+
+        func finish() {
+            let all = waiting.values
+            waiting = [:]
+            all.forEach { $0.resume(returning: nil) }
+        }
     }
 
     /// The Git View prompt for a command's question: hidden text for a password, passphrase, PIN or token.
@@ -2808,7 +2823,7 @@ final class GitView {
         let symbol = switch question.kind {
         case .username: "person"
         case .hostKey: "server.rack"
-        case .password, .passphrase, .pin, .token: "key"
+        case .password, .passphrase, .pin, .token, .other: "key"
         }
         let placeholder = switch question.kind {
         case .username: "Username"
@@ -2817,6 +2832,7 @@ final class GitView {
         case .passphrase: "Passphrase"
         case .pin: "PIN"
         case .token: "Token"
+        case .other: "Answer"
         }
         return GitPrompt(id: id, title: question.question,
                          subject: question.context.isEmpty ? nil : .text(question.context.joined(separator: "\n")),

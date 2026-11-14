@@ -153,16 +153,6 @@ final class RemoteSSH {
         findHostCLI(at: executable) + "\n\"$muxify\" --version 2>/dev/null | head -n 1"
     }
 
-    /// `script`, with a remote PTY so that git's and ssh's questions on the remote machine come back through
-    /// Muxify's own pty (`TerminalCommand`), where they are answered.
-    func terminalScript(_ script: String, arguments: [String] = []) -> CommandInvocation {
-        let words = [Self.remotePath + "\n" + script, "muxify"] + arguments
-        return CommandInvocation(executable: sshExecutable, arguments: options + [
-            "-tt", "-o", "ControlMaster=no", "-o", "BatchMode=yes", "-o", "ProxyCommand=/usr/bin/false",
-            "--", environment.host, "exec /bin/sh -c " + words.map(Tmux.shellQuote).joined(separator: " "),
-        ])
-    }
-
     /// The Session that Start a Session… starts on the remote machine: its name, and its folder there.
     struct NewSession: Equatable {
         let name: String

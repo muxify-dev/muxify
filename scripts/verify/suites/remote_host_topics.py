@@ -1,6 +1,6 @@
 """A Remote App Window shows its Host's Topics, and runs with its Host's Config, through the Host Server, `muxify
-server` on a channel of the attachment's SSH connection, and its Git View reads and changes the Host's repository
-through the same server.
+server` on a channel of the attachment's SSH connection, and its Git View reads, changes and fetches the Host's
+repository through the same server, with the Host's ssh asking its questions in the Git View through askpass.
 
 The SSH fixture runs remote commands locally, as remote_session_end's does: the Host's tmux server is the Sandbox
 server, the Host's home is `remote-home`, and the Host's Topics are in `remote-home/.local/state/muxify/muxify.db`,
@@ -344,6 +344,49 @@ exec /bin/sh -c "$command"
         self.assertEqual(self.host_git(repo, 'status', '--porcelain'), '', 'the commit left a change in the Host\'s repository')
         self.s.wait_rows(lambda rs: not self.s.has('git-commit-box', rs) and not self.s.has('git-row-change:host.txt', rs),
                          'the committed change stays in the Git View', seconds=10)
+        self.close_git_view()
+
+    def test_a_fetch_from_the_git_view_asks_the_hosts_ssh_passphrase_hidden_and_the_answer_reaches_git(self):
+        self.use('serving')
+        self.topic_row(self.before_launch, 'the Host Server does not serve the Remote App Window')
+        repo = self.host_repository('fetch-repo')
+        origin = self.s.root/'fetch-origin.git'
+        self.host_git(self.s.root, 'init', '-q', '--bare', '-b', 'main', str(origin))
+        self.host_git(repo, 'push', '-q', str(origin), 'main')
+        # An ssh on the Host that asks for a passphrase through SSH_ASKPASS, as ssh does under SSH_ASKPASS_REQUIRE=force,
+        # and serves the repository only for the answer `right`. Its name is ssh, so git takes it for OpenSSH.
+        (self.s.root/'fetch-ssh-bin').mkdir()
+        answers, ssh = self.s.root/'fetch-answers', self.s.root/'fetch-ssh-bin/ssh'
+        ssh.write_text('#!/bin/sh\n'
+                       'answer=$("$SSH_ASKPASS" "Enter passphrase for key \'/fake/id\': ") || exit 255\n'
+                       f'printf \'%s\\n\' "$answer" >> {shlex.quote(str(answers))}\n'
+                       '[ "$answer" = right ] || { echo "Permission denied (publickey)." >&2; exit 255; }\n'
+                       'for last; do :; done\n'
+                       'exec /bin/sh -c "$last"\n')
+        ssh.chmod(0o755)
+        self.host_git(repo, 'remote', 'add', 'origin', 'ssh://fake.invalid' + str(origin))
+        self.host_git(repo, 'config', 'core.sshCommand', shlex.quote(str(ssh)))
+        self.open_git_view(repo)
+        self.s.wait_rows(lambda rs: self.s.has('git-row-change:host.txt', rs), 'the Git View does not list the Host\'s change',
+                         seconds=20)
+        # f fetches on the Host; the Host Server's askpass helper asks the Remote App Window, hidden.
+        self.s.act('action', 'git-view', 'f')
+        question = "Enter passphrase for key '/fake/id':"
+        rs = self.s.wait_rows(lambda rs: self.s.row('git-prompt', rs).get('accessibilityLabel') == question,
+                              'the Remote App Window did not ask the Host\'s ssh passphrase', seconds=20)
+        self.assertTrue(self.s.has('git-prompt-secret', rs), 'the passphrase is not hidden')
+        self.s.act('set', 'git-prompt-field', 'right')
+        self.s.act('action', 'git-prompt', 'enter')
+        def fetched():
+            try:
+                return self.host_git(repo, 'rev-parse', '--verify', '-q', 'origin/main').strip() != ''
+            except subprocess.CalledProcessError:
+                return False
+        wait(fetched, lambda: 'the answer did not reach git on the Host: no origin/main after the fetch; answers %r, banner %r, toolbar %r'
+             % (answers.read_text() if answers.exists() else None, self.s.row('git-write-error').get('accessibilityValue'),
+                self.s.row('git-toolbar').get('accessibilityLabel')), seconds=20)
+        self.assertEqual(answers.read_text().split(), ['right'])
+        self.assertFalse(self.s.has('git-write-error'), 'the fetch failed')
         self.close_git_view()
 
     def test_a_host_whose_muxify_has_no_server_mode_shows_sessions_only_and_why(self):

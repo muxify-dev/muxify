@@ -1,51 +1,10 @@
 import XCTest
 @testable import MuxifyCore
 
+/// The Git View's half of a network command: git's and ssh's questions, which come through askpass (ADR 0087), are
+/// asked in Git View prompts, and ⎋ cancels the command.
+@MainActor
 final class GitCredentialPromptTests: XCTestCase {
-    func testLazygitsPromptsAndSshsHostQuestionAreMatchedAndSecretsHidden() {
-        let prompts: [(String, GitCredentialPrompt.Kind, Bool)] = [
-            ("Password:", .password, true),
-            ("git@example.com's password:", .password, true),
-            ("Password for 'https://alice@example.com':", .password, true),
-            ("Username for 'https://example.com':", .username, false),
-            ("Enter passphrase for key '/Users/alice/.ssh/id_ed25519':", .passphrase, true),
-            ("Enter PIN for ECDSA-SK key /Users/alice/.ssh/id_ecdsa_sk:", .pin, true),
-            ("Enter PIN for 'YubiKey':", .pin, true),
-            ("Enter your 2FA Token", .token, true),
-            ("Are you sure you want to continue connecting (yes/no/[fingerprint])?", .hostKey, false),
-            ("Are you sure you want to continue connecting (yes/no)?", .hostKey, false),
-        ]
-        for (line, kind, isSecret) in prompts {
-            let prompt = GitCredentialPrompt.match(line + " ")
-            XCTAssertEqual(prompt?.kind, kind, line)
-            XCTAssertEqual(prompt?.isSecret, isSecret, line)
-            XCTAssertEqual(prompt?.question, line, line)
-        }
-    }
-
-    func testOtherOutputAndUnfinishedPromptsAreNotQuestions() {
-        for line in ["Fetching origin", "remote: Counting objects: 100% (3/3), done.", "Password for 'https://example.com'",
-                     "Enter passphrase for key", "From /tmp/origin", "fatal: Authentication failed for 'https://example.com/'",
-                     "password:"] {
-            XCTAssertNil(GitCredentialPrompt.match(line), line)
-        }
-    }
-
-    func testAMessageLosesItsProgressEscapesAndAnsweredPrompts() {
-        let output = "Fetching origin\r\n"
-            + "Username for 'https://example.com': \r\n"
-            + "Password for 'https://alice@example.com': remote: Invalid username or password.\r\n"
-            + "remote: Enumerating objects: 5, done.\u{1B}[K\r\n"
-            + "Receiving objects:  50% (1/2)\rReceiving objects: 100% (2/2), done.\r\n"
-            + "Resolving deltas: 100% (1/1), done.\r\n"
-            + "\r\n"
-            + "fatal: Authentication failed for 'https://example.com/'\r\n"
-        XCTAssertEqual(GitTerminalOutput.message(output),
-                       "Fetching origin\nremote: Invalid username or password.\nremote: Enumerating objects: 5, done.\n"
-                       + "fatal: Authentication failed for 'https://example.com/'")
-    }
-
-    @MainActor
     func testTheGitViewAsksASecretHiddenAndTheHostQuestionWithWhatSshSaid() {
         var answered: String?
         var cancelled = false
@@ -58,104 +17,88 @@ final class GitCredentialPromptTests: XCTestCase {
         password.onCancel?()
         XCTAssertEqual(answered, "hunter2")
         XCTAssertTrue(cancelled)
-        let host = GitView.credentialPrompt(GitCredentialPrompt(kind: .hostKey, question: "Are you sure you want to continue connecting (yes/no/[fingerprint])?",
-                                                                context: ["The authenticity of host 'example.com' can't be established.",
-                                                                          "ED25519 key fingerprint is SHA256:abc."]),
-                                            answer: { _ in }, cancel: {})
+        let host = GitView.credentialPrompt(GitCredentialPrompt(askpass: """
+        The authenticity of host 'example.com' can't be established.
+        ED25519 key fingerprint is SHA256:abc.
+        Are you sure you want to continue connecting (yes/no/[fingerprint])?\u{20}
+        """), answer: { _ in }, cancel: {})
         XCTAssertFalse(host.isSecret)
+        XCTAssertEqual(host.title, "Are you sure you want to continue connecting (yes/no/[fingerprint])?")
         XCTAssertEqual(host.subject, .text("The authenticity of host 'example.com' can't be established.\nED25519 key fingerprint is SHA256:abc."))
-        let username = GitView.credentialPrompt(GitCredentialPrompt(kind: .username, question: "Username for 'https://example.com':"),
+        let username = GitView.credentialPrompt(GitCredentialPrompt(askpass: "Username for 'https://example.com': "),
                                                 answer: { _ in }, cancel: {})
         XCTAssertFalse(username.isSecret)
     }
 
-    func testARemoteEnvironmentsNetworkCommandGetsARemotePTY() throws {
-        let directory = try TestDirectory()
-        let ssh = try RemoteSSH(environment: RemoteEnvironment(name: "Home", host: "home.example.ts.net", username: "user"),
-                                temporaryDirectory: directory.url)
-        let args = ssh.terminalScript("exec git fetch --all", arguments: ["/repo"]).arguments
-        XCTAssertTrue(args.contains("-tt"))
-        XCTAssertFalse(args.contains("-T"))
-        XCTAssertTrue(args.contains("BatchMode=yes"), "the remote PTY still goes only over the master")
-        XCTAssertTrue(args.last!.contains("exec git fetch --all"))
+    private func gitView(_ link: FakeEnvironmentLink) -> (WorkspaceStore, GitView) {
+        let store = WorkspaceStore(configStore: ConfigStore(path: "/nonexistent/muxify/config.yaml"), defaults: isolatedDefaults()) { _ in link }
+        store.startLinkForTesting()
+        let gitView = store.gitView(for: "@1")
+        gitView.apply(GitSnapshot(root: "/repo", repositoryName: "repo", head: "master"))
+        return (store, gitView)
+    }
+
+    private func wait(_ message: String, until condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while !condition() {
+            guard Date() < deadline else { return XCTFail(message) }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
+    func testAQuestionOfAFetchIsAskedHiddenAndItsAnswerReachesTheCommand() async throws {
+        let link = FakeEnvironmentLink(features: .all)
+        var answers: [String?] = []
+        link.gitNetworkAnswer = { network, ask in
+            XCTAssertEqual(network, .fetch(root: "/repo"))
+            let answer = await ask(AskRequest(prompt: "Enter passphrase for key '/k/id': ", secret: true, operation: "o"))
+            answers.append(answer)
+            guard answer != nil else { throw TmuxError.cancelled }
+            return ""
+        }
+        let (store, gitView) = gitView(link)
+        defer { withExtendedLifetime(store) {} }
+
+        gitView.fetch()
+        try await wait("the passphrase was not asked") { gitView.prompt != nil }
+        XCTAssertEqual(gitView.prompt?.title, "Enter passphrase for key '/k/id':")
+        XCTAssertTrue(gitView.prompt?.isSecret == true)
+        XCTAssertEqual(gitView.networkActivity, [GitView.fetching])
+        gitView.promptText = "right"
+        gitView.submitPrompt()
+        try await wait("the fetch did not end") { gitView.networkActivity.isEmpty }
+        XCTAssertNil(gitView.writeError)
+
+        // ⎋ cancels the command, and the banner says so.
+        gitView.fetch()
+        try await wait("the passphrase was not asked again") { gitView.prompt != nil }
+        gitView.closePrompt()
+        try await wait("the fetch did not end") { gitView.networkActivity.isEmpty }
+        XCTAssertEqual(gitView.writeError, "Fetch cancelled.")
+        XCTAssertEqual(answers, ["right", nil])
+    }
+
+    func testAQuestionStillOpenWhenItsCommandEndsIsClosedAndRefused() async throws {
+        let link = FakeEnvironmentLink(features: .all)
+        let refused = Box()
+        link.gitNetworkAnswer = { _, ask in
+            Task { @MainActor in refused.answer = await ask(AskRequest(prompt: "Password: ", secret: true, operation: "o")) ?? "refused" }
+            try await Task.sleep(nanoseconds: 200_000_000)
+            throw TmuxError.failed(status: 128, stderr: "fatal: Authentication failed")
+        }
+        let (store, gitView) = gitView(link)
+        defer { withExtendedLifetime(store) {} }
+
+        gitView.fetch()
+        try await wait("the password was not asked") { gitView.prompt != nil }
+        try await wait("the fetch did not end") { gitView.networkActivity.isEmpty }
+        XCTAssertNil(gitView.prompt, "a question that nothing waits for stays open")
+        XCTAssertEqual(gitView.writeError, "fatal: Authentication failed")
+        try await wait("the question was never answered") { refused.answer == "refused" }
     }
 }
 
-final class TerminalCommandTests: XCTestCase {
-    private func run(_ script: String, timeout: TimeInterval = 10, answerTimeout: TimeInterval = 600,
-                     onPrompt: @escaping (GitCredentialPrompt, TerminalCommand?) -> Void = { _, _ in })
-        throws -> (result: Result<String, Error>?, prompts: [GitCredentialPrompt]) {
-        var prompts: [GitCredentialPrompt] = []
-        var result: Result<String, Error>?
-        let done = expectation(description: "the command ends")
-        var command: TerminalCommand?
-        command = try TerminalCommand(CommandInvocation(executable: "/bin/sh", arguments: ["-c", script]), timeout: timeout,
-                                      answerTimeout: answerTimeout, onPrompt: { prompt in prompts.append(prompt); onPrompt(prompt, command) },
-                                      completion: { result = $0; done.fulfill() })
-        wait(for: [done], timeout: 20)
-        return (result, prompts)
-    }
-
-    func testAPromptOnTheTerminalIsAnsweredWithALineInTheCLocale() throws {
-        let script = """
-        [ -t 0 ] && [ -t 2 ] || { echo 'not a terminal' >&2; exit 3; }
-        printf "Password for 'https://example.com': " > /dev/tty
-        read -r answer < /dev/tty
-        printf 'answer=%s locale=%s/%s/%s\\n' "$answer" "$LANG" "$LC_ALL" "$LC_MESSAGES"
-        """
-        let (result, prompts) = try run(script) { _, command in command?.answer("hunter2") }
-        XCTAssertEqual(prompts.map(\.kind), [.password])
-        XCTAssertEqual(prompts.first?.question, "Password for 'https://example.com':")
-        let output = try XCTUnwrap(result).get()
-        XCTAssertTrue(output.contains("answer=hunter2 locale=C/C/C"), output)
-        XCTAssertFalse(output.contains("hunter2\r\nanswer"), "the terminal echoed the answer")
-    }
-
-    func testTheTimeoutWaitsWhileAPromptWaits() throws {
-        let script = "printf 'Username for '\\''https://example.com'\\'': '; read -r answer; echo \"got $answer\""
-        let (result, _) = try run(script, timeout: 0.5) { _, command in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { command?.answer("alice") }
-        }
-        XCTAssertTrue(try XCTUnwrap(result).get().contains("got alice"))
-    }
-
-    func testACommandThatRunsTooLongTimesOut() throws {
-        let (result, _) = try run("sleep 10", timeout: 0.3)
-        guard case .failure(TmuxError.timedOut)? = result else { return XCTFail("\(String(describing: result))") }
-    }
-
-    func testAQuestionNobodyAnswersTimesTheCommandOutAndStopsWhatItStarted() throws {
-        let directory = try TestDirectory()
-        let pids = directory.url.appendingPathComponent("pids")
-        // The background sleep stands in for the ssh that git starts to ask the question.
-        let script = "sleep 60 & echo \"$$ $!\" > '\(pids.path)'; printf 'Password: '; read -r answer; echo 'should not run'"
-        let (result, prompts) = try run(script, timeout: 30, answerTimeout: 0.5)
-        XCTAssertEqual(prompts.map(\.kind), [.password])
-        guard case .failure(TmuxError.timedOut)? = result else { return XCTFail("\(String(describing: result))") }
-        let started = try String(contentsOf: pids, encoding: .utf8).split(separator: " ").compactMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-        XCTAssertEqual(started.count, 2)
-        let gone = expectation(description: "the command and what it started are gone")
-        DispatchQueue.global().async {
-            while started.contains(where: { kill($0, 0) == 0 }) { usleep(50_000) }
-            gone.fulfill()
-        }
-        wait(for: [gone], timeout: 5)
-    }
-
-    func testCancellingAQuestionStopsTheCommand() throws {
-        let (result, _) = try run("printf 'Password: '; read -r answer; echo 'should not run'") { _, command in command?.cancel() }
-        guard case .failure(TmuxError.cancelled)? = result else { return XCTFail("\(String(describing: result))") }
-    }
-
-    func testAFailureIsGitsMessageWithoutProgress() throws {
-        let script = """
-        printf 'Receiving objects:  50%% (1/2)\\rReceiving objects: 100%% (2/2), done.\\n' >&2
-        echo 'fatal: repository not found' >&2
-        exit 128
-        """
-        let (result, _) = try run(script)
-        guard case .failure(TmuxError.failed(let status, let message))? = result else { return XCTFail("\(String(describing: result))") }
-        XCTAssertEqual(status, 128)
-        XCTAssertEqual(message, "fatal: repository not found")
-    }
+@MainActor
+private final class Box {
+    var answer: String?
 }

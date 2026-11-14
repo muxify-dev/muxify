@@ -80,11 +80,12 @@ final class FakeEnvironmentLink: EnvironmentLink {
     func environmentService(sessionPaths: [SessionPath], topics: Config.Topics, notifications: Config.Notifications,
                             worktreesRoot: String?) -> EnvironmentService? { nil }
 
-    func startGitNetworkScript(_ script: String, arguments: [String], timeout: TimeInterval,
-                               onPrompt: @escaping (GitCredentialPrompt) -> Void,
-                               completion: @escaping (Result<String, Error>) -> Void) -> TerminalCommand? {
-        completion(.failure(TmuxError.notReady))
-        return nil
+    /// What `runGitNetwork` answers; nil throws `notReady`.
+    var gitNetworkAnswer: ((GitNetwork, @escaping GitAsk) async throws -> String)?
+
+    func runGitNetwork(_ network: GitNetwork, ask: @escaping GitAsk) async throws -> String {
+        guard let gitNetworkAnswer else { throw TmuxError.notReady }
+        return try await gitNetworkAnswer(network, ask)
     }
 
     /// What `git` answers; nil throws `unsupported`, as a link without `.git` does.

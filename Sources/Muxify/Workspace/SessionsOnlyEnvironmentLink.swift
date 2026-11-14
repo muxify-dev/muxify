@@ -105,6 +105,10 @@ final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
         throw EnvironmentLinkError.unsupported("The Git View")
     }
 
+    func runGitNetwork(_ network: GitNetwork, ask: @escaping GitAsk) async throws -> String {
+        throw EnvironmentLinkError.unsupported("The Git View")
+    }
+
     func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription {
         EnvironmentSubscription {}
     }

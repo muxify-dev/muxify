@@ -251,10 +251,10 @@ protocol EnvironmentLink: AnyObject {
     /// The `repository` subscription of a folder: its first event is the whole state, then one comes whenever HEAD,
     /// the index or the working tree changed. Events come on the main thread. A link without `.git` sends none.
     func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription
-    /// Runs a Git View network command in a pseudo-terminal, so its credential prompts go to `onPrompt`.
-    func startGitNetworkScript(_ script: String, arguments: [String], timeout: TimeInterval,
-                               onPrompt: @escaping (GitCredentialPrompt) -> Void,
-                               completion: @escaping (Result<String, Error>) -> Void) -> TerminalCommand?
+    /// Runs one of the Git View's commands that talk to a remote on the repository's machine (ADR 0087), with git's
+    /// and ssh's questions going to `ask` through askpass, and answers what git printed. A cancelled question ends it
+    /// `TmuxError.cancelled`. It is never sent again. A link without `.git` throws `unsupported`.
+    func runGitNetwork(_ network: GitNetwork, ask: @escaping GitAsk) async throws -> String
 
     // MARK: Retiring
 
@@ -344,6 +344,16 @@ enum EnvironmentLinks {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async { continuation.resume(with: Result { try GitReader().run(read) }) }
         }
+    }
+
+    /// Runs a Git View network command on this Mac, with the app's bundled `muxify` as its askpass helper and a one-off
+    /// socket of its own.
+    static func runGitNetwork(_ network: GitNetwork, ask: @escaping GitAsk) async throws -> String {
+        guard let helper = Bundle.main.resourceURL?.appendingPathComponent("bin/muxify").path,
+              FileManager.default.isExecutableFile(atPath: helper) else {
+            throw GitViewError(message: "The command line tool is missing from the app bundle (Contents/Resources/bin/muxify), so git cannot ask for credentials.")
+        }
+        return try await GitNetworkRunner(helper: helper).run(network, ask: ask)
     }
 
     static func writeGit(_ write: GitWrite) async throws -> String {
@@ -455,16 +465,6 @@ class TmuxConnectionLink {
 
     func writeTopics<T>(locks: [SessionLock], _ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
         throw EnvironmentLinkError.unsupported("Topics")
-    }
-
-    func startGitNetworkScript(_ script: String, arguments: [String], timeout: TimeInterval,
-                               onPrompt: @escaping (GitCredentialPrompt) -> Void,
-                               completion: @escaping (Result<String, Error>) -> Void) -> TerminalCommand? {
-        guard let connection else {
-            DispatchQueue.main.async { completion(.failure(TmuxError.notReady)) }
-            return nil
-        }
-        return connection.startTerminalScript(script, arguments: arguments, timeout: timeout, onPrompt: onPrompt, completion: completion)
     }
 
     nonisolated func retire(flushing commands: [ViewCommand]) {

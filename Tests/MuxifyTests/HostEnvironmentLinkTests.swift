@@ -215,6 +215,7 @@ final class HostEnvironmentLinkTests: XCTestCase {
             case .select(let select):
                 selected.append(select)
                 return .done
+            case .ask: return nil
             }
         }
         let reply = try await send(BrowserAgentRequest(window: "@1", command: .tabs))
@@ -386,5 +387,103 @@ private final class Gate: @unchecked Sendable {
         lock.lock()
         secondCalls += 1
         lock.unlock()
+    }
+}
+
+extension HostEnvironmentLinkTests {
+    // MARK: - git's questions come back as `ask` (ADR 0087, Credentials)
+
+    /// A bare `origin.git` and a clone `repo` that reaches it over a fake ssh, which asks for a passphrase through
+    /// `SSH_ASKPASS` and serves the repository only for the answer `right`.
+    private func sshRemote() throws -> String {
+        let folder = directory.appendingPathComponent("net")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let ssh = folder.appendingPathComponent("ssh")
+        try """
+        #!/bin/sh
+        [ "$SSH_ASKPASS_REQUIRE" = force ] || { echo "ssh would ask on a terminal" >&2; exit 255; }
+        answer=$("$SSH_ASKPASS" "Enter passphrase for key '/fake/id': ") || exit 255
+        [ "$answer" = right ] || { echo "Permission denied (publickey)." >&2; exit 255; }
+        for last; do :; done
+        exec /bin/sh -c "$last"
+        """.write(to: ssh, atomically: true, encoding: .utf8)
+        chmod(ssh.path, 0o755)
+        _ = try CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", """
+        cd "$1" && export GIT_CONFIG_NOSYSTEM=1 HOME="$1" GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+        git init -q --bare -b master origin.git
+        git init -q -b master repo && cd repo && git commit -q --allow-empty -m first && git push -q ../origin.git master
+        git remote add origin "ssh://fake.invalid$1/origin.git" && git config core.sshCommand "$1/ssh"
+        """, "muxify", folder.path]), timeout: 30)
+        return folder.appendingPathComponent("repo").path
+    }
+
+    func testANetworkCommandsQuestionOnTheHostReachesItsAskAndItsAnswerReachesGit() async throws {
+        let cli = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("muxify-app-cli").path
+        guard FileManager.default.isExecutableFile(atPath: cli) else { throw XCTSkip("no muxify-app-cli beside the tests") }
+        let paths = paths!, tmux = tmux!
+        let repo = try sshRemote()
+        let environment = ["HOME": directory.appendingPathComponent("net").path, "GIT_CONFIG_NOSYSTEM": "1",
+                           "PATH": ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"]
+        let link = link { number in
+            HostServerContext(paths: paths, tmux: tmux, config: { Config() }, socketID: "9\(number)",
+                              gitNetwork: GitNetworkRunner(helper: cli, scratch: paths.state, environment: environment))
+        }
+        try link.connect()
+        link.startServer()
+        try await wait("the server did not answer") { link.features.contains(.git) }
+
+        let asked = AskLog()
+        _ = try await link.runGitNetwork(.fetch(root: repo)) { request in
+            asked.add(request)
+            return "right"
+        }
+        XCTAssertEqual(asked.all.map(\.prompt), ["Enter passphrase for key '/fake/id': "])
+        XCTAssertEqual(asked.all.map(\.secret), [true])
+
+        do {
+            _ = try await link.runGitNetwork(.fetch(root: repo)) { _ in nil }
+            XCTFail("a cancelled question fetched")
+        } catch {
+            XCTAssertEqual(GitView.message(for: error, cancelled: "Fetch cancelled."), "Fetch cancelled.")
+        }
+    }
+
+    func testAnAskThatNoNetworkCommandWaitsForEndsUnavailable() async throws {
+        let paths = paths!, tmux = tmux!
+        let code = AskLog()
+        let link = link(serve: { request, server in
+            guard code.codes.isEmpty, !code.sent else { return }
+            code.sent = true
+            Task {
+                do {
+                    _ = try await server.call(MacRequest.ask(AskRequest(prompt: "Password: ", secret: true, operation: "nobody")), as: AskAnswer.self)
+                    code.addCode(nil)
+                } catch let error as ProtocolError {
+                    code.addCode(error.code)
+                }
+            }
+            _ = request
+        }, context: { _ in HostServerContext(paths: paths, tmux: tmux, config: { Config() }) })
+        try link.connect()
+        link.startServer()
+        try await wait("the Mac did not answer the ask") { !code.codes.isEmpty }
+        XCTAssertEqual(code.codes, [.unavailable])
+    }
+}
+
+/// What a test's askpass questions and answers were, across threads.
+private final class AskLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var requests: [AskRequest] = []
+    private var errorCodes: [ProtocolErrorCode?] = []
+    private var didSend = false
+
+    func add(_ request: AskRequest) { lock.lock(); requests.append(request); lock.unlock() }
+    var all: [AskRequest] { lock.lock(); defer { lock.unlock() }; return requests }
+    func addCode(_ code: ProtocolErrorCode?) { lock.lock(); errorCodes.append(code); lock.unlock() }
+    var codes: [ProtocolErrorCode?] { lock.lock(); defer { lock.unlock() }; return errorCodes }
+    var sent: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return didSend }
+        set { lock.lock(); didSend = newValue; lock.unlock() }
     }
 }

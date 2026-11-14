@@ -1490,6 +1490,9 @@ final class WorkspaceStore {
             self.select(select)
             onBringToFront?()
             return .done
+        case .ask:
+            // The link asks it in the Git View whose network command it belongs to.
+            return nil
         }
     }
 
@@ -2759,31 +2762,26 @@ final class WorkspaceStore {
         send({ try await $0.script(script, arguments: arguments, timeout: timeout) }, completion: completion)
     }
 
-    /// Runs a Git View network command, such as `git fetch`, on the Environment's machine in a pseudo-terminal,
-    /// so its credential prompts go to `onPrompt`. Returns the command, to answer or cancel.
-    @discardableResult
-    func runGitNetworkScript(_ script: String, arguments: [String], timeout: TimeInterval = 120,
-                             onPrompt: @escaping (GitCredentialPrompt) -> Void,
-                             completion: @escaping (Result<String, Error>) -> Void) -> TerminalCommand? {
+    /// Runs one of the Git View's network commands, such as a fetch, on the repository's machine (ADR 0087). git's and
+    /// ssh's questions come through askpass to `ask`, on the main thread; nil cancels the command. A question for an
+    /// App Window that moved to another Environment is refused.
+    func runGitNetwork(_ network: GitNetwork, ask: @escaping @MainActor (GitCredentialPrompt) async -> String?,
+                       completion: @escaping (Result<String, Error>) -> Void) {
         guard isLinked, !isTransitioning, link.isOnThisMac || isConnected else {
             completion(.failure(GitViewError(message: "Not connected to \(environmentName).")))
-            return nil
+            return
         }
         let current = generation
-        weak var command: TerminalCommand?
-        let started = link.startGitNetworkScript(script, arguments: arguments, timeout: timeout, onPrompt: { [weak self] prompt in
-            guard let self, self.generation == current else {
-                // Nobody is left to answer the question, so the command would wait on it forever.
-                command?.cancel()
-                return
-            }
-            onPrompt(prompt)
-        }, completion: { [weak self] result in
-            guard let self, self.generation == current else { return }
-            completion(result)
-        })
-        command = started
-        return started
+        let asking: GitAsk = { [weak self] request in
+            await self?.askGit(request, generation: current, ask: ask) ?? nil
+        }
+        send({ try await $0.runGitNetwork(network, ask: asking) }, completion: completion)
+    }
+
+    private func askGit(_ request: AskRequest, generation current: UUID,
+                        ask: @MainActor (GitCredentialPrompt) async -> String?) async -> String? {
+        guard generation == current else { return nil }
+        return await ask(GitCredentialPrompt(askpass: request.prompt, secret: request.secret))
     }
 
     // MARK: - Browser

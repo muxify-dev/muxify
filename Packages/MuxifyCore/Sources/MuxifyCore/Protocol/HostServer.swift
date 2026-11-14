@@ -18,13 +18,15 @@ public struct HostServerContext: @unchecked Sendable {
     public var git: GitReader
     /// Runs the Git View's writes that need no network on the Host.
     public var gitWriter: GitWriter
+    /// Runs the Git View's commands that talk to a remote on the Host, with this `muxify` as their askpass helper.
+    public var gitNetwork: GitNetworkRunner
 
     public init(paths: MuxifyPaths = MuxifyPaths(), tmux: TmuxServer = .local,
                 config: (@Sendable () async throws -> Config)? = nil,
                 startControlClient: @escaping TmuxControlClientStart = PipeControlClient.start,
                 home: String = NSHomeDirectory(),
                 socketID: String = String(getpid()),
-                git: GitReader = GitReader(), gitWriter: GitWriter = GitWriter()) {
+                git: GitReader = GitReader(), gitWriter: GitWriter = GitWriter(), gitNetwork: GitNetworkRunner? = nil) {
         self.paths = paths
         self.tmux = tmux
         self.home = home
@@ -33,6 +35,8 @@ public struct HostServerContext: @unchecked Sendable {
         self.socketID = socketID
         self.git = git
         self.gitWriter = gitWriter
+        // The helper's script goes in the state folder: a Host may mount /tmp noexec.
+        self.gitNetwork = gitNetwork ?? GitNetworkRunner(helper: Bundle.main.executablePath ?? CommandLine.arguments[0], scratch: paths.state)
     }
 
     /// The Config file alone, without finding SessionPaths.
@@ -46,20 +50,22 @@ public struct HostServerContext: @unchecked Sendable {
 
 /// `muxify server`: the Host Server's requests (ADR 0085). It serves `ping` and `shutdown`, the `environment`,
 /// `config` and `repository` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and
-/// Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open` and the Git View's reads and writes.
-/// Programs on the Host reach its Mac through its own socket, whose requests it sends the Mac as `MacRequest`s
-/// (ADR 0089).
+/// Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open` and the Git View's reads, writes and network
+/// commands. Programs on the Host reach its Mac through its own socket, whose requests it sends the Mac as `MacRequest`s
+/// (ADR 0089); an askpass helper's `ask` goes to the network command that runs it, which asks the Mac.
 public enum HostServer {
     /// A server on these handles that serves `HostRequest` against `context`.
     public static func make(input: FileHandle, output: FileHandle, build: String, silence: TimeInterval = HostProtocol.serverSilence,
                             context: HostServerContext = HostServerContext(),
                             log: @escaping (String) -> Void = { _ in }) -> ProtocolServer {
         let box = ServerBox()
+        let asks = GitAskpassRoutes()
         let socket = HostServerSocket(tmux: context.tmux, server: context.socketID, log: log) { request in
+            if case .ask(let ask) = request { return await asks.reply(to: ask) }
             guard let server = box.server else { return .failure("cannot reach Muxify: the Host Server has exited") }
             return await forward(request, to: server)
         }
-        let host = HostEnvironment(context: context, socket: socket, log: log)
+        let host = HostEnvironment(context: context, socket: socket, asks: asks, log: log)
         let config = HostConfigFeed(path: context.paths.configFile.path, home: context.home)
         let server = ProtocolServer(input: input, output: output, build: build, silence: silence, log: log) { request, server in
             serve(request, server: server, host: host, config: config)
@@ -111,6 +117,9 @@ public enum HostServer {
             case .select:
                 _ = try await server.call(request, as: ProtocolEmpty.self)
                 return .done
+            case .ask:
+                // An askpass question goes to the network command that runs its helper, which asks the Mac itself.
+                return .failure("Muxify: no Git View command waits for this question")
             }
         } catch let error as ProtocolError {
             switch error.code {
@@ -161,6 +170,8 @@ public enum HostServer {
                 host.git(read, for: request)
             case .gitWrite(let write):
                 host.gitWrite(write, for: request)
+            case .gitNetwork(let network):
+                host.gitNetwork(network, for: request, server: server)
             }
         } catch let error as ProtocolError {
             request.fail(error)
@@ -243,6 +254,8 @@ final class HostEnvironment: @unchecked Sendable {
     private let context: HostServerContext
     /// The server's own socket, which `@muxify_browser_socket` names while its App Window consumes `@muxify_open`.
     let socket: HostServerSocket
+    /// The network commands that wait for askpass answers, which come in on `socket`.
+    private let asks: GitAskpassRoutes
     private let log: (String) -> Void
     /// Where the publisher delivers, and where the subscribers and the state live.
     private let delivery = DispatchQueue(label: "dev.muxify.host-server.environment")
@@ -258,9 +271,10 @@ final class HostEnvironment: @unchecked Sendable {
     /// The `repository` subscriptions by request; `lock` guards it.
     private var watches: [Int: RepositoryWatch] = [:]
 
-    init(context: HostServerContext, socket: HostServerSocket, log: @escaping (String) -> Void) {
+    init(context: HostServerContext, socket: HostServerSocket, asks: GitAskpassRoutes, log: @escaping (String) -> Void) {
         self.context = context
         self.socket = socket
+        self.asks = asks
         self.log = log
     }
 
@@ -331,6 +345,28 @@ final class HostEnvironment: @unchecked Sendable {
             do {
                 let output = try await Self.background { try writer.run(write) }
                 request.finish(GitWritten(output: output))
+            } catch {
+                request.fail(ProtocolError(.failed, GitReader.message(for: error)))
+            }
+        }
+    }
+
+    /// One of the Git View's commands that talk to a remote. Its helper asks through this server's own socket, never
+    /// the one that `@muxify_browser_socket` names, which may be another server's; each question goes to the Mac as an
+    /// `ask` of the request's operation. The `repository` watch sees what it changed and pushes it.
+    func gitNetwork(_ network: GitNetworkRequest, for request: ProtocolIncomingRequest, server: ProtocolServer) {
+        guard socket.listen() else {
+            return request.fail(ProtocolError(.unavailable, "the Host Server cannot listen on its socket for git's questions"))
+        }
+        let runner = context.gitNetwork, path = socket.path, asks = asks
+        Task {
+            do {
+                let output = try await runner.run(network.network, operation: network.operation, socket: path, routes: asks) { ask in
+                    try? await server.call(MacRequest.ask(ask), as: AskAnswer.self).answer
+                }
+                request.finish(GitWritten(output: output))
+            } catch TmuxError.cancelled {
+                request.fail(ProtocolError(.cancelled, "\(network.network.action) cancelled"))
             } catch {
                 request.fail(ProtocolError(.failed, GitReader.message(for: error)))
             }

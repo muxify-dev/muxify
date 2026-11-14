@@ -10,9 +10,10 @@ import MuxifyCore
 /// Sessions and every change come only from the server's `environment` events, and Topic requests, Unread on visit
 /// and view commands go over the channel; the Mac keeps no copy of the Host's records. The Config comes from the
 /// server's `config` subscription, which pushes each edit on the Host. The Muxify Worktrees are the Host's too
-/// (ADR 0088): their requests go over the channel, and without a server they are refused. The Git View's reads and
-/// the `repository` subscription go to the server too. The Git View's changes, Session paths and uploads still go to
-/// the Sessions-only link until later tasks move them onto the server.
+/// (ADR 0088): their requests go over the channel, and without a server they are refused. The Git View's reads,
+/// changes and network commands and the `repository` subscription go to the server too; a network command's askpass
+/// questions come back as `ask` requests of its operation. Session paths and uploads still go to the Sessions-only
+/// link until later tasks move them onto the server.
 ///
 /// Programs on the Host reach this App Window through the server's own socket (ADR 0089): the server sends each
 /// `browser` and `select` request over the channel, and the link hands it to its store's handler. While this App
@@ -61,6 +62,8 @@ final class HostEnvironmentLink: EnvironmentLink {
     private var sawOwnClient = false
     /// The store's handler for the server's requests.
     private var hostRequests: HostRequestHandler?
+    /// The network commands that run on the server, by operation, whose askpass questions come back as `ask`.
+    private var asks: [String: GitAsk] = [:]
     /// Whether this App Window consumes `@muxify_open`, as the store last said.
     private var consumesOpen = false
     /// What the current server was last told: `claim_open` or `release_open`. Nil for a server told nothing yet.
@@ -431,15 +434,28 @@ final class HostEnvironmentLink: EnvironmentLink {
         do { mac = try request.body(MacRequest.self) } catch {
             return request.fail(error as? ProtocolError ?? ProtocolError(.invalid, "\(error)"))
         }
+        if case .ask(let ask) = mac { return await answer(ask, for: request) }
         guard let handler = hostRequests, let reply = await handler(mac) else {
             return request.fail(ProtocolError(.unavailable, "no App Window of \(environmentName) serves this request"))
         }
         switch mac {
-        case .select: request.finish()
+        case .select, .ask: request.finish()
         case .browser:
             // A picture goes as chunks, each waiting for room in the writer's queue, so off the main thread.
             await Task.detached(priority: .userInitiated) { request.finish(browser: reply) }.value
         }
+    }
+
+    /// An askpass question of a network command: asked in the Git View that started it. One that no command of this
+    /// link waits for ends `unavailable`, and a cancelled one `cancelled`, so the helper exits at once.
+    private func answer(_ ask: AskRequest, for request: ProtocolIncomingRequest) async {
+        guard let handler = asks[ask.operation] else {
+            return request.fail(ProtocolError(.unavailable, "no Git View of \(environmentName) waits for this question"))
+        }
+        guard let answer = await handler(ask) else {
+            return request.fail(ProtocolError(.cancelled, "the question was cancelled"))
+        }
+        request.finish(AskAnswer(answer: answer))
     }
 
     // MARK: Sessions
@@ -594,12 +610,6 @@ final class HostEnvironmentLink: EnvironmentLink {
 
     // MARK: Git
 
-    func startGitNetworkScript(_ script: String, arguments: [String], timeout: TimeInterval,
-                               onPrompt: @escaping (GitCredentialPrompt) -> Void,
-                               completion: @escaping (Result<String, Error>) -> Void) -> TerminalCommand? {
-        inner.startGitNetworkScript(script, arguments: arguments, timeout: timeout, onPrompt: onPrompt, completion: completion)
-    }
-
     /// The Git View's reads run in the Host Server; a diff arrives as chunks. Before the server serves, and once it
     /// stops, the Sessions-only link answers them `unsupported`.
     func git(_ read: GitRead) async throws -> GitAnswer {
@@ -632,6 +642,28 @@ final class HostEnvironmentLink: EnvironmentLink {
                 throw GitViewError(message: "\(environmentName) disconnected before \(write.action) finished. It may or may not have happened.")
             }
             throw GitViewError(message: error.message)
+        }
+    }
+
+    /// The Git View's network commands run in the Host Server, with its own socket for their askpass helper. Each
+    /// question comes back as an `ask` of the command's operation, which goes to `ask`. One whose channel ends before
+    /// its answer is never sent again: it may or may not have happened, and says so.
+    func runGitNetwork(_ network: GitNetwork, ask: @escaping GitAsk) async throws -> String {
+        guard serving, let client else { return try await inner.runGitNetwork(network, ask: ask) }
+        let operation = UUID().uuidString
+        asks[operation] = ask
+        defer { asks[operation] = nil }
+        lastSent = Date()
+        do {
+            return try await client.call(HostRequest.gitNetwork(GitNetworkRequest(network: network, operation: operation)),
+                                         as: GitWritten.self).output
+        } catch let error as ProtocolError {
+            switch error.code {
+            case .cancelled: throw TmuxError.cancelled
+            case .unavailable:
+                throw GitViewError(message: "\(environmentName) disconnected before \(network.action) finished. It may or may not have happened.")
+            case .unsupported, .invalid, .failed: throw GitViewError(message: error.message)
+            }
         }
     }
 
