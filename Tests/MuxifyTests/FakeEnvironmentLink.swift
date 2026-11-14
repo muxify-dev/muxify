@@ -65,6 +65,9 @@ final class FakeEnvironmentLink: EnvironmentLink {
     func stopListening() { listening = false }
     var attachmentEnd: AttachmentEnd? { nil }
     func installHostCLI(environmentName: String) {}
+    /// How many times the store asked for the Config again.
+    private(set) var configReloads = 0
+    func reloadConfig() { configReloads += 1 }
 
     func reloadTopics() {}
     func topicsReloaded() async {}

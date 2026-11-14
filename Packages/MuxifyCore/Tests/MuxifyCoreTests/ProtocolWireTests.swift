@@ -71,6 +71,23 @@ final class ProtocolWireTests: XCTestCase {
                        #"{"id":2,"item":{"changes":[{"session":"$1","value":null},{"topic":"t1","value":null}]},"kind":"item"}"# + "\n")
     }
 
+    func testTheConfigSubscriptionIsPinned() throws {
+        func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
+        XCTAssertEqual(text(try ProtocolLine.request(id: 2, HostRequest.subscribe(.config))),
+                       #"{"id":2,"kind":"request","request":{"subscribe":{"config":{}}}}"# + "\n")
+        let present = HostConfig(path: "/home/u/.config/muxify/config.yaml", home: "/home/u", text: "override: ~/m.yaml\n",
+                                 overrides: [.init(path: "~/m.yaml", text: nil)])
+        XCTAssertEqual(text(try ProtocolLine.item(id: 2, present)),
+                       #"{"id":2,"item":{"home":"/home/u","overrides":[{"path":"~/m.yaml"}],"path":"/home/u/.config/muxify/config.yaml","text":"override: ~/m.yaml\n"},"kind":"item"}"# + "\n")
+        let missing = HostConfig(path: "/home/u/.config/muxify/config.yaml", home: "/home/u", text: nil)
+        XCTAssertEqual(text(try ProtocolLine.item(id: 2, missing)),
+                       #"{"id":2,"item":{"home":"/home/u","overrides":[],"path":"/home/u/.config/muxify/config.yaml"},"kind":"item"}"# + "\n",
+                       "a Host with no Config sends no text")
+        let decoded = try JSONDecoder().decode(HostConfig.self, from: Data(#"{"path":"/c.yaml"}"#.utf8))
+        XCTAssertEqual(decoded, HostConfig(path: "/c.yaml", home: "", text: nil), "every key but the path is optional")
+        XCTAssertTrue(decoded.isMissing)
+    }
+
     func testTopicChoicesAndATopicFailureArePinned() throws {
         func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
         let choices = HostRequest.topicChoices(TopicChoicesRequest(.settle, target: .session(SessionID(rawValue: "$1")!)))

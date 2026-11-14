@@ -162,6 +162,78 @@ final class HostServerTests: XCTestCase {
         }
     }
 
+    // MARK: - The config subscription
+
+    /// A context whose Host home is `home` in the run's directory, where its Config lives.
+    private func configContext() -> (HostServerContext, home: URL) {
+        let home = directory.appendingPathComponent("home", isDirectory: true)
+        let hostPaths = MuxifyPaths(environment: ["XDG_STATE_HOME": directory.appendingPathComponent("state").path], home: home.path)
+        return (HostServerContext(paths: hostPaths, tmux: tmux, home: home.path), home)
+    }
+
+    private func subscribeConfig(_ client: ProtocolClient) -> ConfigRecorder {
+        let recorder = ConfigRecorder()
+        let configs = client.subscribe(HostRequest.subscribe(.config), as: HostConfig.self)
+        consumers.append(Task {
+            do {
+                for try await config in configs { recorder.add(config) }
+            } catch {}
+        })
+        return recorder
+    }
+
+    func testTheFirstConfigItemCarriesTheHostsTextAndAnEditPushesTheNewText() async throws {
+        let (context, home) = configContext()
+        let folder = home.appendingPathComponent(".config/muxify", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("config.yaml")
+        try "ui:\n  header_height: 30\noverride: ~/machine.yaml\n".write(to: file, atomically: true, encoding: .utf8)
+        try "ui:\n  header_height: 40\n".write(to: home.appendingPathComponent("machine.yaml"), atomically: true, encoding: .utf8)
+        let client = try await connect(context: context)
+        let recorder = subscribeConfig(client)
+
+        try await wait("no first config item") { !recorder.items.isEmpty }
+        let first = try XCTUnwrap(recorder.items.first)
+        XCTAssertEqual(first.path, file.path)
+        XCTAssertEqual(first.shownPath, "~/.config/muxify/config.yaml")
+        XCTAssertEqual(first.text, "ui:\n  header_height: 30\noverride: ~/machine.yaml\n")
+        XCTAssertEqual(first.overrides, [HostConfig.Override(path: "~/machine.yaml", text: "ui:\n  header_height: 40\n")])
+
+        // An edit in place, as `echo >>` makes it, and an editor's save, which renames a new file over it.
+        let handle = try FileHandle(forWritingTo: file)
+        handle.seekToEndOfFile()
+        handle.write(Data("sidebar:\n  agents: false\n".utf8))
+        try handle.close()
+        try await wait("an edit of the Config pushed nothing", seconds: 5) {
+            recorder.items.last?.text?.hasSuffix("sidebar:\n  agents: false\n") == true
+        }
+        try "ui:\n  header_height: 50\n".write(to: home.appendingPathComponent("machine.yaml"), atomically: true, encoding: .utf8)
+        try await wait("an edit of a Config Override pushed nothing", seconds: 5) {
+            recorder.items.last?.overrides.first?.text == "ui:\n  header_height: 50\n"
+        }
+    }
+
+    func testAHostWithNoConfigPushesMissingAndThenTheConfigItGets() async throws {
+        let (context, home) = configContext()
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let client = try await connect(context: context)
+        let recorder = subscribeConfig(client)
+
+        try await wait("no first config item") { !recorder.items.isEmpty }
+        let first = try XCTUnwrap(recorder.items.first)
+        XCTAssertTrue(first.isMissing, "a Host with no Config pushes missing: \(first)")
+        XCTAssertEqual(first.path, home.appendingPathComponent(".config/muxify/config.yaml").path)
+
+        // Not even the Config's folder was there: the watch of the folder above it hears it made.
+        let folder = home.appendingPathComponent(".config/muxify", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try "ui:\n  header_height: 30\n".write(to: folder.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
+        try await wait("a new Config pushed nothing", seconds: 5) { recorder.items.last?.text == "ui:\n  header_height: 30\n" }
+
+        try FileManager.default.removeItem(at: folder.appendingPathComponent("config.yaml"))
+        try await wait("removing the Config did not push missing", seconds: 5) { recorder.items.last?.isMissing == true }
+    }
+
     // MARK: - Helpers
 
     private final class Recorder: @unchecked Sendable {
@@ -182,10 +254,18 @@ final class HostServerTests: XCTestCase {
         func clear() { lock.lock(); log = []; lock.unlock() }
     }
 
-    private func connect(nonce: String? = nil) async throws -> ProtocolClient {
+    private final class ConfigRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var log: [HostConfig] = []
+
+        func add(_ config: HostConfig) { lock.lock(); log.append(config); lock.unlock() }
+        var items: [HostConfig] { lock.lock(); defer { lock.unlock() }; return log }
+    }
+
+    private func connect(nonce: String? = nil, context: HostServerContext? = nil) async throws -> ProtocolClient {
         let up = Pipe(), down = Pipe()
         let server = HostServer.make(input: up.fileHandleForReading, output: down.fileHandleForWriting, build: "server",
-                                     context: HostServerContext(paths: paths, tmux: tmux))
+                                     context: context ?? HostServerContext(paths: paths, tmux: tmux))
         server.start()
         servers.append(server)
         let client = ProtocolClient(input: down.fileHandleForReading, output: up.fileHandleForWriting, build: "client",

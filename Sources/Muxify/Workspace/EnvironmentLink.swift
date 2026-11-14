@@ -35,6 +35,17 @@ enum EnvironmentEvent {
     case serverStopped(lastLine: String)
     /// No Host Server can run on this attachment: the store falls back to Sessions only at once.
     case serverUnavailable(HostServerUnavailable)
+    /// The Config the App Window runs with: it replaces the store's `remoteConfig` whole.
+    case config(EnvironmentConfig)
+}
+
+/// Which Config an App Window runs with (ADR 0010).
+enum EnvironmentConfig: Equatable {
+    /// The app-wide `ConfigStore`, which owns this Mac's Config file and hears its changes.
+    case local
+    /// The Host's own Config as read there. One with no text says the Host has none, and the store uses the local
+    /// Config.
+    case host(HostConfig)
 }
 
 /// Why a Remote App Window shows Sessions only. Its `reason` ends the Sidebar's "Topics are unavailable on
@@ -167,6 +178,10 @@ protocol EnvironmentLink: AnyObject {
     var attachmentEnd: AttachmentEnd? { get }
     /// Puts the Host CLI on the Environment's machine once it connects. Nothing waits for it.
     func installHostCLI(environmentName: String)
+    /// Sends the Config again as a `config` event: on connecting, on Reload Config and when a Command Palette opens.
+    /// A link that hears its Config change sends what it has; a Sessions-only link reads it again first, and sends
+    /// nothing when the read fails. This Mac's link sends nothing: the `ConfigStore` reloads itself.
+    func reloadConfig()
 
     // MARK: Topics
 
@@ -382,6 +397,7 @@ class TmuxConnectionLink {
     }
 
     func installHostCLI(environmentName: String) {}
+    func reloadConfig() {}
 
     func reloadTopics() {}
     func topicsReloaded() async {}

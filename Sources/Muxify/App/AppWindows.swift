@@ -114,7 +114,7 @@ final class AppWindows {
     /// Reload Config: the local Config, and each Remote Environment's own.
     func reloadConfig() {
         configStore.reload()
-        for store in stores.values { store.loadRemoteConfig() }
+        for store in stores.values { store.reloadEnvironmentConfig() }
     }
 
     func newWindow() {

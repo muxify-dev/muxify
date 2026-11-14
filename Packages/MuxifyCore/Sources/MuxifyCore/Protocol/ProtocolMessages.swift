@@ -192,13 +192,16 @@ public enum HostRequest: Codable, Equatable, Sendable {
     }
 }
 
-/// What a `subscribe` request subscribes to. Later releases add cases (`config`, `repository`).
+/// What a `subscribe` request subscribes to. Later releases add cases (`repository`).
 public enum HostSubscription: Codable, Equatable, Sendable {
     /// The Host's Sessions, Topic records, Open Places and server, as `EnvironmentItem`s keyed `session <id>`,
     /// `topic <id>`, `open_places` and `server`.
     case environment
+    /// The Host's Config, as `HostConfig` items keyed `config`: the whole Config each time, first at once, then
+    /// after each change in its folders that changes it. One without `text` says the Host has no Config.
+    case config
 
-    private enum CodingKeys: String, CodingKey, CaseIterable { case environment }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case environment, config }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: ProtocolKey.self)
@@ -208,6 +211,7 @@ public enum HostSubscription: Codable, Equatable, Sendable {
         }
         switch known {
         case .environment: self = .environment
+        case .config: self = .config
         }
     }
 
@@ -215,6 +219,7 @@ public enum HostSubscription: Codable, Equatable, Sendable {
         var values = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .environment: try values.encode(ProtocolEmpty(), forKey: .environment)
+        case .config: try values.encode(ProtocolEmpty(), forKey: .config)
         }
     }
 }

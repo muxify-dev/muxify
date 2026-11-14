@@ -1,5 +1,5 @@
-"""A Remote App Window shows its Host's Topics through the Host Server, `muxify server` on a channel of the
-attachment's SSH connection.
+"""A Remote App Window shows its Host's Topics, and runs with its Host's Config, through the Host Server, `muxify
+server` on a channel of the attachment's SSH connection.
 
 The SSH fixture runs remote commands locally, as remote_session_end's does: the Host's tmux server is the Sandbox
 server, the Host's home is `remote-home`, and the Host's Topics are in `remote-home/.local/state/muxify/muxify.db`,
@@ -133,6 +133,22 @@ exec /bin/sh -c "$command"
         self.s.wait_rows(lambda rs: self.s.has('palette-row-command-Pin Topic', rs), 'Pin Topic is missing from Commands')
         self.s.act('press', 'palette-row-command-Pin Topic')
         wait(lambda: self.host_store.get(topic).get('pinned') is True, 'Pin Topic did not Pin the Topic in the Host\'s database')
+
+    def test_a_config_edit_on_the_host_changes_the_remote_app_window_without_reload_config(self):
+        """The Host Server's `config` subscription pushes the edit: nothing reloads, and no Command Palette opens."""
+        self.use('serving')
+        self.topic_row(self.before_launch, 'the Remote App Window does not show the Host\'s Topics')
+        self.s.wait_rows(lambda rs: self.s.has('header-session-name', rs), 'the header shows no Session name', seconds=20)
+        config = self.home/'.config/muxify/config.yaml'
+        original = config.read_text()
+        self.addCleanup(config.write_text, original)
+        config.write_text(original + 'ui:\n  status_line:\n    enabled: false\n')
+        self.s.wait_rows(lambda rs: not self.s.has('header-session-name', rs) and self.s.has('toggle-sidebar', rs),
+                         'status_line.enabled: false in the Host\'s Config did not hide the Session name without Reload Config',
+                         seconds=20)
+        config.write_text(original)
+        self.s.wait_rows(lambda rs: self.s.has('header-session-name', rs),
+                         'removing status_line.enabled from the Host\'s Config did not show the Session name again', seconds=20)
 
     def test_a_host_whose_muxify_has_no_server_mode_shows_sessions_only_and_why(self):
         self.use('old')

@@ -31,8 +31,9 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
         startListening()
     }
 
+    /// The Config is the app-wide `ConfigStore`'s, which the store reads as it changes.
     override func initialEvents() -> [EnvironmentEvent] {
-        [.topics(state.topicContents)]
+        [.topics(state.topicContents), .config(.local)]
     }
 
     var isListening: Bool { publisher.isRunning }

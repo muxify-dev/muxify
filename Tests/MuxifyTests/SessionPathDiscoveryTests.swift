@@ -157,10 +157,11 @@ final class SessionPathDiscoveryTests: XCTestCase {
     }
 
     func testRemoteConfigFileOutput() {
-        XCTAssertEqual(RemoteConfigFile.parse("/h/.config/muxify/config.yaml\npresent\nui:\n  header_height: 30\n")?.text,
-                       "ui:\n  header_height: 30\n")
-        XCTAssertEqual(RemoteConfigFile.parse("/h/.config/muxify/config.yaml\npresent\n")?.text, "")
-        let missing = RemoteConfigFile.parse("/h/.config/muxify/config.yaml\nmissing\n")
+        let present = RemoteConfigFile.parse("/h\n/h/.config/muxify/config.yaml\npresent\nui:\n  header_height: 30\n")
+        XCTAssertEqual(present?.text, "ui:\n  header_height: 30\n")
+        XCTAssertEqual(present?.home, "/h")
+        XCTAssertEqual(RemoteConfigFile.parse("/h\n/h/.config/muxify/config.yaml\npresent\n")?.text, "")
+        let missing = RemoteConfigFile.parse("/h\n/h/.config/muxify/config.yaml\nmissing\n")
         XCTAssertEqual(missing?.path, "/h/.config/muxify/config.yaml")
         XCTAssertNil(missing?.text)
         XCTAssertNil(RemoteConfigFile.parse("Welcome!\n"))

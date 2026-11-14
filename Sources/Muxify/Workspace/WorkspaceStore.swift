@@ -1112,7 +1112,7 @@ final class WorkspaceStore {
     private(set) var hasNoSessions = false
     var remoteEnvironments: [RemoteEnvironment] { configStore.config.remoteEnvironments }
     /// A Remote Environment's own Config, as last read without a syntax
-    /// error; nil when that machine has none (ADR 0010).
+    /// error; nil when that machine has none (ADR 0010). Filled only from the link's `config` events.
     private(set) var remoteConfig: LoadedConfig?
     var remoteProblemsDismissed = false
     /// The Config this App Window runs with: its Remote Environment's own
@@ -1262,6 +1262,9 @@ final class WorkspaceStore {
     @ObservationIgnored private(set) var homeDirectory = NSHomeDirectory()
     /// Where the Remote Environment's Config is, or would be.
     @ObservationIgnored private var remoteConfigPath: String?
+    /// The next `config` event looks for the SessionPaths with the Config it brings, even when its `sessions` section
+    /// did not change: after connecting, and when a Command Palette opened.
+    @ObservationIgnored private var findsSessionPathsOnConfig = false
     @ObservationIgnored private var isShuttingDown = false
     @ObservationIgnored private let connectionCleanup = ConnectionCleanup()
     @ObservationIgnored var onSelectEnvironment: ((String?) -> Void)?
@@ -1381,6 +1384,7 @@ final class WorkspaceStore {
             remoteConfigPath = nil
             sessionPaths = []
         }
+        findsSessionPathsOnConfig = false
         activeEnvironment = next
         attachmentTarget = target
         attachmentReadsOnArrival = readsOnArrival
@@ -1619,6 +1623,8 @@ final class WorkspaceStore {
             serverStopped(lastLine: lastLine)
         case .serverUnavailable(let reason):
             fallBack(reason)
+        case .config(let config):
+            apply(config)
         }
     }
 
@@ -1700,7 +1706,7 @@ final class WorkspaceStore {
             isConnected = true
             // The SessionPaths are looked for too, so Start a Session… lists them once no Session is left.
             if connecting {
-                loadRemoteConfig { [weak self] in self?.refreshSessionPaths() }
+                reloadEnvironmentConfig(findingSessionPaths: true)
                 // The machine's own `muxify`, for the phone and its Agents. Nothing waits for it.
                 link.installHostCLI(environmentName: environmentName)
             }
@@ -2430,46 +2436,41 @@ final class WorkspaceStore {
 
     // MARK: - Config and Command Palettes
 
-    /// Reads the Remote Environment's own Config (ADR 0010) and the Config
-    /// Overrides it names (ADR 0075): on connecting, on Reload Config and when
-    /// a Command Palette opens. Not watched.
-    func loadRemoteConfig(then completion: (() -> Void)? = nil) {
-        guard let environment = activeEnvironment, isLinked, isConnected else {
-            completion?()
+    /// Asks the link for its Config again (ADR 0010, ADR 0087): on connecting, on Reload Config and when a Command
+    /// Palette opens. A Host Server pushes each edit by itself; a Sessions-only link reads the Config and the Config
+    /// Overrides it names (ADR 0075) again. With `findingSessionPaths`, the SessionPaths are looked for with the
+    /// Config that comes, at once on this Mac or when the link cannot answer.
+    func reloadEnvironmentConfig(findingSessionPaths: Bool = false) {
+        guard !link.isOnThisMac, activeEnvironment != nil, isLinked, isConnected else {
+            if findingSessionPaths { refreshSessionPaths() }
             return
         }
-        send({ try await $0.script(RemoteConfigFile.script, arguments: [], timeout: 20) }) { [weak self] result in
-            guard let self else { return }
-            // A failed read keeps what this App Window has.
-            guard case .success(let output) = result, let file = RemoteConfigFile.parse(output) else { completion?(); return }
-            self.remoteConfigPath = file.path
-            guard let text = file.text else {
-                if self.remoteConfig != nil { self.remoteConfig = nil }
-                completion?()
-                return
-            }
-            let shown = "\(environment.host):\(Paths.tildify(file.path, home: self.homeDirectory))"
-            let config = RemoteConfigFile.load(text, shown: shown)
-            let host = "\(environment.host):"
-            guard case .success(let named) = config, !named.overrides.isEmpty,
-                  named.overrides.allSatisfy({ $0.hasPrefix(host) }) else {
-                self.applyRemoteConfig(config)
-                completion?()
-                return
-            }
-            // The Overrides are read on the remote, where `~/` is its home.
-            let paths = named.overrides.map { String($0.dropFirst(host.count)) }
-            let end = "muxify-override-end-\(UUID().uuidString)"
-            self.send({ try await $0.script(RemoteConfigFile.overridesScript,
-                                            arguments: RemoteConfigFile.overridesArguments(paths, end: end), timeout: 20) }) { [weak self] result in
-                guard let self else { return }
-                defer { completion?() }
-                guard case .success(let output) = result,
-                      let texts = RemoteConfigFile.parseOverrides(output, paths: paths, end: end) else { return }
-                let overrides = Dictionary(uniqueKeysWithValues: texts.map { (host + $0.key, $0.value) })
-                self.applyRemoteConfig(RemoteConfigFile.load(text, shown: shown, overrides: overrides))
+        if findingSessionPaths { findsSessionPathsOnConfig = true }
+        link.reloadConfig()
+    }
+
+    /// The link's Config replaces this App Window's whole. A syntax error keeps the last good remote Config; a Host
+    /// with no Config, or this Mac, runs with the local one.
+    private func apply(_ environmentConfig: EnvironmentConfig) {
+        let before = config
+        switch environmentConfig {
+        case .local:
+            remoteConfigPath = nil
+            if remoteConfig != nil { remoteConfig = nil }
+        case .host(let file):
+            remoteConfigPath = file.path
+            if let text = file.text, let environment = activeEnvironment {
+                let host = "\(environment.host):"
+                let overrides = Dictionary(file.overrides.map { (host + $0.path, $0.text) }, uniquingKeysWith: { first, _ in first })
+                applyRemoteConfig(RemoteConfigFile.load(text, shown: host + file.shownPath, overrides: overrides))
+            } else if remoteConfig != nil {
+                remoteConfig = nil
             }
         }
+        let sessionsChanged = config.sessionRoots != before.sessionRoots || config.sessionAliases != before.sessionAliases
+        guard findsSessionPathsOnConfig || sessionsChanged else { return }
+        findsSessionPathsOnConfig = false
+        refreshSessionPaths()
     }
 
     /// A syntax error keeps the last good remote Config.
@@ -2486,7 +2487,7 @@ final class WorkspaceStore {
     /// remote one.
     func reloadConfig() {
         configStore.reload()
-        loadRemoteConfig()
+        reloadEnvironmentConfig()
     }
 
     /// A Remote Environment's Config is read again whenever a palette opens,
@@ -2494,7 +2495,7 @@ final class WorkspaceStore {
     func paletteDidOpen(_ palette: CommandPaletteConfig) {
         link.reloadTopics()
         // With no Remote Environment, the local Config is current and the look starts at once.
-        loadRemoteConfig { [weak self] in self?.refreshSessionPaths() }
+        reloadEnvironmentConfig(findingSessionPaths: true)
     }
 
     /// Opens the Config this App Window uses. A Remote Environment's own

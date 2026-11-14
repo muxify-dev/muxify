@@ -8,12 +8,17 @@ public struct HostServerContext: @unchecked Sendable {
     /// takes effect at once.
     public var config: @Sendable () async throws -> Config
     public var startControlClient: TmuxControlClientStart
+    /// The Host's home: the `config` subscription shows the Config's path under it as `~/…`, and an Override's `~/`
+    /// starts there.
+    public var home: String
 
     public init(paths: MuxifyPaths = MuxifyPaths(), tmux: TmuxServer = .local,
                 config: (@Sendable () async throws -> Config)? = nil,
-                startControlClient: @escaping TmuxControlClientStart = PipeControlClient.start) {
+                startControlClient: @escaping TmuxControlClientStart = PipeControlClient.start,
+                home: String = NSHomeDirectory()) {
         self.paths = paths
         self.tmux = tmux
+        self.home = home
         self.config = config ?? { [paths] in try Self.configFile(paths) }
         self.startControlClient = startControlClient
     }
@@ -27,20 +32,22 @@ public struct HostServerContext: @unchecked Sendable {
     }
 }
 
-/// `muxify server`: the Host Server's requests (ADR 0085). It serves `ping` and `shutdown`, the `environment`
-/// subscription, `environment` requests, `mark_read` and the view commands.
+/// `muxify server`: the Host Server's requests (ADR 0085). It serves `ping` and `shutdown`, the `environment` and
+/// `config` subscriptions, `environment` requests, `mark_read` and the view commands.
 public enum HostServer {
     /// A server on these handles that serves `HostRequest` against `context`.
     public static func make(input: FileHandle, output: FileHandle, build: String, silence: TimeInterval = HostProtocol.serverSilence,
                             context: HostServerContext = HostServerContext(),
                             log: @escaping (String) -> Void = { _ in }) -> ProtocolServer {
         let host = HostEnvironment(context: context, log: log)
+        let config = HostConfigFeed(path: context.paths.configFile.path, home: context.home)
         let server = ProtocolServer(input: input, output: output, build: build, silence: silence, log: log) { request, server in
-            serve(request, server: server, host: host)
+            serve(request, server: server, host: host, config: config)
         }
         Task {
             _ = await server.wait()
             host.stop()
+            config.stop()
         }
         return server
     }
@@ -55,7 +62,7 @@ public enum HostServer {
         return await server.wait()
     }
 
-    static func serve(_ request: ProtocolIncomingRequest, server: ProtocolServer, host: HostEnvironment) {
+    static func serve(_ request: ProtocolIncomingRequest, server: ProtocolServer, host: HostEnvironment, config: HostConfigFeed) {
         do {
             let nonce = server.client?.nonce
             switch try request.body(HostRequest.self) {
@@ -66,6 +73,8 @@ public enum HostServer {
                 server.stop(.shutdown)
             case .subscribe(.environment):
                 host.subscribe(request, nonce: nonce)
+            case .subscribe(.config):
+                config.subscribe(request)
             case .environment(let environmentRequest):
                 host.run(environmentRequest, for: request, nonce: nonce)
             case .markRead(let mark):
@@ -80,6 +89,72 @@ public enum HostServer {
         } catch {
             request.fail(ProtocolError(.invalid, "\(error)"))
         }
+    }
+}
+
+/// The `config` subscription: the Host's Config, its path and its Overrides, pushed whole as one `config` item first
+/// and again each time a change in their folders changes what reads. The watch starts with the first subscriber.
+final class HostConfigFeed: @unchecked Sendable {
+    private let path: String
+    private let home: String
+    /// Where the watcher's events, the reads and the subscribers live.
+    private let queue = DispatchQueue(label: "dev.muxify.host-server.config")
+    // Only `queue` touches these.
+    private var watcher: FolderWatcher?
+    private var state: HostConfig?
+    private var subscribers: [Int: ProtocolIncomingRequest] = [:]
+    private var readPending = false
+    private var stopped = false
+
+    init(path: String, home: String) {
+        self.path = path
+        self.home = home
+    }
+
+    func subscribe(_ request: ProtocolIncomingRequest) {
+        let id = request.id
+        queue.async { [self] in
+            guard !request.isCancelled, !stopped else { return }
+            subscribers[id] = request
+            if watcher == nil {
+                watcher = FolderWatcher(queue: queue) { [weak self] in self?.heard() }
+                read()
+            }
+            if let state, !request.sendEvent(state, key: "config") { subscribers[id] = nil }
+        }
+        request.onCancel { self.queue.async { self.subscribers[id] = nil } }
+    }
+
+    func stop() {
+        queue.async { [self] in
+            stopped = true
+            watcher?.stop()
+            watcher = nil
+            subscribers = [:]
+        }
+    }
+
+    /// Something changed in a watched folder: the files are read once the events of one save have come.
+    private func heard() {
+        guard !readPending else { return }
+        readPending = true
+        queue.asyncAfter(deadline: .now() + 0.05) { [self] in
+            readPending = false
+            guard watcher != nil else { return }
+            read()
+        }
+    }
+
+    /// Reads the Config and its Overrides, watches their folders, and pushes what reads when it changed. A change of
+    /// the folders reads once more, so a file made before the new watch began is not missed.
+    private func read() {
+        var next = HostConfig.read(path: path, home: home)
+        if watcher?.watch(next.watchedFolders()) == true { next = HostConfig.read(path: path, home: home) }
+        guard next != state else { return }
+        let first = state == nil
+        state = next
+        guard !first else { return }
+        for (id, request) in subscribers where !request.sendEvent(next, key: "config") { subscribers[id] = nil }
     }
 }
 

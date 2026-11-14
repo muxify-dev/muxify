@@ -37,6 +37,30 @@ final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
         tmuxEvents.stop()
     }
 
+    /// Reads the Host's Config and the Config Overrides it names over the master (ADR 0010, ADR 0075), then sends
+    /// it. Not watched: a read happens at connect, on Reload Config and when a Command Palette opens. A failed read
+    /// sends nothing, so the App Window keeps what it has.
+    override func reloadConfig() {
+        guard connection != nil else { return }
+        Task { [weak self] in
+            guard let self, let output = try? await script(RemoteConfigFile.script, arguments: [], timeout: 20),
+                  let file = RemoteConfigFile.parse(output) else { return }
+            var config = HostConfig(path: file.path, home: file.home, text: file.text)
+            if let text = file.text {
+                // The Overrides are read on the remote, where `~/` is its home.
+                let paths = HostConfig.overridePaths(in: text, shownPath: config.shownPath)
+                if !paths.isEmpty {
+                    let end = "muxify-override-end-\(UUID().uuidString)"
+                    guard let output = try? await script(RemoteConfigFile.overridesScript,
+                                                         arguments: RemoteConfigFile.overridesArguments(paths, end: end), timeout: 20),
+                          let texts = RemoteConfigFile.parseOverrides(output, paths: paths, end: end) else { return }
+                    config.overrides = paths.map { HostConfig.Override(path: $0, text: texts[$0] ?? nil) }
+                }
+            }
+            events.send(.config(.host(config)))
+        }
+    }
+
     func sessionPathOutput(roots: [SessionPathRoot], arguments: [String]) async throws -> String? {
         try await script(SessionPathDiscovery.script, arguments: arguments, timeout: 20)
     }

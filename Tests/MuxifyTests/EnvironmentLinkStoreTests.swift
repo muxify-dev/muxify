@@ -183,6 +183,118 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         }
     }
 
+    // MARK: - The Config
+
+    private func configStore(text: String) throws -> ConfigStore {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-link-\(UUID().uuidString).yaml")
+        try text.write(to: file, atomically: true, encoding: .utf8)
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        return ConfigStore(path: file.path)
+    }
+
+    /// A store on a Remote Environment's link, connected by the link's first read.
+    private func connectedRemoteStore(_ link: FakeEnvironmentLink, local: String = "") throws -> WorkspaceStore {
+        let store = WorkspaceStore(configStore: try configStore(text: local), environment: box, defaults: isolatedDefaults()) { _ in link }
+        store.startLinkForTesting()
+        link.send(.snapshot(snapshot([window("@1")])))
+        return store
+    }
+
+    func testAHostConfigWithItsOverridesReplacesTheLocalOneAndAHostWithNoneFallsBackToTheLocalConfig() throws {
+        let link = FakeEnvironmentLink(isOnThisMac: false, features: [.topics, .git])
+        let store = try connectedRemoteStore(link, local: "ui:\n  status_line:\n    enabled: false\n")
+        XCTAssertFalse(store.config.statusLine.enabled, "before the Host's Config comes, the window runs with the local one")
+
+        link.send(.config(.host(HostConfig(path: "/home/u/.config/muxify/config.yaml", home: "/home/u",
+                                           text: "override: ~/machine.yaml\nui:\n  status_line:\n    enabled: false\n",
+                                           overrides: [.init(path: "~/machine.yaml", text: "ui:\n  status_line:\n    enabled: true\n")]))))
+        XCTAssertTrue(store.config.statusLine.enabled, "the Host's Override applies on top of the Host's Config")
+        XCTAssertNotNil(store.remoteConfig)
+
+        link.send(.config(.host(HostConfig(path: "/home/u/.config/muxify/config.yaml", home: "/home/u", text: nil))))
+        XCTAssertNil(store.remoteConfig, "a Host with no Config has no remote Config")
+        XCTAssertFalse(store.config.statusLine.enabled, "a Host with no Config runs with the local Config (ADR 0010)")
+
+        link.send(.config(.host(HostConfig(path: "/home/u/.config/muxify/config.yaml", home: "/home/u",
+                                           text: "ui:\n  status_line:\n    enabled: true\n"))))
+        XCTAssertTrue(store.config.statusLine.enabled)
+        link.send(.config(.host(HostConfig(path: "/home/u/.config/muxify/config.yaml", home: "/home/u", text: "ui: [\n"))))
+        XCTAssertTrue(store.config.statusLine.enabled, "a syntax error keeps the last good Host Config")
+        XCTAssertFalse(store.remoteConfig?.problems.isEmpty ?? true)
+    }
+
+    func testReloadConfigAndConnectingAskTheLinkForItsConfigAgain() throws {
+        let link = FakeEnvironmentLink(isOnThisMac: false, features: [.git])
+        let store = try connectedRemoteStore(link)
+        XCTAssertEqual(link.configReloads, 1, "connecting reads the Config")
+        store.reloadConfig()
+        XCTAssertEqual(link.configReloads, 2, "Reload Config reads the Config again")
+
+        let local = FakeEnvironmentLink()
+        let localStore = WorkspaceStore(configStore: configStore(), defaults: isolatedDefaults()) { _ in local }
+        localStore.startLinkForTesting()
+        localStore.reloadConfig()
+        XCTAssertEqual(local.configReloads, 0, "this Mac's Config is the ConfigStore's, which reloads itself")
+    }
+
+    func testTheSessionsOnlyLinkReadsTheHostsConfigAgainOnEachReload() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("mxc-" + UUID().uuidString, isDirectory: true)
+        let home = root.appendingPathComponent("home", isDirectory: true)
+        let folder = home.appendingPathComponent(".config/muxify", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        // The fixture's ssh runs the remote command here, with the Host's home.
+        let ssh = root.appendingPathComponent("ssh")
+        try """
+        #!/bin/bash
+        unset TMUX TMUX_PANE XDG_CONFIG_HOME
+        export HOME=\(Tmux.shellQuote(home.path))
+        for arg do command=$arg; done
+        exec /bin/sh -c "$command"
+
+        """.write(to: ssh, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: ssh.path)
+        let file = folder.appendingPathComponent("config.yaml")
+        try "override: ~/machine.yaml\nui:\n  header_height: 30\n".write(to: file, atomically: true, encoding: .utf8)
+        try "ui:\n  header_height: 40\n".write(to: home.appendingPathComponent("machine.yaml"), atomically: true, encoding: .utf8)
+
+        let link = SessionsOnlyEnvironmentLink(environment: box, sshExecutable: ssh.path)
+        try link.connect()
+        defer { link.retire(flushing: []); link.cleanup() }
+        var configs: [HostConfig] = []
+        let subscription = link.subscribe { event in
+            if case .config(.host(let config)) = event { configs.append(config) }
+        }
+        defer { subscription.cancel() }
+
+        link.reloadConfig()
+        try await waitAsync("the Sessions-only link read no Config") { configs.count == 1 }
+        XCTAssertEqual(configs.first?.path, file.path)
+        XCTAssertEqual(configs.first?.shownPath, "~/.config/muxify/config.yaml")
+        XCTAssertEqual(configs.first?.text, "override: ~/machine.yaml\nui:\n  header_height: 30\n")
+        XCTAssertEqual(configs.first?.overrides, [.init(path: "~/machine.yaml", text: "ui:\n  header_height: 40\n")])
+
+        try "ui:\n  header_height: 50\n".write(to: file, atomically: true, encoding: .utf8)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(configs.count, 1, "a Sessions-only link does not watch the Config")
+        link.reloadConfig()
+        try await waitAsync("Reload Config did not read the Config again") { configs.count == 2 }
+        XCTAssertEqual(configs.last?.text, "ui:\n  header_height: 50\n")
+
+        try FileManager.default.removeItem(at: file)
+        link.reloadConfig()
+        try await waitAsync("a removed Config was not read as missing") { configs.count == 3 }
+        XCTAssertEqual(configs.last?.isMissing, true)
+    }
+
+    private func waitAsync(_ message: String, seconds: TimeInterval = 10, until condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(seconds)
+        while !condition() {
+            guard Date() < deadline else { return XCTFail(message) }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
     func testARetiredLinkEndsItsRequestsCancelled() async throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: state) }

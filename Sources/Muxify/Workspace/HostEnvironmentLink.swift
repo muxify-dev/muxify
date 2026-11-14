@@ -8,8 +8,9 @@ import MuxifyCore
 /// Until the server's first state arrives, and whenever it is down, the link is its `SessionsOnlyEnvironmentLink` on
 /// the same master, so the App Window shows Sessions as it does without a server. Once it arrives, the Topics, the
 /// Sessions and every change come only from the server's `environment` events, and Topic requests, Unread on visit
-/// and view commands go over the channel; the Mac keeps no copy of the Host's records. Git, the Config, Session
-/// paths, uploads and Worktrees still go to the Sessions-only link until later tasks move them onto the server.
+/// and view commands go over the channel; the Mac keeps no copy of the Host's records. The Config comes from the
+/// server's `config` subscription, which pushes each edit on the Host. Git, Session paths, uploads and Worktrees
+/// still go to the Sessions-only link until later tasks move them onto the server.
 @MainActor
 final class HostEnvironmentLink: EnvironmentLink {
     let isOnThisMac = false
@@ -39,6 +40,9 @@ final class HostEnvironmentLink: EnvironmentLink {
     private var serving = false
     private var state = EnvironmentState()
     private var subscription: Task<Void, Never>?
+    private var configSubscription: Task<Void, Never>?
+    /// The server's last `config` item. While there is one, the server serves the Config, not the Sessions-only reads.
+    private var servedConfig: HostConfig?
     private var pinger: Timer?
     private var lastSent = Date()
     /// The install chain's result line, for the reason when no Host CLI is found.
@@ -102,15 +106,28 @@ final class HostEnvironmentLink: EnvironmentLink {
 
     func connect() throws {
         try inner.connect()
-        // The Sessions-only link's events reach the store only while no server serves.
+        // The Sessions-only link's events reach the store only while no server serves them.
         innerSubscription = inner.subscribe { [weak self] event in
-            guard let self, !self.serving else { return }
+            guard let self else { return }
+            if case .config = event {
+                guard self.servedConfig == nil else { return }
+            } else {
+                guard !self.serving else { return }
+            }
             self.events.send(event)
         }
     }
 
     func subscribe(_ onEvent: @escaping (EnvironmentEvent) -> Void) -> EnvironmentSubscription {
-        events.subscribe(initial: serving ? [.topics(state.topicContents)] : [], onEvent)
+        let topics: [EnvironmentEvent] = serving ? [.topics(state.topicContents)] : []
+        return events.subscribe(initial: topics + (servedConfig.map { [.config(.host($0))] } ?? []), onEvent)
+    }
+
+    /// The server's last Config, which needs no read: it pushes every change. Until it serves, the Sessions-only link
+    /// reads it.
+    func reloadConfig() {
+        guard let servedConfig else { return inner.reloadConfig() }
+        events.send(.config(.host(servedConfig)))
     }
 
     // MARK: The server's lifecycle
@@ -182,6 +199,16 @@ final class HostEnvironmentLink: EnvironmentLink {
                 for try await item in stream { self?.receive(item.changes, from: client) }
             } catch {}
         }
+        let configs = client.subscribe(HostRequest.subscribe(.config), as: HostConfig.self)
+        configSubscription = Task { [weak self] in
+            do {
+                for try await config in configs { self?.receive(config, from: client) }
+            } catch {
+                // A server that does not serve the Config, or whose subscription ended: the Sessions-only link reads
+                // it again on the next connect, Reload Config or Command Palette.
+            }
+            self?.configEnded(from: client)
+        }
         startPinging(client)
     }
 
@@ -211,6 +238,18 @@ final class HostEnvironmentLink: EnvironmentLink {
         } else {
             noteOwnClient()
         }
+    }
+
+    /// The Host's Config, pushed first at once and then after each edit on the Host.
+    private func receive(_ config: HostConfig, from client: ProtocolClient) {
+        guard client === self.client else { return }
+        servedConfig = config
+        events.send(.config(.host(config)))
+    }
+
+    private func configEnded(from client: ProtocolClient) {
+        guard client === self.client else { return }
+        servedConfig = nil
     }
 
     private func noteOwnClient() {
@@ -243,6 +282,10 @@ final class HostEnvironmentLink: EnvironmentLink {
         session = nil
         subscription?.cancel()
         subscription = nil
+        configSubscription?.cancel()
+        configSubscription = nil
+        // The store keeps the Config it has; the Sessions-only link reads it again on the next reload.
+        servedConfig = nil
         pinger?.invalidate()
         pinger = nil
         sawOwnClient = false

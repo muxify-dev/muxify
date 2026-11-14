@@ -52,10 +52,10 @@ final class HostEnvironmentLinkTests: XCTestCase {
 
     /// A link whose every channel is a pair of pipes to a new Host Server here, made with the context `context`
     /// gives for its number, from 0.
-    private func link(build: String = "muxify 0000000 0",
+    private func link(build: String = "muxify 0000000 0", inner: EnvironmentLink? = nil,
                       context: @escaping (Int) -> HostServerContext) -> HostEnvironmentLink {
         HostEnvironmentLink(
-            environmentName: "box", inner: FakeEnvironmentLink(isOnThisMac: false, features: [.git]), build: build,
+            environmentName: "box", inner: inner ?? FakeEnvironmentLink(isOnThisMac: false, features: [.git]), build: build,
             nonce: { nil }, helloTimeout: 5,
             openChannel: { [unowned self] _ in
                 let up = Pipe(), down = Pipe()
@@ -105,6 +105,40 @@ final class HostEnvironmentLinkTests: XCTestCase {
         XCTAssertEqual(link.features, [.topics, .git])
         XCTAssertTrue(link.publishesChanges, "the server's events replace the poll")
         XCTAssertEqual(Array(heard.prefix(2)), ["features", "topics"])
+    }
+
+    func testTheHostsConfigComesFromTheServerAndAnEditOnTheHostPushesItWithoutAReload() async throws {
+        let tmux = tmux!
+        let home = directory.appendingPathComponent("home", isDirectory: true)
+        let folder = home.appendingPathComponent(".config/muxify", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("config.yaml")
+        try "ui:\n  header_height: 30\n".write(to: file, atomically: true, encoding: .utf8)
+        let hostPaths = MuxifyPaths(environment: ["XDG_STATE_HOME": directory.appendingPathComponent("state").path], home: home.path)
+        let inner = FakeEnvironmentLink(isOnThisMac: false, features: [.git])
+        let link = link(inner: inner) { _ in HostServerContext(paths: hostPaths, tmux: tmux, config: { Config() }, home: home.path) }
+        try link.connect()
+        var configs: [HostConfig] = []
+        let subscription = link.subscribe { event in
+            if case .config(.host(let config)) = event { configs.append(config) }
+        }
+        defer { subscription.cancel() }
+        link.reloadConfig()
+        XCTAssertEqual(inner.configReloads, 1, "before the server serves the Config, the Sessions-only link reads it")
+
+        link.startServer()
+        try await wait("the server sent no Config") { !configs.isEmpty }
+        XCTAssertEqual(configs.last?.text, "ui:\n  header_height: 30\n")
+        XCTAssertEqual(configs.last?.shownPath, "~/.config/muxify/config.yaml")
+        inner.send(.config(.host(HostConfig(path: file.path, home: home.path, text: "stale"))))
+        XCTAssertNotEqual(configs.last?.text, "stale", "a Sessions-only read does not replace the served Config")
+
+        try "ui:\n  header_height: 40\n".write(to: file, atomically: true, encoding: .utf8)
+        try await wait("an edit on the Host pushed no Config") { configs.last?.text == "ui:\n  header_height: 40\n" }
+        let count = configs.count
+        link.reloadConfig()
+        XCTAssertEqual(inner.configReloads, 1, "a served Config needs no read")
+        XCTAssertEqual(configs.count, count + 1, "Reload Config sends the served Config again")
     }
 
     func testAnAppsInfoPlistCarriesTheBuildLineAndTheMacsHelloSendsIt() async throws {
