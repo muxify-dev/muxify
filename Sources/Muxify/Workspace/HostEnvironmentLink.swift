@@ -20,10 +20,11 @@ final class HostEnvironmentLink: EnvironmentLink {
     private let nonce: () -> String?
     private let helloTimeout: TimeInterval
     private let pingInterval: TimeInterval
-    private let openChannel: () throws -> HostServerChannel
-    private let install: (@escaping @Sendable (String) -> Void) -> Void
+    /// Opens a channel running the server from the given path, or from the Host CLI that it finds when nil.
+    private let openChannel: (String?) throws -> HostServerChannel
+    private let install: (@escaping @Sendable (HostCLIReady) -> Void) -> Void
     private let masterAlive: @Sendable () -> Bool
-    private let hostCLIVersion: @Sendable () -> String?
+    private let hostCLIVersion: @Sendable (String?) -> String?
 
     private let events = EnvironmentEvents()
     private let id = UUID()
@@ -42,14 +43,16 @@ final class HostEnvironmentLink: EnvironmentLink {
     private var lastSent = Date()
     /// The install chain's result line, for the reason when no Host CLI is found.
     private var installLine: String?
+    /// The Debug app's own upload, which the server runs from; nil runs the Host CLI.
+    private var serverPath: String?
     /// Once the server named the App Window's own Client, its going away is the end of the attachment.
     private var sawOwnClient = false
 
     init(environmentName: String, inner: EnvironmentLink, build: String = AppBuild.line, nonce: @escaping () -> String?,
          helloTimeout: TimeInterval = HostProtocol.helloTimeout, pingInterval: TimeInterval = 15,
-         openChannel: @escaping () throws -> HostServerChannel,
-         install: @escaping (@escaping @Sendable (String) -> Void) -> Void,
-         masterAlive: @escaping @Sendable () -> Bool, hostCLIVersion: @escaping @Sendable () -> String?) {
+         openChannel: @escaping (String?) throws -> HostServerChannel,
+         install: @escaping (@escaping @Sendable (HostCLIReady) -> Void) -> Void,
+         masterAlive: @escaping @Sendable () -> Bool, hostCLIVersion: @escaping @Sendable (String?) -> String?) {
         self.environmentName = environmentName
         self.inner = inner
         self.build = build
@@ -69,20 +72,23 @@ final class HostEnvironmentLink: EnvironmentLink {
         let name = environment.name
         return HostEnvironmentLink(
             environmentName: name, inner: inner, nonce: { inner.connection?.remote?.nonce },
-            openChannel: {
+            openChannel: { path in
                 guard let remote = inner.connection?.remote else { throw TmuxError.notReady }
-                return try HostServerChannel.process(remote.serverInvocation())
+                return try HostServerChannel.process(remote.serverInvocation(executable: path))
             },
             install: { done in
-                guard let connection = inner.connection else { return done("failed: not connected") }
-                HostCLI.install(over: connection, environmentName: name, baseURL: baseURL, report: Diagnostics.report, completion: done)
+                guard let connection = inner.connection else { return done(HostCLIReady(line: "failed: not connected")) }
+                DispatchQueue.global(qos: .utility).async {
+                    done(HostCLIChain.run(over: connection, environmentName: name, baseURL: baseURL, debug: DebugHostCLI.app,
+                                          report: Diagnostics.report))
+                }
             },
             masterAlive: {
                 guard let remote = inner.connection?.remote else { return false }
                 return (try? CommandRunner().run(remote.control("check"), timeout: 1)) != nil
             },
-            hostCLIVersion: {
-                (try? inner.connection?.runScript(RemoteSSH.hostCLIVersionScript, arguments: [], timeout: 10))?
+            hostCLIVersion: { path in
+                (try? inner.connection?.runScript(RemoteSSH.hostCLIVersionScript(at: path), arguments: [], timeout: 10))?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
             })
     }
@@ -109,13 +115,15 @@ final class HostEnvironmentLink: EnvironmentLink {
 
     // MARK: The server's lifecycle
 
-    /// The Host CLI install chain, then the server. Nothing waits for either.
+    /// The Host CLI install chain, then the server. Nothing waits for either. A server that already runs keeps
+    /// running: a newer binary never restarts it (ADR 0084).
     func installHostCLI(environmentName: String) {
-        install { [weak self] line in
+        install { [weak self] ready in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.installLine = line
+                    self.installLine = ready.line
+                    self.serverPath = ready.server
                     self.startServer()
                 }
             }
@@ -126,7 +134,7 @@ final class HostEnvironmentLink: EnvironmentLink {
     func startServer() {
         guard !transport.isRetired, client == nil else { return }
         let channel: HostServerChannel
-        do { channel = try openChannel() } catch {
+        do { channel = try openChannel(serverPath) } catch {
             Diagnostics.report("Host Server: \(environmentName): the channel did not open: \(error)")
             events.send(.serverStopped(lastLine: "\(error)"))
             return
@@ -257,6 +265,7 @@ final class HostEnvironmentLink: EnvironmentLink {
         let name = environmentName
         let masterAlive = masterAlive
         let hostCLIVersion = hostCLIVersion
+        let serverPath = serverPath
         Task.detached(priority: .utility) { [weak self] in
             let status = channel.exitStatus(waiting: 2)
             channel.close()
@@ -270,7 +279,7 @@ final class HostEnvironmentLink: EnvironmentLink {
             var unavailable: HostServerUnavailable?
             if !answered {
                 switch status {
-                case 2: unavailable = .tooOld(hostCLIVersion().flatMap { $0.isEmpty ? nil : $0 } ?? "it prints no build line")
+                case 2: unavailable = .tooOld(hostCLIVersion(serverPath).flatMap { $0.isEmpty ? nil : $0 } ?? "it prints no build line")
                 case 127: unavailable = .notInstalled("")
                 default:
                     switch reason {

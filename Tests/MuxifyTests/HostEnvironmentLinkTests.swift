@@ -57,7 +57,7 @@ final class HostEnvironmentLinkTests: XCTestCase {
         HostEnvironmentLink(
             environmentName: "box", inner: FakeEnvironmentLink(isOnThisMac: false, features: [.git]), build: build,
             nonce: { nil }, helloTimeout: 5,
-            openChannel: { [unowned self] in
+            openChannel: { [unowned self] _ in
                 let up = Pipe(), down = Pipe()
                 let server = HostServer.make(input: up.fileHandleForReading, output: down.fileHandleForWriting,
                                              build: "muxify 1111111 1", context: context(servers.count))
@@ -67,7 +67,7 @@ final class HostEnvironmentLinkTests: XCTestCase {
                 let writer = up.fileHandleForWriting
                 return HostServerChannel(input: down.fileHandleForReading, output: writer, stop: { try? writer.close() })
             },
-            install: { $0("current") }, masterAlive: { true }, hostCLIVersion: { nil })
+            install: { $0(HostCLIReady(line: "current")) }, masterAlive: { true }, hostCLIVersion: { _ in nil })
     }
 
     private func wait(_ message: String, seconds: TimeInterval = 10, until condition: () -> Bool) async throws {

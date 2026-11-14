@@ -277,4 +277,21 @@ final class HostCLIScriptTests: XCTestCase {
         XCTAssertEqual(HostCLI.baseURL(environment: ["MUXIFY_CLI_BASE_URL": "http://host.orb.internal:8000/"]),
                        "http://host.orb.internal:8000/")
     }
+
+    /// Only a Host that cannot download gets the bytes from the Mac (chain B); the script's own lines say which.
+    func testOnlyTheLinesOfAHostThatCannotDownloadCallForTheMacsUpload() throws {
+        try reset()
+        try FileManager.default.removeItem(atPath: "\(assets)/version")
+        let line = try run("/bin/sh")
+        XCTAssertTrue(HostCLI.hostCannotDownload(line), line)
+        XCTAssertTrue(HostCLI.hostCannotDownload("failed: neither curl nor wget"))
+        XCTAssertTrue(HostCLI.hostCannotDownload("failed: cannot download file:///a/muxify-linux-x86_64"))
+        for line in ["failed: no Host CLI for sunos i86pc", "skipped: app bundle /Applications/Muxify.app/Contents/Resources/bin/muxify",
+                     "current abc1234 200", "failed: cannot move a to b"] {
+            XCTAssertFalse(HostCLI.hostCannotDownload(line), line)
+        }
+        XCTAssertEqual(HostCLI.version("muxify abc1234 200").map { "\($0.sha) \($0.time)" }, "abc1234 200")
+        XCTAssertNil(HostCLI.version("muxify abc1234"))
+        XCTAssertNil(HostCLI.version("muxify abc1234 2x0"))
+    }
 }

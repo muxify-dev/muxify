@@ -121,8 +121,19 @@ final class RemoteSSH {
 
     /// The Host Server, `muxify server`, as a channel of the master like the execs (ADR 0086):
     /// it never signs in on its own and never outlives the master. Its stdin and stdout are the protocol's.
-    func serverInvocation() -> CommandInvocation {
-        script(Self.findHostCLI + "\nexec \"$muxify\" server")
+    /// `executable` is the Debug app's own upload; nil finds the Host CLI.
+    func serverInvocation(executable: String? = nil) -> CommandInvocation {
+        script(Self.findHostCLI(at: executable) + "\nexec \"$muxify\" server")
+    }
+
+    /// `findHostCLI`, or `executable` when there is one: the Debug app's own upload, which exits 127 too when it is
+    /// gone.
+    static func findHostCLI(at executable: String?) -> String {
+        guard let executable else { return findHostCLI }
+        return """
+        muxify=\(Tmux.shellQuote(executable))
+        [ -x "$muxify" ] || { echo "muxify: $muxify is not there" >&2; exit 127; }
+        """
     }
 
     /// Finds the Host CLI as the install and the phone do: on the PATH, in `~/.local/bin`, then, on a Mac only,
@@ -138,7 +149,9 @@ final class RemoteSSH {
 
     /// Prints the first line of the Host CLI's `--version`, for the reason a window gives when that CLI has no
     /// server mode. An old CLI prints nothing.
-    static let hostCLIVersionScript = findHostCLI + "\n\"$muxify\" --version 2>/dev/null | head -n 1"
+    static func hostCLIVersionScript(at executable: String? = nil) -> String {
+        findHostCLI(at: executable) + "\n\"$muxify\" --version 2>/dev/null | head -n 1"
+    }
 
     /// `script`, with a remote PTY so that git's and ssh's questions on the remote machine come back through
     /// Muxify's own pty (`TerminalCommand`), where they are answered.

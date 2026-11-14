@@ -41,12 +41,14 @@ final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
         try await script(SessionPathDiscovery.script, arguments: arguments, timeout: 20)
     }
 
-    /// The machine's own `muxify`, for the phone and its Agents.
+    /// The machine's own `muxify`, for the phone and its Agents: the install chain without a Debug build.
     override func installHostCLI(environmentName: String) {
         guard let connection else { return }
-        HostCLI.install(over: connection, environmentName: environmentName,
-                        baseURL: HostCLI.baseURL(environment: ProcessInfo.processInfo.environment),
-                        report: Diagnostics.report)
+        let baseURL = HostCLI.baseURL(environment: ProcessInfo.processInfo.environment)
+        DispatchQueue.global(qos: .utility).async {
+            _ = HostCLIChain.run(over: connection, environmentName: environmentName, baseURL: baseURL, debug: nil,
+                                 report: Diagnostics.report)
+        }
     }
 
     /// The service on the Remote Environment. It has no Topics, so it runs only the requests that need no Topic

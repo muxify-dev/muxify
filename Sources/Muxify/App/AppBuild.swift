@@ -12,4 +12,14 @@ enum AppBuild {
     }
 
     static let line = line(in: .main)
+
+    /// The checkout a Debug build was built from, which the same build phase stamps as `MuxifySourceRoot`; nil in
+    /// any other build. A Debug app serves a Host from its `build/host-cli/` (`DebugHostCLI`).
+    static let sourceRootKey = "MuxifySourceRoot"
+
+    static func sourceRoot(in bundle: Bundle) -> String? {
+        (bundle.object(forInfoDictionaryKey: sourceRootKey) as? String).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    static let sourceRoot = sourceRoot(in: .main)
 }
