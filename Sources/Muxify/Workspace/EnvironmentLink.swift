@@ -24,7 +24,9 @@ enum EnvironmentEvent {
     /// A whole read of the server: it replaces the store's `windows`, its Panes and its Agents.
     case snapshot(TmuxSnapshot)
     /// The server changed in a way the store reads again.
-    case changed(TmuxEvents.Event)
+    case changed
+    /// A read of the server failed: the store shows it as it shows a read of its own that failed.
+    case unreachable(Error)
 }
 
 /// How the App Window's attachment to a Remote Environment ended, read once its terminal process exited.
@@ -123,6 +125,10 @@ protocol EnvironmentLink: AnyObject {
                          newSession: RemoteSSH.NewSession?) throws -> String
     /// Marks the App Window's own Client on this Mac's server, or removes the mark with nil.
     func updateLocalClient(_ client: TmuxClient?)
+    /// Whether the link hears every change of the server and the records itself and keeps its own Watch Session, so
+    /// the store neither polls it nor starts its listening. The Local link's `EnvironmentPublisher` does; a
+    /// Sessions-only link leaves both to the store.
+    var publishesChanges: Bool { get }
     /// Whether the link hears tmux changes as they happen; it sends each as a `changed` event.
     var isListening: Bool { get }
     func startListening()
@@ -193,7 +199,6 @@ class TmuxConnectionLink {
     /// Set once by `connect`, on the main thread, before anything reads it off it.
     nonisolated(unsafe) private(set) var connection: TmuxConnection?
     let events = EnvironmentEvents()
-    private let tmuxEvents = TmuxEvents()
     private let makeConnection: () throws -> TmuxConnection
     /// The App Window's own Client on this Mac's server, which a view command acting as a Client must still name.
     /// Nil for a Remote Environment, whose `RemoteSSH` checks each such command against its marker.
@@ -201,7 +206,6 @@ class TmuxConnectionLink {
 
     init(makeConnection: @escaping () throws -> TmuxConnection) {
         self.makeConnection = makeConnection
-        tmuxEvents.onEvent = { [weak self] event in self?.events.send(.changed(event)) }
     }
 
     func connect() throws {
@@ -269,17 +273,6 @@ class TmuxConnectionLink {
         ownClient = client.flatMap { $0.isControl || $0.pid <= 0 ? nil : ViewCommandExecutor.Client(tty: $0.tty, pid: $0.pid) }
     }
 
-    var isListening: Bool { tmuxEvents.isRunning }
-
-    func startListening() {
-        guard let connection else { return }
-        tmuxEvents.start(invocation: connection.invocation)
-    }
-
-    func stopListening() {
-        tmuxEvents.stop()
-    }
-
     var attachmentEnd: AttachmentEnd? {
         guard let connection, let remote = connection.remote else { return nil }
         return AttachmentEnd(exitStatus: remote.exitStatus, failureMessage: remote.failureMessage,
@@ -313,9 +306,8 @@ class TmuxConnectionLink {
         }
     }
 
-    /// On the main thread, once the transport is retired: ends the subscriptions and stops what listens.
+    /// On the main thread, once the transport is retired: ends the subscriptions. A subclass also stops what listens.
     func didRetire() {
-        tmuxEvents.stop()
         events.finish()
     }
 

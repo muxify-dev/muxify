@@ -525,8 +525,8 @@ public final class ProtocolIncomingRequest: @unchecked Sendable {
 }
 
 /// Writes all of `data`. A peer that went away fails it with `EPIPE`, since `ignoreBrokenPipes` turned off SIGPIPE.
-/// Outside the types, whose own `write` would hide the system call.
-private func writeAll(_ data: Data, to fd: Int32) -> Bool {
+/// Outside the types, whose own `write` would hide the system call. The tmux control client writes its commands with it too.
+func writeAll(_ data: Data, to fd: Int32) -> Bool {
     data.withUnsafeBytes { buffer in
         guard let base = buffer.baseAddress else { return true }
         var offset = 0
@@ -542,7 +542,7 @@ private func writeAll(_ data: Data, to fd: Int32) -> Bool {
 
 /// A write to a pipe or socket whose reader went away fails with `EPIPE` instead of raising SIGPIPE. Darwin turns
 /// it off per descriptor; Linux has no such option for a pipe, so the process ignores SIGPIPE.
-private func ignoreBrokenPipes(on fd: Int32) {
+func ignoreBrokenPipes(on fd: Int32) {
     #if canImport(Darwin)
     _ = fcntl(fd, F_SETNOSIGPIPE, 1)
     #else

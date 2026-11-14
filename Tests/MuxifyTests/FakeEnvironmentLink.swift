@@ -59,6 +59,7 @@ final class FakeEnvironmentLink: EnvironmentLink {
     }
 
     func updateLocalClient(_ client: TmuxClient?) {}
+    var publishesChanges = false
     var isListening: Bool { listening }
     func startListening() { listening = true }
     func stopListening() { listening = false }

@@ -116,7 +116,10 @@ final class WorkspaceStore {
     private(set) var changingTopic = false {
         didSet {
             if oldValue && !changingTopic {
-                DispatchQueue.main.async { [weak self] in self?.drainTopicRequests() }
+                DispatchQueue.main.async { [weak self] in
+                    self?.drainTopicRequests()
+                    self?.refreshIfDeferred()
+                }
             }
         }
     }
@@ -1188,7 +1191,13 @@ final class WorkspaceStore {
     @ObservationIgnored private var lastStartedRead = 0
     /// Sessions a SessionPath row is creating, by directory, until a snapshot lists them or a few seconds pass.
     @ObservationIgnored private var pendingOpenings: [Folder: (name: String, deadline: Date)] = [:]
+    /// The 1 s read, for a link that does not publish its changes.
     @ObservationIgnored private var timer: Timer?
+    /// Whether the store polls a link that does not publish its changes: once started, not in a store test.
+    @ObservationIgnored private var pollsWhenNeeded = false
+    /// A change arrived while a Topic change or a read of the Agents held reads back. Nothing polls a link that
+    /// publishes its changes, so the read follows once they finish.
+    @ObservationIgnored private var refreshDeferred = false
     @ObservationIgnored private var keyMonitor: Any?
     @ObservationIgnored private var isRefreshing = false
     /// Something changed while a snapshot was in flight; take another one.
@@ -1299,6 +1308,15 @@ final class WorkspaceStore {
             forName: NSApplication.willResignActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in MainActor.assumeIsolated { self?.stopReadingTerminal() } }
         startConnection()
+        pollsWhenNeeded = true
+        startPolling()
+    }
+
+    /// Reads the server every second, unless the link publishes its changes itself.
+    private func startPolling() {
+        timer?.invalidate()
+        timer = nil
+        guard pollsWhenNeeded, !link.publishesChanges else { return }
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.refresh() }
         }
@@ -1345,6 +1363,7 @@ final class WorkspaceStore {
         // waiting for the old one's cleanup never connected, so it is dropped.
         let oldLink = link
         link = makeLink(next)
+        startPolling()
         attachmentStatusID = UUID()
         attachmentStatus = nil
         reconnectWork?.cancel()
@@ -1438,6 +1457,7 @@ final class WorkspaceStore {
         serverID = nil
         isRefreshing = false
         refreshAgain = false
+        refreshDeferred = false
         serverRunning = false
         homeDirectory = NSHomeDirectory()
     }
@@ -1449,6 +1469,7 @@ final class WorkspaceStore {
         guard !isShuttingDown else { connectionCleanup.whenFinished(completion); return }
         isShuttingDown = true
         started = false
+        pollsWhenNeeded = false
         generation = UUID()
         timer?.invalidate()
         timer = nil
@@ -1518,13 +1539,20 @@ final class WorkspaceStore {
             // Resolve switches against a fresh inventory. A close also moves the Client
             // to a Window tmux chose; the Router follows it once the read lists it.
             refresh()
+        case .unreachable(let error):
+            readFailed(error)
         }
     }
 
     // MARK: - Polling
 
     func refresh(attachIfNeeded: Bool = false) {
-        guard isLinked, !isTransitioning, !changingTopic, pendingReads == 0 else { return }
+        guard isLinked, !isTransitioning else { return }
+        guard !changingTopic, pendingReads == 0 else {
+            refreshDeferred = true
+            return
+        }
+        refreshDeferred = false
         // A closed remote master cannot be polled. Its foreground owner reports
         // a final snapshot; a new attachment owns all subsequent operations.
         guard link.isOnThisMac || surface != nil else { return }
@@ -1561,17 +1589,28 @@ final class WorkspaceStore {
                 }
                 self.accept(snapshot, readNumber: readNumber, attachIfNeeded: attachIfNeeded, branches: branches)
             case .failure(let error):
-                self.isConnected = false
-                self.memoryServerID = nil
-                if error as? TmuxError != .notReady {
-                    self.environmentStatus = "Waiting for \(self.environmentName): \(error)"
-                }
+                self.readFailed(error)
             }
             if self.refreshAgain {
                 self.refreshAgain = false
                 self.refresh()
             }
         }
+    }
+
+    /// A read of the server that failed, by the store or by its link.
+    private func readFailed(_ error: Error) {
+        isConnected = false
+        memoryServerID = nil
+        if error as? TmuxError != .notReady {
+            environmentStatus = "Waiting for \(environmentName): \(error)"
+        }
+    }
+
+    /// The read that a change asked for while reads were held back.
+    private func refreshIfDeferred() {
+        guard refreshDeferred, !changingTopic, pendingReads == 0 else { return }
+        refresh()
     }
 
     /// A good read: the connection state it proves, then what it lists.
@@ -1666,8 +1705,9 @@ final class WorkspaceStore {
             gatherGuests()
         }
 
-        // Listen while the user has a Session. The Watch Session alone must not keep the server running.
-        if snapshot.serverRunning, isConnected, isLinked {
+        // Listen while the user has a Session. The Watch Session alone must not keep the server running. A link that
+        // publishes its changes keeps its Watch Session itself.
+        if !link.publishesChanges, snapshot.serverRunning, isConnected, isLinked {
             if !windows.isEmpty {
                 if !link.isListening { link.startListening() }
             } else if let watch = snapshot.watchSessionID {
@@ -2075,6 +2115,9 @@ final class WorkspaceStore {
             guard let self, self.pendingReadNavigations.remove(navigation) != nil else { return }
             switch result {
             case .success:
+                // tmux moved the Client there, so a Session that ends before the next read still counts as its own.
+                self.clientSessionID = target.sessionID
+                self.clientSessionEnded = false
                 self.route(.commandFinished(intent, .success, lastStartedRead: self.lastStartedRead))
             case .failure(let error):
                 self.route(.commandFinished(intent, .failure, lastStartedRead: self.lastStartedRead))

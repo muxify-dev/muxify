@@ -8,11 +8,32 @@ import MuxifyCore
 final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     let isOnThisMac = false
     let features: EnvironmentFeatures = [.git]
+    /// The store polls the remote server and keeps its Watch Session through `startListening` (task 06 moves this
+    /// onto the Host Server's publisher).
+    let publishesChanges = false
     let environment: RemoteEnvironment
+    private let tmuxEvents = TmuxEvents()
 
     init(environment: RemoteEnvironment, sshExecutable: String = "/usr/bin/ssh") {
         self.environment = environment
         super.init { try TmuxConnection(environment: environment, sshExecutable: sshExecutable) }
+        tmuxEvents.onEvent = { [weak self] _ in self?.events.send(.changed) }
+    }
+
+    var isListening: Bool { tmuxEvents.isRunning }
+
+    func startListening() {
+        guard let connection else { return }
+        tmuxEvents.start(invocation: connection.invocation)
+    }
+
+    func stopListening() {
+        tmuxEvents.stop()
+    }
+
+    override func didRetire() {
+        super.didRetire()
+        tmuxEvents.stop()
     }
 
     func sessionPathOutput(roots: [SessionPathRoot], arguments: [String]) async throws -> String? {

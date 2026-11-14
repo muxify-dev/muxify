@@ -23,6 +23,13 @@ public struct PaneCommandLines: Equatable, Sendable {
         entries[pane.id].flatMap { $0.command == pane.command && !$0.line.isEmpty ? $0.line : nil }
     }
 
+    /// The command lines of the Panes in `paneIDs` only, such as one Session's.
+    public func only(_ paneIDs: Set<String>) -> PaneCommandLines {
+        var lines = PaneCommandLines()
+        lines.entries = entries.filter { paneIDs.contains($0.key) }
+        return lines
+    }
+
     /// The command lines for `snapshot`. They are kept while each program Pane of a Topic runs the program of the
     /// last read, so `ps` runs only when such a Pane starts another program. `ps` gives the output of `script`.
     public func updating(for snapshot: TmuxSnapshot, ps: () -> String?) -> PaneCommandLines {

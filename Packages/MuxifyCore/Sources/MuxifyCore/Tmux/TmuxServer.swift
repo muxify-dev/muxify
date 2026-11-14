@@ -8,7 +8,8 @@ public struct TmuxServer: Sendable {
     public static var local: TmuxServer { TmuxServer(options: [], socketPath: defaultSocketPath()) }
 
     private let options: [String]
-    private let socketPath: String
+    /// The socket the server listens on, or will listen on once it starts.
+    public let socketPath: String
 
     private init(options: [String], socketPath: String) {
         self.options = options

@@ -1,28 +1,70 @@
 import Foundation
 import MuxifyCore
 
-/// The link to this Mac: the local tmux server through `TmuxConnection`, the Topic records through `TopicWatcher`,
-/// the local `EnvironmentService` and the Git View's scripts, as they run today. It serves every feature.
+/// The link to this Mac: the local tmux server through `TmuxConnection`, the local `EnvironmentService` and the Git
+/// View's scripts, as they run today. It serves every feature. The `EnvironmentPublisher` hears the server and the
+/// Topic records, in-process, as the Host Server does on a Host: the store reads the server again when a Session or
+/// the server changed, and takes the records from its Topic events. Nothing polls.
 @MainActor
 final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     let isOnThisMac = true
     let features = EnvironmentFeatures.all
-    private let topicWatcher: TopicWatcher
+    let publishesChanges = true
+    private let publisher: EnvironmentPublisher
+    /// What the publisher's events left.
+    private var state = EnvironmentState()
 
     /// The first read of the records is now, so a subscriber starts with them and not with an empty list.
     init(topics: TopicStore = TopicStore(paths: MuxifyPaths())) {
-        topicWatcher = TopicWatcher(store: topics)
+        publisher = EnvironmentPublisher(server: .app, topics: topics, delivery: .main,
+                                         startControlClient: ControlClient.start, report: Diagnostics.report)
         super.init { TmuxConnection() }
-        topicWatcher.onShow = { [weak self] contents in self?.events.send(.topics(contents)) }
+        do {
+            state.apply(state.changes(to: try topics.read(), all: true))
+        } catch {
+            Diagnostics.report("topics: \(error)")
+        }
     }
 
     override func connect() throws {
         try super.connect()
-        topicWatcher.start()
+        startListening()
     }
 
     override func initialEvents() -> [EnvironmentEvent] {
-        [.topics(topicWatcher.contents)]
+        [.topics(state.topicContents)]
+    }
+
+    var isListening: Bool { publisher.isRunning }
+
+    func startListening() {
+        // A tmux notification makes the store read at once, as the publisher does; what that read of the publisher
+        // finds, the store has already read for. A read that failed shows as the store's own would.
+        publisher.start(news: { [weak self] news in
+            MainActor.assumeIsolated {
+                switch news {
+                case .heard: self?.events.send(.changed)
+                case .readFailed(let error): self?.events.send(.unreachable(error))
+                }
+            }
+        }, { [weak self] changes, afterNotification in
+            MainActor.assumeIsolated { self?.receive(changes, readAlready: afterNotification) }
+        })
+    }
+
+    func stopListening() {
+        publisher.stop()
+    }
+
+    /// Topic events replace the records the store shows; a Session or server event makes it read the server again,
+    /// unless a notification already made it read.
+    private func receive(_ changes: [EnvironmentChange], readAlready: Bool) {
+        let contents = state.topicContents
+        state.apply(changes)
+        if state.topicContents != contents { events.send(.topics(state.topicContents)) }
+        if !readAlready, changes.contains(where: { if case .session = $0 { true } else if case .server = $0 { true } else { false } }) {
+            events.send(.changed)
+        }
     }
 
     func sessionPathOutput(roots: [SessionPathRoot], arguments: [String]) async throws -> String? {
@@ -30,25 +72,25 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     }
 
     override func reloadTopics() {
-        topicWatcher.reload()
+        publisher.readTopics()
     }
 
     override func topicsReloaded() async {
-        await topicWatcher.reloaded()
+        await publisher.topicsRead()
     }
 
     override func topicsCaughtUp() async {
-        await topicWatcher.caughtUp()
+        await publisher.caughtUp()
     }
 
     override func writeTopics<T>(locks: [SessionLock], _ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
-        try await topicWatcher.write(locks: locks, body)
+        try await publisher.write(locks: locks, body)
     }
 
     /// The service on the Local server, with the SessionPaths as git reported them last.
     func environmentService(sessionPaths: [SessionPath], topics: Config.Topics, notifications: Config.Notifications,
                             worktreesRoot: String?) -> EnvironmentService? {
-        EnvironmentService(paths: topicWatcher.store.paths, server: TmuxServer.app, sessionPaths: sessionPaths, topics: topics,
+        EnvironmentService(paths: publisher.topics.paths, server: TmuxServer.app, sessionPaths: sessionPaths, topics: topics,
                            notifications: notifications, worktreesRoot: worktreesRoot)
     }
 
@@ -58,6 +100,6 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
 
     override func didRetire() {
         super.didRetire()
-        topicWatcher.stop()
+        publisher.stop()
     }
 }
