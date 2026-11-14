@@ -82,6 +82,22 @@ public struct EnvironmentState: Equatable {
         TopicContents(records: topics.values.sorted { $0.id < $1.id }, openPlaces: openPlaces)
     }
 
+    /// The server as these events show it, in tmux's order: Sessions by name, each with its Windows and Panes in
+    /// the order they came. Nil before a `server` event.
+    public var snapshot: TmuxSnapshot? {
+        guard let server else { return nil }
+        let ordered = sessions.values.sorted {
+            ($0.windows.first?.sessionName ?? "", $0.windows.first?.sessionID ?? "") < ($1.windows.first?.sessionName ?? "", $1.windows.first?.sessionID ?? "")
+        }
+        var snapshot = TmuxSnapshot(windows: ordered.flatMap(\.windows), clients: server.clients, panes: ordered.flatMap(\.panes),
+                                    lastWindowID: server.lastWindowID, serverRunning: server.isRunning, serverID: server.serverID,
+                                    ownClientTTY: server.ownClient?.tty, homeDirectory: server.home)
+        snapshot.socketPath = server.socketPath
+        snapshot.browserSocket = server.browserSocket
+        snapshot.commandLines = ordered.reduce(PaneCommandLines()) { $0.merging($1.commandLines) }
+        return snapshot
+    }
+
     /// The events of every key, as the first item of a subscription carries them.
     public var all: [EnvironmentChange] {
         sessions.sorted { $0.key < $1.key }.map { .session($0.key, $0.value) }

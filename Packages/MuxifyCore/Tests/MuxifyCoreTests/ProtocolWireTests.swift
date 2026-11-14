@@ -71,6 +71,22 @@ final class ProtocolWireTests: XCTestCase {
                        #"{"id":2,"item":{"changes":[{"session":"$1","value":null},{"topic":"t1","value":null}]},"kind":"item"}"# + "\n")
     }
 
+    func testTopicChoicesAndATopicFailureArePinned() throws {
+        func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
+        let choices = HostRequest.topicChoices(TopicChoicesRequest(.settle, target: .session(SessionID(rawValue: "$1")!)))
+        let line = text(try ProtocolLine.request(id: 6, choices))
+        XCTAssertTrue(line.hasPrefix(#"{"id":6,"kind":"request","request":{"topic_choices":{"action":"settle","target":"#), line)
+        let frame = try XCTUnwrap(try ProtocolFrame.decode(Data(line.dropLast().utf8)))
+        XCTAssertEqual(try frame.payload(HostRequest.self), choices)
+
+        let failure = TopicFailure(kind: .topicUnavailable, phase: .nothingChanged, message: "m")
+        XCTAssertEqual(text(ProtocolLine.error(id: 7, ProtocolError(.failed, "m", topicFailure: failure))),
+                       #"{"end":{"error":{"code":"failed","message":"m","topic_failure":{"kind":"topic_unavailable","message":"m","phase":"nothing_changed"}}},"id":7,"kind":"end"}"# + "\n")
+        XCTAssertEqual(text(ProtocolLine.error(id: 8, ProtocolError(.failed, "m"))),
+                       #"{"end":{"error":{"code":"failed","message":"m"}},"id":8,"kind":"end"}"# + "\n",
+                       "an error with no TopicFailure keeps its pinned form")
+    }
+
     func testEnvironmentEventsRoundTrip() throws {
         var window = TmuxWindow(id: "@2", sessionID: "$1", sessionName: "work", index: 1, name: "fish", paneTitle: "~/w", path: "/w",
                                 command: "fish", isActive: true, paneCount: 2, hasBell: false, sessionActivity: 7, agent: "claude",

@@ -86,6 +86,14 @@ final class FakeEnvironmentLink: EnvironmentLink {
 
     func makeGitWatcher(run: @escaping GitRemoteProbe.Run) -> GitWatcher { GitFileWatcher() }
 
+    /// The link a Host link hands over when its Host Server cannot run.
+    var fallback: FakeEnvironmentLink?
+    /// How many times the store started the Host Server again.
+    private(set) var restarts = 0
+
+    func restartServer() { restarts += 1 }
+    func sessionsOnlyLink() -> EnvironmentLink? { fallback }
+
     nonisolated func retire(flushing commands: [ViewCommand]) {
         lock.lock()
         retired = true

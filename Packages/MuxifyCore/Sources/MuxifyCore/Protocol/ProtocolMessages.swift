@@ -99,10 +99,19 @@ public enum ProtocolErrorCode: String, Codable, Sendable, CaseIterable {
 public struct ProtocolError: Error, Codable, Equatable, Sendable, LocalizedError {
     public var code: ProtocolErrorCode
     public var message: String
+    /// The `TopicFailure` of a `failed` Environment request, so the Mac shows its phase and kind as the local path
+    /// does. Optional, as every new key is.
+    public var topicFailure: TopicFailure?
 
-    public init(_ code: ProtocolErrorCode, _ message: String) {
+    public init(_ code: ProtocolErrorCode, _ message: String, topicFailure: TopicFailure? = nil) {
         self.code = code
         self.message = message
+        self.topicFailure = topicFailure
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case code, message
+        case topicFailure = "topic_failure"
     }
 
     public var errorDescription: String? { message }
@@ -140,11 +149,15 @@ public enum HostRequest: Codable, Equatable, Sendable {
     case markRead(MarkRead)
     /// One of the App Window's own tmux commands, answered with tmux's output as `ViewOutput`.
     case view(ViewCommand)
+    /// The Sessions that Settle or Forget offers for a Topic, as the Host's `EnvironmentService` reads them now,
+    /// answered as `TopicChoices`. A failure ends `failed` with its `TopicFailure`.
+    case topicChoices(TopicChoicesRequest)
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case ping, shutdown, subscribe, environment
         case markRead = "mark_read"
         case view
+        case topicChoices = "topic_choices"
     }
 
     public init(from decoder: Decoder) throws {
@@ -161,6 +174,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .environment: self = .environment(try values.decode(EnvironmentRequest.self, forKey: key))
         case .markRead: self = .markRead(try values.decode(MarkRead.self, forKey: key))
         case .view: self = .view(try values.decode(ViewCommand.self, forKey: key))
+        case .topicChoices: self = .topicChoices(try values.decode(TopicChoicesRequest.self, forKey: key))
         }
     }
 
@@ -173,6 +187,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .environment(let request): try values.encode(request, forKey: .environment)
         case .markRead(let mark): try values.encode(mark, forKey: .markRead)
         case .view(let command): try values.encode(command, forKey: .view)
+        case .topicChoices(let choices): try values.encode(choices, forKey: .topicChoices)
         }
     }
 }
@@ -222,6 +237,28 @@ public struct MarkRead: Codable, Equatable, Sendable {
         topics = try values.decodeIfPresent([String].self, forKey: .topics) ?? []
         panes = try values.decodeIfPresent([String].self, forKey: .panes) ?? []
     }
+}
+
+/// `topic_choices`: which Action's choices, for which Topic.
+public struct TopicChoicesRequest: Codable, Equatable, Sendable {
+    public enum Action: String, Codable, Sendable {
+        case settle, forget
+    }
+
+    public var action: Action
+    public var target: EnvironmentTarget
+
+    public init(_ action: Action, target: EnvironmentTarget) {
+        self.action = action
+        self.target = target
+    }
+}
+
+/// The answer to `topic_choices`: the Topic's Sessions, each with what the Action does to it by default.
+public struct TopicChoices: Codable, Equatable, Sendable {
+    public var sessions: [TopicSettleSession]
+
+    public init(sessions: [TopicSettleSession]) { self.sessions = sessions }
 }
 
 /// The answer to a `view` request: what tmux printed.

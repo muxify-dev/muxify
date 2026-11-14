@@ -27,6 +27,36 @@ enum EnvironmentEvent {
     case changed
     /// A read of the server failed: the store shows it as it shows a read of its own that failed.
     case unreachable(Error)
+    /// What the link serves changed: its Host Server answered, or stopped. The store offers what `features` now
+    /// says, and polls only a link that does not publish its changes.
+    case featuresChanged
+    /// The Host Server stopped while the master lives: the store starts it again, or after 3 stops within 60 s
+    /// falls back to Sessions only (ADR 0086). `lastLine` is its last stderr line.
+    case serverStopped(lastLine: String)
+    /// No Host Server can run on this attachment: the store falls back to Sessions only at once.
+    case serverUnavailable(HostServerUnavailable)
+}
+
+/// Why a Remote App Window shows Sessions only. Its `reason` ends the Sidebar's "Topics are unavailable on
+/// <Environment>: <reason>."
+enum HostServerUnavailable: Equatable {
+    /// No Host CLI was found after the install chain: the install's result line.
+    case notInstalled(String)
+    /// The Host CLI has no server mode, or shares no protocol with this app: its build line.
+    case tooOld(String)
+    /// The Host Server's `hello` did not come in time.
+    case noAnswer
+    /// It stopped 3 times within 60 s: its last stderr line.
+    case stoppedRepeatedly(String)
+
+    var reason: String {
+        switch self {
+        case .notInstalled(let line): "the Host CLI could not be installed (\(line))"
+        case .tooOld(let build): "the Host's muxify is too old (\(build))"
+        case .noAnswer: "the Host Server did not answer"
+        case .stoppedRepeatedly(let line): "the Host Server stopped 3 times in a minute (\(line))"
+        }
+    }
 }
 
 /// How the App Window's attachment to a Remote Environment ended, read once its terminal process exited.
@@ -88,7 +118,7 @@ final class EnvironmentEvents {
 }
 
 /// The one way an App Window's `WorkspaceStore` reaches its Active Environment: its tmux server, its Topic records,
-/// its `EnvironmentService` and the Git View's scripts (ADR draft `10-mac-side-seam`). Commands are `async`; state
+/// its `EnvironmentService` and the Git View's scripts (ADR 0087). Commands are `async`; state
 /// comes as keyed events per subscription.
 ///
 /// A link never changes target. Changing the Active Environment retires the store's link: its waiting requests
@@ -154,6 +184,33 @@ protocol EnvironmentLink: AnyObject {
 
     // MARK: Git
 
+    /// Runs an Environment request on the Environment's machine. `local` is the service the store built from its
+    /// Config through `environmentService`; nil when the link can run none.
+    func run(_ request: EnvironmentRequest, client: String?, local: EnvironmentService?) async -> EnvironmentResponse?
+    /// Whether `run` runs requests itself, without the store's `EnvironmentService`.
+    var runsRequests: Bool { get }
+    /// The Sessions that Settle offers for the Topic.
+    func settleChoices(for target: EnvironmentTarget, local: EnvironmentService?) async -> Result<[TopicSettleSession], TopicFailure>?
+    /// The Sessions and Worktrees that Forget offers for the Topic.
+    func forgetChoices(for target: EnvironmentTarget, local: EnvironmentService?)
+        async -> Result<(sessions: [TopicSettleSession], worktrees: [TopicForgetChoices.Worktree]), TopicFailure>?
+    /// Makes the Guests of an older Muxify's Locked Sessions; nil when it changed nothing or failed nothing.
+    func gatherGuests(local: EnvironmentService?) async -> TopicFailure?
+    /// Unread on visit: clears the Unread of these Topics.
+    func markTopicsRead(_ ids: Set<String>) async throws
+    /// Whether the Environment's server writes the Topics' remembered Sessions itself, so the store writes none.
+    var remembersTopics: Bool { get }
+
+    // MARK: The Host Server
+
+    /// Starts the Host Server again on a new channel, after `serverStopped`.
+    func restartServer()
+    /// The link that takes over the same master when no Host Server can run, handed over without `retire`; nil
+    /// when the link has none.
+    func sessionsOnlyLink() -> EnvironmentLink?
+
+    // MARK: Git
+
     /// Runs a Git View network command in a pseudo-terminal, so its credential prompts go to `onPrompt`.
     func startGitNetworkScript(_ script: String, arguments: [String], timeout: TimeInterval,
                                onPrompt: @escaping (GitCredentialPrompt) -> Void,
@@ -174,6 +231,45 @@ extension EnvironmentLink {
     func writeTopics<T>(_ body: @escaping (inout TopicTransaction) throws -> T) async throws -> T {
         try await writeTopics(locks: [], body)
     }
+
+    // A link whose requests run on this Mac, through the store's `EnvironmentService`, takes these.
+
+    func run(_ request: EnvironmentRequest, client: String?, local: EnvironmentService?) async -> EnvironmentResponse? {
+        await EnvironmentLinks.run(request, client: client, local: local)
+    }
+
+    var runsRequests: Bool { false }
+
+    func settleChoices(for target: EnvironmentTarget, local: EnvironmentService?) async -> Result<[TopicSettleSession], TopicFailure>? {
+        guard let local else { return nil }
+        return await Task.detached(priority: .userInitiated) { local.settleChoices(for: target) }.value
+    }
+
+    func forgetChoices(for target: EnvironmentTarget, local: EnvironmentService?)
+        async -> Result<(sessions: [TopicSettleSession], worktrees: [TopicForgetChoices.Worktree]), TopicFailure>? {
+        guard let local else { return nil }
+        return await Task.detached(priority: .userInitiated) {
+            local.forgetChoices(for: target).map { (sessions: $0.sessions, worktrees: $0.worktrees) }
+        }.value
+    }
+
+    func gatherGuests(local: EnvironmentService?) async -> TopicFailure? {
+        guard let local else { return nil }
+        return await Task.detached(priority: .userInitiated) { local.gatherGuests() }.value
+    }
+
+    func markTopicsRead(_ ids: Set<String>) async throws {
+        try await writeTopics { transaction in
+            for record in transaction.records where ids.contains(record.id) && record.isUnread {
+                try transaction.update(record.id) { $0.isUnread = false }
+            }
+        }
+    }
+
+    var remembersTopics: Bool { false }
+
+    func restartServer() {}
+    func sessionsOnlyLink() -> EnvironmentLink? { nil }
 }
 
 /// The links of the app.
@@ -188,7 +284,13 @@ enum EnvironmentLinks {
             sshExecutable = fixture
         }
         #endif
-        return SessionsOnlyEnvironmentLink(environment: environment, sshExecutable: sshExecutable)
+        return HostEnvironmentLink.overSSH(environment: environment, sshExecutable: sshExecutable)
+    }
+
+    /// Runs `request` with the store's service, off the main thread.
+    static func run(_ request: EnvironmentRequest, client: String?, local: EnvironmentService?) async -> EnvironmentResponse? {
+        guard let local else { return nil }
+        return await Task.detached(priority: .userInitiated) { local.handle(request, client: client) }.value
     }
 }
 

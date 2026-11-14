@@ -23,6 +23,13 @@ public struct PaneCommandLines: Equatable, Sendable {
         entries[pane.id].flatMap { $0.command == pane.command && !$0.line.isEmpty ? $0.line : nil }
     }
 
+    /// These command lines and `other`'s, such as every Session's put together again.
+    public func merging(_ other: PaneCommandLines) -> PaneCommandLines {
+        var lines = self
+        lines.entries.merge(other.entries) { _, theirs in theirs }
+        return lines
+    }
+
     /// The command lines of the Panes in `paneIDs` only, such as one Session's.
     public func only(_ paneIDs: Set<String>) -> PaneCommandLines {
         var lines = PaneCommandLines()

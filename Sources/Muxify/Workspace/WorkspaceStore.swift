@@ -639,10 +639,12 @@ final class WorkspaceStore {
         guard link.features.contains(.topics), topics.topicsEnabled, !changingTopic else { return }
         let cards = TopicCards.order(records: records, windows: windows, openPlaces: openPlaces)
         guard !TopicOrder.isInSections(cards, inPlay: topicConfig.inPlay) else { return }
-        guard let service = environmentService() else { return }
+        let service = environmentService()
+        guard service != nil || link.runsRequests else { return }
         changingTopic = true
+        let link = self.link
         Task { [weak self] in
-            let failure = await Task.detached(priority: .userInitiated) { service.gatherGuests() }.value
+            let failure = await link.gatherGuests(local: service)
             guard let self else { return }
             self.changingTopic = false
             self.link.reloadTopics()
@@ -780,16 +782,16 @@ final class WorkspaceStore {
         var client = link.isOnThisMac ? clientTTY ?? surface?.ttyName : clientTTY
         // Reopen at launch leaves the Location where it is, so no client switches to the Topic.
         if case .reopenedAtLaunch = presentation { client = nil }
-        guard let service = environmentService() else { changingTopic = false; return false }
+        let service = environmentService()
+        guard service != nil || link.runsRequests else { changingTopic = false; return false }
         let environment = generation
         let invocation = palette.invocation
         let link = self.link
         Task { [weak self] in
             await self?.flushTopicMemory()
             for command in browserCommands + before { _ = try? await link.view(command) }
-            let response = await Task.detached(priority: .userInitiated) {
-                service.handle(request, client: client)
-            }.value
+            let response = await link.run(request, client: client, local: service)
+                ?? .failed(TopicFailure(kind: .tmuxFailed, phase: .nothingChanged, message: "The Environment is not connected."))
             guard let self else { return }
             await self.link.topicsReloaded()
             guard self.generation == environment else {
@@ -810,6 +812,19 @@ final class WorkspaceStore {
         link.environmentService(sessionPaths: sessionPaths, topics: topicConfig, notifications: config.notifications,
                                 worktreesRoot: config.worktreesRoot)
     }
+
+    /// The Sessions that Settle offers for the Topic, read where its records are.
+    func settleChoices(for target: EnvironmentTarget) async -> Result<[TopicSettleSession], TopicFailure> {
+        await link.settleChoices(for: target, local: environmentService()) ?? .failure(Self.notConnected)
+    }
+
+    /// The Sessions and Worktrees that Forget offers for the Topic, read where its records are.
+    func forgetChoices(for target: EnvironmentTarget)
+        async -> Result<(sessions: [TopicSettleSession], worktrees: [TopicForgetChoices.Worktree]), TopicFailure> {
+        await link.forgetChoices(for: target, local: environmentService()) ?? .failure(Self.notConnected)
+    }
+
+    private static let notConnected = TopicFailure(kind: .tmuxFailed, phase: .nothingChanged, message: "The Environment is not connected.")
 
     private func present(_ response: EnvironmentResponse, as presentation: TopicPresentation, invocation: UUID) {
         var reopenedLast = false
@@ -905,6 +920,8 @@ final class WorkspaceStore {
     }
 
     private func showFailedTopicRequest(_ failure: TopicFailure) {
+        // A change whose channel ended says itself what may have happened.
+        if failure.kind == .disconnected { return showAlert("Could not change the Topic", failure.message) }
         showTopicAlert(failure.phase.summary, detail: failure.message)
     }
 
@@ -913,9 +930,14 @@ final class WorkspaceStore {
     }
 
     private func showTopicAlert(_ message: String, detail: String) {
+        showAlert("Could not change the Topic", message + " " + detail)
+    }
+
+    /// Shows an alert with an OK button. A test replaces it to read what the App Window says.
+    @ObservationIgnored var showAlert: (_ title: String, _ text: String) -> Void = { title, text in
         let alert = NSAlert()
-        alert.messageText = "Could not change the Topic"
-        alert.informativeText = message + " " + detail
+        alert.messageText = title
+        alert.informativeText = text
         alert.addButton(withTitle: "OK")
         alert.runModal()
     }
@@ -1215,6 +1237,12 @@ final class WorkspaceStore {
     @ObservationIgnored private var isLinked = false
     @ObservationIgnored private var linkSubscription: EnvironmentSubscription?
     @ObservationIgnored private var generation = UUID()
+    /// Why this attachment shows Sessions only, once its Host Server could not run; nil until then.
+    private(set) var topicsUnavailableReason: HostServerUnavailable?
+    /// When the Host Server stopped during this attachment, to count 3 within 60 s.
+    @ObservationIgnored private var serverStops: [Date] = []
+    /// The time, which a store test sets.
+    @ObservationIgnored var now: () -> Date = Date.init
     private var isTransitioning = false
     @ObservationIgnored private var reconnectWork: DispatchWorkItem?
     @ObservationIgnored private var reconnectAttempt = 0
@@ -1359,6 +1387,9 @@ final class WorkspaceStore {
         self.picksLatestSession = picksLatestSession
         startingSession = newSession
         generation = UUID()
+        // The next attachment tries the Host Server again.
+        topicsUnavailableReason = nil
+        serverStops = []
         // A link never changes target: the new Environment gets a new one. A link made by a transition that is still
         // waiting for the old one's cleanup never connected, so it is dropped.
         let oldLink = link
@@ -1400,12 +1431,7 @@ final class WorkspaceStore {
             environmentStatus = "Could not start \(environmentName)"
             return
         }
-        // Every event belongs to the link that sent it, never to one that replaced it.
-        let current = generation
-        linkSubscription = link.subscribe { [weak self] event in
-            guard let self, self.generation == current else { return }
-            self.receive(event)
-        }
+        subscribeToLink()
         if link.isOnThisMac {
             refreshSessionPaths()
             if Tmux.binary == nil {
@@ -1424,6 +1450,49 @@ final class WorkspaceStore {
             isConnected = true
             refresh(attachIfNeeded: true)
         }
+    }
+
+    /// Every event belongs to the link that sent it, never to one that replaced it.
+    private func subscribeToLink() {
+        let current = generation
+        linkSubscription = link.subscribe { [weak self] event in
+            guard let self, self.generation == current else { return }
+            self.receive(event)
+        }
+    }
+
+    /// "Topics are unavailable on <Environment>: <reason>.", once this attachment shows Sessions only.
+    var topicsUnavailableNote: String? {
+        topicsUnavailableReason.map { "Topics are unavailable on \(environmentName): \($0.reason)." }
+    }
+
+    /// The Host Server stopped while the master lives: it starts again on a new channel, until it has stopped 3
+    /// times within 60 s.
+    private func serverStopped(lastLine: String) {
+        let time = now()
+        serverStops = serverStops.filter { time.timeIntervalSince($0) < 60 } + [time]
+        if serverStops.count >= 3 {
+            fallBack(.stoppedRepeatedly(lastLine))
+        } else {
+            link.restartServer()
+        }
+    }
+
+    /// Shows Sessions only until the next attachment: the link's Sessions-only link takes over the same master and
+    /// attach, without `retire`, and `generation` drops what the Host link still sends. Nothing retries it.
+    private func fallBack(_ reason: HostServerUnavailable) {
+        topicsUnavailableReason = reason
+        Diagnostics.report("Host Server: \(environmentName): Sessions only: \(reason.reason)")
+        guard let next = link.sessionsOnlyLink() else { return }
+        generation = UUID()
+        linkSubscription?.cancel()
+        linkSubscription = nil
+        link = next
+        records = []
+        openPlaces = []
+        subscribeToLink()
+        startPolling()
+        refresh()
     }
 
     private func clearServerState() {
@@ -1541,6 +1610,15 @@ final class WorkspaceStore {
             refresh()
         case .unreachable(let error):
             readFailed(error)
+        case .featuresChanged:
+            // What the window offers reads `link.features`: its readers update with the link.
+            withMutation(keyPath: \.link) {}
+            startPolling()
+            refresh()
+        case .serverStopped(let lastLine):
+            serverStopped(lastLine: lastLine)
+        case .serverUnavailable(let reason):
+            fallBack(reason)
         }
     }
 
@@ -1939,13 +2017,12 @@ final class WorkspaceStore {
     /// request would make the next edit wait until it ends.
     private func readTopicsOnVisit(_ ids: Set<String>) {
         guard !config.notifications.manualRead, link.features.contains(.topics), !isTransitioning, !ids.isEmpty else { return }
+        let link = self.link
         Task {
             do {
-                try await link.writeTopics { transaction in
-                    for record in transaction.records where ids.contains(record.id) && record.isUnread {
-                        try transaction.update(record.id) { $0.isUnread = false }
-                    }
-                }
+                try await link.markTopicsRead(ids)
+            } catch let failure as TopicFailure {
+                showFailedTopicRequest(failure)
             } catch {
                 showTopicFailure(error)
             }
@@ -2657,7 +2734,7 @@ final class WorkspaceStore {
 
     /// Why the shown Sidebar mode cannot change, or nil when it can. Reads only the Config, as `shownSidebarMode` does.
     var sidebarModeSwitchRefusal: String? {
-        if !link.features.contains(.topics) { return "A Remote App Window shows only Sessions" }
+        if !link.features.contains(.topics) { return topicsUnavailableNote ?? "A Remote App Window shows only Sessions" }
         let sidebar = configStore.config.sidebar
         if !sidebar.topics { return "sidebar.topics is off in the Config" }
         if !sidebar.sessions { return "sidebar.sessions is off in the Config" }
@@ -2811,6 +2888,8 @@ final class WorkspaceStore {
     }
 
     private func rememberTopics(in snapshot: TmuxSnapshot) {
+        // A Host Server writes its Topics' remembered Sessions itself, from each read it makes.
+        guard !link.remembersTopics else { return }
         let continuous = snapshot.serverRunning && snapshot.serverID != nil && snapshot.serverID == memoryServerID
         memoryServerID = snapshot.serverRunning ? snapshot.serverID : nil
         for record in records {

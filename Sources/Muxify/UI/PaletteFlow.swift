@@ -503,19 +503,18 @@ extension CommandPalette {
         case .settle(let topic): target = .topic(.id(topic.id)); forget = false
         case .forget(let topic): target = .topic(.id(topic.id)); forget = true
         }
-        guard let service = store.environmentService() else { draft.choices = .failed("The Environment is not connected."); return }
         draft.choices = .loading
         let token = invocation
         Task {
             if forget {
-                let result = await Task.detached { service.forgetChoices(for: target) }.value
+                let result = await store.forgetChoices(for: target)
                 guard self.invocation == token else { return }
                 switch result {
                 case .success(let choices): draft.choices = .ready(choices.sessions, choices.worktrees)
                 case .failure(let error): draft.choices = .failed(error.message)
                 }
             } else {
-                let result = await Task.detached { service.settleChoices(for: target) }.value
+                let result = await store.settleChoices(for: target)
                 guard self.invocation == token else { return }
                 switch result {
                 case .success(let choices): draft.choices = .ready(choices, [])

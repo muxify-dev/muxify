@@ -346,6 +346,66 @@ extension EnvironmentCommand {
         }
     }
 
+    /// Whether the command only reads. A command that is not a read changes something, so a channel that ends
+    /// before its answer leaves it uncertain.
+    public var onlyReads: Bool {
+        if case .read = lane { return true }
+        return false
+    }
+
+    /// Whether the command acts on Muxify Worktree records.
+    public var isWorktreeCommand: Bool {
+        switch self {
+        case .createWorktree, .removeWorktree, .listWorktrees: true
+        default: false
+        }
+    }
+
+    /// The Action's name, as a message about it says it: "<Environment> disconnected before Settle Topic finished."
+    public var actionName: String {
+        switch self {
+        case .list: "List Topics"
+        case .show: "Show Topic"
+        case .environmentShow: "Show Environment"
+        case .listWorktrees: "List Worktrees"
+        case .tags: "Change Tags"
+        case .note: "Set Topic Note"
+        case .pin: "Pin Topic"
+        case .unpin: "Unpin Topic"
+        case .moveCard: "Move Topic"
+        case .chooseInPlay: "Choose In Play"
+        case .replaceFromBench: "Replace from Bench"
+        case .makeGuest: "Make Guest"
+        case .benchTopic: "Bench Topic"
+        case .fillOpenPlace: "Fill Open Place"
+        case .markRead: "Mark as Read"
+        case .markAllRead: "Mark All as Read"
+        case .create: "New Topic"
+        case .addSession: "Add Session"
+        case .settle: "Settle Topic"
+        case .forget: "Forget Topic"
+        case .move: "Move"
+        case .removeFromTopic: "Remove from Topic"
+        case .removeAndKill: "Remove and Kill"
+        case .rename: "Rename Topic"
+        case .reopen: "Reopen Topic"
+        case .startFresh: "Start Fresh"
+        case .moveSession: "Move Session"
+        case .sortSessions: "Sort Sessions"
+        case .newWindow: "New Window"
+        case .newSession: "New Session"
+        case .renameSession: "Rename Session"
+        case .renameWindow: "Rename Window"
+        case .moveWindow: "Move Window"
+        case .zoomPane: "Zoom Pane"
+        case .killWindow: "Kill Window"
+        case .killSession: "Kill Session"
+        case .createWorktree: "New Worktree"
+        case .removeWorktree: "Remove Worktree"
+        case .forgetSettled: "Forget Settled Topics"
+        }
+    }
+
     /// Whether the command reads or writes a Topic record whatever its target.
     var needsRecords: Bool {
         switch self {

@@ -32,6 +32,17 @@ struct SidebarView: View {
             // can finish and both lists keep their scroll positions as the Agents section appears or disappears.
             VStack(spacing: 0) {
                 if store.sessionsVisible {
+                    // Where Topics would be: why this Remote App Window shows Sessions only.
+                    if let note = store.topicsUnavailableNote {
+                        Text(note)
+                            .font(fontSize.font(11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .accessibilityIdentifier("topics-unavailable")
+                    }
                     WorkSection(store: store)
                         .frame(maxHeight: .infinity)
                 }

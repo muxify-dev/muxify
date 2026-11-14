@@ -72,6 +72,8 @@ public enum HostServer {
                 host.markRead(mark, for: request, nonce: nonce)
             case .view(let command):
                 host.view(command, for: request, nonce: nonce)
+            case .topicChoices(let choices):
+                host.choices(choices, for: request)
             }
         } catch let error as ProtocolError {
             request.fail(error)
@@ -171,9 +173,33 @@ final class HostEnvironment: @unchecked Sendable {
             }
             if !reads { await publisher.read() }
             if case .failed(let failure) = response {
-                request.fail(ProtocolError(.failed, failure.message))
+                request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
             } else {
                 request.finish(response)
+            }
+        }
+    }
+
+    /// The Sessions that Settle or Forget offers, read with the Host's Config. It changes nothing.
+    func choices(_ choices: TopicChoicesRequest, for request: ProtocolIncomingRequest) {
+        Task {
+            let config: Config
+            do { config = try await context.config() } catch {
+                return request.fail(ProtocolError(.failed, Self.message(error)))
+            }
+            let context = context
+            let result = await Self.background {
+                let service = EnvironmentService(paths: context.paths, server: context.tmux, sessionPaths: config.sessionPaths,
+                                                 topics: config.topics, notifications: config.notifications,
+                                                 worktreesRoot: config.worktreesRoot)
+                switch choices.action {
+                case .settle: return service.settleChoices(for: choices.target)
+                case .forget: return service.forgetChoices(for: choices.target).map(\.sessions)
+                }
+            }
+            switch result {
+            case .success(let sessions): request.finish(TopicChoices(sessions: sessions))
+            case .failure(let failure): request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
             }
         }
     }

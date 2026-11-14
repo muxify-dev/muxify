@@ -1,15 +1,16 @@
 import Foundation
 import MuxifyCore
 
-/// The link to a Remote Environment over today's `RemoteSSH` execs: the remote `TmuxConnection` and its scripts.
-/// It serves what a Remote App Window offers today: its Sessions and the Git View, which runs its scripts there.
-/// Topics stay on this Mac (ADR 0062), so it has no `.topics` and no records.
+/// The link to a Remote Environment over `RemoteSSH` execs: the remote `TmuxConnection` and its scripts. It serves
+/// the Sessions and the Git View, which runs its scripts there, and has no `.topics` and no records. It is the
+/// `HostEnvironmentLink`'s link to the same master, which serves until the Host Server answers and whatever the
+/// server does not serve yet, and the App Window's whole link once no Host Server can run (ADR 0087).
 @MainActor
 final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     let isOnThisMac = false
     let features: EnvironmentFeatures = [.git]
-    /// The store polls the remote server and keeps its Watch Session through `startListening` (task 06 moves this
-    /// onto the Host Server's publisher).
+    /// The store polls the remote server and keeps its Watch Session through `startListening`; once a Host Server
+    /// serves, its publisher does both.
     let publishesChanges = false
     let environment: RemoteEnvironment
     private let tmuxEvents = TmuxEvents()

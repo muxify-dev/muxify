@@ -254,12 +254,23 @@ final class RemoteSSHTests: XCTestCase {
         XCTAssertNil(RemoteSSH.text(hex: "e29c"), "Half a UTF-8 character")
     }
 
-    func testOnlyTheListenerRecordsItsPid() throws {
+    func testOnlyTheListenerWatchesTheMarkerAndTheBootstrapKillsNothing() throws {
         let directory = try TestDirectory()
         let ssh = try remote(in: directory)
-        XCTAssertTrue(ssh.command(["-C", "new-session", "-A", "-s", Tmux.watchSessionName]).arguments.last!.contains(ssh.listenerOption))
-        XCTAssertFalse(ssh.command(["list-sessions"]).arguments.last!.contains(ssh.listenerOption))
-        XCTAssertTrue(ssh.bootstrap().contains(ssh.listenerOption))
+        XCTAssertTrue(ssh.command(["-C", "new-session", "-A", "-s", Tmux.watchSessionName]).arguments.last!.contains("kill -HUP"))
+        XCTAssertFalse(ssh.command(["list-sessions"]).arguments.last!.contains("kill -HUP"))
+        XCTAssertFalse(ssh.bootstrap().contains("kill"), "the bootstrap ends no listener: each channel ends itself")
+    }
+
+    func testTheHostServerIsAChannelOfTheMasterThatNeverSignsInOnItsOwn() throws {
+        let directory = try TestDirectory()
+        let ssh = try remote(in: directory)
+        let arguments = ssh.serverInvocation().arguments
+        for option in ["ControlMaster=no", "BatchMode=yes", "ProxyCommand=/usr/bin/false"] {
+            XCTAssertTrue(arguments.contains(option), option)
+        }
+        XCTAssertTrue(arguments.contains("-T"))
+        XCTAssertTrue(arguments.last!.contains("exec \"$muxify\" server"))
     }
 
     /// The report as `od -An -v -tx1 | tr -d ' '` writes it.

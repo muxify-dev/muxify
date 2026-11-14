@@ -30,10 +30,11 @@ public enum HostCLI {
     }()
 
     /// Runs the install on the Environment's machine, off the calling thread, and gives `report` its result line
-    /// or its error, as `Host CLI: <Environment>: <line>`. Nothing waits for it, and nothing it finds changes the
-    /// connection.
+    /// or its error, as `Host CLI: <Environment>: <line>`. The terminal never waits for it. `completion` gets the
+    /// line alone once the install has run, so the Host Server starts after it.
     public static func install(over scripts: any ScriptRunning, environmentName: String, baseURL: String,
-                               report: @escaping @Sendable (String) -> Void) {
+                               report: @escaping @Sendable (String) -> Void,
+                               completion: (@Sendable (String) -> Void)? = nil) {
         DispatchQueue.global(qos: .utility).async {
             let line: String
             do {
@@ -44,6 +45,7 @@ public enum HostCLI {
                 line = "failed: \(error)"
             }
             report("Host CLI: \(environmentName): \(line)")
+            completion?(line)
         }
     }
 }

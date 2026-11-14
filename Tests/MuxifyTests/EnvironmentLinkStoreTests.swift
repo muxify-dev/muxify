@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import MuxifyCore
 
-/// The store reaches its Active Environment only through its `EnvironmentLink` (ADR draft `10-mac-side-seam`).
+/// The store reaches its Active Environment only through its `EnvironmentLink` (ADR 0087).
 @MainActor
 final class EnvironmentLinkStoreTests: XCTestCase {
     override func setUp() {
@@ -101,6 +101,86 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         XCTAssertEqual(store.openPlaces, [])
         link.send(.snapshot(snapshot([window("@3")])))
         XCTAssertEqual(store.windows.map(\.id), ["@3"])
+    }
+
+    // MARK: - The Host Server's fallback
+
+    private let box = RemoteEnvironment(name: "box", host: "box", username: "user")
+
+    /// A store on a Host link that serves Topics, whose Sessions-only link takes over when its server cannot run.
+    private func hostStore() -> (WorkspaceStore, host: FakeEnvironmentLink, sessionsOnly: FakeEnvironmentLink) {
+        let host = FakeEnvironmentLink(isOnThisMac: false, features: [.topics, .git])
+        let sessionsOnly = FakeEnvironmentLink(isOnThisMac: false, features: [.git])
+        host.fallback = sessionsOnly
+        let store = WorkspaceStore(configStore: configStore(), environment: box, defaults: isolatedDefaults()) { _ in host }
+        store.startLinkForTesting()
+        host.send(.topics(TopicContents(records: [TopicRecord(id: "a", title: "A")])))
+        return (store, host, sessionsOnly)
+    }
+
+    func testThreeFailedStartsWithinAMinuteSwapInTheSessionsOnlyLinkWithoutRetireAndBumpGeneration() {
+        let (store, host, sessionsOnly) = hostStore()
+        var time = Date(timeIntervalSince1970: 1_000)
+        store.now = { time }
+        XCTAssertEqual(store.records.map(\.id), ["a"])
+
+        host.send(.serverStopped(lastLine: "first"))
+        time += 30
+        host.send(.serverStopped(lastLine: "second"))
+        XCTAssertEqual(host.restarts, 2, "a server that stopped starts again on a new channel")
+        XCTAssertTrue(store.link === host)
+        XCTAssertNil(store.topicsUnavailableNote)
+
+        time += 29
+        host.send(.serverStopped(lastLine: "panic: third"))
+        XCTAssertTrue(store.link === sessionsOnly, "the third stop within 60 s swaps in the Sessions-only link")
+        XCTAssertEqual(host.restarts, 2, "nothing starts the server again")
+        XCTAssertFalse(host.isRetired, "the swap keeps the master and the attach: no retire")
+        XCTAssertEqual(store.records, [], "the Mac keeps no copy of the Host's Topics")
+        XCTAssertEqual(store.topicsUnavailableNote,
+                       "Topics are unavailable on box: the Host Server stopped 3 times in a minute (panic: third).")
+        XCTAssertEqual(store.sidebarModeSwitchRefusal, store.topicsUnavailableNote)
+        XCTAssertFalse(store.palette.commands.contains(.newTopic))
+
+        // `generation` moved on: what the Host link still sends is dropped, the Sessions-only link's arrives.
+        host.send(.topics(TopicContents(records: [TopicRecord(id: "late", title: "Late")])))
+        host.send(.snapshot(snapshot([window("@9")])))
+        XCTAssertEqual(store.records, [])
+        XCTAssertEqual(store.windows, [])
+        sessionsOnly.send(.snapshot(snapshot([window("@1")])))
+        XCTAssertEqual(store.windows.map(\.id), ["@1"])
+    }
+
+    func testStopsMoreThanAMinuteApartStartTheServerAgainEachTime() {
+        let (store, host, _) = hostStore()
+        var time = Date(timeIntervalSince1970: 1_000)
+        store.now = { time }
+        for line in ["first", "second", "third", "fourth"] {
+            host.send(.serverStopped(lastLine: line))
+            time += 31
+        }
+        XCTAssertEqual(host.restarts, 4)
+        XCTAssertTrue(store.link === host)
+        XCTAssertNil(store.topicsUnavailableNote)
+        XCTAssertEqual(store.records.map(\.id), ["a"])
+    }
+
+    func testAHostServerThatCannotRunFallsBackAtOnceWithTheSpecsReason() {
+        let cases: [(String, HostServerUnavailable, String)] = [
+            ("no server mode", .tooOld("muxify 1a2b3c4 1700000000"), "the Host's muxify is too old (muxify 1a2b3c4 1700000000)"),
+            ("no shared protocol", .tooOld("muxify 9f8e7d6 1900000000"), "the Host's muxify is too old (muxify 9f8e7d6 1900000000)"),
+            ("hello timeout", .noAnswer, "the Host Server did not answer"),
+            ("no Host CLI", .notInstalled("failed: no Host CLI for sunos i86pc"),
+             "the Host CLI could not be installed (failed: no Host CLI for sunos i86pc)"),
+        ]
+        for (name, unavailable, reason) in cases {
+            let (store, host, sessionsOnly) = hostStore()
+            host.send(.serverUnavailable(unavailable))
+            XCTAssertTrue(store.link === sessionsOnly, name)
+            XCTAssertEqual(host.restarts, 0, name)
+            XCTAssertFalse(host.isRetired, name)
+            XCTAssertEqual(store.topicsUnavailableNote, "Topics are unavailable on box: \(reason).", name)
+        }
     }
 
     func testARetiredLinkEndsItsRequestsCancelled() async throws {
