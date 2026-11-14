@@ -186,23 +186,23 @@ enum PaletteCommand: String, CaseIterable {
 extension CommandPalette {
     var commands: [PaletteCommand] {
         guard let store else { return [] }
-        let canChangeTopics = !store.isRemote && !store.changingTopic && store.topics.topicsEnabled
-        let hasOpenTopic = store.topicWatcher.records.contains { $0.id == store.activeTopicID && $0.settledAt == nil }
+        let canChangeTopics = store.link.features.contains(.topics) && !store.changingTopic && store.topics.topicsEnabled
+        let hasOpenTopic = store.records.contains { $0.id == store.activeTopicID && $0.settledAt == nil }
         return PaletteCommand.allCases.filter { command in
             switch command {
             case .markRead: return store.canChangeRead(.read, in: store.currentReadTarget)
             case .markUnread: return store.canChangeRead(.unread, in: store.currentReadTarget)
             case .markAllRead: return store.canChangeRead(.read, in: .environment)
-            case .newTopic: return !store.isRemote && !store.changingTopic
+            case .newTopic: return store.link.features.contains(.topics) && !store.changingTopic
             case .movePane, .moveWindow, .moveSession: return canChangeTopics && store.selectedWindow != nil
             case .movePaneWithTab: return canChangeTopics && store.selectedWindow != nil && store.currentBrowser?.activeTab != nil
             case .addSession, .settleTopic: return canChangeTopics && hasOpenTopic
             case .editTags: return canChangeTopics && hasOpenTopic && store.topicConfig.tags != nil
             case .forgetTopic, .renameTopic, .setTopicNote: return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
-            case .forgetSettledOlderThan: return canChangeTopics && store.topicWatcher.records.contains { $0.settledAt != nil }
+            case .forgetSettledOlderThan: return canChangeTopics && store.records.contains { $0.settledAt != nil }
             case .clearTopicNote:
                 return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
-                    && store.topicWatcher.records.contains { $0.id == store.activeTopicID && $0.note != nil }
+                    && store.records.contains { $0.id == store.activeTopicID && $0.note != nil }
             case .removeSessionFromTopic:
                 return canChangeTopics && hasOpenTopic && store.topics.mode == .topics
                     && store.selectedWindow?.topicID == store.activeTopicID
@@ -213,7 +213,7 @@ extension CommandPalette {
                 return topic.isPinned == (command == .unpinTopic)
             case .makeGuest: return canChangeTopics && store.currentGuestCard.map { store.guestState(of: $0) == false } == true
             case .bench: return canChangeTopics && store.currentGuestCard.map(store.canBench) == true
-            case .installExtensions: return !store.isRemote
+            case .installExtensions: return store.link.isOnThisMac
             // Only a build with an updater has it (UpdateFeed); its result shows on the Update Button.
             case .checkForUpdates: return UpdateModel.shared != nil
             case .newWorktree: return !store.changingTopic && store.sessionPaths.contains { !$0.layout.worktrees.isEmpty }

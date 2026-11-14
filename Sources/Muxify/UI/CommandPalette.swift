@@ -113,7 +113,7 @@ final class CommandPalette {
         guard let store else { return nil }
         return PaletteCatalog(windows: store.windows, agents: store.agents, sessionPaths: store.sessionPaths, folders: store.folders,
                               selectedWindowID: store.selectedWindowID, homeDirectory: store.homeDirectory,
-                              topics: store.isRemote ? nil : store.topics, records: store.topicWatcher.records,
+                              topics: store.link.features.contains(.topics) ? store.topics : nil, records: store.records,
                               lastWindowByGroup: store.topicSelection.lastWindowByGroup, visits: store.visits, commands: commands,
                               commandShortcuts: Dictionary(uniqueKeysWithValues: commands.compactMap { command in
                                   shortcut(for: command).map { (command, $0) }
@@ -149,7 +149,7 @@ final class CommandPalette {
         if store?.canChangeRead(.unread, in: item.readTarget) == true { actions.append(.markUnread) }
         switch item.ref {
         case .topic(let id, _):
-            guard let store, !store.isRemote, let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return actions }
+            guard let store, store.link.features.contains(.topics), let topic = store.records.first(where: { $0.id == id }) else { return actions }
             if topic.settledAt == nil {
                 actions += [.settleTopic, .addSessionToTopic, .rename, .setTopicNote]
                 if topic.note != nil { actions.append(.clearTopicNote) }
@@ -163,21 +163,21 @@ final class CommandPalette {
             }
             actions += [.forgetTopic]
         case .session(let session):
-            if store?.isRemote == false {
+            if store?.link.features.contains(.topics) == true {
                 actions += [.move]
                 if session.windows.first?.topicID != nil { actions += [.removeFromTopic, .removeFromTopicAndKill] }
             }
             if let guest = store?.guestState(of: .session(session.id)) { actions += [guest ? .bench : .makeGuest] }
             actions += [.newSession, .rename, .newWindow, .killSession]
         case .window(let window):
-            if store?.isRemote == false { actions += [.move]; if window.topicID != nil { actions += [.removeFromTopic] } }
+            if store?.link.features.contains(.topics) == true { actions += [.move]; if window.topicID != nil { actions += [.removeFromTopic] } }
             actions += [.rename, .newWindow, .killWindow]
         case .agent:
-            if store?.isRemote == false { actions += [.move] }
+            if store?.link.features.contains(.topics) == true { actions += [.move] }
         case .sessionPath: actions += [.newSession]
         case .choice, .command, .tag: break
         }
-        if !item.path.isEmpty { actions += [.copyFolder]; if store?.isRemote == false { actions += [.revealFolder] } }
+        if !item.path.isEmpty { actions += [.copyFolder]; if store?.link.isOnThisMac == true { actions += [.revealFolder] } }
         if item.target != nil { actions += [.copyTmuxTarget] }
         if row.paste != nil { actions += [.pasteFolder] }
         return actions
@@ -191,7 +191,7 @@ final class CommandPalette {
             case _ where moving != nil: return "Move Here"
             case .topic:
                 guard case .topic(let id, nil) = item.ref,
-                      store?.topicWatcher.records.first(where: { $0.id == id })?.sessions.isEmpty == false else { return "Go to Topic" }
+                      store?.records.first(where: { $0.id == id })?.sessions.isEmpty == false else { return "Go to Topic" }
                 return "Reopen Topic"
             case .settled: return "Reopen Topic"
             case .tag: return flow == nil ? "Show its Topics" : "Choose Tag"
@@ -385,7 +385,7 @@ final class CommandPalette {
             case .sessionPath(let target): store.newSession(in: target)
             case .session(let session):
                 guard let window = EntryWindow.ofSession(session.windows) else { return }
-                let topic = store.isRemote ? nil : store.topicWatcher.records.first { $0.id == window.topicID && $0.settledAt == nil }
+                let topic = store.link.features.contains(.topics) ? store.records.first { $0.id == window.topicID && $0.settledAt == nil } : nil
                 store.newSession(in: OpenDirectory(directory: store.folders.folder(window.sessionPath.isEmpty ? window.path : window.sessionPath),
                     name: SessionNaming.base(of: window.sessionName, topic: topic)), topic: topic?.id)
             default: break

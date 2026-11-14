@@ -31,7 +31,12 @@ final class TmuxConnection: @unchecked Sendable {
         remote = try environment.map { try RemoteSSH(environment: $0, sshExecutable: sshExecutable) }
     }
 
-    var isRemote: Bool { remote != nil }
+    /// The connection to this Mac's server.
+    init() {
+        remote = nil
+    }
+
+    var isOnThisMac: Bool { remote == nil }
 
     func invocation(_ args: [String]) throws -> CommandInvocation {
         if let remote { return remote.command(args) }
@@ -89,7 +94,7 @@ final class TmuxConnection: @unchecked Sendable {
                 .trimmingCharacters(in: .newlines) }
             self.attachmentQueue.async {
                 let result = Result {
-                    defer { if self.isRemote { attachments.removeLocalCopy() } }
+                    defer { if !self.isOnThisMac { attachments.removeLocalCopy() } }
                     let pane = try target.get()
                     guard pane.hasPrefix("%"), Int(pane.dropFirst()) != nil else { throw TmuxError.notReady }
                     var words: [String] = []
@@ -97,10 +102,10 @@ final class TmuxConnection: @unchecked Sendable {
                         switch item {
                         case .text(let text): words.append(text)
                         case .file(let file):
-                            let path = self.isRemote
-                                ? try self.runScript(TerminalAttachments.uploadScript, arguments: [file.lastPathComponent],
+                            let path = self.isOnThisMac
+                                ? file.path
+                                : try self.runScript(TerminalAttachments.uploadScript, arguments: [file.lastPathComponent],
                                                      timeout: 120, inputFile: file)
-                                : file.path
                             guard path.hasPrefix("/") else { throw TmuxError.notReady }
                             words.append(path.contains("\n") || path.contains("\r")
                                          ? Tmux.shellQuote(path) : GhosttyInput.shellEscape(path))
@@ -143,7 +148,7 @@ final class TmuxConnection: @unchecked Sendable {
     /// Serializes marker writes with removal, so a late registration cannot
     /// survive detach or retirement. Each replacement gets its own option.
     func updateLocalClient(_ client: TmuxClient?) {
-        guard !isRemote else { return }
+        guard isOnThisMac else { return }
         queue.async {
             self.lock.lock()
             let stopped = self.retired

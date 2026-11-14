@@ -2093,7 +2093,7 @@ final class GitView {
     /// The Topic records of the Environment, which are on this Mac: a Remote Environment's Git View finds none.
     /// `topicRecordsForTesting` stands in for them.
     private var topicRecords: [TopicRecord] {
-        topicRecordsForTesting ?? (store?.isRemote == true ? [] : store?.topicWatcher.records ?? [])
+        topicRecordsForTesting ?? (store?.link.features.contains(.topics) == true ? store?.records ?? [] : [])
     }
 
     @ObservationIgnored var topicRecordsForTesting: [TopicRecord]?

@@ -20,6 +20,10 @@ final class TopicWatcher: @unchecked Sendable {
     @ObservationIgnored private var timer: Timer?
     /// A timer read waits in the queue. While a read stalls, the ticks after it add no more reads.
     @ObservationIgnored private var timerReadQueued = false
+    /// Called on the main thread with what a read or write left, when it changed what shows.
+    @ObservationIgnored var onShow: ((TopicContents) -> Void)?
+
+    var contents: TopicContents { TopicContents(records: records, openPlaces: openPlaces) }
 
     /// The first read is on the calling thread, so the app starts with the records and not with an empty list.
     init(store: TopicStore = TopicStore(paths: MuxifyPaths())) {
@@ -37,6 +41,12 @@ final class TopicWatcher: @unchecked Sendable {
             timerReadQueued = true
             queue.async { self.showOnMain(self.read(ifChanged: true)) { self.timerReadQueued = false } }
         }
+    }
+
+    /// Stops the reads that look for another connection's changes.
+    func stop() {
+        timer?.invalidate()
+        timer = nil
     }
 
     /// Reads the records again. They show a moment later, and the caller does not wait.
@@ -93,7 +103,9 @@ final class TopicWatcher: @unchecked Sendable {
 
     /// Sets only what changed, so a read that finds the same records builds no view again.
     private func show(_ contents: TopicContents) {
+        guard records != contents.records || openPlaces != contents.openPlaces else { return }
         if records != contents.records { records = contents.records }
         if openPlaces != contents.openPlaces { openPlaces = contents.openPlaces }
+        onShow?(contents)
     }
 }

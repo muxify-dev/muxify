@@ -23,7 +23,7 @@ struct TopicGroupBlock: View {
             .accessibilityIdentifier(group.kind.accessibilityID)
             .accessibilityValue(group.isExpanded ? "expanded" : "collapsed")
             .contextMenu {
-                Button(Self.forgetSettled) { store.presentForgetSettled() }.disabled(store.changingTopic || store.isRemote)
+                Button(Self.forgetSettled) { store.presentForgetSettled() }.disabled(store.changingTopic || !store.link.features.contains(.topics))
             }
             // The context menu's item, for an e2e check that must not open the menu.
             .accessibilityAction(named: Self.forgetSettled) { store.presentForgetSettled() }

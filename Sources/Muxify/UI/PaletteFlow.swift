@@ -302,7 +302,7 @@ extension CommandPalette {
     var forgetSettledChoice: (days: Int, now: Date, topics: [TopicRecord])? {
         guard let store, let days = Int(query.trimmingCharacters(in: .whitespaces)), days >= 1 else { return nil }
         let now = Date()
-        return (days, now, SettledAge.settled(olderThan: days, in: store.topicWatcher.records, now: now, calendar: .autoupdatingCurrent))
+        return (days, now, SettledAge.settled(olderThan: days, in: store.records, now: now, calendar: .autoupdatingCurrent))
     }
 
     var canAccept: Bool {
@@ -333,7 +333,7 @@ extension CommandPalette {
     }
 
     func topicTitle(id: String) -> String {
-        store?.topicWatcher.records.first { $0.id == id }.map(topicTitle) ?? id
+        store?.records.first { $0.id == id }.map(topicTitle) ?? id
     }
 
     func nextTopicNote(_ ids: [String]) -> String? {
@@ -503,9 +503,9 @@ extension CommandPalette {
         case .settle(let topic): target = .topic(.id(topic.id)); forget = false
         case .forget(let topic): target = .topic(.id(topic.id)); forget = true
         }
+        guard let service = store.environmentService() else { draft.choices = .failed("The Environment is not connected."); return }
         draft.choices = .loading
         let token = invocation
-        let service = store.topicService()
         Task {
             if forget {
                 let result = await Task.detached { service.forgetChoices(for: target) }.value
@@ -527,8 +527,8 @@ extension CommandPalette {
 
     private func loadWorktreeStarts(_ draft: WorktreeStartDraft) {
         guard let store, let worktree = draft.choice.worktree else { return }
+        guard let service = store.environmentService() else { draft.starts = .failed("The Environment is not connected."); return }
         let token = invocation
-        let service = store.topicService()
         Task {
             let result = await Task.detached { service.worktreeStarts(from: worktree.folder.path) }.value
             guard self.invocation == token else { return }
@@ -542,9 +542,9 @@ extension CommandPalette {
     /// Cleanup is always opt-in, even for a clean Muxify-created Worktree.
     private func loadRemoveAndKill(_ window: TmuxWindow, draft: PaletteConfirmation) {
         guard let store, let session = SessionID(rawValue: window.sessionID) else { return }
+        guard let service = store.environmentService() else { draft.choices = .failed("The Environment is not connected."); return }
         draft.choices = .loading
         let token = invocation
-        let service = store.topicService()
         Task {
             let result = await Task.detached { service.removeAndKillWorktree(of: .session(session)) }.value
             guard self.invocation == token else { return }
