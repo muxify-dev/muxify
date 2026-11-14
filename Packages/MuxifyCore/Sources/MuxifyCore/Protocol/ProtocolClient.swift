@@ -101,6 +101,17 @@ public final class ProtocolClient: @unchecked Sendable {
         try await channel.call(request, as: Response.self)
     }
 
+    /// Sends a request now, without waiting for its `end`, so requests begun one after another go out in that order: a
+    /// pipelined run. The returned call waits for the answer, or cancels it.
+    public func begin<Request: Encodable, Response: Decodable>(_ request: Request, as response: Response.Type) -> ProtocolCall<Response> {
+        let call = ProtocolCall<Response>(cancel: CancelBox(channel: channel))
+        let id = channel.sendRequest(request, onItem: { _ in }, onEnd: { result in
+            call.settle(result.flatMap { $0.outcome(Response.self) }.mapError { $0 as Error })
+        })
+        call.sent(id)
+        return call
+    }
+
     /// Sends a request that answers `{}`.
     public func call<Request: Encodable>(_ request: Request) async throws {
         _ = try await call(request, as: ProtocolEmpty.self)
@@ -182,6 +193,47 @@ public final class ProtocolClient: @unchecked Sendable {
         lock.unlock()
         for waiter in waiting { waiter.resume(with: result.mapError { $0 as Error }) }
     }
+}
+
+/// A request that `ProtocolClient.begin` sent, whose answer may still come.
+public final class ProtocolCall<Response>: @unchecked Sendable {
+    private let cancelBox: CancelBox
+    private let lock = NSLock()
+    private var result: Result<Response, Error>?
+    private var waiters: [CheckedContinuation<Response, Error>] = []
+
+    fileprivate init(cancel: CancelBox) { cancelBox = cancel }
+
+    fileprivate func sent(_ id: Int) { cancelBox.sent(id) }
+
+    fileprivate func settle(_ result: Result<Response, Error>) {
+        lock.lock()
+        guard self.result == nil else { lock.unlock(); return }
+        self.result = result
+        let waiting = waiters
+        waiters = []
+        lock.unlock()
+        for waiter in waiting { waiter.resume(with: result) }
+    }
+
+    /// Waits for the request's `end`.
+    public var value: Response {
+        get async throws {
+            try await withCheckedThrowingContinuation { continuation in
+                lock.lock()
+                guard let result else {
+                    waiters.append(continuation)
+                    lock.unlock()
+                    return
+                }
+                lock.unlock()
+                continuation.resume(with: result)
+            }
+        }
+    }
+
+    /// Sends `cancel`. The request still ends, `cancelled` unless it had started changing something.
+    public func cancel() { cancelBox.cancel() }
 }
 
 /// The id of a request, so a cancel that comes before the id is known still reaches it.

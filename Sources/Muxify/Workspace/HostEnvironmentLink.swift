@@ -7,13 +7,12 @@ import MuxifyCore
 ///
 /// Until the server's first state arrives, and whenever it is down, the link is its `SessionsOnlyEnvironmentLink` on
 /// the same master, so the App Window shows Sessions as it does without a server. Once it arrives, the Topics, the
-/// Sessions and every change come only from the server's `environment` events, and Topic requests, Unread on visit
-/// and view commands go over the channel; the Mac keeps no copy of the Host's records. The Config comes from the
-/// server's `config` subscription, which pushes each edit on the Host. The Muxify Worktrees are the Host's too
-/// (ADR 0088): their requests go over the channel, and without a server they are refused. The Git View's reads,
-/// changes and network commands and the `repository` subscription go to the server too; a network command's askpass
-/// questions come back as `ask` requests of its operation. Session paths and uploads still go to the Sessions-only
-/// link until later tasks move them onto the server.
+/// Sessions and every change come only from the server's `environment` events, and Topic requests, Unread on visit,
+/// view commands, Session Path discovery and Attachment uploads go over the channel; the Mac keeps no copy of the
+/// Host's records. The Config comes from the server's `config` subscription, which pushes each edit on the Host. The
+/// Muxify Worktrees are the Host's too (ADR 0088): their requests go over the channel, and without a server they are
+/// refused. The Git View's reads, changes and network commands and the `repository` subscription go to the server
+/// too; a network command's askpass questions come back as `ask` requests of its operation.
 ///
 /// Programs on the Host reach this App Window through the server's own socket (ADR 0089): the server sends each
 /// `browser` and `select` request over the channel, and the link hands it to its store's handler. While this App
@@ -492,12 +491,36 @@ final class HostEnvironmentLink: EnvironmentLink {
         try await inner.script(script, arguments: arguments, timeout: timeout)
     }
 
+    /// Session Path discovery runs on the Host, through `session_paths`.
     func sessionPathOutput(roots: [SessionPathRoot], arguments: [String]) async throws -> String? {
-        try await inner.sessionPathOutput(roots: roots, arguments: arguments)
+        guard serving else { return try await inner.sessionPathOutput(roots: roots, arguments: arguments) }
+        return try await call(.sessionPaths(SessionPathsRequest(roots: roots)), as: SessionPathsOutput.self).output
     }
 
+    /// Finds the Client's Pane first, so a later switch does not move the paste, uploads each file through `upload`,
+    /// then pastes the Host paths into that Pane. A failed chunk fails the paste, and the server deletes the partial file.
     func pasteAttachments(_ attachments: TerminalAttachments, client: String) async throws -> String {
-        try await inner.pasteAttachments(attachments, client: client)
+        guard serving, let protocolClient = self.client else { return try await inner.pasteAttachments(attachments, client: client) }
+        defer { attachments.removeLocalCopy() }
+        do {
+            let pane = try await call(.view(.clientPane(client: client)), as: ViewOutput.self).output.trimmingCharacters(in: .newlines)
+            guard TerminalAttachments.isPane(pane) else { throw TmuxError.notReady }
+            var words: [String] = []
+            for item in attachments.items {
+                switch item {
+                case .text(let text): words.append(text)
+                case .file(let file):
+                    lastSent = Date()
+                    let path = try await protocolClient.upload(file, name: file.lastPathComponent)
+                    guard path.hasPrefix("/") else { throw TmuxError.notReady }
+                    words.append(TerminalAttachments.word(forPath: path))
+                }
+            }
+            try await call(.view(.paste(pane: pane, text: words.joined(separator: " "))), as: ViewOutput.self)
+            return pane
+        } catch let error as ProtocolError {
+            throw TmuxError.failed(status: 1, stderr: error.message)
+        }
     }
 
     func terminalCommand(_ arguments: [String], target: String?, picksLatestSession: Bool,

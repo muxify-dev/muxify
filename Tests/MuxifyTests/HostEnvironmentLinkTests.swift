@@ -171,6 +171,23 @@ final class HostEnvironmentLinkTests: XCTestCase {
         XCTAssertEqual(configs.count, count + 1, "Reload Config sends the served Config again")
     }
 
+    func testSessionPathDiscoveryRunsOnTheHostOnceTheServerServes() async throws {
+        let projects = directory.appendingPathComponent("host-projects")
+        try FileManager.default.createDirectory(at: projects.appendingPathComponent("on-host"), withIntermediateDirectories: true)
+        let paths = paths!, tmux = tmux!
+        let link = link { _ in HostServerContext(paths: paths, tmux: tmux, config: { Config() }) }
+        try link.connect()
+        let roots = [SessionPathRoot(path: projects.path, depth: 1)]
+        let before = try await link.sessionPathOutput(roots: roots, arguments: SessionPathDiscovery.arguments(for: roots))
+        XCTAssertNil(before, "before the server serves, the Sessions-only link runs discovery")
+
+        link.startServer()
+        try await wait("the server did not serve") { link.features.contains(.topics) }
+        let output = try await link.sessionPathOutput(roots: roots, arguments: SessionPathDiscovery.arguments(for: roots))
+        let found = SessionPathDiscovery.sessionPaths(in: try XCTUnwrap(output), roots: roots, aliases: [:]).map(\.folder.path)
+        XCTAssertEqual(found, [projects.appendingPathComponent("on-host").path])
+    }
+
     func testAnAppsInfoPlistCarriesTheBuildLineAndTheMacsHelloSendsIt() async throws {
         let app = Bundle(for: Self.self).bundleURL.deletingLastPathComponent().appendingPathComponent("Muxify.app")
         let bundle = try XCTUnwrap(Bundle(url: app), "no Muxify.app beside the tests at \(app.path)")

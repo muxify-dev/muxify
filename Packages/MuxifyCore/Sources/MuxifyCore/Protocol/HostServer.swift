@@ -20,13 +20,16 @@ public struct HostServerContext: @unchecked Sendable {
     public var gitWriter: GitWriter
     /// Runs the Git View's commands that talk to a remote on the Host, with this `muxify` as their askpass helper.
     public var gitNetwork: GitNetworkRunner
+    /// Where uploads go: the Host's `TMPDIR`, else `/tmp`.
+    public var temporaryDirectory: String
 
     public init(paths: MuxifyPaths = MuxifyPaths(), tmux: TmuxServer = .local,
                 config: (@Sendable () async throws -> Config)? = nil,
                 startControlClient: @escaping TmuxControlClientStart = PipeControlClient.start,
                 home: String = NSHomeDirectory(),
                 socketID: String = String(getpid()),
-                git: GitReader = GitReader(), gitWriter: GitWriter = GitWriter(), gitNetwork: GitNetworkRunner? = nil) {
+                git: GitReader = GitReader(), gitWriter: GitWriter = GitWriter(), gitNetwork: GitNetworkRunner? = nil,
+                temporaryDirectory: String? = nil) {
         self.paths = paths
         self.tmux = tmux
         self.home = home
@@ -37,6 +40,8 @@ public struct HostServerContext: @unchecked Sendable {
         self.gitWriter = gitWriter
         // The helper's script goes in the state folder: a Host may mount /tmp noexec.
         self.gitNetwork = gitNetwork ?? GitNetworkRunner(helper: Bundle.main.executablePath ?? CommandLine.arguments[0], scratch: paths.state)
+        self.temporaryDirectory = temporaryDirectory
+            ?? ProcessInfo.processInfo.environment["TMPDIR"].flatMap { $0.isEmpty ? nil : $0 } ?? "/tmp"
     }
 
     /// The Config file alone, without finding SessionPaths.
@@ -50,9 +55,10 @@ public struct HostServerContext: @unchecked Sendable {
 
 /// `muxify server`: the Host Server's requests (ADR 0085). It serves `ping` and `shutdown`, the `environment`,
 /// `config` and `repository` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and
-/// Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open` and the Git View's reads, writes and network
-/// commands. Programs on the Host reach its Mac through its own socket, whose requests it sends the Mac as `MacRequest`s
-/// (ADR 0089); an askpass helper's `ask` goes to the network command that runs it, which asks the Mac.
+/// Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open`, the Git View's reads, writes and network
+/// commands, `session_paths` and `upload`. Programs on the Host reach its Mac through its own socket, whose requests it
+/// sends the Mac as `MacRequest`s (ADR 0089); an askpass helper's `ask` goes to the network command that runs it, which
+/// asks the Mac.
 public enum HostServer {
     /// A server on these handles that serves `HostRequest` against `context`.
     public static func make(input: FileHandle, output: FileHandle, build: String, silence: TimeInterval = HostProtocol.serverSilence,
@@ -172,6 +178,10 @@ public enum HostServer {
                 host.gitWrite(write, for: request)
             case .gitNetwork(let network):
                 host.gitNetwork(network, for: request, server: server)
+            case .sessionPaths(let sessionPaths):
+                host.sessionPaths(sessionPaths, for: request)
+            case .upload(let chunk):
+                host.uploads.receive(chunk, for: request)
             }
         } catch let error as ProtocolError {
             request.fail(error)
@@ -270,12 +280,14 @@ final class HostEnvironment: @unchecked Sendable {
     private var subscribers: [Int: ProtocolIncomingRequest] = [:]
     /// The `repository` subscriptions by request; `lock` guards it.
     private var watches: [Int: RepositoryWatch] = [:]
+    let uploads: HostUploads
 
     init(context: HostServerContext, socket: HostServerSocket, asks: GitAskpassRoutes, log: @escaping (String) -> Void) {
         self.context = context
         self.socket = socket
         self.asks = asks
         self.log = log
+        uploads = HostUploads(directory: context.temporaryDirectory)
     }
 
     func stop() {
@@ -287,6 +299,7 @@ final class HostEnvironment: @unchecked Sendable {
         lock.unlock()
         publisher?.stop()
         watches.forEach { $0.stop() }
+        uploads.stop()
     }
 
     // MARK: - The Git View
@@ -494,6 +507,15 @@ final class HostEnvironment: @unchecked Sendable {
             } catch {
                 request.fail(ProtocolError(.failed, Self.message(error)))
             }
+        }
+    }
+
+    /// Session Path discovery on the Host's folders, `~` being the Host's home. It changes nothing.
+    func sessionPaths(_ sessionPaths: SessionPathsRequest, for request: ProtocolIncomingRequest) {
+        Task {
+            let roots = sessionPaths.sessionPathRoots
+            let output = await Self.background { SessionPathDiscovery.output(for: roots) }
+            request.finish(SessionPathsOutput(output: output))
         }
     }
 

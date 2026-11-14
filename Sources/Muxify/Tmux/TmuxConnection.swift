@@ -99,7 +99,7 @@ final class TmuxConnection: @unchecked Sendable {
                 let result = Result {
                     defer { if !self.isOnThisMac { attachments.removeLocalCopy() } }
                     let pane = try target.get()
-                    guard pane.hasPrefix("%"), Int(pane.dropFirst()) != nil else { throw TmuxError.notReady }
+                    guard TerminalAttachments.isPane(pane) else { throw TmuxError.notReady }
                     var words: [String] = []
                     for item in attachments.items {
                         switch item {
@@ -110,8 +110,7 @@ final class TmuxConnection: @unchecked Sendable {
                                 : try self.runScript(TerminalAttachments.uploadScript, arguments: [file.lastPathComponent],
                                                      timeout: 120, inputFile: file)
                             guard path.hasPrefix("/") else { throw TmuxError.notReady }
-                            words.append(path.contains("\n") || path.contains("\r")
-                                         ? Tmux.shellQuote(path) : GhosttyInput.shellEscape(path))
+                            words.append(TerminalAttachments.word(forPath: path))
                         }
                     }
                     try executor.run(.paste(pane: pane, text: words.joined(separator: " ")))

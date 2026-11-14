@@ -38,6 +38,8 @@ Each server's control Client runs `new-session -A -s muxify-watch -f no-output,i
 - The own Client: the Mac's `hello` carries its Client marker's `nonce`. The server reads `@muxify_client_<nonce>`, and `own_client` is `null` until the marker names an attached Client. Writing the marker makes no tmux notification, so the publisher looks for it each second until it has one. A view command that acts as a Client runs only while the marker names that Client.
 - `mark_read` clears the Topic Unread of `topics` and the Agent Unread of `panes`. The Host Server's publisher writes each Topic's remembered Sessions from every snapshot it reads, so the read after `mark_read` writes them too.
 - Every command that writes reads again before its `end`, so the subscription has pushed the write's events by the time the Mac has its answer.
+- `session_paths { roots }` gives each root its own `{ path, depth }`. It answers `{ output }`: `SessionPathDiscovery`'s output, run on the Host, which the Mac reads and saves as it reads a local run's. How a SessionPath is named stays on the Mac.
+- `upload { name, offset, data, last }` answers every chunk with `{ path }`. `ProtocolClient.upload` keeps 8 chunks waiting at most. The channel hands requests to their handlers concurrently, so the server writes a chunk only once the chunks before it are written. The file is `.upload` in a private folder under the Host's `TMPDIR` until its last chunk renames it. A failed or cancelled chunk, and a server that stops with an upload unfinished, delete that folder.
 
 ## Considered Options
 

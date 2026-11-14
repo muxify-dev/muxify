@@ -174,6 +174,11 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// `GitWritten`. Each of git's and ssh's questions comes to the Mac as an `ask` of its operation while it runs. A
     /// cancelled question ends it `cancelled`; any other failure `failed` with git's words. It is never sent again.
     case gitNetwork(GitNetworkRequest)
+    /// Session Path discovery on the Host, for New Session and Add Session, answered as `SessionPathsOutput`.
+    case sessionPaths(SessionPathsRequest)
+    /// One chunk of an Attachment's upload, answered with the file's path on the Host as `UploadPath`. A failed chunk
+    /// ends `failed` and the server deletes the partial file.
+    case upload(UploadChunk)
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case ping, shutdown, subscribe, environment
@@ -187,6 +192,8 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case git
         case gitWrite = "git_write"
         case gitNetwork = "git_network"
+        case sessionPaths = "session_paths"
+        case upload
     }
 
     public init(from decoder: Decoder) throws {
@@ -211,6 +218,8 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .git: self = .git(try values.decode(GitRead.self, forKey: key))
         case .gitWrite: self = .gitWrite(try values.decode(GitWrite.self, forKey: key))
         case .gitNetwork: self = .gitNetwork(try values.decode(GitNetworkRequest.self, forKey: key))
+        case .sessionPaths: self = .sessionPaths(try values.decode(SessionPathsRequest.self, forKey: key))
+        case .upload: self = .upload(try values.decode(UploadChunk.self, forKey: key))
         }
     }
 
@@ -231,6 +240,8 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .git(let read): try values.encode(read, forKey: .git)
         case .gitWrite(let write): try values.encode(write, forKey: .gitWrite)
         case .gitNetwork(let network): try values.encode(network, forKey: .gitNetwork)
+        case .sessionPaths(let request): try values.encode(request, forKey: .sessionPaths)
+        case .upload(let chunk): try values.encode(chunk, forKey: .upload)
         }
     }
 }
@@ -404,6 +415,70 @@ public struct AdoptedWorktree: Codable, Equatable, Sendable {
         result = .skipped
         self.reason = reason
     }
+}
+
+/// `session_paths`: the roots of the Config's `sessions.paths`, each with its depth. The Host runs
+/// `SessionPathDiscovery` with them, so `~` is the Host's home.
+public struct SessionPathsRequest: Codable, Equatable, Sendable {
+    public struct Root: Codable, Equatable, Sendable {
+        /// Absolute, or starting with `~`. It may be a glob.
+        public var path: String
+        /// 0 is each matched folder itself.
+        public var depth: Int
+
+        public init(path: String, depth: Int) {
+            self.path = path
+            self.depth = depth
+        }
+    }
+
+    public var roots: [Root]
+
+    public init(roots: [SessionPathRoot]) {
+        self.roots = roots.map { Root(path: $0.path, depth: $0.depth) }
+    }
+
+    /// The roots that discovery takes. How a SessionPath is named stays with the Mac, which reads the output.
+    public var sessionPathRoots: [SessionPathRoot] { roots.map { SessionPathRoot(path: $0.path, depth: $0.depth) } }
+}
+
+/// The answer to `session_paths`: `SessionPathDiscovery`'s output, which the Mac reads and saves as it reads a local
+/// run's. Null when discovery found nothing to run or failed.
+public struct SessionPathsOutput: Codable, Equatable, Sendable {
+    public var output: String?
+
+    public init(output: String?) { self.output = output }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(output, forKey: .output)
+    }
+}
+
+/// `upload`: one chunk of an Attachment. An upload is a pipelined run of these, of at most
+/// `HostProtocol.maxChunkBytes` each, in order of `offset`; the one at offset 0 starts it, and the one with `last`
+/// publishes the whole file under `name`.
+public struct UploadChunk: Codable, Equatable, Sendable {
+    /// The file's name on the Host: one path component.
+    public var name: String
+    /// Where `data` starts in the file.
+    public var offset: Int
+    public var data: Data
+    public var last: Bool
+
+    public init(name: String, offset: Int, data: Data, last: Bool) {
+        self.name = name
+        self.offset = offset
+        self.data = data
+        self.last = last
+    }
+}
+
+/// The answer to each `upload` chunk: the path that the file has on the Host once its last chunk is written.
+public struct UploadPath: Codable, Equatable, Sendable {
+    public var path: String
+
+    public init(path: String) { self.path = path }
 }
 
 /// The answer to a `view` request: what tmux printed.

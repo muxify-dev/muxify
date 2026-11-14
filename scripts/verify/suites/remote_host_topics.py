@@ -12,13 +12,20 @@ Host's `$XDG_STATE_HOME/muxify/worktrees` (ADR 0088).
 An Agent on the Host reaches the Remote App Window through its Host Server's own socket, which
 `@muxify_browser_socket` names (ADR 0089): its Browser commands and view verbs run the CLI in a Pane of the Host's
 tmux server, with the Host's environment, as an Agent there does.
+
+The Host's Config names a Session Path root under `~`, which only the Host's home has, and the Host's `TMPDIR` is
+`remote-tmp`: New Session lists the Host's folders and a dropped file is pasted as its path on the Host, both through
+the Host Server's `session_paths` and `upload`.
 """
 
 import json
 import os
+import pathlib
 import re
 import shlex
 import subprocess
+import sys
+import time
 import unittest
 
 from scripts.verify.sandbox import DEBUG_APP, Sandbox, wait
@@ -26,6 +33,22 @@ from scripts.verify.topic_records import TopicRecords
 
 CLI = DEBUG_APP/'Contents/Resources/bin/muxify'
 OLD_BUILD = 'muxify 0123abc 1600000000'
+# A Session Path root of the Host's Config: a folder of the Host's home, not of the Mac's.
+HOST_FOLDERS = 'muxify-verify-host-folders'
+RECORDER = '''import os, pathlib, sys, termios, tty
+output, ready = map(pathlib.Path, sys.argv[1:])
+old = termios.tcgetattr(0)
+tty.setraw(0)
+os.write(1, b'\\x1b[?2004h')
+ready.touch()
+data = b''
+try:
+    while not data.endswith(b'\\x1b[201~'):
+        data += os.read(0, 1)
+    output.write_bytes(data)
+finally:
+    termios.tcsetattr(0, termios.TCSANOW, old)
+'''
 
 
 class RemoteHostTopics(unittest.TestCase):
@@ -35,12 +58,16 @@ class RemoteHostTopics(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         cls.home = home = s.root/'remote-home'
         (home/'.config/muxify').mkdir(parents=True)
-        remote_tmp = s.root/'remote-tmp'
+        cls.remote_tmp = remote_tmp = s.root/'remote-tmp'
         remote_tmp.mkdir()
+        cls.host_folder = home/HOST_FOLDERS/'host-folder-alpha'
+        cls.host_folder.mkdir(parents=True)
         cls.projects = s.root/'host-projects'
         cls.projects.mkdir()
-        # The Host's own Config: its Session Paths, where `muxify topic add-session` starts a Session.
-        (home/'.config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(cls.projects) + '/*\n')
+        # The Host's own Config: its Session Paths, where `muxify topic add-session` starts a Session, and a root under
+        # `~`, which names a folder only in the Host's home.
+        (home/'.config/muxify/config.yaml').write_text('sessions:\n  paths:\n    - path: ' + str(cls.projects) + '/*\n'
+                                                       '    - path: ~/' + HOST_FOLDERS + '/*\n')
         cls.host_store = TopicRecords(home/'.local/state/muxify')
         (s.root/'config/muxify/config.yaml').write_text(
             'remote_environments:\n  - name: Fixture\n    host: unused\n    username: unused\n')
@@ -345,6 +372,69 @@ exec /bin/sh -c "$command"
         self.s.wait_rows(lambda rs: not self.s.has('git-commit-box', rs) and not self.s.has('git-row-change:host.txt', rs),
                          'the committed change stays in the Git View', seconds=10)
         self.close_git_view()
+    def own_client_tty(self):
+        return wait(lambda: next((line.split()[1] for line in self.s.tmux('list-clients', '-F', '#{client_control_mode} #{client_tty}')
+                                  .splitlines() if line.startswith('0 ')), None), 'the Terminal\'s Client did not attach')
+
+    def open_go_to(self):
+        """Presses the Go to… menu item until the palette shows: a press while SwiftUI rebuilds the menu can miss."""
+        def opened():
+            self.s.driver('press', 'Go to…')
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                if self.s.has('palette-search'):
+                    return True
+            return False
+        wait(opened, 'Go to… did not open', seconds=20)
+
+    def test_new_session_in_a_remote_app_window_offers_the_hosts_folders(self):
+        self.use('serving')
+        # A Remote App Window whose Terminal is not up yet starts the Session through a new connection, whose Host Server
+        # serves a moment later: the next check starts the app again rather than act before it serves.
+        self.addCleanup(setattr, type(self), 'mode', None)
+        self.topic_row(self.before_launch, 'the Host Server does not serve the Remote App Window')
+        self.assertFalse((pathlib.Path.home()/HOST_FOLDERS).exists(), 'the Mac has the Host\'s folder too, so the check proves nothing')
+        self.open_go_to()
+        row = 'palette-row-session-path:' + str(self.host_folder)
+        def listed():
+            self.s.act('focus', 'palette-search')
+            self.s.act('set', 'palette-search', 'host-folder-alpha')
+            return self.s.has(row)
+        wait(listed, 'Go to… does not offer the Host\'s folder %s' % self.host_folder, seconds=20)
+        self.s.act('press', row)
+        def started():
+            listed = self.s.tmux('list-sessions', '-F', '#{session_name}|#{session_path}').splitlines()
+            return next((line for line in listed if line.split('|', 1)[1] == str(self.host_folder)), None)
+        session = wait(started, 'the Host\'s folder started no Session on the Host', seconds=20).split('|')[0]
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', '=' + session)
+        self.assertEqual(session, 'host-folder-alpha')
+
+    def test_a_dropped_file_is_pasted_as_a_path_on_the_host(self):
+        self.use('serving')
+        self.topic_row(self.before_launch, 'the Host Server does not serve the Remote App Window')
+        recorder = self.s.root/'record.py'
+        recorder.write_text(RECORDER)
+        output, ready = self.s.root/'dropped.input', self.s.root/'dropped.ready'
+        pane = self.s.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', '=start:', '-n', 'dropped',
+                           shlex.join([sys.executable, str(recorder), str(output), str(ready)]))
+        wait(ready.exists, 'the Pane recorder did not start')
+        tty = self.own_client_tty()
+        self.s.tmux('switch-client', '-c', tty, '-t', pane)
+        wait(lambda: self.s.tmux('display-message', '-p', '-c', tty, '#{pane_id}') == pane, 'the Client did not move to the recorder')
+        source = self.s.root/"Dropped ' $(file).bin"
+        content = bytes(range(256)) * 1024
+        source.write_bytes(content)
+        (self.s.root/'paste-file').write_text(str(source))
+
+        self.s.act('action', 'client-input', 'Drop Fixture File')
+        data = wait(lambda: output.read_bytes() if output.exists() else None, 'the Pane received no paste', seconds=30)
+        self.assertTrue(data.startswith(b'\x1b[200~') and data.endswith(b'\x1b[201~'), data)
+        words = shlex.split(data[6:-6].decode())
+        self.assertEqual(len(words), 1, words)
+        uploaded = pathlib.Path(words[0])
+        self.assertTrue(uploaded.is_relative_to(self.remote_tmp), 'the pasted path is not on the Host: %s' % uploaded)
+        self.assertEqual(uploaded.name, source.name)
+        self.assertEqual(uploaded.read_bytes(), content, 'the Host\'s file is not the dropped file')
 
     def test_a_fetch_from_the_git_view_asks_the_hosts_ssh_passphrase_hidden_and_the_answer_reaches_git(self):
         self.use('serving')

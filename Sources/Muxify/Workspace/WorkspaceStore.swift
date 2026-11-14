@@ -1526,6 +1526,14 @@ final class WorkspaceStore {
         Diagnostics.report("Host Server: \(environmentName): Sessions only: \(reason.reason)")
         guard let next = link.sessionsOnlyLink() else { return }
         generation = UUID()
+        // The new generation drops the completions of the reads and commands still out, which would end these and the
+        // Router's intents; the next read finds the Client where it is.
+        isRefreshing = false
+        refreshAgain = false
+        pendingReads = 0
+        readSnapshotPending = false
+        pendingReadNavigations.removeAll()
+        route(.serverChanged)
         linkSubscription?.cancel()
         linkSubscription = nil
         link = next

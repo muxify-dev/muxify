@@ -20,6 +20,8 @@ final class HostServerTests: XCTestCase {
     private var clientProcess: Process?
     private var saved: [String: String?] = [:]
     private var socket: String { directory.appendingPathComponent("s").path }
+    /// The Host's `TMPDIR`, where uploads go.
+    private var uploads: URL { directory.appendingPathComponent("tmp", isDirectory: true) }
 
     override class func setUp() {
         super.setUp()
@@ -38,6 +40,7 @@ final class HostServerTests: XCTestCase {
         unsetenv("TMUX_PANE")
         setenv("TMUX_TMPDIR", directory.path, 1)
         try tmux.run(["new-session", "-d", "-s", "work", "-x", "120", "-y", "40", "-c", directory.path])
+        try FileManager.default.createDirectory(at: uploads, withIntermediateDirectories: true)
     }
 
     override func tearDown() async throws {
@@ -288,6 +291,85 @@ final class HostServerTests: XCTestCase {
         XCTAssertEqual(worktrees.map(\.id), [id])
     }
 
+    // MARK: - Session paths
+
+    func testSessionPathsReturnsTheServersFoldersForTheRootsAndTheirDepth() async throws {
+        let projects = directory.appendingPathComponent("projects")
+        for folder in ["alpha", "beta/inner", ".hidden"] {
+            try FileManager.default.createDirectory(at: projects.appendingPathComponent(folder), withIntermediateDirectories: true)
+        }
+        let client = try await connect()
+        func folders(depth: Int) async throws -> [String] {
+            let roots = [SessionPathRoot(path: projects.path, depth: depth)]
+            let answer = try await client.call(HostRequest.sessionPaths(SessionPathsRequest(roots: roots)), as: SessionPathsOutput.self)
+            let output = try XCTUnwrap(answer.output, "discovery ran on the server and printed nothing")
+            return SessionPathDiscovery.sessionPaths(in: output, roots: roots, aliases: [:]).map { $0.folder.path }
+        }
+        let shallow = try await folders(depth: 1)
+        XCTAssertEqual(shallow, ["alpha", "beta"].map { projects.appendingPathComponent($0).path }, "a hidden folder is skipped")
+        let deep = try await folders(depth: 2)
+        XCTAssertEqual(deep, ["alpha", "beta", "beta/inner"].map { projects.appendingPathComponent($0).path })
+    }
+
+    // MARK: - Upload
+
+    func testA200KiBUploadArrivesIntactInChunksOfAtMost64KiB() async throws {
+        let bytes = Data((0..<200 * 1024).map { UInt8(truncatingIfNeeded: $0 &* 31 &+ $0 / 251) })
+        let file = directory.appendingPathComponent("local.bin")
+        try bytes.write(to: file)
+        let client = try await connect()
+
+        let path = try await client.upload(file, name: "big file.bin", window: 2)
+        let uploaded = URL(fileURLWithPath: path)
+        XCTAssertEqual(uploaded.deletingLastPathComponent().deletingLastPathComponent().resolvingSymlinksInPath().path,
+                       uploads.resolvingSymlinksInPath().path, "the file goes to the Host's TMPDIR: \(path)")
+        XCTAssertEqual(uploaded.lastPathComponent, "big file.bin")
+        XCTAssertEqual(try Data(contentsOf: uploaded), bytes, "the upload did not arrive intact")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: uploaded.deletingLastPathComponent().path), ["big file.bin"],
+                       "only the published file is left in its folder")
+        let mode = try FileManager.default.attributesOfItem(atPath: uploaded.deletingLastPathComponent().path)[.posixPermissions] as? Int
+        XCTAssertEqual(mode, 0o700, "the folder is private")
+
+        do {
+            let tooLarge = Data(count: HostProtocol.maxChunkBytes + 1)
+            _ = try await client.call(HostRequest.upload(UploadChunk(name: "large", offset: 0, data: tooLarge, last: true)), as: UploadPath.self)
+            XCTFail("a chunk over 64 KiB must be refused")
+        } catch let error as ProtocolError {
+            XCTAssertEqual(error.code, .failed)
+        }
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: uploads.path).count, 1, "the refused upload left a folder")
+    }
+
+    func testAFailedChunkFailsTheUploadAndLeavesNoPartialFile() async throws {
+        let client = try await connect()
+        let chunk = Data(repeating: 7, count: HostProtocol.maxChunkBytes)
+        let first = client.begin(HostRequest.upload(UploadChunk(name: "partial.bin", offset: 0, data: chunk, last: false)), as: UploadPath.self)
+        // A chunk that overlaps what was written fails the run.
+        let overlapping = client.begin(HostRequest.upload(UploadChunk(name: "partial.bin", offset: 10, data: chunk, last: false)), as: UploadPath.self)
+        let later = client.begin(HostRequest.upload(UploadChunk(name: "partial.bin", offset: 2 * chunk.count, data: chunk, last: true)), as: UploadPath.self)
+        let path = try await first.value.path
+        for call in [overlapping, later] {
+            do {
+                _ = try await call.value
+                XCTFail("a chunk of a failed upload must fail")
+            } catch let error as ProtocolError {
+                XCTAssertEqual(error.code, .failed)
+            }
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: URL(fileURLWithPath: path).deletingLastPathComponent().path),
+                       "the failed upload left its partial file")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: uploads.path), [])
+
+        // A channel that ends mid-upload deletes the partial file too.
+        let started = client.begin(HostRequest.upload(UploadChunk(name: "cut.bin", offset: 0, data: chunk, last: false)), as: UploadPath.self)
+        _ = try await started.value
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: uploads.path).count, 1)
+        client.close()
+        try await wait("an upload cut off by the channel's end left its partial file") {
+            (try? FileManager.default.contentsOfDirectory(atPath: uploads.path))?.isEmpty == true
+        }
+    }
+
     // MARK: - Helpers
 
     @discardableResult
@@ -325,7 +407,7 @@ final class HostServerTests: XCTestCase {
     private func connect(nonce: String? = nil, context: HostServerContext? = nil) async throws -> ProtocolClient {
         let up = Pipe(), down = Pipe()
         let server = HostServer.make(input: up.fileHandleForReading, output: down.fileHandleForWriting, build: "server",
-                                     context: context ?? HostServerContext(paths: paths, tmux: tmux))
+                                     context: context ?? HostServerContext(paths: paths, tmux: tmux, temporaryDirectory: uploads.path))
         server.start()
         servers.append(server)
         let client = ProtocolClient(input: down.fileHandleForReading, output: up.fileHandleForWriting, build: "client",

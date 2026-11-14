@@ -148,6 +148,26 @@ final class ProtocolWireTests: XCTestCase {
                        "the server's socket takes the bare line that muxify browser sends every socket")
     }
 
+    func testSessionPathsAndUploadArePinned() throws {
+        func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
+        let sessionPaths = HostRequest.sessionPaths(SessionPathsRequest(roots: [SessionPathRoot(path: "~/code/*", depth: 1, displayDepth: 2)]))
+        XCTAssertEqual(text(try ProtocolLine.request(id: 2, sessionPaths)),
+                       #"{"id":2,"kind":"request","request":{"session_paths":{"roots":[{"depth":1,"path":"~/code/*"}]}}}"# + "\n")
+        XCTAssertEqual(text(try ProtocolLine.ok(id: 2, SessionPathsOutput(output: "H\u{1F}/home/u\n"))),
+                       #"{"end":{"ok":{"output":"H\u001f/home/u\n"}},"id":2,"kind":"end"}"# + "\n")
+        XCTAssertEqual(text(try ProtocolLine.ok(id: 2, SessionPathsOutput(output: nil))), #"{"end":{"ok":{"output":null}},"id":2,"kind":"end"}"# + "\n")
+        let upload = HostRequest.upload(UploadChunk(name: "a.png", offset: 65536, data: Data("hi".utf8), last: true))
+        XCTAssertEqual(text(try ProtocolLine.request(id: 3, upload)),
+                       #"{"id":3,"kind":"request","request":{"upload":{"data":"aGk=","last":true,"name":"a.png","offset":65536}}}"# + "\n")
+        XCTAssertEqual(text(try ProtocolLine.ok(id: 3, UploadPath(path: "/tmp/muxify-paste.x/a.png"))),
+                       #"{"end":{"ok":{"path":"/tmp/muxify-paste.x/a.png"}},"id":3,"kind":"end"}"# + "\n")
+        for request in [sessionPaths, upload] {
+            let line = try ProtocolLine.request(id: 4, request)
+            let frame = try XCTUnwrap(try ProtocolFrame.decode(line.dropLast()))
+            XCTAssertEqual(try frame.payload(HostRequest.self), request)
+        }
+    }
+
     func testEnvironmentEventsRoundTrip() throws {
         var window = TmuxWindow(id: "@2", sessionID: "$1", sessionName: "work", index: 1, name: "fish", paneTitle: "~/w", path: "/w",
                                 command: "fish", isActive: true, paneCount: 2, hasBell: false, sessionActivity: 7, agent: "claude",
