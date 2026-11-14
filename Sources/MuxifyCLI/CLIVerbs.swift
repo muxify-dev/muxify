@@ -3,7 +3,7 @@ import MuxifyCore
 
 /// Every verb of the command line, in the order that `muxify --help` lists them.
 enum CLIVerbs {
-    static let all: [CLIVerb] = browser + session + extensions + environment + topic + window + worktree + agent + read + diagnostics
+    static let all: [CLIVerb] = browser + session + extensions + environment + topic + window + worktree + agent + read + diagnostics + server
 
     /// The verb that the words name, and the words after it. The longest match wins.
     static func verb(for arguments: ArraySlice<String>) -> (CLIVerb, ArraySlice<String>)? {
@@ -375,6 +375,25 @@ enum CLIVerbs {
             let folder = try parsed.value("--folder").map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
                 ?? DiagnosticsSummaryInvocation.defaultFolder(home: home)
             return .diagnosticsSummary(DiagnosticsSummaryInvocation(date: date, folder: folder))
+        },
+    ]
+
+    // MARK: - server
+
+    private static let server: [CLIVerb] = [
+        CLIVerb(path: .server, synopsis: "", options: [],
+                help: """
+                Runs the Host Server on stdin and stdout, which a Muxify window starts
+                over SSH: one line of JSON per message, after a MUXIFY-PROTOCOL line.
+                It logs to stderr. It exits when stdin ends, when asked to shut down, or after
+                45 s with no message (MUXIFY_SERVER_SILENCE sets other seconds).
+                """) { parsed in
+            guard parsed.operands.isEmpty else { throw CLIError.usage }
+            let silence = try parsed.environment["MUXIFY_SERVER_SILENCE"].map { word in
+                guard let seconds = TimeInterval(word), seconds > 0 else { throw CLIError("MUXIFY_SERVER_SILENCE takes seconds, e.g. 45", exitCode: 2) }
+                return seconds
+            } ?? HostProtocol.serverSilence
+            return .server(silence: silence)
         },
     ]
 

@@ -20,6 +20,8 @@ enum CLICommand: Equatable {
     case agent(AgentInvocation)
     case agentConversation(AgentConversationInvocation)
     case diagnosticsSummary(DiagnosticsSummaryInvocation)
+    /// The Host Server on stdin and stdout, which exits after `silence` seconds with no frame.
+    case server(silence: TimeInterval)
 
     static var usage: String { CLIVerbs.usage }
 
@@ -142,6 +144,7 @@ enum CLICommand: Equatable {
         case .agent(let invocation): try await invocation.run()
         case .agentConversation(let invocation): try invocation.run(using: runner)
         case .diagnosticsSummary(let invocation): try invocation.run()
+        case .server(let silence): return await HostServer.run(build: BuildStamp.versionLine, silence: silence).exitCode
         }
         return 0
     }

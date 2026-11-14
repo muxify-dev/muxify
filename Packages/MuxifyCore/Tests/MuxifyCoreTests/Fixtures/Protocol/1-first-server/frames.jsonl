@@ -1,0 +1,12 @@
+{"hello":{"build":"muxify 1a2b3c4 1763100000","capabilities":[],"min_protocol":1,"protocol":1},"id":0,"kind":"hello"}
+{"hello":{"build":"muxify 1a2b3c4 1763100000","capabilities":[],"protocol":1},"id":0,"kind":"hello"}
+{"id":1,"kind":"request","request":{"ping":{}}}
+{"id":2,"kind":"request","request":{"shutdown":{}}}
+{"id":3,"item":{"data":"aGVsbG8="},"kind":"item"}
+{"end":{"ok":{}},"id":1,"kind":"end"}
+{"end":{"error":{"code":"unsupported","message":"this muxify does not know the request frob"}},"id":4,"kind":"end"}
+{"end":{"error":{"code":"invalid","message":"m"}},"id":5,"kind":"end"}
+{"end":{"error":{"code":"cancelled","message":"cancelled"}},"id":6,"kind":"end"}
+{"end":{"error":{"code":"unavailable","message":"the subscriber fell behind"}},"id":7,"kind":"end"}
+{"end":{"error":{"code":"failed","message":"m"}},"id":8,"kind":"end"}
+{"id":6,"kind":"cancel"}
