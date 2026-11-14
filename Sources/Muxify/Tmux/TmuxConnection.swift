@@ -165,7 +165,7 @@ final class TmuxConnection: @unchecked Sendable {
                 }
             }
             guard let client, !client.isControl else { return }
-            let option = "@muxify_client_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            let option = ClientMarker.option(nonce: UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
             let value = [String(client.pid), client.tty, NSHomeDirectory(), Tmux.hostName, "local"]
                 .joined(separator: Tmux.separator)
             self.localMarker = (option, client.pid, false)

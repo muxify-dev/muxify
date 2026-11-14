@@ -21,7 +21,7 @@ enum CLICommand: Equatable {
     case agentConversation(AgentConversationInvocation)
     case diagnosticsSummary(DiagnosticsSummaryInvocation)
     /// The Host Server on stdin and stdout, which exits after `silence` seconds with no frame.
-    case server(silence: TimeInterval)
+    case server(silence: TimeInterval, paths: MuxifyPaths)
 
     static var usage: String { CLIVerbs.usage }
 
@@ -144,7 +144,12 @@ enum CLICommand: Equatable {
         case .agent(let invocation): try await invocation.run()
         case .agentConversation(let invocation): try invocation.run(using: runner)
         case .diagnosticsSummary(let invocation): try invocation.run()
-        case .server(let silence): return await HostServer.run(build: BuildStamp.versionLine, silence: silence).exitCode
+        case .server(let silence, let paths):
+            // The Host's Config, with its SessionPaths found as `topic session-paths` finds them, read for each request.
+            let context = HostServerContext(paths: paths, config: {
+                try await ConfigSessions.load(paths.configFile, cache: SessionPathCache(file: paths.sessionPathCache(remote: nil)))
+            })
+            return await HostServer.run(build: BuildStamp.versionLine, silence: silence, context: context).exitCode
         }
         return 0
     }

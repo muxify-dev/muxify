@@ -41,14 +41,21 @@ public struct EnvironmentServer: Equatable {
     public var clients: [TmuxClient]
     public var lastWindowID: String?
     public var isRunning: Bool
-    /// `#{pid}:#{start_time}`, which changes when another server takes the socket.
+    /// `#{pid}:#{start_time}`, which changes when another server takes the socket. A subscriber stamps it as the
+    /// `sourceID` of what it shows.
     public var serverID: String?
     public var socketPath: String?
     public var browserSocket: String?
     public var home: String
+    /// The name of the machine that the server runs on.
+    public var hostName: String
+    /// The subscriber's own Client, which its Client marker names; nil until the attach writes the marker, or when
+    /// the publisher reads no marker.
+    public var ownClient: ViewCommandExecutor.Client?
 
     public init(clients: [TmuxClient] = [], lastWindowID: String? = nil, isRunning: Bool, serverID: String? = nil,
-                socketPath: String? = nil, browserSocket: String? = nil, home: String) {
+                socketPath: String? = nil, browserSocket: String? = nil, home: String, hostName: String = Tmux.hostName,
+                ownClient: ViewCommandExecutor.Client? = nil) {
         self.clients = clients
         self.lastWindowID = lastWindowID
         self.isRunning = isRunning
@@ -56,6 +63,8 @@ public struct EnvironmentServer: Equatable {
         self.socketPath = socketPath
         self.browserSocket = browserSocket
         self.home = home
+        self.hostName = hostName
+        self.ownClient = ownClient
     }
 }
 
@@ -73,6 +82,14 @@ public struct EnvironmentState: Equatable {
         TopicContents(records: topics.values.sorted { $0.id < $1.id }, openPlaces: openPlaces)
     }
 
+    /// The events of every key, as the first item of a subscription carries them.
+    public var all: [EnvironmentChange] {
+        sessions.sorted { $0.key < $1.key }.map { .session($0.key, $0.value) }
+            + topics.values.sorted { $0.id < $1.id }.map { .topic($0.id, $0) }
+            + [.openPlaces(openPlaces)]
+            + (server.map { [.server($0)] } ?? [])
+    }
+
     public mutating func apply(_ changes: [EnvironmentChange]) {
         for change in changes {
             switch change {
@@ -86,11 +103,13 @@ public struct EnvironmentState: Equatable {
 
     /// The events that bring this state to `snapshot`: a Session that differs, one that is gone, and the server when
     /// it differs. With `all`, every Session and the server.
-    public func changes(to snapshot: TmuxSnapshot, home: String, all: Bool = false) -> [EnvironmentChange] {
+    public func changes(to snapshot: TmuxSnapshot, home: String, hostName: String = Tmux.hostName,
+                        ownClient: ViewCommandExecutor.Client? = nil, all: Bool = false) -> [EnvironmentChange] {
         let next = Self.sessions(in: snapshot)
         let server = EnvironmentServer(clients: snapshot.clients, lastWindowID: snapshot.lastWindowID,
                                        isRunning: snapshot.serverRunning, serverID: snapshot.serverID,
-                                       socketPath: snapshot.socketPath, browserSocket: snapshot.browserSocket, home: home)
+                                       socketPath: snapshot.socketPath, browserSocket: snapshot.browserSocket, home: home,
+                                       hostName: hostName, ownClient: ownClient)
         var changes: [EnvironmentChange] = []
         for (id, session) in next.sorted(by: { $0.key < $1.key }) where all || sessions[id] != session {
             changes.append(.session(id, session))

@@ -11,7 +11,7 @@ final class RemoteSSH {
     private let sshExecutable: String
     private var ownsDirectory = false
     var socketPath: String { directory.appendingPathComponent("s").path }
-    var markerOption: String { "@muxify_client_\(nonce)" }
+    var markerOption: String { ClientMarker.option(nonce: nonce) }
     /// The PID of this connection's control-mode listener (`tmux -C`).
     var listenerOption: String { "@muxify_listener_\(nonce)" }
     private var exitFile: URL { directory.appendingPathComponent("exit") }

@@ -28,6 +28,8 @@ public final class ProtocolServer: @unchecked Sendable {
     private let log: (String) -> Void
     private let lock = NSLock()
     private var exit: Exit?
+    /// The exit that `stop` asked for, which comes once what was queued is written.
+    private var stopping: Exit?
     private var peer: ProtocolHello?
     private var waiters: [CheckedContinuation<Exit, Never>] = []
     private var timer: DispatchSourceTimer?
@@ -47,7 +49,11 @@ public final class ProtocolServer: @unchecked Sendable {
             handler(request, self)
         }
         channel.onClose { [weak self] reason in
-            self?.finish(reason == .inputEnded ? .inputEnded : .failed(reason.message))
+            guard let self else { return }
+            self.lock.lock()
+            let stopping = self.stopping
+            self.lock.unlock()
+            self.finish(stopping ?? (reason == .inputEnded ? .inputEnded : .failed(reason.message)))
         }
     }
 
@@ -79,9 +85,12 @@ public final class ProtocolServer: @unchecked Sendable {
         return peer
     }
 
-    /// Writes what is queued, such as the `end` of `shutdown`, then exits.
+    /// Writes what is queued, such as the `end` of `shutdown`, then exits: `wait` returns once it is written, so a
+    /// process that exits then has sent it.
     public func stop(_ exit: Exit) {
-        finish(exit)
+        lock.lock()
+        if stopping == nil { stopping = exit }
+        lock.unlock()
         channel.closeWhenFlushed()
     }
 
@@ -132,41 +141,6 @@ public final class ProtocolServer: @unchecked Sendable {
         case .shutdown: "asked to shut down"
         case .silence: "no frame came in time"
         case .failed(let reason): reason
-        }
-    }
-}
-
-/// `muxify server`: the Host Server's requests. Protocol 1 serves `ping` and `shutdown`; later tasks add the domain
-/// commands and subscriptions.
-public enum HostServer {
-    /// A server on these handles that serves `HostRequest`.
-    public static func make(input: FileHandle, output: FileHandle, build: String, silence: TimeInterval = HostProtocol.serverSilence,
-                            log: @escaping (String) -> Void = { _ in }) -> ProtocolServer {
-        ProtocolServer(input: input, output: output, build: build, silence: silence, log: log, handler: serve)
-    }
-
-    /// Runs a server on stdin and stdout until it exits, logging to stderr.
-    public static func run(build: String, silence: TimeInterval = HostProtocol.serverSilence) async -> ProtocolServer.Exit {
-        let server = make(input: .standardInput, output: .standardOutput, build: build, silence: silence) { line in
-            FileHandle.standardError.write(Data((line + "\n").utf8))
-        }
-        server.start()
-        return await server.wait()
-    }
-
-    static func serve(_ request: ProtocolIncomingRequest, server: ProtocolServer) {
-        do {
-            switch try request.body(HostRequest.self) {
-            case .ping:
-                request.finish()
-            case .shutdown:
-                request.finish()
-                server.stop(.shutdown)
-            }
-        } catch let error as ProtocolError {
-            request.fail(error)
-        } catch {
-            request.fail(ProtocolError(.invalid, "\(error)"))
         }
     }
 }

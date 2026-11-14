@@ -46,13 +46,14 @@ public final class ProtocolClient: @unchecked Sendable {
     private var outcome: Result<Session, Failure>?
     private var waiters: [CheckedContinuation<Session, Error>] = []
 
-    /// Starts reading at once. `onRequest` serves the requests that the server starts; without it they are answered
-    /// `unsupported`.
+    /// Starts reading at once. `nonce` is that of the App Window's Client marker, which the server reads to name
+    /// the App Window's own Client. `onRequest` serves the requests that the server starts; without it they are
+    /// answered `unsupported`.
     public init(input: FileHandle, output: FileHandle, build: String, capabilities: [String] = HostProtocol.capabilities,
                 protocols: ClosedRange<Int> = HostProtocol.supported, helloTimeout: TimeInterval = HostProtocol.helloTimeout,
-                queueCapacity: Int = 256, onRequest: ((ProtocolIncomingRequest) -> Void)? = nil) {
+                nonce: String? = nil, queueCapacity: Int = 256, onRequest: ((ProtocolIncomingRequest) -> Void)? = nil) {
         channel = ProtocolChannel(input: input, output: output, awaitingMagic: true, queueCapacity: queueCapacity)
-        hello = ProtocolHello(protocolVersion: protocols.upperBound, build: build, capabilities: capabilities)
+        hello = ProtocolHello(protocolVersion: protocols.upperBound, build: build, capabilities: capabilities, nonce: nonce)
         self.protocols = protocols
         channel.onRequest = onRequest
         channel.onHello = { [weak self] hello in self?.received(hello) }

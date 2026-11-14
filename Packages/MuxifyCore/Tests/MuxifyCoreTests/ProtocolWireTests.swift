@@ -42,6 +42,66 @@ final class ProtocolWireTests: XCTestCase {
         XCTAssertEqual(text(ProtocolLine.magic), "MUXIFY-PROTOCOL\n")
     }
 
+    func testTheEnvironmentSurfaceIsPinned() throws {
+        func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
+        XCTAssertEqual(text(try ProtocolLine.hello(ProtocolHello(protocolVersion: 1, build: "c", nonce: "0a1b"))),
+                       #"{"hello":{"build":"c","capabilities":[],"nonce":"0a1b","protocol":1},"id":0,"kind":"hello"}"# + "\n")
+        XCTAssertEqual(text(try ProtocolLine.request(id: 2, HostRequest.subscribe(.environment))),
+                       #"{"id":2,"kind":"request","request":{"subscribe":{"environment":{}}}}"# + "\n")
+        XCTAssertEqual(text(try ProtocolLine.request(id: 3, HostRequest.markRead(MarkRead(topics: ["t1"], panes: ["%3", "%4"])))),
+                       #"{"id":3,"kind":"request","request":{"mark_read":{"panes":["%3","%4"],"topics":["t1"]}}}"# + "\n")
+        XCTAssertEqual(text(try ProtocolLine.request(id: 4, HostRequest.view(.splitPane(target: "%3", side: .right)))),
+                       #"{"id":4,"kind":"request","request":{"view":{"split_pane":{"side":"right","target":"%3"}}}}"# + "\n")
+        XCTAssertEqual(text(try ProtocolLine.ok(id: 4, ViewOutput(output: "%5\n"))), #"{"end":{"ok":{"output":"%5\n"}},"id":4,"kind":"end"}"# + "\n")
+        XCTAssertEqual(text(try ProtocolLine.request(id: 5, HostRequest.environment(EnvironmentRequest(.create(title: "T"))))),
+                       text(try ProtocolLine.request(id: 5, ["environment": EnvironmentRequest(.create(title: "T"))])),
+                       "an environment request carries the EnvironmentRequest as it is")
+
+        let server = EnvironmentServer(clients: [TmuxClient(tty: "/dev/pts/1", sessionID: "$1", windowID: "@2", pid: 42)],
+                                       lastWindowID: "@2", isRunning: true, serverID: "100:1763100000",
+                                       socketPath: "/tmp/tmux-1000/default", home: "/home/u", hostName: "box",
+                                       ownClient: ViewCommandExecutor.Client(tty: "/dev/pts/1", pid: 42))
+        XCTAssertEqual(text(try ProtocolLine.item(id: 2, EnvironmentItem(changes: [.server(server)]))),
+                       #"{"id":2,"item":{"changes":[{"server":{"browser_socket":null,"clients":[{"control":false,"pid":42,"session_id":"$1","tty":"/dev/pts/1","window_id":"@2"}],"home":"/home/u","host_name":"box","last_window_id":"@2","own_client":{"pid":42,"tty":"/dev/pts/1"},"running":true,"server_id":"100:1763100000","socket_path":"/tmp/tmux-1000/default"}}]},"kind":"item"}"# + "\n")
+        var before = server
+        before.ownClient = nil
+        XCTAssertTrue(text(try ProtocolLine.item(id: 2, EnvironmentItem(changes: [.server(before)]))).contains(#""own_client":null"#),
+                      "own_client is null before the marker names a Client")
+        XCTAssertEqual(text(try ProtocolLine.item(id: 2, EnvironmentItem(changes: [.session("$1", nil), .topic("t1", nil)]))),
+                       #"{"id":2,"item":{"changes":[{"session":"$1","value":null},{"topic":"t1","value":null}]},"kind":"item"}"# + "\n")
+    }
+
+    func testEnvironmentEventsRoundTrip() throws {
+        var window = TmuxWindow(id: "@2", sessionID: "$1", sessionName: "work", index: 1, name: "fish", paneTitle: "~/w", path: "/w",
+                                command: "fish", isActive: true, paneCount: 2, hasBell: false, sessionActivity: 7, agent: "claude",
+                                storedBrowser: StoredBrowser(tabURLs: ["https://a"], activeTab: 0), openRequests: ["https://b"])
+        window.topicID = "t1"
+        window.savedSessionID = "s1"
+        window.lockOrder = 1.5
+        window.layout = "abcd,120x40,0,0"
+        let pane = TmuxPane(id: "%3", windowID: "@2", index: 1, isActive: true, title: "t", path: "/w", command: "node",
+                            agent: "", agentStatus: "", unread: true, tty: "/dev/pts/1")
+        var record = TopicRecord(id: "t1", title: "Topic")
+        record.isUnread = true
+        let changes: [EnvironmentChange] = [
+            .session("$1", EnvironmentSession(windows: [window], panes: [pane])), .session("$9", nil),
+            .topic("t1", record), .topic("t2", nil), .openPlaces([]),
+            .server(EnvironmentServer(isRunning: false, home: "/home/u", hostName: "box")),
+        ]
+        let line = try ProtocolLine.item(id: 1, EnvironmentItem(changes: changes))
+        let decoded = try XCTUnwrap(try ProtocolFrame.decode(line.dropLast())).payload(EnvironmentItem.self)
+        XCTAssertEqual(decoded.changes.map(\.key), changes.map(\.key))
+        guard case .session(_, let session?) = decoded.changes[0] else { return XCTFail("no session") }
+        XCTAssertEqual(session.panes, [pane])
+        XCTAssertEqual(session.windows.first?.id, window.id)
+        XCTAssertEqual(session.windows.first?.topicID, "t1")
+        XCTAssertEqual(session.windows.first?.lockOrder, 1.5)
+        XCTAssertEqual(session.windows.first?.storedBrowser, window.storedBrowser)
+        XCTAssertEqual(session.windows.first?.openRequests, ["https://b"])
+        XCTAssertEqual(decoded.changes[2], .topic("t1", record))
+        XCTAssertEqual(decoded.changes[5], changes[5])
+    }
+
     func testAFrameIsOneLineEvenWhenItsStringsHoldNewlines() throws {
         let line = ProtocolLine.error(id: 1, ProtocolError(.failed, "one\ntwo\r\nthree"))
         XCTAssertEqual(line.filter { $0 == UInt8(ascii: "\n") }.count, 1)

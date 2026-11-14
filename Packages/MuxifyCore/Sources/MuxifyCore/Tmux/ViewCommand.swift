@@ -44,7 +44,7 @@ public struct PaneUnread: Codable, Hashable, Sendable {
 }
 
 /// The App Window's own tmux commands, which ADR 0039 gives no mirror: what it does to the Window it shows, its
-/// Panes, its Client and the Browser state on its Windows (ADR draft `09-message-surface`). The app sends these and
+/// Panes, its Client and the Browser state on its Windows (ADR 0085). The app sends these and
 /// never a raw tmux argument list; `ViewCommandExecutor` turns each into tmux commands on whatever machine runs it.
 public enum ViewCommand: Codable, Hashable, Sendable {
     /// Makes `target` its Window's active Pane, or, with `move`, the Pane in that direction from it. For

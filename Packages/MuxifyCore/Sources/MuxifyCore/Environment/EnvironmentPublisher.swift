@@ -1,6 +1,6 @@
 import Foundation
 
-/// The producer of the `environment` subscription (ADR draft `09-message-surface`): it reads a whole `TmuxSnapshot`
+/// The producer of the `environment` subscription (ADR 0085): it reads a whole `TmuxSnapshot`
 /// and the Topic records on this machine whenever something may have changed, compares them per key with what it sent
 /// last, and sends only the keys that changed. Its first item holds every key. The Host Server runs it on a Host, and
 /// the Local Environment's link runs it in the app.
@@ -13,6 +13,9 @@ import Foundation
 /// - `PRAGMA data_version` every 0.25 s, for another connection's writes, and each write made through `write`;
 /// - a whole read every 5 s.
 ///
+/// The Host Server's publisher also reads its Mac's Client marker, so its `server` event names that Mac's own Client,
+/// and writes the Sessions that each read gives the Topics onto their records, so the Mac writes no record itself.
+///
 /// It installs no tmux hook. It keeps the Watch Session's rule: with no user Session left it kills the Watch Session,
 /// so the server can exit, and it joins or makes it again once a user Session appears.
 ///
@@ -22,6 +25,10 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     public let server: TmuxServer
     public let topics: TopicStore
     private let startControlClient: TmuxControlClientStart
+    /// The `@muxify_client_<nonce>` option of the subscriber's own Client, or nil.
+    private let clientMarker: String?
+    /// The Config's Session order, when each read writes the Topics' remembered Sessions.
+    private let rememberingOrder: SessionOrder?
     private let delivery: DispatchQueue
     private let report: (String) -> Void
     private let queue = DispatchQueue(label: "dev.muxify.environment-publisher", qos: .userInitiated)
@@ -46,6 +53,9 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     private var readFailed = false
     private var codexPrefixes: [String] = []
     private var codexReports: [String]?
+    private var ownClient: ViewCommandExecutor.Client?
+    private var rememberedServerID: String?
+    private var rememberedWindows: [TmuxWindow] = []
 
     private let lock = NSLock()
     // `lock` guards these.
@@ -62,14 +72,19 @@ public final class EnvironmentPublisher: @unchecked Sendable {
     static let readTimeout: TimeInterval = 5
 
     /// `startControlClient` starts the control Client; the app passes one on a pty. Events go to the handler on
-    /// `delivery`.
+    /// `delivery`. `clientMarker` names the server option of the subscriber's Client marker, whose Client the
+    /// `server` event then carries. With `rememberingOrder`, each read writes the Sessions it gives each Topic onto the
+    /// Topic's record (ADR 0080), as an App Window does for the Local Environment.
     public init(server: TmuxServer, topics: TopicStore, delivery: DispatchQueue,
                 startControlClient: @escaping TmuxControlClientStart = PipeControlClient.start,
+                clientMarker: String? = nil, rememberingOrder: SessionOrder? = nil,
                 report: @escaping (String) -> Void = { _ in }) {
         self.server = server
         self.topics = topics
         self.delivery = delivery
         self.startControlClient = startControlClient
+        self.clientMarker = clientMarker
+        self.rememberingOrder = rememberingOrder
         self.report = report
     }
 
@@ -210,11 +225,36 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         serverRunning = snapshot.serverRunning
         codexPrefixes = CodexReports.prefixes(in: snapshot)
         codexReports = codexReportFiles()
-        let changes = sent.changes(to: snapshot, home: home, all: !sentSessions)
+        ownClient = clientMarker.flatMap { marker in
+            snapshot.serverRunning ? (try? run(["show-option", "-sqv", marker])).flatMap { ClientMarker.client($0, in: snapshot.clients) } : nil
+        }
+        let changes = sent.changes(to: snapshot, home: home, ownClient: ownClient, all: !sentSessions)
         sentSessions = true
         sent.apply(changes)
         keepWatchSession(snapshot)
-        return changes
+        return changes + (remember(snapshot) ? topicChanges() : [])
+    }
+
+    /// Writes the Sessions that `snapshot` gives each Topic onto its record, as `WorkspaceStore` does for the Local
+    /// Environment: the last write wins (ADR 0080). True when it wrote.
+    private func remember(_ snapshot: TmuxSnapshot) -> Bool {
+        guard let order = rememberingOrder else { return false }
+        // A Window seen before counts only on the same server: on another, its id may name another Window.
+        let continuous = snapshot.serverRunning && snapshot.serverID != nil && snapshot.serverID == rememberedServerID
+        let previously = continuous ? rememberedWindows : []
+        rememberedServerID = snapshot.serverRunning ? snapshot.serverID : nil
+        rememberedWindows = snapshot.windows
+        do {
+            let updates = try topics.read().records.compactMap { $0.remembering(snapshot, order: order, previously: previously) }
+            guard !updates.isEmpty else { return false }
+            try topics.write { transaction in
+                for record in updates { _ = try transaction.remember(record.sessions, of: record.id) }
+            }
+            return true
+        } catch {
+            report("remembering Topics: \(error)")
+            return false
+        }
     }
 
     private func topicChanges() -> [EnvironmentChange] {
@@ -264,7 +304,9 @@ public final class EnvironmentPublisher: @unchecked Sendable {
         let reportsChanged = !codexPrefixes.isEmpty && codexReportFiles() != codexReports
         let mayAttach = client == nil && ticks % Self.ticksPerAttachCheck == 0
             && (serverRunning || FileManager.default.fileExists(atPath: server.socketPath))
-        if reportsChanged || mayAttach { readSessions() }
+        // Writing the Client marker makes no notification, so it is looked for until it names a Client.
+        let awaitsOwnClient = clientMarker != nil && ownClient == nil && serverRunning && ticks % Self.ticksPerAttachCheck == 0
+        if reportsChanged || mayAttach || awaitsOwnClient { readSessions() }
     }
 
     /// The Codex reports of the snapshot's Codex Panes, by name, time and size: a report that changes has no

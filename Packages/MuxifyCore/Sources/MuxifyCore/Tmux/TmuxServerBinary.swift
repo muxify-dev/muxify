@@ -113,9 +113,13 @@ extension TmuxServerBinary {
         return length < 0 ? nil : String(decoding: buffer[..<length], as: UTF8.self)
     }
 
-    /// `/proc` files report a size of 0, so they are read to their end.
+    /// `/proc` files report a size of 0, so they are read to their end. A process that exits while its file is read
+    /// fails the read with `ESRCH`, on which `readDataToEndOfFile` traps, so the throwing read gives nil instead.
     private static func readFile(_ path: String) -> String? {
-        FileHandle(forReadingAtPath: path).map { String(decoding: $0.readDataToEndOfFile(), as: UTF8.self) }
+        guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? handle.close() }
+        guard let data = try? handle.readToEnd() else { return nil }
+        return String(decoding: data, as: UTF8.self)
     }
 }
 #else

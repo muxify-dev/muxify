@@ -393,7 +393,7 @@ enum CLIVerbs {
                 guard let seconds = TimeInterval(word), seconds > 0 else { throw CLIError("MUXIFY_SERVER_SILENCE takes seconds, e.g. 45", exitCode: 2) }
                 return seconds
             } ?? HostProtocol.serverSilence
-            return .server(silence: silence)
+            return .server(silence: silence, paths: parsed.paths)
         },
     ]
 

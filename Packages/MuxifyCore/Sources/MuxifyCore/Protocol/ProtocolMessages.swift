@@ -42,12 +42,16 @@ public struct ProtocolHello: Codable, Equatable, Sendable {
     public var build: String
     /// What this side adds to its protocol. The other side sends only what this side declared.
     public var capabilities: [String]
+    /// The client's only: the nonce of its App Window's Client marker, `@muxify_client_<nonce>`, so the server's
+    /// `server` event can name that Client.
+    public var nonce: String?
 
-    public init(protocolVersion: Int, minProtocol: Int? = nil, build: String, capabilities: [String] = []) {
+    public init(protocolVersion: Int, minProtocol: Int? = nil, build: String, capabilities: [String] = [], nonce: String? = nil) {
         self.protocolVersion = protocolVersion
         self.minProtocol = minProtocol
         self.build = build
         self.capabilities = capabilities
+        self.nonce = nonce
     }
 
     /// The protocols that a server's `hello` offers.
@@ -59,7 +63,7 @@ public struct ProtocolHello: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case protocolVersion = "protocol"
         case minProtocol = "min_protocol"
-        case build, capabilities
+        case build, capabilities, nonce
     }
 
     public init(from decoder: Decoder) throws {
@@ -68,6 +72,7 @@ public struct ProtocolHello: Codable, Equatable, Sendable {
         minProtocol = try values.decodeIfPresent(Int.self, forKey: .minProtocol)
         build = try values.decodeIfPresent(String.self, forKey: .build) ?? ""
         capabilities = try values.decodeIfPresent([String].self, forKey: .capabilities) ?? []
+        nonce = try values.decodeIfPresent(String.self, forKey: .nonce)
     }
 }
 
@@ -118,15 +123,29 @@ public struct ProtocolChunk: Codable, Equatable, Sendable {
     public init(data: Data) { self.data = data }
 }
 
-/// A request that the Mac sends to the Host Server. Later releases add cases, each behind a capability. A case
-/// that this build does not know is answered `unsupported`.
+/// A request that the Mac sends to the Host Server (ADR 0085): a typed MuxifyCore command or subscription, never
+/// a script or a raw tmux command. Later releases add cases, each behind a capability. A case that this build does
+/// not know is answered `unsupported`.
 public enum HostRequest: Codable, Equatable, Sendable {
     /// Answers `ok`. The Mac sends one every 15 s when it has sent nothing else.
     case ping
     /// Answers `ok`, then the server exits.
     case shutdown
+    /// A subscription: its items are events, the first holding the whole state.
+    case subscribe(HostSubscription)
+    /// An `EnvironmentRequest`, run by the Host's `EnvironmentService` and answered with its `EnvironmentResponse`.
+    /// A failure ends `failed` with MuxifyCore's message.
+    case environment(EnvironmentRequest)
+    /// Unread on visit: clears the Unread marks of what the App Window shows. Answers `{}`.
+    case markRead(MarkRead)
+    /// One of the App Window's own tmux commands, answered with tmux's output as `ViewOutput`.
+    case view(ViewCommand)
 
-    private enum CodingKeys: String, CodingKey, CaseIterable { case ping, shutdown }
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case ping, shutdown, subscribe, environment
+        case markRead = "mark_read"
+        case view
+    }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: ProtocolKey.self)
@@ -134,9 +153,14 @@ public enum HostRequest: Codable, Equatable, Sendable {
             let names = values.allKeys.map(\.stringValue).sorted().joined(separator: ", ")
             throw ProtocolError(.unsupported, "this muxify does not know the request \(names.isEmpty ? "{}" : names)")
         }
+        let key = ProtocolKey(known.rawValue)
         switch known {
         case .ping: self = .ping
         case .shutdown: self = .shutdown
+        case .subscribe: self = .subscribe(try values.decode(HostSubscription.self, forKey: key))
+        case .environment: self = .environment(try values.decode(EnvironmentRequest.self, forKey: key))
+        case .markRead: self = .markRead(try values.decode(MarkRead.self, forKey: key))
+        case .view: self = .view(try values.decode(ViewCommand.self, forKey: key))
         }
     }
 
@@ -145,8 +169,66 @@ public enum HostRequest: Codable, Equatable, Sendable {
         switch self {
         case .ping: try values.encode(ProtocolEmpty(), forKey: .ping)
         case .shutdown: try values.encode(ProtocolEmpty(), forKey: .shutdown)
+        case .subscribe(let subscription): try values.encode(subscription, forKey: .subscribe)
+        case .environment(let request): try values.encode(request, forKey: .environment)
+        case .markRead(let mark): try values.encode(mark, forKey: .markRead)
+        case .view(let command): try values.encode(command, forKey: .view)
         }
     }
+}
+
+/// What a `subscribe` request subscribes to. Later releases add cases (`config`, `repository`).
+public enum HostSubscription: Codable, Equatable, Sendable {
+    /// The Host's Sessions, Topic records, Open Places and server, as `EnvironmentItem`s keyed `session <id>`,
+    /// `topic <id>`, `open_places` and `server`.
+    case environment
+
+    private enum CodingKeys: String, CodingKey, CaseIterable { case environment }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: ProtocolKey.self)
+        guard let known = CodingKeys.allCases.first(where: { values.contains(ProtocolKey($0.rawValue)) }) else {
+            let names = values.allKeys.map(\.stringValue).sorted().joined(separator: ", ")
+            throw ProtocolError(.unsupported, "this muxify does not know the subscription \(names.isEmpty ? "{}" : names)")
+        }
+        switch known {
+        case .environment: self = .environment
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .environment: try values.encode(ProtocolEmpty(), forKey: .environment)
+        }
+    }
+}
+
+/// `mark_read`: Unread on visit. The server clears the Topic Unread of `topics` and the Agent Unread of `panes`,
+/// then reads the server again, which writes the Topics' remembered Sessions and sends the events of all of it.
+public struct MarkRead: Codable, Equatable, Sendable {
+    /// The ids of the Topics whose Unread the visit clears.
+    public var topics: [String]
+    /// The ids of the Agent Panes whose Unread the visit clears.
+    public var panes: [String]
+
+    public init(topics: [String] = [], panes: [String] = []) {
+        self.topics = topics
+        self.panes = panes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        topics = try values.decodeIfPresent([String].self, forKey: .topics) ?? []
+        panes = try values.decodeIfPresent([String].self, forKey: .panes) ?? []
+    }
+}
+
+/// The answer to a `view` request: what tmux printed.
+public struct ViewOutput: Codable, Equatable, Sendable {
+    public var output: String
+
+    public init(output: String) { self.output = output }
 }
 
 /// A key named at run time, such as the payload key of a frame, which is its `kind`.
