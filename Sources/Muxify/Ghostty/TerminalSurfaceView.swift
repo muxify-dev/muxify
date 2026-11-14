@@ -16,7 +16,14 @@ final class TerminalSurfaceView: NSView {
     private var lastPerformKeyEvent: TimeInterval?
     private var cursor: NSCursor = .iBeam
     private var trackingArea: NSTrackingArea?
-    private var screenObserver: NSObjectProtocol?
+    /// The window's screen and occlusion changes, while the view is in a window.
+    private var windowObservers: [NSObjectProtocol] = []
+    /// Screen reconfigurations and screen wakes, for as long as the surface lives.
+    private var displayObservers: [(center: NotificationCenter, token: NSObjectProtocol)] = []
+    /// The occlusion last sent to libghostty; nil before the first.
+    private var isWindowVisible: Bool?
+    /// Coalesces the bursts of screen-parameter changes a wake brings into one display sync.
+    private var displaySync: DispatchWorkItem?
     private(set) var isHandlingKeyDown = false
 
     static func from(_ userdata: UnsafeMutableRawPointer?) -> TerminalSurfaceView? {
@@ -62,6 +69,7 @@ final class TerminalSurfaceView: NSView {
             }
         }
         guard surface != nil else { return nil }
+        observeDisplays()
         updateColorScheme()
         registerForDraggedTypes(GhosttyInput.dropTypes)
     }
@@ -69,7 +77,9 @@ final class TerminalSurfaceView: NSView {
     required init?(coder: NSCoder) { fatalError("not supported") }
 
     deinit {
-        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+        windowObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        displayObservers.forEach { $0.center.removeObserver($0.token) }
+        displaySync?.cancel()
         if let surface { ghostty_surface_free(surface) }
     }
 
@@ -77,6 +87,7 @@ final class TerminalSurfaceView: NSView {
     func close() {
         guard let surface else { return }
         self.surface = nil
+        displaySync?.cancel()
         ghostty_surface_free(surface)
     }
 
@@ -118,15 +129,22 @@ final class TerminalSurfaceView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
-        screenObserver = nil
+        windowObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        windowObservers = []
         guard let window else { return }
-        screenObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didChangeScreenNotification, object: window, queue: .main
-        ) { [weak self] _ in self?.updateDisplayID() }
+        let center = NotificationCenter.default
+        windowObservers = [
+            center.addObserver(forName: NSWindow.didChangeScreenNotification, object: window, queue: .main) { [weak self] _ in
+                self?.updateDisplayID()
+            },
+            center.addObserver(forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main) { [weak self] _ in
+                self?.syncOcclusion()
+            },
+        ]
         updateContentScale()
         updateDisplayID()
         updateSurfaceSize()
+        syncOcclusion()
     }
 
     override func viewDidChangeBackingProperties() {
@@ -161,6 +179,54 @@ final class TerminalSurfaceView: NSView {
               let number = window?.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
         else { return }
         ghostty_surface_set_display_id(surface, number.uint32Value)
+    }
+
+    /// Tells libghostty when the window is hidden or shown, as Ghostty's own app does. The renderer stops its display
+    /// link while hidden and, when shown again, restarts it and rebuilds the frame. Screens going to sleep hide the
+    /// window, so a wake restarts the renderer instead of leaving it on a stale frame.
+    private func syncOcclusion() {
+        guard let surface, let window else { return }
+        let visible = window.occlusionState.contains(.visible)
+        guard visible != isWindowVisible else { return }
+        isWindowVisible = visible
+        ghostty_surface_set_occlusion(surface, visible)
+        if visible { syncDisplay(reason: nil) }
+    }
+
+    /// Screen reconfigurations do not move the window to another screen, so `didChangeScreenNotification` misses
+    /// them. A surface made while the Mac had no display, in a dark wake, has no display link until it is given a
+    /// display again.
+    private func observeDisplays() {
+        let app = NotificationCenter.default
+        let workspace = NSWorkspace.shared.notificationCenter
+        displayObservers = [
+            (app, app.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.scheduleDisplaySync(reason: "screen parameters changed")
+            }),
+            (workspace, workspace.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main) { [weak self] _ in
+                self?.scheduleDisplaySync(reason: "screens woke")
+            }),
+        ]
+    }
+
+    /// A wake brings a burst of screen-parameter changes; sync once, after the burst settles.
+    private func scheduleDisplaySync(reason: String) {
+        displaySync?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.syncDisplay(reason: reason) }
+        displaySync = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    /// Gives libghostty the window's display again, which creates a display link that is missing, and asks it to
+    /// draw the frame afresh. A `reason` goes to the Diagnostics log.
+    private func syncDisplay(reason: String?) {
+        displaySync = nil
+        guard let surface, window != nil else { return }
+        updateDisplayID()
+        ghostty_surface_refresh(surface)
+        guard let reason else { return }
+        let screen = window?.screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        Diagnostics.report("terminal display synced after \(reason): display \(screen.map { "\($0)" } ?? "none")")
     }
 
     private func updateColorScheme() {
