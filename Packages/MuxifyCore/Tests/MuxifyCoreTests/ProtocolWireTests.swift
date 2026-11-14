@@ -104,6 +104,26 @@ final class ProtocolWireTests: XCTestCase {
                        "an error with no TopicFailure keeps its pinned form")
     }
 
+    func testTheWorktreeRequestsAndAnswersArePinned() throws {
+        func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
+        func roundTrip(_ request: HostRequest, _ pinned: String) throws {
+            let line = text(try ProtocolLine.request(id: 9, request))
+            XCTAssertEqual(line, pinned + "\n")
+            XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(Data(line.dropLast().utf8))).payload(HostRequest.self), request)
+        }
+        try roundTrip(.worktreeStarts(WorktreeStartsRequest(from: "/src/app")),
+                      #"{"id":9,"kind":"request","request":{"worktree_starts":{"from":"/src/app"}}}"#)
+        let row = MuxifyWorktreeRecord(id: "w", repository: "/src/app", name: "fix", path: "/t/fix", branch: "fix", base: "abc",
+                                       createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+        try roundTrip(.adoptWorktrees(AdoptWorktrees(rows: [row])),
+                      #"{"id":9,"kind":"request","request":{"adopt_worktrees":{"rows":[{"base":"abc","branch":"fix","created_at":"2023-11-14T22:13:20Z","id":"w","name":"fix","path":"/t/fix","repository":"/src/app"}]}}}"#)
+        XCTAssertEqual(text(try ProtocolLine.ok(id: 9, AdoptedWorktrees(rows: [AdoptedWorktree(id: "w"), AdoptedWorktree(id: "v", skipped: "why")]))),
+                       #"{"end":{"ok":{"rows":[{"id":"w","result":"taken"},{"id":"v","reason":"why","result":"skipped"}]}},"id":9,"kind":"end"}"# + "\n")
+        XCTAssertEqual(text(try ProtocolLine.ok(id: 9, WorktreeStarts(starts: [WorktreeStartChoice(branch: "main", checkedOutAt: "/src/app"),
+                                                                                WorktreeStartChoice(branch: "x", checkedOutAt: nil)]))),
+                       #"{"end":{"ok":{"starts":[{"branch":"main","checked_out_at":"/src/app"},{"branch":"x"}]}},"id":9,"kind":"end"}"# + "\n")
+    }
+
     func testEnvironmentEventsRoundTrip() throws {
         var window = TmuxWindow(id: "@2", sessionID: "$1", sessionName: "work", index: 1, name: "fish", paneTitle: "~/w", path: "/w",
                                 command: "fish", isActive: true, paneCount: 2, hasBell: false, sessionActivity: 7, agent: "claude",

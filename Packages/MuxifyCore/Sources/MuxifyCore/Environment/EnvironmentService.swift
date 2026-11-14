@@ -17,9 +17,8 @@ public struct EnvironmentService: Sendable {
     public let topicsAvailable: Bool
     /// Runs the Muxify Worktree scripts on the Environment's machine.
     public let scripts: any ScriptRunning
-    /// Nil on this Mac, else the Remote Environment's name, which the Muxify Worktree records keep.
-    public let environmentName: String?
-    /// The Config's `worktrees.root_path`.
+    /// The Config's `worktrees.root_path` on the machine whose records this service keeps: a Host's own, never the
+    /// Mac's (ADR 0088).
     public let worktreesRoot: String?
     /// The Request that the command line runs through this service; nil for every other caller. The store writes
     /// its ledger row, and a new Topic takes its id.
@@ -28,8 +27,8 @@ public struct EnvironmentService: Sendable {
 
     public init(paths: MuxifyPaths, server: any TmuxRunning = TmuxServer.local, sessionPaths: [SessionPath] = [],
                 topics: Config.Topics = Config.Topics(), notifications: Config.Notifications = Config.Notifications(),
-                topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(),
-                environmentName: String? = nil, worktreesRoot: String? = nil, request: PendingRequest? = nil) {
+                topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(), worktreesRoot: String? = nil,
+                request: PendingRequest? = nil) {
         self.paths = paths
         self.server = server
         self.sessionPaths = sessionPaths
@@ -37,7 +36,6 @@ public struct EnvironmentService: Sendable {
         self.notifications = notifications
         self.topicsAvailable = topicsAvailable
         self.scripts = scripts
-        self.environmentName = environmentName
         self.worktreesRoot = worktreesRoot
         self.request = request
         store = TopicStore(paths: paths, inPlay: topics.inPlay, request: request)

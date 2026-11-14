@@ -152,12 +152,20 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// The Sessions that Settle or Forget offers for a Topic, as the Host's `EnvironmentService` reads them now,
     /// answered as `TopicChoices`. A failure ends `failed` with its `TopicFailure`.
     case topicChoices(TopicChoicesRequest)
+    /// New Worktree's start choices from a checkout on the Host (`git worktree list`, `for-each-ref`), answered as
+    /// `WorktreeStarts`.
+    case worktreeStarts(WorktreeStartsRequest)
+    /// The Mac's Muxify Worktree rows that wait to move to this Host (ADR 0088). The server writes each as a record
+    /// of the Host, as the import of the old record files does, and answers `AdoptedWorktrees`, one per row.
+    case adoptWorktrees(AdoptWorktrees)
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case ping, shutdown, subscribe, environment
         case markRead = "mark_read"
         case view
         case topicChoices = "topic_choices"
+        case worktreeStarts = "worktree_starts"
+        case adoptWorktrees = "adopt_worktrees"
     }
 
     public init(from decoder: Decoder) throws {
@@ -175,6 +183,8 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .markRead: self = .markRead(try values.decode(MarkRead.self, forKey: key))
         case .view: self = .view(try values.decode(ViewCommand.self, forKey: key))
         case .topicChoices: self = .topicChoices(try values.decode(TopicChoicesRequest.self, forKey: key))
+        case .worktreeStarts: self = .worktreeStarts(try values.decode(WorktreeStartsRequest.self, forKey: key))
+        case .adoptWorktrees: self = .adoptWorktrees(try values.decode(AdoptWorktrees.self, forKey: key))
         }
     }
 
@@ -188,6 +198,8 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .markRead(let mark): try values.encode(mark, forKey: .markRead)
         case .view(let command): try values.encode(command, forKey: .view)
         case .topicChoices(let choices): try values.encode(choices, forKey: .topicChoices)
+        case .worktreeStarts(let request): try values.encode(request, forKey: .worktreeStarts)
+        case .adoptWorktrees(let adopt): try values.encode(adopt, forKey: .adoptWorktrees)
         }
     }
 }
@@ -264,6 +276,58 @@ public struct TopicChoices: Codable, Equatable, Sendable {
     public var sessions: [TopicSettleSession]
 
     public init(sessions: [TopicSettleSession]) { self.sessions = sessions }
+}
+
+/// `worktree_starts`: the checkout that a new Worktree starts from.
+public struct WorktreeStartsRequest: Codable, Equatable, Sendable {
+    public var from: String
+
+    public init(from: String) { self.from = from }
+}
+
+/// The answer to `worktree_starts`: each local branch, newest commit first, with the Worktree that has it checked out.
+public struct WorktreeStarts: Codable, Equatable, Sendable {
+    public var starts: [WorktreeStartChoice]
+
+    public init(starts: [WorktreeStartChoice]) { self.starts = starts }
+}
+
+/// `adopt_worktrees`: the Mac's rows waiting to move to this Host, as records.
+public struct AdoptWorktrees: Codable, Equatable, Sendable {
+    public var rows: [MuxifyWorktreeRecord]
+
+    public init(rows: [MuxifyWorktreeRecord]) { self.rows = rows }
+}
+
+/// The answer to `adopt_worktrees`: one entry for each row, in order.
+public struct AdoptedWorktrees: Codable, Equatable, Sendable {
+    public var rows: [AdoptedWorktree]
+
+    public init(rows: [AdoptedWorktree]) { self.rows = rows }
+}
+
+/// What the Host did with one row: `taken`, so the Mac deletes its row, or `skipped` with the reason, so the Mac
+/// keeps it and sends it again on the next connect.
+public struct AdoptedWorktree: Codable, Equatable, Sendable {
+    public enum Result: String, Codable, Sendable {
+        case taken, skipped
+    }
+
+    public var id: String
+    public var result: Result
+    public var reason: String?
+
+    public init(id: String) {
+        self.id = id
+        result = .taken
+        reason = nil
+    }
+
+    public init(id: String, skipped reason: String) {
+        self.id = id
+        result = .skipped
+        self.reason = reason
+    }
 }
 
 /// The answer to a `view` request: what tmux printed.

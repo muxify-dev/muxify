@@ -88,6 +88,12 @@ enum EnvironmentLinkError: Error, Equatable, CustomStringConvertible {
         case .unsupported(let what): "\(what) is unavailable on this Environment."
         }
     }
+
+    /// What a link that lacks `.worktrees` answers a Muxify Worktree request: the Host's records are the Host CLI's
+    /// alone, so the Mac never makes or removes a Host's Worktree without its server (ADR 0088).
+    static var worktreesRefused: TopicFailure {
+        TopicFailure(kind: .unsupported, phase: .nothingChanged, message: unsupported("Muxify Worktrees").description)
+    }
 }
 
 /// One subscription to a link's events. Cancelling it stops delivery; a retired link ends it too.
@@ -213,6 +219,9 @@ protocol EnvironmentLink: AnyObject {
     func gatherGuests(local: EnvironmentService?) async -> TopicFailure?
     /// Unread on visit: clears the Unread of these Topics.
     func markTopicsRead(_ ids: Set<String>) async throws
+    /// New Worktree's start choices from the checkout at `folder`, read with git on the Environment's machine; nil
+    /// when the link can read none.
+    func worktreeStarts(from folder: String, local: EnvironmentService?) async -> Result<[WorktreeStartChoice], TopicFailure>?
     /// Whether the Environment's server writes the Topics' remembered Sessions itself, so the store writes none.
     var remembersTopics: Bool { get }
 
@@ -279,6 +288,14 @@ extension EnvironmentLink {
                 try transaction.update(record.id) { $0.isUnread = false }
             }
         }
+    }
+
+    func worktreeStarts(from folder: String, local: EnvironmentService?) async -> Result<[WorktreeStartChoice], TopicFailure>? {
+        guard let local else { return nil }
+        return await Task.detached(priority: .userInitiated) {
+            Result { try WorktreeStartChoice.read(from: folder, scripts: local.scripts) }
+                .mapError { TopicFailure(kind: .tmuxFailed, phase: .nothingChanged, message: String(describing: $0)) }
+        }.value
     }
 
     var remembersTopics: Bool { false }

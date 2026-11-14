@@ -52,22 +52,52 @@ final class HostEnvironmentLinkTests: XCTestCase {
 
     /// A link whose every channel is a pair of pipes to a new Host Server here, made with the context `context`
     /// gives for its number, from 0.
-    private func link(build: String = "muxify 0000000 0", inner: EnvironmentLink? = nil,
+    /// `serve`, when given, answers the requests in place of a Host Server. `macPaths` holds the Mac's state.
+    private func link(build: String = "muxify 0000000 0", inner: EnvironmentLink? = nil, macPaths: MuxifyPaths? = nil,
+                      serve: ((ProtocolIncomingRequest, ProtocolServer) -> Void)? = nil,
                       context: @escaping (Int) -> HostServerContext) -> HostEnvironmentLink {
         HostEnvironmentLink(
             environmentName: "box", inner: inner ?? FakeEnvironmentLink(isOnThisMac: false, features: [.git]), build: build,
             nonce: { nil }, helloTimeout: 5,
             openChannel: { [unowned self] _ in
                 let up = Pipe(), down = Pipe()
-                let server = HostServer.make(input: up.fileHandleForReading, output: down.fileHandleForWriting,
-                                             build: "muxify 1111111 1", context: context(servers.count))
+                let server = serve.map {
+                    ProtocolServer(input: up.fileHandleForReading, output: down.fileHandleForWriting, build: "muxify 1111111 1", handler: $0)
+                } ?? HostServer.make(input: up.fileHandleForReading, output: down.fileHandleForWriting,
+                                     build: "muxify 1111111 1", context: context(servers.count))
                 server.start()
                 servers.append(server)
                 serverOutputs.append(down.fileHandleForWriting)
                 let writer = up.fileHandleForWriting
                 return HostServerChannel(input: down.fileHandleForReading, output: writer, stop: { try? writer.close() })
             },
-            install: { $0(HostCLIReady(line: "current")) }, masterAlive: { true }, hostCLIVersion: { _ in nil })
+            install: { $0(HostCLIReady(line: "current")) }, masterAlive: { true }, hostCLIVersion: { _ in nil },
+            macWorktrees: MuxifyWorktreeStore(paths: macPaths ?? MuxifyPaths(environment: [
+                "XDG_STATE_HOME": directory.appendingPathComponent("mac-state").path,
+            ], home: "/nonexistent")))
+    }
+
+    /// The Mac's state, with an older Muxify's record files for `rows`, keyed by Environment, imported as rows that wait
+    /// to move, and one record of the Mac's own.
+    private func macState(waiting rows: [(String, MuxifyWorktreeRecord)]) throws -> MuxifyPaths {
+        let mac = MuxifyPaths(environment: ["XDG_STATE_HOME": directory.appendingPathComponent("mac-state").path], home: "/nonexistent")
+        try FileManager.default.createDirectory(at: mac.worktrees, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        for (environment, row) in rows {
+            var object = try XCTUnwrap(try JSONSerialization.jsonObject(with: encoder.encode(row)) as? [String: Any])
+            object["environment"] = environment
+            try JSONSerialization.data(withJSONObject: object).write(to: mac.worktrees.appendingPathComponent(row.id + ".json"))
+        }
+        try MuxifyWorktreeStore(paths: mac).write(own)
+        return mac
+    }
+
+    private let own = MuxifyWorktreeRecord(id: "mac", repository: "/Users/me/app", name: "mine", path: "/Users/me/trees/mine", branch: "mine",
+                                           base: "m", createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+
+    private func row(_ id: String, path: String) -> MuxifyWorktreeRecord {
+        MuxifyWorktreeRecord(id: id, repository: "/home/me/app", name: id, path: path, branch: id, base: "b",
+                             createdAt: Date(timeIntervalSince1970: 1_700_000_000))
     }
 
     private func wait(_ message: String, seconds: TimeInterval = 10, until condition: () -> Bool) async throws {
@@ -102,7 +132,7 @@ final class HostEnvironmentLinkTests: XCTestCase {
 
         link.startServer()
         try await wait("the server's hello and first state did not give the link its features") { link.features.contains(.topics) }
-        XCTAssertEqual(link.features, [.topics, .git])
+        XCTAssertEqual(link.features, [.topics, .git, .worktrees], "the Host's server keeps its Muxify Worktrees")
         XCTAssertTrue(link.publishesChanges, "the server's events replace the poll")
         XCTAssertEqual(Array(heard.prefix(2)), ["features", "topics"])
     }
@@ -191,6 +221,51 @@ final class HostEnvironmentLinkTests: XCTestCase {
         XCTAssertEqual(gate.second, requests, "the new server got a request: nothing is sent again after a reconnect")
         XCTAssertFalse(try TopicStore(paths: paths).read().records.contains { $0.title == "Lost" })
         XCTAssertEqual(alerts.count, 1)
+    }
+}
+
+extension HostEnvironmentLinkTests {
+    // MARK: - The Mac's waiting Worktree rows move to the Host (ADR 0088)
+
+    func testAfterHelloTheMacDeletesOnlyTheRowsTheHostTook() async throws {
+        let paths = paths!, tmux = tmux!
+        let host = MuxifyWorktreeStore(paths: paths)
+        try host.write(row("clash", path: "/home/me/trees/clash"))
+        let mac = try macState(waiting: [("box", row("new", path: "/home/me/trees/new")),
+                                         ("box", row("clash", path: "/home/me/trees/other")),
+                                         ("box", row("twin", path: "/home/me/trees/clash")),
+                                         ("gone", row("stays", path: "/home/me/trees/stays"))])
+        let store = MuxifyWorktreeStore(paths: mac)
+        XCTAssertEqual(try store.waiting(for: "box").count, 3)
+        let link = link(macPaths: mac) { _ in HostServerContext(paths: paths, tmux: tmux, config: { Config() }) }
+        try link.connect()
+        link.startServer()
+
+        try await wait("the Mac did not delete the row the Host took") { (try? store.waiting(for: "box").map(\.id).sorted()) == ["clash", "twin"] }
+        XCTAssertEqual(host.record("new")?.path, "/home/me/trees/new", "the taken row is the Host's record")
+        XCTAssertEqual(host.record("clash")?.path, "/home/me/trees/clash", "a skipped row changes nothing on the Host")
+        XCTAssertEqual(try store.waiting(for: "gone").map(\.id), ["stays"], "a row of an Environment not connected stays")
+        XCTAssertEqual(try store.all(), [own], "the Mac's own records stay")
+    }
+
+    func testAChannelThatEndsBeforeTheAnswerLeavesEveryWaitingRow() async throws {
+        let paths = paths!, tmux = tmux!
+        let mac = try macState(waiting: [("box", row("one", path: "/home/me/trees/one")), ("box", row("two", path: "/home/me/trees/two"))])
+        let sent = Gate()
+        // The server ends the channel when the rows arrive, before it answers.
+        let link = link(macPaths: mac, serve: { request, server in
+            if case .adoptWorktrees(let adopt)? = try? request.body(HostRequest.self) {
+                XCTAssertEqual(adopt.rows.map(\.id), ["one", "two"])
+                sent.close()
+                server.stop(.shutdown)
+            }
+        }, context: { _ in HostServerContext(paths: paths, tmux: tmux, config: { Config() }) })
+        try link.connect()
+        link.startServer()
+
+        try await wait("the Mac did not send its waiting rows after hello") { sent.isClosed }
+        try await Task.sleep(nanoseconds: 500_000_000)
+        XCTAssertEqual(try MuxifyWorktreeStore(paths: mac).waiting(for: "box").map(\.id), ["one", "two"], "no row was deleted")
     }
 }
 

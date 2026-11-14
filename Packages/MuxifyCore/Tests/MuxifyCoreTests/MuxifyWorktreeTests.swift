@@ -131,7 +131,7 @@ final class MuxifyWorktreeTests: XCTestCase {
     func testPreDeleteStopsAtTheFirstFailedHookAndKeepsItsOutput() throws {
         let work = try repository()
         let made = try worktrees.add(name: "fix", from: work, at: path("trees/fix"), start: .head)
-        let record = MuxifyWorktreeRecord(environment: nil, repository: work, name: "fix", path: made.path, branch: "fix", base: made.commit)
+        let record = MuxifyWorktreeRecord(repository: work, name: "fix", path: made.path, branch: "fix", base: made.commit)
         XCTAssertEqual(try worktrees.runPreDelete(record, hooks: [#"echo "$MUXIFY_WORKTREE_NAME""#]), "$ echo \"$MUXIFY_WORKTREE_NAME\"\nfix\n")
         XCTAssertThrowsError(try worktrees.runPreDelete(record, hooks: ["echo one", "exit 3", "echo never"])) { error in
             guard case MuxifyWorktreeError.hookFailed(let output, let reason) = error else { return XCTFail("\(error)") }
@@ -143,7 +143,7 @@ final class MuxifyWorktreeTests: XCTestCase {
     func testRemoveRefusesChangesUnlessForced() throws {
         let work = try repository()
         let made = try worktrees.add(name: "fix", from: work, at: path("trees/fix"), start: .head)
-        let record = MuxifyWorktreeRecord(environment: nil, repository: work, name: "fix", path: made.path, branch: "fix", base: made.commit)
+        let record = MuxifyWorktreeRecord(repository: work, name: "fix", path: made.path, branch: "fix", base: made.commit)
         try "change".write(toFile: made.path + "/new.txt", atomically: true, encoding: .utf8)
         XCTAssertEqual(try worktrees.states([made.path]), [.dirty])
         XCTAssertThrowsError(try worktrees.remove(record, force: false))
@@ -155,7 +155,7 @@ final class MuxifyWorktreeTests: XCTestCase {
     func testPostCreateScriptRunsEachHookInTheWorktreeAndStopsAtAFailure() throws {
         let work = try repository()
         let made = try worktrees.add(name: "fix", from: work, at: path("trees/fix"), start: .head)
-        let record = MuxifyWorktreeRecord(environment: nil, repository: work, name: "fix", path: made.path, branch: "fix", base: made.commit)
+        let record = MuxifyWorktreeRecord(repository: work, name: "fix", path: made.path, branch: "fix", base: made.commit)
         let command = try worktrees.postCreateCommand(record, hooks: ["pwd > hook-ran", "false", "touch never"], setupFile: work + "/.worktree.json")
         XCTAssertThrowsError(try Shell.run("/bin/sh", ["-c", command]))
         XCTAssertEqual(try String(contentsOfFile: made.path + "/hook-ran", encoding: .utf8), made.path + "\n")
@@ -172,7 +172,7 @@ final class MuxifyWorktreeTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: paths.state.path), "a read creates no state folder")
         let checkout = paths.worktrees.appendingPathComponent("app/fix")
         try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
-        let record = MuxifyWorktreeRecord(environment: "box", repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "fix", base: "abc",
+        let record = MuxifyWorktreeRecord(repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "fix", base: "abc",
                                           createdAt: Date(timeIntervalSince1970: 1_700_000_000))
         try store.write(record)
         XCTAssertEqual(try store.all(), [record])
@@ -187,7 +187,7 @@ final class MuxifyWorktreeTests: XCTestCase {
 
     func testAWriteOfAnExistingIDUpdatesItsRecord() throws {
         let store = MuxifyWorktreeStore(paths: paths)
-        var record = MuxifyWorktreeRecord(environment: nil, repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "fix", base: "abc",
+        var record = MuxifyWorktreeRecord(repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "fix", base: "abc",
                                           createdAt: Date(timeIntervalSince1970: 1_700_000_000))
         try store.write(record)
         record.branch = "fix-2"
@@ -198,15 +198,66 @@ final class MuxifyWorktreeTests: XCTestCase {
 
     func testASecondRecordAtAPathThatHasOneFailsWithAnErrorNamingThePath() throws {
         let store = MuxifyWorktreeStore(paths: paths)
-        let first = MuxifyWorktreeRecord(environment: nil, repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "fix", base: "abc",
+        let first = MuxifyWorktreeRecord(repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "fix", base: "abc",
                                          createdAt: Date(timeIntervalSince1970: 1_700_000_000))
         try store.write(first)
-        let second = MuxifyWorktreeRecord(environment: nil, repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "other", base: "def")
+        let second = MuxifyWorktreeRecord(repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "other", base: "def")
         XCTAssertThrowsError(try MuxifyWorktreeStore(paths: paths).write(second)) { error in
             XCTAssertEqual(error as? MuxifyWorktreeError, .pathTaken("/src/trees/fix"))
             XCTAssertTrue(String(describing: error).contains("/src/trees/fix"), String(describing: error))
             XCTAssertEqual(EnvironmentService(paths: self.paths).failure(error, phase: .nothingChanged).kind, .worktreeExists)
         }
         XCTAssertEqual(try store.all(), [first], "the second record was not written")
+    }
+
+    // MARK: - A record lives on the machine that has it (ADR 0088)
+
+    func testARecordNamesNoEnvironmentAndKeepsItsDateAsISO8601() throws {
+        let record = MuxifyWorktreeRecord(id: "w", repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "fix", base: "abc",
+                                          createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        XCTAssertEqual(String(decoding: try encoder.encode(record), as: UTF8.self),
+                       #"{"base":"abc","branch":"fix","created_at":"2023-11-14T22:13:20Z","id":"w","name":"fix","path":"/src/trees/fix","repository":"/src/app"}"#)
+        let older = #"{"id":"w","environment":"box","repository":"/src/app","name":"fix","path":"/src/trees/fix","branch":"fix","base":"abc","created_at":"2023-11-14T22:13:20Z"}"#
+        XCTAssertEqual(try JSONDecoder().decode(MuxifyWorktreeRecord.self, from: Data(older.utf8)), record,
+                       "an older record's environment is not part of the record")
+    }
+
+    func testTheDefaultRootIsTheMachinesOwnStateHome() {
+        let host = MuxifyPaths(environment: ["XDG_STATE_HOME": "/home/me/state"], home: "/home/me")
+        XCTAssertEqual(EnvironmentService(paths: host).defaultWorktreesRoot, "/home/me/state/muxify/worktrees")
+        XCTAssertEqual(EnvironmentService(paths: MuxifyPaths(environment: [:], home: "/home/me")).defaultWorktreesRoot,
+                       "/home/me/.local/state/muxify/worktrees")
+        let repository = WorktreeRepository(main: "/src/app", name: "app", stateHome: "/home/me/state", home: "/home/me", setupFolder: nil,
+                                            setup: WorktreeSetup())
+        let service = EnvironmentService(paths: host)
+        XCTAssertEqual(repository.folder(for: "fix", root: service.worktreesRoot, defaultRoot: service.defaultWorktreesRoot),
+                       "/home/me/state/muxify/worktrees/app/fix")
+        XCTAssertEqual(repository.folder(for: "fix", root: "/trees", defaultRoot: service.defaultWorktreesRoot), "/trees/app/fix",
+                       "the machine's own worktrees.root_path wins")
+    }
+
+    func testTheMacsReadsAndWritesIgnoreARowThatWaitsForAHost() throws {
+        try FileManager.default.createDirectory(at: paths.worktrees, withIntermediateDirectories: true)
+        let waiting = #"{"id":"remote","environment":"box","repository":"/home/me/app","name":"fix","path":"/home/me/trees/fix","branch":"fix","base":"abc","created_at":"2026-09-01T10:00:00Z"}"#
+        try Data(waiting.utf8).write(to: paths.worktrees.appendingPathComponent("remote.json"))
+        let store = MuxifyWorktreeStore(paths: paths)
+        let local = MuxifyWorktreeRecord(id: "local", repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "fix", base: "abc",
+                                         createdAt: Date(timeIntervalSince1970: 1_700_000_000))
+        try store.write(local)
+
+        XCTAssertEqual(try store.all(), [local], "the list leaves out the waiting row")
+        XCTAssertNil(store.record("remote"), "a lookup by id does not find it")
+        let service = EnvironmentService(paths: paths)
+        XCTAssertEqual(try service.worktreeRecords().map(\.id), ["local"])
+        XCTAssertThrowsError(try service.worktreeRecord(named: "/home/me/trees/fix"), "Remove Worktree cannot name it")
+        try store.remove("remote")
+        XCTAssertEqual(try store.waiting(for: "box").map(\.id), ["remote"], "a remove of this Mac's record leaves it")
+        XCTAssertEqual(try store.waiting(for: "other"), [])
+
+        try store.removeWaiting(["remote", "local"], for: "box")
+        XCTAssertEqual(try store.waiting(for: "box"), [])
+        XCTAssertEqual(try store.all(), [local], "removeWaiting deletes no record of this Mac")
     }
 }

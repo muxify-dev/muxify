@@ -183,6 +183,31 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         }
     }
 
+    func testASessionsOnlyWindowRefusesTheWorktreeActionsWithTheFallbacksReason() async {
+        let (store, host, sessionsOnly) = hostStore()
+        host.features = .all
+        XCTAssertNil(store.worktreesRefusal, "a Host Server keeps the Host's Muxify Worktrees")
+        host.features = [.topics, .git]
+        XCTAssertEqual(store.worktreesRefusal, "Muxify Worktrees are unavailable on box: its Host Server has not answered yet.")
+
+        host.send(.serverUnavailable(.tooOld("muxify 1a2b3c4 1700000000")))
+        XCTAssertTrue(store.link === sessionsOnly)
+        let expected = "Muxify Worktrees are unavailable on box: the Host's muxify is too old (muxify 1a2b3c4 1700000000)."
+        XCTAssertEqual(store.worktreesRefusal, expected)
+        var alerts: [String] = []
+        store.showAlert = { _, text in alerts.append(text) }
+        XCTAssertFalse(store.perform(EnvironmentRequest(.createWorktree(name: "fix", from: "/home/me/app", start: .head, open: true))),
+                       "Create Worktree does not start")
+        XCTAssertFalse(store.perform(EnvironmentRequest(.removeWorktree("w1", kill: false, force: false))), "Remove Worktree does not start")
+        XCTAssertEqual(alerts.count, 2)
+        XCTAssertTrue(alerts.allSatisfy { $0.hasSuffix(expected) }, "\(alerts)")
+        guard case .failure(let list) = await store.listWorktrees() else { return XCTFail("the Muxify Worktree list was not refused") }
+        XCTAssertEqual(list.message, expected)
+        guard case .failure(let starts) = await store.newWorktreeStarts(from: "/home/me/app") else { return XCTFail("the start step was not refused") }
+        XCTAssertEqual(starts.message, expected)
+        XCTAssertEqual(sessionsOnly.commands, [], "nothing reached the Host")
+    }
+
     // MARK: - The Config
 
     private func configStore(text: String) throws -> ConfigStore {

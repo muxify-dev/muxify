@@ -189,7 +189,7 @@ public enum WorktreeStart: Codable, Hashable, Sendable {
 }
 
 /// A local branch that a new Worktree can start from, as the palette's start step lists it.
-public struct WorktreeStartChoice: Equatable, Sendable {
+public struct WorktreeStartChoice: Codable, Equatable, Sendable {
     public let branch: String
     /// The Worktree that has the branch checked out. git checks out a branch in one Worktree only.
     public let checkedOutAt: String?
@@ -197,6 +197,11 @@ public struct WorktreeStartChoice: Equatable, Sendable {
     public init(branch: String, checkedOutAt: String?) {
         self.branch = branch
         self.checkedOutAt = checkedOutAt
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case branch
+        case checkedOutAt = "checked_out_at"
     }
 }
 
@@ -630,8 +635,6 @@ public struct MuxifyWorktreeSummary: Codable, Hashable, Sendable {
     public var path: String
     public var repository: String
     public var base: String
-    /// Nil on this Mac, else the Remote Environment's name.
-    public var environment: String?
     public var state: MuxifyWorktrees.State
     /// The live Sessions that have a Window or Pane in it.
     public var sessions: [String]
@@ -645,7 +648,6 @@ public struct MuxifyWorktreeSummary: Codable, Hashable, Sendable {
         path = record.path
         repository = record.repository
         base = record.base
-        environment = record.environment
         self.state = state
         self.sessions = sessions
         self.topic = topic

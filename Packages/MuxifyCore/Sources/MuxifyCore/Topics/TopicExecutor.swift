@@ -98,8 +98,8 @@ struct TopicExecutor {
         guard let folder = repository.setupFolder else { return nil }
         _ = try worktrees.sync(repository.setup, from: folder, to: worktree.path)
         guard !repository.setup.postCreate.isEmpty else { return nil }
-        let record = (try? records.all())?.first { $0.environment == nil && $0.path == worktree.path }
-            ?? MuxifyWorktreeRecord(environment: nil, repository: repository.main, name: (worktree.path as NSString).lastPathComponent,
+        let record = (try? records.all())?.first { $0.path == worktree.path }
+            ?? MuxifyWorktreeRecord(repository: repository.main, name: (worktree.path as NSString).lastPathComponent,
                                     path: worktree.path, branch: worktree.branch, base: base ?? "")
         return try worktrees.postCreateCommand(record, hooks: repository.setup.postCreate, setupFile: folder + "/" + WorktreeSetup.fileName)
     }
@@ -109,14 +109,14 @@ struct TopicExecutor {
         guard FileManager.default.fileExists(atPath: worktree.path) else { return }
         let hooks = try worktrees.repository(at: worktree.path).setup.preDelete
         guard !hooks.isEmpty else { return }
-        let record = (try? records.all())?.first { $0.environment == nil && $0.path == worktree.path }
-            ?? MuxifyWorktreeRecord(environment: nil, repository: worktree.repositoryPath, name: (worktree.path as NSString).lastPathComponent,
+        let record = (try? records.all())?.first { $0.path == worktree.path }
+            ?? MuxifyWorktreeRecord(repository: worktree.repositoryPath, name: (worktree.path as NSString).lastPathComponent,
                                     path: worktree.path, branch: worktree.branch, base: "")
         _ = try worktrees.runPreDelete(record, hooks: hooks)
     }
 
     private func forgetRecord(of worktree: TopicPlan.WorktreeSpec) throws {
-        for record in try records.all() where record.environment == nil && Folder.local(record.path) == Folder.local(worktree.path) {
+        for record in try records.all() where Folder.local(record.path) == Folder.local(worktree.path) {
             try records.remove(record.id)
         }
     }

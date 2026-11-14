@@ -93,7 +93,7 @@ One checkout of a repository at its own path, such as a folder inside a bare rep
 _Avoid_: checkout, clone, Session Path (when you mean one checkout)
 
 **Muxify Worktree**:
-A Worktree that Muxify made and remembers, so it can list and remove it. A Topic may own it, or none.
+A Worktree that Muxify made and remembers, so it can list and remove it. Its record is on the machine that has the Worktree: a Remote Environment's are kept by its Host CLI. A Topic may own it, or none.
 _Avoid_: managed worktree, created worktree
 
 **Worktree setup**:

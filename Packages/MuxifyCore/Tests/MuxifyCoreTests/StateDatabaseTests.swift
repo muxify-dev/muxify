@@ -254,12 +254,15 @@ final class StateDatabaseTests: XCTestCase {
             XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
             XCTAssertTrue(FileManager.default.fileExists(atPath: file.path + ".migrated"), "the old file stays readable as <id>.json.migrated")
         }
-        XCTAssertEqual(try MuxifyWorktreeStore(paths: paths).all(), [
-            MuxifyWorktreeRecord(id: "two", environment: "box", repository: "/src/app", name: "fix", path: "/home/me/trees/two", branch: "fix",
-                                 base: "abc", createdAt: Date(timeIntervalSince1970: 1_788_256_800)),
-            MuxifyWorktreeRecord(id: "one", environment: nil, repository: "/src/app", name: "fix", path: "/src/trees/one", branch: "fix",
+        let store = MuxifyWorktreeStore(paths: paths)
+        XCTAssertEqual(try store.all(), [
+            MuxifyWorktreeRecord(id: "one", repository: "/src/app", name: "fix", path: "/src/trees/one", branch: "fix",
                                  base: "abc", createdAt: Date(timeIntervalSince1970: 1_788_343_200)),
-        ])
+        ], "a Remote Environment's record is no record of this Mac")
+        XCTAssertEqual(try store.waiting(for: "box"), [
+            MuxifyWorktreeRecord(id: "two", repository: "/src/app", name: "fix", path: "/home/me/trees/two", branch: "fix",
+                                 base: "abc", createdAt: Date(timeIntervalSince1970: 1_788_256_800)),
+        ], "it waits to move to its Host")
     }
 
     func testTheImportSkipsAnUndecodableWorktreeFileWithAProblemLineAndLeavesIt() throws {

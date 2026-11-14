@@ -76,13 +76,23 @@ final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     }
 
     /// The service on the Remote Environment. It has no Topics, so it runs only the requests that need no Topic
-    /// record. Its Muxify Worktree scripts run over the connection, on that machine (ADR 0062).
+    /// record, and no Muxify Worktree records either: those are the Host CLI's (ADR 0088).
     func environmentService(sessionPaths: [SessionPath], topics: Config.Topics, notifications: Config.Notifications,
                             worktreesRoot: String?) -> EnvironmentService? {
         guard let connection else { return nil }
         return EnvironmentService(paths: MuxifyPaths(), server: connection, topics: topics, notifications: notifications,
-                                  topicsAvailable: false, scripts: connection, environmentName: environment.name,
-                                  worktreesRoot: worktreesRoot)
+                                  topicsAvailable: false, scripts: connection)
+    }
+
+    /// Create Worktree, Remove Worktree and the list of Muxify Worktrees are refused: the Mac cannot write the Host's
+    /// record, and a Worktree with no record could never be removed by Muxify (ADR 0088).
+    func run(_ request: EnvironmentRequest, client: String?, local: EnvironmentService?) async -> EnvironmentResponse? {
+        if request.command.isWorktreeCommand { return .failed(EnvironmentLinkError.worktreesRefused) }
+        return await EnvironmentLinks.run(request, client: client, local: local)
+    }
+
+    func worktreeStarts(from folder: String, local: EnvironmentService?) async -> Result<[WorktreeStartChoice], TopicFailure>? {
+        .failure(EnvironmentLinkError.worktreesRefused)
     }
 
     /// A probe every 2 seconds over the owned ssh connection.

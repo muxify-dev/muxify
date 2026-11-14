@@ -201,7 +201,9 @@ final class HostCLIInstallTests: XCTestCase {
                     done(HostCLIChain.run(over: connection, environmentName: "Fixture", baseURL: base, debug: nil, report: { _ in }))
                 }
             },
-            masterAlive: { true }, hostCLIVersion: { _ in nil })
+            masterAlive: { true }, hostCLIVersion: { _ in nil },
+            macWorktrees: MuxifyWorktreeStore(paths: MuxifyPaths(environment: ["XDG_STATE_HOME": root.url.appendingPathComponent("mac-state").path],
+                                                                 home: "/nonexistent")))
         var unavailable: HostServerUnavailable?
         let subscription = link.subscribe { if case .serverUnavailable(let reason) = $0 { unavailable = reason } }
         defer { subscription.cancel() }
@@ -336,7 +338,9 @@ final class HostCLIInstallTests: XCTestCase {
                     DispatchQueue.main.async { installs += 1 }
                 }
             },
-            masterAlive: { true }, hostCLIVersion: { _ in nil })
+            masterAlive: { true }, hostCLIVersion: { _ in nil },
+            macWorktrees: MuxifyWorktreeStore(paths: MuxifyPaths(environment: ["XDG_STATE_HOME": root.url.appendingPathComponent("mac-state").path],
+                                                                 home: "/nonexistent")))
         var changes = 0
         let subscription = link.subscribe { if case .changed = $0 { changes += 1 } }
         defer { subscription.cancel(); _ = link.sessionsOnlyLink() }

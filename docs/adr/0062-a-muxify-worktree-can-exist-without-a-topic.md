@@ -24,6 +24,8 @@ Remove Worktree runs preDelete before `git worktree remove`. It refuses a Worktr
 
 ## Remote Environments
 
+_Superseded by [ADR 0088](0088-a-muxify-worktrees-record-lives-on-the-machine-that-has-it.md): a Host's records live in the Host's database, and the Host CLI's server keeps them._
+
 The palette Actions work on a Remote Environment over its owned SSH connection ([ADR 0006](0006-remote-environments-use-owned-ssh-connections.md)), and the records stay on the Mac, keyed by Environment. The CLI stays local: it talks to the local tmux server, and no `muxify` binary runs on the remote machine. Topics stay local, so a remote Muxify Worktree never has a Topic.
 
 ## Considered Options

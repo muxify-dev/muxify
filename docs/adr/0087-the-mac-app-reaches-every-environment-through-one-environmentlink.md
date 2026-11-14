@@ -18,7 +18,7 @@ Each `!isRemote` guard becomes one of two questions.
 - **`link.isOnThisMac`**, a fact about the machine: Reveal Folder, Install Extensions, the Browser finding local servers, pasting a local file URL, `Tmux.binary`, `FolderResolver` and the local Client marker.
 - **`link.features.contains(.x)`**, what the Environment serves. Features are coarse: `.topics`, `.git`, `.worktrees`, and one for each later capability. `LocalEnvironmentLink` has them all. `HostEnvironmentLink` derives them from `hello`, as protocol 1's base plus the capabilities both sides declared ([ADR 0084](0084-the-mac-app-and-the-host-server-agree-on-a-protocol-and-capabilities-never-on-a-build.md)), and writes the one Diagnostics line per connect. `SessionsOnlyEnvironmentLink` has a fixed small set.
 
-`isRemote` stays only where the UI says the window is remote: the badge, the title and the "Connecting…" state. `EnvironmentService` loses `topicsAvailable`, `scripts:` and `environmentName:`. On a Host it always runs inside the server, with Topics. Its Worktree scripts run on whatever machine it runs on, and the record drops `environment` ([the Worktree records draft](../../.cook/maps/remote-host-protocol/adrs/11-remote-worktree-records.md)).
+`isRemote` stays only where the UI says the window is remote: the badge, the title and the "Connecting…" state. `EnvironmentService` loses `topicsAvailable`, `scripts:` and `environmentName:`. On a Host it always runs inside the server, with Topics. Its Worktree scripts run on whatever machine it runs on, and the record drops `environment` ([ADR 0088](0088-a-muxify-worktrees-record-lives-on-the-machine-that-has-it.md)).
 
 ## The Sessions-only fallback
 

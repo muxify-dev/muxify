@@ -33,7 +33,8 @@ public struct HostServerContext: @unchecked Sendable {
 }
 
 /// `muxify server`: the Host Server's requests (ADR 0085). It serves `ping` and `shutdown`, the `environment` and
-/// `config` subscriptions, `environment` requests, `mark_read` and the view commands.
+/// `config` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and Worktree start choices
+/// and `adopt_worktrees`.
 public enum HostServer {
     /// A server on these handles that serves `HostRequest` against `context`.
     public static func make(input: FileHandle, output: FileHandle, build: String, silence: TimeInterval = HostProtocol.serverSilence,
@@ -83,6 +84,10 @@ public enum HostServer {
                 host.view(command, for: request, nonce: nonce)
             case .topicChoices(let choices):
                 host.choices(choices, for: request)
+            case .worktreeStarts(let starts):
+                host.worktreeStarts(starts, for: request)
+            case .adoptWorktrees(let adopt):
+                host.adoptWorktrees(adopt, for: request)
             }
         } catch let error as ProtocolError {
             request.fail(error)
@@ -275,6 +280,36 @@ final class HostEnvironment: @unchecked Sendable {
             switch result {
             case .success(let sessions): request.finish(TopicChoices(sessions: sessions))
             case .failure(let failure): request.fail(ProtocolError(.failed, failure.message, topicFailure: failure))
+            }
+        }
+    }
+
+    /// New Worktree's start choices, read with git on the Host. It changes nothing.
+    func worktreeStarts(_ starts: WorktreeStartsRequest, for request: ProtocolIncomingRequest) {
+        Task {
+            do {
+                let choices = try await Self.background { try WorktreeStartChoice.read(from: starts.from, scripts: LocalScripts()) }
+                request.finish(WorktreeStarts(starts: choices))
+            } catch {
+                request.fail(ProtocolError(.failed, Self.message(error)))
+            }
+        }
+    }
+
+    /// The Mac's rows that wait to move to this Host become the Host's records, each unless the Host has its id or
+    /// its path already (ADR 0088).
+    func adoptWorktrees(_ adopt: AdoptWorktrees, for request: ProtocolIncomingRequest) {
+        guard request.startMutation() else { return }
+        let paths = context.paths
+        Task {
+            do {
+                let rows = try await Self.background { try MuxifyWorktreeStore(paths: paths).adopt(adopt.rows) }
+                for row in rows where row.result == .skipped {
+                    log("muxify server: kept the Mac's Muxify Worktree record \(row.id) where it is: \(row.reason ?? "")")
+                }
+                request.finish(AdoptedWorktrees(rows: rows))
+            } catch {
+                request.fail(ProtocolError(.failed, Self.message(error)))
             }
         }
     }

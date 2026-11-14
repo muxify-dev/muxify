@@ -5,9 +5,12 @@ The SSH fixture runs remote commands locally, as remote_session_end's does: the 
 server, the Host's home is `remote-home`, and the Host's Topics are in `remote-home/.local/state/muxify/muxify.db`,
 apart from the Mac's own `state/muxify`. The Host's `muxify` is the first one on the fixture's PATH: the Debug app's
 own CLI, which serves, or a stand-in with no server mode, which the app must answer with Sessions only and a reason.
+The Host's Muxify Worktrees are its own too: their records are in the Host's database and their folders under the
+Host's `$XDG_STATE_HOME/muxify/worktrees` (ADR 0088).
 """
 
 import json
+import os
 import shlex
 import subprocess
 import unittest
@@ -63,6 +66,11 @@ exec /bin/sh -c "$command"
         # The install chain finds a CLI on the PATH; an old one would be updated from here, which serves nothing.
         s.app_env['MUXIFY_CLI_BASE_URL'] = 'http://127.0.0.1:9/'
         cls.mode = None
+        # A repository on the Host, which the Host's Session Paths find, for New Worktree to start from.
+        cls.repository = cls.projects/'tree-repo'
+        for args in (['init', '-q', '-b', 'main', str(cls.repository)], ['-C', str(cls.repository), 'commit', '-q', '--allow-empty', '-m', 'init']):
+            subprocess.run(['/usr/bin/git', '-c', 'user.name=Verify', '-c', 'user.email=verify@example.invalid', '-c', 'commit.gpgSign=false',
+                            *args], env=s.env, check=True, capture_output=True, timeout=30)
         s.tmux('new-session', '-d', '-s', 'start', '-c', str(cls.projects), '/bin/sh')
         # A Topic that the Host CLI wrote before the app started.
         cls.before_launch = cls.new_topic('Before Launch', 'before-launch')
@@ -149,6 +157,34 @@ exec /bin/sh -c "$command"
         config.write_text(original)
         self.s.wait_rows(lambda rs: self.s.has('header-session-name', rs),
                          'removing status_line.enabled from the Host\'s Config did not show the Session name again', seconds=20)
+
+    def test_new_worktree_from_a_remote_app_window_makes_the_worktree_and_its_record_on_the_host(self):
+        self.use('serving')
+        self.topic_row(self.before_launch, 'the Host Server does not serve the Remote App Window')
+        wait(lambda: self.s.driver('press', 'Commands')['pressed'], 'Commands did not open')
+        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'the Commands field did not show')
+        self.s.act('focus', 'palette-search')
+        self.s.act('set', 'palette-search', 'New Worktree')
+        self.s.wait_rows(lambda rs: self.s.has('palette-row-command-New Worktree', rs), 'New Worktree is missing from Commands', seconds=30)
+        self.s.act('press', 'palette-row-command-New Worktree')
+        checkout = 'palette-row-' + os.path.realpath(self.repository)
+        self.s.wait_rows(lambda rs: self.s.has(checkout, rs), 'New Worktree does not list the Host\'s repository')
+        self.s.act('press', checkout)
+        self.s.wait_rows(lambda rs: self.s.has('palette-accept', rs), 'New Worktree did not ask for a name')
+        self.s.act('set', 'palette-search', 'from-mac')
+        self.s.act('press', 'palette-accept')
+        self.s.wait_rows(lambda rs: self.s.has('palette-row-head', rs), 'New Worktree did not go on to the start step', seconds=30)
+        self.s.act('press', 'palette-row-head')
+
+        folder = self.home/'.local/state/muxify/worktrees/tree-repo/from-mac'
+        wait(lambda: (folder/'.git').exists(), 'no Worktree under the Host\'s $XDG_STATE_HOME/muxify/worktrees', seconds=30)
+        records = wait(lambda: [r for r in self.host_store.worktrees() if r['name'] == 'from-mac'],
+                       'the Host\'s database has no record of the Worktree', seconds=15)
+        self.assertEqual(records[0]['path'], os.path.realpath(folder), records)
+        self.assertEqual([r for r in TopicRecords(self.s.root/'state/muxify').worktrees() if r['name'] == 'from-mac'], [],
+                         'the Mac keeps a record of the Host\'s Worktree')
+        listed = json.loads(self.host_muxify('worktree', 'list', '--all', '--json'))['worktrees']
+        self.assertIn('from-mac', [w['name'] for w in listed], 'muxify worktree on the Host does not list it')
 
     def test_a_host_whose_muxify_has_no_server_mode_shows_sessions_only_and_why(self):
         self.use('old')

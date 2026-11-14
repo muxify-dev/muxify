@@ -775,6 +775,10 @@ final class WorkspaceStore {
     func perform(_ request: EnvironmentRequest, presenting presentation: TopicPresentation = .edit,
                  before: [ViewCommand] = []) -> Bool {
         guard !changingTopic else { return false }
+        if request.command.isWorktreeCommand, let refusal = worktreesRefusalFailure {
+            showFailedTopicRequest(refusal)
+            return false
+        }
         let browserCommands = pendingBrowserCommands
         changingTopic = true
         topicEditGeneration += 1
@@ -824,7 +828,7 @@ final class WorkspaceStore {
         await link.forgetChoices(for: target, local: environmentService()) ?? .failure(Self.notConnected)
     }
 
-    private static let notConnected = TopicFailure(kind: .tmuxFailed, phase: .nothingChanged, message: "The Environment is not connected.")
+    static let notConnected = TopicFailure(kind: .tmuxFailed, phase: .nothingChanged, message: "The Environment is not connected.")
 
     private func present(_ response: EnvironmentResponse, as presentation: TopicPresentation, invocation: UUID) {
         var reopenedLast = false

@@ -234,7 +234,67 @@ final class HostServerTests: XCTestCase {
         try await wait("removing the Config did not push missing", seconds: 5) { recorder.items.last?.isMissing == true }
     }
 
+    // MARK: - Worktrees on the Host (ADR 0088)
+
+    func testAdoptWorktreesTakesNewRowsAndSkipsAnIDOrAPathThatTheHostHas() async throws {
+        let host = MuxifyWorktreeStore(paths: paths)
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        try host.write(MuxifyWorktreeRecord(id: "here", repository: "/src/app", name: "here", path: "/trees/app/here", branch: "here", base: "a",
+                                            createdAt: date))
+        let new = MuxifyWorktreeRecord(id: "new", repository: "/src/app", name: "new", path: "/trees/app/new", branch: "new", base: "b",
+                                       createdAt: date)
+        let sameID = MuxifyWorktreeRecord(id: "here", repository: "/src/app", name: "other", path: "/trees/app/other", branch: "o", base: "c",
+                                          createdAt: date)
+        let samePath = MuxifyWorktreeRecord(id: "twin", repository: "/src/app", name: "here", path: "/trees/app/here", branch: "t", base: "d",
+                                            createdAt: date)
+        let client = try await connect()
+
+        let answer = try await client.call(HostRequest.adoptWorktrees(AdoptWorktrees(rows: [new, sameID, samePath])), as: AdoptedWorktrees.self)
+
+        XCTAssertEqual(answer.rows.map(\.id), ["new", "here", "twin"])
+        XCTAssertEqual(answer.rows.map(\.result), [.taken, .skipped, .skipped])
+        XCTAssertNil(answer.rows[0].reason)
+        XCTAssertEqual(answer.rows[1].reason, "a Muxify Worktree record with the id here is on the Host already")
+        XCTAssertEqual(answer.rows[2].reason, "a Muxify Worktree record at /trees/app/here is on the Host already")
+        XCTAssertEqual(try host.all().map(\.id).sorted(), ["here", "new"])
+        XCTAssertEqual(host.record("new"), new, "the taken row is the Host's record, with no Environment")
+        XCTAssertEqual(host.record("here")?.name, "here", "a skipped row changes nothing")
+    }
+
+    func testCreateWorktreeOnTheServerWritesTheHostsRecordUnderTheHostsRootAndTheStartsListItsBranches() async throws {
+        let repository = directory.appendingPathComponent("app").path
+        try git(["init", "-q", "-b", "main", repository], in: directory.path)
+        try git(["commit", "-q", "--allow-empty", "-m", "init"], in: repository)
+        try git(["branch", "feature"], in: repository)
+        let client = try await connect()
+
+        let starts = try await client.call(HostRequest.worktreeStarts(WorktreeStartsRequest(from: repository)), as: WorktreeStarts.self)
+        XCTAssertEqual(Set(starts.starts.map(\.branch)), ["main", "feature"])
+        XCTAssertNotNil(starts.starts.first { $0.branch == "main" }?.checkedOutAt)
+
+        let response = try await client.call(HostRequest.environment(EnvironmentRequest(.createWorktree(name: "fix", from: repository, start: .head,
+                                                                                                        open: false))),
+                                             as: EnvironmentResponse.self)
+        guard case .changed(let change) = response, let id = change.worktreeID else { return XCTFail("unexpected \(response)") }
+        let record = try XCTUnwrap(MuxifyWorktreeStore(paths: paths).record(id), "the Host's database has no record")
+        let root = Folder.local(paths.worktrees.path).real
+        XCTAssertEqual(record.path, root + "/app/fix", "the Worktree goes under the Host's $XDG_STATE_HOME/muxify/worktrees")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: record.path + "/.git"))
+        XCTAssertEqual(record.branch, "fix")
+
+        let listed = try await client.call(HostRequest.environment(EnvironmentRequest(.listWorktrees(all: true, from: nil))),
+                                           as: EnvironmentResponse.self)
+        guard case .worktrees(let worktrees) = listed else { return XCTFail("unexpected \(listed)") }
+        XCTAssertEqual(worktrees.map(\.id), [id])
+    }
+
     // MARK: - Helpers
+
+    @discardableResult
+    private func git(_ arguments: [String], in folder: String) throws -> String {
+        try Shell.run("/usr/bin/git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgSign=false"] + arguments,
+                      directory: folder)
+    }
 
     private final class Recorder: @unchecked Sendable {
         private let lock = NSLock()

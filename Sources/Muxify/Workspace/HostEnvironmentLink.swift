@@ -9,8 +9,9 @@ import MuxifyCore
 /// the same master, so the App Window shows Sessions as it does without a server. Once it arrives, the Topics, the
 /// Sessions and every change come only from the server's `environment` events, and Topic requests, Unread on visit
 /// and view commands go over the channel; the Mac keeps no copy of the Host's records. The Config comes from the
-/// server's `config` subscription, which pushes each edit on the Host. Git, Session paths, uploads and Worktrees
-/// still go to the Sessions-only link until later tasks move them onto the server.
+/// server's `config` subscription, which pushes each edit on the Host. The Muxify Worktrees are the Host's too
+/// (ADR 0088): their requests go over the channel, and without a server they are refused. Git, Session paths and
+/// uploads still go to the Sessions-only link until later tasks move them onto the server.
 @MainActor
 final class HostEnvironmentLink: EnvironmentLink {
     let isOnThisMac = false
@@ -26,6 +27,8 @@ final class HostEnvironmentLink: EnvironmentLink {
     private let install: (@escaping @Sendable (HostCLIReady) -> Void) -> Void
     private let masterAlive: @Sendable () -> Bool
     private let hostCLIVersion: @Sendable (String?) -> String?
+    /// The Mac's Muxify Worktree records, whose rows that wait for this Environment move to the Host on connect.
+    private let macWorktrees: MuxifyWorktreeStore
 
     private let events = EnvironmentEvents()
     private let id = UUID()
@@ -56,7 +59,8 @@ final class HostEnvironmentLink: EnvironmentLink {
          helloTimeout: TimeInterval = HostProtocol.helloTimeout, pingInterval: TimeInterval = 15,
          openChannel: @escaping (String?) throws -> HostServerChannel,
          install: @escaping (@escaping @Sendable (HostCLIReady) -> Void) -> Void,
-         masterAlive: @escaping @Sendable () -> Bool, hostCLIVersion: @escaping @Sendable (String?) -> String?) {
+         masterAlive: @escaping @Sendable () -> Bool, hostCLIVersion: @escaping @Sendable (String?) -> String?,
+         macWorktrees: MuxifyWorktreeStore = MuxifyWorktreeStore(paths: MuxifyPaths())) {
         self.environmentName = environmentName
         self.inner = inner
         self.build = build
@@ -67,6 +71,7 @@ final class HostEnvironmentLink: EnvironmentLink {
         self.install = install
         self.masterAlive = masterAlive
         self.hostCLIVersion = hostCLIVersion
+        self.macWorktrees = macWorktrees
     }
 
     /// The link of the app: the Host Server on a channel of the Sessions-only link's master.
@@ -99,7 +104,7 @@ final class HostEnvironmentLink: EnvironmentLink {
 
     // MARK: What it serves
 
-    var features: EnvironmentFeatures { serving ? [.topics, .git] : inner.features }
+    var features: EnvironmentFeatures { serving ? [.topics, .git, .worktrees] : inner.features }
     var publishesChanges: Bool { serving }
     var runsRequests: Bool { serving }
     var remembersTopics: Bool { serving }
@@ -210,6 +215,35 @@ final class HostEnvironmentLink: EnvironmentLink {
             self?.configEnded(from: client)
         }
         startPinging(client)
+        adoptWaitingWorktrees(on: client)
+    }
+
+    /// Once after each `hello`: the Mac's Muxify Worktree rows that wait for this Environment go to the Host, which
+    /// makes each its own record unless it has its id or its path already (ADR 0088). The Mac deletes only the rows the
+    /// Host took. A skipped row stays, and so does every row when the channel ends before the answer: the next connect
+    /// sends them again.
+    private func adoptWaitingWorktrees(on client: ProtocolClient) {
+        let store = macWorktrees
+        let name = environmentName
+        Task { [weak self] in
+            let rows = await Task.detached(priority: .utility) { (try? store.waiting(for: name)) ?? [] }.value
+            guard !rows.isEmpty, let self, client === self.client else { return }
+            self.lastSent = Date()
+            let answer: AdoptedWorktrees
+            do {
+                answer = try await client.call(HostRequest.adoptWorktrees(AdoptWorktrees(rows: rows)), as: AdoptedWorktrees.self)
+            } catch {
+                return Diagnostics.report("Host Server: \(name): kept the Mac's \(rows.count) Muxify Worktree records for the next connect: \(error)")
+            }
+            let taken = answer.rows.filter { $0.result == .taken }.map(\.id)
+            let removed: Error? = await Task.detached(priority: .utility) {
+                do { try store.removeWaiting(taken, for: name); return nil } catch { return error }
+            }.value
+            let skipped = answer.rows.filter { $0.result == .skipped }
+            Diagnostics.report("Host Server: \(name): moved \(taken.count) Muxify Worktree records to the Host"
+                + (skipped.isEmpty ? "" : "; kept " + skipped.map { "\($0.id) (\($0.reason ?? "skipped"))" }.joined(separator: ", "))
+                + (removed.map { "; the Mac's rows stay: \($0)" } ?? ""))
+        }
     }
 
     /// The server's events: the first holds every key, and the server serves from then on.
@@ -420,14 +454,18 @@ final class HostEnvironmentLink: EnvironmentLink {
         throw EnvironmentLinkError.unsupported("Writing Topic records on the Mac")
     }
 
-    /// The Sessions-only link's service, for the Worktrees until they move onto the server.
+    /// The Sessions-only link's service, for the requests it runs before the server serves.
     func environmentService(sessionPaths: [SessionPath], topics: Config.Topics, notifications: Config.Notifications,
                             worktreesRoot: String?) -> EnvironmentService? {
         inner.environmentService(sessionPaths: sessionPaths, topics: topics, notifications: notifications, worktreesRoot: worktreesRoot)
     }
 
     func run(_ request: EnvironmentRequest, client: String?, local: EnvironmentService?) async -> EnvironmentResponse? {
-        guard serving, !request.command.isWorktreeCommand else { return await EnvironmentLinks.run(request, client: client, local: local) }
+        guard serving else {
+            // Only the Host's server writes its Muxify Worktree records (ADR 0088).
+            if request.command.isWorktreeCommand { return .failed(EnvironmentLinkError.worktreesRefused) }
+            return await EnvironmentLinks.run(request, client: client, local: local)
+        }
         do {
             return try await call(.environment(request), as: EnvironmentResponse.self)
         } catch {
@@ -452,6 +490,15 @@ final class HostEnvironmentLink: EnvironmentLink {
             return .success((sessions: choices.sessions, worktrees: []))
         } catch {
             return .failure(failure(error, changes: false, action: "Forget Topic"))
+        }
+    }
+
+    func worktreeStarts(from folder: String, local: EnvironmentService?) async -> Result<[WorktreeStartChoice], TopicFailure>? {
+        guard serving else { return .failure(EnvironmentLinkError.worktreesRefused) }
+        do {
+            return .success(try await call(.worktreeStarts(WorktreeStartsRequest(from: folder)), as: WorktreeStarts.self).starts)
+        } catch {
+            return .failure(failure(error, changes: false, action: "New Worktree"))
         }
     }
 

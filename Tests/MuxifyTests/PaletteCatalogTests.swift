@@ -372,7 +372,7 @@ final class PaletteCatalogTests: XCTestCase {
         draft.starts = .ready([WorktreeStartChoice(branch: "main", checkedOutAt: "/work/game/main"),
                                WorktreeStartChoice(branch: "feature", checkedOutAt: nil)])
         let removing = RemoveWorktreeDraft()
-        removing.rows = .ready([MuxifyWorktreeSummary(record: MuxifyWorktreeRecord(environment: nil, repository: "/work/game", name: "fix",
+        removing.rows = .ready([MuxifyWorktreeSummary(record: MuxifyWorktreeRecord(repository: "/work/game", name: "fix",
                                                                                    path: "/trees/game/fix", branch: "fix", base: "abc"),
                                                       state: .clean, sessions: [], topic: nil)])
         // New Worktree lists the WorkspaceStore's SessionPaths, which only discovery fills: none here to check.
