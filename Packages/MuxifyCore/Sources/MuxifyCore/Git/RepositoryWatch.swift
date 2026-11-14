@@ -124,10 +124,10 @@ final class GitDirectoryEvents {
 
     init?(folders: [String], queue: DispatchQueue, changed: @escaping () -> Void) {
         #if os(Linux)
-        let descriptor = muxifyInotifyInit1(Inotify.nonBlocking | Inotify.closeOnExec)
+        let descriptor = Inotify.initialize()
         guard descriptor >= 0 else { return nil }
         var watching = 0
-        for folder in folders where muxifyInotifyAddWatch(descriptor, folder, Inotify.changes) >= 0 { watching += 1 }
+        for folder in folders where Inotify.addWatch(descriptor, folder, Inotify.changes) >= 0 { watching += 1 }
         guard watching > 0 else {
             close(descriptor)
             return nil
@@ -171,19 +171,3 @@ final class GitDirectoryEvents {
 
     deinit { stop() }
 }
-
-#if os(Linux)
-/// inotify, declared here: the static Linux SDK's C module does not promise `sys/inotify.h`.
-private enum Inotify {
-    static let nonBlocking: Int32 = 0o4000
-    static let closeOnExec: Int32 = 0o2000000
-    /// IN_MODIFY, IN_ATTRIB, IN_CLOSE_WRITE, IN_MOVED_FROM, IN_MOVED_TO, IN_CREATE and IN_DELETE.
-    static let changes: UInt32 = 0x2 | 0x4 | 0x8 | 0x40 | 0x80 | 0x100 | 0x200
-}
-
-@_silgen_name("inotify_init1")
-private func muxifyInotifyInit1(_ flags: Int32) -> Int32
-
-@_silgen_name("inotify_add_watch")
-private func muxifyInotifyAddWatch(_ descriptor: Int32, _ path: UnsafePointer<CChar>, _ mask: UInt32) -> Int32
-#endif

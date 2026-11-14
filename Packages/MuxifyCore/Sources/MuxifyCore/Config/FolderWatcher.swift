@@ -2,8 +2,10 @@ import Foundation
 #if canImport(CoreServices)
 import CoreServices
 #endif
-#if os(Linux)
+#if canImport(Glibc)
 import Glibc
+#elseif canImport(Musl)
+import Musl
 #endif
 
 /// Hears changes to the files in a set of folders: inotify on Linux, FSEvents on a Mac (as ADR 0072's Git watcher).
@@ -43,12 +45,11 @@ final class FolderWatcher: @unchecked Sendable {
     deinit { stopWatching() }
 
     #if os(Linux)
-    private static let mask = UInt32(IN_CREATE | IN_DELETE | IN_MODIFY | IN_CLOSE_WRITE | IN_MOVED_FROM | IN_MOVED_TO | IN_ATTRIB
-                                      | IN_DELETE_SELF | IN_MOVE_SELF)
+    private static let mask = Inotify.changes | Inotify.folderGone
 
     private func start() {
         if fd < 0 {
-            fd = inotify_init1(Int32(IN_NONBLOCK) | Int32(IN_CLOEXEC))
+            fd = Inotify.initialize()
             guard fd >= 0 else { return }
             let fd = fd
             let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
@@ -62,8 +63,8 @@ final class FolderWatcher: @unchecked Sendable {
             source.resume()
             self.source = source
         }
-        for watch in watches { inotify_rm_watch(fd, watch) }
-        watches = folders.sorted().map { inotify_add_watch(fd, $0, Self.mask) }.filter { $0 >= 0 }
+        for watch in watches { _ = Inotify.removeWatch(fd, watch) }
+        watches = folders.sorted().map { Inotify.addWatch(fd, $0, Self.mask) }.filter { $0 >= 0 }
     }
 
     private func stopWatching() {
