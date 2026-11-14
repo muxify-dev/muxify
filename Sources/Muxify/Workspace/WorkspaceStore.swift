@@ -1531,6 +1531,7 @@ final class WorkspaceStore {
         subscribeToLink()
         startPolling()
         refresh()
+        gitLinkChanged()
     }
 
     private func clearServerState() {
@@ -1653,6 +1654,7 @@ final class WorkspaceStore {
             withMutation(keyPath: \.link) {}
             startPolling()
             refresh()
+            gitLinkChanged()
         case .serverStopped(let lastLine):
             serverStopped(lastLine: lastLine)
         case .serverUnavailable(let reason):
@@ -2588,9 +2590,8 @@ final class WorkspaceStore {
         let gitView = GitView(windowID: windowID)
         gitView.store = self
         gitView.copiedStore = copiedCommits
-        gitView.watcher = link.makeGitWatcher { [weak self] script, arguments, completion in
-            guard let self else { return completion(.failure(CancellationError())) }
-            self.runGitScript(script, arguments: arguments, timeout: 5, completion: completion)
+        gitView.watcher = RepositoryWatcher { [weak self] path, onEvent in
+            self?.watchRepository(path, onEvent) ?? EnvironmentSubscription {}
         }
         gitViews[windowID] = gitView
         return gitView
@@ -2677,6 +2678,61 @@ final class WorkspaceStore {
         selectedWindowID.map(gitView(for:))?.applyDemo(fields)
     }
     #endif
+
+    /// "The Git View is unavailable on <Environment>: <reason>." while the link reads no repository: a Remote App
+    /// Window that shows Sessions only, or whose Host Server has not answered yet.
+    var gitViewUnavailableMessage: String? {
+        guard !link.features.contains(.git) else { return nil }
+        let reason = topicsUnavailableReason?.reason ?? "the Host Server has not answered yet"
+        return "The Git View is unavailable on \(environmentName): \(reason)."
+    }
+
+    /// Runs one of the Git View's reads on the repository's machine through the link, and calls back with what `pick`
+    /// takes of its answer. Its reply belongs to the link that sent it.
+    func readGit<T>(_ read: GitRead, _ pick: @escaping (GitAnswer) -> T?, completion: @escaping (Result<T, Error>) -> Void) {
+        if let message = gitViewUnavailableMessage {
+            completion(.failure(GitViewError(message: message)))
+            return
+        }
+        guard isLinked, !isTransitioning, link.isOnThisMac || isConnected else {
+            completion(.failure(GitViewError(message: "Not connected to \(environmentName).")))
+            return
+        }
+        send({ link in
+            guard let value = pick(try await link.git(read)) else { throw GitViewError(message: "Muxify read an answer it did not ask for.") }
+            return value
+        }, completion: completion)
+    }
+
+    /// The `repository` subscription of a folder through the link. Its events belong to the link that sends them: a
+    /// new link, or new features, need a new subscription, as `repositoryLink` tells a view.
+    func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription {
+        let current = generation
+        return link.watchRepository(path) { [weak self] event in
+            guard let self, self.generation == current else { return }
+            onEvent(event)
+        }
+    }
+
+    /// `watchRepository` as a stream, for a view's task: it ends the subscription when the task ends.
+    func repositoryEvents(_ path: String) -> AsyncStream<RepositoryEvent> {
+        AsyncStream { continuation in
+            let subscription = watchRepository(path) { continuation.yield($0) }
+            continuation.onTermination = { _ in
+                Task { @MainActor in subscription.cancel() }
+            }
+        }
+    }
+
+    /// Changes with the link and with what it serves: a view's `repository` subscription is made again when it does.
+    var repositoryLink: String {
+        "\(generation.uuidString) \(ObjectIdentifier(link).hashValue) \(link.features.rawValue)"
+    }
+
+    /// The link, or what it serves, changed: each open Git View subscribes again and reads again.
+    private func gitLinkChanged() {
+        gitViews.values.forEach { $0.linkChanged() }
+    }
 
     /// Runs a Git View script on the Environment's machine, like the
     /// Session Paths scan.

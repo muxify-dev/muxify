@@ -2,13 +2,14 @@ import Foundation
 import MuxifyCore
 
 /// The link to a Remote Environment over `RemoteSSH` execs: the remote `TmuxConnection` and its scripts. It serves
-/// the Sessions and the Git View, which runs its scripts there, and has no `.topics` and no records. It is the
+/// the Sessions only: no `.topics`, no records and no `.git`, whose reads and `repository` subscription it answers
+/// `unsupported`. It is the
 /// `HostEnvironmentLink`'s link to the same master, which serves until the Host Server answers and whatever the
 /// server does not serve yet, and the App Window's whole link once no Host Server can run (ADR 0087).
 @MainActor
 final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     let isOnThisMac = false
-    let features: EnvironmentFeatures = [.git]
+    let features: EnvironmentFeatures = []
     /// The store polls the remote server and keeps its Watch Session through `startListening`; once a Host Server
     /// serves, its publisher does both.
     let publishesChanges = false
@@ -95,8 +96,12 @@ final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
         .failure(EnvironmentLinkError.worktreesRefused)
     }
 
-    /// A probe every 2 seconds over the owned ssh connection.
-    func makeGitWatcher(run: @escaping GitRemoteProbe.Run) -> GitWatcher {
-        GitRemoteProbe(run: run)
+    /// The Git View runs only where a Host Server reads the repository: here it is unavailable.
+    func git(_ read: GitRead) async throws -> GitAnswer {
+        throw EnvironmentLinkError.unsupported("The Git View")
+    }
+
+    func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription {
+        EnvironmentSubscription {}
     }
 }

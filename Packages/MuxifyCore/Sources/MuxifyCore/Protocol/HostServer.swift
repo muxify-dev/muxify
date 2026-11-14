@@ -14,18 +14,22 @@ public struct HostServerContext: @unchecked Sendable {
     /// What names this server's own socket, `<tmux socket>.muxify-browser.<id>` (ADR 0089): its pid. A test that runs
     /// several servers in one process gives each its own.
     public var socketID: String
+    /// Runs the Git View's reads on the Host.
+    public var git: GitReader
 
     public init(paths: MuxifyPaths = MuxifyPaths(), tmux: TmuxServer = .local,
                 config: (@Sendable () async throws -> Config)? = nil,
                 startControlClient: @escaping TmuxControlClientStart = PipeControlClient.start,
                 home: String = NSHomeDirectory(),
-                socketID: String = String(getpid())) {
+                socketID: String = String(getpid()),
+                git: GitReader = GitReader()) {
         self.paths = paths
         self.tmux = tmux
         self.home = home
         self.config = config ?? { [paths] in try Self.configFile(paths) }
         self.startControlClient = startControlClient
         self.socketID = socketID
+        self.git = git
     }
 
     /// The Config file alone, without finding SessionPaths.
@@ -37,10 +41,10 @@ public struct HostServerContext: @unchecked Sendable {
     }
 }
 
-/// `muxify server`: the Host Server's requests (ADR 0085). It serves `ping` and `shutdown`, the `environment` and
-/// `config` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and Worktree start choices,
-/// `adopt_worktrees`, `claim_open` and `release_open`. Programs on the Host reach its Mac through its own socket, whose
-/// requests it sends the Mac as `MacRequest`s (ADR 0089).
+/// `muxify server`: the Host Server's requests (ADR 0085). It serves `ping` and `shutdown`, the `environment`,
+/// `config` and `repository` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and
+/// Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open` and the Git View's reads. Programs on the
+/// Host reach its Mac through its own socket, whose requests it sends the Mac as `MacRequest`s (ADR 0089).
 public enum HostServer {
     /// A server on these handles that serves `HostRequest` against `context`.
     public static func make(input: FileHandle, output: FileHandle, build: String, silence: TimeInterval = HostProtocol.serverSilence,
@@ -129,6 +133,8 @@ public enum HostServer {
                 host.subscribe(request, nonce: nonce)
             case .subscribe(.config):
                 config.subscribe(request)
+            case .subscribe(.repository(let repository)):
+                host.watch(repository, for: request)
             case .environment(let environmentRequest):
                 host.run(environmentRequest, for: request, nonce: nonce)
             case .markRead(let mark):
@@ -147,6 +153,8 @@ public enum HostServer {
             case .releaseOpen:
                 host.socket.release()
                 request.finish()
+            case .git(let read):
+                host.git(read, for: request)
             }
         } catch let error as ProtocolError {
             request.fail(error)
@@ -241,6 +249,8 @@ final class HostEnvironment: @unchecked Sendable {
     private var state = EnvironmentState()
     private var hasState = false
     private var subscribers: [Int: ProtocolIncomingRequest] = [:]
+    /// The `repository` subscriptions by request; `lock` guards it.
+    private var watches: [Int: RepositoryWatch] = [:]
 
     init(context: HostServerContext, socket: HostServerSocket, log: @escaping (String) -> Void) {
         self.context = context
@@ -252,8 +262,60 @@ final class HostEnvironment: @unchecked Sendable {
         lock.lock()
         stopped = true
         let publisher = publisherStorage
+        let watches = Array(self.watches.values)
+        self.watches = [:]
         lock.unlock()
         publisher?.stop()
+        watches.forEach { $0.stop() }
+    }
+
+    // MARK: - The Git View
+
+    /// The `repository` subscription of a folder: one watch per request, until it is cancelled or falls behind.
+    func watch(_ repository: RepositorySubscription, for request: ProtocolIncomingRequest) {
+        let id = request.id
+        let watch = RepositoryWatch(path: repository.path, reader: context.git) { [weak self] event in
+            guard request.sendEvent(event, key: "repository") else {
+                self?.endWatch(id)
+                return
+            }
+        }
+        lock.lock()
+        guard !stopped else {
+            lock.unlock()
+            return request.fail(ProtocolError(.unavailable, "the Host Server is stopping"))
+        }
+        watches[id] = watch
+        lock.unlock()
+        request.onCancel { [weak self] in self?.endWatch(id) }
+        watch.start()
+    }
+
+    private func endWatch(_ id: Int) {
+        lock.lock()
+        let watch = watches.removeValue(forKey: id)
+        lock.unlock()
+        watch?.stop()
+    }
+
+    /// One of the Git View's reads. A diff streams its text, so a large one goes out as chunks between other frames.
+    func git(_ read: GitRead, for request: ProtocolIncomingRequest) {
+        let reader = context.git
+        Task {
+            let answer: GitAnswer
+            do {
+                answer = try await Self.background { try reader.run(read) }
+            } catch {
+                return request.fail(ProtocolError(.failed, GitReader.message(for: error)))
+            }
+            switch answer {
+            case .snapshot(let snapshot): request.finish(snapshot)
+            case .log(let log): request.finish(log)
+            case .remote(let remote): request.finish(remote)
+            case .text(let text):
+                if request.stream(Data(text.utf8)) { request.finish() }
+            }
+        }
     }
 
     // MARK: - The subscription

@@ -57,7 +57,7 @@ final class HostEnvironmentLinkTests: XCTestCase {
                       serve: ((ProtocolIncomingRequest, ProtocolServer) -> Void)? = nil,
                       context: @escaping (Int) -> HostServerContext) -> HostEnvironmentLink {
         HostEnvironmentLink(
-            environmentName: "box", inner: inner ?? FakeEnvironmentLink(isOnThisMac: false, features: [.git]), build: build,
+            environmentName: "box", inner: inner ?? FakeEnvironmentLink(isOnThisMac: false, features: []), build: build,
             nonce: { nil }, helloTimeout: 5,
             openChannel: { [unowned self] _ in
                 let up = Pipe(), down = Pipe()
@@ -118,7 +118,7 @@ final class HostEnvironmentLinkTests: XCTestCase {
         let paths = paths!, tmux = tmux!
         let link = link { _ in HostServerContext(paths: paths, tmux: tmux, config: { Config() }) }
         try link.connect()
-        XCTAssertEqual(link.features, [.git], "before the server answers, the link is its Sessions-only link")
+        XCTAssertEqual(link.features, [], "before the server answers, the link is its Sessions-only link")
         XCTAssertFalse(link.publishesChanges)
         var heard: [String] = []
         let subscription = link.subscribe { event in
@@ -145,7 +145,7 @@ final class HostEnvironmentLinkTests: XCTestCase {
         let file = folder.appendingPathComponent("config.yaml")
         try "ui:\n  header_height: 30\n".write(to: file, atomically: true, encoding: .utf8)
         let hostPaths = MuxifyPaths(environment: ["XDG_STATE_HOME": directory.appendingPathComponent("state").path], home: home.path)
-        let inner = FakeEnvironmentLink(isOnThisMac: false, features: [.git])
+        let inner = FakeEnvironmentLink(isOnThisMac: false, features: [])
         let link = link(inner: inner) { _ in HostServerContext(paths: hostPaths, tmux: tmux, config: { Config() }, home: home.path) }
         try link.connect()
         var configs: [HostConfig] = []

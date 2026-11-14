@@ -1,5 +1,6 @@
 """A Remote App Window shows its Host's Topics, and runs with its Host's Config, through the Host Server, `muxify
-server` on a channel of the attachment's SSH connection.
+server` on a channel of the attachment's SSH connection, and its Git View reads the Host's repository through the
+same server.
 
 The SSH fixture runs remote commands locally, as remote_session_end's does: the Host's tmux server is the Sandbox
 server, the Host's home is `remote-home`, and the Host's Topics are in `remote-home/.local/state/muxify/muxify.db`,
@@ -262,6 +263,47 @@ exec /bin/sh -c "$command"
         stored = self.s.tmux('show-options', '-wqv', '-t', window, '@muxify_open').split()
         tabs = self.s.tmux('show-options', '-wqv', '-t', window, '@muxify_tabs').split()
         self.assertTrue(stored == [url] or tabs == [url], 'browser open did not fall back to @muxify_open: %r, %r' % (stored, tabs))
+
+    def host_git(self, repo, *args):
+        return subprocess.run(['/usr/bin/git', '-C', str(repo), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid',
+                               '-c', 'commit.gpgsign=false', *args], check=True, capture_output=True, text=True).stdout
+
+    def test_the_git_view_shows_the_hosts_changes_and_diff_and_follows_a_change_on_the_host(self):
+        self.use('serving')
+        self.topic_row(self.before_launch, 'the Host Server does not serve the Remote App Window')
+        repo = self.projects/'host-repo'
+        repo.mkdir()
+        self.host_git(repo, 'init', '-q', '-b', 'main')
+        (repo/'host.txt').write_text('first line\n')
+        self.host_git(repo, 'add', 'host.txt')
+        self.host_git(repo, 'commit', '-q', '-m', 'first')
+        (repo/'host.txt').write_text('first line\nchanged on the host\n')
+        session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'host-repo', '-c', str(repo), '/bin/sh')
+        window = self.s.tmux('display-message', '-p', '-t', session + ':', '#{window_id}')
+        tty = next(line.split()[1] for line in self.s.tmux('list-clients', '-F', '#{client_control_mode} #{client_tty}').splitlines()
+                   if line.startswith('0 '))
+        self.s.tmux('switch-client', '-c', tty, '-t', window)
+        def selected(rs):
+            return any(self.s.row(prefix + window, rs).get('accessibilityValue') == 'selected'
+                       for prefix in ('session-window-', 'topic-window-'))
+        self.s.wait_rows(selected, 'the Remote App Window does not show the repository\'s Window', seconds=20)
+
+        def opened():
+            self.s.driver('press', 'Show Git View')
+            return self.s.has('git-view')
+        wait(opened, 'the Git View did not open in the Remote App Window', seconds=20, step=.5)
+        # Changes open on the first file, so its diff shows the line written on the Host.
+        self.s.wait_rows(lambda rs: self.s.has('git-row-change:host.txt', rs), 'the Git View does not list the Host\'s change',
+                         seconds=20)
+        self.s.wait_rows(lambda rs: any(r.get('accessibilityIdentifier', '').startswith('git-line-')
+                                        and r.get('accessibilityLabel') == 'changed on the host' for r in rs),
+                         'the Git View does not show the Host\'s diff', seconds=20)
+        # A file written on the Host shows by itself: the Host Server's `repository` subscription, no key and no palette.
+        (repo/'z-written-on-host.txt').write_text('later\n')
+        self.s.wait_rows(lambda rs: self.s.has('git-row-change:z-written-on-host.txt', rs),
+                         'the Git View did not follow a change on the Host', seconds=8)
+        self.s.act('action', 'git-view', 'q')
+        wait(lambda: not self.s.has('git-view'), 'the Git View did not close', seconds=10)
 
     def test_a_host_whose_muxify_has_no_server_mode_shows_sessions_only_and_why(self):
         self.use('old')

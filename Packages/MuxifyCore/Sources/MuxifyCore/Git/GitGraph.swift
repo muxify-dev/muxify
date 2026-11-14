@@ -1,12 +1,11 @@
 import Foundation
-import MuxifyCore
 
 /// A row of the History graph, as lazygit draws `git log --graph`: a lane
 /// per line of history, a dot for the commit, and curves where history
 /// forks and merges.
-struct GitGraphRow: Equatable {
-    struct Edge: Equatable {
-        enum Kind: Equatable {
+public struct GitGraphRow: Codable, Equatable, Sendable {
+    public struct Edge: Codable, Equatable, Sendable {
+        public enum Kind: String, Codable, Equatable, Sendable {
             /// Down the whole row, past the commit.
             case through
             /// From the row's top in `lane` into the commit.
@@ -15,23 +14,35 @@ struct GitGraphRow: Equatable {
             case out
         }
 
-        let kind: Kind
-        let lane: Int
+        public let kind: Kind
+        public let lane: Int
         /// Which of the graph's colors; a lane keeps its color.
-        let color: Int
+        public let color: Int
+
+        public init(kind: Kind, lane: Int, color: Int) {
+            self.kind = kind
+            self.lane = lane
+            self.color = color
+        }
     }
 
     /// The commit's lane and color.
-    let lane: Int
-    let color: Int
-    var edges: [Edge] = []
+    public let lane: Int
+    public let color: Int
+    public var edges: [Edge] = []
+
+    public init(lane: Int, color: Int, edges: [Edge] = []) {
+        self.lane = lane
+        self.color = color
+        self.edges = edges
+    }
 
     /// How many lanes the row draws in.
-    var width: Int { (edges.map(\.lane) + [lane]).max()! + 1 }
+    public var width: Int { (edges.map(\.lane) + [lane]).max()! + 1 }
 
     /// Commits newest first, children before their parents
     /// (`git log --topo-order`).
-    static func layout(_ commits: [GitCommit]) -> [GitGraphRow] {
+    public static func layout(_ commits: [GitCommit]) -> [GitGraphRow] {
         // The commit each lane leads down to next.
         var lanes: [(sha: String, color: Int)?] = []
         var colors = 0

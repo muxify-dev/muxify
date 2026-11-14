@@ -10,8 +10,9 @@ import MuxifyCore
 /// Sessions and every change come only from the server's `environment` events, and Topic requests, Unread on visit
 /// and view commands go over the channel; the Mac keeps no copy of the Host's records. The Config comes from the
 /// server's `config` subscription, which pushes each edit on the Host. The Muxify Worktrees are the Host's too
-/// (ADR 0088): their requests go over the channel, and without a server they are refused. Git, Session paths and
-/// uploads still go to the Sessions-only link until later tasks move them onto the server.
+/// (ADR 0088): their requests go over the channel, and without a server they are refused. The Git View's reads and
+/// the `repository` subscription go to the server too. The Git View's changes, Session paths and uploads still go to
+/// the Sessions-only link until later tasks move them onto the server.
 ///
 /// Programs on the Host reach this App Window through the server's own socket (ADR 0089): the server sends each
 /// `browser` and `select` request over the channel, and the link hands it to its store's handler. While this App
@@ -599,8 +600,41 @@ final class HostEnvironmentLink: EnvironmentLink {
         inner.startGitNetworkScript(script, arguments: arguments, timeout: timeout, onPrompt: onPrompt, completion: completion)
     }
 
-    func makeGitWatcher(run: @escaping GitRemoteProbe.Run) -> GitWatcher {
-        inner.makeGitWatcher(run: run)
+    /// The Git View's reads run in the Host Server; a diff arrives as chunks. Before the server serves, and once it
+    /// stops, the Sessions-only link answers them `unsupported`.
+    func git(_ read: GitRead) async throws -> GitAnswer {
+        guard serving, let client else { return try await inner.git(read) }
+        lastSent = Date()
+        do {
+            switch read.answer {
+            case .snapshot: return .snapshot(try await client.call(HostRequest.git(read), as: GitSnapshot.self))
+            case .log: return .log(try await client.call(HostRequest.git(read), as: GitLog.self))
+            case .remote: return .remote(try await client.call(HostRequest.git(read), as: GitRemote.self))
+            case .text:
+                var data = Data()
+                for try await chunk in client.stream(HostRequest.git(read)) { data.append(chunk) }
+                return .text(String(decoding: data, as: UTF8.self))
+            }
+        } catch let error as ProtocolError {
+            throw GitViewError(message: error.message)
+        }
+    }
+
+    /// The server's `repository` subscription. Its events stop when the channel ends; the store subscribes again when
+    /// the link's features change.
+    func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription {
+        guard serving, let client else { return inner.watchRepository(path, onEvent) }
+        lastSent = Date()
+        let events = client.subscribe(HostRequest.subscribe(.repository(RepositorySubscription(path: path))), as: RepositoryEvent.self)
+        let task = Task { @MainActor [weak self] in
+            do {
+                for try await event in events {
+                    guard let self, client === self.client else { return }
+                    onEvent(event)
+                }
+            } catch {}
+        }
+        return EnvironmentSubscription { task.cancel() }
     }
 
     // MARK: Retiring

@@ -87,7 +87,21 @@ final class FakeEnvironmentLink: EnvironmentLink {
         return nil
     }
 
-    func makeGitWatcher(run: @escaping GitRemoteProbe.Run) -> GitWatcher { GitFileWatcher() }
+    /// What `git` answers; nil throws `unsupported`, as a link without `.git` does.
+    var gitAnswer: ((GitRead) throws -> GitAnswer)?
+
+    func git(_ read: GitRead) async throws -> GitAnswer {
+        guard let gitAnswer else { throw EnvironmentLinkError.unsupported("The Git View") }
+        return try gitAnswer(read)
+    }
+
+    /// The folders of every `repository` subscription the store made.
+    private(set) var watchedRepositories: [String] = []
+
+    func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription {
+        watchedRepositories.append(path)
+        return EnvironmentSubscription {}
+    }
 
     /// The link a Host link hands over when its Host Server cannot run.
     var fallback: FakeEnvironmentLink?

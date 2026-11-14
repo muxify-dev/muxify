@@ -340,7 +340,7 @@ final class GitRepositoryParsingTests: XCTestCase {
     func testStatusReadsTheUpstreamAndRenames() {
         let output = ["## main...origin/main [ahead 2, behind 1]", "M  staged.swift", " M unstaged.swift",
                       "R  new.swift", "old.swift", "?? notes.txt", ""].joined(separator: "\0")
-        let status = GitRepository.parseStatus(output)
+        let status = GitReads.parseStatus(output)
         XCTAssertEqual(status.upstream, "origin/main")
         XCTAssertEqual(status.ahead, 2)
         XCTAssertEqual(status.behind, 1)
@@ -355,7 +355,7 @@ final class GitRepositoryParsingTests: XCTestCase {
     }
 
     func testStatusWithoutCommitsOrUpstream() {
-        let status = GitRepository.parseStatus("## No commits yet on main\0")
+        let status = GitReads.parseStatus("## No commits yet on main\0")
         XCTAssertNil(status.upstream)
         XCTAssertEqual(status.changes, [])
     }
@@ -367,7 +367,7 @@ final class GitRepositoryParsingTests: XCTestCase {
         let output = [line("aaaaaaaa1", "HEAD -> refs/heads/feature", "p1"),
                       line("bbbbbbbb2", "tag: refs/tags/v1, refs/remotes/origin/feature, refs/remotes/origin/HEAD", "p1 p2"),
                       line("cccccccc3", "", "p1")].joined(separator: "\n")
-        let commits = GitRepository.parseCommits(output, unpushed: ["aaaaaaaa1"], unmerged: ["aaaaaaaa1", "bbbbbbbb2"])
+        let commits = GitReads.parseCommits(output, unpushed: ["aaaaaaaa1"], unmerged: ["aaaaaaaa1", "bbbbbbbb2"])
         XCTAssertEqual(commits.map(\.status), [.unpushed, .pushed, .merged])
         XCTAssertEqual(commits[0].refs, ["feature"])
         XCTAssertEqual(commits[1].tags, ["v1"])
@@ -377,7 +377,7 @@ final class GitRepositoryParsingTests: XCTestCase {
         XCTAssertEqual(commits[0].initials, "YK")
         XCTAssertEqual(commits[0].shortSHA, "aaaaaaaa")
         // Without an upstream, everything not in the main branch is unpushed.
-        let local = GitRepository.parseCommits(output, unpushed: nil, unmerged: ["aaaaaaaa1"])
+        let local = GitReads.parseCommits(output, unpushed: nil, unmerged: ["aaaaaaaa1"])
         XCTAssertEqual(local.map(\.status), [.unpushed, .merged, .merged])
     }
 
@@ -385,7 +385,7 @@ final class GitRepositoryParsingTests: XCTestCase {
         let changes = [GitChange(index: "M", worktree: "M", path: "a.swift"), GitChange(index: "R", worktree: " ", path: "new.swift", originalPath: "old.swift"),
                        GitChange(index: "U", worktree: "U", path: "both.swift"), GitChange(index: "?", worktree: "?", path: "c.txt"),
                        GitChange(index: " ", worktree: "M", path: "img.png")]
-        let counted = GitRepository.counted(changes, staged: ["a.swift": (1, 1), "new.swift": (0, 0)],
+        let counted = GitReads.counted(changes, staged: ["a.swift": (1, 1), "new.swift": (0, 0)],
                                             unstaged: ["a.swift": (2, 0), "both.swift": (5, 3), "img.png": (nil, nil)], untracked: ["c.txt": 7])
         XCTAssertEqual(counted.map { "\($0.status) \($0.path) +\($0.additions ?? -1) -\($0.deletions ?? -1)" }, [
             "MM a.swift +3 -1", "R  new.swift +0 -0", "UU both.swift +5 -3", "?? c.txt +7 -0", " M img.png +-1 --1",
@@ -398,30 +398,30 @@ final class GitRepositoryParsingTests: XCTestCase {
     }
 
     func testAChangesOutputIsSplitByGroup() {
-        let parts = GitRepository.parseParts("\n\u{1E}unstaged\ndiff --git a/a b/a\n\n\u{1E}staged\n\n\u{1E}bogus\nx")
+        let parts = GitReads.parseParts("\n\u{1E}unstaged\ndiff --git a/a b/a\n\n\u{1E}staged\n\n\u{1E}bogus\nx")
         XCTAssertEqual(parts.map(\.group), [.unstaged, .staged])
         XCTAssertEqual(parts[0].patch, "diff --git a/a b/a\n")
         XCTAssertEqual(parts[1].patch, "")
     }
 
     func testNumstatReadsRenamesAndBinaries() {
-        let counts = GitRepository.parseNumstat("1\t2\ta.swift\0-\t-\timg.png\03\t0\t\0old.swift\0new.swift\0")
+        let counts = GitReads.parseNumstat("1\t2\ta.swift\0-\t-\timg.png\03\t0\t\0old.swift\0new.swift\0")
         XCTAssertEqual(counts["a.swift"]?.0, 1)
         XCTAssertEqual(counts["a.swift"]?.1, 2)
         XCTAssertNotNil(counts["img.png"])
         XCTAssertNil(counts["img.png"]?.0)
         XCTAssertEqual(counts["new.swift"]?.0, 3)
         XCTAssertNil(counts["old.swift"])
-        XCTAssertEqual(GitRepository.parseLineCounts("      25 Sources/A.swift\n       3 b c.txt\n      28 total\n"),
+        XCTAssertEqual(GitReads.parseLineCounts("      25 Sources/A.swift\n       3 b c.txt\n      28 total\n"),
                        ["Sources/A.swift": 25, "b c.txt": 3])
     }
 
     func testBranchesAreComparedWithHEAD() {
-        let divergence = GitRepository.parseDivergence("master 2 14\nfeature 0\t3\n")
+        let divergence = GitReads.parseDivergence("master 2 14\nfeature 0\t3\n")
         XCTAssertEqual(divergence["master"]?.0, 2)
         XCTAssertEqual(divergence["feature"]?.1, 3)
-        XCTAssertEqual(GitRepository.parseComparison("origin/master 1\t0\n"), GitComparison(base: "origin/master", ahead: 1, behind: 0))
-        XCTAssertNil(GitRepository.parseComparison(""))
+        XCTAssertEqual(GitReads.parseComparison("origin/master 1\t0\n"), GitComparison(base: "origin/master", ahead: 1, behind: 0))
+        XCTAssertNil(GitReads.parseComparison(""))
     }
 
     func testAgesUseLazygitUnits() {
@@ -868,28 +868,6 @@ final class GitScriptTests: XCTestCase {
 
     private var repository: String { directory.url.appendingPathComponent("repo").path }
 
-    /// The remote probe reads the same while nothing changes, even a file whose time changed and whose index entry
-    /// `git status` would otherwise rewrite, and reads otherwise after a commit.
-    func testTheRemoteProbeIsStableUntilTheRepositoryChangesAndNeverWritesTheIndex() throws {
-        try run("""
-        cd "$1" && printf 'd\\n' > d.txt && git add d.txt && git commit -q -m d && touch -t 202001010000 d.txt
-        """, repository)
-        func probe() throws -> String? {
-            GitRemoteProbe.value(of: .success(try run(GitRemoteProbe.script, repository)))
-        }
-        let index = { try FileManager.default.attributesOfItem(atPath: self.repository + "/.git/index")[.modificationDate] as? Date }
-        let first = try XCTUnwrap(try probe())
-        XCTAssertTrue(first.contains("refs/heads/master"), first)
-        let indexTime = try index()
-        XCTAssertEqual(try probe(), first, "nothing changed, yet the probe read otherwise")
-        XCTAssertEqual(try index(), indexTime, "the probe wrote the index")
-        try run("cd \"$1\" && git add c.txt && git commit -q -m Second", repository)
-        XCTAssertNotEqual(try probe(), first, "a commit left the probe the same")
-        // A folder in no repository, or one that is gone, reads nothing.
-        XCTAssertNil(GitRemoteProbe.value(of: .success(try run(GitRemoteProbe.script, directory.url.path))))
-        XCTAssertNil(GitRemoteProbe.value(of: .success(try run(GitRemoteProbe.script, directory.url.path + "/gone"))))
-    }
-
     func testThePullRequestLinkScriptPrintsTheUpstreamRemotesUrlAndTheUpstreamBranch() throws {
         try run("""
         cd "$1"
@@ -898,36 +876,36 @@ final class GitScriptTests: XCTestCase {
         git config branch.feature.merge refs/heads/topic/feature
         git config url.https://github.com/.insteadOf git@github.com:
         """, repository)
-        XCTAssertEqual(try run(GitRepository.pullRequestLinkScript, repository, "feature"),
+        XCTAssertEqual(try run(GitReads.pullRequestLinkScript, repository, "feature"),
                        "https://github.com/me/repo.git\ntopic/feature\n")
     }
 
     func testTheCommitLinkScriptReadsOriginOrTheOnlyRemote() throws {
         // No remote.
-        XCTAssertThrowsError(try run(GitRepository.commitLinkScript, repository)) { error in
+        XCTAssertThrowsError(try run(GitReads.commitLinkScript, repository)) { error in
             XCTAssertTrue(String(describing: error).contains("There is no 'origin' remote"), "\(error)")
         }
         try run("cd \"$1\" && git remote add fork git@github.com:me/repo.git", repository)
-        XCTAssertEqual(try run(GitRepository.commitLinkScript, repository), "git@github.com:me/repo.git\n", "the only remote")
+        XCTAssertEqual(try run(GitReads.commitLinkScript, repository), "git@github.com:me/repo.git\n", "the only remote")
         try run("cd \"$1\" && git remote add upstream git@github.com:team/repo.git", repository)
-        XCTAssertThrowsError(try run(GitRepository.commitLinkScript, repository), "several remotes and none called origin") { error in
+        XCTAssertThrowsError(try run(GitReads.commitLinkScript, repository), "several remotes and none called origin") { error in
             XCTAssertTrue(String(describing: error).contains("There is no 'origin' remote"), "\(error)")
         }
         try run("cd \"$1\" && git remote add origin git@github.com:owner/repo.git && git config url.https://github.com/.insteadOf git@github.com:", repository)
-        XCTAssertEqual(try run(GitRepository.commitLinkScript, repository), "https://github.com/owner/repo.git\n", "origin, with insteadOf applied")
+        XCTAssertEqual(try run(GitReads.commitLinkScript, repository), "https://github.com/owner/repo.git\n", "origin, with insteadOf applied")
     }
 
     func testThePullRequestLinkScriptRefusesABranchWithNoUpstreamOrOnTheRemoteDot() throws {
         for setup in ["true", "git config branch.feature.remote . && git config branch.feature.merge refs/heads/master"] {
             try run("cd \"$1\" && \(setup)", repository)
-            XCTAssertThrowsError(try run(GitRepository.pullRequestLinkScript, repository, "feature")) { error in
+            XCTAssertThrowsError(try run(GitReads.pullRequestLinkScript, repository, "feature")) { error in
                 XCTAssertTrue(String(describing: error).contains("Cannot open a pull request for a branch with no upstream"), "\(error)")
             }
         }
     }
 
     func testTheSnapshotListsEverySection() throws {
-        let snapshot = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get()
+        let snapshot = try GitReads.parseSnapshot(run(GitReads.snapshotScript, repository)).get()
         XCTAssertEqual(snapshot.repositoryName, "repo")
         XCTAssertNil(snapshot.worktreeName)
         XCTAssertEqual(snapshot.head, "master")
@@ -952,7 +930,7 @@ final class GitScriptTests: XCTestCase {
 
     func testALinkedWorktreeIsNamedAfterItsFolderAndComparedWithMain() throws {
         let linked = directory.url.appendingPathComponent("linked").path
-        let snapshot = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, linked)).get()
+        let snapshot = try GitReads.parseSnapshot(run(GitReads.snapshotScript, linked)).get()
         XCTAssertEqual(snapshot.repositoryName, "repo")
         XCTAssertEqual(snapshot.worktreeName, "linked")
         XCTAssertEqual(snapshot.head, "other")
@@ -970,7 +948,7 @@ final class GitScriptTests: XCTestCase {
             git -C "$2" worktree add -q "$3" master
             git -C "$3" checkout -q -b abc
             """, directory.url.path, bare, path)
-            let snapshot = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, path)).get()
+            let snapshot = try GitReads.parseSnapshot(run(GitReads.snapshotScript, path)).get()
             XCTAssertEqual(snapshot.head, "abc", bare)
             XCTAssertNil(snapshot.branches.first { $0.name == "master" }?.worktreePath, bare)
             XCTAssertNotNil(snapshot.branches.first { $0.name == "abc" }?.worktreePath, bare)
@@ -978,7 +956,7 @@ final class GitScriptTests: XCTestCase {
     }
 
     func testAFolderOutsideARepositoryIsNotAnError() throws {
-        let result = GitRepository.parseSnapshot(try run(GitRepository.snapshotScript, directory.url.path))
+        let result = GitReads.parseSnapshot(try run(GitReads.snapshotScript, directory.url.path))
         XCTAssertEqual(result, .failure(GitViewError(message: "Not a git repository: \(directory.url.path)")))
     }
 
@@ -999,7 +977,7 @@ final class GitScriptTests: XCTestCase {
     }
 
     private func change(_ path: String, _ groups: String) throws -> GitPatch {
-        let parts = GitRepository.parseParts(try run(GitRepository.changeScript, repository, path, "", "3", groups))
+        let parts = GitReads.parseParts(try run(GitReads.changeScript, repository, path, "", "3", groups))
         return GitPatch.joined(parts.map { ($0.group, GitPatch.parse($0.patch)) })
     }
 
@@ -1022,23 +1000,23 @@ final class GitScriptTests: XCTestCase {
     }
 
     func testABranchHasItsOwnHistory() throws {
-        let log = GitRepository.parseLog(try run(GitRepository.logScript, repository, "feature"))
+        let log = GitReads.parseLog(try run(GitReads.logScript, repository, "feature"))
         XCTAssertEqual(log.commits.map(\.subject), ["Add b", "First"])
         XCTAssertEqual(log.commits.first?.refs, ["feature"])
         // No upstream: what isn't in master yet is unpushed.
         XCTAssertEqual(log.commits.map(\.status), [.unpushed, .merged])
         XCTAssertEqual(log.graph.count, 2)
-        let snapshot = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get()
+        let snapshot = try GitReads.parseSnapshot(run(GitReads.snapshotScript, repository)).get()
         XCTAssertEqual(snapshot.branches.first { $0.name == "feature" }?.sha, log.commits.first?.sha)
     }
 
     func testACommitHasItsMessageAndParents() throws {
-        let root = GitRepository.parseCommitDetail(try run(GitRepository.commitScript, repository, "v1"))
+        let root = GitReads.parseCommitDetail(try run(GitReads.commitScript, repository, "v1"))
         XCTAssertEqual(root.detail?.title, "First")
         XCTAssertEqual(root.detail?.body, "The body.")
         XCTAssertEqual(root.detail?.parents, [])
         XCTAssertEqual(GitPatch.parse(root.patch).files.first?.hunks.first?.lines.map(\.text), ["let a = 1"])
-        let child = GitRepository.parseCommitDetail(try run(GitRepository.commitScript, repository, "feature"))
+        let child = GitReads.parseCommitDetail(try run(GitReads.commitScript, repository, "feature"))
         XCTAssertEqual(child.detail?.parents.count, 1)
         XCTAssertEqual(child.detail?.author, "Yauhen Karatkou")
     }
@@ -1052,14 +1030,14 @@ final class GitScriptTests: XCTestCase {
         GIT_COMMITTER_DATE="$(($(git log -1 --format=%ct feature) + 60)) +0000" git commit -q -m Move
         """, repository)
         let gitView = GitView(windowID: "@1")
-        gitView.apply(try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get())
+        gitView.apply(try GitReads.parseSnapshot(run(GitReads.snapshotScript, repository)).get())
         gitView.perform(.tab(.branches))
         select("feature", in: gitView)
         gitView.perform(.mark)
         select("moved", in: gitView)
-        let request = try XCTUnwrap(gitView.request())
-        XCTAssertEqual(request.script, GitRepository.gitScript)
-        let patch = GitPatch.parse(try run(request.script, request.arguments))
+        let read = try XCTUnwrap(gitView.request()?.read)
+        guard case .range = read else { return XCTFail("a comparison reads \(read)") }
+        let patch = GitPatch.parse(try XCTUnwrap(GitReader().run(read).text))
         XCTAssertEqual(patch.files.map(\.path), ["c.swift", "renamed.swift"])
         XCTAssertEqual(patch.files.map(\.change), [.added, .renamed])
         XCTAssertEqual(patch.additions, 1)
@@ -1460,12 +1438,12 @@ final class GitScriptTests: XCTestCase {
         let path = try mergeableRepository()
         let linked = directory.url.appendingPathComponent("merges-linked").path
         try git("worktree add -q -b linked \"\(linked)\"", in: path)
-        let main = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, path)).get()
-        let other = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, linked)).get()
+        let main = try GitReads.parseSnapshot(run(GitReads.snapshotScript, path)).get()
+        let other = try GitReads.parseSnapshot(run(GitReads.snapshotScript, linked)).get()
         XCTAssertFalse(main.commonDirectory.isEmpty)
         XCTAssertEqual(main.commonDirectory, other.commonDirectory)
         XCTAssertNotEqual(main.root, other.root)
-        let unrelated = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, try conflictedRepository())).get()
+        let unrelated = try GitReads.parseSnapshot(run(GitReads.snapshotScript, try conflictedRepository())).get()
         XCTAssertNotEqual(unrelated.commonDirectory, main.commonDirectory)
     }
 
@@ -1845,16 +1823,16 @@ final class GitScriptTests: XCTestCase {
 
     func testThePreviousBranchIsWhatCheckoutDashGoesBackTo() throws {
         try prepareCheckout()
-        let before = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get()
+        let before = try GitReads.parseSnapshot(run(GitReads.snapshotScript, repository)).get()
         XCTAssertEqual(before.previousBranch, "diverged", "prepareCheckout moved from diverged to master")
         try run(GitRepository.checkoutScript, repository, "previous", "-", "0")
         XCTAssertEqual(try currentBranch(), "diverged")
-        let after = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get()
+        let after = try GitReads.parseSnapshot(run(GitReads.snapshotScript, repository)).get()
         XCTAssertEqual(after.previousBranch, "master")
         // A repository that never switched has none, and says so.
         try run("git init -q -b main \"$1/fresh\" && cd \"$1/fresh\" && git -c user.email=a@b -c user.name=a commit -q --allow-empty -m x", directory.url.path)
         let fresh = directory.url.appendingPathComponent("fresh").path
-        XCTAssertNil(try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, fresh)).get().previousBranch)
+        XCTAssertNil(try GitReads.parseSnapshot(run(GitReads.snapshotScript, fresh)).get().previousBranch)
         XCTAssertThrowsError(try run(GitRepository.checkoutScript, fresh, "previous", "-", "0")) { error in
             XCTAssertTrue(stderr(of: error).contains("no previous branch"), stderr(of: error))
         }
@@ -1866,7 +1844,7 @@ final class GitScriptTests: XCTestCase {
         cd "$1" && git init -q --bare ../origin.git && git remote add origin ../origin.git
         git push -q origin feature:remote-only && git fetch -q origin
         """, repository)
-        let snapshot = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, repository)).get()
+        let snapshot = try GitReads.parseSnapshot(run(GitReads.snapshotScript, repository)).get()
         XCTAssertEqual(snapshot.remoteBranches, ["origin/remote-only"])
         try run(GitRepository.checkoutScript, repository, "remote", "origin/remote-only", "0")
         XCTAssertEqual(try currentBranch(), "remote-only")
@@ -1918,7 +1896,7 @@ final class GitScriptTests: XCTestCase {
     func testTheSnapshotNamesTheRepositoryFolderFromAnyWorktree() throws {
         let real = (repository as NSString).resolvingSymlinksInPath
         for path in [repository, directory.url.appendingPathComponent("linked").path] {
-            let snapshot = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, path)).get()
+            let snapshot = try GitReads.parseSnapshot(run(GitReads.snapshotScript, path)).get()
             XCTAssertEqual((snapshot.repositoryFolder as NSString).resolvingSymlinksInPath, real)
         }
     }
@@ -2004,7 +1982,7 @@ final class GitScriptTests: XCTestCase {
         git checkout -q master && printf 'ours\\n' > f && git commit -qam ours
         git merge theirs >/dev/null 2>&1 || true
         """, directory.url.path)
-        let snapshot = try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, merging)).get()
+        let snapshot = try GitReads.parseSnapshot(run(GitReads.snapshotScript, merging)).get()
         let theirs = try XCTUnwrap(snapshot.branches.first { $0.name == "theirs" })
         XCTAssertEqual(snapshot.operation, .merge([theirs.sha]))
         XCTAssertEqual(snapshot.operationTitle, "Merging theirs")
@@ -2030,7 +2008,7 @@ final class GitScriptTests: XCTestCase {
         git cherry-pick theirs >/dev/null 2>&1 || true
         """, directory.url.path)
         func operation() throws -> GitOperation? {
-            try GitRepository.parseSnapshot(run(GitRepository.snapshotScript, path)).get().operation
+            try GitReads.parseSnapshot(run(GitReads.snapshotScript, path)).get().operation
         }
         let theirs = try run("cd \"$1\" && git rev-parse theirs", path).trimmingCharacters(in: .whitespacesAndNewlines)
         XCTAssertEqual(try operation(), .cherryPick(theirs))
@@ -2044,7 +2022,7 @@ final class GitScriptTests: XCTestCase {
     }
 
     func testAStashIsShownWithGit() throws {
-        let stash = try run(GitRepository.gitScript, repository, "stash", "show", "--patch", "--no-color", "stash@{0}")
+        let stash = try run(GitReads.gitScript, repository, "stash", "show", "--patch", "--no-color", "stash@{0}")
         XCTAssertEqual(GitPatch.parse(stash).files.first?.hunks.first?.lines.last?.text, "stashed")
     }
 }
@@ -2199,7 +2177,7 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(gitView.compared?.id, "branch:feature")
         let request = gitView.request()
         XCTAssertEqual(request?.id, "compare:branch:master@c2 branch:feature@f1")
-        XCTAssertEqual(request?.arguments, ["/repo", "diff", "--no-color", "--no-ext-diff", "-M", "c2", "f1", "--"])
+        XCTAssertEqual(request?.read, .range(root: "/repo", from: "c2", to: "f1"))
         XCTAssertEqual(request?.isFixed, true)
         XCTAssertEqual(gitView.filesLevel?.owner?.id, "branch:feature")
         gitView.perform(.enter)
@@ -2230,7 +2208,7 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.down)
         gitView.perform(.mark)
         gitView.perform(.tab(.history))
-        XCTAssertEqual(gitView.request()?.arguments.suffix(3), ["f1", "c2", "--"])
+        XCTAssertEqual(gitView.request()?.read, .range(root: "/repo", from: "f1", to: "c2"))
         var moved = snapshot
         moved.branches[1] = branch("feature", at: "f2")
         gitView.apply(moved)
@@ -3907,25 +3885,35 @@ final class GitViewWatchingTests: XCTestCase {
     }
 }
 
-/// The Remote Environment's probe, driven by fake script output.
+/// The Git View's watcher in every Environment: the `repository` subscription through the store's link, driven by
+/// fake events.
 @MainActor
-final class GitRemoteProbeTests: XCTestCase {
-    private struct Failed: Error {}
+final class RepositoryWatcherTests: XCTestCase {
+    /// The subscriptions made, each with its folder, its event handler and whether it was cancelled.
+    private final class Subscription {
+        let path: String
+        let onEvent: (RepositoryEvent) -> Void
+        var cancelled = false
 
-    /// The probes run, each waiting to be answered.
-    private var calls: [(script: String, arguments: [String], completion: (Result<String, Error>) -> Void)] = []
+        init(path: String, onEvent: @escaping (RepositoryEvent) -> Void) {
+            self.path = path
+            self.onEvent = onEvent
+        }
+    }
+
+    private var subscriptions: [Subscription] = []
     private var changes = 0
     private var reads = 0
     private var gitView: GitView?
 
-    private func makeProbe(interval: TimeInterval = 60) -> GitRemoteProbe {
-        GitRemoteProbe(interval: interval) { [unowned self] script, arguments, completion in
-            calls.append((script, arguments, completion))
+    private func makeWatcher() -> RepositoryWatcher {
+        RepositoryWatcher { [unowned self] path, onEvent in
+            let subscription = Subscription(path: path, onEvent: onEvent)
+            subscriptions.append(subscription)
+            return EnvironmentSubscription { subscription.cancelled = true }
         }
     }
 
-    private func answer(_ output: String) { calls.removeFirst().completion(.success("\u{1E}probe\n" + output)) }
-    private func fail() { calls.removeFirst().completion(.failure(Failed())) }
     private let repository = GitWatchedRepository(root: "/repo", commonDirectory: "/repo/.git")
 
     private func spin(_ seconds: TimeInterval) {
@@ -3938,103 +3926,50 @@ final class GitRemoteProbeTests: XCTestCase {
         while !done(), Date() < deadline { spin(0.01) }
     }
 
-    func testUnchangedValuesReportNothingAndAChangedOneReports() {
-        let probe = makeProbe()
-        probe.start(repository) { self.changes += 1 }
-        XCTAssertEqual(calls.count, 1, "it does not probe at once")
-        XCTAssertEqual(calls.first?.script, GitRemoteProbe.script)
-        XCTAssertEqual(calls.first?.arguments, ["/repo"])
-        answer("abc\nrefs/heads/main\n1.0\n42 10\n")
-        XCTAssertEqual(changes, 0, "the first probe only sets what the next ones are compared with")
-        probe.probe()
-        answer("abc\nrefs/heads/main\n1.0\n42 10\n")
-        XCTAssertEqual(changes, 0, "nothing changed, yet it reported a change")
-        // Each of HEAD, the index's time and the status hash is a change.
-        for changed in ["def\nrefs/heads/main\n1.0\n42 10\n", "def\nrefs/heads/main\n2.0\n42 10\n",
-                        "def\nrefs/heads/main\n2.0\n7 0\n"] {
-            let before = changes
-            probe.probe()
-            answer(changed)
-            XCTAssertEqual(changes, before + 1, changed)
-        }
-        probe.stop()
+    func testTheFirstEventReportsNothingAndEachChangeReports() {
+        let watcher = makeWatcher()
+        watcher.start(repository) { self.changes += 1 }
+        XCTAssertEqual(subscriptions.map(\.path), ["/repo"], "it does not subscribe to the repository's top folder")
+        subscriptions[0].onEvent(RepositoryEvent(head: "main", repository: true, changed: false))
+        XCTAssertEqual(changes, 0, "the first event, the whole state, reported a change")
+        subscriptions[0].onEvent(RepositoryEvent(head: "main", repository: true, changed: true))
+        subscriptions[0].onEvent(RepositoryEvent(head: "feature", repository: true, changed: true))
+        XCTAssertEqual(changes, 2)
+        // The same repository again keeps its subscription; another one replaces it.
+        watcher.start(repository) { self.changes += 1 }
+        XCTAssertEqual(subscriptions.count, 1)
+        watcher.start(GitWatchedRepository(root: "/other", commonDirectory: "/other/.git")) { self.changes += 1 }
+        XCTAssertEqual(subscriptions.map(\.path), ["/repo", "/other"])
+        XCTAssertTrue(subscriptions[0].cancelled)
+        watcher.stop()
+        XCTAssertTrue(subscriptions[1].cancelled, "a stopped watcher keeps its subscription")
+        subscriptions[1].onEvent(RepositoryEvent(head: "main", repository: true, changed: true))
+        XCTAssertEqual(changes, 2, "a stopped watcher reported a change")
     }
 
-    func testAFailedProbeReportsNothingAndTheNextComparesWithTheLastRead() {
-        let probe = makeProbe()
-        probe.start(repository) { self.changes += 1 }
-        answer("a\n")
-        probe.probe()
-        fail()
-        probe.probe()
-        calls.removeFirst().completion(.success(""))
-        XCTAssertEqual(changes, 0, "a failed probe reported a change")
-        probe.probe()
-        answer("a\n")
-        XCTAssertEqual(changes, 0)
-        // Changed while the connection was down: the next probe that reads reports it.
-        probe.probe()
-        fail()
-        probe.probe()
-        answer("b\n")
-        XCTAssertEqual(changes, 1)
-        probe.stop()
-    }
-
-    func testOneProbeRunsAtATimeAndAStoppedProbeReportsNothing() {
-        let probe = makeProbe()
-        probe.start(repository) { self.changes += 1 }
-        probe.probe()
-        XCTAssertEqual(calls.count, 1, "a probe started while one ran")
-        answer("a\n")
-        probe.probe()
-        probe.stop()
-        answer("b\n")
-        XCTAssertEqual(changes, 0, "a probe that ended after the stop reported a change")
-        probe.probe()
-        XCTAssertTrue(calls.isEmpty, "a stopped probe probed")
-    }
-
-    func testItProbesOnTheIntervalUntilStopped() {
-        let probe = makeProbe(interval: 0.05)
-        probe.start(repository) { self.changes += 1 }
-        answer("a\n")
-        spin { !calls.isEmpty }
-        XCTAssertEqual(calls.count, 1, "it did not probe on the interval")
-        answer("b\n")
-        XCTAssertEqual(changes, 1)
-        probe.stop()
-        spin(0.2)
-        XCTAssertTrue(calls.isEmpty, "a stopped probe kept probing")
-    }
-
-    func testAnOpenGitViewReadsWhenTheProbeSeesAChangeAndASuspendedOneProbesNothing() {
+    func testAnOpenGitViewReadsWhenTheRepositoryChangesAndASuspendedOneSubscribesToNothing() {
         let gitView = GitView(windowID: "@1")
         self.gitView = gitView
-        let probe = makeProbe()
-        gitView.watcher = probe
+        gitView.watcher = makeWatcher()
         gitView.changeTiming = (settle: 0.01, spacing: 0.01)
         gitView.readAfterChange = { [unowned self] done in
             reads += 1
             done()
         }
-        // Closed, it probes nothing.
+        // Closed, it subscribes to nothing.
         var snapshot = GitSnapshot(root: "/repo", repositoryName: "repo", head: "main")
         snapshot.commonDirectory = "/repo/.git"
         gitView.apply(snapshot)
-        XCTAssertTrue(calls.isEmpty, "a Git View that never opened probes")
+        XCTAssertTrue(subscriptions.isEmpty, "a Git View that never opened subscribes")
         gitView.startWatching()
-        answer("a\n")
-        probe.probe()
-        answer("a\n")
+        XCTAssertEqual(subscriptions.count, 1)
+        subscriptions[0].onEvent(RepositoryEvent(head: "main", repository: true, changed: false))
         spin(0.1)
-        XCTAssertEqual(reads, 0, "an unchanged probe started a read")
-        probe.probe()
-        answer("b\n")
+        XCTAssertEqual(reads, 0, "the first event started a read")
+        subscriptions[0].onEvent(RepositoryEvent(head: "main", repository: true, changed: true))
         spin { reads > 0 }
-        XCTAssertEqual(reads, 1, "a changed probe started no read")
+        XCTAssertEqual(reads, 1, "a change started no read")
         gitView.suspend()
-        probe.probe()
-        XCTAssertTrue(calls.isEmpty, "a suspended Git View probes")
+        XCTAssertTrue(subscriptions[0].cancelled, "a suspended Git View keeps its subscription")
     }
 }

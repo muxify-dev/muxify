@@ -135,7 +135,7 @@ final class EnvironmentEvents {
 }
 
 /// The one way an App Window's `WorkspaceStore` reaches its Active Environment: its tmux server, its Topic records,
-/// its `EnvironmentService` and the Git View's scripts (ADR 0087). Commands are `async`; state
+/// its `EnvironmentService` and the Git View's reads and scripts (ADR 0087). Commands are `async`; state
 /// comes as keyed events per subscription.
 ///
 /// A link never changes target. Changing the Active Environment retires the store's link: its waiting requests
@@ -241,12 +241,16 @@ protocol EnvironmentLink: AnyObject {
 
     // MARK: Git
 
+    /// Runs one of the Git View's reads on the repository's machine (ADR 0085). A link without `.git` throws
+    /// `unsupported`.
+    func git(_ read: GitRead) async throws -> GitAnswer
+    /// The `repository` subscription of a folder: its first event is the whole state, then one comes whenever HEAD,
+    /// the index or the working tree changed. Events come on the main thread. A link without `.git` sends none.
+    func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription
     /// Runs a Git View network command in a pseudo-terminal, so its credential prompts go to `onPrompt`.
     func startGitNetworkScript(_ script: String, arguments: [String], timeout: TimeInterval,
                                onPrompt: @escaping (GitCredentialPrompt) -> Void,
                                completion: @escaping (Result<String, Error>) -> Void) -> TerminalCommand?
-    /// What tells a Git View that its repository changed. `run` runs the probe's script through the store.
-    func makeGitWatcher(run: @escaping GitRemoteProbe.Run) -> GitWatcher
 
     // MARK: Retiring
 
@@ -329,6 +333,13 @@ enum EnvironmentLinks {
         }
         #endif
         return HostEnvironmentLink.overSSH(environment: environment, sshExecutable: sshExecutable)
+    }
+
+    /// Runs a Git View read on this Mac, off the main thread.
+    static func readGit(_ read: GitRead) async throws -> GitAnswer {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async { continuation.resume(with: Result { try GitReader().run(read) }) }
+        }
     }
 
     /// Runs `request` with the store's service, off the main thread.

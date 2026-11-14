@@ -1,8 +1,8 @@
 import Foundation
 import MuxifyCore
 
-/// The link to this Mac: the local tmux server through `TmuxConnection`, the local `EnvironmentService` and the Git
-/// View's scripts, as they run today. It serves every feature. The `EnvironmentPublisher` hears the server and the
+/// The link to this Mac: the local tmux server through `TmuxConnection`, the local `EnvironmentService`, and the Git
+/// View's reads, run in-process by MuxifyCore's `GitReader`. It serves every feature. The `EnvironmentPublisher` hears the server and the
 /// Topic records, in-process, as the Host Server does on a Host: the store reads the server again when a Session or
 /// the server changed, and takes the records from its Topic events. Nothing polls.
 @MainActor
@@ -95,8 +95,15 @@ final class LocalEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
                            notifications: notifications, worktreesRoot: worktreesRoot)
     }
 
-    func makeGitWatcher(run: @escaping GitRemoteProbe.Run) -> GitWatcher {
-        GitFileWatcher()
+    func git(_ read: GitRead) async throws -> GitAnswer {
+        try await EnvironmentLinks.readGit(read)
+    }
+
+    /// ADR 0072's FSEvents watcher, with the HEAD read of each change.
+    func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription {
+        let watch = LocalRepositoryWatch(path: path, onEvent: onEvent)
+        watch.start()
+        return EnvironmentSubscription { watch.stop() }
     }
 
     override func didRetire() {

@@ -473,8 +473,9 @@ final class GitView {
     @ObservationIgnored private var fixedOutputs: [String: String] = [:]
     @ObservationIgnored private var refreshTimer: Timer?
     @ObservationIgnored private var activationObserver: Any?
-    /// What reports that the repository changed, so the Git View reads it again at once, set by the store: FSEvents
-    /// in the Local Environment, a 2-second probe in a Remote one. Without one it reads only on the timer.
+    /// What reports that the repository changed, so the Git View reads it again at once, set by the store: the
+    /// `repository` subscription through its link, fed by FSEvents in the Local Environment and by the Host Server's
+    /// watch on a Host. Without one it reads only on the timer.
     @ObservationIgnored var watcher: GitWatcher?
     /// How long changes must stop before a read starts, and the least time between two reads' starts, so build
     /// output in an ignored folder cannot flood it.
@@ -593,6 +594,14 @@ final class GitView {
         takeFocus()
         refresh()
         startRefreshing()
+    }
+
+    /// The store's link, or what it serves, changed: a watching Git View subscribes again on the new link, and an open
+    /// one reads again, so it shows the repository, or why the Git View is unavailable.
+    func linkChanged() {
+        guard isOpen else { return }
+        if isWatching { startWatching() }
+        if isCurrent { refresh() }
     }
 
     private func startRefreshing() {
@@ -2016,16 +2025,15 @@ final class GitView {
     func openPullRequest(of branch: GitBranch) {
         guard list == .branches, let store, let root = snapshot?.root else { return }
         writeError = nil
-        store.runGitScript(GitRepository.pullRequestLinkScript, arguments: [root, branch.name], timeout: 10) { [weak self] result in
+        store.readGit(.upstream(root: root, branch: branch.name), \.remote) { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success(let output):
-                let lines = output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-                guard lines.count >= 2 else {
+            case .success(let remote):
+                guard let upstream = remote.branch else {
                     self.writeError = GitHosting.Failure.noUpstream.message
                     return
                 }
-                switch GitHosting.pullRequestURL(remoteURL: lines[0], upstreamBranch: lines[1], services: store.config.gitView.services) {
+                switch GitHosting.pullRequestURL(remoteURL: remote.url, upstreamBranch: upstream, services: store.config.gitView.services) {
                 case .success(let url): self.openInBrowser(url)
                 case .failure(let failure): self.writeError = failure.message
                 }
@@ -2040,11 +2048,11 @@ final class GitView {
     func openCommitPage(_ commit: GitCommit) {
         guard let store, let root = snapshot?.root else { return }
         writeError = nil
-        store.runGitScript(GitRepository.commitLinkScript, arguments: [root], timeout: 10) { [weak self] result in
+        store.readGit(.origin(root: root), \.remote) { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success(let output):
-                switch GitHosting.commitURL(remoteURL: output, hash: commit.sha, services: store.config.gitView.services) {
+            case .success(let remote):
+                switch GitHosting.commitURL(remoteURL: remote.url, hash: commit.sha, services: store.config.gitView.services) {
                 case .success(let url): self.openInBrowser(url)
                 case .failure(let failure): self.writeError = failure.message
                 }
@@ -3271,11 +3279,11 @@ final class GitView {
         snapshotGeneration += 1
         let generation = snapshotGeneration
         if showingProgress { isReading = true }
-        store.runGitScript(GitRepository.snapshotScript, arguments: [folder]) { [weak self] result in
+        store.readGit(.status(folder: folder), \.snapshot) { [weak self] result in
             defer { done?() }
             guard let self, self.isOpen, self.snapshotGeneration == generation else { return }
             self.isReading = false
-            switch result.flatMap({ GitRepository.parseSnapshot($0).mapError { $0 as Error } }) {
+            switch result {
             case .success(let snapshot):
                 self.apply(snapshot)
             case .failure(let error):
@@ -3365,10 +3373,10 @@ final class GitView {
     private func runLog(of branch: GitBranch) {
         guard let store, let root = snapshot?.root else { return }
         readingLog = "\(branch.name) \(branch.sha)"
-        store.runGitScript(GitRepository.logScript, arguments: [root, branch.name]) { [weak self] result in
+        store.readGit(.log(root: root, branch: branch.name), \.log) { [weak self] result in
             guard let self, self.isOpen else { return }
             switch result {
-            case .success(let output): self.didRead(GitRepository.parseLog(output), of: branch)
+            case .success(let log): self.didRead(log, of: branch)
             case .failure(let error): self.didRead(GitLog(error: Self.message(for: error)), of: branch)
             }
         }
@@ -3441,9 +3449,9 @@ final class GitView {
     }
 
     private func run(_ request: Request) {
-        guard let store else { return }
+        guard let store, let read = request.read else { return }
         loadingID = request.id
-        store.runGitScript(request.script, arguments: request.arguments) { [weak self] result in
+        store.readGit(read, \.text) { [weak self] result in
             guard let self, self.isOpen, self.loadingID == request.id else { return }
             self.loadingID = nil
             switch result {
@@ -3475,9 +3483,9 @@ final class GitView {
             var patch: GitPatch
             switch header {
             case .change, .folder:
-                patch = GitPatch.joined(GitRepository.parseParts(output).map { ($0.group, GitPatch.parse($0.patch)) })
+                patch = GitPatch.joined(GitReads.parseParts(output).map { ($0.group, GitPatch.parse($0.patch)) })
             case .commit(let commit, _):
-                let parsed = GitRepository.parseCommitDetail(output)
+                let parsed = GitReads.parseCommitDetail(output)
                 header = .commit(commit, parsed.detail)
                 patch = GitPatch.parse(parsed.patch)
             default:
@@ -3518,12 +3526,12 @@ final class GitView {
         }
     }
 
-    /// A git command whose output the diff pane shows.
+    /// A git read whose output the diff pane shows.
     struct Request {
         let id: String
         let header: Content.Header
-        var script = ""
-        var arguments: [String] = []
+        /// The read; nil for what is shown without running git.
+        var read: GitRead?
         /// Commits and stashes, which never change; the rest is read again
         /// on every refresh.
         var isFixed = false
@@ -3545,34 +3553,29 @@ final class GitView {
                 return Request(id: "base:\(base.id)@\(from)", header: .comparison(base: base, target: nil), localOutput: "")
             }
             return Request(id: "compare:\(base.id)@\(from) \(item.id)@\(to)", header: .comparison(base: base, target: item),
-                           script: GitRepository.gitScript,
-                           arguments: [root, "diff", "--no-color", "--no-ext-diff", "-M", from, to, "--"], isFixed: true)
+                           read: .range(root: root, from: from, to: to), isFixed: true)
         }
         switch item {
         case .change(let change):
             let whole = wholeFiles.contains(change.path)
             return Request(id: "\(item.id):\(change.status)\(whole ? ":whole" : "")", header: .change(change),
-                           script: GitRepository.changeScript,
-                           arguments: [root, change.path, change.originalPath ?? "", whole ? "100000" : "3",
-                                       change.groups.map(\.rawValue).joined(separator: " ")])
+                           read: .change(root: root, path: change.path, from: change.originalPath, context: whole ? 100_000 : 3,
+                                         groups: change.groups))
         case .folder(_, let path):
             let changes = snapshot.changes.filter { GitTree.path($0.path, isIn: path) }
             let groups = GitChange.Group.allCases.filter { group in changes.contains { $0.groups.contains(group) } }
             let names = groups.map(\.rawValue).joined(separator: " ")
-            return Request(id: "\(item.id):\(names)", header: .folder(path, changes), script: GitRepository.changeScript,
-                           arguments: [root, path, "", "3", names])
+            return Request(id: "\(item.id):\(names)", header: .folder(path, changes),
+                           read: .change(root: root, path: path, from: nil, context: 3, groups: groups))
         case .branch(let branch):
             // Its card: the latest commits, read with its history.
             let log = log(of: branch)
             return Request(id: "\(item.id):\(log?.commits.first?.sha ?? log?.error ?? "reading")", header: .branch(branch, log),
                            localOutput: "")
         case .commit(let commit):
-            return Request(id: item.id, header: .commit(commit, nil), script: GitRepository.commitScript,
-                           arguments: [root, commit.sha], isFixed: true)
+            return Request(id: item.id, header: .commit(commit, nil), read: .commit(root: root, sha: commit.sha), isFixed: true)
         case .stash(let stash):
-            return Request(id: item.id, header: .stash(stash), script: GitRepository.gitScript,
-                           arguments: [root, "stash", "show", "--patch", "--no-color", "--no-ext-diff", "-M", stash.sha],
-                           isFixed: true)
+            return Request(id: item.id, header: .stash(stash), read: .stash(root: root, sha: stash.sha), isFixed: true)
         case .file:
             return nil
         }

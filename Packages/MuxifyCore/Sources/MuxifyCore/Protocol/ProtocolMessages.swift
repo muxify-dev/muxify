@@ -164,6 +164,9 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// The App Window of this channel no longer consumes `@muxify_open`: the server clears
     /// `@muxify_browser_socket` if it still names its own socket. Answers `{}`.
     case releaseOpen
+    /// One of the Git View's reads, run by the Host's `GitReader`. A snapshot, log or remote answers as its value; a
+    /// diff streams its text as chunks. A failure ends `failed` with the Git View's message.
+    case git(GitRead)
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case ping, shutdown, subscribe, environment
@@ -174,6 +177,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case adoptWorktrees = "adopt_worktrees"
         case claimOpen = "claim_open"
         case releaseOpen = "release_open"
+        case git
     }
 
     public init(from decoder: Decoder) throws {
@@ -195,6 +199,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .adoptWorktrees: self = .adoptWorktrees(try values.decode(AdoptWorktrees.self, forKey: key))
         case .claimOpen: self = .claimOpen
         case .releaseOpen: self = .releaseOpen
+        case .git: self = .git(try values.decode(GitRead.self, forKey: key))
         }
     }
 
@@ -212,6 +217,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .adoptWorktrees(let adopt): try values.encode(adopt, forKey: .adoptWorktrees)
         case .claimOpen: try values.encode(ProtocolEmpty(), forKey: .claimOpen)
         case .releaseOpen: try values.encode(ProtocolEmpty(), forKey: .releaseOpen)
+        case .git(let read): try values.encode(read, forKey: .git)
         }
     }
 }
@@ -250,7 +256,7 @@ public enum MacRequest: Codable, Equatable, Sendable {
     }
 }
 
-/// What a `subscribe` request subscribes to. Later releases add cases (`repository`).
+/// What a `subscribe` request subscribes to. Later releases add cases.
 public enum HostSubscription: Codable, Equatable, Sendable {
     /// The Host's Sessions, Topic records, Open Places and server, as `EnvironmentItem`s keyed `session <id>`,
     /// `topic <id>`, `open_places` and `server`.
@@ -258,8 +264,11 @@ public enum HostSubscription: Codable, Equatable, Sendable {
     /// The Host's Config, as `HostConfig` items keyed `config`: the whole Config each time, first at once, then
     /// after each change in its folders that changes it. One without `text` says the Host has no Config.
     case config
+    /// A folder's repository, as `RepositoryEvent`s keyed `repository`: the first is the whole state, each later one a
+    /// change of HEAD, the index or the working tree.
+    case repository(RepositorySubscription)
 
-    private enum CodingKeys: String, CodingKey, CaseIterable { case environment, config }
+    private enum CodingKeys: String, CodingKey, CaseIterable { case environment, config, repository }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: ProtocolKey.self)
@@ -270,6 +279,7 @@ public enum HostSubscription: Codable, Equatable, Sendable {
         switch known {
         case .environment: self = .environment
         case .config: self = .config
+        case .repository: self = .repository(try values.decode(RepositorySubscription.self, forKey: ProtocolKey(known.rawValue)))
         }
     }
 
@@ -278,6 +288,7 @@ public enum HostSubscription: Codable, Equatable, Sendable {
         switch self {
         case .environment: try values.encode(ProtocolEmpty(), forKey: .environment)
         case .config: try values.encode(ProtocolEmpty(), forKey: .config)
+        case .repository(let repository): try values.encode(repository, forKey: .repository)
         }
     }
 }

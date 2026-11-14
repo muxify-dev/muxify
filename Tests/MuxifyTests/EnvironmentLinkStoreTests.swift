@@ -110,7 +110,7 @@ final class EnvironmentLinkStoreTests: XCTestCase {
     /// A store on a Host link that serves Topics, whose Sessions-only link takes over when its server cannot run.
     private func hostStore() -> (WorkspaceStore, host: FakeEnvironmentLink, sessionsOnly: FakeEnvironmentLink) {
         let host = FakeEnvironmentLink(isOnThisMac: false, features: [.topics, .git])
-        let sessionsOnly = FakeEnvironmentLink(isOnThisMac: false, features: [.git])
+        let sessionsOnly = FakeEnvironmentLink(isOnThisMac: false, features: [])
         host.fallback = sessionsOnly
         let store = WorkspaceStore(configStore: configStore(), environment: box, defaults: isolatedDefaults()) { _ in host }
         store.startLinkForTesting()
@@ -181,6 +181,25 @@ final class EnvironmentLinkStoreTests: XCTestCase {
             XCTAssertFalse(host.isRetired, name)
             XCTAssertEqual(store.topicsUnavailableNote, "Topics are unavailable on box: \(reason).", name)
         }
+    }
+
+    func testTheGitViewOfASessionsOnlyWindowSaysWhyItIsUnavailable() {
+        let (store, host, sessionsOnly) = hostStore()
+        host.gitAnswer = { _ in .snapshot(GitSnapshot(root: "/work/app", repositoryName: "app", head: "main")) }
+        XCTAssertNil(store.gitViewUnavailableMessage, "a Host Server that serves reads the repository")
+
+        host.send(.serverUnavailable(.tooOld("muxify 1a2b3c4 1700000000")))
+        XCTAssertTrue(store.link === sessionsOnly)
+        let message = "The Git View is unavailable on box: the Host's muxify is too old (muxify 1a2b3c4 1700000000)."
+        XCTAssertEqual(store.gitViewUnavailableMessage, message)
+        // The Git View's read fails with it, and the Git View shows it where it shows a read that failed.
+        var shown: String?
+        store.readGit(.status(folder: "/work/app"), \.snapshot) { result in
+            if case .failure(let error) = result { shown = GitView.message(for: error) }
+        }
+        XCTAssertEqual(shown, message)
+        let subscription = store.watchRepository("/work/app") { _ in XCTFail("a Sessions-only link sent a repository event") }
+        subscription.cancel()
     }
 
     func testASessionsOnlyWindowRefusesTheWorktreeActionsWithTheFallbacksReason() async {
