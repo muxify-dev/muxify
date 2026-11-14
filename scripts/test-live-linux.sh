@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs the live SSH tests (LiveHostCLITests and LiveSSHTests) against a throwaway
+# Runs the live SSH tests (LiveHostCLITests, LiveHostServerTests and LiveSSHTests) against a throwaway
 # OrbStack machine for each architecture: arm64, then amd64 through Rosetta.
 # It builds the Host CLI assets (make host-cli) and the tests once, then for each
 # architecture creates a uniquely named Ubuntu machine with tmux, git and curl,
@@ -19,7 +19,8 @@ if ! command -v orb >/dev/null 2>&1; then
 fi
 
 ARCHS=(arm64 amd64)
-ONLY_TESTING=(-only-testing:MuxifyTests/LiveHostCLITests -only-testing:MuxifyTests/LiveSSHTests)
+ONLY_TESTING=(-only-testing:MuxifyTests/LiveHostCLITests -only-testing:MuxifyTests/LiveHostServerTests
+  -only-testing:MuxifyTests/LiveSSHTests)
 # As make test runs xcodebuild.
 XCODEBUILD=(xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug
   -destination "platform=macOS,arch=arm64" -derivedDataPath build
