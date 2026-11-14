@@ -267,8 +267,7 @@ extension EnvironmentService {
             if case .topic = request.target { throw TopicRequestError.noTarget }
             let window = try sessionWindow(request.target, caller: request.caller, snapshot: snapshot, client: client)
             guard (try? SessionNaming.validate(name)) != nil else { throw TopicRequestError.sessionNameInvalid(name) }
-            // Topics are local: a Remote Environment's Sessions are all No Topic Sessions.
-            let topic = topicsAvailable ? records.first { $0.id == window.topicID && $0.settledAt == nil } : nil
+            let topic = records.first { $0.id == window.topicID && $0.settledAt == nil }
             let taken = Set(snapshot.windows.filter { $0.sessionID != window.sessionID }.map(\.sessionName))
             let full = SessionNaming.available(name, topic: topic?.slug, taken: taken)
             return Planned(edit: TopicEdit(record: nil, commands: [.tmux(["rename-session", "-t", window.sessionID, full])], selection: .unchanged),
@@ -308,16 +307,15 @@ extension EnvironmentService {
                 window = try source().0.window
             }
             let kill = TmuxObjectPlan.kill(window, session: session, snapshot: snapshot, expectedPaneIDs: request.expectedPaneIDs,
-                                           topic: topicsAvailable ? records.first { $0.id == window.topicID && $0.settledAt == nil } : nil,
+                                           topic: records.first { $0.id == window.topicID && $0.settledAt == nil },
                                            order: topics.sessionOrder)
             return Planned(edit: try kill.get(), stopped: TmuxObjectPlan.agents(killedBy: window, session: session, in: snapshot))
         case .newSession(let path, let name):
-            // A Remote Environment's folder is on its own machine, so only a local one is checked and named here.
-            let launch = topicsAvailable ? try sessionPath(at: path) : nil
-            let base = name ?? launch?.name ?? SessionPath.sessionName((path as NSString).lastPathComponent)
+            let launch = try sessionPath(at: path)
+            let base = name ?? launch.name
             guard (try? SessionNaming.validate(base)) != nil else { throw TopicRequestError.sessionNameInvalid(base) }
             return Planned(edit: TmuxObjectPlan.newSession(named: SessionNaming.available(base, taken: Set(snapshot.windows.map(\.sessionName))),
-                                                           in: launch?.folder.path ?? path))
+                                                           in: launch.folder.path))
         case .reopen, .startFresh:
             guard case .topic(let ref) = request.target else { throw TopicRequestError.noTarget }
             let topic = try ref.resolve(in: records, open: false)

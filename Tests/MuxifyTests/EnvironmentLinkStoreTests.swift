@@ -331,6 +331,20 @@ final class EnvironmentLinkStoreTests: XCTestCase {
         XCTAssertEqual(configs.last?.isMissing, true)
     }
 
+    func testTheSessionsOnlyLinkRefusesARequestThatNeedsATopicRecordAndRunsTheOthers() async throws {
+        let link = SessionsOnlyEnvironmentLink(environment: RemoteEnvironment(name: "box", host: "unused", username: "unused"))
+        let list = await link.run(EnvironmentRequest(.list), client: nil, local: nil)
+        XCTAssertEqual(list, .failed(EnvironmentLinkError.topicsRefused))
+        let topic = await link.run(EnvironmentRequest(.newWindow(command: nil), target: .topic(.id("t"))), client: nil, local: nil)
+        XCTAssertEqual(topic, .failed(EnvironmentLinkError.topicsRefused), "a Topic target is found through the records")
+        let worktree = await link.run(EnvironmentRequest(.listWorktrees(all: true, from: nil)), client: nil, local: nil)
+        XCTAssertEqual(worktree, .failed(EnvironmentLinkError.worktreesRefused))
+        let window = await link.run(EnvironmentRequest(.newWindow(command: nil)), client: nil, local: nil)
+        XCTAssertNil(window, "a Session request goes to the service, which a link that is not connected has not")
+        XCTAssertFalse(SessionsOnlyEnvironmentLink.noRecords.state.path.hasPrefix(MuxifyPaths().state.path),
+                       "a Sessions-only service never reads this Mac's Topic records")
+    }
+
     private func waitAsync(_ message: String, seconds: TimeInterval = 10, until condition: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition() {

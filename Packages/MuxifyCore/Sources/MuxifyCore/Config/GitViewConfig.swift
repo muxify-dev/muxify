@@ -62,12 +62,6 @@ public struct GitViewConfig: Equatable {
         return command + rest
     }
 
-    /// What `e` runs with no Window: a /bin/sh script that takes the
-    /// repository's folder.
-    public func editorScript(file: String, line: Int) -> String {
-        "cd \"$1\" || exit 1\n" + editorCommand(file: file, line: line)
-    }
-
     /// What tmux runs in the new Window: plain words, because tmux's default
     /// shell may be fish.
     public func editorShellCommand(file: String, line: Int) -> String {

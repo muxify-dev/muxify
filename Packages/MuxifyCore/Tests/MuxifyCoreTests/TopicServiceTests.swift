@@ -1537,11 +1537,6 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.read, scope: .topic), target: .topic(.id(id)))),
                        .readChanged(TopicReadChange(topicIDs: [id], paneIDs: [done])))
         XCTAssertFalse(try topicUnread())
-
-        let remote = EnvironmentService(paths: paths, server: server, topicsAvailable: false)
-        XCTAssertEqual(try failure(remote.handle(EnvironmentRequest(.markRead(.read, scope: .topic), target: .pane(done)))).kind, .topicsUnavailable)
-        XCTAssertEqual(remote.handle(EnvironmentRequest(.markRead(.unread, scope: .window), target: .pane(done))),
-                       .readChanged(TopicReadChange(paneIDs: [done])), "an Agent's Unread is in tmux, so it changes without Topics")
     }
 
     func testTopicMarkChangesOnlyTheTopicUnreadAndASecondCallChangesNothing() throws {
@@ -1621,17 +1616,6 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(atEnd.kind, .cardAtEnd)
         XCTAssertEqual(atEnd.phase, .nothingChanged)
         XCTAssertEqual(try topicList(), ["Third", "First", "Second", "lock:notes"], "a failed move changes nothing")
-    }
-
-    func testWithoutTopicsARequestThatNeedsARecordFailsAndANewWindowStillRuns() throws {
-        let remote = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath], topicsAvailable: false)
-        XCTAssertEqual(try failure(remote.handle(EnvironmentRequest(.list))).kind, .topicsUnavailable)
-        let main = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "main" })
-        let made = try change(remote.handle(EnvironmentRequest(.newWindow(command: nil), target: .session(SessionID(rawValue: main.sessionID)!))))
-        XCTAssertEqual(made.session?.rawValue, main.sessionID)
-        let id = try XCTUnwrap(change(EnvironmentService(paths: paths, server: server).handle(EnvironmentRequest(.create(title: "Local")))).topicID)
-        XCTAssertEqual(try failure(remote.handle(EnvironmentRequest(.newWindow(command: nil), target: .topic(.id(id))))).kind, .topicsUnavailable,
-                       "a Topic target is found through the records")
     }
 
     func testABaseRefThatNamesNoCommitFailsAndMakesNoWorktree() throws {

@@ -154,32 +154,37 @@ final class HostEnvironmentLinkTests: XCTestCase {
         }
         defer { subscription.cancel() }
         link.reloadConfig()
-        XCTAssertEqual(inner.configReloads, 1, "before the server serves the Config, the Sessions-only link reads it")
+        XCTAssertEqual(inner.configReloads, 0, "the Sessions-only link never reads the Config of a Host link")
+        XCTAssertTrue(configs.isEmpty, "before the server's first item, the App Window keeps its Config")
 
         link.startServer()
         try await wait("the server sent no Config") { !configs.isEmpty }
         XCTAssertEqual(configs.last?.text, "ui:\n  header_height: 30\n")
         XCTAssertEqual(configs.last?.shownPath, "~/.config/muxify/config.yaml")
         inner.send(.config(.host(HostConfig(path: file.path, home: home.path, text: "stale"))))
-        XCTAssertNotEqual(configs.last?.text, "stale", "a Sessions-only read does not replace the served Config")
+        XCTAssertNotEqual(configs.last?.text, "stale", "a Sessions-only Config never reaches the store")
 
         try "ui:\n  header_height: 40\n".write(to: file, atomically: true, encoding: .utf8)
         try await wait("an edit on the Host pushed no Config") { configs.last?.text == "ui:\n  header_height: 40\n" }
         let count = configs.count
         link.reloadConfig()
-        XCTAssertEqual(inner.configReloads, 1, "a served Config needs no read")
+        XCTAssertEqual(inner.configReloads, 0, "a served Config needs no read")
         XCTAssertEqual(configs.count, count + 1, "Reload Config sends the served Config again")
     }
 
-    func testSessionPathDiscoveryRunsOnTheHostOnceTheServerServes() async throws {
+    func testSessionPathDiscoveryRunsOnlyOnTheHostsServer() async throws {
         let projects = directory.appendingPathComponent("host-projects")
         try FileManager.default.createDirectory(at: projects.appendingPathComponent("on-host"), withIntermediateDirectories: true)
         let paths = paths!, tmux = tmux!
         let link = link { _ in HostServerContext(paths: paths, tmux: tmux, config: { Config() }) }
         try link.connect()
         let roots = [SessionPathRoot(path: projects.path, depth: 1)]
-        let before = try await link.sessionPathOutput(roots: roots, arguments: SessionPathDiscovery.arguments(for: roots))
-        XCTAssertNil(before, "before the server serves, the Sessions-only link runs discovery")
+        do {
+            _ = try await link.sessionPathOutput(roots: roots, arguments: SessionPathDiscovery.arguments(for: roots))
+            XCTFail("before the server answers, nothing runs discovery")
+        } catch {
+            XCTAssertEqual(error as? TmuxError, .notReady)
+        }
 
         link.startServer()
         try await wait("the server did not serve") { link.features.contains(.topics) }

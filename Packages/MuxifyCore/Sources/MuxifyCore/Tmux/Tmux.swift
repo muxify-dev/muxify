@@ -212,6 +212,17 @@ public struct TmuxSnapshot {
     /// caller reads `ps` for it.
     public var commandLines = PaneCommandLines()
 
+    /// Marks the snapshot as a Host's, read over SSH or from its Host Server: its home, and each Window's home and
+    /// host name, for the Window's title.
+    public mutating func stampHost(home: String, hostName: String) {
+        homeDirectory = home
+        for index in windows.indices {
+            windows[index].homeDirectory = home
+            windows[index].hostName = hostName
+            windows[index].isRemote = true
+        }
+    }
+
     /// The Agents running in this snapshot's Panes, in tmux order.
     public var agents: [Agent] { Agent.list(panes: panes, windows: windows) }
 }

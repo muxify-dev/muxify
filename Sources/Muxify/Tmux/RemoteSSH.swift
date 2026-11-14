@@ -340,12 +340,7 @@ final class RemoteSSH {
             ? TmuxSnapshot(windows: [], clients: [], panes: [], lastWindowID: nil, serverRunning: false)
             : Tmux.parseSnapshot(payload)
         guard payload == "empty" || snapshot.serverID != nil else { return nil }
-        snapshot.homeDirectory = metadata[0]
-        for index in snapshot.windows.indices {
-            snapshot.windows[index].homeDirectory = metadata[0]
-            snapshot.windows[index].hostName = metadata[1]
-            snapshot.windows[index].isRemote = true
-        }
+        snapshot.stampHost(home: metadata[0], hostName: metadata[1])
         return snapshot
     }
 

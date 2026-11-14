@@ -22,6 +22,9 @@ public enum GitRead: Codable, Equatable, Sendable {
     case upstream(root: String, branch: String)
     /// The URL of `origin`, or of the only remote, for a commit's page, answered as a `GitRemote`.
     case origin(root: String)
+    /// Whether a file of the working tree is still there, before `e` opens it: answered as the text `present` or
+    /// `missing`.
+    case fileExists(path: String)
 
     /// What the read answers.
     public enum Answer: Sendable {
@@ -32,7 +35,7 @@ public enum GitRead: Codable, Equatable, Sendable {
         switch self {
         case .status: .snapshot
         case .log: .log
-        case .change, .range, .commit, .stash: .text
+        case .change, .range, .commit, .stash, .fileExists: .text
         case .upstream, .origin: .remote
         }
     }
@@ -104,6 +107,8 @@ public struct GitReader: Sendable {
             return .remote(GitRemote(url: lines[0], branch: lines[1]))
         case .origin(let root):
             return .remote(GitRemote(url: try script(GitReads.commitLinkScript, [root], read)))
+        case .fileExists(let path):
+            return .text(FileManager.default.fileExists(atPath: path) ? "present" : "missing")
         }
     }
 

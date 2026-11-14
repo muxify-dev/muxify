@@ -70,15 +70,15 @@ final class GitViewConfigTests: XCTestCase {
         XCTAssertEqual(invalid.problems.first?.message, "git_view.editor_in_window: expected a boolean")
     }
 
-    func testTheEditorScriptRunsTheCommandInTheFolderItTakes() throws {
+    func testOpenEditorRunsTheCommandInTheFolderItTakes() throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
-        let script = GitViewConfig(editor: "printf '%s %s %s' \"$PWD\" {file} {line} > out").editorScript(file: "/r/a b", line: 4)
-        _ = try CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", script, "muxify", folder.path]))
+        let command = GitViewConfig(editor: "printf '%s %s %s' \"$PWD\" {file} {line} > out").editorCommand(file: "/r/a b", line: 4)
+        try GitWriter().run(.openEditor(root: folder.path, command: command))
         let out = try String(contentsOf: folder.appendingPathComponent("out"), encoding: .utf8)
         XCTAssertEqual(out, "\(folder.path) /r/a b 4")
-        XCTAssertThrowsError(try CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", script, "muxify", "/no/such/folder"])))
+        XCTAssertThrowsError(try GitWriter().run(.openEditor(root: "/no/such/folder", command: command)))
     }
 
     func testTheEditorCommandQuotesTheFileAndFillsTheLine() {

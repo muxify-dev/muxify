@@ -49,7 +49,6 @@ final class FakeEnvironmentLink: EnvironmentLink {
 
     func snapshot(updating commandLines: PaneCommandLines?) async throws -> TmuxSnapshot { throw TmuxError.notReady }
     func snapshotNow() throws -> TmuxSnapshot { throw TmuxError.notReady }
-    func script(_ script: String, arguments: [String], timeout: TimeInterval) async throws -> String { throw TmuxError.notReady }
     func sessionPathOutput(roots: [SessionPathRoot], arguments: [String]) async throws -> String? { nil }
     func pasteAttachments(_ attachments: TerminalAttachments, client: String) async throws -> String { throw TmuxError.notReady }
 

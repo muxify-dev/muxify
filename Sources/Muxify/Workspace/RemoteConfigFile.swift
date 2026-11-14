@@ -70,11 +70,4 @@ enum RemoteConfigFile {
         }
         return texts
     }
-
-    /// The remote Config `text`, shown as `shown`, with its Config Overrides
-    /// merged on top (ADR 0075). `overrides` holds the texts read on the
-    /// remote, by shown path; one that is not there is missing.
-    static func load(_ text: String, shown: String, overrides: [String: String?] = [:]) -> Result<Config, ConfigSyntaxError> {
-        Config.load(path: shown, isRemote: true) { $0 == shown ? text : overrides[$0] ?? nil }
-    }
 }

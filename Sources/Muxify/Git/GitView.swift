@@ -1394,15 +1394,15 @@ final class GitView {
         guard let target = editorTarget else { return }
         writeError = nil
         let file = (root as NSString).appendingPathComponent(target.path)
-        store.runGitScript("[ -e \"$1\" ] && echo present || echo missing", arguments: [file], timeout: 10) { [weak self] result in
+        store.readGit(.fileExists(path: file), \.text) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success(let output) where output.contains("missing"):
                 self.writeError = "\(target.path) is no longer in the working tree."
             case .success where !store.config.gitView.editorInWindow:
                 // The editor runs elsewhere, so the Git View keeps Focus.
-                let script = store.config.gitView.editorScript(file: file, line: target.line)
-                store.runGitScript(script, arguments: [root], timeout: 10) { [weak self] result in
+                let command = store.config.gitView.editorCommand(file: file, line: target.line)
+                store.writeGit(.openEditor(root: root, command: command)) { [weak self] result in
                     if case .failure(let error) = result { self?.writeError = Self.editorMessage(for: error) }
                 }
             case .success:

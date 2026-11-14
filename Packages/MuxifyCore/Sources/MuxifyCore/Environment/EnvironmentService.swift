@@ -13,10 +13,6 @@ public struct EnvironmentService: Sendable {
     public let topics: Config.Topics
     /// The Config's `notifications`: which Agent marks `environment show` shows.
     public let notifications: Config.Notifications
-    /// False on a Remote Environment: Topic records are local, so a command that reads or writes one fails there.
-    public let topicsAvailable: Bool
-    /// Runs the Muxify Worktree scripts on the Environment's machine.
-    public let scripts: any ScriptRunning
     /// The Config's `worktrees.root_path` on the machine whose records this service keeps: a Host's own, never the
     /// Mac's (ADR 0088).
     public let worktreesRoot: String?
@@ -27,15 +23,12 @@ public struct EnvironmentService: Sendable {
 
     public init(paths: MuxifyPaths, server: any TmuxRunning = TmuxServer.local, sessionPaths: [SessionPath] = [],
                 topics: Config.Topics = Config.Topics(), notifications: Config.Notifications = Config.Notifications(),
-                topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(), worktreesRoot: String? = nil,
-                request: PendingRequest? = nil) {
+                worktreesRoot: String? = nil, request: PendingRequest? = nil) {
         self.paths = paths
         self.server = server
         self.sessionPaths = sessionPaths
         self.topics = topics
         self.notifications = notifications
-        self.topicsAvailable = topicsAvailable
-        self.scripts = scripts
         self.worktreesRoot = worktreesRoot
         self.request = request
         store = TopicStore(paths: paths, inPlay: topics.inPlay, request: request)
@@ -48,9 +41,6 @@ public struct EnvironmentService: Sendable {
         guard request.version == EnvironmentRequest.currentVersion else {
             return .failed(TopicFailure(kind: .unsupported, phase: .nothingChanged,
                                         message: "The Topic request has version \(request.version). This Muxify reads version \(EnvironmentRequest.currentVersion)."))
-        }
-        guard topicsAvailable || !request.needsRecords else {
-            return .failed(failure(TopicRequestError.topicsUnavailable, phase: .nothingChanged))
         }
         switch request.command.lane {
         case .read(let read):
@@ -92,7 +82,6 @@ public struct EnvironmentService: Sendable {
 
     public func sessionPathChoices(for target: EnvironmentTarget) -> Result<TopicSessionPathChoices, TopicFailure> {
         do {
-            guard topicsAvailable else { throw TopicRequestError.topicsUnavailable }
             let records = try store.read().records
             let snapshot = try server.snapshot()
             let topic = try openTopic(target, caller: nil, records: records, snapshot: snapshot, client: nil)
@@ -260,7 +249,6 @@ public struct EnvironmentService: Sendable {
             case .branchCheckedOut: return .branchCheckedOut
             case .chooseSession: return .chooseSession
             case .topicEmpty: return .topicEmpty
-            case .topicsUnavailable: return .topicsUnavailable
             case .sessionNameInvalid: return .sessionNameInvalid
             case .sessionNameTaken: return .duplicateSession
             case .panesChanged: return .panesChanged
@@ -405,7 +393,7 @@ extension EnvironmentCommand {
     }
 
     /// Whether the command reads or writes a Topic record whatever its target.
-    var needsRecords: Bool {
+    public var needsRecords: Bool {
         switch self {
         case .newWindow, .newSession, .renameSession, .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession: return false
         // A Remote Environment's Muxify Worktrees have no Topic; on this Mac the request also updates the Topics.
@@ -423,9 +411,9 @@ extension EnvironmentCommand {
 }
 
 extension EnvironmentRequest {
-    /// Whether the request reads or writes a Topic record. Only the others run on a Remote Environment. A `.topic`
-    /// target is found through the records, so it needs them with any command.
-    var needsRecords: Bool {
+    /// Whether the request reads or writes a Topic record. Only the others run where there are no Topics, in a
+    /// Sessions-only App Window. A `.topic` target is found through the records, so it needs them with any command.
+    public var needsRecords: Bool {
         if case .topic? = target { return true }
         return command.needsRecords
     }
@@ -469,7 +457,6 @@ public enum TopicRequestError: Error, CustomStringConvertible {
     case branchCheckedOut(branch: String, worktree: String)
     case chooseSession(topic: String, sessions: [String])
     case topicEmpty(topic: String, id: String, dormant: Bool)
-    case topicsUnavailable
     case sessionNameInvalid(String)
     /// A Session outside the Topic has the name that the caller chose for a new Session of the Topic.
     case sessionNameTaken(String)
@@ -504,7 +491,6 @@ public enum TopicRequestError: Error, CustomStringConvertible {
             return dormant ? "The Topic \(topic) has no live Session. Reopen it first: muxify topic reopen --topic \(id). "
                              + "Or add one: muxify topic add-session <dir> --topic \(id)."
                            : "The Topic \(topic) has no Session. Add one first: muxify topic add-session <dir> --topic \(id)."
-        case .topicsUnavailable: return "Topics are not available in a Remote Environment."
         case .panesChanged: return "The Windows or Panes changed. Review them and confirm again."
         case .cardAtEnd(let card, let up, let pinned):
             return "\(card) is the \(up ? "first" : "last") card among the \(pinned ? "Pinned Topics" : "Topics that are not Pinned")."

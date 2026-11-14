@@ -2,10 +2,10 @@ import Foundation
 import MuxifyCore
 
 /// The link to a Remote Environment over `RemoteSSH` execs: the remote `TmuxConnection` and its scripts. It serves
-/// the Sessions only: no `.topics`, no records and no `.git`, whose reads and `repository` subscription it answers
-/// `unsupported`. It is the
-/// `HostEnvironmentLink`'s link to the same master, which serves until the Host Server answers and whatever the
-/// server does not serve yet, and the App Window's whole link once no Host Server can run (ADR 0087).
+/// the Sessions only: the snapshot, view commands, Attachment upload, the Config read and Session Path discovery, and
+/// the Session requests that need no Topic record. Topics, the Git View, `repository` and the Muxify Worktrees answer
+/// `unsupported`. It is the `HostEnvironmentLink`'s master, and its Sessions until the Host Server's first state, and
+/// the App Window's whole link once no Host Server can run (ADR 0087).
 @MainActor
 final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     let isOnThisMac = false
@@ -44,7 +44,7 @@ final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     override func reloadConfig() {
         guard connection != nil else { return }
         Task { [weak self] in
-            guard let self, let output = try? await script(RemoteConfigFile.script, arguments: [], timeout: 20),
+            guard let self, let output = try? await run(RemoteConfigFile.script, arguments: [], timeout: 20),
                   let file = RemoteConfigFile.parse(output) else { return }
             var config = HostConfig(path: file.path, home: file.home, text: file.text)
             if let text = file.text {
@@ -52,7 +52,7 @@ final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
                 let paths = HostConfig.overridePaths(in: text, shownPath: config.shownPath)
                 if !paths.isEmpty {
                     let end = "muxify-override-end-\(UUID().uuidString)"
-                    guard let output = try? await script(RemoteConfigFile.overridesScript,
+                    guard let output = try? await run(RemoteConfigFile.overridesScript,
                                                          arguments: RemoteConfigFile.overridesArguments(paths, end: end), timeout: 20),
                           let texts = RemoteConfigFile.parseOverrides(output, paths: paths, end: end) else { return }
                     config.overrides = paths.map { HostConfig.Override(path: $0, text: texts[$0] ?? nil) }
@@ -63,7 +63,15 @@ final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     }
 
     func sessionPathOutput(roots: [SessionPathRoot], arguments: [String]) async throws -> String? {
-        try await script(SessionPathDiscovery.script, arguments: arguments, timeout: 20)
+        try await run(SessionPathDiscovery.script, arguments: arguments, timeout: 20)
+    }
+
+    /// Runs one of this link's own /bin/sh reads on the Remote Environment, off the main thread.
+    private func run(_ script: String, arguments: [String], timeout: TimeInterval) async throws -> String {
+        guard let connection else { throw TmuxError.notReady }
+        return try await Task.detached(priority: .userInitiated) {
+            try connection.runScript(script, arguments: arguments, timeout: timeout)
+        }.value
     }
 
     /// The machine's own `muxify`, for the phone and its Agents: the install chain without a Debug build.
@@ -76,21 +84,36 @@ final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
         }
     }
 
-    /// The service on the Remote Environment. It has no Topics, so it runs only the requests that need no Topic
-    /// record, and no Muxify Worktree records either: those are the Host CLI's (ADR 0088).
+    /// The service for the Session requests on the Remote Environment's tmux. A Sessions-only App Window has no Topic
+    /// records, so its records are an empty state folder of its own, never this Mac's.
     func environmentService(sessionPaths: [SessionPath], topics: Config.Topics, notifications: Config.Notifications,
                             worktreesRoot: String?) -> EnvironmentService? {
         guard let connection else { return nil }
-        return EnvironmentService(paths: MuxifyPaths(), server: connection, topics: topics, notifications: notifications,
-                                  topicsAvailable: false, scripts: connection)
+        return EnvironmentService(paths: Self.noRecords, server: connection, topics: topics, notifications: notifications)
     }
 
-    /// Create Worktree, Remove Worktree and the list of Muxify Worktrees are refused: the Mac cannot write the Host's
-    /// record, and a Worktree with no record could never be removed by Muxify (ADR 0088).
+    /// The state folder of the Sessions-only services, where no Topic record is ever written.
+    static let noRecords = MuxifyPaths(environment: [
+        "XDG_STATE_HOME": FileManager.default.temporaryDirectory.appendingPathComponent("muxify-sessions-only").path,
+    ])
+
+    /// Only the requests that need no Topic record run. Create Worktree, Remove Worktree and the list of Muxify
+    /// Worktrees are refused: the Mac cannot write the Host's record, and a Worktree with no record could never be
+    /// removed by Muxify (ADR 0088). A new Session's folder is on the Remote Environment, so it is taken as it is.
     func run(_ request: EnvironmentRequest, client: String?, local: EnvironmentService?) async -> EnvironmentResponse? {
         if request.command.isWorktreeCommand { return .failed(EnvironmentLinkError.worktreesRefused) }
-        return await EnvironmentLinks.run(request, client: client, local: local)
+        if request.needsRecords { return .failed(EnvironmentLinkError.topicsRefused) }
+        guard let local, case .newSession(let path, _) = request.command else {
+            return await EnvironmentLinks.run(request, client: client, local: local)
+        }
+        let folder = SessionPath(path: path, name: SessionPath.sessionName((path as NSString).lastPathComponent))
+        let service = EnvironmentService(paths: local.paths, server: local.server, sessionPaths: [folder], topics: local.topics,
+                                         notifications: local.notifications)
+        return await EnvironmentLinks.run(request, client: client, local: service)
     }
+
+    /// No Topic records, so no Locked Sessions to gather.
+    func gatherGuests(local: EnvironmentService?) async -> TopicFailure? { nil }
 
     func worktreeStarts(from folder: String, local: EnvironmentService?) async -> Result<[WorktreeStartChoice], TopicFailure>? {
         .failure(EnvironmentLinkError.worktreesRefused)

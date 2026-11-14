@@ -61,23 +61,13 @@ final class TmuxConnection: @unchecked Sendable {
         }
     }
 
-    /// Runs a /bin/sh `script` on the Environment's machine: over the SSH
-    /// master for a Remote Environment, else here. Off the tmux queue, so a
-    /// slow script never holds up tmux commands.
-    func runScriptAsync(_ script: String, arguments: [String] = [], timeout: TimeInterval = 20,
-                        completion: @escaping (Result<String, Error>) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { try self.runScript(script, arguments: arguments, timeout: timeout) }
-            DispatchQueue.main.async { completion(result) }
-        }
-    }
-
-    /// `ScriptRunning`, for the Muxify Worktree scripts of a Remote Environment.
+    /// Runs a /bin/sh `script` on the Environment's machine: over the SSH master for a Remote Environment, else here.
+    /// Off the tmux queue, so a slow script never holds up tmux commands. Only the Sessions-only link's own reads (the
+    /// Config, Session Paths, the Panes' command lines, an upload) and the Host CLI install chain run one.
     func runScript(_ script: String, arguments: [String], timeout: TimeInterval) throws -> String {
         try runScript(script, arguments: arguments, timeout: timeout, inputFile: nil)
     }
 
-    /// `runScriptAsync` for a caller that is already off the main thread.
     func runScript(_ script: String, arguments: [String] = [], timeout: TimeInterval = 20, inputFile: URL? = nil) throws -> String {
         lock.lock()
         let stopped = retired
@@ -163,12 +153,7 @@ final class TmuxConnection: @unchecked Sendable {
             throw TmuxError.notReady
         }
         snapshot.ownClientTTY = client.tty
-        snapshot.homeDirectory = marker[2]
-        for index in snapshot.windows.indices {
-            snapshot.windows[index].homeDirectory = marker[2]
-            snapshot.windows[index].hostName = marker[3]
-            snapshot.windows[index].isRemote = true
-        }
+        snapshot.stampHost(home: marker[2], hostName: marker[3])
         return stamped(snapshot)
     }
 

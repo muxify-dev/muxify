@@ -94,6 +94,11 @@ enum EnvironmentLinkError: Error, Equatable, CustomStringConvertible {
     static var worktreesRefused: TopicFailure {
         TopicFailure(kind: .unsupported, phase: .nothingChanged, message: unsupported("Muxify Worktrees").description)
     }
+
+    /// What a link without `.topics` answers a request that reads or writes a Topic record.
+    static var topicsRefused: TopicFailure {
+        TopicFailure(kind: .topicsUnavailable, phase: .nothingChanged, message: unsupported("Topics").description)
+    }
 }
 
 /// One subscription to a link's events. Cancelling it stops delivery; a retired link ends it too.
@@ -135,7 +140,7 @@ final class EnvironmentEvents {
 }
 
 /// The one way an App Window's `WorkspaceStore` reaches its Active Environment: its tmux server, its Topic records,
-/// its `EnvironmentService` and the Git View's reads and scripts (ADR 0087). Commands are `async`; state
+/// its `EnvironmentService` and the Git View's typed reads and writes (ADR 0087). Commands are `async`; state
 /// comes as keyed events per subscription.
 ///
 /// A link never changes target. Changing the Active Environment retires the store's link: its waiting requests
@@ -161,8 +166,6 @@ protocol EnvironmentLink: AnyObject {
     func snapshot(updating commandLines: PaneCommandLines?) async throws -> TmuxSnapshot
     /// `snapshot` for a caller that must answer before it returns.
     func snapshotNow() throws -> TmuxSnapshot
-    /// Runs a /bin/sh script on the Environment's machine.
-    func script(_ script: String, arguments: [String], timeout: TimeInterval) async throws -> String
     /// The Session Path discovery output for `roots`, as `SessionPathDiscovery` reads it; nil when there is none.
     func sessionPathOutput(roots: [SessionPathRoot], arguments: [String]) async throws -> String?
     /// Pastes the attachments into the Client's current Pane, uploading files first where they are not on this Mac.
@@ -304,10 +307,11 @@ extension EnvironmentLink {
         }
     }
 
+    /// Runs on this Mac, the machine whose service it is.
     func worktreeStarts(from folder: String, local: EnvironmentService?) async -> Result<[WorktreeStartChoice], TopicFailure>? {
-        guard let local else { return nil }
+        guard local != nil else { return nil }
         return await Task.detached(priority: .userInitiated) {
-            Result { try WorktreeStartChoice.read(from: folder, scripts: local.scripts) }
+            Result { try WorktreeStartChoice.read(from: folder, scripts: LocalScripts()) }
                 .mapError { TopicFailure(kind: .tmuxFailed, phase: .nothingChanged, message: String(describing: $0)) }
         }.value
     }
@@ -423,13 +427,6 @@ class TmuxConnectionLink {
 
     func snapshotNow() throws -> TmuxSnapshot {
         try connected().snapshot()
-    }
-
-    func script(_ script: String, arguments: [String], timeout: TimeInterval) async throws -> String {
-        let connection = try connected()
-        return try await withCheckedThrowingContinuation { continuation in
-            connection.runScriptAsync(script, arguments: arguments, timeout: timeout) { continuation.resume(with: $0) }
-        }
     }
 
     func pasteAttachments(_ attachments: TerminalAttachments, client: String) async throws -> String {

@@ -173,7 +173,6 @@ extension EnvironmentService {
     /// Gathers each Locked Session that an older Muxify kept among the Topics into the Guests. The host calls it at
     /// launch. A list that is already in the three sections does not change. Nil when it succeeded.
     public func gatherGuests(client: String? = nil) -> TopicFailure? {
-        guard topicsAvailable else { return nil }
         var phase = TopicFailure.Phase.nothingChanged
         do {
             let records = try store.read().records
@@ -191,7 +190,7 @@ extension EnvironmentService {
     private func markRead(_ request: EnvironmentRequest, _ change: ReadChange, scope: ReadScope?, client: String?) -> EnvironmentResponse {
         var phase = TopicFailure.Phase.nothingChanged
         do {
-            let records = topicsAvailable ? try store.read().records : []
+            let records = try store.read().records
             let snapshot = try server.snapshot()
             let place = try scope.map { try readPlace($0, request, records: records, snapshot: snapshot, client: client) } ?? .environment
             let agents = scope == .topicMark ? [] : Agent.list(panes: snapshot.panes, windows: snapshot.windows, ordered: false)

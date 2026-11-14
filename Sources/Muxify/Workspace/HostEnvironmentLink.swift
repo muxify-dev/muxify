@@ -5,14 +5,15 @@ import MuxifyCore
 /// `muxify server` on a `-T` channel of the attachment's own SSH master, which the Mac opens once the master is ready
 /// and the Host CLI install chain has run. The terminal never waits for it.
 ///
-/// Until the server's first state arrives, and whenever it is down, the link is its `SessionsOnlyEnvironmentLink` on
-/// the same master, so the App Window shows Sessions as it does without a server. Once it arrives, the Topics, the
-/// Sessions and every change come only from the server's `environment` events, and Topic requests, Unread on visit,
-/// view commands, Session Path discovery and Attachment uploads go over the channel; the Mac keeps no copy of the
-/// Host's records. The Config comes from the server's `config` subscription, which pushes each edit on the Host. The
-/// Muxify Worktrees are the Host's too (ADR 0088): their requests go over the channel, and without a server they are
-/// refused. The Git View's reads, changes and network commands and the `repository` subscription go to the server
-/// too; a network command's askpass questions come back as `ask` requests of its operation.
+/// Until the server's first state arrives, and whenever it is down, the App Window shows the Sessions of its
+/// `SessionsOnlyEnvironmentLink` on the same master, so connecting is never slower than without a server; that link
+/// serves nothing else here. Once the state arrives, the Topics, the Sessions and every change come only from the
+/// server's `environment` events, and Topic requests, Unread on visit, view commands, Session Path discovery and
+/// Attachment uploads go over the channel; the Mac keeps no copy of the Host's records. The Config comes from the
+/// server's `config` subscription, which pushes each edit on the Host. The Muxify Worktrees are the Host's too
+/// (ADR 0088). The Git View's reads, changes and network commands and the `repository` subscription go to the server
+/// too; a network command's askpass questions come back as `ask` requests of its operation. Without a server, each of
+/// these is unavailable.
 ///
 /// Programs on the Host reach this App Window through the server's own socket (ADR 0089): the server sends each
 /// `browser` and `select` request over the channel, and the link hands it to its store's handler. While this App
@@ -21,7 +22,8 @@ import MuxifyCore
 final class HostEnvironmentLink: EnvironmentLink {
     let isOnThisMac = false
     let environmentName: String
-    /// The same master's Sessions-only link: the master, the attach, the execs.
+    /// The same master's Sessions-only link: the master, the attach, the Client marker, and the Sessions shown until
+    /// the server's first state.
     nonisolated(unsafe) private let inner: EnvironmentLink
     private let build: String
     private let nonce: () -> String?
@@ -49,7 +51,7 @@ final class HostEnvironmentLink: EnvironmentLink {
     private var state = EnvironmentState()
     private var subscription: Task<Void, Never>?
     private var configSubscription: Task<Void, Never>?
-    /// The server's last `config` item. While there is one, the server serves the Config, not the Sessions-only reads.
+    /// The server's last `config` item, which Reload Config sends again.
     private var servedConfig: HostConfig?
     private var pinger: Timer?
     private var lastSent = Date()
@@ -117,21 +119,18 @@ final class HostEnvironmentLink: EnvironmentLink {
 
     // MARK: What it serves
 
-    var features: EnvironmentFeatures { serving ? [.topics, .git, .worktrees] : inner.features }
+    var features: EnvironmentFeatures { serving ? [.topics, .git, .worktrees] : [] }
     var publishesChanges: Bool { serving }
     var runsRequests: Bool { serving }
     var remembersTopics: Bool { serving }
 
     func connect() throws {
         try inner.connect()
-        // The Sessions-only link's events reach the store only while no server serves them.
+        // The Sessions-only link's Sessions reach the store only while no server serves them. Its Config does not:
+        // the server's `config` subscription is the Host's Config.
         innerSubscription = inner.subscribe { [weak self] event in
-            guard let self else { return }
-            if case .config = event {
-                guard self.servedConfig == nil else { return }
-            } else {
-                guard !self.serving else { return }
-            }
+            guard let self, !self.serving else { return }
+            if case .config = event { return }
             self.events.send(event)
         }
     }
@@ -141,10 +140,10 @@ final class HostEnvironmentLink: EnvironmentLink {
         return events.subscribe(initial: topics + (servedConfig.map { [.config(.host($0))] } ?? []), onEvent)
     }
 
-    /// The server's last Config, which needs no read: it pushes every change. Until it serves, the Sessions-only link
-    /// reads it.
+    /// The server's last Config, which needs no read: it pushes every change. Until its first item, the App Window
+    /// keeps the Config it has.
     func reloadConfig() {
-        guard let servedConfig else { return inner.reloadConfig() }
+        guard let servedConfig else { return }
         events.send(.config(.host(servedConfig)))
     }
 
@@ -227,8 +226,7 @@ final class HostEnvironmentLink: EnvironmentLink {
             do {
                 for try await config in configs { self?.receive(config, from: client) }
             } catch {
-                // A server that does not serve the Config, or whose subscription ended: the Sessions-only link reads
-                // it again on the next connect, Reload Config or Command Palette.
+                // A server whose subscription ended: the App Window keeps the Config it has until the next one.
             }
             self?.configEnded(from: client)
         }
@@ -337,7 +335,7 @@ final class HostEnvironmentLink: EnvironmentLink {
         subscription = nil
         configSubscription?.cancel()
         configSubscription = nil
-        // The store keeps the Config it has; the Sessions-only link reads it again on the next reload.
+        // The store keeps the Config it has until the next server's first item.
         servedConfig = nil
         pinger?.invalidate()
         pinger = nil
@@ -478,30 +476,26 @@ final class HostEnvironmentLink: EnvironmentLink {
 
     private func servedSnapshot() throws -> TmuxSnapshot {
         guard var snapshot = state.snapshot, let server = state.server, server.ownClient != nil else { throw TmuxError.notReady }
+        snapshot.stampHost(home: server.home, hostName: server.hostName)
         for index in snapshot.windows.indices {
-            snapshot.windows[index].homeDirectory = server.home
-            snapshot.windows[index].hostName = server.hostName
-            snapshot.windows[index].isRemote = true
             snapshot.windows[index].sourceID = "\(id.uuidString):\(server.serverID ?? "")"
         }
         return snapshot
     }
 
-    func script(_ script: String, arguments: [String], timeout: TimeInterval) async throws -> String {
-        try await inner.script(script, arguments: arguments, timeout: timeout)
-    }
-
-    /// Session Path discovery runs on the Host, through `session_paths`.
+    /// Session Path discovery runs on the Host, through `session_paths`, as soon as the server answered `hello`: the
+    /// Host's Config, which names the roots, comes before its first state.
     func sessionPathOutput(roots: [SessionPathRoot], arguments: [String]) async throws -> String? {
-        guard serving else { return try await inner.sessionPathOutput(roots: roots, arguments: arguments) }
-        return try await call(.sessionPaths(SessionPathsRequest(roots: roots)), as: SessionPathsOutput.self).output
+        guard let client, session != nil else { throw TmuxError.notReady }
+        lastSent = Date()
+        return try await client.call(HostRequest.sessionPaths(SessionPathsRequest(roots: roots)), as: SessionPathsOutput.self).output
     }
 
     /// Finds the Client's Pane first, so a later switch does not move the paste, uploads each file through `upload`,
     /// then pastes the Host paths into that Pane. A failed chunk fails the paste, and the server deletes the partial file.
     func pasteAttachments(_ attachments: TerminalAttachments, client: String) async throws -> String {
-        guard serving, let protocolClient = self.client else { return try await inner.pasteAttachments(attachments, client: client) }
         defer { attachments.removeLocalCopy() }
+        guard serving, let protocolClient = self.client else { throw TmuxError.notReady }
         do {
             let pane = try await call(.view(.clientPane(client: client)), as: ViewOutput.self).output.trimmingCharacters(in: .newlines)
             guard TerminalAttachments.isPane(pane) else { throw TmuxError.notReady }
@@ -549,18 +543,14 @@ final class HostEnvironmentLink: EnvironmentLink {
         throw EnvironmentLinkError.unsupported("Writing Topic records on the Mac")
     }
 
-    /// The Sessions-only link's service, for the requests it runs before the server serves.
+    /// Every request runs in the Host Server: the Mac builds no service for a Host.
     func environmentService(sessionPaths: [SessionPath], topics: Config.Topics, notifications: Config.Notifications,
                             worktreesRoot: String?) -> EnvironmentService? {
-        inner.environmentService(sessionPaths: sessionPaths, topics: topics, notifications: notifications, worktreesRoot: worktreesRoot)
+        nil
     }
 
     func run(_ request: EnvironmentRequest, client: String?, local: EnvironmentService?) async -> EnvironmentResponse? {
-        guard serving else {
-            // Only the Host's server writes its Muxify Worktree records (ADR 0088).
-            if request.command.isWorktreeCommand { return .failed(EnvironmentLinkError.worktreesRefused) }
-            return await EnvironmentLinks.run(request, client: client, local: local)
-        }
+        guard serving else { return nil }
         do {
             return try await call(.environment(request), as: EnvironmentResponse.self)
         } catch {
@@ -634,9 +624,9 @@ final class HostEnvironmentLink: EnvironmentLink {
     // MARK: Git
 
     /// The Git View's reads run in the Host Server; a diff arrives as chunks. Before the server serves, and once it
-    /// stops, the Sessions-only link answers them `unsupported`.
+    /// stops, they are `unsupported`.
     func git(_ read: GitRead) async throws -> GitAnswer {
-        guard serving, let client else { return try await inner.git(read) }
+        guard serving, let client else { throw EnvironmentLinkError.unsupported("The Git View") }
         lastSent = Date()
         do {
             switch read.answer {
@@ -656,7 +646,7 @@ final class HostEnvironmentLink: EnvironmentLink {
     /// The Git View's writes run in the Host Server. One whose channel ends before its answer is never sent again:
     /// it may or may not have happened, and says so.
     func writeGit(_ write: GitWrite) async throws -> String {
-        guard serving, let client else { return try await inner.writeGit(write) }
+        guard serving, let client else { throw EnvironmentLinkError.unsupported("The Git View") }
         lastSent = Date()
         do {
             return try await client.call(HostRequest.gitWrite(write), as: GitWritten.self).output
@@ -672,7 +662,7 @@ final class HostEnvironmentLink: EnvironmentLink {
     /// question comes back as an `ask` of the command's operation, which goes to `ask`. One whose channel ends before
     /// its answer is never sent again: it may or may not have happened, and says so.
     func runGitNetwork(_ network: GitNetwork, ask: @escaping GitAsk) async throws -> String {
-        guard serving, let client else { return try await inner.runGitNetwork(network, ask: ask) }
+        guard serving, let client else { throw EnvironmentLinkError.unsupported("The Git View") }
         let operation = UUID().uuidString
         asks[operation] = ask
         defer { asks[operation] = nil }
@@ -693,7 +683,7 @@ final class HostEnvironmentLink: EnvironmentLink {
     /// The server's `repository` subscription. Its events stop when the channel ends; the store subscribes again when
     /// the link's features change.
     func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription {
-        guard serving, let client else { return inner.watchRepository(path, onEvent) }
+        guard serving, let client else { return EnvironmentSubscription {} }
         lastSent = Date()
         let events = client.subscribe(HostRequest.subscribe(.repository(RepositorySubscription(path: path))), as: RepositoryEvent.self)
         let task = Task { @MainActor [weak self] in

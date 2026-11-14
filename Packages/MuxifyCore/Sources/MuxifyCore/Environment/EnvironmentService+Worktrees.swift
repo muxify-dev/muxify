@@ -3,7 +3,7 @@ import Foundation
 // Muxify Worktrees, in a Topic or not (ADR 0062). Create and Remove take no lock: a second Worktree at the same path
 // fails in `git worktree add` or at its record, and is not retried; List reads only.
 extension EnvironmentService {
-    var worktrees: MuxifyWorktrees { MuxifyWorktrees(scripts: scripts) }
+    var worktrees: MuxifyWorktrees { MuxifyWorktrees(scripts: LocalScripts()) }
     var worktreeStore: MuxifyWorktreeStore { MuxifyWorktreeStore(paths: paths) }
 
     /// Muxify's state folder on the machine whose records this service keeps: `$XDG_STATE_HOME/muxify/worktrees`,
@@ -86,7 +86,7 @@ extension EnvironmentService {
             phase = .changesStarted
             try worktrees.remove(record, force: force)
             try worktreeStore.remove(record.id)
-            if topicsAvailable { try forgetSessions(in: record) }
+            try forgetSessions(in: record)
             for arguments in kills { try server.run(arguments) }
             return .changed(TopicChange(topicID: nil, worktreeID: record.id, output: output.isEmpty ? nil : output))
         } catch {
@@ -104,7 +104,7 @@ extension EnvironmentService {
                 records = records.filter { $0.repository == main }
             }
             let states = try worktrees.states(records.map(\.path))
-            let topicRecords = topicsAvailable ? try store.read().records : []
+            let topicRecords = try store.read().records
             let labels = TopicLabels(topicRecords)
             return .worktrees(zip(records, states).map { record, state in
                 let topic = topicRecords.first { $0.settledAt == nil && $0.sessions.contains { $0[TopicWorktrees.idKey]?.string == record.id } }

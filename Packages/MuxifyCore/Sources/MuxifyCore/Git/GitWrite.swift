@@ -48,6 +48,9 @@ public enum GitWrite: Codable, Equatable, Sendable {
     /// `autostash`, a checkout that Changes are in the way of fails with `GitWrites.checkoutBlockedMarker`, then git's
     /// message.
     case checkout(root: String, kind: CheckoutKind, target: String, autostash: Bool, base: String?)
+    /// Runs the Config's `git_view.editor` command, with `{file}` and `{line}` already filled in, in the repository's
+    /// folder and with no Window: `e` with `editor_in_window: false`, which hands the file to an editor that runs.
+    case openEditor(root: String, command: String)
 
     public enum PatchMode: String, Codable, Sendable { case stage, unstage, discard }
 
@@ -119,6 +122,7 @@ public enum GitWrite: Codable, Equatable, Sendable {
         case .renameBranch: "Rename Branch"
         case .deleteBranch: "Delete Branch"
         case .checkout: "Checkout"
+        case .openEditor: "Open in Editor"
         }
     }
 
@@ -126,6 +130,7 @@ public enum GitWrite: Codable, Equatable, Sendable {
     public var timeout: TimeInterval {
         switch self {
         case .commit, .amend, .merge, .rebase, .operation, .cherryPick: 600
+        case .openEditor: 10
         default: 30
         }
     }
@@ -153,6 +158,7 @@ public enum GitWrite: Codable, Equatable, Sendable {
         case .deleteBranch(let root, let branch, let force): (GitWrites.deleteBranchScript, [root, branch, force ? "1" : "0"])
         case .checkout(let root, let kind, let target, let autostash, let base):
             (GitWrites.checkoutScript, [root, kind.rawValue, target, autostash ? "1" : "0"] + (base.map { [$0] } ?? []))
+        case .openEditor(let root, let command): ("cd \"$1\" || exit 1\neval \"$2\"", [root, command])
         }
     }
 }

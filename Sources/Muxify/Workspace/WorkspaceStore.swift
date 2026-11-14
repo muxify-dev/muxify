@@ -2507,10 +2507,8 @@ final class WorkspaceStore {
             if remoteConfig != nil { remoteConfig = nil }
         case .host(let file):
             remoteConfigPath = file.path
-            if let text = file.text, let environment = activeEnvironment {
-                let host = "\(environment.host):"
-                let overrides = Dictionary(file.overrides.map { (host + $0.path, $0.text) }, uniquingKeysWith: { first, _ in first })
-                applyRemoteConfig(RemoteConfigFile.load(text, shown: host + file.shownPath, overrides: overrides))
+            if let environment = activeEnvironment, let loaded = file.load(host: environment.host) {
+                applyRemoteConfig(loaded)
             } else if remoteConfig != nil {
                 remoteConfig = nil
             }
@@ -2757,17 +2755,6 @@ final class WorkspaceStore {
     /// The link, or what it serves, changed: each open Git View subscribes again and reads again.
     private func gitLinkChanged() {
         gitViews.values.forEach { $0.linkChanged() }
-    }
-
-    /// Runs a Git View script on the Environment's machine, like the
-    /// Session Paths scan.
-    func runGitScript(_ script: String, arguments: [String], timeout: TimeInterval = 30,
-                      completion: @escaping (Result<String, Error>) -> Void) {
-        guard isLinked, !isTransitioning, link.isOnThisMac || isConnected else {
-            completion(.failure(GitViewError(message: "Not connected to \(environmentName).")))
-            return
-        }
-        send({ try await $0.script(script, arguments: arguments, timeout: timeout) }, completion: completion)
     }
 
     /// Runs one of the Git View's network commands, such as a fetch, on the repository's machine (ADR 0087). git's and

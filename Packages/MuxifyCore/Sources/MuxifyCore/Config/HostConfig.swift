@@ -46,6 +46,15 @@ public struct HostConfig: Codable, Equatable, Sendable {
     /// `path` as the Mac shows it after `host:`.
     public var shownPath: String { home.isEmpty ? path : Paths.tildify(path, home: home) }
 
+    /// The Config as the Mac runs with it, shown as `<host>:<shownPath>`, with its Config Overrides merged on top
+    /// (ADR 0075). Nil when the Host has no Config.
+    public func load(host: String) -> Result<Config, ConfigSyntaxError>? {
+        guard let text else { return nil }
+        let shown = "\(host):\(shownPath)"
+        let texts = Dictionary(overrides.map { ("\(host):\($0.path)", $0.text) }, uniquingKeysWith: { first, _ in first })
+        return Config.load(path: shown, isRemote: true) { $0 == shown ? text : texts[$0] ?? nil }
+    }
+
     /// The Override paths that a Host's Config `text`, shown at `shownPath`, names, as `Config.load` resolves them for
     /// a remote Config without its `host:`. None when the text does not parse.
     public static func overridePaths(in text: String, shownPath: String) -> [String] {
