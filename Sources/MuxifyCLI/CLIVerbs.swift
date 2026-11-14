@@ -192,6 +192,8 @@ enum CLIVerbs {
                 help: """
                 Prints local or remote when Muxify shows this Pane's tmux server, else no.
                 Exits 0 for local or remote, 1 for no, and 2 when it cannot read tmux.
+                remote: Muxify on a Mac shows this Host. Browser commands work, but the Mac's
+                Browser cannot load this Host's localhost.
                 """) { parsed in
             guard parsed.operands.isEmpty else { throw CLIError("browser available takes no arguments", exitCode: 2) }
             return .browserAvailable(pane: parsed.environment["TMUX_PANE"])

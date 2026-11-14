@@ -186,6 +186,49 @@ final class HostEnvironmentLinkTests: XCTestCase {
         XCTAssertEqual(servers.first?.client?.build, line)
     }
 
+    func testTheServersRequestsReachTheHandlerAndTheConsumersServerNamesItsSocket() async throws {
+        let paths = paths!, tmux = tmux!
+        let id = String(Int.random(in: 10_000...99_999))
+        let link = link { _ in HostServerContext(paths: paths, tmux: tmux, config: { Config() }, socketID: id) }
+        let path = socket + ".muxify-browser." + id
+        func option() -> String {
+            ((try? tmux.run(["show-options", "-sqv", BrowserAgentChannel.option])) ?? "").trimmingCharacters(in: .newlines)
+        }
+        func send(_ request: some Encodable & Sendable) async throws -> BrowserAgentReply {
+            try await Task.detached { try BrowserAgentChannel.send(request, replyTimeout: 20, to: path) }.value
+        }
+        try link.connect()
+        link.setOpenConsumer(true)
+        link.startServer()
+        try await wait("the server did not answer") { link.features.contains(.topics) }
+        try await wait("the consumer's server did not name its socket") { option() == path }
+
+        let tabs = try await send(BrowserAgentRequest(window: "@1", command: .tabs))
+        guard case .failure(let message, _) = tabs else { return XCTFail("a request with no handler answered \(tabs)") }
+        XCTAssertTrue(message.hasPrefix("cannot reach Muxify"), message)
+
+        let picture = Data([0x89, 0x50, 0x4E, 0x47]) + Data((0..<(100 * 1024)).map { UInt8($0 % 241) })
+        var selected: [SelectRequest] = []
+        link.serveHostRequests { request in
+            switch request {
+            case .browser(let browser): return browser.command == .screenshot ? .png(picture) : .tabs([])
+            case .select(let select):
+                selected.append(select)
+                return .done
+            }
+        }
+        let reply = try await send(BrowserAgentRequest(window: "@1", command: .tabs))
+        XCTAssertEqual(reply, .tabs([]))
+        let screenshot = try await send(BrowserAgentRequest(window: "@1", command: .screenshot))
+        XCTAssertEqual(screenshot, .png(picture), "a picture over one chunk comes back whole")
+        let select = try await send(MacRequest.select(.window("@3")))
+        XCTAssertEqual(select, .done)
+        XCTAssertEqual(selected, [.window("@3")])
+
+        link.setOpenConsumer(false)
+        try await wait("a window that stopped consuming @muxify_open left its socket") { option().isEmpty }
+    }
+
     func testAClosedChannelFailsAWaitingMutationWhichTheStoreReportsAndNeverSendsAgain() async throws {
         let paths = paths!, tmux = tmux!
         // The first server never gets its Config for a request once the test says so, so the request waits on it.

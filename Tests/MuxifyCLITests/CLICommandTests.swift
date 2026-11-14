@@ -36,6 +36,15 @@ final class CLICommandTests: XCTestCase {
         }
     }
 
+    func testBrowserAvailableAndTheSkillSayWhatRemoteMeansForBrowserCommands() throws {
+        let help = CLIVerbs.usage(for: ["browser", "available"])
+        XCTAssertTrue(help.contains("Browser commands work, but the Mac's\n"), help)
+        XCTAssertTrue(help.contains("Browser cannot load this Host's localhost."), help)
+        let skill = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../extensions/skills/muxify/SKILL.md")
+        let text = try String(contentsOf: skill, encoding: .utf8)
+        XCTAssertTrue(text.contains("Browser commands work, but the Mac's Browser cannot load this Host's `localhost`"), text)
+    }
+
     func testHelpShowsOnlyTheVerbsThatTheWordsName() {
         let browser = CLIVerbs.usage(for: ["browser"])
         XCTAssertTrue(browser.hasPrefix("usage: muxify browser open"), browser)
@@ -145,10 +154,24 @@ final class CLICommandTests: XCTestCase {
     }
 
     func testSessionUsesExactNameAndPercentEncodesUTF8() async throws {
-        let runner = RecordingRunner(results: [.init(status: 0, output: ""), .init(status: 0, output: "")])
+        let runner = RecordingRunner(results: [.init(status: 0, output: ""), .init(status: 0, output: ""), .init(status: 0, output: "")])
+        #if os(macOS)
         try await CLICommand.sessionOpen(name: "a &猫").execute(using: runner)
+        #else
+        // A Linux Host with no Host Server's socket has no Muxify to reach, and no `open` to run.
+        do {
+            try await CLICommand.sessionOpen(name: "a &猫").execute(using: runner)
+            XCTFail("a Host with no Host Server must fail the view verb")
+        } catch let error as CLIError {
+            XCTAssertTrue(error.message.hasPrefix("cannot reach Muxify"), error.message)
+        }
+        XCTAssertEqual(runner.calls.count, 2)
+        #endif
+        guard runner.calls.count == 3 else { return }
         XCTAssertEqual(runner.calls, [
             .init(command: "tmux", arguments: ["has-session", "-t", "=a &猫"], quiet: true),
+            // No Host Server's socket in @muxify_browser_socket: this is the Mac, whose app `open` reaches.
+            .init(command: "tmux", arguments: ["show-options", "-sqv", "@muxify_browser_socket"], quiet: true),
             .init(command: "open", arguments: ["muxify://select?session=%61%20%26%e7%8c%ab"], quiet: false),
         ])
     }
@@ -163,10 +186,21 @@ final class CLICommandTests: XCTestCase {
     }
 
     func testWindowOpenOpensTheURLOfTheWindowThatTmuxNames() async throws {
-        let runner = RecordingRunner(results: [.init(status: 0, output: "@12\n"), .init(status: 0, output: "")])
+        let runner = RecordingRunner(results: [.init(status: 0, output: "@12\n"), .init(status: 0, output: "/tmp/tmux-1/default.muxify-browser\n"),
+                                               .init(status: 0, output: "")])
+        #if os(macOS)
         try await CLICommand.windowOpen(target: "%7").execute(using: runner)
+        #else
+        do {
+            try await CLICommand.windowOpen(target: "%7").execute(using: runner)
+            XCTFail("a Host with no Host Server must fail the view verb")
+        } catch {}
+        #endif
+        guard runner.calls.count == 3 else { return }
         XCTAssertEqual(runner.calls, [
             .init(command: "tmux", arguments: ["list-panes", "-t", "%7", "-F", "#{window_id}"], quiet: true),
+            // The Mac app's own socket takes no `select`: macOS `open` reaches the app.
+            .init(command: "tmux", arguments: ["show-options", "-sqv", "@muxify_browser_socket"], quiet: true),
             .init(command: "open", arguments: ["muxify://select?window=%40%31%32"], quiet: false),
         ])
     }

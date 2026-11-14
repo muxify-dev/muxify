@@ -32,6 +32,7 @@ public final class ProtocolServer: @unchecked Sendable {
     private var stopping: Exit?
     private var peer: ProtocolHello?
     private var waiters: [CheckedContinuation<Exit, Never>] = []
+    private var exitHandlers: [() -> Void] = []
     private var timer: DispatchSourceTimer?
 
     public init(input: FileHandle, output: FileHandle, build: String, capabilities: [String] = HostProtocol.capabilities,
@@ -94,6 +95,36 @@ public final class ProtocolServer: @unchecked Sendable {
         channel.closeWhenFlushed()
     }
 
+    /// Runs `handler` once when the server exits, before `wait` returns, so a process that exits then has run it.
+    public func onExit(_ handler: @escaping () -> Void) {
+        lock.lock()
+        guard exit != nil else {
+            exitHandlers.append(handler)
+            lock.unlock()
+            return
+        }
+        lock.unlock()
+        handler()
+    }
+
+    // MARK: - Requests to the client
+
+    /// Sends the client a request (ADR 0089) and waits for its `end`, whose `ok` decodes as `Response`. It is
+    /// written once both `hello`s are in; once the channel has ended it fails at once with `unavailable`.
+    public func call<Request: Encodable, Response: Decodable>(_ request: Request, as response: Response.Type) async throws -> Response {
+        try await channel.call(request, as: Response.self)
+    }
+
+    /// `call` for a request whose `item`s are `ProtocolChunk`s: the `end`'s value, and the chunks' bytes in order.
+    public func callStreaming<Request: Encodable, Response: Decodable>(_ request: Request,
+                                                                       as response: Response.Type) async throws -> (Response, Data) {
+        let bytes = ChunkBuffer()
+        let value = try await channel.call(request, as: Response.self) { frame in
+            if let chunk = try? frame.payload(ProtocolChunk.self) { bytes.append(chunk.data) }
+        }
+        return (value, bytes.data)
+    }
+
     /// Waits until the server exits.
     public func wait() async -> Exit {
         await withCheckedContinuation { continuation in
@@ -129,9 +160,12 @@ public final class ProtocolServer: @unchecked Sendable {
         let waiting = waiters
         waiters = []
         let timer = timer
+        let handlers = exitHandlers
+        exitHandlers = []
         lock.unlock()
         timer?.cancel()
         log("muxify server: exits, \(Self.describe(exit))")
+        for handler in handlers { handler() }
         for waiter in waiting { waiter.resume(returning: exit) }
     }
 
@@ -142,5 +176,23 @@ public final class ProtocolServer: @unchecked Sendable {
         case .silence: "no frame came in time"
         case .failed(let reason): reason
         }
+    }
+}
+
+/// The bytes of a streamed answer, gathered on the reader's queue.
+private final class ChunkBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var bytes = Data()
+
+    func append(_ chunk: Data) {
+        lock.lock()
+        bytes.append(chunk)
+        lock.unlock()
+    }
+
+    var data: Data {
+        lock.lock()
+        defer { lock.unlock() }
+        return bytes
     }
 }

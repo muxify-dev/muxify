@@ -452,7 +452,7 @@ extension RequestInvocation {
                 try reportConversations(of: topic)
                 return shown
             case .open:
-                try CLICommand.open("muxify://select?topic=\(CLICommand.percentEncoded(topic.id))")
+                try CLICommand.select(.topic(topic.id))
                 return shown
             default: break
             }

@@ -12,6 +12,10 @@ import MuxifyCore
 /// server's `config` subscription, which pushes each edit on the Host. The Muxify Worktrees are the Host's too
 /// (ADR 0088): their requests go over the channel, and without a server they are refused. Git, Session paths and
 /// uploads still go to the Sessions-only link until later tasks move them onto the server.
+///
+/// Programs on the Host reach this App Window through the server's own socket (ADR 0089): the server sends each
+/// `browser` and `select` request over the channel, and the link hands it to its store's handler. While this App
+/// Window consumes `@muxify_open`, the link tells the server with `claim_open`, so `@muxify_browser_socket` names it.
 @MainActor
 final class HostEnvironmentLink: EnvironmentLink {
     let isOnThisMac = false
@@ -54,6 +58,12 @@ final class HostEnvironmentLink: EnvironmentLink {
     private var serverPath: String?
     /// Once the server named the App Window's own Client, its going away is the end of the attachment.
     private var sawOwnClient = false
+    /// The store's handler for the server's requests.
+    private var hostRequests: HostRequestHandler?
+    /// Whether this App Window consumes `@muxify_open`, as the store last said.
+    private var consumesOpen = false
+    /// What the current server was last told: `claim_open` or `release_open`. Nil for a server told nothing yet.
+    private var toldConsumes: Bool?
 
     init(environmentName: String, inner: EnvironmentLink, build: String = AppBuild.line, nonce: @escaping () -> String?,
          helloTimeout: TimeInterval = HostProtocol.helloTimeout, pingInterval: TimeInterval = 15,
@@ -165,7 +175,12 @@ final class HostEnvironmentLink: EnvironmentLink {
         errors.read(channel.errors)
         self.errors = errors
         let client = ProtocolClient(input: channel.input, output: channel.output, build: build, helloTimeout: helloTimeout,
-                                    nonce: nonce())
+                                    nonce: nonce(), onRequest: { [weak self] request in
+                                        Task { @MainActor in
+                                            guard let self else { return request.fail(.channelEnded) }
+                                            await self.serve(request)
+                                        }
+                                    })
         guard transport.open(client, channel) else {
             client.close()
             channel.close()
@@ -260,6 +275,7 @@ final class HostEnvironmentLink: EnvironmentLink {
             events.send(.topics(state.topicContents))
             events.send(.changed)
             noteOwnClient()
+            tellOpenConsumer()
             return
         }
         if state.topicContents != topics { events.send(.topics(state.topicContents)) }
@@ -323,6 +339,7 @@ final class HostEnvironmentLink: EnvironmentLink {
         pinger?.invalidate()
         pinger = nil
         sawOwnClient = false
+        toldConsumes = nil
         let wasServing = serving
         serving = false
         state = EnvironmentState()
@@ -384,6 +401,44 @@ final class HostEnvironmentLink: EnvironmentLink {
         innerSubscription?.cancel()
         innerSubscription = nil
         return inner
+    }
+
+    // MARK: Requests from the Host
+
+    func serveHostRequests(_ handler: @escaping HostRequestHandler) {
+        hostRequests = handler
+    }
+
+    func setOpenConsumer(_ consumes: Bool) {
+        consumesOpen = consumes
+        tellOpenConsumer()
+    }
+
+    /// Tells the serving server when this App Window became, or stopped being, the consumer of `@muxify_open`. A new
+    /// server hears only a claim: it names no socket of its own before one.
+    private func tellOpenConsumer() {
+        guard serving, toldConsumes != consumesOpen, toldConsumes != nil || consumesOpen else { return }
+        toldConsumes = consumesOpen
+        let request: HostRequest = consumesOpen ? .claimOpen : .releaseOpen
+        Task { [weak self] in try? await self?.call(request, as: ProtocolEmpty.self) }
+    }
+
+    /// A request that the server sent: a program on the Host asked this App Window for a Browser command or to show
+    /// something. Nothing here takes focus; `select` brings the App Window to the front through the store.
+    private func serve(_ request: ProtocolIncomingRequest) async {
+        let mac: MacRequest
+        do { mac = try request.body(MacRequest.self) } catch {
+            return request.fail(error as? ProtocolError ?? ProtocolError(.invalid, "\(error)"))
+        }
+        guard let handler = hostRequests, let reply = await handler(mac) else {
+            return request.fail(ProtocolError(.unavailable, "no App Window of \(environmentName) serves this request"))
+        }
+        switch mac {
+        case .select: request.finish()
+        case .browser:
+            // A picture goes as chunks, each waiting for room in the writer's queue, so off the main thread.
+            await Task.detached(priority: .userInitiated) { request.finish(browser: reply) }.value
+        }
     }
 
     // MARK: Sessions

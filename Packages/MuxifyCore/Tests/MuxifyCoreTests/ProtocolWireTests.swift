@@ -124,6 +124,30 @@ final class ProtocolWireTests: XCTestCase {
                        #"{"end":{"ok":{"starts":[{"branch":"main","checked_out_at":"/src/app"},{"branch":"x"}]}},"id":9,"kind":"end"}"# + "\n")
     }
 
+    func testTheHostToMacSurfaceIsPinned() throws {
+        func text(_ line: Data) -> String { String(decoding: line, as: UTF8.self) }
+        XCTAssertEqual(text(try ProtocolLine.request(id: 9, HostRequest.claimOpen)), #"{"id":9,"kind":"request","request":{"claim_open":{}}}"# + "\n")
+        XCTAssertEqual(text(try ProtocolLine.request(id: 9, HostRequest.releaseOpen)), #"{"id":9,"kind":"request","request":{"release_open":{}}}"# + "\n")
+        XCTAssertEqual(text(try ProtocolLine.request(id: 1, MacRequest.select(.session("my work")))),
+                       #"{"id":1,"kind":"request","request":{"select":{"session":"my work"}}}"# + "\n")
+        XCTAssertEqual(text(try ProtocolLine.request(id: 2, MacRequest.select(.window("@3")))),
+                       #"{"id":2,"kind":"request","request":{"select":{"window":"@3"}}}"# + "\n")
+        XCTAssertEqual(text(try ProtocolLine.request(id: 3, MacRequest.select(.topic("t1")))),
+                       #"{"id":3,"kind":"request","request":{"select":{"topic":"t1"}}}"# + "\n")
+        let browser = BrowserAgentRequest(window: "@3", command: .tabs)
+        XCTAssertEqual(text(try ProtocolLine.request(id: 4, MacRequest.browser(browser))),
+                       text(try ProtocolLine.request(id: 4, ["browser": browser])),
+                       "a browser request carries the BrowserAgentRequest as the CLI sends it")
+        XCTAssertEqual(text(try ProtocolLine.ok(id: 4, BrowserAgentReply.png(Data()))), #"{"end":{"ok":{"png":{"_0":""}}},"id":4,"kind":"end"}"# + "\n",
+                       "a picture's bytes come as chunks before its end")
+        for request in [MacRequest.browser(browser), .select(.window("@3"))] {
+            let line = try ProtocolLine.request(id: 5, request)
+            XCTAssertEqual(try XCTUnwrap(try ProtocolFrame.decode(line.dropLast())).payload(MacRequest.self), request)
+        }
+        XCTAssertEqual(HostServerSocket.request(try JSONEncoder().encode(browser)), .browser(browser),
+                       "the server's socket takes the bare line that muxify browser sends every socket")
+    }
+
     func testEnvironmentEventsRoundTrip() throws {
         var window = TmuxWindow(id: "@2", sessionID: "$1", sessionName: "work", index: 1, name: "fish", paneTitle: "~/w", path: "/w",
                                 command: "fish", isActive: true, paneCount: 2, hasBell: false, sessionActivity: 7, agent: "claude",

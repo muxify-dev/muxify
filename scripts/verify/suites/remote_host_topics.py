@@ -7,10 +7,15 @@ apart from the Mac's own `state/muxify`. The Host's `muxify` is the first one on
 own CLI, which serves, or a stand-in with no server mode, which the app must answer with Sessions only and a reason.
 The Host's Muxify Worktrees are its own too: their records are in the Host's database and their folders under the
 Host's `$XDG_STATE_HOME/muxify/worktrees` (ADR 0088).
+
+An Agent on the Host reaches the Remote App Window through its Host Server's own socket, which
+`@muxify_browser_socket` names (ADR 0089): its Browser commands and view verbs run the CLI in a Pane of the Host's
+tmux server, with the Host's environment, as an Agent there does.
 """
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import unittest
@@ -106,6 +111,24 @@ exec /bin/sh -c "$command"
             self.s.restart_app(args=args)
         type(self).mode = mode
 
+    @classmethod
+    def agent_muxify(cls, pane, *args):
+        """Runs the CLI as an Agent in a Pane on the Host does: TMUX_PANE names its Pane."""
+        environment = {k: v for k, v in cls.s.env.items() if k not in ('TMUX', 'TMUX_PANE', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME')}
+        environment.update(HOME=str(cls.home), TMUX_TMPDIR=str(cls.s.root/'tmux'), TMUX_PANE=pane)
+        return subprocess.run([str(CLI), *args], env=environment, capture_output=True, text=True, timeout=60)
+
+    def agent_ok(self, pane, *args):
+        result = self.agent_muxify(pane, *args)
+        self.assertEqual(result.returncode, 0, 'muxify %s in a Host Pane: %s' % (' '.join(args), result.stderr))
+        return result.stdout
+
+    def host_server_socket(self):
+        """The Host Server socket that `@muxify_browser_socket` names, once the Remote App Window's server claimed it."""
+        return wait(lambda: (lambda path: path if re.search(r'\.muxify-browser\.\d+$', path) else None)(
+            self.s.tmux('show-options', '-sqv', '@muxify_browser_socket')),
+            'the Remote App Window\'s Host Server did not name its socket in @muxify_browser_socket', seconds=30)
+
     def topic_row(self, topic, message):
         return self.s.wait_rows(lambda rs: self.s.has('topic-' + topic, rs), message, seconds=30)
 
@@ -185,6 +208,60 @@ exec /bin/sh -c "$command"
                          'the Mac keeps a record of the Host\'s Worktree')
         listed = json.loads(self.host_muxify('worktree', 'list', '--all', '--json'))['worktrees']
         self.assertIn('from-mac', [w['name'] for w in listed], 'muxify worktree on the Host does not list it')
+
+    def test_browser_commands_in_a_host_pane_are_served_by_the_remote_app_windows_browser_without_taking_focus(self):
+        self.use('serving')
+        self.topic_row(self.before_launch, 'the Remote App Window does not show the Host\'s Topics')
+        socket = self.host_server_socket()
+        self.assertTrue(socket.startswith(self.s.tmux('display-message', '-p', '#{socket_path}') + '.muxify-browser.'), socket)
+        page = self.s.root/'host-page.html'
+        page.write_text('<!doctype html><html><head><meta charset="utf-8"><title>Host fixture</title></head><body>Host</body></html>\n')
+        window, pane = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id} #{pane_id}', '-t', 'start:', '-n', 'agent',
+                                   '/bin/sh').split()
+        before = self.s.driver('responder')['responders']
+
+        tab = json.loads(self.agent_ok(pane, 'browser', 'open', '--json', page.as_uri()))
+        self.assertEqual((tab['url'], tab['title']), (page.as_uri(), 'Host fixture'), 'open returns after the page loaded')
+        tabs = json.loads(self.agent_ok(pane, 'browser', 'tabs', '--json'))
+        self.assertEqual([(t['id'], t['active']) for t in tabs], [(tab['id'], True)])
+        # The Remote App Window's Browser of that Window keeps the Tab on the Host's tmux Window.
+        wait(lambda: self.s.tmux('show-options', '-wqv', '-t', window, '@muxify_tabs').split() == [page.as_uri()],
+             'the Remote App Window\'s Browser does not keep the Tab that the Host Pane opened')
+        self.assertEqual(self.s.driver('responder')['responders'], before, 'a Browser command from the Host moved the focus')
+
+    def test_window_open_in_a_host_pane_shows_that_window(self):
+        self.use('serving')
+        self.topic_row(self.before_launch, 'the Remote App Window does not show the Host\'s Topics')
+        self.host_server_socket()
+        session = next(line.split()[0] for line in self.s.tmux('list-sessions', '-F', '#{session_id} #{@muxify_topic}').splitlines()
+                       if line.split()[1:] == [self.before_launch])
+        # A Window that the Terminal does not show, in a Session of a Topic In Play.
+        window, pane = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id} #{pane_id}', '-t', session + ':', '-n', 'shown',
+                                   '/bin/sh').split()
+
+        self.agent_ok(pane, 'window', 'open')
+        def terminal():
+            return [line.split()[1] for line in self.s.tmux('list-clients', '-F', '#{client_control_mode} #{window_id}').splitlines()
+                    if line.startswith('0 ')]
+        wait(lambda: terminal() == [window], lambda: 'the Remote App Window\'s Terminal shows %s, not %s' % (terminal(), window),
+             seconds=20)
+        self.s.wait_rows(lambda rs: self.s.row('topic-window-' + window, rs).get('accessibilityValue') == 'selected',
+                         'muxify window open in a Host Pane did not show its Window in the Sidebar', seconds=20)
+
+    def test_browser_commands_on_a_sessions_only_host_cannot_reach_muxify_and_open_falls_back(self):
+        self.use('old')
+        self.s.wait_rows(lambda rs: self.s.has('topics-unavailable', rs), 'the window does not show Sessions only', seconds=30)
+        window, pane = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id} #{pane_id}', '-t', 'start:', '-n', 'fallback',
+                                   '/bin/sh').split()
+        result = self.agent_muxify(pane, 'browser', 'tabs')
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertTrue(result.stderr.startswith('muxify: cannot reach Muxify'), result.stderr)
+        url = 'http://127.0.0.1:9/fallback'
+        self.agent_ok(pane, 'browser', 'open', url)
+        # The Tab waits in @muxify_open for the window's next read, which opens it and clears the option.
+        stored = self.s.tmux('show-options', '-wqv', '-t', window, '@muxify_open').split()
+        tabs = self.s.tmux('show-options', '-wqv', '-t', window, '@muxify_tabs').split()
+        self.assertTrue(stored == [url] or tabs == [url], 'browser open did not fall back to @muxify_open: %r, %r' % (stored, tabs))
 
     def test_a_host_whose_muxify_has_no_server_mode_shows_sessions_only_and_why(self):
         self.use('old')

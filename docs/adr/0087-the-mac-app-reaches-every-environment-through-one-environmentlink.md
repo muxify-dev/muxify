@@ -30,7 +30,7 @@ Each `!isRemote` guard becomes one of two questions.
 
 ## Requests from the Host
 
-`HostEnvironmentLink` hands each incoming `browser`, `select` and `ask` request to a handler that its own store installs ([the Host-to-Mac requests draft](../../.cook/maps/remote-host-protocol/adrs/12-host-to-mac-requests.md)). Nothing global on the Mac sees them.
+`HostEnvironmentLink` hands each incoming `browser`, `select` and `ask` request to a handler that its own store installs ([ADR 0089](0089-host-programs-reach-the-mac-through-a-socket-of-their-own-server.md)). Nothing global on the Mac sees them.
 
 - `browser` goes to `BrowserAgentService.handle(_:in: store)`. The local socket listener passes its consumer store.
 - `select` goes to the same path as `muxify://select`, in that App Window.

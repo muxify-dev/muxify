@@ -1280,6 +1280,11 @@ final class WorkspaceStore {
     @ObservationIgnored var serveBrowserAgent: ((_ tmuxSocket: String) -> String?)?
     /// Whether this store wrote `BrowserAgentChannel.option`, so its connection removes it when it retires.
     @ObservationIgnored private var publishedBrowserSocket = false
+    /// Answers a Browser command that a program on the Host sent through this App Window's Host Server (ADR 0089),
+    /// with this store's Browsers. Nil while nothing serves Browser commands.
+    @ObservationIgnored var serveBrowserRequest: ((BrowserAgentRequest) async -> BrowserAgentReply)?
+    /// Brings this App Window to the front, after a program on the Host asked it to show something.
+    @ObservationIgnored var onBringToFront: (() -> Void)?
     #if DEBUG
     @ObservationIgnored private var gitDemoObserver: NSObjectProtocol?
     #endif
@@ -1467,6 +1472,31 @@ final class WorkspaceStore {
             guard let self, self.generation == current else { return }
             self.receive(event)
         }
+        link.serveHostRequests { [weak self] request in
+            guard let self, self.generation == current else { return nil }
+            return await self.serveHostRequest(request)
+        }
+        updateOpenConsumer()
+    }
+
+    /// What a program on the Host asked this App Window through its Host Server (ADR 0089): a Browser command, served
+    /// by this store's Browsers, or a view verb's `select`, which shows the target as `muxify://select` does locally.
+    private func serveHostRequest(_ request: MacRequest) async -> BrowserAgentReply? {
+        switch request {
+        case .browser(let browser):
+            guard let serveBrowserRequest else { return nil }
+            return await serveBrowserRequest(browser)
+        case .select(let select):
+            self.select(select)
+            onBringToFront?()
+            return .done
+        }
+    }
+
+    /// Tells the link whether this App Window consumes `@muxify_open` now, which on a Host decides whose Host Server
+    /// `@muxify_browser_socket` names. Called on each read, and when another App Window takes focus.
+    func updateOpenConsumer() {
+        link.setOpenConsumer(shouldConsumeOpenRequests?() ?? true)
     }
 
     /// "Topics are unavailable on <Environment>: <reason>.", once this attachment shows Sessions only.
@@ -1789,6 +1819,7 @@ final class WorkspaceStore {
         recordVisit()
         consumeOpenRequests()
         publishBrowserSocket(snapshot)
+        updateOpenConsumer()
         if !updateUnread(snapshot.panes) {
             gatherGuests()
         }

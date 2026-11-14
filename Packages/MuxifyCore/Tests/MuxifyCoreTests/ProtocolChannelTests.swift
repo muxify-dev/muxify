@@ -20,7 +20,7 @@ final class ProtocolChannelTests: XCTestCase {
 
     func testAClientAndAServerCompleteHelloThenAPingEndsOk() async throws {
         let wire = Wire()
-        let server = HostServer.make(input: wire.serverInput, output: wire.serverOutput, build: "muxify server 1")
+        let server = wire.hostServer(build: "muxify server 1")
         server.start()
         let client = wire.client(build: "muxify client 1")
         let session = try await client.connect()
@@ -34,7 +34,7 @@ final class ProtocolChannelTests: XCTestCase {
 
     func testAnUnknownRequestCaseIsAnsweredUnsupportedAndTheChannelGoesOn() async throws {
         let wire = Wire()
-        let server = HostServer.make(input: wire.serverInput, output: wire.serverOutput, build: "s")
+        let server = wire.hostServer(build: "s")
         server.start()
         let client = wire.client()
         do {
@@ -52,7 +52,7 @@ final class ProtocolChannelTests: XCTestCase {
 
     func testUnknownKeysAreIgnoredByTheServer() throws {
         let wire = Wire()
-        let server = HostServer.make(input: wire.serverInput, output: wire.serverOutput, build: "s")
+        let server = wire.hostServer(build: "s")
         server.start()
         let mac = wire.handDrivenClient()
         XCTAssertEqual(try mac.line(), "MUXIFY-PROTOCOL")
@@ -349,6 +349,16 @@ private struct Wire {
 
     var serverInput: FileHandle { up.fileHandleForReading }
     var serverOutput: FileHandle { down.fileHandleForWriting }
+
+    /// A Host Server on the server's end, with a throwaway state folder and tmux socket path, so its own socket and
+    /// its reads stay away from the user's tmux server and `muxify.db`. No tmux runs there.
+    func hostServer(build: String) -> ProtocolServer {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mxp-" + UUID().uuidString.prefix(8))
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let context = HostServerContext(paths: MuxifyPaths(environment: ["XDG_STATE_HOME": directory.path + "/state"], home: "/nonexistent"),
+                                        tmux: TmuxServer(socketPath: directory.path + "/s"), config: { Config() }, home: "/nonexistent")
+        return HostServer.make(input: serverInput, output: serverOutput, build: build, context: context)
+    }
 
     func client(build: String = "c", protocols: ClosedRange<Int> = HostProtocol.supported, helloTimeout: TimeInterval = 5) -> ProtocolClient {
         ProtocolClient(input: down.fileHandleForReading, output: up.fileHandleForWriting, build: build, protocols: protocols, helloTimeout: helloTimeout)

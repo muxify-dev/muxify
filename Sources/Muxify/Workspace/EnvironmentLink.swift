@@ -232,6 +232,12 @@ protocol EnvironmentLink: AnyObject {
     /// The link that takes over the same master when no Host Server can run, handed over without `retire`; nil
     /// when the link has none.
     func sessionsOnlyLink() -> EnvironmentLink?
+    /// Hands the Host Server's requests (ADR 0089), what programs on the Host sent its socket, to `handler`: the
+    /// store's own. A request that it answers nil, or that comes with no handler, ends `unavailable`.
+    func serveHostRequests(_ handler: @escaping HostRequestHandler)
+    /// Whether this App Window consumes `@muxify_open` on its Environment, so that its Host Server names its own
+    /// socket in `@muxify_browser_socket`: it sends `claim_open` or `release_open` when this changes.
+    func setOpenConsumer(_ consumes: Bool)
 
     // MARK: Git
 
@@ -302,7 +308,13 @@ extension EnvironmentLink {
 
     func restartServer() {}
     func sessionsOnlyLink() -> EnvironmentLink? { nil }
+    func serveHostRequests(_ handler: @escaping HostRequestHandler) {}
+    func setOpenConsumer(_ consumes: Bool) {}
 }
+
+/// What answers a Host Server's request for its App Window: a Browser command's reply, `done` for a `select`, or
+/// nil when nothing serves it.
+typealias HostRequestHandler = @MainActor (MacRequest) async -> BrowserAgentReply?
 
 /// The links of the app.
 enum EnvironmentLinks {

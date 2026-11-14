@@ -11,16 +11,21 @@ public struct HostServerContext: @unchecked Sendable {
     /// The Host's home: the `config` subscription shows the Config's path under it as `~/…`, and an Override's `~/`
     /// starts there.
     public var home: String
+    /// What names this server's own socket, `<tmux socket>.muxify-browser.<id>` (ADR 0089): its pid. A test that runs
+    /// several servers in one process gives each its own.
+    public var socketID: String
 
     public init(paths: MuxifyPaths = MuxifyPaths(), tmux: TmuxServer = .local,
                 config: (@Sendable () async throws -> Config)? = nil,
                 startControlClient: @escaping TmuxControlClientStart = PipeControlClient.start,
-                home: String = NSHomeDirectory()) {
+                home: String = NSHomeDirectory(),
+                socketID: String = String(getpid())) {
         self.paths = paths
         self.tmux = tmux
         self.home = home
         self.config = config ?? { [paths] in try Self.configFile(paths) }
         self.startControlClient = startControlClient
+        self.socketID = socketID
     }
 
     /// The Config file alone, without finding SessionPaths.
@@ -33,18 +38,31 @@ public struct HostServerContext: @unchecked Sendable {
 }
 
 /// `muxify server`: the Host Server's requests (ADR 0085). It serves `ping` and `shutdown`, the `environment` and
-/// `config` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and Worktree start choices
-/// and `adopt_worktrees`.
+/// `config` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and Worktree start choices,
+/// `adopt_worktrees`, `claim_open` and `release_open`. Programs on the Host reach its Mac through its own socket, whose
+/// requests it sends the Mac as `MacRequest`s (ADR 0089).
 public enum HostServer {
     /// A server on these handles that serves `HostRequest` against `context`.
     public static func make(input: FileHandle, output: FileHandle, build: String, silence: TimeInterval = HostProtocol.serverSilence,
                             context: HostServerContext = HostServerContext(),
                             log: @escaping (String) -> Void = { _ in }) -> ProtocolServer {
-        let host = HostEnvironment(context: context, log: log)
+        let box = ServerBox()
+        let socket = HostServerSocket(tmux: context.tmux, server: context.socketID, log: log) { request in
+            guard let server = box.server else { return .failure("cannot reach Muxify: the Host Server has exited") }
+            return await forward(request, to: server)
+        }
+        let host = HostEnvironment(context: context, socket: socket, log: log)
         let config = HostConfigFeed(path: context.paths.configFile.path, home: context.home)
         let server = ProtocolServer(input: input, output: output, build: build, silence: silence, log: log) { request, server in
             serve(request, server: server, host: host, config: config)
         }
+        box.server = server
+        // Before `wait` returns, so a process that exits then has removed its socket and cleared the option.
+        server.onExit {
+            box.server = nil
+            socket.stop()
+        }
+        socket.listen()
         Task {
             _ = await server.wait()
             host.stop()
@@ -59,8 +77,43 @@ public enum HostServer {
         let server = make(input: .standardInput, output: .standardOutput, build: build, silence: silence, context: context) { line in
             FileHandle.standardError.write(Data((line + "\n").utf8))
         }
+        // A server stopped by a signal exits as on EOF, so it removes its socket and clears the option it named.
+        let signals = [SIGTERM, SIGHUP, SIGINT].map { number in
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+            source.setEventHandler { server.stop(.failed("signal \(number)")) }
+            source.resume()
+            return source
+        }
         server.start()
-        return await server.wait()
+        let exit = await server.wait()
+        signals.forEach { $0.cancel() }
+        return exit
+    }
+
+    /// Sends a program's request to the Mac and turns the Mac's answer into the reply line for the program. A Mac
+    /// that serves none, or a channel that ended, is "cannot reach Muxify", as a socket that nobody listens on is.
+    static func forward(_ request: MacRequest, to server: ProtocolServer) async -> BrowserAgentReply {
+        do {
+            switch request {
+            case .browser:
+                let (reply, bytes) = try await server.callStreaming(request, as: BrowserAgentReply.self)
+                if case .png = reply { return .png(bytes) }
+                return reply
+            case .select:
+                _ = try await server.call(request, as: ProtocolEmpty.self)
+                return .done
+            }
+        } catch let error as ProtocolError {
+            switch error.code {
+            case .unavailable, .unsupported, .cancelled:
+                return .failure("cannot reach Muxify: \(error.message). Run muxify browser available to check that Muxify shows this tmux server.")
+            case .invalid, .failed:
+                return .failure(error.message)
+            }
+        } catch {
+            return .failure("\(error)")
+        }
     }
 
     static func serve(_ request: ProtocolIncomingRequest, server: ProtocolServer, host: HostEnvironment, config: HostConfigFeed) {
@@ -88,6 +141,12 @@ public enum HostServer {
                 host.worktreeStarts(starts, for: request)
             case .adoptWorktrees(let adopt):
                 host.adoptWorktrees(adopt, for: request)
+            case .claimOpen:
+                host.socket.claim()
+                request.finish()
+            case .releaseOpen:
+                host.socket.release()
+                request.finish()
             }
         } catch let error as ProtocolError {
             request.fail(error)
@@ -168,6 +227,8 @@ final class HostConfigFeed: @unchecked Sendable {
 /// write's events go out before the `end`; other processes' writes arrive through `data_version`.
 final class HostEnvironment: @unchecked Sendable {
     private let context: HostServerContext
+    /// The server's own socket, which `@muxify_browser_socket` names while its App Window consumes `@muxify_open`.
+    let socket: HostServerSocket
     private let log: (String) -> Void
     /// Where the publisher delivers, and where the subscribers and the state live.
     private let delivery = DispatchQueue(label: "dev.muxify.host-server.environment")
@@ -181,8 +242,9 @@ final class HostEnvironment: @unchecked Sendable {
     private var hasState = false
     private var subscribers: [Int: ProtocolIncomingRequest] = [:]
 
-    init(context: HostServerContext, log: @escaping (String) -> Void) {
+    init(context: HostServerContext, socket: HostServerSocket, log: @escaping (String) -> Void) {
         self.context = context
+        self.socket = socket
         self.log = log
     }
 
@@ -217,6 +279,10 @@ final class HostEnvironment: @unchecked Sendable {
         state.apply(changes)
         let first = !hasState
         hasState = true
+        if let server = state.server, first || changes.contains(where: { $0.key == "server" }) {
+            let socket = socket
+            DispatchQueue.global(qos: .utility).async { socket.noteOption(server.browserSocket, serverRunning: server.isRunning) }
+        }
         for id in subscribers.keys.sorted() {
             if first { send(state.all, to: id, first: true) } else { send(changes, to: id, first: false) }
         }
@@ -434,5 +500,16 @@ final class HostEnvironment: @unchecked Sendable {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async { continuation.resume(returning: body()) }
         }
+    }
+}
+
+/// The server, for its socket's requests, which may come before it is made and after it exits.
+private final class ServerBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: ProtocolServer?
+
+    var server: ProtocolServer? {
+        get { lock.lock(); defer { lock.unlock() }; return stored }
+        set { lock.lock(); stored = newValue; lock.unlock() }
     }
 }

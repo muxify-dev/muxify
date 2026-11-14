@@ -98,17 +98,7 @@ public final class ProtocolClient: @unchecked Sendable {
 
     /// Sends a request and waits for its `end`, whose `ok` decodes as `Response`. Cancelling the task sends `cancel`.
     public func call<Request: Encodable, Response: Decodable>(_ request: Request, as response: Response.Type) async throws -> Response {
-        let cancel = CancelBox(channel: channel)
-        return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { continuation in
-                let id = channel.sendRequest(request, onItem: { _ in }, onEnd: { result in
-                    continuation.resume(with: result.flatMap { $0.outcome(Response.self) }.mapError { $0 as Error })
-                })
-                cancel.sent(id)
-            }
-        } onCancel: {
-            cancel.cancel()
-        }
+        try await channel.call(request, as: Response.self)
     }
 
     /// Sends a request that answers `{}`.
@@ -195,7 +185,7 @@ public final class ProtocolClient: @unchecked Sendable {
 }
 
 /// The id of a request, so a cancel that comes before the id is known still reaches it.
-private final class CancelBox: @unchecked Sendable {
+final class CancelBox: @unchecked Sendable {
     private let channel: ProtocolChannel
     private let lock = NSLock()
     private var id: Int?

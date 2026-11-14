@@ -182,6 +182,23 @@ public final class ProtocolChannel: @unchecked Sendable {
         return id
     }
 
+    /// Sends a request and waits for its `end`, whose `ok` decodes as `Response`. `onItem` gets each `item` first, in
+    /// order. Cancelling the task sends `cancel`.
+    func call<Request: Encodable, Response: Decodable>(_ request: Request, as response: Response.Type,
+                                                        onItem: @escaping (ProtocolFrame) -> Void = { _ in }) async throws -> Response {
+        let cancel = CancelBox(channel: self)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let id = sendRequest(request, onItem: onItem, onEnd: { result in
+                    continuation.resume(with: result.flatMap { $0.outcome(Response.self) }.mapError { $0 as Error })
+                })
+                cancel.sent(id)
+            }
+        } onCancel: {
+            cancel.cancel()
+        }
+    }
+
     /// Cancels a request this side sent. One not yet written ends `cancelled` here and is never written.
     func cancel(_ id: Int) {
         state.lock()

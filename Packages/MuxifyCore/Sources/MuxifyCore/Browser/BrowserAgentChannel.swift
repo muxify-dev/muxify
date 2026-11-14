@@ -12,6 +12,20 @@ public enum BrowserAgentChannel {
     /// The socket of the server at `tmuxSocket`, in the server's own 0700 directory.
     public static func socketPath(forTmuxSocket tmuxSocket: String) -> String { tmuxSocket + ".muxify-browser" }
 
+    /// The socket of one Host Server on a Host (ADR 0089), beside the Mac app's: `<tmux socket>.muxify-browser.<id>`,
+    /// where `id` is the server's pid.
+    public static func socketPath(forTmuxSocket tmuxSocket: String, server id: String) -> String {
+        socketPath(forTmuxSocket: tmuxSocket) + "." + id
+    }
+
+    /// Whether `path` is a Host Server's socket, which also takes a view verb's `select`, rather than the Mac app's.
+    public static func isHostServerSocket(_ path: String) -> Bool {
+        let name = (path as NSString).lastPathComponent
+        guard let range = name.range(of: ".muxify-browser.", options: .backwards) else { return false }
+        let id = name[range.upperBound...]
+        return !id.isEmpty && id.allSatisfy(\.isNumber)
+    }
+
     public enum Failure: Error, Equatable {
         /// No app listens on the path: the app quit, or crashed and left the option.
         case unreachable(String)
@@ -20,9 +34,15 @@ public enum BrowserAgentChannel {
     }
 
     public static func send(_ request: BrowserAgentRequest, to path: String) throws -> BrowserAgentReply {
+        try send(request, replyTimeout: request.command.replyTimeout, to: path)
+    }
+
+    /// Sends one request line of any form that the socket at `path` takes, such as a Host Server's `MacRequest`, and
+    /// reads the reply line.
+    public static func send(_ request: some Encodable, replyTimeout: TimeInterval, to path: String) throws -> BrowserAgentReply {
         let fd = try connection(to: path)
         defer { close(fd) }
-        var wait = timeval(tv_sec: Int(request.command.replyTimeout), tv_usec: 0)
+        var wait = timeval(tv_sec: Int(replyTimeout), tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
         var line = try JSONEncoder().encode(request)
         line.append(UInt8(ascii: "\n"))
@@ -45,6 +65,19 @@ public enum BrowserAgentChannel {
             throw Failure.unreachable(reason)
         }
         return fd
+    }
+
+    /// Whether `path` is a socket that nobody listens on: what a killed listener leaves behind.
+    static func refusesConnection(_ path: String) -> Bool {
+        var status = stat()
+        guard lstat(path, &status) == 0, (status.st_mode & mode_t(S_IFMT)) == mode_t(S_IFSOCK), var address = address(path) else { return false }
+        let fd = socket(AF_UNIX, streamSocket, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        return connected != 0 && errno == ECONNREFUSED
     }
 
     static func address(_ path: String) -> sockaddr_un? {
@@ -113,6 +146,8 @@ private func writeWithoutSignal(_ fd: Int32, _ bytes: UnsafeRawPointer, _ count:
 /// request and calls `reply` once, from any thread.
 public final class BrowserAgentListener: @unchecked Sendable {
     public typealias Handler = @Sendable (BrowserAgentRequest, @escaping @Sendable (BrowserAgentReply) -> Void) -> Void
+    /// The request line as it came, for a socket that takes more than Browser commands.
+    public typealias LineHandler = @Sendable (Data, @escaping @Sendable (BrowserAgentReply) -> Void) -> Void
 
     public let path: String
     private let fd: Int32
@@ -121,7 +156,21 @@ public final class BrowserAgentListener: @unchecked Sendable {
     private let source: DispatchSourceRead
     private let connections = DispatchQueue(label: "muxify.browser-agent.connections", attributes: .concurrent)
 
-    public init(path: String, handler: @escaping Handler) throws {
+    public convenience init(path: String, handler: @escaping Handler) throws {
+        try self.init(path: path, serving: { line, respond in
+            guard let request = try? JSONDecoder().decode(BrowserAgentRequest.self, from: line) else {
+                return respond(.failure(message: "Muxify cannot read this request; update the CLI and the app together", exitCode: 2))
+            }
+            handler(request, respond)
+        })
+    }
+
+    /// A listener that hands `handler` each request line as it came.
+    public static func lines(at path: String, _ handler: @escaping LineHandler) throws -> BrowserAgentListener {
+        try BrowserAgentListener(path: path, serving: handler)
+    }
+
+    private init(path: String, serving handler: @escaping LineHandler) throws {
         guard var address = BrowserAgentChannel.address(path) else {
             throw BrowserAgentChannel.Failure.unreachable("the socket path is too long: \(path)")
         }
@@ -162,7 +211,7 @@ public final class BrowserAgentListener: @unchecked Sendable {
         if stat(path, &status) == 0, status.st_ino == inode { unlink(path) }
     }
 
-    private static func serve(_ client: Int32, handler: Handler) {
+    private static func serve(_ client: Int32, handler: LineHandler) {
         // An accepted socket inherits O_NONBLOCK from the listener; the reads below wait.
         _ = fcntl(client, F_SETFL, fcntl(client, F_GETFL) & ~O_NONBLOCK)
         var wait = timeval(tv_sec: 5, tv_usec: 0)
@@ -178,10 +227,6 @@ public final class BrowserAgentListener: @unchecked Sendable {
             close(client)
         }
         guard let line = BrowserAgentChannel.readLine(from: client) else { close(client); return }
-        guard let request = try? JSONDecoder().decode(BrowserAgentRequest.self, from: line) else {
-            respond(.failure(message: "Muxify cannot read this request; update the CLI and the app together", exitCode: 2))
-            return
-        }
-        handler(request, respond)
+        handler(line, respond)
     }
 }

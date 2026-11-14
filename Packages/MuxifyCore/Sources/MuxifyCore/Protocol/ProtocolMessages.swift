@@ -158,6 +158,12 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// The Mac's Muxify Worktree rows that wait to move to this Host (ADR 0088). The server writes each as a record
     /// of the Host, as the import of the old record files does, and answers `AdoptedWorktrees`, one per row.
     case adoptWorktrees(AdoptWorktrees)
+    /// The App Window of this channel now consumes `@muxify_open`: the server writes its own socket into
+    /// `@muxify_browser_socket` (ADR 0089). Answers `{}`.
+    case claimOpen
+    /// The App Window of this channel no longer consumes `@muxify_open`: the server clears
+    /// `@muxify_browser_socket` if it still names its own socket. Answers `{}`.
+    case releaseOpen
 
     private enum CodingKeys: String, CodingKey, CaseIterable {
         case ping, shutdown, subscribe, environment
@@ -166,6 +172,8 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case topicChoices = "topic_choices"
         case worktreeStarts = "worktree_starts"
         case adoptWorktrees = "adopt_worktrees"
+        case claimOpen = "claim_open"
+        case releaseOpen = "release_open"
     }
 
     public init(from decoder: Decoder) throws {
@@ -185,6 +193,8 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .topicChoices: self = .topicChoices(try values.decode(TopicChoicesRequest.self, forKey: key))
         case .worktreeStarts: self = .worktreeStarts(try values.decode(WorktreeStartsRequest.self, forKey: key))
         case .adoptWorktrees: self = .adoptWorktrees(try values.decode(AdoptWorktrees.self, forKey: key))
+        case .claimOpen: self = .claimOpen
+        case .releaseOpen: self = .releaseOpen
         }
     }
 
@@ -200,6 +210,42 @@ public enum HostRequest: Codable, Equatable, Sendable {
         case .topicChoices(let choices): try values.encode(choices, forKey: .topicChoices)
         case .worktreeStarts(let request): try values.encode(request, forKey: .worktreeStarts)
         case .adoptWorktrees(let adopt): try values.encode(adopt, forKey: .adoptWorktrees)
+        case .claimOpen: try values.encode(ProtocolEmpty(), forKey: .claimOpen)
+        case .releaseOpen: try values.encode(ProtocolEmpty(), forKey: .releaseOpen)
+        }
+    }
+}
+
+/// A request that the Host Server sends to its Mac (ADR 0089): what a program on the Host sent the server's own
+/// socket. Protocol 1's base, so it needs no capability. A Mac with no handler for it ends it `unavailable`.
+public enum MacRequest: Codable, Equatable, Sendable {
+    /// A Browser command, served by the Browsers of the App Window whose channel carried it. Its `end` is the
+    /// `BrowserAgentReply`, except that a `png` comes as `ProtocolChunk` items of at most
+    /// `HostProtocol.maxChunkBytes`, and its `end` is `{"png": ""}`.
+    case browser(BrowserAgentRequest)
+    /// A view verb: the App Window shows the target and comes to the front. Answers `{}`.
+    case select(SelectRequest)
+
+    private enum CodingKeys: String, CodingKey, CaseIterable { case browser, select }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: ProtocolKey.self)
+        guard let known = CodingKeys.allCases.first(where: { values.contains(ProtocolKey($0.rawValue)) }) else {
+            let names = values.allKeys.map(\.stringValue).sorted().joined(separator: ", ")
+            throw ProtocolError(.unsupported, "this Muxify does not know the request \(names.isEmpty ? "{}" : names)")
+        }
+        let key = ProtocolKey(known.rawValue)
+        switch known {
+        case .browser: self = .browser(try values.decode(BrowserAgentRequest.self, forKey: key))
+        case .select: self = .select(try values.decode(SelectRequest.self, forKey: key))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .browser(let request): try values.encode(request, forKey: .browser)
+        case .select(let request): try values.encode(request, forKey: .select)
         }
     }
 }
