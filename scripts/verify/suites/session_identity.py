@@ -36,10 +36,14 @@ class SessionIdentity(unittest.TestCase):
         return path
 
     def session(self, name, directory, topic=None):
-        sid = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, '-c', str(directory), '/bin/zsh -f')
+        # The Topic goes on in the same tmux command as the Session, as `agent_session` in topics_sidebar.py does. tmux
+        # tells the app of a new Session at once but of a changed option never, so with a second tmux command the app
+        # could read the Session before its Topic and show it in No Topic until its next read, a second later. New
+        # Session on it in that second named it as a No Topic Session: `debug/repeat-topic+2`.
+        command = ['new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, '-c', str(directory), '/bin/zsh -f']
         if topic:
-            self.s.tmux('set-option', '-t', sid, '@muxify_topic', topic)
-        return sid
+            command += [';', 'set-option', '@muxify_topic', topic]
+        return self.s.tmux(*command)
 
     def topic(self, name):
         self.store.put(dict(id=name, title=name, slug=name))

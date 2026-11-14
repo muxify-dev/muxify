@@ -8,6 +8,7 @@ Run from the repo root after `make build`:
 
 import math
 import re
+import subprocess
 import time
 import unittest
 
@@ -40,16 +41,32 @@ class TopicsBenchSidebar(TopicsSidebar):
         for order in range(3, 3 + dormant):
             topic = '%s-t%02d' % (prefix, order)
             self.write_topic(topic, topic.capitalize(), self.beta, order=order)
-        # The app reads the Config a moment after the write. Until then the last check's in_play still cuts the list,
-        # and an Action on a card acts on the wrong cut.
+        if dormant:
+            # The list keeps the place that the last check scrolled it to, such as the end of its long Bench, when the
+            # app reads that check's clean-up and these cards together, so the list never gets shorter than its view.
+            # A long Bench then showed its end, and the check found it fitting the Sidebar. Start at the top.
+            self.s.act('scroll', 'topics-list', from_end=100000)
+        # The app reads the Config up to 2 seconds after the write (`ConfigStore`). Until then the last check's in_play
+        # still cuts the list, and an Action on a card acts on the wrong cut: a Bench with the last check's in_play 2
+        # put the card under b, `_ b a c`. Wait for the line too: while the app has read only the first card, the old
+        # cut shows that card alone with no line, as the new cut would.
         expected = ['topic-%s-%s' % (prefix, name) for name in 'abc'][:in_play]
         def in_play_cards(rs):
             ids = self.s.ids(rs)
             ids = ids[:ids.index(LINE)] if LINE in ids else ids
             return [key for key in ids if key.startswith('topic-%s-' % prefix)]
-        self.s.wait_rows(lambda rs: in_play_cards(rs) == expected,
-                         lambda: 'the Sidebar does not show In Play %s: %s' % (expected, in_play_cards(self.s.rows())))
+        self.s.wait_rows(lambda rs: LINE in self.s.ids(rs) and in_play_cards(rs) == expected,
+                         lambda: 'the Sidebar does not show In Play %s over the line: %s' % (expected, self.cards(prefix, self.s.rows())))
+        # The first in_play that the app reads makes it gather the Guests (`gatherGuestsWhenInPlayIsSet` in
+        # Workspace/WorkspaceStore.swift) at its next read of tmux, up to a second after the cut shows. That is a change of
+        # the Topics: while it runs no card lifts and no drop or Action changes the order, so a drag in the suite's first
+        # check did nothing. The app sets this default once it has gathered them.
+        wait(self.guests_gathered, 'the app did not gather the Guests for in_play %d' % in_play, seconds=10)
         return windows
+
+    def guests_gathered(self):
+        read = subprocess.run(['defaults', 'read', self.s.bundle_id, 'guestsGathered'], capture_output=True, text=True)
+        return read.stdout.strip() == '1'
 
     def long_bench(self, prefix):
         """A shown Bench much longer than the Sidebar. Returns the identifiers of the Benched cards in list order."""
@@ -421,7 +438,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         # records after it and the save does not bring a Topic back for the next check.
         orders = lambda: self.orders('bench-drag')
         wait(lambda: orders()['bench-drag-c'] < orders()['bench-drag-b'] < orders()['bench-drag-a'],
-             'the drag did not save c, b, a: %s' % orders(), seconds=5)
+             lambda: 'the drag did not save c, b, a: %s' % orders(), seconds=5)
         s.wait_rows(lambda rs: self.cards('bench-drag', rs)
                     == ['topic-bench-drag-c', LINE, 'topic-bench-drag-b', 'topic-bench-drag-a'],
                     'the Benched card and the card In Play did not trade places: %s' % self.cards('bench-drag', s.rows()))
@@ -450,7 +467,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         s.act('drag', 'topic-bench-tall-b', 'topic-bench-tall-a')
         orders = lambda: self.orders('bench-tall')
         wait(lambda: orders()['bench-tall-b'] < orders()['bench-tall-a'] < orders()['bench-tall-c'],
-             'the tall card did not trade with the first card: %s' % orders(), seconds=5)
+             lambda: 'the tall card did not trade with the first card: %s' % orders(), seconds=5)
 
     def test_a_card_let_go_on_the_shown_bench_line_stays_in_its_place(self):
         # The line is between the cards, so a card that reaches only the line has not passed the card under it.
@@ -524,7 +541,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         s.act('drag', 'topic-bench-hidden-trade-a', 'topic-bench-hidden-trade-b', via=LINE, edge='bottom')
         orders = lambda: self.orders('bench-hidden-trade')
         wait(lambda: orders()['bench-hidden-trade-b'] < orders()['bench-hidden-trade-a'] < orders()['bench-hidden-trade-c'],
-             'the drag did not save b, a, c: %s' % orders(), seconds=5)
+             lambda: 'the drag did not save b, a, c: %s' % orders(), seconds=5)
         s.wait_rows(lambda rs: self.cards('bench-hidden-trade', rs) == ['topic-bench-hidden-trade-b', LINE]
                     and self.line(rs) == 'Bench',
                     'the Bench that the drag opened did not hide again: %s' % self.cards('bench-hidden-trade', s.rows()))
@@ -631,7 +648,7 @@ class TopicsBenchSidebar(TopicsSidebar):
                         % (self.tops([bench[-1]], rs), before))
         self.assert_in_place(fixed, before, rs)
         orders = lambda: self.orders('bench-edge')
-        wait(lambda: orders()['bench-edge-b'] > orders()['bench-edge-c'], 'the drop did not save: %s' % orders(), seconds=5)
+        wait(lambda: orders()['bench-edge-b'] > orders()['bench-edge-c'], lambda: 'the drop did not save: %s' % orders(), seconds=5)
 
     def test_a_card_in_play_trades_with_the_card_it_is_let_go_on_in_a_scrolled_bench(self):
         s = self.s

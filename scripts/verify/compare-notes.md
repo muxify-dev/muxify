@@ -180,10 +180,12 @@ Suites that changed. One check changed for the move, because it measured SwiftUI
 
 No other check changed for the move. Task 17 repaired the timing of five checks that failed by chance with either list,
 and of one part of the palette: `session_paths_palette`, `git_view_remotes`, `git_view_changes`, `topics_bench_sidebar`
-(its helper `act_until`), `topics_groups_sidebar`, and `CommandPalette.query` for `palette_tags`. Each still proves what
-it proved; the next list gives each cause.
+(its helper `act_until`), `topics_groups_sidebar`, and `CommandPalette.query` for `palette_tags`. Task 19 repaired the
+fixture of `session_identity` and the helper `bench_topics` of `topics_bench_sidebar` in the same way, and found that
+task 17's repair of `act_until` had not reached its cause. Each still proves what it proved; the next list gives each
+cause.
 
-The checks that failed or were FLAKY in the runs of task 17, and their causes. None is in the AppKit Topics list or
+The checks that failed or were FLAKY in the runs of task 17 and in the Verifier's runs after it, and their causes. None is in the AppKit Topics list or
 comes from its code: each is a check that acted before the app had read a change, or a part of the app outside the
 Topics list.
 
@@ -191,7 +193,16 @@ Topics list.
   each list, also alone, and the scene `topics-hover` failed its gate in the first compare run: the user's full-screen
   windows covered the App Window whole, so its views got no hover. Once a part of it showed, `hover_labels_sidebar`,
   `interface_font_size` and `quick_switch_hints` passed with both lists, and `topics-hover` passed its gate; a hover
-  check that ran while the user covered the App Window again passed in its rerun.
+  check that ran while the user covered the App Window again passed in its rerun. In the Verifier's runs the user's
+  window, 1728 by 1084 points under the menu bar, covered every App Window again, and the 11 hover checks and
+  `topics-hover` could not run. Task 19 waited for a part of the App Window to show, reading only the list of windows
+  on the screen: from 01:37 to 12:57 on 14 November, about 11 hours over three attempts, none showed. From 14:12 the
+  user moved between full-screen windows and the desktop, and five runs failed on a covered App Window: three because
+  the user went back to a full-screen window during the run, two because the window list was empty for a moment while
+  the screen moved between Spaces, and the wait took that for a shown desktop. At 15:44, after another hour and a
+  half, the desktop stayed in view: `hover_labels_sidebar` and `interface_font_size` passed with the AppKit list
+  (20261114-154507-504f17) and with the SwiftUI list (20261114-154737-86c47a) with no check failing on a covered App
+  Window, `topics-hover` passed its gate, and `SELF=1` found no pixel that differs in it.
 - `palette_tags`, a pasted line break in New Topic: failed against the AppKit list, alone too, and in a probe against
   either list in about two launches of five, most often on the first paste after a launch. The palette turns the line
   break into a space in its model on the next turn of the main queue, but while the field is edited SwiftUI's
@@ -221,10 +232,62 @@ Topics list.
   the dump still had the choice. The check now reads it once the App Window shows the new Session; it still fails when
   the link asks instead of rebuilding.
 - `topics_bench_sidebar`, Bench on a card In Play: FLAKY in a run of eleven suites against the AppKit list, and failed
-  the same way in two runs of the pilot, before the set. Its helper ran the card's named action again each second
-  until the written order was right; under load the app wrote the first Bench's order more than a second later, so a
-  second Bench moved the card that was now on top of the Bench down: `_ b a c`. The helper now runs an action again
-  only when the last one changed nothing within 5 seconds.
+  the same way in two runs of the pilot, before the set: the order `_ b a c`, with the card under b and not on top of
+  the Bench. Task 17 took it for a second Bench and made the helper `act_until` run an action again only when the last
+  one changed nothing within 5 seconds; that was not the cause. In the Verifier's run of 12 suites with `--repeat 2`
+  against the AppKit list (20261114-002844-75de56) it failed again after one Bench: the order changed within half a
+  second of the Action and stayed `_ b a c` for 15 seconds. The check before it by name,
+  `test_bench_of_the_last_card_in_play…`, sets `topics.in_play` to 2, and the app reads the Config every 2 seconds
+  (`ConfigStore`). Until it reads this check's in_play 1, a Bench of a with a and b In Play leaves an Open Place and
+  puts a on top of the Bench, under b. The helper `bench_topics` waited until the cards above the line were a alone,
+  but while the app had read the record of a and not yet those of b and c, the old cut showed a alone with no line,
+  and the wait passed on it. A probe reproduced it: with the app on in_play 2, a Bench 0.1 seconds after a write of
+  in_play 1 gave `_ b a c`. The cause is the check and the app's read of the Config every 2 seconds, not the set's
+  code. `bench_topics` now waits for the line too: a alone above the line is only the new cut.
+- `topics_bench_sidebar`, a Benched card dragged across the shown Bench line onto the card In Play
+  (`test_a_card_dragged_across_the_shown_bench_line_trades…`): FLAKY against the AppKit list in the Verifier's full run
+  20261114-000105-dc2d7f, and before the set against the SwiftUI list (20261111-142428-71c0a7 at `701a6baf`, and
+  20261105-111111-acddea). The drag saved nothing: the orders stayed a, b, c. Its message gave the orders from before
+  its wait, so no failure shows more. In each of these failures it was the suite's first check, as it is by name. The
+  first in_play that the app reads makes it gather the Guests (`gatherGuestsWhenInPlayIsSet`) at its next read of
+  tmux, up to a second after the cut shows, and that is a change of the Topics: while one runs, no card lifts
+  (`liftsUnits`, and the `isEnabled` of the SwiftUI handle) and `perform` refuses a drop. A probe in a new Sandbox saw
+  the cut 1.7 seconds after the write of in_play and the Guests gathered 0.13 seconds after the cut, with no load. The
+  check drags within a second of the cut; under the load of the parallel pass the gathering takes longer, and the drag
+  met it. Its rerun runs alone, and passed. No failure caught the drag in the act, so this is the cause that the code
+  and the runs point to, not one that a failure showed. `bench_topics` now waits until the app has gathered the Guests
+  (it then sets the default `guestsGathered`), and each drag of the suite gives the orders at the end of its wait.
+  The gathering does not explain every drag that saves nothing: the tall card's trade in the same suite, which is not
+  a first check, did so in round 2 of task 19's run of 12 suites with `--repeat 2` against the AppKit list
+  (20261114-015058-00dab5), its orders still a, b, c at the end of its wait, as it has with the SwiftUI list since
+  before the set. Its cause was not found.
+- `topics_bench_sidebar`, the long Bench of the edge scroll (`test_a_lifted_card_held_at_the_bottom_edge…`), "the long
+  Bench fits in the Sidebar": FLAKY in the Verifier's run of 12 suites against the AppKit list and in a run of task 19
+  (20261114-014201-de9d2f), and recorded by task 08. The check before it by name, the Jump To a Benched card out of
+  view, scrolls the list to the end of its own long Bench. When the app reads that check's clean-up and the next
+  check's cards together, the list never gets shorter than its view and keeps that place, so the new long Bench showed
+  its end, and the wait for a Bench longer than the Sidebar did not pass. A probe that ran the Jump To check and then
+  the long Bench's steps saw it in its first round with each list: the AppKit list showed the last Benched card, and in
+  the SwiftUI list the card In Play and the line were out of view and out of the dump. `bench_topics` now scrolls the
+  list to its top before it waits for a long Bench; the probe then passed three rounds in three with each list.
+- In task 19's run of 12 suites with `--repeat 2` against the AppKit list (20261114-015058-00dab5), after the repairs
+  above, Bench on a card In Play, the drag across the shown Bench line and the long Bench passed in both rounds. Besides
+  the tall card's trade, three more checks were FLAKY there, each outside the AppKit Topics list's code as far as its
+  symptom shows, and their causes were not found: `topics_agents_sidebar`'s failed and done Agent marks of a Pane row in
+  round 1 ("Show Panes is not on: no change to pane-%2"), as in the Verifier's run of the same suites, and
+  `topics_groups_sidebar`'s Forget Settled older than in round 2 ("press settled-topics did not hit its target").
+- `session_identity`, New Session on a Session of a Topic (`test_new_session_on_topic_member_keeps_scope…`): FLAKY in
+  the Verifier's full runs against each list (20261113-235620-572a01, 20261114-000105-dc2d7f), at `cc306a56` before the
+  set (20261111-165221-dc688d), and on 26 October. Each time the new Session was `debug/repeat-topic+2`, the name that
+  New Session gives a Session in No Topic, not `debug+2/repeat-topic`. The check started the Session with one tmux
+  command and put it in its Topic, `@muxify_topic`, with a second. tmux tells the app of a new Session at once, through
+  its control client, but of a changed option never, so a read between the two commands showed the Session in No Topic
+  until the app's next read, a second later (the timer in `WorkspaceStore`). The palette lists the Session either way,
+  and New Session in that second took it as a Session in No Topic. A probe that set the option 0.3 seconds after the
+  Session gave the No Topic name 2 times in 4; with the option in the same tmux command as the Session, as
+  `agent_session` in `topics_sidebar.py` does, the name was `debug+2/…` 4 times in 4: tmux runs the whole command before
+  it tells the control client. The check's fixture now does that. The Topic record is written before the Session
+  starts and read four times a second; the probe's late option alone was enough for the failure.
 - The other checks that were FLAKY in one full run each, against the SwiftUI list unless named, all of them outside
   the AppKit Topics list, each failed once in the 24 to 28 runs that `build/verify/runs/` keeps, and passed in its
   rerun: `git_view_merge_rebase`'s conflicting merge (the merge menu did not open after R, on a Git View that had not
@@ -244,7 +307,9 @@ Topics list.
   failed in the same minutes against the AppKit list, in its rerun too, because the Terminal's tmux Client did not
   attach. It is the failure that the pilot recorded for `local_session_end` and `attachments_terminal` late in the
   parallel pass. Both suites pass alone with both lists, and the set does not touch the Terminal; the cause was not
-  found.
+  found. Task 19's hover run of two suites against the SwiftUI list (20261114-154737-86c47a) saw it without that load:
+  `interface_font_size`'s Git View line number gutter was FLAKY, because the App Window did not show its new Window
+  and tmux had no Terminal Client, only the app's `muxify-watch`. It passed in its rerun.
 
 The full runs of task 17, with `make verify TOPICS_LIST=appkit` and `TOPICS_LIST=swiftui`, three of each: every suite
 passed with both lists but the hover checks, which the covered App Window failed, and the checks above. The hover

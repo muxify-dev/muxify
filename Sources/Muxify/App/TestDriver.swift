@@ -5,8 +5,8 @@ import MuxifyCore
 /// Lets scripts/verify drive a Debug build through its accessibility tree.
 /// The script writes `command.json` (with a fresh nonce) into the folder
 /// named by MUXIFY_TEST_DRIVER; a timer on the main run loop answers each new
-/// nonce in `result.json`. Commands: dump, press, set, focus, action, drag, hover, snapshot, responder, scroll, stall,
-/// binding, counts, sessions-list, actions, each with the option `reveal` that scrolls the target into view first, and
+/// nonce in `result.json`. Commands: dump, press, set, focus, action, click, drag, hover, snapshot, responder, scroll,
+/// stall, binding, counts, topics-list, actions, each with the option `reveal` that scrolls the target into view first, and
 /// `watch` that reads frames of elements in each drawn frame after it. None of
 /// them activates the app, opens a menu or moves the pointer, so a run never takes focus.
 enum TestDriver {
