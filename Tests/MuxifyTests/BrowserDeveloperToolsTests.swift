@@ -4,36 +4,25 @@ import XCTest
 @testable import MuxifyCore
 
 final class BrowserDeveloperToolsTests: XCTestCase {
-    func testDeveloperExtrasSetterReceivesABoolean() {
-        let preferences = Preferences()
-        XCTAssertTrue(BrowserDeveloperTools.enable(in: preferences))
-        XCTAssertTrue(preferences.enabled)
-    }
-
-    func testMissingDeveloperExtrasSetterIsSafe() {
-        XCTAssertFalse(BrowserDeveloperTools.enable(in: NSObject()))
-    }
-
-    func testShowUsesThePagesInspectorAndRepeatedCallsFocusIt() {
+    func testShowAndCloseUseThePagesInspectorAndRepeatedShowsFocusIt() {
         let inspector = Inspector()
         let webView = Page(inspector: inspector)
         XCTAssertTrue(BrowserDeveloperTools.show(for: webView))
         XCTAssertTrue(BrowserDeveloperTools.show(for: webView))
         XCTAssertEqual(inspector.showCalls, 2)
         XCTAssertEqual(inspector.closeCalls, 0)
+        BrowserDeveloperTools.close(for: webView)
+        XCTAssertEqual(inspector.closeCalls, 1)
     }
 
-    func testCloseUsesTheSameInspector() {
-        let first = Inspector()
-        let second = Inspector()
-        BrowserDeveloperTools.close(for: Page(inspector: first))
-        XCTAssertEqual(first.closeCalls, 1)
-        XCTAssertEqual(second.closeCalls, 0)
-    }
-
-    func testMissingInspectorOrActionsAreSafe() {
-        for webView in [NSObject(), Page(inspector: nil), Page(inspector: NSObject())] {
-            XCTAssertFalse(BrowserDeveloperTools.show(for: webView))
+    func testAMissingDeveloperExtrasSetterInspectorOrActionIsSafe() {
+        XCTAssertFalse(BrowserDeveloperTools.enable(in: NSObject()))
+        let pages: [(String, NSObject)] = [
+            ("no _inspector", NSObject()), ("no inspector", Page(inspector: nil)),
+            ("an inspector without show or close", Page(inspector: NSObject())),
+        ]
+        for (name, webView) in pages {
+            XCTAssertFalse(BrowserDeveloperTools.show(for: webView), name)
             BrowserDeveloperTools.close(for: webView)
         }
     }
@@ -184,13 +173,6 @@ final class BrowserDeveloperToolsTests: XCTestCase {
         let onFinish: () -> Void
         init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { onFinish() }
-    }
-
-    private final class Preferences: NSObject {
-        var enabled = false
-        @objc(_setDeveloperExtrasEnabled:) func setDeveloperExtrasEnabled(_ enabled: Bool) {
-            self.enabled = enabled
-        }
     }
 
     private final class Page: NSObject {
