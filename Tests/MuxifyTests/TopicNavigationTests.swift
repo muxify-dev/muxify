@@ -7,7 +7,7 @@ final class TopicNavigationTests: XCTestCase {
         var config = Config()
         config.topics.inPlay = inPlay
         return TopicsModel(records: records, windows: windows, config: config, selection: selection,
-                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window))
+                        location: selection.windowLocation)
     }
 
     private func visit(_ id: String, topic: String, selection: inout TopicSelection) {

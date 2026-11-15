@@ -1,12 +1,12 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// The Sidebar's sections, in order, with each card's label, state and mark, from the cards that `TopicsList` builds.
 final class SidebarCardsTests: XCTestCase {
     private func window(_ session: String, topic: String? = nil, lock: Double? = nil) -> TmuxWindow {
-        TmuxWindow(id: "@" + session.dropFirst(), sessionID: session, sessionName: "s" + session.dropFirst(), index: 0, name: "shell",
-                   paneTitle: "", path: "/work", command: "zsh", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
-                   storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, lockOrder: lock)
+        .fixture(id: "@" + session.dropFirst(), sessionID: session, sessionName: "s" + session.dropFirst(), topicID: topic,
+                 lockOrder: lock)
     }
 
     private func agent(in session: String, _ status: AgentStatus, unread: Bool = false) -> TmuxPane {

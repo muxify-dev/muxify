@@ -1,15 +1,14 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class AgentsScopeTests: XCTestCase {
     private let alpha = TopicRecord(id: "a", title: "Alpha")
     private let beta = TopicRecord(id: "b", title: "Beta")
 
     private func window(_ id: String, session: String, topic: String?) -> TmuxWindow {
-        TmuxWindow(id: id, sessionID: session, sessionName: "name-" + session, index: 0, name: "agent",
-                   paneTitle: "agent", path: "/work/app", command: "sleep", isActive: true, paneCount: 1,
-                   hasBell: false, sessionActivity: 0, agent: "codex", storedBrowser: StoredBrowser(),
-                   openRequests: [], topicID: topic, sessionPath: "/work/app")
+        .fixture(id: id, sessionID: session, sessionName: "name-" + session, name: "agent", paneTitle: "agent", path: "/work/app",
+                 command: "sleep", agent: "codex", topicID: topic, sessionPath: "/work/app")
     }
 
     private func agent(_ id: String, in window: TmuxWindow, _ status: AgentStatus = .done, unread: Bool = false) -> Agent {
@@ -24,7 +23,7 @@ final class AgentsScopeTests: XCTestCase {
         var selection = TopicSelection()
         selection.windowID = selected
         return TopicsModel(records: records, windows: windows, config: config, selection: selection,
-                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), mode: mode, agents: agents)
+                        location: selection.windowLocation, mode: mode, agents: agents)
     }
 
     func testAnEmptyTopicPageScopesAgentsToItsTopic() {
@@ -108,7 +107,7 @@ final class AgentsScopeTests: XCTestCase {
         var selection = TopicSelection()
         selection.windowID = "@1"
         let scoped = TopicsModel(records: [alpha], windows: [first, other], config: config, selection: selection,
-                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window),
+                        location: selection.windowLocation,
                                  mode: .topics, agents: [agent("%1", in: first), agent("%2", in: other)])
         XCTAssertEqual(scoped.mode, .sessions)
         XCTAssertEqual(scoped.visibleAgents.map(\.paneID), ["%1"])

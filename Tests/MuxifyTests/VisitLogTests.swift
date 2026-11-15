@@ -1,14 +1,13 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class VisitLogTests: XCTestCase {
     private let sessionPaths = [SessionPath(path: "/work/app", name: "app"),
                             SessionPath(path: "/work/game", name: "game", layout: .bareRepository([Worktree(path: "/work/game/main", branch: "main")]))]
 
     private func window(_ id: String, session: String, directory: String, topic: String? = nil) -> TmuxWindow {
-        TmuxWindow(id: id, sessionID: "$" + session, sessionName: session, index: 0, name: "shell", paneTitle: "", path: directory,
-                   command: "zsh", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
-                   storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, sessionPath: directory)
+        .fixture(id: id, sessionID: "$" + session, sessionName: session, path: directory, topicID: topic, sessionPath: directory)
     }
 
     private func defaults() throws -> UserDefaults {

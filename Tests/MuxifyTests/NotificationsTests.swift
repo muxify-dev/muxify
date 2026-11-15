@@ -1,13 +1,12 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class NotificationsTests: XCTestCase {
     private func load(_ text: String) throws -> Config { try Config.load(path: "/cfg/config.yaml") { _ in text }.get() }
     private func window(_ id: String, topic: String?) -> TmuxWindow {
-        TmuxWindow(id: id, sessionID: "$1", sessionName: "app/topic", index: 0, name: "agent",
-                   paneTitle: "agent", path: "/app", command: "sleep", isActive: true, paneCount: 1,
-                   hasBell: false, sessionActivity: 0, agent: "codex", storedBrowser: StoredBrowser(),
-                   openRequests: [], topicID: topic)
+        .fixture(id: id, sessionName: "app/topic", name: "agent", paneTitle: "agent", path: "/app", command: "sleep", agent: "codex",
+                 topicID: topic)
     }
     private func agent(_ status: AgentStatus, id: String = "%1", window: String = "@1", unread: Bool = true) -> Agent {
         Agent(paneID: id, kind: .codex, status: status, unread: unread, windowID: window,

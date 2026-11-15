@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class ReopenAtLaunchTests: XCTestCase {
     private func topic(_ id: String, remembers: Bool = true, settled: Bool = false, pinned: Bool = false, guest: Bool = false,
@@ -13,14 +14,6 @@ final class ReopenAtLaunchTests: XCTestCase {
         return record
     }
 
-    private func window(_ id: String, topic: String?) -> TmuxWindow {
-        var window = TmuxWindow(id: "@" + id, sessionID: "$" + id, sessionName: "session-" + id, index: 0,
-                                name: "shell", paneTitle: "shell", path: "/tmp", command: "zsh", isActive: true,
-                                paneCount: 1, hasBell: false, sessionActivity: 0, agent: "", storedBrowser: .init(), openRequests: [])
-        window.topicID = topic
-        return window
-    }
-
     /// Pinned, In Play, a Guest and two on the Bench (with `in_play: 1`) are Dormant; the others are not.
     private var records: [TopicRecord] {
         [topic("pinned", pinned: true), topic("in-play", order: 0), topic("guest", guest: true, order: 1),
@@ -28,7 +21,7 @@ final class ReopenAtLaunchTests: XCTestCase {
          topic("settled", settled: true), topic("empty", remembers: false), topic("live", order: 4)]
     }
 
-    private var windows: [TmuxWindow] { [window("1", topic: "live"), window("2", topic: nil)] }
+    private var windows: [TmuxWindow] { [.fixture(topicID: "live"), .fixture(id: "@2", sessionID: "$2")] }
 
     func testTheKeyOffReopensNoTopic() {
         var reopen = ReopenAtLaunch()

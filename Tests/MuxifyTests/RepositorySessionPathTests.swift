@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// A repository with several Worktrees is one SessionPath. Real git in a temp folder for the
 /// layout detection, plain models for the rows and labels.
@@ -119,10 +120,7 @@ final class RepositorySessionPathTests: XCTestCase {
     private var notes: SessionPath { SessionPath(path: "/work/notes", name: "notes") }
 
     private func window(_ id: String, session: String, topic: String?, directory: String, path: String? = nil) -> TmuxWindow {
-        TmuxWindow(id: id, sessionID: session, sessionName: "s" + session, index: 0,
-                   name: "shell", paneTitle: "", path: path ?? directory, command: "zsh",
-                   isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
-                   storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, sessionPath: directory)
+        .fixture(id: id, sessionID: session, sessionName: "s" + session, path: path ?? directory, topicID: topic, sessionPath: directory)
     }
 
     private func shown(_ rows: [SessionPathRow]) -> [String] {

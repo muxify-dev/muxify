@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class SidebarRenderingTests: XCTestCase {
     /// Use real row presentation without starting Ghostty or a tmux connection.
@@ -93,10 +94,9 @@ final class SidebarRenderingTests: XCTestCase {
     }
 
     @MainActor private func rows() -> some View {
-        let window = TmuxWindow(id: "@1", sessionID: "$1", sessionName: "A very long Session name with AgM descenders",
-                                index: 1, name: "shell", paneTitle: "A very long Window title with AgM descenders",
-                                path: "/test", command: "fish", isActive: true, paneCount: 3, hasBell: true,
-                                sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(), openRequests: [])
+        let window = TmuxWindow.fixture(sessionName: "A very long Session name with AgM descenders", index: 1,
+                                        paneTitle: "A very long Window title with AgM descenders", path: "/test", command: "fish",
+                                        paneCount: 3, hasBell: true)
         let agent = Agent(paneID: "%1", kind: .codex, status: .failed, unread: true, windowID: "@1", sessionID: "$1",
                           sessionName: window.sessionName, windowIndex: 1, windowTitle: window.displayTitle,
                           label: window.displayTitle)

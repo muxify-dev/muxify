@@ -1,12 +1,11 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class TopicsTests: XCTestCase {
     private func window(_ id: String, session: String, topic: String? = nil, path: String = "/work/app") -> TmuxWindow {
-        TmuxWindow(id: id, sessionID: session, sessionName: "renamed-by-hand", index: 0,
-                   name: "editor", paneTitle: "editor", path: "/different/active/pane", command: "zsh",
-                   isActive: true, paneCount: 1, hasBell: true, sessionActivity: 0, agent: "",
-                   storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, sessionPath: path)
+        .fixture(id: id, sessionID: session, sessionName: "renamed-by-hand", name: "editor", paneTitle: "editor",
+                 path: "/different/active/pane", hasBell: true, topicID: topic, sessionPath: path)
     }
 
     func testASessionKeepsItsTmuxNameATopicWithNoLiveSessionIsDormantAndTheRestAreNoTopic() {
@@ -40,7 +39,7 @@ final class TopicsTests: XCTestCase {
         var selection = TopicSelection()
         func open() -> Set<TopicGroupID> {
             Set(TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
-                            location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window)).rows.filter(\.isExpanded).map(\.id))
+                            location: selection.windowLocation).rows.filter(\.isExpanded).map(\.id))
         }
         selection.select(windowID: "@1", activeTopic: .topic("a"))
         XCTAssertEqual(open(), [.topic("a")], "only the Active Topic is open at start")
@@ -94,7 +93,7 @@ final class TopicsTests: XCTestCase {
         selection.setTopic(.topic("a"), open: false)
         selection.windowID = "@2"
         let rows = TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
-                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window)).rows
+                        location: selection.windowLocation).rows
         XCTAssertEqual(rows.filter(\.isExpanded).map(\.id), [.topic("b")])
     }
 

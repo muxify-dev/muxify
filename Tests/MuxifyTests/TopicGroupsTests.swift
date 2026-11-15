@@ -1,12 +1,11 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class TopicGroupsTests: XCTestCase {
     private func window(_ id: String, session: String, topic: String?) -> TmuxWindow {
-        TmuxWindow(id: id, sessionID: session, sessionName: "app/" + (topic ?? "plain"), index: 0, name: "editor",
-                   paneTitle: "editor", path: "/work/app", command: "zsh", isActive: true, paneCount: 1, hasBell: false,
-                   sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(), openRequests: [], topicID: topic,
-                   sessionPath: "/work/app")
+        .fixture(id: id, sessionID: session, sessionName: "app/" + (topic ?? "plain"), name: "editor", paneTitle: "editor",
+                 path: "/work/app", topicID: topic, sessionPath: "/work/app")
     }
 
     private func settled(_ id: String, at: String) -> TopicRecord {
@@ -21,7 +20,7 @@ final class TopicGroupsTests: XCTestCase {
     private func model(_ records: [TopicRecord], windows: [TmuxWindow] = [], mode: SidebarMode = .topics,
                        groups: TopicGroupsState = TopicGroupsState(), selection: TopicSelection = TopicSelection(), location: Location? = nil) -> TopicsModel {
         TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
-                        location: location ?? selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), mode: mode, groups: groups)
+                        location: location ?? selection.windowLocation, mode: mode, groups: groups)
     }
 
     func testGroupsFollowTheOpenTopicsInTopicsModeOnlyAndHideWhenEmpty() {

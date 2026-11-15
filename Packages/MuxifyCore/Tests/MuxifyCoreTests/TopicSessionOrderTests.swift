@@ -1,15 +1,14 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class TopicSessionOrderTests: XCTestCase {
     private let sessionPaths = ["a", "b", "c", "d"].map { SessionPath(path: "/work/" + $0, name: $0) }
 
     /// A live Session of the Topic in SessionPath `name`, created at `created`.
     private func window(_ name: String, created: Int) -> TmuxWindow {
-        TmuxWindow(id: "@" + name, sessionID: "$" + name, sessionName: name + "/topic", index: 0, name: "shell", paneTitle: "",
-                   path: "/work/" + name, command: "zsh", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0,
-                   agent: "", storedBrowser: StoredBrowser(), openRequests: [], topicID: "topic", sessionPath: "/work/" + name,
-                   sessionCreated: created)
+        .fixture(id: "@" + name, sessionID: "$" + name, sessionName: name + "/topic", path: "/work/" + name, topicID: "topic",
+                 sessionPath: "/work/" + name, sessionCreated: created)
     }
 
     private func record(manual: [String]? = nil) -> TopicRecord {

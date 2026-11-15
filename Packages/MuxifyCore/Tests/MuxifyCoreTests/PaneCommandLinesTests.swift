@@ -1,12 +1,10 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class PaneCommandLinesTests: XCTestCase {
     private func snapshot(_ command: String, topic: String? = "topic") -> TmuxSnapshot {
-        var window = TmuxWindow(id: "@1", sessionID: "$1", sessionName: "game", index: 0, name: "dev", paneTitle: "", path: "/work",
-                                command: command, isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
-                                storedBrowser: StoredBrowser(), openRequests: [])
-        window.topicID = topic
+        let window = TmuxWindow.fixture(sessionName: "game", name: "dev", command: command, topicID: topic)
         let pane = TmuxPane(id: "%1", windowID: "@1", command: command, agent: "", agentStatus: "", unread: false, tty: "/dev/pts/4")
         return TmuxSnapshot(windows: [window], clients: [], panes: [pane], serverRunning: true)
     }

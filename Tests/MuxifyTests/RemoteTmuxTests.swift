@@ -1,5 +1,4 @@
 import XCTest
-import Darwin
 @testable import MuxifyCore
 import MuxifyTestSupport
 
@@ -8,46 +7,20 @@ import MuxifyTestSupport
 final class RemoteTmuxTests: XCTestCase {
     func testBootstrapClientTargetingLiteralArgumentsAndServerRestart() throws {
         let tmux = try requireTmux()
-        let root = try TestDirectory()
-        defer { withExtendedLifetime(root) {} }
+        let host = try TestRemoteHost()
+        defer { withExtendedLifetime(host) {} }
+        let root = host.root
+        let home = host.home
         let fm = FileManager.default
-        let home = root.url.appendingPathComponent("home")
-        let bin = root.url.appendingPathComponent("bin")
-        let socket = root.url.appendingPathComponent("t").path
-        try fm.createDirectory(at: home, withIntermediateDirectories: true)
-        try fm.createDirectory(at: bin, withIntermediateDirectories: true)
-        let shim = bin.appendingPathComponent("tmux")
-        try ("#!/bin/sh\nexec " + Tmux.shellQuote(tmux) + " -S " + Tmux.shellQuote(socket) + " -f /dev/null \"$@\"\n")
-            .write(to: shim, atomically: true, encoding: .utf8)
-        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: shim.path)
-        var environment = ProcessInfo.processInfo.environment
-        environment["TMUX_TMPDIR"] = root.url.path
-        environment["HOME"] = home.path
-        environment["PATH"] = bin.path + ":/usr/bin:/bin:/usr/sbin:/sbin"
-        environment["TERM"] = "xterm-256color"
-        environment["LC_ALL"] = "C"
-        environment["TMUX"] = nil
-        environment["TMUX_PANE"] = nil
-        environment["SSH_TTY"] = nil
-        let runner = CommandRunner()
-        func raw(_ args: [String]) throws -> String {
-            if ["kill-server", "kill-pane", "detach-client"].contains(args.first ?? "") {
-                let actual = try runner.run(CommandInvocation(executable: shim.path, arguments: ["display-message", "-p", "#{socket_path}"]), environment: environment)
-                guard actual.trimmingCharacters(in: .whitespacesAndNewlines) == socket else { throw TmuxError.notReady }
-            }
-            return try runner.run(CommandInvocation(executable: shim.path, arguments: ["-u"] + args), environment: environment)
-        }
-        defer { _ = try? raw(["kill-server"]) }
         let ssh = try RemoteSSH(environment: RemoteEnvironment(name: "test", host: "unused", username: "unused"),
                                 temporaryDirectory: root.url)
         func remote(_ args: [String]) throws -> String {
-            try runner.run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", ssh.command(args).arguments.last!]),
-                           environment: environment)
+            try host.run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", ssh.command(args).arguments.last!]))
         }
         let terminal = Process()
         terminal.executableURL = URL(fileURLWithPath: "/usr/bin/script")
         terminal.arguments = ["-q", "/dev/null", "/bin/sh", "-c", ssh.bootstrap(newSession: .init(name: "main", folder: home.path))]
-        terminal.environment = environment
+        terminal.environment = host.environment
         let log = root.url.appendingPathComponent("terminal.log")
         fm.createFile(atPath: log.path, contents: nil)
         let output = try FileHandle(forWritingTo: log)
@@ -57,7 +30,7 @@ final class RemoteTmuxTests: XCTestCase {
         terminal.standardOutput = output
         terminal.standardError = output
         try terminal.run()
-        defer { stop(terminal) }
+        defer { host.stop(terminal) }
 
         var marker: [String] = []
         var snapshot: TmuxSnapshot?
@@ -83,18 +56,18 @@ final class RemoteTmuxTests: XCTestCase {
         let paneDirectory = try XCTUnwrap(initial.windows.first?.path)
         XCTAssertEqual(URL(fileURLWithPath: paneDirectory).resolvingSymlinksInPath().path, home.resolvingSymlinksInPath().path)
 
-        let otherSession = try raw(["new-session", "-d", "-s", "other", "-P", "-F", "#{session_id}", "-c", home.path])
+        let otherSession = try host.raw(["new-session", "-d", "-s", "other", "-P", "-F", "#{session_id}", "-c", home.path])
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let other = Process()
         other.executableURL = URL(fileURLWithPath: tmux)
-        other.arguments = ["-S", socket, "-u", "-C", "attach-session", "-f", "read-only,no-output,ignore-size", "-t", otherSession]
-        other.environment = environment
+        other.arguments = ["-S", host.socket, "-u", "-C", "attach-session", "-f", "read-only,no-output,ignore-size", "-t", otherSession]
+        other.environment = host.environment
         let otherInput = Pipe()
         other.standardInput = otherInput
         other.standardOutput = FileHandle.nullDevice
         other.standardError = FileHandle.nullDevice
         try other.run()
-        defer { stop(other) }
+        defer { host.stop(other) }
         let otherDeadline = Date().addingTimeInterval(3)
         while Date() < otherDeadline {
             if (try? Tmux.readSnapshot(using: remote).clients.contains { $0.pid == Int(other.processIdentifier) }) == true { break }
@@ -113,15 +86,15 @@ final class RemoteTmuxTests: XCTestCase {
         XCTAssertEqual(try remote(["display-message", "-p", "-t", window, "#{window_id}"])
             .trimmingCharacters(in: .whitespacesAndNewlines), window)
 
-        stop(terminal)
-        XCTAssertNoThrow(try raw(["has-session", "-t", "=main"]))
+        host.stop(terminal)
+        XCTAssertNoThrow(try host.raw(["has-session", "-t", "=main"]))
         XCTAssertThrowsError(try remote(["switch-client", "-c", own.tty, "-t", otherSession]))
-        XCTAssertEqual(try Tmux.readSnapshot(using: raw).clients.first { $0.pid == Int(other.processIdentifier) }?.sessionID, otherSession)
+        XCTAssertEqual(try Tmux.readSnapshot(using: host.raw).clients.first { $0.pid == Int(other.processIdentifier) }?.sessionID, otherSession)
 
-        _ = try raw(["kill-server"])
-        _ = try raw(["new-session", "-d", "-s", "replacement", "-c", home.path])
+        _ = try host.raw(["kill-server"])
+        _ = try host.raw(["new-session", "-d", "-s", "replacement", "-c", home.path])
         XCTAssertThrowsError(try remote(["rename-window", "-t", "@0", "wrong-server"]))
-        XCTAssertNotEqual(try raw(["display-message", "-p", "-t", "@0", "#{window_name}"])
+        XCTAssertNotEqual(try host.raw(["display-message", "-p", "-t", "@0", "#{window_name}"])
             .trimmingCharacters(in: .whitespacesAndNewlines), "wrong-server")
         withExtendedLifetime((terminalInput, otherInput)) {}
     }
@@ -139,53 +112,23 @@ final class RemoteTmuxTests: XCTestCase {
     }
 
     func testClosingSessionsReportsSurvivorsAndOnlyStartASessionCreatesOne() throws {
-        let tmux = try requireTmux()
-        let root = try TestDirectory()
-        defer { withExtendedLifetime(root) {} }
+        let host = try TestRemoteHost()
+        defer { withExtendedLifetime(host) {} }
+        let root = host.root
+        let home = host.home
         let fm = FileManager.default
-        let home = root.url.appendingPathComponent("home")
-        let bin = root.url.appendingPathComponent("bin")
-        let socket = root.url.appendingPathComponent("t").path
-        try fm.createDirectory(at: home, withIntermediateDirectories: true)
-        try fm.createDirectory(at: bin, withIntermediateDirectories: true)
-        let shim = bin.appendingPathComponent("tmux")
-        // A real remote process cannot inherit the local logger's pipe FDs.
-        // macOS script keeps extra descriptors when nesting PTYs; close them
-        // before tmux starts a daemon that could otherwise retain our pipes.
-        try ("#!/bin/bash\nfor ((fd=3; fd<255; fd++)); do eval \"exec $fd>&-\"; done\nexec " + Tmux.shellQuote(tmux) + " -S " + Tmux.shellQuote(socket) + " -f /dev/null \"$@\"\n")
-            .write(to: shim, atomically: true, encoding: .utf8)
         // Execute the production SSH remote command on this isolated socket,
         // including PTY merging and the production local output/snapshot logger.
-        let fakeSSH = bin.appendingPathComponent("ssh")
+        let fakeSSH = host.bin.appendingPathComponent("ssh")
         try "#!/bin/sh\nfor arg do command=$arg; done\nexec /usr/bin/script -q /dev/null /bin/sh -c \"$command\" 2>&1 3>&- 4>&-\n"
             .write(to: fakeSSH, atomically: true, encoding: .utf8)
-        for file in [shim, fakeSSH] {
-            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
-        }
-        var environment = ProcessInfo.processInfo.environment
-        environment["TMUX_TMPDIR"] = root.url.path
-        environment["HOME"] = home.path
-        environment["PATH"] = bin.path + ":/usr/bin:/bin:/usr/sbin:/sbin"
-        environment["TERM"] = "xterm-256color"
-        environment["LC_ALL"] = "C"
-        environment["SSH_TTY"] = nil
-        environment["TMUX"] = nil
-        environment["TMUX_PANE"] = nil
-        let runner = CommandRunner()
-        func raw(_ args: [String]) throws -> String {
-            if ["kill-server", "kill-pane", "detach-client"].contains(args.first ?? "") {
-                let actual = try runner.run(CommandInvocation(executable: shim.path, arguments: ["display-message", "-p", "#{socket_path}"]), environment: environment)
-                guard actual.trimmingCharacters(in: .whitespacesAndNewlines) == socket else { throw TmuxError.notReady }
-            }
-            return try runner.run(CommandInvocation(executable: shim.path, arguments: ["-u"] + args), environment: environment)
-        }
-        defer { _ = try? raw(["kill-server"]) }
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeSSH.path)
         var terminals: [Process] = []
         var inputs: [Pipe] = []
         var outputs: [FileHandle] = []
         var logs: [Int32: URL] = [:]
         defer {
-            terminals.forEach(stop)
+            terminals.forEach(host.stop)
             outputs.forEach { try? $0.close() }
             withExtendedLifetime(inputs) {}
         }
@@ -197,7 +140,7 @@ final class RemoteTmuxTests: XCTestCase {
             terminal.executableURL = URL(fileURLWithPath: "/usr/bin/script")
             terminal.arguments = ["-q", "/dev/null", "/bin/sh", "-c", ssh.terminalCommand(target: target, picksLatestSession: picksLatestSession,
                                                                                                       newSession: newSession)]
-            terminal.environment = environment
+            terminal.environment = host.environment
             let input = Pipe()
             terminal.standardInput = input
             let log = root.url.appendingPathComponent(UUID().uuidString + ".log")
@@ -215,8 +158,8 @@ final class RemoteTmuxTests: XCTestCase {
         func ready(_ ssh: RemoteSSH) throws -> TmuxSnapshot {
             let deadline = Date().addingTimeInterval(5)
             while Date() < deadline {
-                if let snapshot = try? Tmux.readSnapshot(using: raw),
-                   let marker = try? raw(["show-option", "-sqv", ssh.markerOption]),
+                if let snapshot = try? Tmux.readSnapshot(using: host.raw),
+                   let marker = try? host.raw(["show-option", "-sqv", ssh.markerOption]),
                    let pid = Int(marker.components(separatedBy: Tmux.separator)[0]),
                    snapshot.clients.contains(where: { $0.pid == pid }) { return snapshot }
                 Thread.sleep(forTimeInterval: 0.02)
@@ -235,7 +178,7 @@ final class RemoteTmuxTests: XCTestCase {
         let (empty, emptyTerminal) = try connect()
         try exited(emptyTerminal, owner: empty)
         XCTAssertEqual(empty.closedSnapshot?.windows.count, 0)
-        XCTAssertThrowsError(try raw(["has-session"]), "The first connection must not create main")
+        XCTAssertThrowsError(try host.raw(["has-session"]), "The first connection must not create main")
 
         let project = home.appendingPathComponent("project")
         try fm.createDirectory(at: project, withIntermediateDirectories: true)
@@ -243,23 +186,23 @@ final class RemoteTmuxTests: XCTestCase {
         let started = try XCTUnwrap(try ready(first).windows.first)
         XCTAssertEqual(started.sessionName, "project")
         XCTAssertEqual(URL(fileURLWithPath: started.path).resolvingSymlinksInPath(), project.resolvingSymlinksInPath())
-        let otherTarget = try raw(["new-session", "-d", "-s", "other", "-P", "-F", "#{session_id}:#{window_id}", "-c", home.path])
+        let otherTarget = try host.raw(["new-session", "-d", "-s", "other", "-P", "-F", "#{session_id}:#{window_id}", "-c", home.path])
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        _ = try raw(["detach-client", "-t", try XCTUnwrap(try ready(first).clients.first { !$0.isControl }?.tty)])
+        _ = try host.raw(["detach-client", "-t", try XCTUnwrap(try ready(first).clients.first { !$0.isControl }?.tty)])
         try exited(firstTerminal, owner: first)
-        XCTAssertEqual(try raw(["show-option", "-sqv", first.markerOption]).trimmingCharacters(in: .newlines), "")
+        XCTAssertEqual(try host.raw(["show-option", "-sqv", first.markerOption]).trimmingCharacters(in: .newlines), "")
         XCTAssertEqual(first.closedSnapshot?.windows.count, 2, "Intentional detach preserves both Sessions")
 
         let (again, againTerminal) = try connect(newSession: RemoteSSH.NewSession(name: "project", folder: home.path))
         XCTAssertEqual(try ready(again).clients.first { !$0.isControl }?.sessionID, started.sessionID, "A Session of that name is gone to")
-        XCTAssertEqual(try raw(["list-sessions", "-F", "#{session_name}"]).split(separator: "\n").sorted(), ["other", "project"])
-        _ = try raw(["detach-client", "-t", try XCTUnwrap(try ready(again).clients.first { !$0.isControl }?.tty)])
+        XCTAssertEqual(try host.raw(["list-sessions", "-F", "#{session_name}"]).split(separator: "\n").sorted(), ["other", "project"])
+        _ = try host.raw(["detach-client", "-t", try XCTUnwrap(try ready(again).clients.first { !$0.isControl }?.tty)])
         try exited(againTerminal, owner: again)
 
         let (second, secondTerminal) = try connect(target: otherTarget, picksLatestSession: false)
         _ = try ready(second)
         // A UTF-8 name holds bytes that Ghostty reads as C1 controls; the report must not break out of its DCS.
-        _ = try raw(["rename-window", "-t", started.id, "✳ agent"])
+        _ = try host.raw(["rename-window", "-t", started.id, "✳ agent"])
         // The listener stays attached to the Watch Session, so it ends itself once the bootstrap clears the marker.
         // Over real SSH the master, and so the Terminal, waits for it.
         let listener = Process()
@@ -267,25 +210,25 @@ final class RemoteTmuxTests: XCTestCase {
                                               "-f", "no-output,ignore-size", "cat"])
         listener.executableURL = URL(fileURLWithPath: listenerCommand.executable)
         listener.arguments = listenerCommand.arguments
-        listener.environment = environment
+        listener.environment = host.environment
         let listenerInput = Pipe()
         listener.standardInput = listenerInput
         listener.standardOutput = FileHandle.nullDevice
         listener.standardError = FileHandle.nullDevice
         try listener.run()
-        defer { stop(listener); withExtendedLifetime(listenerInput) {} }
+        defer { host.stop(listener); withExtendedLifetime(listenerInput) {} }
         let listening = Date().addingTimeInterval(5)
         while Date() < listening, !((try? ready(second))?.clients.contains(where: \.isControl) ?? false) {
             Thread.sleep(forTimeInterval: 0.02)
         }
         XCTAssertTrue(try ready(second).clients.contains(where: \.isControl), "The listener attached")
-        _ = try raw(["kill-pane", "-t", otherTarget])
+        _ = try host.raw(["kill-pane", "-t", otherTarget])
         try exited(secondTerminal, owner: second)
         let listenerEnd = Date().addingTimeInterval(5)
         while listener.isRunning, Date() < listenerEnd { Thread.sleep(forTimeInterval: 0.02) }
         XCTAssertFalse(listener.isRunning, "The listener ends itself when its Terminal Client ends")
         // Muxify kills the Watch Session itself once no Session of the user's is left.
-        _ = try raw(["kill-session", "-t", Tmux.watchSessionName])
+        _ = try host.raw(["kill-session", "-t", Tmux.watchSessionName])
         let survivors = try XCTUnwrap(second.closedSnapshot)
         XCTAssertEqual(survivors.windows.map(\.sessionName), ["project"])
         XCTAssertEqual(survivors.windows.map(\.name), ["✳ agent"])
@@ -299,33 +242,24 @@ final class RemoteTmuxTests: XCTestCase {
 
         let (last, lastTerminal) = try connect(target: "\(started.sessionID):\(started.id)", picksLatestSession: false)
         _ = try ready(last)
-        _ = try raw(["kill-pane", "-t", started.id])
+        _ = try host.raw(["kill-pane", "-t", started.id])
         try exited(lastTerminal, owner: last)
         XCTAssertEqual(last.closedSnapshot?.windows.count, 0)
         XCTAssertFalse(last.closedSnapshot?.serverRunning ?? true)
-        XCTAssertThrowsError(try raw(["has-session"]))
+        XCTAssertThrowsError(try host.raw(["has-session"]))
 
         let (recovery, recoveryTerminal) = try connect(picksLatestSession: false)
         try exited(recoveryTerminal, owner: recovery)
         XCTAssertEqual(recovery.closedSnapshot?.windows.count, 0)
-        XCTAssertThrowsError(try raw(["has-session"]), "Automatic recovery must not recreate main")
+        XCTAssertThrowsError(try host.raw(["has-session"]), "Automatic recovery must not recreate main")
 
         let (reconnect, reconnectTerminal) = try connect()
         try exited(reconnectTerminal, owner: reconnect)
-        XCTAssertThrowsError(try raw(["has-session"]), "An explicit reconnect must not create main")
+        XCTAssertThrowsError(try host.raw(["has-session"]), "An explicit reconnect must not create main")
 
         let (restarted, _) = try connect(newSession: RemoteSSH.NewSession(name: "home", folder: home.path))
         let restored = try ready(restarted)
         XCTAssertEqual(restored.windows.map(\.sessionName), ["home"])
         XCTAssertEqual(URL(fileURLWithPath: try XCTUnwrap(restored.windows.first?.path)).resolvingSymlinksInPath(), home.resolvingSymlinksInPath())
-    }
-
-    private func stop(_ process: Process) {
-        guard process.isRunning else { return }
-        process.terminate()
-        let deadline = Date().addingTimeInterval(1)
-        while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.01) }
-        if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-        process.waitUntilExit()
     }
 }

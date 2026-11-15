@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class NewTopicTests: XCTestCase {
     private let sessionPath = SessionPath(path: "/work/game", name: "game")
@@ -52,9 +53,7 @@ final class NewTopicTests: XCTestCase {
         config.sessionPaths = [sessionPath]
         let topic = TopicRecord(newTopic: "empty", title: "Plan", slug: "plan", now: Date())
         func window(topic: String?) -> TmuxWindow {
-            TmuxWindow(id: "@1", sessionID: "$1", sessionName: "game", index: 0, name: "shell", paneTitle: "", path: "/work/game",
-                       command: "zsh", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
-                       storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, sessionPath: "/work/game")
+            .fixture(sessionName: "game", path: "/work/game", topicID: topic, sessionPath: "/work/game")
         }
         var selection = TopicSelection()
         selection.windowID = "@1"

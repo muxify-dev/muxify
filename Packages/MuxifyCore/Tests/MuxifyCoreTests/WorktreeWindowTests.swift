@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class WorktreeWindowTests: XCTestCase {
     private var root = ""
@@ -17,9 +18,8 @@ final class WorktreeWindowTests: XCTestCase {
     }
 
     private func window(_ id: String, session: String, index: Int = 0, active: Bool = true, activity: Int = 0) -> TmuxWindow {
-        TmuxWindow(id: id, sessionID: "$" + session, sessionName: session, index: index, name: "shell", paneTitle: "", path: "",
-                   command: "zsh", isActive: active, paneCount: 1, hasBell: false, sessionActivity: activity, agent: "",
-                   storedBrowser: StoredBrowser(), openRequests: [])
+        .fixture(id: id, sessionID: "$" + session, sessionName: session, index: index, path: "", isActive: active,
+                 sessionActivity: activity)
     }
 
     private func pane(_ id: String, in windowID: String, at path: String) -> TmuxPane {

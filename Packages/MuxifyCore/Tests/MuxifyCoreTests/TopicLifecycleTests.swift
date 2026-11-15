@@ -1,12 +1,12 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class TopicLifecycleTests: XCTestCase {
     private var topic: TopicRecord { TopicRecord(id: "topic", title: "Fix", slug: "fix") }
     private func window(_ n: Int = 1, name: String = "debug/fix", id: String? = nil) -> TmuxWindow {
-        TmuxWindow(id: id ?? "@\(n)", sessionID: "$\(n)", sessionName: name, index: 0, name: "shell", paneTitle: "",
-            path: "/work/game", command: "zsh", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0,
-            agent: "", storedBrowser: StoredBrowser(), openRequests: [], topicID: "topic", sessionPath: "/work/game")
+        .fixture(id: id ?? "@\(n)", sessionID: "$\(n)", sessionName: name, path: "/work/game", topicID: "topic",
+                 sessionPath: "/work/game")
     }
     private func snapshot(_ windows: [TmuxWindow], running: Bool = true) -> TmuxSnapshot {
         TmuxSnapshot(windows: windows, clients: [], panes: [], serverRunning: running)

@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class AgentMarkViewTests: XCTestCase {
     private let gray = AgentColors()[.working].color
@@ -284,9 +285,7 @@ final class AgentMarkViewTests: XCTestCase {
     }
 
     @MainActor func testZoomChangesOnlyThePaneCountAppearance() throws {
-        var window = TmuxWindow(id: "@1", sessionID: "$1", sessionName: "app", index: 0, name: "editor",
-                                paneTitle: "editor", path: "/app", command: "zsh", isActive: true, paneCount: 3,
-                                hasBell: false, sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(), openRequests: [])
+        var window = TmuxWindow.fixture(sessionName: "app", name: "editor", paneTitle: "editor", path: "/app", paneCount: 3)
         for scheme in [ColorScheme.light, .dark] {
             window.isZoomed = false
             let before = try render(WindowRow(window: window, isSelected: false, tabCount: 12), scheme: scheme, width: 240, height: 30, scale: 2)

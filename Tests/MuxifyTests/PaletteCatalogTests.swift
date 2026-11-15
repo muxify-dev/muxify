@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class PaletteCatalogTests: XCTestCase {
     private let game = SessionPath(path: "/work/game", name: "game",
@@ -10,9 +11,8 @@ final class PaletteCatalogTests: XCTestCase {
 
     private func window(_ id: String, session: String, directory: String, topic: String? = nil, active: Bool = true,
                         activity: Int = 0) -> TmuxWindow {
-        TmuxWindow(id: id, sessionID: "$" + session, sessionName: session, index: 0, name: "shell", paneTitle: "", path: directory,
-                   command: "zsh", isActive: active, paneCount: 1, hasBell: false, sessionActivity: activity, agent: "",
-                   storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, sessionPath: directory)
+        .fixture(id: id, sessionID: "$" + session, sessionName: session, path: directory, isActive: active, sessionActivity: activity,
+                 topicID: topic, sessionPath: directory)
     }
 
     /// A Topic whose Session is remembered in the main Worktree of game, as the app remembers it.
@@ -31,7 +31,7 @@ final class PaletteCatalogTests: XCTestCase {
         var selection = TopicSelection()
         selection.windowID = selected
         let model = TopicsModel(records: records, windows: windows, config: config, selection: selection,
-                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), mode: mode,
+                        location: selection.windowLocation, mode: mode,
                                 agents: agents)
         return PaletteCatalog(windows: windows, agents: agents, sessionPaths: config.sessionPaths, selectedWindowID: selected,
                               homeDirectory: "/home", topics: model, records: records, lastWindowByGroup: lastWindow,

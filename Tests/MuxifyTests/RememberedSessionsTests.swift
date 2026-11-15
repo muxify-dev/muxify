@@ -1,14 +1,14 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class RememberedSessionsTests: XCTestCase {
     private func snapshot(_ sessions: [String] = ["a", "b"], conversation: String = "conversation-1") -> TmuxSnapshot {
         let windows = sessions.enumerated().map { index, session in
-            TmuxWindow(id: "@\(session)", sessionID: "$\(session)", sessionName: session, index: index,
-                       name: "editor", paneTitle: "editor", path: "/work/\(session)/src", command: "codex",
-                       isActive: true, paneCount: 2, hasBell: false, sessionActivity: 0, agent: "codex",
-                       storedBrowser: StoredBrowser(tabURLs: ["https://example.com/issue"]), openRequests: [],
-                       topicID: "topic", sessionPath: "/work/\(session)", activePaneID: "%\(session)", startCommand: "codex")
+            TmuxWindow.fixture(id: "@\(session)", sessionID: "$\(session)", sessionName: session, index: index, name: "editor",
+                               paneTitle: "editor", path: "/work/\(session)/src", command: "codex", paneCount: 2, agent: "codex",
+                               storedBrowser: StoredBrowser(tabURLs: ["https://example.com/issue"]), topicID: "topic",
+                               sessionPath: "/work/\(session)", activePaneID: "%\(session)", startCommand: "codex")
         }
         let panes = sessions.map { session in
             TmuxPane(id: "%\(session)", windowID: "@\(session)", command: "codex", agent: "codex",

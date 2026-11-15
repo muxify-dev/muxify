@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class RouterTests: XCTestCase {
     func testAnEmptyTopicPageEntersTheWindowThatAppears() {
@@ -561,8 +562,6 @@ final class RouterTests: XCTestCase {
     }
 
     private func window(_ id: String, sessionID: String = "$1", sessionName: String = "test", active: Bool = true) -> TmuxWindow {
-        TmuxWindow(id: id, sessionID: sessionID, sessionName: sessionName, index: 0, name: "shell",
-                   paneTitle: "", path: "/", command: "sh", isActive: active, paneCount: 1,
-                   hasBell: false, sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(), openRequests: [])
+        .fixture(id: id, sessionID: sessionID, sessionName: sessionName, path: "/", command: "sh", isActive: active)
     }
 }

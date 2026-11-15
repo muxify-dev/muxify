@@ -4,15 +4,6 @@ import XCTest
 final class ReadDecisionTests: XCTestCase {
     private let topic = TopicRecord(id: "topic", title: "Fix", slug: "fix")
 
-    private func window(zoomed: Bool, activePane: String = "%1") -> TmuxWindow {
-        var window = TmuxWindow(id: "@1", sessionID: "$1", sessionName: "s", index: 0,
-            name: "shell", paneTitle: "", path: "/work", command: "zsh", isActive: true,
-            paneCount: 3, hasBell: false, sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(),
-            openRequests: [], topicID: "topic", activePaneID: activePane)
-        window.isZoomed = zoomed
-        return window
-    }
-
     private func agent(_ pane: String, _ status: AgentStatus? = .done, unread: Bool) -> Agent {
         Agent(paneID: pane, kind: .claude, status: status, unread: unread, windowID: "@1", sessionID: "$1",
               sessionName: "s", windowIndex: 0, windowTitle: "Agent", label: "Agent")
@@ -20,7 +11,8 @@ final class ReadDecisionTests: XCTestCase {
 
     private func decide(_ change: ReadChange, _ place: ReadPlan.Place, agents: [Agent], zoomed: Bool = true,
                         busy: Bool = false, writable: Bool = true) -> ReadPlan.Decision {
-        ReadPlan.decide(change, in: place, records: [topic], agents: agents, windows: [window(zoomed: zoomed)],
+        ReadPlan.decide(change, in: place, records: [topic], agents: agents,
+                        windows: [.fixture(paneCount: 3, topicID: "topic", activePaneID: "%1", isZoomed: zoomed)],
                         busy: busy, agentsWritable: writable)
     }
 

@@ -1,12 +1,11 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class SidebarFormatContextTests: XCTestCase {
     private func window(_ id: String = "@1", remote: Bool = false) -> TmuxWindow {
-        TmuxWindow(id: id, sessionID: "$1", sessionName: "app-feature", index: 2, name: "shell", paneTitle: "Task",
-                   path: "/trees/feature/src", command: "sleep", isActive: true, paneCount: 1,
-                   hasBell: false, sessionActivity: 0, agent: "codex", storedBrowser: .init(), openRequests: [],
-                   isRemote: remote, topicID: "topic", sessionPath: "/trees/feature")
+        .fixture(id: id, sessionName: "app-feature", index: 2, paneTitle: "Task", path: "/trees/feature/src", command: "sleep",
+                 agent: "codex", isRemote: remote, topicID: "topic", sessionPath: "/trees/feature")
     }
 
     func testContextsKeepBranchAndDefaultSummaryAndIncludeHiddenPanes() throws {
