@@ -171,7 +171,7 @@ enum CLICommand: Equatable {
     }
 
     /// A view verb: the App Window shows `request` and comes to the front. On a Host, the Host Server that
-    /// `@muxify_browser_socket` names passes it to its Mac (ADR 0089); on a Mac, macOS `open` hands the app a
+    /// `@muxify_browser_socket` names passes it to its Mac (ADR 0091); on a Mac, macOS `open` hands the app a
     /// `muxify://select` URL.
     static func select(_ request: SelectRequest, using runner: any CLICommandRunning = CLIProcessRunner()) throws {
         if let socket = hostServerSocket(using: runner) {

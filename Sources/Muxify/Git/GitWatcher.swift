@@ -26,7 +26,7 @@ struct GitWatchedRepository: Equatable {
     }
 }
 
-/// Tells the Git View that its repository may have changed, so it reads it again (ADR 0072, ADR 0085). The Git View starts it while it is open and current and stops it when it
+/// Tells the Git View that its repository may have changed, so it reads it again (ADR 0072, ADR 0087). The Git View starts it while it is open and current and stops it when it
 /// closes or is suspended; it debounces and spaces the reads itself. Calls come on the main thread.
 protocol GitWatcher: AnyObject {
     /// Reports changes to `repository` by calling `changed` on the main thread. Started again with another
@@ -86,7 +86,7 @@ final class GitFileWatcher: GitWatcher {
 }
 
 /// The Git View's watcher in every Environment: the `repository` subscription of the repository's top folder through
-/// the store's link (ADR 0085). FSEvents feeds it for the Local Environment, the Host Server's watch for a Host. Each
+/// the store's link (ADR 0087). FSEvents feeds it for the Local Environment, the Host Server's watch for a Host. Each
 /// event that says the repository changed reports it.
 final class RepositoryWatcher: GitWatcher {
     typealias Watch = @MainActor (_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription

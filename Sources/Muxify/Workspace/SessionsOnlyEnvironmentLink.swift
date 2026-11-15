@@ -5,7 +5,7 @@ import MuxifyCore
 /// the Sessions only: the snapshot, view commands, Attachment upload, the Config read and Session Path discovery, and
 /// the Session requests that need no Topic record. Topics, the Git View, `repository` and the Muxify Worktrees answer
 /// `unsupported`. It is the `HostEnvironmentLink`'s master, and its Sessions until the Host Server's first state, and
-/// the App Window's whole link once no Host Server can run (ADR 0087).
+/// the App Window's whole link once no Host Server can run (ADR 0089).
 @MainActor
 final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
     let isOnThisMac = false
@@ -99,7 +99,7 @@ final class SessionsOnlyEnvironmentLink: TmuxConnectionLink, EnvironmentLink {
 
     /// Only the requests that need no Topic record run. Create Worktree, Remove Worktree and the list of Muxify
     /// Worktrees are refused: the Mac cannot write the Host's record, and a Worktree with no record could never be
-    /// removed by Muxify (ADR 0088). A new Session's folder is on the Remote Environment, so it is taken as it is.
+    /// removed by Muxify (ADR 0090). A new Session's folder is on the Remote Environment, so it is taken as it is.
     func run(_ request: EnvironmentRequest, client: String?, local: EnvironmentService?) async -> EnvironmentResponse? {
         if request.command.isWorktreeCommand { return .failed(EnvironmentLinkError.worktreesRefused) }
         if request.needsRecords { return .failed(EnvironmentLinkError.topicsRefused) }

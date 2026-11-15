@@ -3,7 +3,7 @@ import MuxifyCore
 
 /// HEAD of the Window's folder, from the `repository` subscription through the store's link, independent of opening the
 /// much larger Git View snapshot: it runs on the repository's machine, so remote paths never read local repositories,
-/// and its events come when HEAD changes, with nothing polled (ADR 0085).
+/// and its events come when HEAD changes, with nothing polled (ADR 0087).
 /// Each event also tells the store whether the folder is in a repository; the button hides when it is not, unless this
 /// Window's Git View is open, and the subscription goes on while it is hidden, so a `cd` into a repository brings it
 /// back.

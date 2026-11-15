@@ -2,7 +2,7 @@ import AppKit
 import XCTest
 @testable import MuxifyCore
 
-/// The store reaches its Active Environment only through its `EnvironmentLink` (ADR 0087).
+/// The store reaches its Active Environment only through its `EnvironmentLink` (ADR 0089).
 @MainActor
 final class EnvironmentLinkStoreTests: XCTestCase {
     override func setUp() {

@@ -1,6 +1,6 @@
 # An App Window uses the Config of its Environment's machine
 
-> **Changed by [ADR-0085](0085-muxify-reaches-a-host-only-through-typed-commands-and-subscriptions.md) and [ADR-0087](0087-the-mac-app-reaches-every-environment-through-one-environmentlink.md):** the Host Server watches a Host's Config folder and pushes each edit on its `config` subscription, so the file is watched while the server serves. Only a Sessions-only window still reads it on connect, on Reload Config and when a Command Palette opens. A Host with no Config still gives the local one.
+> **Changed by [ADR-0087](0087-muxify-reaches-a-host-only-through-typed-commands-and-subscriptions.md) and [ADR-0089](0089-the-mac-app-reaches-every-environment-through-one-environmentlink.md):** the Host Server watches a Host's Config folder and pushes each edit on its `config` subscription, so the file is watched while the server serves. Only a Sessions-only window still reads it on connect, on Reload Config and when a Command Palette opens. A Host with no Config still gives the local one.
 
 > **Update 2026-11-11:** "One file per machine" is now one Config per machine with the Config Overrides it names, all on that machine. See [0075](0075-a-config-can-name-overrides-that-merge-on-top-of-it.md).
 

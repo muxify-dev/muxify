@@ -1,6 +1,6 @@
 import Foundation
 
-/// One of the Git View's reads (ADR 0085), with the inputs it had as a script. The Mac runs it through its
+/// One of the Git View's reads (ADR 0087), with the inputs it had as a script. The Mac runs it through its
 /// App Window's `EnvironmentLink`: `GitReader` in-process for the Local Environment, a `git` request to the Host Server
 /// for a Host. Its JSON is `{"<case>": {<its values>}}`.
 public enum GitRead: Codable, Equatable, Sendable {

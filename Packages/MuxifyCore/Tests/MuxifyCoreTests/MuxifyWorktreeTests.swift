@@ -210,7 +210,7 @@ final class MuxifyWorktreeTests: XCTestCase {
         XCTAssertEqual(try store.all(), [first], "the second record was not written")
     }
 
-    // MARK: - A record lives on the machine that has it (ADR 0088)
+    // MARK: - A record lives on the machine that has it (ADR 0090)
 
     func testARecordNamesNoEnvironmentAndKeepsItsDateAsISO8601() throws {
         let record = MuxifyWorktreeRecord(id: "w", repository: "/src/app", name: "fix", path: "/src/trees/fix", branch: "fix", base: "abc",

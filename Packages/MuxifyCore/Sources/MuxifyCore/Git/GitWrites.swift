@@ -1,7 +1,7 @@
 import Foundation
 
 /// The scripts of the Git View's writes, which `GitWriter` runs on the repository's machine: in-process for the Local
-/// Environment, in the Host Server for a Host. Only a `GitWrite` crosses the wire, never these (ADR 0085).
+/// Environment, in the Host Server for a Host. Only a `GitWrite` crosses the wire, never these (ADR 0087).
 public enum GitWrites {
     /// Takes the folder, then files and folders to stage, with everything
     /// in them: new, changed and deleted files. A conflicted file that

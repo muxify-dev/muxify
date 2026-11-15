@@ -2627,7 +2627,7 @@ final class GitView {
 
     /// A git command that changes the repository.
     enum WriteCommand {
-        /// Runs on the repository's machine through the link (ADR 0085).
+        /// Runs on the repository's machine through the link (ADR 0087).
         case git(GitWrite)
         /// Talks to a remote, such as a pull, on the repository's machine; the toolbar names it.
         case network(GitNetwork, activity: String, cancelled: String)

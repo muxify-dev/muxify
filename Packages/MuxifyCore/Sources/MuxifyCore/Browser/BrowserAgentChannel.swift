@@ -12,7 +12,7 @@ public enum BrowserAgentChannel {
     /// The socket of the server at `tmuxSocket`, in the server's own 0700 directory.
     public static func socketPath(forTmuxSocket tmuxSocket: String) -> String { tmuxSocket + ".muxify-browser" }
 
-    /// The socket of one Host Server on a Host (ADR 0089), beside the Mac app's: `<tmux socket>.muxify-browser.<id>`,
+    /// The socket of one Host Server on a Host (ADR 0091), beside the Mac app's: `<tmux socket>.muxify-browser.<id>`,
     /// where `id` is the server's pid.
     public static func socketPath(forTmuxSocket tmuxSocket: String, server id: String) -> String {
         socketPath(forTmuxSocket: tmuxSocket) + "." + id

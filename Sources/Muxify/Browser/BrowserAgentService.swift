@@ -3,7 +3,7 @@ import MuxifyCore
 
 /// Serves the Browser commands of the Local Environment's tmux server (ADR 0057, ADR 0058). It answers each
 /// request with the Browsers of the local App Windows. A Host's commands come through the Host Server of one App
-/// Window, which `handle(_:in:)` answers with that window's store alone (ADR 0089).
+/// Window, which `handle(_:in:)` answers with that window's store alone (ADR 0091).
 @MainActor
 final class BrowserAgentService {
     /// The local App Windows' stores. The first one consumes `@muxify_open`, so `open`, `tabs` and the active Tab

@@ -7,7 +7,7 @@ import Musl
 #endif
 import Foundation
 
-/// The Host Server's side of the `repository` subscription (ADR 0085). It probes the folder at once, for the first
+/// The Host Server's side of the `repository` subscription (ADR 0087). It probes the folder at once, for the first
 /// event, then again whenever its git directory changes and every `probeInterval` as a safety net, and sends an event
 /// whenever HEAD or the probe's fingerprint changed since the event before. The git directory's watch is
 /// non-recursive, as ADR 0072's set: the Worktree's own git directory (HEAD, the index), the common git directory and

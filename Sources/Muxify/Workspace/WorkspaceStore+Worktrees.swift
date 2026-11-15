@@ -15,7 +15,7 @@ extension WorkspaceStore {
 
     /// Why Create Worktree, Remove Worktree and the list of Muxify Worktrees are refused, or nil when the link serves
     /// Muxify Worktrees. A Host's records are the Host CLI's alone, so a Remote App Window without its Host Server
-    /// refuses them, with the reason it gives for Topics (ADR 0088).
+    /// refuses them, with the reason it gives for Topics (ADR 0090).
     var worktreesRefusal: String? {
         guard !link.features.contains(.worktrees) else { return nil }
         let reason = topicsUnavailableReason?.reason ?? "its Host Server has not answered yet"

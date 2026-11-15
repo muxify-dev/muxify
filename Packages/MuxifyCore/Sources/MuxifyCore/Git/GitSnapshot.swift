@@ -1,7 +1,7 @@
 import Foundation
 
 // What the Git View reads of a repository. The reads run on whichever machine has the repository: in-process for
-// the Local Environment, in the Host Server for a Host (ADR 0085), so these values cross the wire as JSON.
+// the Local Environment, in the Host Server for a Host (ADR 0087), so these values cross the wire as JSON.
 
 /// What the Git View lists of a repository (CONTEXT.md): its status, changed
 /// files, local branches, commits and stashes.

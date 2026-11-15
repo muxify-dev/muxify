@@ -10,7 +10,7 @@ import XCTest
 @testable import MuxifyCore
 import MuxifyTestSupport
 
-/// A Host Server's own socket (ADR 0089) through a pair of pipes in this process: a program's line on the socket
+/// A Host Server's own socket (ADR 0091) through a pair of pipes in this process: a program's line on the socket
 /// reaches the protocol client as a `MacRequest`, and `@muxify_browser_socket` follows `claim_open` and
 /// `release_open`, on a throwaway tmux server.
 final class HostServerSocketTests: XCTestCase {

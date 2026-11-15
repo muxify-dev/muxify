@@ -1,7 +1,7 @@
 import XCTest
 @testable import MuxifyCore
 
-/// The JSON of every frame of the Host Server protocol is a contract (ADR 0084's change rule): these strings are
+/// The JSON of every frame of the Host Server protocol is a contract (ADR 0086's change rule): these strings are
 /// pinned, and every release's fixtures folder must still decode.
 final class ProtocolWireTests: XCTestCase {
     private static let build = "muxify 1a2b3c4 1763100000"

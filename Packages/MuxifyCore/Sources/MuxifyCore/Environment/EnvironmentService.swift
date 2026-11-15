@@ -14,7 +14,7 @@ public struct EnvironmentService: Sendable {
     /// The Config's `notifications`: which Agent marks `environment show` shows.
     public let notifications: Config.Notifications
     /// The Config's `worktrees.root_path` on the machine whose records this service keeps: a Host's own, never the
-    /// Mac's (ADR 0088).
+    /// Mac's (ADR 0090).
     public let worktreesRoot: String?
     /// The Request that the command line runs through this service; nil for every other caller. The store writes
     /// its ledger row, and a new Topic takes its id.
@@ -396,7 +396,7 @@ extension EnvironmentCommand {
     public var needsRecords: Bool {
         switch self {
         case .newWindow, .newSession, .renameSession, .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession: return false
-        // A Muxify Worktree request is refused on its own where the Worktrees are unavailable (ADR 0088); where they
+        // A Muxify Worktree request is refused on its own where the Worktrees are unavailable (ADR 0090); where they
         // are served, it also updates the Topics.
         case .createWorktree, .removeWorktree, .listWorktrees: return false
         // Agent Unread is in tmux. Only a Topic's Read state is in its record; Mark All as Read leaves the records

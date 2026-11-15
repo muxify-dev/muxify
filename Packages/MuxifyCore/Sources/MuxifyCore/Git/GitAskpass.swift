@@ -65,7 +65,7 @@ public struct GitCredentialPrompt: Equatable, Sendable {
 
 /// What the askpass helper asks: git's or ssh's prompt, whether its answer is a secret, and the operation that the
 /// command's environment named. The helper sends it to its socket as the `MacRequest` `{"ask": {…}}`; on a Host, the
-/// Host Server sends it on to its Mac (ADR 0089), which asks it in the Git View that started the operation.
+/// Host Server sends it on to its Mac (ADR 0091), which asks it in the Git View that started the operation.
 public struct AskRequest: Codable, Equatable, Sendable {
     public var prompt: String
     public var secret: Bool

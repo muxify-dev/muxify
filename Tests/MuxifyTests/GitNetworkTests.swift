@@ -1,7 +1,7 @@
 import XCTest
 @testable import MuxifyCore
 
-/// The Git View's half of a network command: git's and ssh's questions, which come through askpass (ADR 0087), are
+/// The Git View's half of a network command: git's and ssh's questions, which come through askpass (ADR 0089), are
 /// asked in Git View prompts, and ⎋ cancels the command.
 @MainActor
 final class GitCredentialPromptTests: XCTestCase {

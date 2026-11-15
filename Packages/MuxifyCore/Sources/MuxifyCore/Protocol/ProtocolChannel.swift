@@ -9,7 +9,7 @@ import Foundation
 
 /// One side of a Host Server channel, on a pair of file handles: an SSH channel's, `muxify server`'s stdin and
 /// stdout, or a test's pipes. Both sides send requests and number their own from 1. Every request ends exactly once,
-/// and when the channel ends every request that waits fails at once with `unavailable`; nothing is replayed (ADR 0083).
+/// and when the channel ends every request that waits fails at once with `unavailable`; nothing is replayed (ADR 0085).
 ///
 /// The reader runs on a read source of its own, the writer on a thread of its own behind one bounded queue, and each
 /// request from the peer runs its handler on a concurrent queue. `ProtocolClient` and `HostServer` own a channel and

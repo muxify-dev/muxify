@@ -4,7 +4,7 @@ import Foundation
 /// one-time import of the `worktrees/<id>.json` files an older Muxify wrote.
 enum WorktreeTable {
     /// One row for each record, keyed by its id. `environment` is NULL for a Worktree on this machine; set, the row is
-    /// an older Muxify's record of that Remote Environment's Worktree, waiting to move to its Host (ADR 0088), and no
+    /// an older Muxify's record of that Remote Environment's Worktree, waiting to move to its Host (ADR 0090), and no
     /// new row sets it. The schema only grows, so the column stays. No two records share a path. `created_at` is
     /// ISO 8601 text, as the record files had it.
     static let migration = StateDatabase.Migration(

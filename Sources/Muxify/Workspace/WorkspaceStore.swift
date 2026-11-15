@@ -1279,7 +1279,7 @@ final class WorkspaceStore {
     @ObservationIgnored var serveBrowserAgent: ((_ tmuxSocket: String) -> String?)?
     /// Whether this store wrote `BrowserAgentChannel.option`, so its connection removes it when it retires.
     @ObservationIgnored private var publishedBrowserSocket = false
-    /// Answers a Browser command that a program on the Host sent through this App Window's Host Server (ADR 0089),
+    /// Answers a Browser command that a program on the Host sent through this App Window's Host Server (ADR 0091),
     /// with this store's Browsers. Nil while nothing serves Browser commands.
     @ObservationIgnored var serveBrowserRequest: ((BrowserAgentRequest) async -> BrowserAgentReply)?
     /// Brings this App Window to the front, after a program on the Host asked it to show something.
@@ -1478,7 +1478,7 @@ final class WorkspaceStore {
         updateOpenConsumer()
     }
 
-    /// What a program on the Host asked this App Window through its Host Server (ADR 0089): a Browser command, served
+    /// What a program on the Host asked this App Window through its Host Server (ADR 0091): a Browser command, served
     /// by this store's Browsers, or a view verb's `select`, which shows the target as `muxify://select` does locally.
     private func serveHostRequest(_ request: MacRequest) async -> BrowserAgentReply? {
         switch request {
@@ -2483,7 +2483,7 @@ final class WorkspaceStore {
 
     // MARK: - Config and Command Palettes
 
-    /// Asks the link for its Config again (ADR 0010, ADR 0087): on connecting, on Reload Config and when a Command
+    /// Asks the link for its Config again (ADR 0010, ADR 0089): on connecting, on Reload Config and when a Command
     /// Palette opens. A Host Server pushes each edit by itself; a Sessions-only link reads the Config and the Config
     /// Overrides it names (ADR 0075) again. With `findingSessionPaths`, the SessionPaths are looked for with the
     /// Config that comes, at once on this Mac or when the link cannot answer.
@@ -2756,7 +2756,7 @@ final class WorkspaceStore {
         gitViews.values.forEach { $0.linkChanged() }
     }
 
-    /// Runs one of the Git View's network commands, such as a fetch, on the repository's machine (ADR 0087). git's and
+    /// Runs one of the Git View's network commands, such as a fetch, on the repository's machine (ADR 0089). git's and
     /// ssh's questions come through askpass to `ask`, on the main thread; nil cancels the command. A question for an
     /// App Window that moved to another Environment is refused.
     func runGitNetwork(_ network: GitNetwork, ask: @escaping @MainActor (GitCredentialPrompt) async -> String?,

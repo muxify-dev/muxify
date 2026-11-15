@@ -2,7 +2,7 @@ import XCTest
 @testable import MuxifyCLI
 import MuxifyCore
 
-/// `muxify askpass`, the helper that git and ssh run for the Git View's network commands (ADR 0087), run as git runs
+/// `muxify askpass`, the helper that git and ssh run for the Git View's network commands (ADR 0089), run as git runs
 /// it: the built CLI with the prompt as its one argument, against a socket that a test listener serves.
 final class AskpassCommandTests: XCTestCase {
     private var socketPath = ""

@@ -4,7 +4,7 @@ import Foundation
 /// Muxify made it: `worktree list` lists records, and Remove Worktree removes only a Worktree that has one.
 ///
 /// A record always describes a Worktree on the machine of its own database: a Host's Worktrees are in the Host's
-/// `muxify.db`, which only the Host CLI there writes (ADR 0088). It names no Environment.
+/// `muxify.db`, which only the Host CLI there writes (ADR 0090). It names no Environment.
 public struct MuxifyWorktreeRecord: Codable, Hashable, Sendable {
     public var id: String
     /// The repository's main working tree, or its bare folder.
@@ -67,7 +67,7 @@ public struct MuxifyWorktreeRecord: Codable, Hashable, Sendable {
 /// row, and a second record at a path that has one fails.
 ///
 /// On the Mac, a row whose `environment` is set is an older Muxify's record of a Remote Environment's Worktree,
-/// waiting to move to that Environment's Host (ADR 0088). Every read and write here but the `waiting` ones ignores
+/// waiting to move to that Environment's Host (ADR 0090). Every read and write here but the `waiting` ones ignores
 /// such a row.
 public struct MuxifyWorktreeStore: Sendable {
     public let paths: MuxifyPaths

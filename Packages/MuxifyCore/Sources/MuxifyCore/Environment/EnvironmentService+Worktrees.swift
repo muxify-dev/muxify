@@ -7,7 +7,7 @@ extension EnvironmentService {
     var worktreeStore: MuxifyWorktreeStore { MuxifyWorktreeStore(paths: paths) }
 
     /// Muxify's state folder on the machine whose records this service keeps: `$XDG_STATE_HOME/muxify/worktrees`,
-    /// the Host CLI's own on a Host (ADR 0088).
+    /// the Host CLI's own on a Host (ADR 0090).
     var defaultWorktreesRoot: String { paths.worktrees.path }
 
     /// The records of this machine's Worktrees.

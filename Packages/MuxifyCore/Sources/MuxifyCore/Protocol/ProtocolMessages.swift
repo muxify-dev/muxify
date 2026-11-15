@@ -1,8 +1,8 @@
 import Foundation
 
 // The messages of the Host Server protocol: the Mac app and `muxify server` speak it over one SSH channel, and a test
-// over a pair of pipes. Each frame is one line of JSON (ADR 0083). The two sides agree on a protocol number and on
-// capabilities, never on a build (ADR 0084). The JSON form of every message is a contract pinned by tests, and a
+// over a pair of pipes. Each frame is one line of JSON (ADR 0085). The two sides agree on a protocol number and on
+// capabilities, never on a build (ADR 0086). The JSON form of every message is a contract pinned by tests, and a
 // fixtures folder per release keeps the older forms decodable.
 
 /// The constants of the wire and of the version contract.
@@ -132,7 +132,7 @@ public struct ProtocolChunk: Codable, Equatable, Sendable {
     public init(data: Data) { self.data = data }
 }
 
-/// A request that the Mac sends to the Host Server (ADR 0085): a typed MuxifyCore command or subscription, never
+/// A request that the Mac sends to the Host Server (ADR 0087): a typed MuxifyCore command or subscription, never
 /// a script or a raw tmux command. Later releases add cases, each behind a capability. A case that this build does
 /// not know is answered `unsupported`.
 public enum HostRequest: Codable, Equatable, Sendable {
@@ -155,11 +155,11 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// New Worktree's start choices from a checkout on the Host (`git worktree list`, `for-each-ref`), answered as
     /// `WorktreeStarts`.
     case worktreeStarts(WorktreeStartsRequest)
-    /// The Mac's Muxify Worktree rows that wait to move to this Host (ADR 0088). The server writes each as a record
+    /// The Mac's Muxify Worktree rows that wait to move to this Host (ADR 0090). The server writes each as a record
     /// of the Host, as the import of the old record files does, and answers `AdoptedWorktrees`, one per row.
     case adoptWorktrees(AdoptWorktrees)
     /// The App Window of this channel now consumes `@muxify_open`: the server writes its own socket into
-    /// `@muxify_browser_socket` (ADR 0089). Answers `{}`.
+    /// `@muxify_browser_socket` (ADR 0091). Answers `{}`.
     case claimOpen
     /// The App Window of this channel no longer consumes `@muxify_open`: the server clears
     /// `@muxify_browser_socket` if it still names its own socket. Answers `{}`.
@@ -246,7 +246,7 @@ public enum HostRequest: Codable, Equatable, Sendable {
     }
 }
 
-/// A request that the Host Server sends to its Mac (ADR 0089): what a program on the Host sent the server's own
+/// A request that the Host Server sends to its Mac (ADR 0091): what a program on the Host sent the server's own
 /// socket. Protocol 1's base, so it needs no capability. A Mac with no handler for it ends it `unavailable`.
 public enum MacRequest: Codable, Equatable, Sendable {
     /// A Browser command, served by the Browsers of the App Window whose channel carried it. Its `end` is the

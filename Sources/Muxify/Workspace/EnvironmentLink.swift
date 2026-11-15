@@ -31,7 +31,7 @@ enum EnvironmentEvent {
     /// says, and polls only a link that does not publish its changes.
     case featuresChanged
     /// The Host Server stopped while the master lives: the store starts it again, or after 3 stops within 60 s
-    /// falls back to Sessions only (ADR 0086). `lastLine` is its last stderr line.
+    /// falls back to Sessions only (ADR 0088). `lastLine` is its last stderr line.
     case serverStopped(lastLine: String)
     /// No Host Server can run on this attachment: the store falls back to Sessions only at once.
     case serverUnavailable(HostServerUnavailable)
@@ -90,7 +90,7 @@ enum EnvironmentLinkError: Error, Equatable, CustomStringConvertible {
     }
 
     /// What a link that lacks `.worktrees` answers a Muxify Worktree request: the Host's records are the Host CLI's
-    /// alone, so the Mac never makes or removes a Host's Worktree without its server (ADR 0088).
+    /// alone, so the Mac never makes or removes a Host's Worktree without its server (ADR 0090).
     static var worktreesRefused: TopicFailure {
         TopicFailure(kind: .unsupported, phase: .nothingChanged, message: unsupported("Muxify Worktrees").description)
     }
@@ -140,7 +140,7 @@ final class EnvironmentEvents {
 }
 
 /// The one way an App Window's `WorkspaceStore` reaches its Active Environment: its tmux server, its Topic records,
-/// its `EnvironmentService` and the Git View's typed reads and writes (ADR 0087). Commands are `async`; state
+/// its `EnvironmentService` and the Git View's typed reads and writes (ADR 0089). Commands are `async`; state
 /// comes as keyed events per subscription.
 ///
 /// A link never changes target. Changing the Active Environment retires the store's link: its waiting requests
@@ -235,7 +235,7 @@ protocol EnvironmentLink: AnyObject {
     /// The link that takes over the same master when no Host Server can run, handed over without `retire`; nil
     /// when the link has none.
     func sessionsOnlyLink() -> EnvironmentLink?
-    /// Hands the Host Server's requests (ADR 0089), what programs on the Host sent its socket, to `handler`: the
+    /// Hands the Host Server's requests (ADR 0091), what programs on the Host sent its socket, to `handler`: the
     /// store's own. A request that it answers nil, or that comes with no handler, ends `unavailable`.
     func serveHostRequests(_ handler: @escaping HostRequestHandler)
     /// Whether this App Window consumes `@muxify_open` on its Environment, so that its Host Server names its own
@@ -244,17 +244,17 @@ protocol EnvironmentLink: AnyObject {
 
     // MARK: Git
 
-    /// Runs one of the Git View's reads on the repository's machine (ADR 0085). A link without `.git` throws
+    /// Runs one of the Git View's reads on the repository's machine (ADR 0087). A link without `.git` throws
     /// `unsupported`.
     func git(_ read: GitRead) async throws -> GitAnswer
-    /// Runs one of the Git View's writes that need no network on the repository's machine (ADR 0085), and answers
+    /// Runs one of the Git View's writes that need no network on the repository's machine (ADR 0087), and answers
     /// what git printed. It is never sent again: one whose answer the link lost may or may not have happened. A link
     /// without `.git` throws `unsupported`.
     func writeGit(_ write: GitWrite) async throws -> String
     /// The `repository` subscription of a folder: its first event is the whole state, then one comes whenever HEAD,
     /// the index or the working tree changed. Events come on the main thread. A link without `.git` sends none.
     func watchRepository(_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription
-    /// Runs one of the Git View's commands that talk to a remote on the repository's machine (ADR 0087), with git's
+    /// Runs one of the Git View's commands that talk to a remote on the repository's machine (ADR 0089), with git's
     /// and ssh's questions going to `ask` through askpass, and answers what git printed. A cancelled question ends it
     /// `TmuxError.cancelled`. It is never sent again. A link without `.git` throws `unsupported`.
     func runGitNetwork(_ network: GitNetwork, ask: @escaping GitAsk) async throws -> String

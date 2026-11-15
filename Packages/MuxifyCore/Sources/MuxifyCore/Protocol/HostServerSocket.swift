@@ -1,6 +1,6 @@
 import Foundation
 
-/// A Host Server's own socket (ADR 0089). Programs on the Host send it one request line, as they send the Mac app's
+/// A Host Server's own socket (ADR 0091). Programs on the Host send it one request line, as they send the Mac app's
 /// socket (ADR 0057): a `BrowserAgentRequest` from `muxify browser`, or a `MacRequest` such as a view verb's
 /// `select`. The server passes each to its Mac and writes the Mac's reply line back.
 ///
@@ -120,7 +120,7 @@ final class HostServerSocket: @unchecked Sendable {
 
 extension ProtocolIncomingRequest {
     /// Ends a `browser` request with the Mac's reply. A `png` goes first as `ProtocolChunk` items of at most
-    /// `HostProtocol.maxChunkBytes`, and its `end` carries an empty picture (ADR 0089).
+    /// `HostProtocol.maxChunkBytes`, and its `end` carries an empty picture (ADR 0091).
     public func finish(browser reply: BrowserAgentReply) {
         guard case .png(let data) = reply else { return finish(reply) }
         guard stream(data) else { return }

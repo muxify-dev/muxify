@@ -9,7 +9,7 @@ import Foundation
 import XCTest
 @testable import MuxifyCore
 
-/// The Git View's network commands with askpass (ADR 0087, Credentials): fetch, push, pull and remote branch delete
+/// The Git View's network commands with askpass (ADR 0089, Credentials): fetch, push, pull and remote branch delete
 /// against a local bare remote that a fake ssh guards with a passphrase, which it asks through `SSH_ASKPASS` as ssh does
 /// under `SSH_ASKPASS_REQUIRE=force`. The helper is the real `muxify askpass`, built beside these tests by the app's
 /// Xcode build; without it, as under `swift test` of this package alone, the askpass checks skip.

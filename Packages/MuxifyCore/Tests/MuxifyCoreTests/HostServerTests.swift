@@ -239,7 +239,7 @@ final class HostServerTests: XCTestCase {
         try await wait("removing the Config did not push missing", seconds: 5) { recorder.items.last?.isMissing == true }
     }
 
-    // MARK: - Worktrees on the Host (ADR 0088)
+    // MARK: - Worktrees on the Host (ADR 0090)
 
     func testAdoptWorktreesTakesNewRowsAndSkipsAnIDOrAPathThatTheHostHas() async throws {
         let host = MuxifyWorktreeStore(paths: paths)

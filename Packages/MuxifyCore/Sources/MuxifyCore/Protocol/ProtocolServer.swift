@@ -2,7 +2,7 @@ import Foundation
 
 /// The server half of the Host Server protocol, on a pair of file handles: `muxify server`'s stdin and stdout, or a
 /// test's pipes. It writes the magic line and its `hello`, waits for the client's, and serves requests with
-/// `handler`. It exits on EOF, on `stop`, or when no frame comes for `silence` seconds (ADR 0083; the end rules of
+/// `handler`. It exits on EOF, on `stop`, or when no frame comes for `silence` seconds (ADR 0085; the end rules of
 /// the server's lifecycle). Its log lines are plain text, never parsed.
 public final class ProtocolServer: @unchecked Sendable {
     public enum Exit: Equatable, Sendable {
@@ -109,7 +109,7 @@ public final class ProtocolServer: @unchecked Sendable {
 
     // MARK: - Requests to the client
 
-    /// Sends the client a request (ADR 0089) and waits for its `end`, whose `ok` decodes as `Response`. It is
+    /// Sends the client a request (ADR 0091) and waits for its `end`, whose `ok` decodes as `Response`. It is
     /// written once both `hello`s are in; once the channel has ended it fails at once with `unavailable`.
     public func call<Request: Encodable, Response: Decodable>(_ request: Request, as response: Response.Type) async throws -> Response {
         try await channel.call(request, as: Response.self)

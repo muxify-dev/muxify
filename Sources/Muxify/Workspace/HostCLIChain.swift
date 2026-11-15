@@ -1,7 +1,7 @@
 import Foundation
 import MuxifyCore
 
-/// What the Host CLI install chain leaves for the Host Server (ADR 0084, "Which binary serves").
+/// What the Host CLI install chain leaves for the Host Server (ADR 0086, "Which binary serves").
 struct HostCLIReady: Equatable, Sendable {
     /// The chain's result line: the reason a window gives when no `muxify` is found after it (chain D).
     let line: String
@@ -45,7 +45,7 @@ struct DebugHostCLI: Equatable, Sendable {
     }
 }
 
-/// The Host CLI install chain, run once per connect before the Host Server starts (ADR 0084): a Debug app's own
+/// The Host CLI install chain, run once per connect before the Host Server starts (ADR 0086): a Debug app's own
 /// build when it has one; else A, the Host downloads `cli-latest` itself (ADR 0076); else B, when the Host cannot
 /// download, the Mac fetches the Host's asset from the same base and streams it gzipped over the master into
 /// `~/.local/bin/muxify`. When nothing is installed, the server's channel exits 127 and the window shows Sessions

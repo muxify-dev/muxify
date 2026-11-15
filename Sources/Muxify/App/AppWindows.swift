@@ -201,7 +201,7 @@ final class AppWindows {
     }
 
     /// Which App Window consumes `@muxify_open` follows focus, and on a Host its Host Server names its own socket in
-    /// `@muxify_browser_socket` (ADR 0089), so each store hears at once whether it is the one.
+    /// `@muxify_browser_socket` (ADR 0091), so each store hears at once whether it is the one.
     private func updateOpenConsumers() {
         for store in stores.values { store.updateOpenConsumer() }
     }

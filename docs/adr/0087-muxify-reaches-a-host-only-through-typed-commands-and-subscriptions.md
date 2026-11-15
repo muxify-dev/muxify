@@ -4,7 +4,7 @@ Today the Mac app does all the work for a Remote Environment itself. It runs `En
 
 ## Subscriptions
 
-Each one pushes state, never deltas. Every event has a key, so a newer event replaces an unsent one with the same key (ADR 0083).
+Each one pushes state, never deltas. Every event has a key, so a newer event replaces an unsent one with the same key (ADR 0085).
 
 - **`environment`**: the inputs that the Mac's cards, Sidebar and palette already draw from, so that code does not change.
   - Events are `session <id>` (that Session's Windows and Panes, or null when it is gone), `topic <id>` (one Topic record, or null), `open_places`, and `server` (Clients, last Window, server running, socket, home). The first item holds all of them.
@@ -24,7 +24,7 @@ Each one pushes state, never deltas. Every event has a key, so a newer event rep
 - **Worktrees**: the `EnvironmentRequest` Worktree commands, plus the start choices of a new Worktree (`git worktree list`, `for-each-ref`).
 - **The Codex reads and `ps`**: run by the server as part of its snapshot read. They are not separate requests.
 - **`upload { name, offset, data, last }`**: one Attachment, sent as a pipelined run of chunks of at most 64 KiB. The first `end` names the path on the Host. The paste is a view command. When a chunk fails, the paste fails and the server deletes the partial file.
-- **`adopt_worktrees { rows }`**: sent once after `hello`, when the Mac has Worktree rows waiting to move to this Host ([ADR 0088](0088-a-muxify-worktrees-record-lives-on-the-machine-that-has-it.md)). Its `end` lists every row as `taken`, or `skipped` with a reason such as a name or path clash. The Mac deletes only the taken rows. A channel that ends before the `end` leaves every row in place.
+- **`adopt_worktrees { rows }`**: sent once after `hello`, when the Mac has Worktree rows waiting to move to this Host ([ADR 0090](0090-a-muxify-worktrees-record-lives-on-the-machine-that-has-it.md)). Its `end` lists every row as `taken`, or `skipped` with a reason such as a name or path clash. The Mac deletes only the taken rows. A channel that ends before the `end` leaves every row in place.
 
 ## The Watch Session
 

@@ -5,7 +5,7 @@ import XCTest
 import MuxifyTestSupport
 
 /// `HostEnvironmentLink` through pipes to a Host Server in this process, on a throwaway tmux server and a temporary
-/// state database (ADR 0087: the Mac's half of the protocol, tested without SSH).
+/// state database (ADR 0089: the Mac's half of the protocol, tested without SSH).
 @MainActor
 final class HostEnvironmentLinkTests: XCTestCase {
     private var directory: URL!
@@ -337,7 +337,7 @@ private final class StalledScripts: ScriptRunning, @unchecked Sendable {
 }
 
 extension HostEnvironmentLinkTests {
-    // MARK: - The Mac's waiting Worktree rows move to the Host (ADR 0088)
+    // MARK: - The Mac's waiting Worktree rows move to the Host (ADR 0090)
 
     func testAfterHelloTheMacDeletesOnlyTheRowsTheHostTook() async throws {
         let paths = paths!, tmux = tmux!
@@ -413,7 +413,7 @@ private final class Gate: @unchecked Sendable {
 }
 
 extension HostEnvironmentLinkTests {
-    // MARK: - git's questions come back as `ask` (ADR 0087, Credentials)
+    // MARK: - git's questions come back as `ask` (ADR 0089, Credentials)
 
     /// A bare `origin.git` and a clone `repo` that reaches it over a fake ssh, which asks for a passphrase through
     /// `SSH_ASKPASS` and serves the repository only for the answer `right`.

@@ -11,7 +11,7 @@ public struct HostServerContext: @unchecked Sendable {
     /// The Host's home: the `config` subscription shows the Config's path under it as `~/…`, and an Override's `~/`
     /// starts there.
     public var home: String
-    /// What names this server's own socket, `<tmux socket>.muxify-browser.<id>` (ADR 0089): its pid. A test that runs
+    /// What names this server's own socket, `<tmux socket>.muxify-browser.<id>` (ADR 0091): its pid. A test that runs
     /// several servers in one process gives each its own.
     public var socketID: String
     /// Runs the Git View's reads on the Host.
@@ -53,11 +53,11 @@ public struct HostServerContext: @unchecked Sendable {
     }
 }
 
-/// `muxify server`: the Host Server's requests (ADR 0085). It serves `ping` and `shutdown`, the `environment`,
+/// `muxify server`: the Host Server's requests (ADR 0087). It serves `ping` and `shutdown`, the `environment`,
 /// `config` and `repository` subscriptions, `environment` requests, `mark_read`, the view commands, the Topic and
 /// Worktree start choices, `adopt_worktrees`, `claim_open`, `release_open`, the Git View's reads, writes and network
 /// commands, `session_paths` and `upload`. Programs on the Host reach its Mac through its own socket, whose requests it
-/// sends the Mac as `MacRequest`s (ADR 0089); an askpass helper's `ask` goes to the network command that runs it, which
+/// sends the Mac as `MacRequest`s (ADR 0091); an askpass helper's `ask` goes to the network command that runs it, which
 /// asks the Mac.
 public enum HostServer {
     /// A server on these handles that serves `HostRequest` against `context`.
@@ -493,7 +493,7 @@ final class HostEnvironment: @unchecked Sendable {
     }
 
     /// The Mac's rows that wait to move to this Host become the Host's records, each unless the Host has its id or
-    /// its path already (ADR 0088).
+    /// its path already (ADR 0090).
     func adoptWorktrees(_ adopt: AdoptWorktrees, for request: ProtocolIncomingRequest) {
         guard request.startMutation() else { return }
         let paths = context.paths

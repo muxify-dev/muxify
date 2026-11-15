@@ -1,7 +1,7 @@
 import Foundation
 import MuxifyCore
 
-/// The link to a Host through its Host Server (ADRs 0086 and 0087): one
+/// The link to a Host through its Host Server (ADRs 0088 and 0089): one
 /// `muxify server` on a `-T` channel of the attachment's own SSH master, which the Mac opens once the master is ready
 /// and the Host CLI install chain has run. The terminal never waits for it.
 ///
@@ -11,11 +11,11 @@ import MuxifyCore
 /// server's `environment` events, and Topic requests, Unread on visit, view commands, Session Path discovery and
 /// Attachment uploads go over the channel; the Mac keeps no copy of the Host's records. The Config comes from the
 /// server's `config` subscription, which pushes each edit on the Host. The Muxify Worktrees are the Host's too
-/// (ADR 0088). The Git View's reads, changes and network commands and the `repository` subscription go to the server
+/// (ADR 0090). The Git View's reads, changes and network commands and the `repository` subscription go to the server
 /// too; a network command's askpass questions come back as `ask` requests of its operation. Without a server, each of
 /// these is unavailable.
 ///
-/// Programs on the Host reach this App Window through the server's own socket (ADR 0089): the server sends each
+/// Programs on the Host reach this App Window through the server's own socket (ADR 0091): the server sends each
 /// `browser` and `select` request over the channel, and the link hands it to its store's handler. While this App
 /// Window consumes `@muxify_open`, the link tells the server with `claim_open`, so `@muxify_browser_socket` names it.
 @MainActor
@@ -150,7 +150,7 @@ final class HostEnvironmentLink: EnvironmentLink {
     // MARK: The server's lifecycle
 
     /// The Host CLI install chain, then the server. Nothing waits for either. A server that already runs keeps
-    /// running: a newer binary never restarts it (ADR 0084).
+    /// running: a newer binary never restarts it (ADR 0086).
     func installHostCLI(environmentName: String) {
         install { [weak self] ready in
             DispatchQueue.main.async {
@@ -235,7 +235,7 @@ final class HostEnvironmentLink: EnvironmentLink {
     }
 
     /// Once after each `hello`: the Mac's Muxify Worktree rows that wait for this Environment go to the Host, which
-    /// makes each its own record unless it has its id or its path already (ADR 0088). The Mac deletes only the rows the
+    /// makes each its own record unless it has its id or its path already (ADR 0090). The Mac deletes only the rows the
     /// Host took. A skipped row stays, and so does every row when the channel ends before the answer: the next connect
     /// sends them again.
     private func adoptWaitingWorktrees(on client: ProtocolClient) {

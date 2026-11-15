@@ -46,7 +46,7 @@ public enum GitHeadRead: Codable, Equatable, Sendable {
     }
 }
 
-/// The Git View's reads, as /bin/sh scripts that run on the repository's machine (ADR 0085): in-process for the Local
+/// The Git View's reads, as /bin/sh scripts that run on the repository's machine (ADR 0087): in-process for the Local
 /// Environment, in the Host Server for a Host. No script crosses the wire; `GitReader` runs them and parses their output.
 public enum GitReads {
     /// How many commits the History, or a branch's commits, list.

@@ -1,7 +1,7 @@
 import Foundation
 
 /// What a view verb asks the App Window to show: `muxify session open`, `window open` and `topic open`. Locally it
-/// travels as a `muxify://select` URL; on a Host, as a `select` request through the Host Server (ADR 0089), whose
+/// travels as a `muxify://select` URL; on a Host, as a `select` request through the Host Server (ADR 0091), whose
 /// JSON is `{"session": "<name>"}`, `{"window": "<id>"}` or `{"topic": "<id>"}`.
 public enum SelectRequest: Codable, Equatable, Sendable {
     case session(String)

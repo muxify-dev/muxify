@@ -1,6 +1,6 @@
 import Foundation
 
-/// The producer of the `environment` subscription (ADR 0085): it reads a whole `TmuxSnapshot`
+/// The producer of the `environment` subscription (ADR 0087): it reads a whole `TmuxSnapshot`
 /// and the Topic records on this machine whenever something may have changed, compares them per key with what it sent
 /// last, and sends only the keys that changed. Its first item holds every key. The Host Server runs it on a Host, and
 /// the Local Environment's link runs it in the app.

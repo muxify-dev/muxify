@@ -1,6 +1,6 @@
 import Foundation
 
-// The JSON form of the `environment` subscription's events (ADR 0085). Each item of the subscription is an
+// The JSON form of the `environment` subscription's events (ADR 0087). Each item of the subscription is an
 // `EnvironmentItem`: the first holds every key, each later one a single change, keyed so that a newer one replaces an
 // unsent one. The Host Server sends what tmux and the records hold; the Mac stamps what is its own, such as
 // `isRemote` and `sourceID`, from the `server` event. Every key but an id decodes when it is missing, so a newer

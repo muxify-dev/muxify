@@ -1,6 +1,6 @@
 import Foundation
 
-/// One of the Git View's writes that changes the repository without the network (ADR 0085), with the inputs it had
+/// One of the Git View's writes that changes the repository without the network (ADR 0087), with the inputs it had
 /// as a script. The Mac runs it through its App Window's `EnvironmentLink`: `GitWriter` in-process for the Local
 /// Environment, a `git_write` request to the Host Server for a Host. Its JSON is `{"<case>": {<its values>}}`, and it
 /// answers what git printed, such as a new commit's short hash.

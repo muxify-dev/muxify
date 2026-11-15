@@ -162,7 +162,7 @@ final class BrowserAgentCommandTests: XCTestCase {
         XCTAssertFalse(answers.ran("set-option"), "the app opened the Tab, so @muxify_open stays empty")
     }
 
-    // MARK: - On a Host (ADR 0089)
+    // MARK: - On a Host (ADR 0091)
 
     /// A Host Server here, whose socket is `<dir>/s.muxify-browser.7`, and its Mac's end, which answers each request
     /// with `answer`. No tmux runs: the server listens beside where tmux's socket would be.

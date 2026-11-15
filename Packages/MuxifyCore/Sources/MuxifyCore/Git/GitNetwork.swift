@@ -1,6 +1,6 @@
 import Foundation
 
-/// One of the Git View's commands that talk to a remote: fetch, push, pull and deleting a remote branch (ADR 0087,
+/// One of the Git View's commands that talk to a remote: fetch, push, pull and deleting a remote branch (ADR 0089,
 /// Credentials). It runs on the repository's machine, through `GitNetworkRunner`: in-process for the Local Environment,
 /// as a `git_network` request to the Host Server for a Host. git's and ssh's questions, such as a passphrase, come back
 /// through askpass and are asked in the Git View. Its JSON is `{"<case>": {<its values>}}`, and it answers what git

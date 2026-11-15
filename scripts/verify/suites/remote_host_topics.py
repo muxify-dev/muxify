@@ -7,10 +7,10 @@ server, the Host's home is `remote-home`, and the Host's Topics are in `remote-h
 apart from the Mac's own `state/muxify`. The Host's `muxify` is the first one on the fixture's PATH: the Debug app's
 own CLI, which serves, or a stand-in with no server mode, which the app must answer with Sessions only and a reason.
 The Host's Muxify Worktrees are its own too: their records are in the Host's database and their folders under the
-Host's `$XDG_STATE_HOME/muxify/worktrees` (ADR 0088).
+Host's `$XDG_STATE_HOME/muxify/worktrees` (ADR 0090).
 
 An Agent on the Host reaches the Remote App Window through its Host Server's own socket, which
-`@muxify_browser_socket` names (ADR 0089): its Browser commands and view verbs run the CLI in a Pane of the Host's
+`@muxify_browser_socket` names (ADR 0091): its Browser commands and view verbs run the CLI in a Pane of the Host's
 tmux server, with the Host's environment, as an Agent there does.
 
 The Host's Config names a Session Path root under `~`, which only the Host's home has, and the Host's `TMPDIR` is

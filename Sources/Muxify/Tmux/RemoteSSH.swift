@@ -119,7 +119,7 @@ final class RemoteSSH {
         ])
     }
 
-    /// The Host Server, `muxify server`, as a channel of the master like the execs (ADR 0086):
+    /// The Host Server, `muxify server`, as a channel of the master like the execs (ADR 0088):
     /// it never signs in on its own and never outlives the master. Its stdin and stdout are the protocol's.
     /// `executable` is the Debug app's own upload; nil finds the Host CLI.
     func serverInvocation(executable: String? = nil) -> CommandInvocation {
