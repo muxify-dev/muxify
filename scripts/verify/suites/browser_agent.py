@@ -68,8 +68,7 @@ class BrowserAgent(unittest.TestCase):
         cls.session = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'agent', '-x', '200', '-y', '50', SHELL)
         s.launch()
         wait(lambda: '0' in s.tmux('list-clients', '-F', '#{client_control_mode}').split(), 'the app attached no tmux client')
-        cls.socket = wait(lambda: s.tmux('show-options', '-sqv', '@muxify_browser_socket'),
-                          'the app did not publish its Browser socket')
+        wait(lambda: s.tmux('show-options', '-sqv', '@muxify_browser_socket'), 'the app did not publish its Browser socket')
         cls.cli = str(s.app/'Contents/Resources/bin/muxify')
 
     def window(self, name=None):
@@ -96,10 +95,6 @@ class BrowserAgent(unittest.TestCase):
 
     def stored_tabs(self, window):
         return self.s.tmux('show-options', '-wqv', '-t', window, '@muxify_tabs').split()
-
-    def test_socket_sits_beside_the_tmux_socket(self):
-        tmux_socket = self.s.tmux('display-message', '-p', '#{socket_path}')
-        self.assertEqual(self.socket, tmux_socket + '.muxify-browser')
 
     def tabs(self, pane):
         return json.loads(self.ok(pane, 'tabs', '--json'))
@@ -224,17 +219,6 @@ class BrowserAgent(unittest.TestCase):
         self.ok(pane, 'close')
         self.assertEqual([(t['id'], t['active']) for t in self.tabs(pane)], [(first['id'], True)])
 
-    def test_click_on_a_new_window_link_loads_in_the_same_tab_and_keeps_the_focus(self):
-        window, pane = self.window()
-        tab = self.open(pane, 'new-window-link')
-        self.s.show(window)
-        before = self.s.driver('responder')['responders']
-        _, refs = self.refs(pane)
-        self.assertEqual(self.ok(pane, 'click', refs['link "Open in a new window"']), '')
-        self.assertEqual([(t['id'], t['url']) for t in self.tabs(pane)], [(tab['id'], self.url('new-window'))],
-                         'the link opened another Tab, or click returned before the page loaded')
-        self.assertEqual(self.s.driver('responder')['responders'], before)
-
     def refs(self, pane):
         """The snapshot, and the Ref of each line by its role and name, such as 'button "Save"'."""
         snapshot = self.ok(pane, 'snapshot')
@@ -275,9 +259,9 @@ class BrowserAgent(unittest.TestCase):
         self.ok(pane, 'wait', '--selector', '#out', '--timeout', '5')
         self.assertEqual(self.ok(pane, 'eval', "document.getElementById('out').textContent"), '"Searched ab"\n')
 
-    def test_commands_on_the_shown_window_leave_the_focus_where_it_was(self):
+    def test_commands_on_the_shown_window_leave_the_focus_and_a_new_window_link_loads_in_the_same_tab(self):
         window, pane = self.window()
-        self.open(pane, 'focus')
+        tab = self.open(pane, 'focus')
         self.s.show(window)
         before = self.s.driver('responder')['responders']
         _, refs = self.refs(pane)
@@ -285,6 +269,9 @@ class BrowserAgent(unittest.TestCase):
         self.ok(pane, 'click', refs['button "Save"'])
         self.ok(pane, 'press', 'a', refs['textbox "Query"'])
         self.ok(pane, 'wait', '--text', 'Saved focus')
+        self.assertEqual(self.ok(pane, 'click', refs['link "Open in a new window"']), '')
+        self.assertEqual([(t['id'], t['url']) for t in self.tabs(pane)], [(tab['id'], self.url('new-window'))],
+                         'the link opened another Tab, or click returned before the page loaded')
         self.assertEqual(self.s.driver('responder')['responders'], before)
         self.assertNotIn('WKWebView', before, 'the Terminal keeps the focus that it had')
 

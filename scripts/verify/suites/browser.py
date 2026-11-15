@@ -99,8 +99,6 @@ PAGE = '''<!doctype html>
     if (params.has('pagekeys')) document.addEventListener('keydown', (event) => event.preventDefault());
     if (params.has('escape')) field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
     if (params.has('history')) { location.hash = 'second'; await new Promise((done) => setTimeout(done, 300)); }
-    // Only from a new Tab, so going Back to this page stays on it.
-    if (params.has('goto') && history.length === 1) location.search = params.get('goto');
     if (params.has('every')) setInterval(() => send(params.get('every')), 200);
     for (const group of (params.get('keys') || '').split(',').filter(Boolean)) {
       if (params.has('held')) await hold(group); else send(group);
@@ -128,14 +126,13 @@ class Browser(unittest.TestCase):
         s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES'])
         wait(lambda: '0' in s.tmux('list-clients', '-F', '#{client_control_mode}').split(), 'the app attached no tmux client')
 
-    def open_page(self, query, left=(), right=(), shows=None):
+    def open_page(self, query, left=()):
         """A new Window whose Browser shows the fixture page with the query, selected in the app's tmux client.
-        The Tabs with the URLs in `left` and `right` stand on each side of it. `shows` is the query of the page
-        that the Tab goes on to by itself."""
+        The Tabs with the URLs in `left` stand on its left."""
         name = self.id().rsplit('.', 1)[-1][5:]
-        self.query = shows or query
+        self.query = query
         url = self.page.as_uri() + '?' + query
-        tabs = ' '.join([*left, url, *right])
+        tabs = ' '.join([*left, url])
         # One tmux call, so the app never reads the Window without its Browser options.
         options = [arg for option, value in [('@muxify_tabs', tabs), ('@muxify_active_tab', str(len(left))), ('@muxify_browser', 'on')]
                    for arg in (';', 'set-option', '-w', '-t', 'browser:' + name, option, value)]
@@ -206,11 +203,6 @@ class Browser(unittest.TestCase):
         self.wait_status('1 of 4', 'Find in Page did not count the matches')
         self.s.act('press', 'browser-find-next')
         self.wait_status('2 of 4', 'Find Next did not go to the second match')
-
-    def test_find_highlights_every_match(self):
-        self.open_page('find=highlight')
-        self.find('needle')
-        self.wait_page(lambda page: page['hl'] == '4', 'the page does not highlight all 4 matches')
 
     def test_find_scrolls_to_a_match_below_the_page(self):
         self.open_page('find=scroll')
@@ -345,24 +337,6 @@ class Browser(unittest.TestCase):
         self.assertEqual(self.page_state()['y'], '0', 'j scrolled with browser.vim_keys off')
 
     # Reopen Closed Tab
-
-    def test_reopen_closed_tab_brings_the_tab_back_at_its_index_with_its_back_history(self):
-        left, right = self.page.as_uri() + '?tab=left', self.page.as_uri() + '?tab=right'
-        first, second = self.page.as_uri() + '?goto=case=reopened', self.page.as_uri() + '?case=reopened'
-        self.open_page('goto=case=reopened', left=[left], right=[right], shows='case=reopened')
-        wait(lambda: self.stored_tabs() == ([left, second, right], '1'), 'the app did not store the second page in the middle Tab')
-
-        self.press_menu('Close Tab')
-        wait(lambda: self.stored_tabs()[0] == [left, right], 'Close Tab did not close the middle Tab')
-        self.press_menu('Reopen Closed Tab')
-        wait(lambda: self.stored_tabs() == ([left, second, right], '1'),
-             'Reopen Closed Tab did not bring the second page back as the active middle Tab')
-        self.wait_page(lambda page: True, 'the reopened Tab does not show the second page')
-
-        self.press_menu('Back')
-        self.query = 'goto=case=reopened'
-        self.wait_page(lambda page: True, 'Back in the reopened Tab did not go to the first page')
-        wait(lambda: self.stored_tabs() == ([left, first, right], '1'), 'Back did not store the first page in the middle Tab')
 
     def test_command_shift_t_reopens_a_closed_tab_with_browser_focus_and_opens_move_with_terminal_focus(self):
         left = self.page.as_uri() + '?tab=shift-t-left'

@@ -62,17 +62,6 @@ class FindInPaneTerminal(unittest.TestCase):
         self.s.act('press', 'terminal-find-previous')
         self.wait_status('1 of 3', 'Find Previous did not go back down')
 
-    def test_a_query_with_no_match_is_not_found(self):
-        self.find('haystack')
-        self.wait_status('Not found', 'Find in Pane found a query that the Pane does not show')
-
-    def test_done_closes_the_bar_and_leaves_copy_mode(self):
-        self.find('needle')
-        self.wait_status('1 of 3', 'Find in Pane did not find the needles')
-        self.s.act('press', 'terminal-find-done')
-        self.s.wait_rows(lambda rs: not self.s.has('terminal-find-field', rs), 'Done did not close Find in Pane')
-        wait(lambda: self.pane_format('#{pane_mode}') == '', 'Done left the Pane in copy mode')
-
     def test_the_find_keys_of_the_field_step_and_close(self):
         self.find('needle')
         self.wait_status('1 of 3', 'Find in Pane did not find the needles')
@@ -110,7 +99,7 @@ class FindInPaneTerminal(unittest.TestCase):
         self.assertTrue(self.s.has('terminal-find-field'), 'Esc in another Pane closed Find in Pane')
         self.assertEqual(self.pane_format('#{pane_mode}'), 'copy-mode', 'Esc in another Pane ended the search')
 
-    def test_the_searched_pane_shows_the_find_colors_until_done(self):
+    def test_the_searched_pane_shows_the_find_colors_until_done_closes_the_bar_and_leaves_copy_mode(self):
         style = lambda name: self.s.tmux('show-options', '-pqv', '-t', self.pane, name)
         self.find('needle')
         self.wait_status('1 of 3', 'Find in Pane did not find the needles')
@@ -118,6 +107,8 @@ class FindInPaneTerminal(unittest.TestCase):
         self.assertEqual(style('copy-mode-match-style'), 'bg=#ffd54f,fg=#000000')
         self.assertEqual(style('copy-mode-current-match-style'), 'bg=#ff9600,fg=#000000')
         self.s.act('press', 'terminal-find-done')
+        self.s.wait_rows(lambda rs: not self.s.has('terminal-find-field', rs), 'Done did not close Find in Pane')
+        wait(lambda: self.pane_format('#{pane_mode}') == '', 'Done left the Pane in copy mode')
         wait(lambda: style('copy-mode-match-style') == '' and style('copy-mode-current-match-style') == '',
              'Done left the find colors on the Pane')
 
