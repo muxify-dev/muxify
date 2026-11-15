@@ -13,16 +13,17 @@ final class AppWindows {
     @ObservationIgnored private let defaults: UserDefaults
     @ObservationIgnored private let initialEnvironmentName: String?
     private(set) var focusedID: UUID?
-    @ObservationIgnored var openWindow: ((AppWindowRequest) -> Void)?
-    @ObservationIgnored var openSettings: (() -> Void)?
+    /// Opens the App Window of a request in a window controller of its own. A test replaces it to see what would open.
+    @ObservationIgnored lazy var openWindow: (AppWindowRequest) -> Void = { [weak self] in self?.makeWindow(for: $0) }
     /// The Settings window's draft, kept while the window is closed (ADR 0074).
     @ObservationIgnored let settings: SettingsModel
+    @ObservationIgnored private lazy var settingsWindow = SettingsWindowController(model: settings)
     @ObservationIgnored private var catalog = AppWindowCatalog()
     @ObservationIgnored private var stores: [UUID: WorkspaceStore] = [:]
+    @ObservationIgnored private var controllers: [UUID: AppWindowController] = [:]
     @ObservationIgnored private var nativeWindows: [UUID: NSWindow] = [:]
     @ObservationIgnored private var observers: [UUID: [NSObjectProtocol]] = [:]
     @ObservationIgnored private var isQuitting = false
-    @ObservationIgnored private var closedIDs = Set<UUID>()
 
     var focusedStore: WorkspaceStore? { focusedID.flatMap { stores[$0] } }
     @ObservationIgnored private(set) lazy var browserAgent = BrowserAgentService { [weak self] in self?.localStores ?? [] }
@@ -61,28 +62,43 @@ final class AppWindows {
         for tokens in observers.values { tokens.forEach(NotificationCenter.default.removeObserver) }
     }
 
-    /// SwiftUI may create scenes without an explicit value, including at launch.
-    /// Every such scene needs its own terminal host, never the launch scene's ID.
-    func defaultWindowRequest() -> AppWindowRequest {
-        AppWindowRequest(environmentName: catalog.requests.isEmpty ? initialEnvironmentName : nil)
+    /// The App Window that launch opens, on the Environment that was focused last, when AppKit restored none.
+    func openFirstWindow() {
+        guard catalog.requests.isEmpty else { return }
+        openWindow(catalog.openEnvironment(named: initialEnvironmentName))
+    }
+
+    private func makeWindow(for request: AppWindowRequest) {
+        controller(for: request).showWindow(nil)
+    }
+
+    /// The window of an App Window that AppKit restores at launch. AppKit puts it back where it was and shows it.
+    func restoreWindow(for request: AppWindowRequest) -> NSWindow? {
+        controller(for: request).window
+    }
+
+    /// Each App Window request gets one window controller, and with it one store.
+    private func controller(for request: AppWindowRequest) -> AppWindowController {
+        if let controller = controllers[request.id] { return controller }
+        let controller = AppWindowController(request: request, store: store(for: request), windows: self)
+        controllers[request.id] = controller
+        return controller
+    }
+
+    func showSettings() {
+        settingsWindow.showWindow(nil)
     }
 
     func store(for request: AppWindowRequest) -> WorkspaceStore {
         if let store = stores[request.id] { return store }
         let environment = configStore.config.remoteEnvironments.first { $0.name == request.environmentName }
         let store = WorkspaceStore(configStore: configStore, environment: environment, defaults: defaults)
-        // SwiftUI can evaluate a closing scene again after its cleanup finishes.
-        // Do not resurrect its reservation or connection.
-        if isQuitting || closedIDs.contains(request.id) {
-            store.shutdown {}
-            return store
-        }
         stores[request.id] = store
         catalog.register(request)
         catalog.updateEnvironment(request.id, name: environment?.name)
         store.onSelectEnvironment = { [weak self] name in self?.selectEnvironment(named: name) }
         store.onNewAppWindow = { [weak self] in self?.newWindow() }
-        store.onOpenSettings = { [weak self] in self?.openSettings?() }
+        store.onOpenSettings = { [weak self] in self?.showSettings() }
         // The last App Window to close quits the app.
         store.onCloseAppWindow = { [weak self] in self?.nativeWindows[request.id]?.close() }
         store.shouldConsumeOpenRequests = { [weak self, weak store] in
@@ -102,13 +118,12 @@ final class AppWindows {
     }
 
     func newWindow() {
-        guard !isQuitting, let openWindow else { return }
+        guard !isQuitting else { return }
         openWindow(catalog.newLocalWindow())
     }
 
     func selectEnvironment(named name: String?) {
         guard !isQuitting, name == nil || configStore.config.remoteEnvironments.contains(where: { $0.name == name }) else { return }
-        guard let openWindow else { return }
         let request = catalog.openEnvironment(named: name)
         if let window = nativeWindows[request.id] {
             if window.isMiniaturized { window.deminiaturize(nil) }
@@ -124,20 +139,25 @@ final class AppWindows {
     func handle(_ url: URL) {
         guard !isQuitting, url.scheme == "muxify" else { return }
         if url.host == "toggle-browser" { focusedStore?.handle(url); return }
-        guard ["select", "open", "topic"].contains(url.host ?? ""), openWindow != nil else { return }
+        guard ["select", "open", "topic"].contains(url.host ?? "") else { return }
         let request = catalog.openEnvironment(named: nil)
         store(for: request).handle(url)
         selectEnvironment(named: nil)
     }
 
     func register(_ window: NSWindow, for id: UUID) {
-        guard !isQuitting, !closedIDs.contains(id) else { return }
+        guard !isQuitting else { return }
         if let existing = nativeWindows[id] {
             if existing !== window { Diagnostics.report("refusing duplicate App Window identity \(id)") }
             return
         }
         nativeWindows[id] = window
         window.tabbingMode = .disallowed
+        // The verify checks find the traffic lights by these. Accessibility sees each button's cell, not the button.
+        for (button, identifier) in [(NSWindow.ButtonType.closeButton, "traffic-light-close"),
+                                     (.miniaturizeButton, "traffic-light-minimize"), (.zoomButton, "traffic-light-zoom")] {
+            window.standardWindowButton(button)?.cell?.setAccessibilityIdentifier(identifier)
+        }
         let center = NotificationCenter.default
         observers[id] = [
             center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
@@ -161,6 +181,7 @@ final class AppWindows {
     func updateEnvironment(for id: UUID) {
         guard let store = stores[id] else { return }
         catalog.updateEnvironment(id, name: store.activeEnvironment?.name)
+        nativeWindows[id]?.invalidateRestorableState()
         if focusedID == id { remember(store.activeEnvironment?.name) }
     }
 
@@ -177,7 +198,6 @@ final class AppWindows {
     }
 
     private func close(_ id: UUID) {
-        closedIDs.insert(id)
         nativeWindows[id] = nil
         catalog.close(id)
         if focusedID == id { focusedID = nil }
@@ -185,6 +205,7 @@ final class AppWindows {
         store.shutdown { [weak self] in
             guard let self else { return }
             self.stores[id] = nil
+            self.controllers[id] = nil
             self.observers.removeValue(forKey: id)?.forEach(NotificationCenter.default.removeObserver)
         }
     }

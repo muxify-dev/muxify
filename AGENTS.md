@@ -14,6 +14,10 @@ To prove a change in the running app, use the e2e harness in `scripts/verify/`. 
 - Add a check that must stay true to its feature's suite, and commit it with the feature. Keep one-off probes in the run directory.
 - Checks must not take focus from the user. Follow "Do not take focus" in `scripts/verify/README.md`: reach a context-menu behavior through an accessibility action, not through the menu.
 
+## Views
+
+Before you add or move a view, read `docs/adr/0083-appkit-owns-the-app-its-windows-and-its-long-lists.md`: it says which views are AppKit and which are SwiftUI.
+
 ## Actions and Commands
 
 Design every new Action or Command as steps in the palette's view: run at once, choose a row, check Topics, type one value, or confirm. Read `docs/adr/0014-every-action-runs-in-the-palettes-view.md` before you add or change one. For an Action on several Topics, use the check step in `Sources/Muxify/UI/PaletteCheck.swift`, and read `docs/adr/0035-a-check-step-checks-topics-for-snooze-and-unsnooze.md`. A sheet or an alert that takes input needs its own ADR first.

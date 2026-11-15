@@ -4,6 +4,7 @@ HintVerification exposes Mark Read through the existing configured-shortcut acti
 This uses the normal keybinding path without taking keyboard focus from the user.
 """
 
+import subprocess
 import time
 import unittest
 
@@ -337,7 +338,10 @@ class AgentsUnread(TopicsSidebar):
 
     def test_git_view_visit_preserves_unread(self):
         self.configure(manual_read=False)
-        _, window, pane = self.agent_session('git-read-target', status='done', unread=True)
+        # Show Git View is disabled for a Window outside a repository (218dfa6), so the Agent runs in one.
+        repository = self.s.root/'git-read-target'
+        subprocess.run(['/usr/bin/git', 'init', '-q', '-b', 'main', str(repository)], check=True)
+        _, window, pane = self.agent_session('git-read-target', status='done', unread=True, directory=repository)
         self.s.show(window)
         self.s.wait_shown(window)
         self.assert_read(pane)

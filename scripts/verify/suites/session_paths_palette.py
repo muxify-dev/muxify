@@ -56,6 +56,14 @@ class SessionPathsPalette(unittest.TestCase):
         self.s.act('focus', 'palette-search')
         self.s.act('set', 'palette-search', text)
 
+    def restore_base(self):
+        """The server of the fixture again: the Session `base`, and no Session in a Session Path. Go to… lists a folder
+        that has a live Session as that Session, not as a Session Path, so a Session that a check starts in `saved-repo`
+        would hide the row that the next check looks for."""
+        if 'base' not in self.sessions():
+            self.s.tmux('new-session', '-d', '-s', 'base', '-c', str(self.s.root), '/bin/zsh -f')
+        self.s.tmux_ok('kill-session', '-t', '=saved-repo')
+
     def sessions(self):
         """The Session names on the sandbox server; none when no server runs."""
         listed = self.s.tmux_ok('list-sessions', '-F', '#{session_name}')
@@ -67,6 +75,7 @@ class SessionPathsPalette(unittest.TestCase):
         a No Topic Session in its folder, named after it. Every step is a press, so the check takes no focus."""
         socket = self.s.tmux('display-message', '-p', '#{socket_path}')
         self.assertTrue(os.path.realpath(socket).startswith(os.path.realpath(self.s.root)), socket)
+        self.addCleanup(self.restore_base)
         self.s.tmux_ok('kill-server')
         self.s.restart_app(LAUNCH_ARGS)
 

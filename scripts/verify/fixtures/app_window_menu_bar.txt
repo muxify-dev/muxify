@@ -1,0 +1,116 @@
+Muxify
+Muxify › About Muxify
+Muxify › ---
+Muxify › Open Config
+Muxify › Reload Config | ⇧⌘,
+Muxify › Install Extensions
+Muxify › Install Command Line Tool
+Muxify › Settings… | ⌘,
+Muxify › ---
+Muxify › Services
+Muxify › ---
+Muxify › Hide Muxify | ⌘H
+Muxify › Hide Others | ⌥⌘H
+Muxify › Show All
+Muxify › ---
+Muxify › Quit Muxify | ⌘Q
+File
+File › New Muxify Window | ⇧⌘N
+File › ---
+File › New Topic… | ⌘N
+File › Move Pane… | ⇧⌘T
+File › Move Window…
+File › Move Session… | ⇧⌘M
+File › Add a Session to Topic… | ⇧⌘A | disabled
+File › Settle Topic… | disabled
+File › ---
+File › Mark Read | ⇧⌘R
+File › Mark Unread | ⇧⌘U | disabled
+File › Mark All as Read | disabled
+File › ---
+File › New Tab | ⌘T
+File › New tmux Window
+File › New tmux Session
+File › ---
+File › ---
+File › Close | ⌘W | disabled
+File › Close All | ⌥⌘W | alternate
+Edit
+Edit › Undo | ⌘Z | disabled
+Edit › Redo | ⇧⌘Z | disabled
+Edit › ---
+Edit › Cut | ⌘X | disabled
+Edit › Copy | ⌘C | disabled
+Edit › Paste | ⌘V | disabled
+Edit › Delete | disabled
+Edit › Select All | ⌘A | disabled
+Edit › ---
+Edit › Writing Tools
+Edit › Writing Tools › Show Writing Tools | disabled
+Edit › Writing Tools › ---
+Edit › Writing Tools › Proofread | disabled
+Edit › Writing Tools › Rewrite | disabled
+Edit › Writing Tools › ---
+Edit › Writing Tools › Make Friendly | disabled
+Edit › Writing Tools › Make Professional | disabled
+Edit › Writing Tools › Make Concise | disabled
+Edit › Writing Tools › ---
+Edit › Writing Tools › Summarize | disabled
+Edit › Writing Tools › Create Key Points | disabled
+Edit › Writing Tools › Make List | disabled
+Edit › Writing Tools › Make Table | disabled
+Edit › Writing Tools › ---
+Edit › Writing Tools › Compose… | disabled
+Edit › AutoFill
+Edit › AutoFill › Contact… | disabled
+Edit › AutoFill › Passwords… | disabled
+Edit › AutoFill › Credit Card… | disabled
+Edit › Start Dictation | 🎤 | disabled
+Edit › Emoji & Symbols | ⌘Space
+View
+View › Hide Sidebar | ⌘S
+View › Switch to Sessions | ⌥⌘T
+View › Show Sessions | checked
+View › Show Agents | checked
+View › Show Panes
+View › Show Bench | ⇧⌘S | disabled
+View › Show Git View | ⌘G | disabled
+View › ---
+View › Commands | ⇧⌘P
+View › Go to… | ⌘P
+Browser
+Browser › Show Browser | ⌘B
+Browser › Hide Terminal | ⌘J | disabled
+Browser › Maximize | ⇧⌘↩
+Browser › Maximize Terminal | ⌥⌘J
+Browser › Maximize Browser | ⌥⌘B
+Browser › ---
+Browser › Open Location… | ⌘L
+Browser › ---
+Browser › Find… | ⌘F | disabled
+Browser › Find Next | disabled
+Browser › Find Previous | disabled
+Browser › ---
+Browser › Close Tab
+Browser › Reopen Closed Tab | ⇧⌘T | disabled
+Browser › Show Next Tab | ⇧⌘]
+Browser › Show Previous Tab | ⇧⌘[
+Browser › ---
+Browser › Back | ⌘[
+Browser › Forward | ⌘]
+Browser › Reload Page | ⌘R
+Browser › Copy URL | ⇧⌘C | disabled
+Browser › Show Developer Tools | ⌥⌘I | disabled
+Browser › ---
+Browser › Focus Terminal | ⇧⌘J
+Browser › Focus Browser | ⇧⌘B
+Browser › Toggle Focus | ⌘0
+Window
+Window › Minimize | ⌘M | disabled
+Window › Zoom | disabled
+Window › ---
+Window › Bring All to Front
+Window › ---
+Window › app-window
+Help
+Help › Muxify Help | ⌘?

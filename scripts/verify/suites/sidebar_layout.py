@@ -142,7 +142,13 @@ class SidebarLayout(unittest.TestCase):
     def move_client(self, sid):
         for tty in self.s.tmux('list-clients', '-F', '#{client_tty}').split():
             self.s.tmux('switch-client', '-c', tty, '-t', sid + ':')
-        self.s.wait_shown(sid + ':')
+        self.wait_shown(sid)
+
+    def wait_shown(self, sid):
+        # Sandbox.wait_shown reads a row's last element: in Sessions mode, layout-open's Pane badge, which has no value (8aa9b29).
+        window = self.s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
+        self.s.wait_rows(lambda rs: self.s.row('header-window-' + window, rs).get('accessibilityValue') == 'selected',
+                         'the app does not show ' + sid)
 
     def test_session_cards_one_keeps_only_the_location_card_open(self):
         self.addCleanup(self.move_client, self.sessions[0])
@@ -153,12 +159,16 @@ class SidebarLayout(unittest.TestCase):
         def expanded(key, rs):
             return self.s.row(key, rs).get('accessibilityValue', '').startswith('expanded')
         # The default `any` keeps every card the Location went to open.
-        self.s.wait_shown(self.sessions[0] + ':')
+        self.wait_shown(self.sessions[0])
         self.move_client(self.sessions[1])
         self.move_client(self.sessions[0])
         self.s.wait_rows(lambda rs: expanded(first, rs) and expanded(second, rs),
                          'with the default session_cards the card of the Session left behind closed')
-        self.write_config('sidebar:\n  session_cards: one\n')
+        # The app reads the Config a moment after the write, and a move before that follows the old rule. The Session
+        # title of the same Config shows that the app has read it.
+        self.write_config("sidebar:\n  session_cards: one\n  formats:\n    session:\n      title: 'one #{session_name}'\n")
+        self.s.wait_rows(lambda rs: self.s.row(first, rs).get('accessibilityLabel', '').startswith('one '),
+                         'the Sidebar did not read the Config with session_cards: one')
         self.move_client(self.sessions[1])
         self.s.wait_rows(lambda rs: expanded(second, rs) and not expanded(first, rs),
                          'session_cards: one leaves the card of the Session left behind open')
@@ -196,9 +206,12 @@ class SidebarLayout(unittest.TestCase):
         several cards puts that centre on another card's header, so the anchor at the last card presses a different one."""
         rs = self.s.wait_rows(lambda rs: all(self.s.has(key, rs) for key in [list_key] + card_keys),
                               'the list %s does not show the cards %s' % (list_key, card_keys))
-        list_bottom, list_top = frame(self.s.row(list_key, rs))
+        list_row = self.s.row(list_key, rs)
+        list_bottom, list_top = frame(list_row)
         cards = [frame(self.s.row(key, rs)) for key in card_keys]
-        spanning = [row for row in rs if 'accessibilityFrame' in row and row is not self.s.row(list_key, rs)
+        # The list's elements follow it in the depth-first dump; its page's NSHostingView (e27483b) comes before, with its frame.
+        inside = rs[next(index for index, row in enumerate(rs) if row is list_row) + 1:]
+        spanning = [row for row in inside if 'accessibilityFrame' in row
                     and list_bottom <= frame(row)[0] and frame(row)[1] <= list_top
                     and sum(frame(row)[0] <= bottom and top <= frame(row)[1] for bottom, top in cards) > 1]
         self.assertEqual(spanning, [], 'elements in %s cover more than one card' % list_key)

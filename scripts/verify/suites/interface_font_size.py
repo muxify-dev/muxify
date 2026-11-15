@@ -89,6 +89,8 @@ HEADER_BUTTON_SIDES = 8 + 8
 FIXTURE = ("sidebar:\n  panes: true\n  tag_placement: line\n  formats:\n    pane:\n      summary: 'Pane Summary'\n"
            'topics:\n  tags:\n    work: {color: blue}\n')
 IN_PLAY = '  in_play: 1\n'
+# Every Topic of setUpClass In Play, so each card shows, when a check sets no `topics.in_play`. The default is 3 (#134).
+ALL_IN_PLAY = '  in_play: 5\n'
 LAUNCH_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-agentsVisible', 'YES', '-sidebarWorkView', 'Topics']
 # The Git button's maximum width at 12, with its 16 points of padding (`HeaderGitButton`).
 GIT_BUTTON_MAX = 180 + HEADER_BUTTON_SIDES
@@ -210,6 +212,13 @@ def bounds(row):
     return tuple(map(float, re.findall(r'-?[\d.]+', row['accessibilityFrame'])))
 
 
+def init_repository(s, repo, branch):
+    """A new repository in the folder `repo`, on `branch`, with one commit."""
+    for args in [['init', '-q', '-b', branch], ['-c', 'user.name=Verify', '-c', 'user.email=verify@example.test',
+                                                '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'x']]:
+        subprocess.run(['git', '-C', str(repo), *args], env=s.env, check=True, capture_output=True)
+
+
 class InterfaceFontSize(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -217,6 +226,8 @@ class InterfaceFontSize(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         cls.project = s.root/'projects/alpha'
         cls.project.mkdir(parents=True)
+        # The header shows its Git button only in a repository, and the header check measures it.
+        init_repository(s, cls.project, 'main')
         cls.config = s.root/'config/muxify/config.yaml'
         cls.write_config('')
         store = TopicRecords(s.root/'state/muxify')
@@ -249,7 +260,7 @@ class InterfaceFontSize(unittest.TestCase):
     @classmethod
     def write_config(cls, extra, topics=''):
         """The Config with `extra` after the Session Paths, then the FIXTURE, whose `topics` section ends with `topics`."""
-        cls.config.write_text('sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n' + extra + FIXTURE + topics)
+        cls.config.write_text('sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n' + extra + FIXTURE + (topics or ALL_IN_PLAY))
 
     def set_size(self, size, topics='', extra=''):
         """Writes `ui.font_size`, then `extra`, and waits until the Sidebar has the width of an undragged Sidebar at that
@@ -404,7 +415,8 @@ class InterfaceFontSize(unittest.TestCase):
                          lambda: 'the Benched card of the Location does not show alone under the hidden line: %s'
                          % self.after_line(s.rows()))
         before = self.top(key, rs)
-        s.act('press', LINE)
+        # A click, as the user's: after the driver's press the scroll that keeps the card in place lands late or never.
+        s.act('click', LINE)
         rs = s.wait_rows(lambda rs: s.row(LINE, rs).get('accessibilityLabel') == 'Hide Bench'
                          and abs(self.under_pill(key, rs)) <= ROUNDING,
                          lambda: 'the card of the Location is not directly under the "more above" pill: %s'
@@ -488,9 +500,7 @@ class InterfaceFontSize(unittest.TestCase):
         repo = s.root/'projects/fs-branch'
         repo.mkdir(parents=True, exist_ok=True)
         branch = 'fs-branch/' + 'long-' * 30 + 'end'
-        for args in [['init', '-q', '-b', branch], ['-c', 'user.name=Verify', '-c', 'user.email=verify@example.test',
-                                                    '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'x']]:
-            subprocess.run(['git', '-C', str(repo), *args], env=s.env, check=True, capture_output=True)
+        init_repository(s, repo, branch)
         sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'fs-branch', '-c', str(repo), SHELL)
         self.addCleanup(s.tmux_ok, 'kill-session', '-t', sid)
         window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
@@ -570,9 +580,7 @@ class InterfaceFontSize(unittest.TestCase):
         s = self.s
         repo = s.root/'projects'/name
         repo.mkdir(parents=True)
-        for args in [['init', '-q', '-b', 'main'], ['-c', 'user.name=Verify', '-c', 'user.email=verify@example.test',
-                                                    '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'x']]:
-            subprocess.run(['git', '-C', str(repo), *args], env=s.env, check=True, capture_output=True)
+        init_repository(s, repo, 'main')
         for file in files:
             (repo/file).write_text('one\n')
         sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name, '-c', str(repo), SHELL)

@@ -13,6 +13,12 @@ from scripts.verify.sandbox import wait
 
 
 class PaletteCurrentCommands(PaletteFixture):
+    @classmethod
+    def config_text(cls, tags=None):
+        # The checks move four Topics among 5 In Play places, the default until 07dd51f (#134) made it 3; with 3, the
+        # fourth Topic waits on the hidden Bench.
+        return super().config_text(tags) + 'topics:\n  in_play: 5\n'
+
     def back(self, title):
         self.s.act('action', 'palette-search', 'Back')
         self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == title

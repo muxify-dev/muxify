@@ -24,6 +24,14 @@ AGENT_WINDOW_FIELDS = ['session', 'topic', 'window', 'pane', 'pane_pid', 'comman
 
 
 class TopicsCardsSidebar(TopicsSidebar):
+    def setUp(self):
+        super().setUp()
+        # Forget, Settle and Pin of an In Play card leave an Open Place that keeps its place (bf1fc3a). With 3 places
+        # (07dd51f), those that earlier checks left put this check's Topics on the hidden Bench, where find misses them.
+        self.store.set_open_places([])
+        self.s.wait_rows(lambda rs: not any(key.startswith('open-place-') for key in self.s.ids(rs)),
+                         lambda: 'the Sidebar still shows an Open Place: %s' % self.store.open_places())
+
     def wait_selected(self, window):
         """Waits until the app selects the Window. tmux moves the client at once, but the app follows it only at its
         next read, and until then it still keeps the last Window of the Topic that it shows."""
@@ -265,7 +273,13 @@ class TopicsCardsSidebar(TopicsSidebar):
         window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
         self.open_card('topic-' + topic)
         keys = ['card-topic-' + topic, 'settle-topic-' + topic, 'topic-window-' + window]
-        rs = s.wait_rows(lambda rs: all(s.has(key, rs) for key in keys), 'the open card misses one of %s' % keys)
+        # The rows show as the card starts to open, and the card grows to its footer line in its glide. So the frames
+        # count once two dumps in a row have them in one place.
+        frames = []
+        def at_rest(rs):
+            frames.append([s.row(key, rs).get('accessibilityFrame') for key in keys] if all(s.has(key, rs) for key in keys) else None)
+            return len(frames) >= 2 and frames[-1] is not None and frames[-1] == frames[-2]
+        rs = s.wait_rows(at_rest, lambda: 'the open card misses one of %s, or does not come to rest: %s' % (keys, frames[-3:]))
         card, settle, row = (frame(s.row(key, rs)) for key in keys)
         # frame() is (bottom, top), a larger value higher on screen.
         self.assertLessEqual(settle[1], row[0] + 1, 'Settle %s is not on the footer line below the row %s' % (settle, row))
@@ -542,7 +556,8 @@ class TopicsCardsSidebar(TopicsSidebar):
         s.tmux('split-window', '-d', '-t', sid + ':', '-c', str(self.alpha), 'sleep 6061')
 
         def remembered():
-            windows = self.records().get('split-dormant', {}).get('sessions', [{}])[0].get('windows', [])
+            # A record read from the state database has `sessions: []` until the app saves the Session (a3308a1).
+            windows = (self.records().get('split-dormant', {}).get('sessions') or [{}])[0].get('windows', [])
             panes = windows[0].get('panes', []) if windows else []
             return len(panes) == 3 and any(pane.get('command') == 'sleep 6061' for pane in panes)
         wait(remembered, 'the Topic did not remember three Panes and the program: %s' % self.records().get('split-dormant'))

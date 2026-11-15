@@ -115,8 +115,11 @@ class TopicsGroupsSidebar(TopicsSidebar):
         self.s.act('press', 'reopen-topic-group-settled')
         self.wait_session('alpha/group-settled')
         self.addCleanup(self.end_session, self.s.tmux('display-message', '-p', '-t', '=alpha/group-settled:', '#{session_id}'))
-        self.assertFalse(self.s.has('reopen-choice-reopen'), 'the Reopen link showed the Reopen choice')
+        # Once the App Window shows the new Session. The Empty Topic page offers the Reopen choice only while the app has
+        # not read the Topic's live Session yet, and tmux has the Session before the app's next read of it: under load a
+        # dump taken right after tmux had it still showed that page.
         self.s.wait_shown('=alpha/group-settled:')
+        self.assertFalse(self.s.has('reopen-choice-reopen'), 'the Reopen link showed the Reopen choice')
         latency, rs = self.rows_until(lambda rs: self.s.has('topic-group-settled', rs)
                                       and not self.grouped('topic-group-settled', 'settled-topics', rs))
         self.assertIsNotNone(latency, 'Reopen did not return the Topic to the Topics list; Topic rows %s' % self.topic_rows(rs))
@@ -126,10 +129,12 @@ class TopicsGroupsSidebar(TopicsSidebar):
         s = self.s
         topic = 'age-today'
         self.write_topic(topic, 'Age today', self.beta)
-        self.new_session('age-today', self.beta, topic=topic)
+        sid = self.new_session('age-today', self.beta, topic=topic)
         self.find('settle-topic-' + topic)
         s.act('press', 'settle-topic-' + topic)
-        s.wait_rows(lambda rs: s.has('palette-accept', rs), 'Settle did not open the Settle palette')
+        # Accept is disabled until the step has read the Topic's Sessions, and a press before that does nothing.
+        s.wait_rows(lambda rs: s.has('palette-accept', rs) and s.has('palette-row-session-' + sid, rs),
+                    'Settle did not open the Settle palette with the Topic\'s Session')
         s.act('press', 'palette-accept')
         wait(lambda: self.records()[topic].get('settled_at'), 'Settle did not save the settle date')
         self.expand('settled-topics')

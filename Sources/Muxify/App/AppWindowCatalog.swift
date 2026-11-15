@@ -1,6 +1,6 @@
 import Foundation
 
-/// Stable SwiftUI scene identity; Environment names resolve against live Config.
+/// An App Window's identity, which its window controller keeps for its life; Environment names resolve against live Config.
 struct AppWindowRequest: Codable, Hashable, Identifiable {
     let id: UUID
     var environmentName: String?

@@ -57,12 +57,6 @@ struct SettingsView: View {
             }
         }
         .navigationTitle(query.isEmpty ? "Settings: \(section)" : "Settings")
-        .frame(minWidth: 820, idealWidth: 960, minHeight: 540, idealHeight: 700)
-        .background(AppWindowRegistration { window in
-            // Settings closes; it neither minimizes nor zooms.
-            window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-            window.standardWindowButton(.zoomButton)?.isHidden = true
-        })
         .onAppear { model.revertIfUnchanged() }
         .onChange(of: model.configStore.config) { model.revertIfUnchanged() }
     }

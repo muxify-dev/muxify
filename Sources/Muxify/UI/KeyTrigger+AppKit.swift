@@ -1,6 +1,5 @@
 import AppKit
 import Carbon.HIToolbox
-import SwiftUI
 import MuxifyCore
 
 extension KeyTrigger {
@@ -17,16 +16,18 @@ extension KeyTrigger {
         }
     }
 
-    var shortcut: KeyboardShortcut {
-        var eventModifiers: SwiftUI.EventModifiers = []
-        if modifiers.contains(.control) { eventModifiers.insert(.control) }
-        if modifiers.contains(.option) { eventModifiers.insert(.option) }
-        if modifiers.contains(.shift) { eventModifiers.insert(.shift) }
-        if modifiers.contains(.command) { eventModifiers.insert(.command) }
+    /// Shows the trigger as the item's shortcut.
+    func show(in item: NSMenuItem) {
         switch key {
-        case .character(let character): return KeyboardShortcut(KeyEquivalent(character), modifiers: eventModifiers)
-        case .special(let special): return KeyboardShortcut(special.keyEquivalent, modifiers: eventModifiers)
+        case .character(let character): item.keyEquivalent = String(character)
+        case .special(let special): item.keyEquivalent = special.keyEquivalent
         }
+        var flags: NSEvent.ModifierFlags = []
+        if modifiers.contains(.control) { flags.insert(.control) }
+        if modifiers.contains(.option) { flags.insert(.option) }
+        if modifiers.contains(.shift) { flags.insert(.shift) }
+        if modifiers.contains(.command) { flags.insert(.command) }
+        item.keyEquivalentModifierMask = flags
     }
 
     /// As macOS writes shortcuts in menus, e.g. `⌃⌘S`.
@@ -98,17 +99,18 @@ private extension KeyTrigger.SpecialKey {
         }
     }
 
-    var keyEquivalent: KeyEquivalent {
+    /// The character a menu item's key equivalent names the key by.
+    var keyEquivalent: String {
         switch self {
-        case .enter: .return
-        case .tab: .tab
-        case .escape: .escape
-        case .backspace: .delete
-        case .delete: .deleteForward
-        case .left: .leftArrow
-        case .right: .rightArrow
-        case .down: .downArrow
-        case .up: .upArrow
+        case .enter: "\r"
+        case .tab: "\t"
+        case .escape: "\u{1B}"
+        case .backspace: "\u{8}"
+        case .delete: "\u{F728}"
+        case .left: "\u{F702}"
+        case .right: "\u{F703}"
+        case .down: "\u{F701}"
+        case .up: "\u{F700}"
         }
     }
 

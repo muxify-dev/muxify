@@ -113,7 +113,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         self.hide_bench()
         s.show(windows[z])
         s.wait_rows(lambda rs: self.shown_after_line(rs) == [z], 'the Benched card of the Location does not show under the line')
-        self.show_bench()
+        self.show_bench('click')
         rs = s.wait_rows(lambda rs: self.more_above(rs) == len(bench) - 1, 'the "more above" pill does not count the cards before z')
         self.assertEqual(self.tops_in_pill(bench, rs), [], 'the pill covers the top of a Benched card')
         self.assertAlmostEqual(self.under_pill(z, rs), 0, delta=1, msg='the card of the Location is not directly under the pill')
@@ -127,7 +127,8 @@ class TopicsBenchSidebar(TopicsSidebar):
         rs = s.wait_rows(lambda rs: self.shown_after_line(rs) == [z],
                          'the Benched card of the Location does not show alone under the line: %s' % self.shown_after_line(s.rows()))
         before = {key: self.top(key, rs) for key in (z, LINE)}
-        shown = s.act('press', LINE, watch=[z, LINE], watch_seconds=1)
+        # A click, as in show_bench('click'): after the driver's press the card's keeping scroll lands late or never.
+        shown = s.act('click', LINE, watch=[z, LINE], watch_seconds=1)
         rs = s.wait_rows(lambda rs: self.line(rs) == 'Hide Bench', 'the Bench did not show')
         # The card moves down by the pill's band, out from under the pill that counts the cards before it, and no more.
         self.assertAlmostEqual(self.top(z, rs), before[z] - PILL, delta=1,
@@ -159,7 +160,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         self.hide_bench()
         s.show(windows[z])
         s.wait_rows(lambda rs: self.shown_after_line(rs) == [z], 'the Benched card of the Location does not show under the line')
-        self.show_bench()
+        self.show_bench('click')
         s.wait_rows(lambda rs: self.more_above(rs) == len(bench) - 1, 'the "more above" pill does not count the cards before z')
         s.act('press', 'topics-more-above')
         rs = s.wait_rows(lambda rs: abs(self.under_pill(bench[-2], rs)) <= 1,
@@ -206,9 +207,11 @@ class TopicsBenchSidebar(TopicsSidebar):
             self.s.act('press', LINE)
         self.s.wait_rows(lambda rs: self.line(rs) == 'Bench', 'the Bench did not hide')
 
-    def show_bench(self):
+    def show_bench(self, command='press'):
+        """`command='click'` shows it as the user's click does. After the driver's press, the scroll that keeps the
+        Location's Benched card in place lands a frame late or not at all, and the Bench opens at its top."""
         if self.line(self.s.rows()) == 'Bench':
-            self.s.act('press', LINE)
+            self.s.act(command, LINE)
         self.s.wait_rows(lambda rs: self.line(rs) == 'Hide Bench', 'the Bench did not show')
 
     def test_a_new_topic_goes_to_the_top_of_the_bench(self):
@@ -560,7 +563,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         s.wait_rows(lambda rs: self.shown_after_line(rs) == ['topic-bench-visit-open-c'],
                     'the Benched card of the Location does not show under the line: %s' % s.ids())
         saved = self.orders('bench-visit-open')
-        self.show_bench()
+        self.show_bench('click')
         b, c = 'topic-bench-visit-open-b', 'topic-bench-visit-open-c'
         rs = s.wait_rows(lambda rs: s.has(b, rs) and self.more_above(rs) == 1,
                          'the shown Bench does not show b above the area: %s' % self.describe('topics-more-above', s.rows()))
