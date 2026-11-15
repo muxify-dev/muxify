@@ -62,15 +62,27 @@ final class AppWindows {
         for tokens in observers.values { tokens.forEach(NotificationCenter.default.removeObserver) }
     }
 
-    /// The App Window that launch opens, on the Environment that was focused last.
+    /// The App Window that launch opens, on the Environment that was focused last, when AppKit restored none.
     func openFirstWindow() {
+        guard catalog.requests.isEmpty else { return }
         openWindow(catalog.openEnvironment(named: initialEnvironmentName))
     }
 
     private func makeWindow(for request: AppWindowRequest) {
+        controller(for: request).showWindow(nil)
+    }
+
+    /// The window of an App Window that AppKit restores at launch. AppKit puts it back where it was and shows it.
+    func restoreWindow(for request: AppWindowRequest) -> NSWindow? {
+        controller(for: request).window
+    }
+
+    /// Each App Window request gets one window controller, and with it one store.
+    private func controller(for request: AppWindowRequest) -> AppWindowController {
+        if let controller = controllers[request.id] { return controller }
         let controller = AppWindowController(request: request, store: store(for: request), windows: self)
         controllers[request.id] = controller
-        controller.showWindow(nil)
+        return controller
     }
 
     func showSettings() {
@@ -169,6 +181,7 @@ final class AppWindows {
     func updateEnvironment(for id: UUID) {
         guard let store = stores[id] else { return }
         catalog.updateEnvironment(id, name: store.activeEnvironment?.name)
+        nativeWindows[id]?.invalidateRestorableState()
         if focusedID == id { remember(store.activeEnvironment?.name) }
     }
 

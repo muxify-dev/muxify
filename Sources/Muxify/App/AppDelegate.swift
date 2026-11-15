@@ -2,7 +2,7 @@ import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Nil in the tests, which drive the launch queue and the termination flow alone.
-    private let windows: AppWindows?
+    let windows: AppWindows?
     /// The Sparkle updater, kept for the app's life. The tests build without Sparkle.
     private let updater: AnyObject?
     private var mainMenu: MainMenu?
@@ -30,11 +30,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard let windows else { return }
         shutdown = windows.shutdown
+        // AppKit restores the App Windows it kept before this call, so the first App Window opens only without them.
         windows.openFirstWindow()
         openURLs = { $0.forEach(windows.handle) }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// AppKit restores App Windows (`AppWindowRestoration`) with secure coding, as it requires from macOS 14.
+    func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
         // The GUI is exiting; surviving tmux jobs must not keep its Dock item alive.

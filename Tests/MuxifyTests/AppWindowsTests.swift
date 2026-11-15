@@ -48,6 +48,22 @@ final class AppWindowsTests: XCTestCase {
         }
     }
 
+    @MainActor func testARestoredRequestMakesOneAppWindowOnAnEnvironmentTheConfigHas() throws {
+        try withWindows { windows, _ in
+            var opened: [AppWindowRequest] = []
+            windows.openWindow = { opened.append($0) }
+            let request = AppWindowRequest(environmentName: "Gone")
+            let window = try XCTUnwrap(windows.restoreWindow(for: request))
+            let store = windows.store(for: request)
+            XCTAssertTrue(windows.restoreWindow(for: request) === window)
+            XCTAssertTrue(windows.store(for: request) === store)
+            XCTAssertNil(store.activeEnvironment)
+            XCTAssertEqual(store.shouldConsumeOpenRequests?(), true)
+            windows.openFirstWindow()
+            XCTAssertTrue(opened.isEmpty, "launch opened a default App Window beside the restored one")
+        }
+    }
+
     @MainActor func testDuplicateNativeRegistrationCannotReplaceTheOwningWindow() throws {
         try withWindows { windows, _ in
             let request = AppWindowRequest()
