@@ -154,12 +154,15 @@ class Diagnostics(unittest.TestCase):
         wait(lambda: 'unknown key "sessions.diagnostics_probe"' in self.log_text(), 'no Config problem in the log', 10)
 
     def test_freeze_is_logged_with_a_sample_taken_during_it(self):
+        # Under load, the driver's first dump at launch freezes the app too, and its sample shows no stall.
+        before = {path.name for path in self.logs.glob('freeze-*.txt')}
         # sample takes about a second to start recording, and the app starts it a second into a freeze.
         self.s.act('stall', seconds=4)
         wait(lambda: 'freeze: main thread busy for 4.' in self.log_text(), 'no freeze line in the log', 10)
 
         def finished_samples():
-            return [path for path in self.logs.glob('freeze-*.txt') if 'Binary Images:' in path.read_text(errors='replace')]
+            return [path for path in self.logs.glob('freeze-*.txt')
+                    if path.name not in before and 'Binary Images:' in path.read_text(errors='replace')]
         # Under load, sample can start recording seconds after the app starts it, when the first stall has ended.
         # Stalling on until the sample is written keeps the main thread in the stall while it records.
         deadline = time.monotonic() + 20

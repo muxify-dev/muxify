@@ -49,12 +49,14 @@ class GitViewRemotes(GitViewFixture):
 
     def fake_ssh(self, name):
         """An ssh for git's core.sshCommand that, once the file `go` exists, asks for a passphrase on its terminal as
-        ssh does, writes the answer to `answers`, and serves the repository only for the answer `right`."""
+        ssh does, writes the answer to `answers`, and serves the repository only for the answer `right`. A check that
+        ends before `go` lets it fail: a fetch still waiting on it would make the f of the next checks do nothing."""
         folder = self.s.root/name
         folder.mkdir()
-        go, answers, ssh = folder/'go', folder/'answers', folder/'ssh'
+        go, stop, answers, ssh = folder/'go', folder/'stop', folder/'answers', folder/'ssh'
+        self.addCleanup(stop.touch)
         ssh.write_text('#!/bin/sh\n'
-                       f'while [ ! -e {shlex.quote(str(go))} ]; do sleep .1; done\n'
+                       f'while [ ! -e {shlex.quote(str(go))} ]; do [ -e {shlex.quote(str(stop))} ] && exit 255; sleep .1; done\n'
                        'printf "Enter passphrase for key \'/fake/id\': " > /dev/tty\n'
                        'IFS= read -r answer < /dev/tty\n'
                        f'printf \'%s\\n\' "$answer" >> {shlex.quote(str(answers))}\n'
@@ -230,6 +232,12 @@ class GitViewRemotes(GitViewFixture):
         self.addCleanup(self.take_back, before, 'remote.txt')
         question = "Enter passphrase for key '/fake/id':"
         self.read_upstream()
+        # Space stages or unstages the change as the Git View last read it. The check before this one staged new.txt in
+        # the app, and its clean-up unstaged it behind the app's back. The Git View opens again on the snapshot it read
+        # last and reads the repository after it, so under load it still showed new.txt staged here: space queued an
+        # unstage, and nothing was staged after the pull.
+        self.s.wait_rows(lambda rs: self.status(self.s.row('git-row-change:new.txt', rs)) == '??',
+                         'the Git View does not show new.txt untracked', seconds=15)
         self.select_row('git-row-change:new.txt')
         self.key('p')
         self.s.wait_rows(lambda rs: 'Pulling…' in self.toolbar(rs), 'the toolbar does not show Pulling…')

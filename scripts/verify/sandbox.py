@@ -319,7 +319,10 @@ class Sandbox:
         SwiftUI elements. Without that request SwiftUI gives the driver an App Window with no elements."""
         while True:
             woke = ax_wake(self.pid)
-            if any(row.get('accessibilityIdentifier') for row in self.driver('dump')['rows']):
+            ids = [row.get('accessibilityIdentifier', '') for row in self.driver('dump')['rows']]
+            # The traffic lights' cells have identifiers from the window's start (AppWindows.register), before SwiftUI
+            # builds its tree, so they do not show that the tree is there.
+            if any(key and not key.startswith('traffic-light-') for key in ids):
                 return
             assert time.monotonic() < deadline, ('the driver sees no SwiftUI elements: ax_wake exit %d %s'
                                                  % (woke.returncode, woke.stderr.strip()))

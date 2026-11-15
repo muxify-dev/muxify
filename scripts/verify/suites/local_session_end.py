@@ -36,10 +36,13 @@ class LocalSessionEnd(unittest.TestCase):
             wait(lambda: not alive(self.s.pid), 'app %d still runs after SIGKILL' % self.s.pid, seconds=5)
 
     def open_alone(self, session):
-        """Makes a Session with one Window and shows it."""
+        """Makes a Session with one Window, moves the Terminal's Client to it and waits until the app shows it."""
         window = self.s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', session, '-c', str(self.s.root),
                              '/bin/sh')
-        self.s.show(window)
+        tty, _ = self.client()
+        # show() can return before the app reads its Client there, and then the close looks like a detach to the app.
+        self.s.tmux('switch-client', '-c', tty, '-t', window)
+        self.s.wait_shown(window)
         return window
 
     def test_closing_the_last_window_of_a_session_opens_another_session(self):

@@ -16,6 +16,14 @@ PILL = 30
 
 
 class TopicsOverflowSidebar(TopicsSidebar):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # In Play is the only Topics mode (bf1fc3a), and the Topics past `topics.in_play` wait on the hidden Bench, so
+        # every Topic of a check takes a place, and the list is longer than the Sidebar.
+        cls.config_text += 'topics:\n  in_play: %d\n' % (COUNT + 10)
+        cls.config.write_text(cls.config_text)
+
     def more_below(self, rs):
         found = re.search(r'(\d+) more below', self.s.row('topics-more-below', rs).get('accessibilityLabel', ''))
         return int(found.group(1)) if found else None

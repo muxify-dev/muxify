@@ -415,7 +415,8 @@ class InterfaceFontSize(unittest.TestCase):
                          lambda: 'the Benched card of the Location does not show alone under the hidden line: %s'
                          % self.after_line(s.rows()))
         before = self.top(key, rs)
-        s.act('press', LINE)
+        # A click, as the user's: after the driver's press the scroll that keeps the card in place lands late or never.
+        s.act('click', LINE)
         rs = s.wait_rows(lambda rs: s.row(LINE, rs).get('accessibilityLabel') == 'Hide Bench'
                          and abs(self.under_pill(key, rs)) <= ROUNDING,
                          lambda: 'the card of the Location is not directly under the "more above" pill: %s'

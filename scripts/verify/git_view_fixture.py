@@ -280,7 +280,9 @@ class GitViewFixture(unittest.TestCase):
         return self.git('stash', 'list', '--format=%gs').splitlines()
 
     def porcelain(self):
-        return self.git('status', '--porcelain', '--untracked-files=all').splitlines()
+        # Without optional locks: a plain `git status` holds index.lock while it runs, and a staging of the app that
+        # starts in that moment fails ("Unable to create index.lock"), so a check that polls would cause its failure.
+        return self.git('--no-optional-locks', 'status', '--porcelain', '--untracked-files=all').splitlines()
 
     def back_to_main(self):
         self.git('checkout', '-q', 'main')
