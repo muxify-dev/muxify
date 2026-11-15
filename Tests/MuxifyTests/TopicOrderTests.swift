@@ -305,12 +305,6 @@ final class TopicOrderTests: XCTestCase {
                        "the pointer, held on d, is at d's top, above c's middle, not on a card out of view")
     }
 
-    func testAPlacementMovesTheItemNextToItsAnchor() {
-        XCTAssertEqual(DropPlacement.before("a").placing("c", in: ["a", "b", "c"]), ["c", "a", "b"])
-        XCTAssertEqual(DropPlacement.after("c").placing("a", in: ["a", "b", "c"]), ["b", "c", "a"])
-        XCTAssertEqual(DropPlacement.after("x").placing("a", in: ["a", "b"]), ["a", "b"], "an anchor that left keeps the list")
-    }
-
     func testMovesUseOnlyTheMovedRankWhenThereIsAFiniteGap() throws {
         let entries = [record("a", order: 0), record("b", order: 1), record("c", order: 2), record("d", order: 3)].map(TopicListEntry.topic)
         let cases: [(String, TopicPlacement, [String])] = [

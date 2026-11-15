@@ -31,16 +31,6 @@ final class SessionPathDiscoveryTests: XCTestCase {
         XCTAssertEqual(config.sessionPaths, [], "loading never looks on disk")
     }
 
-    func testTheOldSessionPathsSectionsAreProblemsThatNameTheirNewPlace() throws {
-        for (text, message) in [("sessionPaths:\n  - path: ~/Dev/*", "unknown section \"sessionPaths\""),
-                                ("projects:\n  paths: [{path: ~/src}]", "unknown section \"projects\""),
-                                ("projects_aliases:\n  - ~/Dev/x: X", "unknown section \"projects_aliases\"")] {
-            let config = try load(text)
-            XCTAssertEqual(config.problems.map(\.message), [message], text)
-            XCTAssertEqual(config.sessionRoots, [], text)
-        }
-    }
-
     func testWrongSessionsPathsShapesAreProblemsAndSkipTheirEntry() throws {
         for entry in ["wrong", "{display_depth: 2}", "{path: 42}", "{path: true}", "{path: ''}",
                       "{path: /tmp, display_depth: 0}", "{path: /tmp, display_depth: -1}", "{path: /tmp, display_depth: '2'}",

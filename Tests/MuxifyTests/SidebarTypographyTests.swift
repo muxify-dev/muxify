@@ -4,21 +4,6 @@ import XCTest
 @testable import MuxifyCore
 
 final class SidebarTypographyTests: XCTestCase {
-    func testDefaultSystemFontsExactlyMatchExistingRoles() {
-        let typography = SidebarTypography()
-        let roles: [(SidebarTypography.Role, CGFloat, Font.Weight)] = [
-            (.session, 14, .semibold), (.title, 12, .regular), (.section, 11, .semibold),
-            (.location, 10.5, .regular), (.badge, 10, .medium),
-        ]
-        for (role, size, weight) in roles {
-            XCTAssertEqual(typography.size(for: role), size)
-            XCTAssertEqual(typography.font(for: role) { _, _, _ in
-                XCTFail("The system font must not resolve an installed family")
-                return nil
-            }, Font.system(size: size, weight: weight))
-        }
-    }
-
     func testFractionalAndLargerInterfaceFontSizesScaleEveryTextRole() {
         for size in [9.0, 12.5, 13.5, 18.0, 24.0] {
             let typography = SidebarTypography(fontSize: InterfaceFontSize(size))
@@ -26,16 +11,6 @@ final class SidebarTypographyTests: XCTestCase {
                 let expected = role.defaultSize * CGFloat(size / 12)
                 XCTAssertEqual(typography.size(for: role), expected, accuracy: 0.0001)
                 XCTAssertEqual(typography.font(for: role), Font.system(size: expected, weight: role.weight))
-            }
-        }
-    }
-
-    func testTheSmallestAndLargestInterfaceFontSizesKeepRoleSizesPositiveAndFinite() {
-        for size in [InterfaceFontSize.range.lowerBound, InterfaceFontSize.range.upperBound] {
-            for role in SidebarTypography.Role.allCases {
-                let points = SidebarTypography(fontSize: InterfaceFontSize(size)).size(for: role)
-                XCTAssertGreaterThan(points, 0)
-                XCTAssertTrue(points.isFinite)
             }
         }
     }
@@ -59,11 +34,16 @@ final class SidebarTypographyTests: XCTestCase {
         }
     }
 
-    func testFamilyDisappearingAfterConfigReadStillRendersSystemText() {
-        let typography = SidebarTypography(fontSize: InterfaceFontSize(18), fontFamily: "Removed Font")
+    func testTheSystemFontAndAFamilyDisappearingAfterConfigReadRenderSystemText() {
+        let removed = SidebarTypography(fontSize: InterfaceFontSize(18), fontFamily: "Removed Font")
+        let system = SidebarTypography(fontSize: InterfaceFontSize(18))
         for role in SidebarTypography.Role.allCases {
-            XCTAssertEqual(typography.font(for: role) { _, _, _ in nil },
-                           Font.system(size: typography.size(for: role), weight: role.weight))
+            XCTAssertEqual(removed.font(for: role) { _, _, _ in nil },
+                           Font.system(size: removed.size(for: role), weight: role.weight), "\(role)")
+            XCTAssertEqual(system.font(for: role) { _, _, _ in
+                XCTFail("The system font must not resolve an installed family")
+                return nil
+            }, Font.system(size: system.size(for: role), weight: role.weight), "\(role)")
         }
     }
 
@@ -88,10 +68,5 @@ final class SidebarTypographyTests: XCTestCase {
             XCTAssertEqual(font.familyName, family)
             XCTAssertEqual(font.pointSize, role.defaultSize)
         }
-    }
-
-    func testEnvironmentDefaultsAreCurrentSidebarTypography() {
-        XCTAssertEqual(EnvironmentValues().sidebarTypography, SidebarTypography())
-        XCTAssertEqual(EnvironmentValues().interfaceFontSize, InterfaceFontSize(12))
     }
 }

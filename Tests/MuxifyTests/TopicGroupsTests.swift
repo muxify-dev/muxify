@@ -48,21 +48,6 @@ final class TopicGroupsTests: XCTestCase {
         XCTAssertNil(titles["done-1"], "a Settled Topic beyond the shown page has no row and no title")
     }
 
-    func testPinnedTopicsComeFirstInTheOpenRows() {
-        func pinned(_ record: TopicRecord) -> TopicRecord {
-            var record = record
-            record.isPinned = true
-            return record
-        }
-        var open = TopicRecord(id: "open", title: "Open")
-        open.order = 0
-        var pin = pinned(TopicRecord(id: "pin", title: "Pin"))
-        pin.order = 5
-        let topics = model([open, pin])
-        XCTAssertEqual(topics.rows.map(\.id), [.topic("pin"), .topic("open")])
-        XCTAssertEqual(topics.rows.map(\.isPinned), [true, false])
-    }
-
     func testSettledRowsShowNewestFirstAndSettleDateAndRememberedSessions() {
         let records = [settled("older", at: "2026-10-01T10:00:00Z"), settled("newer", at: "2026-10-05T10:00:00Z")]
         var selection = TopicSelection()

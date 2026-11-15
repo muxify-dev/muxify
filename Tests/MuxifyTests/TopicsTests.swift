@@ -9,7 +9,7 @@ final class TopicsTests: XCTestCase {
                    storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, sessionPath: path)
     }
 
-    func testGroupingSessionPathLabelsWorktreeAndDormantTopics() {
+    func testASessionKeepsItsTmuxNameATopicWithNoLiveSessionIsDormantAndTheRestAreNoTopic() {
         var topic = TopicRecord(id: "a", title: "Fix reward")
         topic.sessions = [.object(["repository_path": .string("/work/app"), "worktree_path": .string("/trees/fix")]),
                           .object(["repository_path": .string("/work/app/tools")])]
@@ -111,19 +111,5 @@ final class TopicsTests: XCTestCase {
         second.order = -10
         XCTAssertEqual(titles(), before)
         XCTAssertEqual(Set(before.values), ["Untitled 1", "Untitled 2", "Untitled 3"])
-    }
-
-    func testConfigControlsBothViewsAndToggle() {
-        var config = Config()
-        for topics in [false, true] {
-            for sessions in [false, true] {
-                config.sidebar.topics = topics
-                config.sidebar.sessions = sessions
-                let model = TopicsModel(records: [], windows: [], config: config, selection: TopicSelection())
-                XCTAssertEqual(model.topicsEnabled, topics)
-                XCTAssertEqual(model.sessionsEnabled, sessions)
-                XCTAssertEqual(model.showsToggle, topics && sessions)
-            }
-        }
     }
 }

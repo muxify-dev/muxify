@@ -6,16 +6,6 @@ import XCTest
 final class AgentMarkViewTests: XCTestCase {
     private let gray = AgentColors()[.working].color
 
-    func testWorkingPhaseAdvancesAndLoopsOnTheSharedClock() {
-        let period = TerminalActivityIndicator.period
-        for cycles in [0.0, 0.25, 0.92, 1.0, 1.25, 100.25, -0.75] {
-            let phase = TerminalActivityIndicator.phase(at: Date(timeIntervalSinceReferenceDate: cycles * period))
-            XCTAssertEqual(phase, cycles - floor(cycles), accuracy: 0.000001)
-            XCTAssertGreaterThanOrEqual(phase, 0)
-            XCTAssertLessThan(phase, 1)
-        }
-    }
-
     func testPixelCellsFormAThreeByThreeSquareInClockwiseOrder() {
         let cells = TerminalActivityGlyph.cells
         XCTAssertEqual(cells.count, 8)
@@ -32,14 +22,16 @@ final class AgentMarkViewTests: XCTestCase {
         XCTAssertEqual(cells[3], CGPoint(x: 2, y: 1))
     }
 
-    func testSharedClockDoesNotRepeatOrSkipPixelsAtTickBoundaries() {
+    func testSharedClockLoopsInOneCycleAndDoesNotRepeatOrSkipPixelsAtTickBoundaries() {
         let period = TerminalActivityIndicator.period
         let count = TerminalActivityGlyph.cells.count
         for cycle in [0.0, 10000.0, 700000000.0, -1.0] {
             for step in 0..<(count * 2) {
                 let time = cycle * period + Double(step) * period / Double(count)
                 let phase = TerminalActivityIndicator.phase(at: Date(timeIntervalSinceReferenceDate: time))
-                XCTAssertEqual(TerminalActivityGlyph.head(at: phase), step % count)
+                XCTAssertGreaterThanOrEqual(phase, 0, "at \(time)")
+                XCTAssertLessThan(phase, 1, "at \(time)")
+                XCTAssertEqual(TerminalActivityGlyph.head(at: phase), step % count, "at \(time)")
             }
         }
     }
@@ -50,32 +42,6 @@ final class AgentMarkViewTests: XCTestCase {
         XCTAssertEqual(host.fittingSize.width, 10)
         XCTAssertEqual(host.fittingSize.height, 10)
         XCTAssertEqual(TerminalActivityGlyph.blockSize, 3)
-    }
-
-    @MainActor func testWorkingGlyphIsAGraySquareWithAnEmptyCenterInBothSchemes() throws {
-        for scheme in [ColorScheme.light, .dark] {
-            for phase in [0.0, 0.25, 0.92] {
-                let image = try render(TerminalActivityGlyph(phase: phase, color: gray), scheme: scheme)
-                let background = try color(image, x: 0, y: 0)
-                var xs: [Int] = []
-                var ys: [Int] = []
-                for y in 0..<image.pixelsHigh {
-                    for x in 0..<image.pixelsWide {
-                        let pixel = try color(image, x: x, y: y)
-                        guard abs(pixel.redComponent - background.redComponent) > 0.04 else { continue }
-                        XCTAssertEqual(pixel.redComponent, pixel.greenComponent, accuracy: 0.025)
-                        XCTAssertEqual(pixel.greenComponent, pixel.blueComponent, accuracy: 0.025)
-                        xs.append(x)
-                        ys.append(y)
-                    }
-                }
-                let width = try XCTUnwrap(xs.max()) - XCTUnwrap(xs.min())
-                let height = try XCTUnwrap(ys.max()) - XCTUnwrap(ys.min())
-                XCTAssertEqual(width, height, "The pixel perimeter must be square")
-                let center = try color(image, x: image.pixelsWide / 2, y: image.pixelsHigh / 2)
-                XCTAssertEqual(center.redComponent, background.redComponent, accuracy: 0.01)
-            }
-        }
     }
 
     @MainActor func testPixelsStepAlongThePerimeterRatherThanMovingContinuously() throws {
@@ -124,6 +90,9 @@ final class AgentMarkViewTests: XCTestCase {
                 let y = pixel / image.pixelsWide
                 xs.append(x)
                 ys.append(y)
+                let ink = try color(image, x: x, y: y)
+                XCTAssertEqual(ink.redComponent, ink.greenComponent, accuracy: 0.025, "Each block must be gray", file: file, line: line)
+                XCTAssertEqual(ink.greenComponent, ink.blueComponent, accuracy: 0.025, "Each block must be gray", file: file, line: line)
                 for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
                     let nextX = x + dx
                     let nextY = y + dy

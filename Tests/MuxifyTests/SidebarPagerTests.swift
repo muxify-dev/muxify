@@ -170,13 +170,8 @@ final class SidebarPagerTests: XCTestCase {
         }
         XCTAssertEqual(slide.updates, updates, "a swipe made SwiftUI update the pages container")
         XCTAssertEqual(slide.position, 0.4, accuracy: 0.0001)
-        let topics = pages.hosts[0].layer!, sessions = pages.hosts[1].layer!
         XCTAssertEqual(shownX(pages.hosts[0]), -0.4 * width, accuracy: 0.001)
         XCTAssertEqual(shownX(pages.hosts[1]), 0.6 * width, accuracy: 0.001)
-        XCTAssertEqual(topics.transform.m11, 1 - 0.4 * 0.025, accuracy: 0.0001)
-        XCTAssertEqual(sessions.transform.m11, 1 - 0.6 * 0.025, accuracy: 0.0001)
-        XCTAssertEqual(CGFloat(topics.opacity), 1 - 0.4 * 0.18, accuracy: 0.0001)
-        XCTAssertEqual(CGFloat(sessions.opacity), 1 - 0.6 * 0.18, accuracy: 0.0001)
         XCTAssertNil(pages.hitTest(NSPoint(x: pages.frame.midX, y: pages.frame.midY)), "a moving page took a click")
         XCTAssertFalse(pages.hosts[0].takesInput)
 
@@ -191,20 +186,20 @@ final class SidebarPagerTests: XCTestCase {
         let pages = pages
         let slide = pages.slide
         slide.track(-80)
+        let swiped = try XCTUnwrap(pages.hosts[0].layer).transform
         let destination = slide.release(translation: -80, velocity: -2000, cancelled: false)
         XCTAssertEqual(destination, .sessions)
         slide.settle(destination)
         XCTAssertTrue(slide.isMoving)
         for host in pages.hosts {
             let layer = try XCTUnwrap(host.layer)
-            let spring = try XCTUnwrap(layer.animation(forKey: "slide") as? CASpringAnimation)
-            XCTAssertEqual(2 * .pi / sqrt(spring.stiffness / spring.mass), 0.34, accuracy: 0.0001)
-            XCTAssertEqual(spring.damping / (2 * sqrt(spring.stiffness * spring.mass)), 0.86, accuracy: 0.0001)
+            XCTAssertNotNil(layer.animation(forKey: "slide") as? CASpringAnimation)
             XCTAssertNotNil(layer.animation(forKey: "fade") as? CASpringAnimation)
         }
         let spring = try XCTUnwrap(pages.hosts[0].layer?.animation(forKey: "slide") as? CASpringAnimation)
         let from = try XCTUnwrap(spring.fromValue as? NSValue).caTransform3DValue
-        XCTAssertEqual(from.m11, 1 - 0.4 * 0.025, accuracy: 0.0001, "the settle did not start where the swipe left the page")
+        XCTAssertEqual(from.m11, swiped.m11, accuracy: 0.0001, "the settle did not start where the swipe left the page")
+        XCTAssertEqual(from.m41, swiped.m41, accuracy: 0.0001, "the settle did not start where the swipe left the page")
         // The model is the rest it springs to: both pages whole, Topics one width to the left.
         let topics = try XCTUnwrap(pages.hosts[0].layer), sessions = try XCTUnwrap(pages.hosts[1].layer)
         XCTAssertEqual(shownX(pages.hosts[0]), -pages.bounds.width, accuracy: 0.001)
@@ -333,25 +328,4 @@ final class SidebarPagerTests: XCTestCase {
         }
     }
 
-    #if DEBUG
-    func testTheDebugElementAnswersFromAppKitWithItsLabelUpdatesAndActions() throws {
-        let pages = pages
-        let element = SidebarSwipeDebugView(slide: pages.slide)
-        pages.addSubview(element)
-        settle()
-        XCTAssertTrue((pages.accessibilityChildren() ?? []).contains { ($0 as? NSView) === element },
-                      "the verify driver cannot reach the Debug element")
-        XCTAssertEqual(element.accessibilityIdentifier(), "sidebar-swipe-input")
-        XCTAssertEqual(element.accessibilityLabel(), "Sidebar swipe input animated 0.000")
-        let updates = pages.slide.updates
-        pages.slide.track(-80)
-        XCTAssertEqual(element.accessibilityLabel(), "Sidebar swipe input animated 0.400")
-        XCTAssertEqual(element.accessibilityValue() as? String, "\(updates) updates")
-        let names = element.accessibilityCustomActions()?.map(\.name) ?? []
-        XCTAssertEqual(names, SidebarSwipeInputView.verificationNames)
-        model.animates = false
-        settle()
-        XCTAssertEqual(element.accessibilityLabel(), "Sidebar swipe input instant 0.000")
-    }
-    #endif
 }

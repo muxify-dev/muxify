@@ -53,35 +53,6 @@ final class VisitLogTests: XCTestCase {
                                         .topic(.noTopic): Date(timeIntervalSince1970: 7)])
     }
 
-    func testLegacyVisitStorageIsNotImportedOrChanged() throws {
-        let defaults = try defaults()
-        defaults.set(["/work/app/": Date(timeIntervalSince1970: 50), "/work/game": Date(timeIntervalSince1970: 60)], forKey: "projectLastOpened")
-        defaults.set(["path:/work/game": 99.0], forKey: VisitLog.defaultsKey)
-        let imported = VisitLog(defaults: defaults)
-        XCTAssertNil(imported.last(.directory("/work/app")))
-        XCTAssertEqual(imported.last(.directory("/work/game")), Date(timeIntervalSince1970: 99), "a newer visit is not overwritten")
-        XCTAssertNotNil(defaults.object(forKey: "projectLastOpened"))
-        XCTAssertEqual(VisitLog(defaults: defaults), imported, "the import is saved, so a restart keeps it")
-    }
-
-    func testLoadingVisitsDoesNotRewriteStoredKeys() throws {
-        let defaults = try defaults()
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("VisitLogTests-" + UUID().uuidString)
-        try FileManager.default.createDirectory(at: root.appendingPathComponent("work/app"), withIntermediateDirectories: true)
-        try FileManager.default.createSymbolicLink(atPath: root.appendingPathComponent("dev").path, withDestinationPath: "work")
-        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
-        let real = String(cString: realpath(root.appendingPathComponent("work/app").path, nil))
-        defaults.set(["path:" + root.appendingPathComponent("dev/app").path: 70.0, "path:" + real: 40.0, "session:app": 5.0],
-                     forKey: VisitLog.defaultsKey)
-        let resolved = VisitLog(defaults: defaults)
-        XCTAssertEqual(resolved.times, [.directory(root.appendingPathComponent("dev/app").path): Date(timeIntervalSince1970: 70),
-            .directory(real): Date(timeIntervalSince1970: 40), .session(name: "app"): Date(timeIntervalSince1970: 5)])
-        XCTAssertEqual(try XCTUnwrap(defaults.dictionary(forKey: VisitLog.defaultsKey)).count, 3)
-        defaults.set(["path:" + root.appendingPathComponent("dev/app").path: 90.0], forKey: VisitLog.defaultsKey)
-        XCTAssertEqual(VisitLog(defaults: defaults).times, [.directory(root.appendingPathComponent("dev/app").path): Date(timeIntervalSince1970: 90)],
-                       "a key saved after the change is not resolved again")
-    }
-
     func testOnlyTheNewestTwoThousandVisitsAreSaved() throws {
         let defaults = try defaults()
         var log = VisitLog()

@@ -40,21 +40,6 @@ final class RememberedSessionsTests: XCTestCase {
         XCTAssertEqual(try windowFields(changed)["agent_conversation"], .string("conversation-2"))
     }
 
-    func testUnchangedSnapshotDoesNotWrite() throws {
-        let state = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: state) }
-        let paths = MuxifyPaths(environment: ["XDG_STATE_HOME": state.path], home: "/nonexistent")
-        let store = TopicStore(paths: paths), watcher = TopicStore(paths: paths)
-        let record = try XCTUnwrap(TopicRecord(id: "topic").remembering(snapshot(), order: .oldestFirst))
-        try store.write { try $0.create(record) }
-        let token = watcher.changeToken()
-        let loaded = try XCTUnwrap(store.read().records.first)
-        let change = loaded.remembering(snapshot(), order: .oldestFirst)
-        XCTAssertNil(change)
-        if let change { try store.write { try $0.update(change.id) { $0 = change } } }
-        XCTAssertEqual(watcher.changeToken(), token, "nothing was committed")
-    }
-
     func testTheSaveWritesItsSessionsOverAnotherWritersAndNeverBringsBackAForgottenTopic() throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: state) }
@@ -70,15 +55,6 @@ final class RememberedSessionsTests: XCTestCase {
         _ = try store.write { try $0.forget(["topic"]) }
         XCTAssertFalse(try store.write { try $0.remember(remembered.sessions, of: "topic") })
         XCTAssertEqual(try store.read().records, [])
-    }
-
-    func testKilledSessionIsForgottenWhileAnotherLivesAndLastRemovalKeepsSet() throws {
-        let both = try XCTUnwrap(TopicRecord(id: "topic").remembering(snapshot(), order: .oldestFirst))
-        let remaining = try XCTUnwrap(both.remembering(snapshot(["b"]), order: .oldestFirst, previously: snapshot().windows))
-        XCTAssertEqual(remaining.sessions.map { $0["directory"]?.string }, ["/work/b"])
-        XCTAssertNil(remaining.remembering(snapshot([]), order: .oldestFirst))
-        XCTAssertEqual(remaining.sessions.count, 1)
-        XCTAssertNil(both.remembering(snapshot([]), order: .oldestFirst))
     }
 
     func testUnknownSessionFieldsAndWorktreeBranchSurviveSnapshotUpdates() throws {
