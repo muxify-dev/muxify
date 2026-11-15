@@ -21,7 +21,12 @@ struct BrowserAgentInvocation: Equatable {
     }
 
     func run(using runner: any CLICommandRunning) throws {
-        let reply = try Self.send(command, target: target, tab: tab, using: runner)
+        let reply: BrowserAgentReply
+        do {
+            reply = try Self.send(command, target: target, tab: tab, using: runner)
+        } catch BrowserAgentChannel.Failure.unreachable where command == .tabs {
+            reply = .tabs(try Self.storedTabs(target: target, using: runner))
+        }
         switch reply {
         case .tabs(let tabs):
             if json { print(try Self.json(tabs)) }
@@ -79,6 +84,19 @@ struct BrowserAgentInvocation: Equatable {
             throw BrowserAgentChannel.Failure.unreachable("Muxify does not serve the Browser of this tmux server")
         }
         return try BrowserAgentChannel.send(BrowserAgentRequest(window: window, tab: tab, command: command), to: path)
+    }
+
+    /// The Window's Tabs as tmux holds them, for a client that reads Tabs while no app runs, such as the phone
+    /// (ADR 0084). Window options, read through one of its Panes. `-u`, as `TmuxServer` reads: without a UTF-8
+    /// locale, tmux prints the separator as `_`.
+    private static func storedTabs(target: String, using runner: any CLICommandRunning) throws -> [BrowserAgentTab] {
+        let format = [Tmux.tabsOption, Tmux.activeTabOption, Tmux.openOption].map { "#{\($0)}" }.joined(separator: Tmux.separator)
+        let result = try runner.run("tmux", arguments: ["-u", "list-panes", "-t", target, "-F", format], quiet: true)
+        let fields = result.output.split(separator: "\n", omittingEmptySubsequences: false).first?
+            .components(separatedBy: Tmux.separator) ?? []
+        guard result.status == 0, fields.count == 3 else { throw CLIError("no tmux Window or Pane '\(target)'") }
+        let stored = StoredBrowser(tabs: fields[0], activeTab: fields[1], shown: "", maximized: "")
+        return stored.agentTabs(opening: fields[2].split(separator: " ").map(String.init))
     }
 
     static func json(_ value: some Encodable) throws -> String {

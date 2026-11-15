@@ -151,7 +151,7 @@ final class BrowserHistory {
 
     func record(url: URL, title: String, visit: HistoryVisit, topic: String?, at now: Date = Date()) {
         guard isEnabled, HistoryVisit.isRecordable(url) else { return }
-        let key = BrowserTab.matchKey(url.absoluteString)
+        let key = TabURL.matchKey(url.absoluteString)
         var entry = entries[key] ?? HistoryEntry(key: key, url: url.absoluteString, title: "", topics: [])
         entry.add(HistoryEntry.Visit(at: now, weight: visit.weight))
         entry.url = url.absoluteString
@@ -171,7 +171,7 @@ final class BrowserHistory {
 
     /// A page changed its title after its load, as a single-page app does for each of its views.
     func updateTitle(of url: String, to title: String) {
-        let key = BrowserTab.matchKey(url)
+        let key = TabURL.matchKey(url)
         guard isEnabled, !title.isEmpty, let entry = entries[key], entry.title != title else { return }
         entries[key]?.title = title
         changedKeys.insert(key)

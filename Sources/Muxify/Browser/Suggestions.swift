@@ -87,7 +87,7 @@ enum Suggestion: Equatable {
         case .prefix(let prefix, _): prefix.display
         case .search(let query): query
         case .page(let entry): Self.display(ofKey: entry.key)
-        default: Self.display(ofKey: BrowserTab.matchKey(url))
+        default: Self.display(ofKey: TabURL.matchKey(url))
         }
     }
 
@@ -95,7 +95,7 @@ enum Suggestion: Equatable {
         switch self {
         case .tab(let id, _, _): "tab-" + id.uuidString
         case .search: "search"
-        default: BrowserTab.matchKey(url)
+        default: TabURL.matchKey(url)
         }
     }
 
@@ -158,7 +158,7 @@ struct HistoryIndex {
         }
         // A prefix that is a page itself stands for that page.
         for prefix in prefixes {
-            let key = prefix.ownKey ?? BrowserTab.matchKey(prefix.url)
+            let key = prefix.ownKey ?? TabURL.matchKey(prefix.url)
             let suggestion = Suggestion.prefix(prefix, title: prefix.ownKey.flatMap { entries[$0]?.title } ?? "")
             rows[key] = Row(key: key, suggestion: suggestion, match: MatchText(suggestion))
         }
@@ -225,16 +225,16 @@ enum SuggestionRanker {
         }
 
         // An open Tab takes the place of its page or prefix, as a typed visit of now on top of its score.
-        let tabKeys = Set(live.tabs.map { BrowserTab.matchKey($0.url) })
+        let tabKeys = Set(live.tabs.map { TabURL.matchKey($0.url) })
         for row in index.rows where !tabKeys.contains(row.key) { consider(row.suggestion, row.match, score: score(row.suggestion)) }
         for tab in live.tabs {
             let suggestion = Suggestion.tab(id: tab.id, url: tab.url, title: tab.title)
-            let history = index.rowByKey[BrowserTab.matchKey(tab.url)].map { score(index.rows[$0].suggestion) } ?? 0
+            let history = index.rowByKey[TabURL.matchKey(tab.url)].map { score(index.rows[$0].suggestion) } ?? 0
             consider(suggestion, MatchText(suggestion), score: history + HistoryVisit.typed.weight)
         }
         for port in live.ports {
             let suggestion = Suggestion.devServer(port: port)
-            let key = BrowserTab.matchKey(suggestion.url)
+            let key = TabURL.matchKey(suggestion.url)
             guard index.rowByKey[key] == nil, !tabKeys.contains(key) else { continue }
             consider(suggestion, MatchText(suggestion), score: 0)
         }

@@ -6,7 +6,7 @@ final class SuggestionRankerTests: XCTestCase {
 
     private func entries(_ scores: [(String, Double)], topics: [String: Set<String>] = [:]) -> [String: HistoryEntry] {
         Dictionary(uniqueKeysWithValues: scores.map { url, score in
-            let key = BrowserTab.matchKey(url)
+            let key = TabURL.matchKey(url)
             return (key, HistoryEntry(key: key, url: url, title: "", recent: [.init(at: now, weight: score)], topics: topics[url] ?? []))
         })
     }

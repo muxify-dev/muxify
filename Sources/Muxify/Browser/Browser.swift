@@ -118,20 +118,19 @@ final class Browser {
         if activeTab == nil { activeTabID = tabs.last?.id }
     }
 
-    /// Shows `url` in a Tab and shows the Browser. Switches to a Tab that
-    /// already has the URL, reuses the active Tab if it is still blank, and
-    /// otherwise adds a new Tab.
+    /// Shows `url` in a Tab, as `TabOpening` says, and shows the Browser.
     @discardableResult
     func open(_ url: URL) -> BrowserTab {
-        let key = BrowserTab.matchKey(url.absoluteString)
         let tab: BrowserTab
-        if let existing = tabs.first(where: { $0.hasPage && BrowserTab.matchKey($0.urlString) == key }) {
-            tab = existing
-            activeTabID = existing.id
-        } else if let blank = activeTab, !blank.hasPage {
-            tab = blank
-            blank.load(url)
-        } else {
+        switch TabOpening(url.absoluteString, tabURLs: tabs.map(\.urlString),
+                          activeTab: tabs.firstIndex { $0.id == activeTabID }) {
+        case .activate(let index):
+            tab = tabs[index]
+            activeTabID = tab.id
+        case .load(let index):
+            tab = tabs[index]
+            tab.load(url)
+        case .append:
             tab = appendTab(url)
         }
         changeLayout { $0.show(.browser) }
