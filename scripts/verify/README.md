@@ -59,6 +59,7 @@ When a driver command times out, read `logs/app.log` and `driver/stall-<n>.txt` 
 
 ## Add a check
 
+- Before you add a check, ask whether a Swift test can prove the behavior. If it can, write the Swift test instead. See "Prove each behaviour once" in `docs/testing.md`.
 - Test one behavior in each check.
 - Name the check for that behavior. Use the terms in `CONTEXT.md`. Example: `test_session_with_unknown_topic_stays_under_no_topic`.
 - Make the fixture state that the check needs in the check. Use Session and Topic names that no other check uses. The check must pass alone and in any order.

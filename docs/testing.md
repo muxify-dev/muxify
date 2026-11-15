@@ -18,6 +18,16 @@ architecture; `TEST_LINUX_PLATFORM=linux/amd64` picks another. When the host's
 resolver does not answer for the Ubuntu mirrors, add
 `TEST_LINUX_DOCKER_ARGS="--dns 1.1.1.1"`.
 
+## Prove each behaviour once
+
+Prove each behaviour once, at the cheapest layer that can see it. An e2e check
+in `scripts/verify/` proves only what needs the running app: drawing, focus,
+gestures, and tmux→app wiring. A Swift test proves the rest.
+
+When a Swift test and an e2e check prove the same thing, keep the Swift test
+and remove the check. Only `make test` and `make test-linux` run in CI;
+`make verify` does not.
+
 ## Tests run in parallel
 
 All three test bundles are parallelizable, locally and in CI, and xcodebuild
