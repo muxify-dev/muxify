@@ -104,7 +104,7 @@ class GitViewChanges(GitViewFixture):
             self.wait_change('z-discard-agent.txt', bool, 'Changes do not list z-discard-agent.txt')
             # A working Agent in a folder inside the Worktree is named in the Discard menu, and x still discards from it.
             self.agent_pane('gv-agent-inside', self.repo/'.git', 'working')
-            self.assertEqual(self.discard_names_agents('z-discard-agent.txt', True), 'Claude Code in gv-agent-inside')
+            self.assertEqual(self.discard_names_agents('z-discard-agent.txt'), 'Claude Code in gv-agent-inside')
             self.select_change('z-discard-agent.txt')
             self.open_discard_menu()
             self.s.act('action', 'git-menu', 'x')
@@ -120,9 +120,9 @@ class GitViewChanges(GitViewFixture):
         self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_status', status)
         return pane
 
-    def discard_names_agents(self, name, shown):
-        """Opens the Discard menu of `name` until the Git View knows the Agents as they are, then returns the
-        guard's warning, or None. Muxify reads the Panes' options on its own timer, so the first menu may be early."""
+    def discard_names_agents(self, name):
+        """Opens the Discard menu of `name` until it names the Agents, then returns the guard's warning. Muxify reads
+        the Panes' options on its own timer, so the first menu may be early."""
         found = []
 
         def asked():
@@ -131,8 +131,8 @@ class GitViewChanges(GitViewFixture):
             found[:] = [self.s.row('git-menu-agents', rs).get('accessibilityLabel') if self.s.has('git-menu-agents', rs) else None]
             self.s.act('action', 'git-menu', 'escape')
             self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
-            return (found[0] is not None) == shown
-        wait(asked, 'the Discard menu %s the Agent' % ('does not name' if shown else 'still names'), seconds=15, step=.5)
+            return found[0] is not None
+        wait(asked, 'the Discard menu does not name the Agent', seconds=15, step=.5)
         return found[0]
 
     def open_reset_options(self):
