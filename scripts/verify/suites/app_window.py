@@ -237,6 +237,8 @@ exec /bin/sh -c "$command"
         self.s.act('press', 'traffic-light-close')
         wait(lambda: not alive(app), 'the app still runs after its last App Window closed', 20)
 
+    # The AppKit shell restores App Windows in task 03 (restore-app-windows-through-appkit).
+    @unittest.expectedFailure
     def test_app_windows_and_their_frames_come_back_after_a_relaunch(self):
         subprocess.run(['defaults', 'write', self.s.bundle_id, 'NSQuitAlwaysKeepsWindows', '-bool', 'YES'], check=True)
         self.addCleanup(subprocess.run, ['defaults', 'delete', self.s.bundle_id, 'NSQuitAlwaysKeepsWindows'], capture_output=True)

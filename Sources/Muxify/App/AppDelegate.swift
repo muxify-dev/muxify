@@ -1,7 +1,12 @@
 import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    /// Installed by the app once its App Windows coordinator is available.
+    /// Nil in the tests, which drive the launch queue and the termination flow alone.
+    private let windows: AppWindows?
+    /// The Sparkle updater, kept for the app's life. The tests build without Sparkle.
+    private let updater: AnyObject?
+    private var mainMenu: MainMenu?
+    /// Installed once the first App Window opens.
     var shutdown: ((@escaping () -> Void) -> Void)?
     var openURLs: (([URL]) -> Void)? {
         didSet { deliverURLs() }
@@ -9,6 +14,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pendingURLs: [URL] = []
     private var isTerminating = false
     private var hasReplied = false
+
+    init(windows: AppWindows? = nil, updater: AnyObject? = nil) {
+        self.windows = windows
+        self.updater = updater
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard let windows else { return }
+        let menu = MainMenu(windows: windows)
+        NSApp.mainMenu = menu.menu
+        mainMenu = menu
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        guard let windows else { return }
+        shutdown = windows.shutdown
+        windows.openFirstWindow()
+        openURLs = { $0.forEach(windows.handle) }
+    }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
@@ -18,13 +42,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         BrowserHistory.shared.flush()
     }
 
+    /// URLs that arrive at launch wait here until the App Windows can route them.
     func application(_ application: NSApplication, open urls: [URL]) {
-        receive(urls)
-    }
-
-    /// SwiftUI consumes URLs handled by onOpenURL; AppKit delivers any others.
-    /// Both paths share the launch queue, before App Windows routing is ready.
-    func receive(_ urls: [URL]) {
         pendingURLs += urls
         deliverURLs()
     }

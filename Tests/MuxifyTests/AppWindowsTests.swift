@@ -12,11 +12,11 @@ final class AppWindowsTests: XCTestCase {
     /// The UserDefaults suite of the App Windows that `withWindows` builds.
     private var defaults: UserDefaults!
 
-    @MainActor func testDefaultScenesHaveIndependentStoresAndTerminalHosts() throws {
+    @MainActor func testAppWindowsHaveIndependentStoresAndTerminalHosts() throws {
         try withWindows { windows, _ in
-            let firstRequest = windows.defaultWindowRequest()
+            let firstRequest = AppWindowRequest()
             let first = windows.store(for: firstRequest)
-            let secondRequest = windows.defaultWindowRequest()
+            let secondRequest = AppWindowRequest()
             let second = windows.store(for: secondRequest)
             XCTAssertNotEqual(firstRequest.id, secondRequest.id)
             XCTAssertFalse(first === second)
@@ -32,28 +32,16 @@ final class AppWindowsTests: XCTestCase {
         }
     }
 
-    @MainActor func testRestoredValueKeepsTheShownWindowAsTheOpenRequestConsumer() throws {
-        try withWindows { windows, _ in
-            let identity = AppWindowIdentity()
-            let launched = windows.defaultWindowRequest()
-            let shown = identity.resolve(launched, in: windows)
-            let restored = identity.resolve(AppWindowRequest(), in: windows)
-            XCTAssertEqual(restored.request.id, launched.id)
-            XCTAssertTrue(restored.store === shown.store)
-            XCTAssertEqual(shown.store.shouldConsumeOpenRequests?(), true)
-        }
-    }
-
-    @MainActor func testOnlyFirstDefaultSceneUsesTheRememberedEnvironment() throws {
+    @MainActor func testOnlyTheFirstAppWindowUsesTheRememberedEnvironment() throws {
         try withWindows { windows, _ in
             defaults.set("Home", forKey: "selectedEnvironment")
             let remembered = AppWindows(configStore: windows.configStore, defaults: defaults)
-            let first = remembered.defaultWindowRequest()
-            XCTAssertEqual(first.environmentName, "Home")
-            _ = remembered.store(for: first)
-            let second = remembered.defaultWindowRequest()
-            XCTAssertNotEqual(first.id, second.id)
-            XCTAssertNil(second.environmentName)
+            var opened: [AppWindowRequest] = []
+            remembered.openWindow = { opened.append($0) }
+            remembered.openFirstWindow()
+            remembered.newWindow()
+            XCTAssertEqual(opened.map(\.environmentName), ["Home", nil])
+            XCTAssertNotEqual(opened.first?.id, opened.last?.id)
             let finished = expectation(description: "remembered workspace cleanup")
             remembered.shutdown { finished.fulfill() }
             wait(for: [finished], timeout: 3)
@@ -62,7 +50,7 @@ final class AppWindowsTests: XCTestCase {
 
     @MainActor func testDuplicateNativeRegistrationCannotReplaceTheOwningWindow() throws {
         try withWindows { windows, _ in
-            let request = windows.defaultWindowRequest()
+            let request = AppWindowRequest()
             let store = windows.store(for: request)
             let owner = FocusWindow()
             let duplicate = FocusWindow()
@@ -82,7 +70,7 @@ final class AppWindowsTests: XCTestCase {
 
     @MainActor func testRepeatedSessionUrlsFocusTheExistingLocalWithoutMovingItsTerminalHost() throws {
         try withWindows { windows, _ in
-            let firstRequest = windows.defaultWindowRequest()
+            let firstRequest = AppWindowRequest()
             let first = windows.store(for: firstRequest)
             let firstWindow = FocusWindow()
             firstWindow.contentView = first.terminalHost
@@ -328,26 +316,6 @@ final class AppWindowsTests: XCTestCase {
             XCTAssertEqual(first.shouldConsumeOpenRequests?(), true)
             XCTAssertEqual(second.shouldConsumeOpenRequests?(), false)
             XCTAssertEqual(remote.shouldConsumeOpenRequests?(), true)
-        }
-    }
-
-    @MainActor func testAClosingSwiftUiSceneCannotResurrectItsWindowReservation() throws {
-        try withWindows { windows, _ in
-            let request = AppWindowRequest(environmentName: "Home")
-            _ = windows.store(for: request)
-            let native = FocusWindow()
-            windows.register(native, for: request.id)
-            NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: native)
-            let retired = expectation(description: "closed window retired")
-            windows.store(for: request).shutdown { retired.fulfill() }
-            wait(for: [retired], timeout: 3)
-            let stale = windows.store(for: request)
-            var opened: [AppWindowRequest] = []
-            windows.openWindow = { opened.append($0) }
-            stale.selectEnvironment(named: "Home")
-            XCTAssertTrue(opened.isEmpty)
-            windows.selectEnvironment(named: "Home")
-            XCTAssertNotEqual(opened.first?.id, request.id)
         }
     }
 

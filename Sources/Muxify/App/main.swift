@@ -1,53 +1,28 @@
 import AppKit
 import MuxifyCore
-import SwiftUI
 
-@main
-struct MuxifyApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var windows: AppWindows
-    /// Nil in a build without a feed, such as Debug or `make install` (UpdateFeed).
-    @State private var updater: SparkleUpdater?
-
-    init() {
-        CommandLineToolForwarding.forwardIfNeeded()
-        #if DEBUG
-        TestDriver.startIfRequested()
-        #endif
-        AppEnvironment.prepare()
-        PTYWatch.start()
-        let configStore = ConfigStore(appliesAppSettings: true)
-        configStore.start()
-        // The imports of the old Topic records, Muxify Worktree record and Browser History files name each entry they
-        // could not move in the Diagnostics log.
-        StateDatabase.reportProblem = { Diagnostics.report("state: \($0)") }
-        let windows = AppWindows(configStore: configStore)
-        _windows = State(initialValue: windows)
-        _updater = State(initialValue: SparkleUpdater.startIfConfigured(update: configStore.config.update))
-        GhosttyRuntime.shared.delegate = windows
-    }
-
-    var body: some Scene {
-        WindowGroup("Muxify", id: "workspace", for: AppWindowRequest.self) { request in
-            AppWindowView(request: request.wrappedValue, windows: windows)
-                .onOpenURL { appDelegate.receive([$0]) }
-                .onAppear {
-                    appDelegate.shutdown = windows.shutdown
-                    appDelegate.openURLs = { $0.forEach(windows.handle) }
-                }
-        } defaultValue: {
-            windows.defaultWindowRequest()
-        }
-        .defaultSize(width: 1500, height: 920)
-        .windowStyle(.hiddenTitleBar)
-        // AppDelegate sends each muxify:// URL to the App Window of its Environment. Without this, SwiftUI
-        // also opens a new App Window for the URL.
-        .handlesExternalEvents(matching: [])
-        .commands { MuxifyCommands(windows: windows) }
-
-        Settings { SettingsView(model: windows.settings) }
-    }
+// What the app does before AppKit runs, in this order: the process environment is fixed before libghostty and the
+// first tmux call, which inherit it. Then the app delegate takes over (ADR 0083).
+let appDelegate = MainActor.assumeIsolated {
+    CommandLineToolForwarding.forwardIfNeeded()
+    #if DEBUG
+    TestDriver.startIfRequested()
+    #endif
+    AppEnvironment.prepare()
+    PTYWatch.start()
+    let configStore = ConfigStore(appliesAppSettings: true)
+    configStore.start()
+    // The imports of the old Topic records, Muxify Worktree record and Browser History files name each entry they
+    // could not move in the Diagnostics log.
+    StateDatabase.reportProblem = { Diagnostics.report("state: \($0)") }
+    let windows = AppWindows(configStore: configStore)
+    // Nil in a build without a feed, such as Debug or `make install` (UpdateFeed).
+    let updater = SparkleUpdater.startIfConfigured(update: configStore.config.update)
+    GhosttyRuntime.shared.delegate = windows
+    return AppDelegate(windows: windows, updater: updater)
 }
+NSApplication.shared.delegate = appDelegate
+_ = NSApplicationMain(CommandLine.argc, CommandLine.unsafeArgv)
 
 enum AppEnvironment {
     /// Process environment fixes that must happen before libghostty and the

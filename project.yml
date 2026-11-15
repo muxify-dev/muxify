@@ -119,7 +119,7 @@ targets:
     sources:
       - path: Sources/Muxify
         # The tests never link Sparkle: they drive the update model through the events its driver sends.
-        excludes: [App/MuxifyApp.swift, Updates/SparkleUpdater.swift]
+        excludes: [App/main.swift, Updates/SparkleUpdater.swift]
       - path: Tests/MuxifyTests
     dependencies:
       - package: MuxifyCore
