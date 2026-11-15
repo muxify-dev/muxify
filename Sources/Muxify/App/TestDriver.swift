@@ -564,7 +564,7 @@ enum TestDriver {
                 pressed = press(object) || pressed
             }
         }
-        if name == "press", let item = updatedMenuItem(titled: target) {
+        if name == "press", let item = menuItem(titled: target, in: updatedMainMenu()) {
             pressed = press(item) || pressed
         }
         return ["rows": elements.map(\.row), "pressed": pressed]
@@ -582,8 +582,8 @@ enum TestDriver {
 
     private static func press(_ object: NSObject) -> Bool {
         if let item = object as? NSMenuItem {
-            // SwiftUI rebuilds a menu when state it reads changes, and the dump can hold an item the
-            // rebuild has detached or disabled; the live item with the same title takes the press.
+            // MainMenu replaces a menu's items each time it fills it, and an item found before the last fill is
+            // detached; the live item with the same title takes the press.
             return perform(menuItem(titled: item.title, in: NSApp.mainMenu) ?? item)
         }
         if let button = object as? NSButton ?? (object as? NSButtonCell)?.controlView as? NSButton, button.isEnabled {
@@ -736,7 +736,8 @@ enum TestDriver {
     }
 
     /// The main menu, after each menu has updated its items as it does before it opens.
-    /// SwiftUI builds and enables its menu items only then, so an item that nobody opened can be out of date.
+    /// MainMenu fills the menus that follow state, and AppKit enables items, only then, so an item that nobody opened can
+    /// be out of date.
     private static func updatedMainMenu() -> NSMenu? {
         func update(_ menu: NSMenu) {
             menu.delegate?.menuNeedsUpdate?(menu)
@@ -746,10 +747,6 @@ enum TestDriver {
         guard let mainMenu = NSApp.mainMenu else { return nil }
         update(mainMenu)
         return mainMenu
-    }
-
-    private static func updatedMenuItem(titled title: String) -> NSMenuItem? {
-        updatedMainMenu().flatMap { menuItem(titled: title, in: $0) }
     }
 
     /// The item at the title path: the title of a menu bar item, then the title of an item in each submenu.
