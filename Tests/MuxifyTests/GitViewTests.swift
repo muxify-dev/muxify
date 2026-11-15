@@ -1505,19 +1505,27 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.pop)
         XCTAssertNil(gitView.menu)
         gitView.perform(.tab(.stashes))
-        for (command, id, title, question) in [
-            (GitView.Command.toggle, "stash-apply", "Apply stash", "Are you sure you want to apply this stash entry?"),
-            (.pop, "stash-pop", "Pop stash", "Are you sure you want to pop this stash entry?"),
-            (.discard, "stash-drop", "Drop stash", "Are you sure you want to drop the selected stash entry?"),
+        for (command, verb, title, question) in [
+            (GitView.Command.toggle, "apply", "Apply stash", "Are you sure you want to apply this stash entry?"),
+            (.pop, "pop", "Pop stash", "Are you sure you want to pop this stash entry?"),
+            (.discard, "drop", "Drop stash", "Are you sure you want to drop the selected stash entry?"),
         ] {
             gitView.perform(command)
-            XCTAssertEqual(gitView.menu?.id, id)
+            XCTAssertEqual(gitView.menu?.id, "stash-" + verb)
             XCTAssertEqual(gitView.menu?.title, title)
             XCTAssertEqual(gitView.menu?.subject, .text("stash@{0} On master: wip"))
             XCTAssertEqual(gitView.menu?.choices.map(\.key), ["y"])
             XCTAssertTrue(gitView.menu?.choices.first?.note?.hasPrefix(question) == true)
             XCTAssertEqual(gitView.menu?.choices.first?.isDestructive, command == .discard)
             gitView.closeMenu()
+            XCTAssertEqual(gitView.queuedWriteArguments, [], "\(verb): asking or ⎋ runs nothing")
+        }
+        // y runs it on the stash asked about.
+        for (command, verb) in [(GitView.Command.toggle, "apply"), (.pop, "pop"), (.discard, "drop")] {
+            gitView.perform(command)
+            XCTAssertTrue(gitView.chooseMenu(key: "y"), verb)
+            XCTAssertNil(gitView.menu, verb)
+            XCTAssertEqual(gitView.queuedWriteArguments.last, ["/repo", verb, "stash@{0}", "s1"], verb)
         }
         // In the stash's files, space folds a folder and d and g do nothing.
         gitView.perform(.enter)
@@ -2235,13 +2243,14 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertNil(gitView.menu)
     }
 
-    func testTheDiscardMenuOffersWhatLazygitDoes() {
+    func testTheDiscardMenuOffersWhatLazygitDoes() throws {
         let gitView = GitView(windowID: "@1")
         let mixed = GitChange(index: "M", worktree: "M", path: "src/a.swift")
         let untracked = GitChange(index: "?", worktree: "?", path: "src/c.txt")
         let file = gitView.discardMenu(GitView.Discard(path: mixed.path, isFolder: false, changes: [mixed]))
         XCTAssertEqual(file.title, "Discard changes")
         XCTAssertEqual(file.choices.map(\.key), ["x", "u"])
+        XCTAssertEqual(file.choices.map(\.title), ["Discard all changes", "Discard unstaged changes"])
         XCTAssertEqual(file.choices.map(\.isEnabled), [true, true])
         XCTAssertEqual(file.highlightedChoice?.key, "x")
         let new = gitView.discardMenu(GitView.Discard(path: untracked.path, isFolder: false, changes: [untracked]))
@@ -2254,6 +2263,20 @@ final class GitViewKeysTests: XCTestCase {
         let picked = gitView.discardMenu(GitView.Discard(path: mixed.path, isFolder: false, changes: [mixed], lines: lines))
         XCTAssertEqual(picked.title, "Discard lines")
         XCTAssertEqual(picked.choices.map(\.title), ["Discard 3 lines"])
+        // While d's menu is open in Changes, a tab's key is not the menu's and leaves the tab, and ⎋ closes the menu
+        // in the same tab and discards nothing.
+        var changed = snapshot
+        changed.changes = [untracked]
+        gitView.apply(changed)
+        gitView.perform(.discard)
+        XCTAssertEqual(gitView.menu?.id, "discard")
+        XCTAssertFalse(gitView.handleMenuKey(try KeyTrigger("2")))
+        XCTAssertEqual(gitView.menu?.id, "discard", "2 closed the menu")
+        XCTAssertEqual(gitView.tab, .changes, "2 changed the tab under the menu")
+        XCTAssertTrue(gitView.handleMenuKey(try KeyTrigger("escape")))
+        XCTAssertNil(gitView.menu)
+        XCTAssertEqual(gitView.tab, .changes)
+        XCTAssertEqual(gitView.queuedWriteArguments, [], "escape discarded")
     }
 
     func testDiscardNamesTheAgentsWorkingInTheWorktreeInItsOwnMenu() {
@@ -2464,6 +2487,15 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(gitView.prompt?.subject, .text("Stash all changes including untracked files"))
         XCTAssertEqual(gitView.prompt?.allowsEmpty, true)
         gitView.closePrompt()
+        XCTAssertEqual(gitView.queuedWriteArguments, [], "cancelling the message stashes nothing")
+        // Each choice stashes its kind, with the message typed.
+        for (key, kind) in [("a", "all"), ("shift+u", "untracked"), ("s", "staged"), ("u", "unstaged"), ("i", "keepindex")] {
+            gitView.perform(.stashOptions)
+            XCTAssertTrue(gitView.chooseMenu(key: key), key)
+            gitView.promptText = "by \(key)"
+            gitView.submitPrompt()
+            XCTAssertEqual(gitView.queuedWriteArguments.last, ["/repo", kind, "by \(key)"], key)
+        }
         // s asks for the message of a stash of all changes, in Changes only.
         gitView.perform(.stash)
         XCTAssertEqual(gitView.prompt?.subject, .text("Stash all changes"))
