@@ -8,8 +8,9 @@ struct RequestInvocation: Equatable {
         /// An Empty Topic.
         case new(title: String, tags: [Tag])
         /// `directory` resolves to its row of the New Topic list. `newWorktree` asks for a new Worktree from that
-        /// row's Worktree, which starts as it says.
-        case addSession(directory: String, newWorktree: WorktreeStart?)
+        /// row's Worktree, which starts as it says. `name` is the Session's exact name in the Topic, which the caller chose:
+        /// a Session of the Topic that has it is found, not made again.
+        case addSession(directory: String, newWorktree: WorktreeStart?, name: String? = nil)
         /// `removeWorktrees` removes each Worktree that the Settle sheet offers to remove, as if each box were selected.
         case settle(removeWorktrees: Bool, killSessions: Bool = false)
         case forget(removeWorktrees: Bool, killSessions: Bool = false)
@@ -113,6 +114,29 @@ struct RequestInvocation: Equatable {
 
         var needsTarget: Bool { !targets.isEmpty }
 
+        /// What `--request` means for this command. A new command does not compile until it chooses.
+        var requestPolicy: RequestPolicy {
+            switch self {
+            case .list, .environmentShow, .show, .open, .exec, .status, .diff, .listWorktrees:
+                return .read
+            // Each of these gives one end state however many times it runs: it sets a value, or it finds what its
+            // first run made.
+            case .new, .tag, .note, .rename, .pin, .markRead, .markAllRead, .chooseInPlay, .sortSessions:
+                return .rerun
+            // Without a new Worktree, a second run finds the Session by its name. A new Worktree has setup that only
+            // the first run can type into the Session.
+            case .addSession(_, let newWorktree, let name):
+                return name != nil && newWorktree == nil ? .rerun : .inDoubt
+            // A second run could apply these twice: a move from the place where the first run left the card, a
+            // Session or a Window that tmux makes again, a Topic that is no longer where the first run found it.
+            case .settle, .forget, .forgetSettled, .reopen, .startFresh, .moveWindow, .placeWindow, .moveToNewTopic, .moveToNewWindow,
+                 .removeSessionFromTopic, .removeWindowFromTopic, .newWindow, .newSession, .renameSession, .renameWindow, .zoomPane, .kill,
+                 .makeGuest, .benchTopic, .fillPlace, .moveCard, .placeCard, .tradeCard, .replaceFromBench, .moveSession,
+                 .createWorktree, .removeWorktree:
+                return .inDoubt
+            }
+        }
+
         /// exec, status and diff work in the Sessions that `topic show` gives.
         var showsTopic: Bool {
             switch self {
@@ -204,6 +228,22 @@ struct RequestInvocation: Equatable {
         }
     }
 
+    /// What a command does with a Request id. For a command that changes something, the policy says what a second
+    /// send does when the first one changed the records and did not finish.
+    enum RequestPolicy {
+        /// The command changes nothing that a Request can guard, so it refuses `--request`.
+        case read
+        /// The command gives the same end state when it runs again, so the second send runs it to its end.
+        case rerun
+        /// The command could apply its change twice, so the second send fails and runs nothing.
+        case inDoubt
+    }
+
+    /// The exit status when the Request id has a row for another verb or other arguments.
+    static let requestMismatchExitCode: Int32 = 3
+    /// The exit status when the Request changed the records, did not finish, and cannot run again.
+    static let requestInDoubtExitCode: Int32 = 4
+
     enum TargetOption: String, CaseIterable {
         case topic = "--topic"
         case window = "--window"
@@ -289,6 +329,8 @@ struct RequestInvocation: Equatable {
     var caller: PaneID?
     var output: Output
     var paths: MuxifyPaths
+    /// The Request that `--request` names. Nil runs the command as before, with no ledger.
+    var request: PendingRequest? = nil
 }
 
 extension RequestInvocation {
@@ -304,6 +346,11 @@ extension RequestInvocation {
         target = parsed.targets.chosen?.target
         output = parsed.output
         paths = parsed.paths
+        request = parsed.request
+        if request != nil, command.requestPolicy == .read {
+            throw CLIError("--request names a change that Muxify applies one time only. \(command.phrase) is not such a change, so it does not take --request.",
+                           exitCode: 2)
+        }
     }
 
     static func choice(of options: [TargetOption]) -> String {
@@ -313,7 +360,56 @@ extension RequestInvocation {
         return "; name the target with " + list
     }
 
-    func run() async throws {
+    /// Runs the command and prints its answer. With a Request, the ledger decides first: a Request that has its answer
+    /// prints it again and changes nothing.
+    func run() async throws -> Int32 {
+        guard let request else { return try await answer().reply.emit() }
+        let ledger = RequestLedger(paths: paths)
+        let lock: RequestLock, known: RequestLookup
+        do {
+            lock = try ledger.lock(request.id)
+            known = try ledger.lookup(request)
+        } catch {
+            throw CLIError("Muxify could not read the Request ledger in \(paths.state.path). \(error) No changes were made.")
+        }
+        // Held until the answer is in the ledger, so a second send that starts meanwhile waits and then finds it.
+        defer { lock.unlock() }
+        switch known {
+        case .new: break
+        case .replay(let reply): return try reply.emit()
+        case .mismatch(let verb):
+            throw CLIError("The Request \(request.id) is the id of an earlier \(verb) with other arguments. Use a new id for a new change. No changes were made.",
+                           exitCode: Self.requestMismatchExitCode)
+        case .resume:
+            switch command.requestPolicy {
+            case .rerun, .read: break
+            case .inDoubt:
+                throw CLIError("The Request \(request.id) changed the Topic records, but \(command.phrase) did not finish. Muxify does not run it again, "
+                               + "because that could apply the change twice. Look at the Environment before you send a new Request.",
+                               exitCode: Self.requestInDoubtExitCode)
+            }
+        }
+        let answer = try await answer()
+        if answer.isFinal {
+            do {
+                try ledger.finish(request, reply: answer.reply)
+            } catch {
+                // The answer still goes out: the change is made, and only a second send would not find it.
+                FileHandle.standardError.write(Data("muxify: the ledger could not record the Request \(request.id): \(error)\n".utf8))
+            }
+        }
+        return try answer.reply.emit()
+    }
+
+    /// What one run of the command gave. `isFinal` is true for an answer that a second send must get again: a
+    /// success or a refusal. A failure that can change on a second run, such as tmux that does not run, is not final.
+    private struct Outcome {
+        var reply: RequestReply
+        var isFinal: Bool
+    }
+
+    /// A command that shows a Topic prints as it runs and gives an empty Reply.
+    private func answer() async throws -> Outcome {
         var response: EnvironmentResponse
         switch command {
         case .list:
@@ -322,11 +418,11 @@ extension RequestInvocation {
             let config = try await ConfigSessions.load(paths.configFile, within: command.findsAllSessionPaths ? nil : [])
             func handle() throws -> EnvironmentResponse {
                 let service = EnvironmentService(paths: paths, server: TmuxServer.local, sessionPaths: config.sessionPaths, topics: config.topics,
-                                                 notifications: config.notifications, worktreesRoot: config.worktreesRoot)
+                                                 notifications: config.notifications, worktreesRoot: config.worktreesRoot, request: request)
                 // No client: no terminal switches to the result, because a command changes what the user sees only
                 // when they ask for it. A new Worktree's Session is shown unless --no-open says not to, and a Remove
                 // that kills the caller's Session moves its terminal first.
-                return service.handle(EnvironmentRequest(try request(sessionPaths: config.sessionPaths, service: service), target: target,
+                return service.handle(EnvironmentRequest(try self.request(sessionPaths: config.sessionPaths, service: service), target: target,
                                                          caller: caller.map(TopicCaller.pane)), client: callerClient)
             }
             do {
@@ -335,72 +431,87 @@ extension RequestInvocation {
                 response = answer.response
             }
             if case .forgetSettled(let days) = command, case .topics([]) = response, output == .text {
-                print("No Settled Topic was Settled more than \(days ?? config.topics.forgetSettledOlderThan) days ago.")
-                return
+                return Outcome(reply: RequestReply(stdout: "No Settled Topic was Settled more than \(days ?? config.topics.forgetSettledOlderThan) days ago.\n"),
+                               isFinal: true)
             }
         }
         if case .topic(let topic) = response {
+            let shown = Outcome(reply: RequestReply(stdout: ""), isFinal: true)
             switch command {
             case .exec(let sessionPath, let timeout, let arguments):
                 let sessions = try TopicExec.sessions(of: topic, session: sessionPath)
-                return try TopicExec(arguments: arguments, timeout: timeout).run(sessions, topic: topic, output: output)
+                try TopicExec(arguments: arguments, timeout: timeout).run(sessions, topic: topic, output: output)
+                return shown
             case .status(let sessionPath):
-                return try TopicGit(report: .status).run(try TopicExec.sessions(of: topic, session: sessionPath),
-                                                         topic: topic, output: output)
+                try TopicGit(report: .status).run(try TopicExec.sessions(of: topic, session: sessionPath), topic: topic, output: output)
+                return shown
             case .diff(let sessionPath, let stat):
-                return try TopicGit(report: .diff(stat: stat)).run(try TopicExec.sessions(of: topic, session: sessionPath),
-                                                                   topic: topic, output: output)
+                try TopicGit(report: .diff(stat: stat)).run(try TopicExec.sessions(of: topic, session: sessionPath), topic: topic, output: output)
+                return shown
             case .show(conversations: true):
-                return try reportConversations(of: topic)
+                try reportConversations(of: topic)
+                return shown
             case .open:
-                return try CLICommand.open("muxify://select?topic=\(CLICommand.percentEncoded(topic.id))")
+                try CLICommand.open("muxify://select?topic=\(CLICommand.percentEncoded(topic.id))")
+                return shown
             default: break
             }
         }
-        try Self.report(response, output: output)
+        let isFinal: Bool
+        if case .failed(let failure) = response { isFinal = failure.isRefusal } else { isFinal = true }
+        return Outcome(reply: try Self.reply(to: response, output: output), isFinal: isFinal)
     }
 
     /// Prints a response of the Topic service, and throws its failure so that the command exits with an error.
     static func report(_ response: EnvironmentResponse, output: Output) throws {
+        _ = try reply(to: response, output: output).emit()
+    }
+
+    /// What the command line prints for a response of the Topic service. A failure is the error line and exit status 1.
+    static func reply(to response: EnvironmentResponse, output: Output) throws -> RequestReply {
+        var stdout = ""
+        func line(_ text: String) { stdout += text + "\n" }
         switch output {
         case .json:
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
             // The snapshot is the whole answer of `environment show`, so it prints with no key around it.
-            if case .snapshot(let snapshot) = response { print(String(decoding: try encoder.encode(snapshot), as: UTF8.self)) }
-            else { print(String(decoding: try encoder.encode(response), as: UTF8.self)) }
+            if case .snapshot(let snapshot) = response { line(String(decoding: try encoder.encode(EnvironmentShown(snapshot: snapshot)), as: UTF8.self)) }
+            else { line(String(decoding: try encoder.encode(response), as: UTF8.self)) }
         case .text:
             switch response {
             case .topics(let topics):
                 // One line per Topic, so a label keeps no tab or line break.
                 for topic in topics {
-                    print(Self.line(id: topic.id, label: topic.label, tags: topic.tags))
+                    line(Self.line(id: topic.id, label: topic.label, tags: topic.tags))
                 }
             case .topic(let topic):
                 // One line for the Topic, then one for each live Session, with tab-separated fields as in topic list.
-                print(Self.line(id: topic.id, label: topic.label, tags: topic.tags))
+                line(Self.line(id: topic.id, label: topic.label, tags: topic.tags))
                 for session in topic.sessions {
-                    print([session.name, session.baseName, session.directory,
-                           session.worktree?.branch ?? ""].map(\.oneLineField).joined(separator: "\t"))
+                    line([session.name, session.baseName, session.directory,
+                          session.worktree?.branch ?? ""].map(\.oneLineField).joined(separator: "\t"))
                 }
-            case .snapshot(let snapshot): print(snapshot.text, terminator: "")
+            case .snapshot(let snapshot): stdout += snapshot.text
             // A Worktree change prints what its sync or hooks printed, then the Session it made. A Topic change prints the
             // Topic's id, a change of a Window the Window's id, and a Session rename the full name.
             case .changed(let change) where change.worktreeID != nil:
-                if let output = change.output { print(output.trimmingCharacters(in: .newlines)) }
-                if let name = change.sessionName { print(name) }
-            case .changed(let change): if let id = change.topicID ?? change.window?.rawValue ?? change.sessionName { print(id) }
+                if let output = change.output { line(output.trimmingCharacters(in: .newlines)) }
+                if let name = change.sessionName { line(name) }
+            case .changed(let change): if let id = change.topicID ?? change.window?.rawValue ?? change.sessionName { line(id) }
             case .worktrees(let worktrees):
                 // One line each: name, branch, state, path, the Sessions that use it, and its Topic.
                 for worktree in worktrees {
-                    print([worktree.name, worktree.branch, worktree.state.rawValue, worktree.path, worktree.sessions.joined(separator: ","),
-                           worktree.topic ?? ""].map(\.oneLineField).joined(separator: "\t"))
+                    line([worktree.name, worktree.branch, worktree.state.rawValue, worktree.path, worktree.sessions.joined(separator: ","),
+                          worktree.topic ?? ""].map(\.oneLineField).joined(separator: "\t"))
                 }
-            case .readChanged(let change): for id in change.topicIDs + change.paneIDs.map(\.rawValue) { print(id) }
+            case .readChanged(let change): for id in change.topicIDs + change.paneIDs.map(\.rawValue) { line(id) }
             case .failed: break
             }
         }
-        if case .failed(let failure) = response { throw CLIError(failure) }
+        guard case .failed(let failure) = response else { return RequestReply(stdout: stdout) }
+        let error = CLIError(failure)
+        return RequestReply(stdout: stdout, stderr: error.message, exitCode: error.exitCode)
     }
 
     /// A Topic's line in `topic list` and `topic show`: id, label, and its Tags with `#`, which an empty field
@@ -435,17 +546,18 @@ extension RequestInvocation {
     private func request(sessionPaths: [SessionPath], service: EnvironmentService) throws -> EnvironmentCommand {
         switch command {
         case .new(let title, let tags): return .create(title: title, tags: tags.isEmpty ? nil : tags)
-        case .addSession(let path, let newWorktree):
+        case .addSession(let path, let newWorktree, let name):
             let directory = try Self.directory(path)
             // A folder in no SessionPath goes to the service as typed, which fails with the Config's own words.
             guard let choice = SessionChoice.containing(directory, in: sessionPaths) else {
-                return .addSession(sessionPath: directory.real, workingCopy: .directory)
+                return .addSession(sessionPath: directory.real, workingCopy: .directory, chosenName: name)
             }
             if newWorktree != nil, choice.worktree == nil {
                 throw CLIError("--worktree needs a git repository, and \(choice.directory.path) is not one", exitCode: 2)
             }
             // The same choice as the Add Session sheet makes for this row.
-            return .addSession(sessionPath: choice.sessionPath.folder.path, workingCopy: choice.workingCopy(newWorktree: newWorktree != nil, start: newWorktree ?? .head), name: choice.name)
+            return .addSession(sessionPath: choice.sessionPath.folder.path, workingCopy: choice.workingCopy(newWorktree: newWorktree != nil, start: newWorktree ?? .head), name: choice.name,
+                               chosenName: name)
         case .forget(let remove, let kill):
             guard let target = target ?? caller.map(EnvironmentTarget.pane),
                   var choices = try? service.forgetChoices(for: target).get() else { return .forget(choices: [], worktrees: []) }
@@ -557,6 +669,31 @@ extension RequestInvocation {
             throw CLIError("no directory '\(path)'", exitCode: 2)
         }
         return folder
+    }
+}
+
+extension RequestReply {
+    /// Prints the Reply as the command's own answer: its output, then its error as the command's failure.
+    func emit() throws -> Int32 {
+        print(stdout, terminator: "")
+        if let stderr { throw CLIError(stderr, exitCode: exitCode) }
+        return exitCode
+    }
+}
+
+/// The `--json` form of `environment show`: the snapshot's own keys, and `capabilities`, the options that this command
+/// line takes and an older one does not. A caller sends `--request` only when the list has `request`.
+private struct EnvironmentShown: Encodable {
+    static let capabilities = ["request"]
+
+    let snapshot: EnvironmentSnapshot
+
+    private enum CodingKeys: String, CodingKey { case capabilities }
+
+    func encode(to encoder: Encoder) throws {
+        try snapshot.encode(to: encoder)
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(Self.capabilities, forKey: .capabilities)
     }
 }
 

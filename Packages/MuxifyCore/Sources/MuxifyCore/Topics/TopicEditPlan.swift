@@ -154,13 +154,37 @@ struct TopicSessionOrderPlan {
 
 struct TopicSessionPlan {
     public let edit: TopicEdit
+    /// The live Session that has the caller's chosen name, which the plan found and did not make.
+    public let found: TmuxWindow?
 
+    /// With `chosenName`, the plan converges: a live Session of the Topic with that name is found, a Session that
+    /// the record has with that name and tmux does not is made from the record, and only a Topic with neither gets a
+    /// new Session.
     public init(topic: TopicRecord, sessionPath: SessionPath, workingCopy: TopicWorkingCopy, windows: [TmuxWindow], sessionPaths: [SessionPath],
-                order: SessionOrder = .oldestFirst, baseName: String? = nil) throws {
+                order: SessionOrder = .oldestFirst, baseName: String? = nil, chosenName: String? = nil) throws {
         try TopicEditSessions.validate(sessionPath)
         if let baseName { try SessionNaming.validate(baseName) }
         let slug = topic.slug ?? TopicNaming.slugify(topic.title ?? "topic")
-        let name = SessionNaming.available(baseName ?? sessionPath.name, topic: slug, taken: Set(windows.map(\.sessionName)))
+        if let chosenName {
+            try SessionNaming.validate(chosenName)
+            let name = chosenName + "/" + slug
+            if let live = windows.first(where: { $0.sessionName == name }) {
+                guard live.topicID == topic.id else { throw TopicRequestError.sessionNameTaken(name) }
+                found = live
+                edit = TopicEdit(record: topic, commands: [], selection: .sessionName(name))
+                return
+            }
+            if let entry = topic.sessions.first(where: { $0["name"]?.string == name }),
+               let id = entry["id"]?.string, let directory = entry["directory"]?.string {
+                found = nil
+                edit = TopicEdit(record: topic, commands: Self.commands(name: name, directory: directory, topic: topic.id, id: id),
+                                 selection: .sessionName(name))
+                return
+            }
+        }
+        found = nil
+        let name = chosenName.map { $0 + "/" + slug }
+            ?? SessionNaming.available(baseName ?? sessionPath.name, topic: slug, taken: Set(windows.map(\.sessionName)))
         var record = topic
         let start = workingCopy.sessionStart(in: sessionPath, slug: slug)
         let id = UUID().uuidString.lowercased()
@@ -170,11 +194,16 @@ struct TopicSessionPlan {
         session["base_name"] = .string(SessionNaming.base(of: name, topic: record))
         session["directory"] = .string(start.directory)
         record.recordingNewSession(session, order: order)
-        edit = TopicEdit(record: record, newWorktree: start.newWorktree, commands: [
-            .tmuxMaking(["new-session", "-d", "-s", name, "-c", start.directory]),
-            .tmux(["set-option", "-t", "=" + name + ":", "@muxify_topic", topic.id]),
+        edit = TopicEdit(record: record, newWorktree: start.newWorktree,
+                         commands: Self.commands(name: name, directory: start.directory, topic: topic.id, id: id), selection: .sessionName(name))
+    }
+
+    private static func commands(name: String, directory: String, topic: String, id: String) -> [TopicPlan.Command] {
+        [
+            .tmuxMaking(["new-session", "-d", "-s", name, "-c", directory]),
+            .tmux(["set-option", "-t", "=" + name + ":", "@muxify_topic", topic]),
             .tmux(["set-option", "-t", "=" + name + ":", "@muxify_session_id", id]),
-        ], selection: .sessionName(name))
+        ]
     }
 }
 

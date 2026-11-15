@@ -59,11 +59,14 @@ struct ParsedArguments {
     /// The words after `--` on a verb that runs a command. Nil without `--`.
     private(set) var command: [String]?
     private(set) var targets: RequestInvocation.TargetOptions
+    /// The Request that `--request` names, which `CLICommand` took from the command line before the verb's words.
+    let request: PendingRequest?
     private var given: [(name: String, value: String?)] = []
 
-    init(_ arguments: ArraySlice<String>, for verb: CLIVerb, environment: [String: String], now: Date) throws {
+    init(_ arguments: ArraySlice<String>, for verb: CLIVerb, environment: [String: String], now: Date, request: PendingRequest? = nil) throws {
         self.environment = environment
         self.now = now
+        self.request = request
         targets = RequestInvocation.TargetOptions(accepting: verb.targets)
         var args = arguments
         while let word = args.popFirst() {

@@ -19,6 +19,14 @@ _Avoid_: remote Session, SSH session (when you mean the Environment)
 The `muxify` on a Remote Environment's machine, which Muxify installs and keeps up to date in `~/.local/bin`. The phone and the Agents on that machine use it, and it keeps that machine's Topics; the Mac app does not read them.
 _Avoid_: remote helper, agent binary, remote CLI
 
+**Request**:
+One Host CLI write that its caller names with a **Request id**, a UUID, as `muxify --request <uuid> <verb> …`. The Host applies it one time: a second send with the same id, verb and arguments prints the first answer and changes nothing. A verb that changes nothing refuses the option.
+_Avoid_: idempotency key, transaction, operation id
+
+**Request ledger**:
+The Host's record of the Requests of the last 24 hours, in the state database. A Request is _started_ when it changed the Topic records, and _done_ when it has its answer. A second send of a started Request runs again only when its verb gives the same end state; else it fails as in doubt.
+_Avoid_: outbox, request log, dedupe table
+
 **Active Environment**:
 The Environment shown in an App Window. Each App Window has one Active Environment.
 _Avoid_: current host, active workspace

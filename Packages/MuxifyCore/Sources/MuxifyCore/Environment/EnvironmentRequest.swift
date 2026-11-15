@@ -279,8 +279,10 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
     /// An Empty Topic. It starts no Session and reads no target or caller, so it works outside tmux. A Session comes
     /// with `addSession`, and a Pane moves into a new Topic with `move(to: .newTopic)`.
     case create(title: String, tags: [Tag]? = nil)
-    /// Adds a Session for `sessionPath` to the target's Topic.
-    case addSession(sessionPath: String, workingCopy: TopicWorkingCopyChoice, name: String? = nil)
+    /// Adds a Session for `sessionPath` to the target's Topic. `name` starts the Session's name, and a name that a
+    /// Session has gets `+2`. `chosenName` is the Session's exact name in the Topic: when the Topic has a Session with
+    /// that name, the command finds it and adds nothing, so the command can run again.
+    case addSession(sessionPath: String, workingCopy: TopicWorkingCopyChoice, name: String? = nil, chosenName: String? = nil)
     /// Empty `choices` take the default choice for each Session.
     case settle(choices: [TopicSettleSession])
     case forget(choices: [TopicSettleSession], worktrees: [String])
@@ -419,6 +421,7 @@ public enum EnvironmentCommand: Codable, Hashable, Sendable {
         case sessionPath = "directory"
         case name
         case workingCopy = "working_copy"
+        case chosenName = "chosen_name"
     }
 
     private enum ForgetSettledCodingKeys: String, CodingKey {

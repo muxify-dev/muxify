@@ -25,7 +25,12 @@ enum CLICommand: Equatable {
 
     /// A help option before `--` asks for help on the verbs that the words before it name. A usage error shows the
     /// help of the verb that the words name, else of the verbs that they start, so `muxify browser` shows only Browser.
-    init(arguments: [String], environment: [String: String] = ProcessInfo.processInfo.environment, now: Date = Date()) throws {
+    ///
+    /// `--request <uuid>` before `--` goes with any verb, so it is taken here, before the verb reads its words. Only a
+    /// verb that sends a request to the Environment keeps it; every other verb refuses it.
+    init(arguments: [String], environment: [String: String] = ProcessInfo.processInfo.environment, now: Date = Date(),
+         workingDirectory: String = FileManager.default.currentDirectoryPath) throws {
+        let (arguments, requestID) = try Self.takingRequest(from: arguments)
         let args = ArraySlice(arguments)
         let options = args.prefix { $0 != "--" }
         let scope = CLIVerbs.scope(of: args)
@@ -40,12 +45,48 @@ enum CLICommand: Equatable {
         }
         guard let (verb, rest) = CLIVerbs.verb(for: args) else { throw CLIError.usage(for: scope) }
         do {
-            let parsed = try ParsedArguments(rest, for: verb, environment: environment, now: now)
+            let request = requestID.map {
+                PendingRequest(id: $0, verb: verb.path.rawValue, words: Array(rest),
+                               callerPane: environment["TMUX_PANE"].flatMap { $0.isEmpty ? nil : $0 }, workingDirectory: workingDirectory)
+            }
+            let parsed = try ParsedArguments(rest, for: verb, environment: environment, now: now, request: request)
             if let form = verb.removed.first(where: { $0.matches(parsed) }) { throw CLIError(form.message(parsed), exitCode: 2) }
             self = try verb.build(parsed)
+            if request != nil {
+                guard case .request = self else {
+                    throw CLIError("--request names a change that Muxify applies one time only. \(verb.path.rawValue) is not such a change, "
+                                   + "so it does not take --request.", exitCode: 2)
+                }
+            }
         } catch let error as CLIError where error.isUsage {
             throw CLIError.usage(for: verb.words)
         }
+    }
+
+    /// The arguments without `--request <uuid>` or `--request=<uuid>`, and the id. The words after `--` stay.
+    private static func takingRequest(from arguments: [String]) throws -> ([String], RequestID?) {
+        var kept: [String] = [], values: [String] = []
+        var rest = ArraySlice(arguments)
+        while let word = rest.popFirst() {
+            if word == "--" {
+                kept += [word] + rest
+                break
+            }
+            if word == "--request" {
+                guard let value = rest.popFirst() else { throw CLIError.usage(for: []) }
+                values.append(value)
+            } else if word.hasPrefix("--request=") {
+                values.append(String(word.dropFirst("--request=".count)))
+            } else {
+                kept.append(word)
+            }
+        }
+        guard values.count <= 1 else { throw CLIError("give --request one time only", exitCode: 2) }
+        guard let value = values.first else { return (kept, nil) }
+        guard let id = RequestID(value) else {
+            throw CLIError("--request takes a UUID, e.g. 3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c", exitCode: 2)
+        }
+        return (kept, id)
     }
 
     @discardableResult
@@ -95,7 +136,7 @@ enum CLICommand: Equatable {
             let window = result.output.components(separatedBy: "\n").first ?? ""
             guard result.status == 0, !window.isEmpty else { throw CLIError("no tmux Window or Pane '\(target)'") }
             try Self.open("muxify://select?window=\(Self.percentEncoded(window))", using: runner)
-        case .request(let invocation): try await invocation.run()
+        case .request(let invocation): return try await invocation.run()
         case .sessionList(let invocation): try await invocation.run()
         case .topicSessionPaths(let invocation): try await invocation.run()
         case .agent(let invocation): try await invocation.run()
