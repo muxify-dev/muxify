@@ -66,7 +66,7 @@ extension WorkspaceStore {
                 tooltips: config.sidebar.windowTooltips, tabCount: tabCount(for: window),
                 isGitViewOpen: isGitViewOpen(in: window.id),
                 usesMainWorkingCopy: TopicsModel.usesMainWorkingCopy(
-                    window, record: topicWatcher.records.first { $0.id == window.topicID }, sessionPaths: sessionPaths)))
+                    window, record: records.first { $0.id == window.topicID }, sessionPaths: sessionPaths)))
         case .pane(let row):
             return .pane(SidebarRowState.Pane(
                 formatted: sidebarText(.pane, context: sidebarFormatContexts.panes[row.pane.id]),

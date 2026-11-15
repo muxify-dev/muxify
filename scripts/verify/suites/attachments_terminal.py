@@ -3,6 +3,9 @@
 ClientVerification's fixed actions use private pasteboards, leaving the user's
 clipboard and keyboard alone. The SSH fixture executes remote commands locally;
 all tmux processes and uploaded files stay in this Sandbox.
+
+The Host's `muxify` is a stand-in with no server mode, so the App Window stays Sessions only and uploads through the
+SSH exec upload script, which the fixture can hold and fail. remote_host_topics proves the Host Server's `upload`.
 """
 
 import base64
@@ -26,12 +29,17 @@ class AttachmentsTerminal(unittest.TestCase):
         cls.remote_tmp.mkdir()
         home = sandbox.root/'remote-home'
         home.mkdir()
+        host_bin = sandbox.root/'host-bin'
+        host_bin.mkdir()
+        (host_bin/'muxify').write_text('#!/bin/sh\ncase "$1" in\n    --version) echo muxify 0123abc 1600000000 ;;\n'
+                                       '    *) echo "muxify: unknown command $1" >&2; exit 2 ;;\nesac\n')
+        (host_bin/'muxify').chmod(0o755)
         (sandbox.root/'config/muxify/config.yaml').write_text(
             'remote_environments:\n  - name: Fixture\n    host: unused\n    username: unused\n')
         fake = sandbox.root/'ssh'
         fake.write_text('''#!/bin/bash
 unset TMUX TMUX_PANE XDG_CONFIG_HOME XDG_STATE_HOME
-export TMUX_TMPDIR=%s TMPDIR=%s HOME=%s
+export TMUX_TMPDIR=%s TMPDIR=%s HOME=%s PATH=%s:"$PATH"
 for arg do
     if [ "$arg" = -O ]; then exit 0; fi
     command=$arg
@@ -42,17 +50,24 @@ if [[ "$command" == *'folder=$(mktemp'* ]]; then
     if [ -f %s ]; then echo 'fixture upload failed' >&2; exit 1; fi
 fi
 exec /bin/sh -c "$command"
-''' % tuple(shlex.quote(str(p)) for p in [sandbox.root/'tmux', cls.remote_tmp, home,
+''' % tuple(shlex.quote(str(p)) for p in [sandbox.root/'tmux', cls.remote_tmp, home, host_bin,
                                          sandbox.root/'upload-started', sandbox.root/'upload-hold', sandbox.root/'upload-fail']))
         fake.chmod(0o755)
         sandbox.app_env['MUXIFY_TEST_SSH'] = str(fake)
+        # The install chain would update the old muxify from here; nothing answers, so no server mode comes.
+        sandbox.app_env['MUXIFY_CLI_BASE_URL'] = 'http://127.0.0.1:9/'
+        # The Host's muxify on the PATH serves, or has no server mode: never the Debug app's own build/host-cli upload.
+        sandbox.debug_host_cli = False
         sandbox.tmux('new-session', '-d', '-s', 'attachments', '/bin/sh')
-        sandbox.launch(args=('-selectedEnvironment', 'Fixture'))
+        sandbox.launch(args=('-selectedEnvironment', 'Fixture', '-sidebarVisible', 'YES'))
         cls.tty = wait(lambda: next((line.split('|')[1] for line in sandbox.tmux(
             'list-clients', '-F', '#{client_control_mode}|#{client_tty}').splitlines()
             if line.startswith('0|')), None), 'remote Client did not attach')
         sandbox.wait_rows(lambda rows: any(r.get('accessibilityIdentifier') == 'client-input' for r in rows),
                           'Client actions missing')
+        # The window falls back to Sessions only once the Host Server fails to start; the checks begin after it.
+        sandbox.wait_rows(lambda rows: sandbox.has('topics-unavailable', rows), 'the window did not fall back to Sessions only',
+                          seconds=30)
         cls.recorder = sandbox.root/'record.py'
         cls.recorder.write_text('''import os, pathlib, sys, termios, tty
 output, ready = map(pathlib.Path, sys.argv[1:])
@@ -86,7 +101,9 @@ finally:
                                            for r in rows), 'Remote Environment not shown')
         window = sandbox.tmux('display-message', '-p', '-t', pane, '#{window_id}')
         key = 'header-window-' + window
-        sandbox.wait_rows(lambda rows: sandbox.has(key, rows), 'Recorder Window did not appear')
+        sandbox.wait_rows(lambda rows: sandbox.has(key, rows), lambda: 'Recorder Window %s did not appear; the header shows %s; tmux has %s' % (
+            window, [r.get('accessibilityIdentifier') for r in sandbox.rows() if str(r.get('accessibilityIdentifier', '')).startswith('header-')],
+            sandbox.tmux('list-windows', '-a', '-F', '#{session_name}:#{window_id}').split()))
         sandbox.act('press', key)
         sandbox.wait_rows(lambda rows: sandbox.row(key, rows).get('accessibilityValue') == 'selected'
                           and sandbox.tmux('display-message', '-p', '-c', self.tty, '#{window_id}') == window,

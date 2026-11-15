@@ -3,7 +3,7 @@ import Foundation
 /// The full command line of the program that runs in each Topic Pane, such as `npm run dev` where tmux says only
 /// `node`. Topic memory records it, so Reopen can type it again.
 public struct PaneCommandLines: Equatable, Sendable {
-    private struct Entry: Equatable, Sendable {
+    private struct Entry: Codable, Equatable, Sendable {
         /// The Pane's `pane_current_command` when `line` was read. Another program in the Pane makes `line` stale.
         let command: String
         /// Empty when `ps` gave no line, so a Pane that has none does not run `ps` again on each read.
@@ -21,6 +21,20 @@ public struct PaneCommandLines: Equatable, Sendable {
     /// The command line of the program in `pane`, when it runs one that is not a shell or an Agent.
     public subscript(pane: TmuxPane) -> String? {
         entries[pane.id].flatMap { $0.command == pane.command && !$0.line.isEmpty ? $0.line : nil }
+    }
+
+    /// These command lines and `other`'s, such as every Session's put together again.
+    public func merging(_ other: PaneCommandLines) -> PaneCommandLines {
+        var lines = self
+        lines.entries.merge(other.entries) { _, theirs in theirs }
+        return lines
+    }
+
+    /// The command lines of the Panes in `paneIDs` only, such as one Session's.
+    public func only(_ paneIDs: Set<String>) -> PaneCommandLines {
+        var lines = PaneCommandLines()
+        lines.entries = entries.filter { paneIDs.contains($0.key) }
+        return lines
     }
 
     /// The command lines for `snapshot`. They are kept while each program Pane of a Topic runs the program of the
@@ -51,5 +65,17 @@ public struct PaneCommandLines: Equatable, Sendable {
             lines.entries[pane.id] = Entry(command: pane.command, line: leaders[tty] ?? "")
         }
         return lines
+    }
+}
+
+/// On the wire, by Pane id: `{"%3": {"command": "node", "line": "npm run dev"}}`.
+extension PaneCommandLines: Codable {
+    public init(from decoder: Decoder) throws {
+        entries = try decoder.singleValueContainer().decode([String: Entry].self)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var value = encoder.singleValueContainer()
+        try value.encode(entries)
     }
 }

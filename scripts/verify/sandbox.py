@@ -95,6 +95,10 @@ class Sandbox:
         self.bundle_id = 'dev.muxify.verify.%s.%s' % (self.name, root.name)
         self.pid = None
         self.evidence = None
+        # A Debug app serves a Host from its checkout's `build/host-cli/` when that build matches its sha
+        # (`DebugHostCLI`). False leaves the stamped source root out of the app copy, so the Host's own `muxify`
+        # serves, or fails to, as a suite's fixture means it to, whatever `make host-cli` last built.
+        self.debug_host_cli = True
 
         # tmux takes default-shell from SHELL when the server starts, and runs each Pane command through it.
         # The user's zsh startup files replace XDG_CONFIG_HOME, so a Pane with their shell reads their Config.
@@ -286,6 +290,9 @@ class Sandbox:
         plist = str(self.app/'Contents/Info.plist')
         for key, value in [('CFBundleIdentifier', self.bundle_id), ('CFBundleName', 'MuxifyVerify-' + self.name)]:
             subprocess.run(['/usr/libexec/PlistBuddy', '-c', 'Set :%s %s' % (key, value), plist], check=True)
+        if not self.debug_host_cli:
+            # Absent from a build without the stamp, so a failed Delete is fine.
+            subprocess.run(['/usr/libexec/PlistBuddy', '-c', 'Delete :MuxifySourceRoot', plist], capture_output=True)
         subprocess.run(['codesign', '--force', '--deep', '--sign', '-', str(self.app)], check=True, capture_output=True)
 
         ready = self.driver_dir/'ready'

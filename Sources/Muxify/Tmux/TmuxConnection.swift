@@ -31,7 +31,12 @@ final class TmuxConnection: @unchecked Sendable {
         remote = try environment.map { try RemoteSSH(environment: $0, sshExecutable: sshExecutable) }
     }
 
-    var isRemote: Bool { remote != nil }
+    /// The connection to this Mac's server.
+    init() {
+        remote = nil
+    }
+
+    var isOnThisMac: Bool { remote == nil }
 
     func invocation(_ args: [String]) throws -> CommandInvocation {
         if let remote { return remote.command(args) }
@@ -46,30 +51,23 @@ final class TmuxConnection: @unchecked Sendable {
         return try runner.run(invocation(args))
     }
 
-    func runAsync(_ args: [String], completion: ((Result<String, Error>) -> Void)? = nil) {
+    /// Runs a view command on the tmux queue, in the order asked. `ownClient` is the Client that a command acting as
+    /// a Client must still find at its tty; a Remote Environment's `RemoteSSH` checks that itself against its marker.
+    func view(_ command: ViewCommand, ownClient: ViewCommandExecutor.Client?,
+              completion: @escaping (Result<String, Error>) -> Void) {
         queue.async {
-            let result = Result { try self.run(args) }
-            if let completion { DispatchQueue.main.async { completion(result) } }
-        }
-    }
-
-    /// Runs a /bin/sh `script` on the Environment's machine: over the SSH
-    /// master for a Remote Environment, else here. Off the tmux queue, so a
-    /// slow script never holds up tmux commands.
-    func runScriptAsync(_ script: String, arguments: [String] = [], timeout: TimeInterval = 20,
-                        completion: @escaping (Result<String, Error>) -> Void) {
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { try self.runScript(script, arguments: arguments, timeout: timeout) }
+            let result = Result { try ViewCommandExecutor(ownClient: ownClient, run: self.run).run(command) }
             DispatchQueue.main.async { completion(result) }
         }
     }
 
-    /// `ScriptRunning`, for the Muxify Worktree scripts of a Remote Environment.
+    /// Runs a /bin/sh `script` on the Environment's machine: over the SSH master for a Remote Environment, else here.
+    /// Off the tmux queue, so a slow script never holds up tmux commands. Only the Sessions-only link's own reads (the
+    /// Config, Session Paths, the Panes' command lines, an upload) and the Host CLI install chain run one.
     func runScript(_ script: String, arguments: [String], timeout: TimeInterval) throws -> String {
         try runScript(script, arguments: arguments, timeout: timeout, inputFile: nil)
     }
 
-    /// `runScriptAsync` for a caller that is already off the main thread.
     func runScript(_ script: String, arguments: [String] = [], timeout: TimeInterval = 20, inputFile: URL? = nil) throws -> String {
         lock.lock()
         let stopped = retired
@@ -82,34 +80,30 @@ final class TmuxConnection: @unchecked Sendable {
 
     /// Resolve the actual Pane of this Client before the upload, independently
     /// of the Sidebar's polling snapshot. A slow upload never blocks tmux reads.
-    func pasteAttachments(_ attachments: TerminalAttachments, client: String,
+    func pasteAttachments(_ attachments: TerminalAttachments, client: String, ownClient: ViewCommandExecutor.Client? = nil,
                           completion: @escaping (Result<String, Error>) -> Void) {
+        let executor = ViewCommandExecutor(ownClient: ownClient, run: run)
         queue.async {
-            let target = Result { try self.run(["display-message", "-p", "-c", client, "#{pane_id}"])
-                .trimmingCharacters(in: .newlines) }
+            let target = Result { try executor.run(.clientPane(client: client)).trimmingCharacters(in: .newlines) }
             self.attachmentQueue.async {
                 let result = Result {
-                    defer { if self.isRemote { attachments.removeLocalCopy() } }
+                    defer { if !self.isOnThisMac { attachments.removeLocalCopy() } }
                     let pane = try target.get()
-                    guard pane.hasPrefix("%"), Int(pane.dropFirst()) != nil else { throw TmuxError.notReady }
+                    guard TerminalAttachments.isPane(pane) else { throw TmuxError.notReady }
                     var words: [String] = []
                     for item in attachments.items {
                         switch item {
                         case .text(let text): words.append(text)
                         case .file(let file):
-                            let path = self.isRemote
-                                ? try self.runScript(TerminalAttachments.uploadScript, arguments: [file.lastPathComponent],
+                            let path = self.isOnThisMac
+                                ? file.path
+                                : try self.runScript(TerminalAttachments.uploadScript, arguments: [file.lastPathComponent],
                                                      timeout: 120, inputFile: file)
-                                : file.path
                             guard path.hasPrefix("/") else { throw TmuxError.notReady }
-                            words.append(path.contains("\n") || path.contains("\r")
-                                         ? Tmux.shellQuote(path) : GhosttyInput.shellEscape(path))
+                            words.append(TerminalAttachments.word(forPath: path))
                         }
                     }
-                    let buffer = "muxify-paste-" + UUID().uuidString
-                    defer { _ = try? self.run(["delete-buffer", "-b", buffer]) }
-                    _ = try self.run(["set-buffer", "-b", buffer, "--", words.joined(separator: " "), ";",
-                                      "paste-buffer", "-d", "-p", "-b", buffer, "-t", pane])
+                    try executor.run(.paste(pane: pane, text: words.joined(separator: " ")))
                     return pane
                 }
                 DispatchQueue.main.async { completion(result) }
@@ -117,33 +111,10 @@ final class TmuxConnection: @unchecked Sendable {
         }
     }
 
-    /// Runs a /bin/sh `script` as `runScriptAsync` does, but in a pseudo-terminal with the C locale, over SSH
-    /// with a remote PTY for a Remote Environment, so git's and ssh's credential prompts go to `onPrompt`
-    /// (`TerminalCommand`). Returns the command, to answer or cancel, or nil after completing with the error.
-    @discardableResult
-    func startTerminalScript(_ script: String, arguments: [String] = [], timeout: TimeInterval,
-                             onPrompt: @escaping (GitCredentialPrompt) -> Void,
-                             completion: @escaping (Result<String, Error>) -> Void) -> TerminalCommand? {
-        lock.lock()
-        let stopped = retired
-        lock.unlock()
-        let exports = TerminalCommand.locale.keys.sorted().map { "\($0)=\(TerminalCommand.locale[$0]!)" }.joined(separator: " ")
-        let script = "export \(exports)\n" + script
-        do {
-            guard !stopped else { throw TmuxError.cancelled }
-            let invocation = remote?.terminalScript(script, arguments: arguments)
-                ?? CommandInvocation(executable: "/bin/sh", arguments: ["-c", script, "muxify"] + arguments)
-            return try TerminalCommand(invocation, timeout: timeout, onPrompt: onPrompt, completion: completion)
-        } catch {
-            DispatchQueue.main.async { completion(.failure(error)) }
-            return nil
-        }
-    }
-
     /// Serializes marker writes with removal, so a late registration cannot
     /// survive detach or retirement. Each replacement gets its own option.
     func updateLocalClient(_ client: TmuxClient?) {
-        guard !isRemote else { return }
+        guard isOnThisMac else { return }
         queue.async {
             self.lock.lock()
             let stopped = self.retired
@@ -160,7 +131,7 @@ final class TmuxConnection: @unchecked Sendable {
                 }
             }
             guard let client, !client.isControl else { return }
-            let option = "@muxify_client_" + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+            let option = ClientMarker.option(nonce: UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())
             let value = [String(client.pid), client.tty, NSHomeDirectory(), Tmux.hostName, "local"]
                 .joined(separator: Tmux.separator)
             self.localMarker = (option, client.pid, false)
@@ -182,12 +153,7 @@ final class TmuxConnection: @unchecked Sendable {
             throw TmuxError.notReady
         }
         snapshot.ownClientTTY = client.tty
-        snapshot.homeDirectory = marker[2]
-        for index in snapshot.windows.indices {
-            snapshot.windows[index].homeDirectory = marker[2]
-            snapshot.windows[index].hostName = marker[3]
-            snapshot.windows[index].isRemote = true
-        }
+        snapshot.stampHost(home: marker[2], hostName: marker[3])
         return stamped(snapshot)
     }
 

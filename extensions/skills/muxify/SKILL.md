@@ -9,6 +9,8 @@ Muxify is a macOS front end for tmux. It groups tmux Sessions into Topics, one T
 
 Check once: `muxify browser available`. Exit 0 (`local` or `remote`) means Muxify shows this Pane, so this skill applies. Exit 1, or no `muxify` command, means Muxify does not show this Pane: use your usual tools. Exit 2 means tmux could not be read; stderr says why.
 
+`remote` means that you run on a Host and Muxify shows it from a Mac. Browser commands work, but the Mac's Browser cannot load this Host's `localhost`: open a URL that the Mac can reach.
+
 ## Your own place
 
 Every command acts on your own Pane, and through it on your Window, Session and Topic, because it reads `$TMUX_PANE`. Leave out `--topic`, `--session`, `--window` and `--pane` for your own work. Give a target only when the user names one.

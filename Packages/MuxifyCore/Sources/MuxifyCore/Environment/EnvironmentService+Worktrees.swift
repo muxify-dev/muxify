@@ -3,15 +3,16 @@ import Foundation
 // Muxify Worktrees, in a Topic or not (ADR 0062). Create and Remove take no lock: a second Worktree at the same path
 // fails in `git worktree add` or at its record, and is not retried; List reads only.
 extension EnvironmentService {
-    var worktrees: MuxifyWorktrees { MuxifyWorktrees(scripts: scripts) }
+    var worktrees: MuxifyWorktrees { MuxifyWorktrees(scripts: LocalScripts()) }
     var worktreeStore: MuxifyWorktreeStore { MuxifyWorktreeStore(paths: paths) }
 
-    /// Muxify's state folder on this Mac, where the records are too; on a Remote Environment, the one on its machine.
-    var defaultWorktreesRoot: String? { environmentName == nil ? paths.worktrees.path : nil }
+    /// Muxify's state folder on the machine whose records this service keeps: `$XDG_STATE_HOME/muxify/worktrees`,
+    /// the Host CLI's own on a Host (ADR 0090).
+    var defaultWorktreesRoot: String { paths.worktrees.path }
 
-    /// This Environment's records.
+    /// The records of this machine's Worktrees.
     func worktreeRecords() throws -> [MuxifyWorktreeRecord] {
-        try worktreeStore.all().filter { $0.environment == environmentName }
+        try worktreeStore.all()
     }
 
     func createWorktree(_ request: EnvironmentRequest, name: String, from: String?, start: WorktreeStart, open: Bool,
@@ -30,7 +31,7 @@ extension EnvironmentService {
             let added = try worktrees.add(name: name, from: folder, at: path, start: start)
             phase = .changesStarted
             let branch: String = if case .branch(let branch) = start { branch } else { name }
-            let record = MuxifyWorktreeRecord(environment: environmentName, repository: repository.main, name: name, path: added.path,
+            let record = MuxifyWorktreeRecord(repository: repository.main, name: name, path: added.path,
                                               branch: branch, base: added.commit)
             try worktreeStore.write(record)
             var output = try repository.setupFolder.map { try worktrees.sync(repository.setup, from: $0, to: record.path) } ?? []
@@ -85,7 +86,7 @@ extension EnvironmentService {
             phase = .changesStarted
             try worktrees.remove(record, force: force)
             try worktreeStore.remove(record.id)
-            if topicsAvailable { try forgetSessions(in: record) }
+            try forgetSessions(in: record)
             for arguments in kills { try server.run(arguments) }
             return .changed(TopicChange(topicID: nil, worktreeID: record.id, output: output.isEmpty ? nil : output))
         } catch {
@@ -103,7 +104,7 @@ extension EnvironmentService {
                 records = records.filter { $0.repository == main }
             }
             let states = try worktrees.states(records.map(\.path))
-            let topicRecords = topicsAvailable ? try store.read().records : []
+            let topicRecords = try store.read().records
             let labels = TopicLabels(topicRecords)
             return .worktrees(zip(records, states).map { record, state in
                 let topic = topicRecords.first { $0.settledAt == nil && $0.sessions.contains { $0[TopicWorktrees.idKey]?.string == record.id } }
@@ -119,7 +120,7 @@ extension EnvironmentService {
     /// hooks, which the new Session's Pane types.
     func setUpWorktree(_ new: TopicPlan.NewWorktree) throws -> String? {
         let spec = new.worktree
-        let record = MuxifyWorktreeRecord(id: new.id, environment: environmentName, repository: new.setup.repository ?? spec.repositoryPath,
+        let record = MuxifyWorktreeRecord(id: new.id, repository: new.setup.repository ?? spec.repositoryPath,
                                           name: (spec.path as NSString).lastPathComponent, path: spec.path, branch: spec.branch, base: new.commit)
         try worktreeStore.write(record)
         guard let folder = new.setup.folder else { return nil }
@@ -133,7 +134,7 @@ extension EnvironmentService {
         let records = try worktreeRecords()
         if let record = records.first(where: { $0.id == value }) { return record }
         let path = Folder.lexical(value)
-        if let record = records.first(where: { $0.path == path || (environmentName == nil && Folder.local($0.path) == Folder.local(path)) }) {
+        if let record = records.first(where: { $0.path == path || Folder.local($0.path) == Folder.local(path) }) {
             return record
         }
         let named = records.filter { $0.name == value }

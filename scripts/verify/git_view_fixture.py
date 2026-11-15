@@ -43,7 +43,8 @@ Accessibility identifiers of the Git View:
     git-menu-agents          the Agent guard's warning in a menu, only while an Agent that is working or blocked has a
                              Pane in the Worktree; its label is one line for each Agent, "<kind> in <Topic or Session>"
     git-menu-cancel          the menu's Cancel button
-    git-commit-box           the commit message box that c opens in Changes
+    git-commit-box           the commit message box that c opens in Changes; its action Commit commits, as ⌘↩ does
+    git-commit-summary       the commit box's summary field: `set` it to type
     git-prompt               an open Git View prompt, such as the stash message that s asks for; its label is its title,
                              and its actions are enter (submit) and escape (cancel)
     git-prompt-field         the prompt's one-line field: `set` it to type; its label is the prompt's title

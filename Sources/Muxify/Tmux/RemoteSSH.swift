@@ -11,9 +11,7 @@ final class RemoteSSH {
     private let sshExecutable: String
     private var ownsDirectory = false
     var socketPath: String { directory.appendingPathComponent("s").path }
-    var markerOption: String { "@muxify_client_\(nonce)" }
-    /// The PID of this connection's control-mode listener (`tmux -C`).
-    var listenerOption: String { "@muxify_listener_\(nonce)" }
+    var markerOption: String { ClientMarker.option(nonce: nonce) }
     private var exitFile: URL { directory.appendingPathComponent("exit") }
     private var errorFile: URL { directory.appendingPathComponent("stderr") }
     private var snapshotFile: URL { directory.appendingPathComponent("snapshot") }
@@ -80,13 +78,31 @@ final class RemoteSSH {
                 if [ "$actual" != "$expected" ]; then echo 'Muxify: remote tmux client changed.' >&2; exit 75; fi
                 """
             }
-            if args.first == "-C" {
-                // Recorded before the marker check, so the bootstrap, which clears the marker first, always sees a
-                // listener that can still start. `exec` keeps the PID for the tmux client.
-                checks = "tmux -u set-option -sq \(Tmux.shellQuote(listenerOption)) \"$$\" || exit $?\n" + checks
-            }
         }
-        let script = Self.remotePath + "\n" + checks + "\nexec tmux -u " + args.map(Tmux.shellQuote).joined(separator: " ")
+        let tmux = "tmux -u " + args.map(Tmux.shellQuote).joined(separator: " ")
+        let script: String
+        if args.first == "-C" {
+            // The listener stays attached to the Watch Session, and the SSH master, and so the Terminal, waits for
+            // every channel over it. It ends itself once the attachment's marker is gone, which the bootstrap clears
+            // when its Client ends. The control client reads the channel's input, saved before `&` replaces it.
+            script = Self.remotePath + "\n" + checks + """
+
+            exec 3<&0
+            \(tmux) <&3 &
+            listener=$!
+            exec 3<&-
+            while kill -0 "$listener" 2>/dev/null; do
+                sleep 1
+                if [ -z "$(tmux -u show-option -sqv \(Tmux.shellQuote(markerOption)) 2>/dev/null)" ]; then
+                    kill -HUP "$listener" 2>/dev/null
+                    break
+                fi
+            done
+            wait "$listener"
+            """
+        } else {
+            script = Self.remotePath + "\n" + checks + "\nexec " + tmux
+        }
         return CommandInvocation(executable: sshExecutable, arguments: options + [
             "-T", "-o", "ControlMaster=no", "-o", "BatchMode=yes", "-o", "ProxyCommand=/usr/bin/false",
             "--", environment.host, "exec /bin/sh -c " + Tmux.shellQuote(script),
@@ -103,14 +119,38 @@ final class RemoteSSH {
         ])
     }
 
-    /// `script`, with a remote PTY so that git's and ssh's questions on the remote machine come back through
-    /// Muxify's own pty (`TerminalCommand`), where they are answered.
-    func terminalScript(_ script: String, arguments: [String] = []) -> CommandInvocation {
-        let words = [Self.remotePath + "\n" + script, "muxify"] + arguments
-        return CommandInvocation(executable: sshExecutable, arguments: options + [
-            "-tt", "-o", "ControlMaster=no", "-o", "BatchMode=yes", "-o", "ProxyCommand=/usr/bin/false",
-            "--", environment.host, "exec /bin/sh -c " + words.map(Tmux.shellQuote).joined(separator: " "),
-        ])
+    /// The Host Server, `muxify server`, as a channel of the master like the execs (ADR 0088):
+    /// it never signs in on its own and never outlives the master. Its stdin and stdout are the protocol's.
+    /// `executable` is the Debug app's own upload; nil finds the Host CLI.
+    func serverInvocation(executable: String? = nil) -> CommandInvocation {
+        script(Self.findHostCLI(at: executable) + "\nexec \"$muxify\" server")
+    }
+
+    /// `findHostCLI`, or `executable` when there is one: the Debug app's own upload, which exits 127 too when it is
+    /// gone.
+    static func findHostCLI(at executable: String?) -> String {
+        guard let executable else { return findHostCLI }
+        return """
+        muxify=\(Tmux.shellQuote(executable))
+        [ -x "$muxify" ] || { echo "muxify: $muxify is not there" >&2; exit 127; }
+        """
+    }
+
+    /// Finds the Host CLI as the install and the phone do: on the PATH, in `~/.local/bin`, then, on a Mac only,
+    /// Muxify.app's own. Exits 127 with no line on stdout when there is none.
+    static let findHostCLI = """
+    bundle=\(Tmux.shellQuote(HostCLI.appBundleCLI))
+    if muxify=$(command -v muxify 2>/dev/null) && [ -x "$muxify" ]; then :
+    elif [ -x "$HOME/.local/bin/muxify" ]; then muxify=$HOME/.local/bin/muxify
+    elif [ "$(uname -s)" = Darwin ] && [ -x "$bundle" ]; then muxify=$bundle
+    else echo 'muxify: the Host CLI is not installed' >&2; exit 127
+    fi
+    """
+
+    /// Prints the first line of the Host CLI's `--version`, for the reason a window gives when that CLI has no
+    /// server mode. An old CLI prints nothing.
+    static func hostCLIVersionScript(at executable: String? = nil) -> String {
+        findHostCLI(at: executable) + "\n\"$muxify\" --version 2>/dev/null | head -n 1"
     }
 
     /// The Session that Start a Session… starts on the remote machine: its name, and its folder there.
@@ -262,15 +302,10 @@ final class RemoteSSH {
         # Advertise it for this client only, without rewriting server options.
         /bin/sh -c \(Tmux.shellQuote(attachment)) muxify "$client_tty" "$target"
         status=$?
+        # The SSH master stays until every channel over it closes. Clearing the marker ends them: the listener ends
+        # itself, and the Mac closes the Host Server's channel once the server says its Client is gone.
         tmux -u set-option -su \(Tmux.shellQuote(markerOption)) 2>/dev/null
-        listener=$(tmux -u show-option -sqv \(Tmux.shellQuote(listenerOption)) 2>/dev/null)
-        tmux -u set-option -su \(Tmux.shellQuote(listenerOption)) 2>/dev/null
         \(reportSnapshot)
-        # The SSH master stays until every channel over it closes, and the listener attached to the Watch Session
-        # outlives this client. End it, or the Terminal never sees SSH exit and never goes on to the next Session.
-        if [ -n "$listener" ] && tmux -u list-clients -F '#{client_pid}' 2>/dev/null | grep -qx "$listener"; then
-            kill -HUP "$listener" 2>/dev/null
-        fi
         exit "$status"
         """
     }
@@ -305,12 +340,7 @@ final class RemoteSSH {
             ? TmuxSnapshot(windows: [], clients: [], panes: [], lastWindowID: nil, serverRunning: false)
             : Tmux.parseSnapshot(payload)
         guard payload == "empty" || snapshot.serverID != nil else { return nil }
-        snapshot.homeDirectory = metadata[0]
-        for index in snapshot.windows.indices {
-            snapshot.windows[index].homeDirectory = metadata[0]
-            snapshot.windows[index].hostName = metadata[1]
-            snapshot.windows[index].isRemote = true
-        }
+        snapshot.stampHost(home: metadata[0], hostName: metadata[1])
         return snapshot
     }
 

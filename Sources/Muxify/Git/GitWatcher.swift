@@ -1,5 +1,6 @@
 import CoreServices
 import Foundation
+import MuxifyCore
 
 /// The folders of a repository that change when it does: the Worktree's top folder, with its files and, in the main
 /// checkout, its git directory (HEAD, index), and the common git directory, with the refs, which for a linked
@@ -25,8 +26,7 @@ struct GitWatchedRepository: Equatable {
     }
 }
 
-/// Tells the Git View that its repository may have changed, so it reads it again (ADR "The Git View watches a local
-/// repository and probes a remote one"). The Git View starts it while it is open and current and stops it when it
+/// Tells the Git View that its repository may have changed, so it reads it again (ADR 0072, ADR 0087). The Git View starts it while it is open and current and stops it when it
 /// closes or is suspended; it debounces and spaces the reads itself. Calls come on the main thread.
 protocol GitWatcher: AnyObject {
     /// Reports changes to `repository` by calling `changed` on the main thread. Started again with another
@@ -36,7 +36,8 @@ protocol GitWatcher: AnyObject {
     func stop()
 }
 
-/// Watches a repository in the Local Environment with FSEvents, on its folders and everything in them.
+/// Watches a repository in the Local Environment with FSEvents, on its folders and everything in them: what feeds the
+/// Local link's `repository` subscription.
 final class GitFileWatcher: GitWatcher {
     private var stream: FSEventStreamRef?
     private var watched: GitWatchedRepository?
@@ -84,90 +85,155 @@ final class GitFileWatcher: GitWatcher {
     deinit { stopStream() }
 }
 
-/// Probes a repository on a Remote Environment, where FSEvents cannot see: every `interval`, over the owned ssh
-/// connection, one script reads HEAD, the index's modification time and a hash of the status, and the Git View reads
-/// again only when one of them changed since the last probe. It needs only `git` and `sh` on the remote machine and
-/// leaves nothing running there. A failed probe, as with the connection down, reports nothing; the next one retries.
-final class GitRemoteProbe: GitWatcher {
-    /// Runs a script with its arguments on the Environment's machine and calls back on the main thread:
-    /// `WorkspaceStore.runGitScript`.
-    typealias Run = (_ script: String, _ arguments: [String],
-                     _ completion: @escaping (Result<String, Error>) -> Void) -> Void
+/// The Git View's watcher in every Environment: the `repository` subscription of the repository's top folder through
+/// the store's link (ADR 0087). FSEvents feeds it for the Local Environment, the Host Server's watch for a Host. Each
+/// event that says the repository changed reports it.
+final class RepositoryWatcher: GitWatcher {
+    typealias Watch = @MainActor (_ path: String, _ onEvent: @escaping (RepositoryEvent) -> Void) -> EnvironmentSubscription
 
-    /// Takes the top folder. Prints a section, `probe`, with HEAD's commit and branch, the index's modification time
-    /// (GNU `stat`, else BSD) and a checksum of the status; nothing when the folder is gone or in no repository.
-    /// `GIT_OPTIONAL_LOCKS=0`, so `git status` never rewrites the index and changes its time on every probe.
-    static let script = """
-    cd "$1" 2>/dev/null || exit 0
-    export GIT_OPTIONAL_LOCKS=0
-    index=$(git rev-parse --git-path index 2>/dev/null) || exit 0
-    printf '\\036probe\\n'
-    git rev-parse -q --verify HEAD 2>/dev/null
-    git symbolic-ref -q HEAD 2>/dev/null
-    stat -c %y "$index" 2>/dev/null || stat -f %Fm "$index" 2>/dev/null
-    git -c core.quotepath=off status --porcelain=v1 --branch -z --untracked-files=all 2>/dev/null | cksum
-    """
-
-    /// What a probe read, or nil when it read nothing.
-    static func value(of result: Result<String, Error>) -> String? {
-        guard case .success(let output) = result else { return nil }
-        return GitRepository.sections(output)["probe"]
-    }
-
-    let interval: TimeInterval
-    private let run: Run
-    private var timer: Timer?
+    private let watchRepository: Watch
+    private var subscription: EnvironmentSubscription?
     private var watched: GitWatchedRepository?
     private var changed: (() -> Void)?
-    /// What the last probe that read anything read: a change since is reported.
-    private var last: String?
-    private var isProbing = false
-    /// Counts the starts and stops, so a probe that ends after one changes nothing.
-    private var generation = 0
 
-    init(interval: TimeInterval = 2, run: @escaping Run) {
-        self.interval = interval
-        self.run = run
+    init(_ watchRepository: @escaping Watch) {
+        self.watchRepository = watchRepository
     }
 
-    /// Probes at once, for the values the next probes are compared with, then every `interval`.
     func start(_ repository: GitWatchedRepository, changed: @escaping () -> Void) {
         self.changed = changed
-        guard timer == nil || repository != watched else { return }
-        stopTimer()
+        guard subscription == nil || repository != watched else { return }
+        stopSubscription()
         watched = repository
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in self?.probe() }
-        probe()
-    }
-
-    func stop() {
-        stopTimer()
-        changed = nil
-    }
-
-    /// One probe at a time: a tick while one runs, as over a slow connection, starts none.
-    func probe() {
-        guard let watched, !isProbing else { return }
-        isProbing = true
-        let generation = generation
-        run(Self.script, [watched.root]) { [weak self] result in
-            guard let self, self.generation == generation else { return }
-            self.isProbing = false
-            guard let value = Self.value(of: result) else { return }
-            let last = self.last
-            self.last = value
-            if let last, last != value { self.changed?() }
+        subscription = MainActor.assumeIsolated {
+            watchRepository(repository.root) { [weak self] event in
+                if event.changed { self?.changed?() }
+            }
         }
     }
 
-    private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
-        watched = nil
-        last = nil
-        isProbing = false
-        generation += 1
+    func stop() {
+        stopSubscription()
+        changed = nil
     }
 
-    deinit { timer?.invalidate() }
+    private func stopSubscription() {
+        watched = nil
+        guard let subscription else { return }
+        self.subscription = nil
+        MainActor.assumeIsolated { subscription.cancel() }
+    }
+}
+
+/// The `repository` subscription of a folder in the Local Environment: one probe for the first event and the folders,
+/// then ADR 0072's FSEvents watcher on them, and one HEAD read once it watches. Each change it hears is an event at once, with HEAD as it was; HEAD is read
+/// again at most once a second, and an event follows when it moved. A folder in no repository is not watched: the
+/// header reads it again when its Window's folder changes.
+///
+/// The folder itself is watched from the start, while the probe runs: the subscriber read the repository before it
+/// subscribed, so a change during the probe, which the first event's state already holds, is still an event after it.
+@MainActor
+final class LocalRepositoryWatch {
+    let path: String
+    private let onEvent: (RepositoryEvent) -> Void
+    private let files = GitFileWatcher()
+    /// The folder's own watcher while the probe runs, stopped a second after `files` watches the repository's folders:
+    /// FSEvents may deliver a change from before the probe after the probe ends.
+    private let early = GitFileWatcher()
+    private var hasStarted = false
+    private var changedEarly = false
+    private var head: GitHeadRead = .unknown
+    private var stopped = false
+    private var readingHead = false
+    private var headWanted = false
+    private var lastHeadRead: TimeInterval?
+
+    init(path: String, onEvent: @escaping (RepositoryEvent) -> Void) {
+        self.path = path
+        self.onEvent = onEvent
+    }
+
+    func start() {
+        let path = path
+        early.start(GitWatchedRepository(root: path, commonDirectory: "")) { [weak self] in
+            MainActor.assumeIsolated { self?.changedWhileStarting() }
+        }
+        Task { [weak self] in
+            let probe = await Task.detached(priority: .userInitiated) { GitReader().probe(path) }.value
+            self?.started(probe)
+        }
+    }
+
+    func stop() {
+        stopped = true
+        early.stop()
+        files.stop()
+    }
+
+    private func started(_ probe: RepositoryProbe) {
+        guard !stopped else { return }
+        hasStarted = true
+        guard probe.head.isRepository != nil else { return early.stop() }
+        head = probe.head
+        onEvent(RepositoryEvent(probe.head, changed: false))
+        guard let root = probe.root else { return early.stop() }
+        files.start(GitWatchedRepository(root: root, commonDirectory: probe.commonDirectory ?? "")) { [weak self] in
+            MainActor.assumeIsolated { self?.filesChanged() }
+        }
+        if changedEarly {
+            changedEarly = false
+            onEvent(RepositoryEvent(head, changed: true))
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            MainActor.assumeIsolated { self?.early.stop() }
+        }
+        // HEAD may have moved between the probe and the watcher's start, which FSEvents never reports.
+        readHead()
+    }
+
+    /// A change `early` heard: held for after the first event while the probe runs, else reported as `files`' are.
+    private func changedWhileStarting() {
+        if hasStarted { filesChanged() } else { changedEarly = true }
+    }
+
+    private func filesChanged() {
+        guard !stopped else { return }
+        onEvent(RepositoryEvent(head, changed: true))
+        readHead()
+    }
+
+    /// One HEAD read at a time, each at least a second after the last.
+    private func readHead() {
+        headWanted = true
+        guard !readingHead else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        if let lastHeadRead, now - lastHeadRead < 1 {
+            readingHead = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + (1 - (now - lastHeadRead))) { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.readingHead = false
+                    self?.readHead()
+                }
+            }
+            return
+        }
+        headWanted = false
+        readingHead = true
+        lastHeadRead = now
+        let path = path
+        Task { [weak self] in
+            let read = await Task.detached(priority: .utility) { GitReader().head(path) }.value
+            self?.didRead(read)
+        }
+    }
+
+    private func didRead(_ read: GitHeadRead) {
+        readingHead = false
+        guard !stopped else { return }
+        if read.isRepository != nil, read != head {
+            head = read
+            onEvent(RepositoryEvent(read, changed: true))
+        }
+        if headWanted { readHead() }
+    }
 }

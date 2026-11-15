@@ -1,5 +1,7 @@
 # The Git View watches a local repository and probes a remote one
 
+> **Changed by [ADR-0087](0087-muxify-reaches-a-host-only-through-typed-commands-and-subscriptions.md):** the Git View and the header now hear of changes through the `repository { path }` subscription of the App Window's link. Locally the FSEvents watcher below feeds it. On a Host the Host Server feeds it: a non-recursive watch of the git directory (inotify on Linux) and this 2-second probe, run on the Host itself. The probe over ssh and the header's 2-second HEAD read are gone, and a Sessions-only window has no Git View.
+
 The Git View read its repository only every 10 seconds, on app activation, on `R` and after its own writes. After a commit in a Pane or by an Agent, the committed files stayed in Changes for up to 10 seconds. We decide that an open, current Git View reads its repository again as soon as the repository changes. How it notices depends on where the repository is.
 
 - **Local Environment**: a file-system watcher (FSEvents) on the working tree, the Worktree's own git directory (HEAD, index) and the common git directory (refs), which for a linked Worktree lies outside the tree. Events are debounced by about 250 ms, one read runs at a time, and reads start at most once per second, so build output in ignored folders cannot flood it. The reads set `GIT_OPTIONAL_LOCKS=0`, so a read does not write `.git/index` and wake the watcher again.

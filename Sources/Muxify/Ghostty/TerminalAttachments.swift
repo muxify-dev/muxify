@@ -66,6 +66,16 @@ final class TerminalAttachments {
 
     func removeLocalCopy() { try? FileManager.default.removeItem(at: directory) }
 
+    /// A file's path as one word of the paste: escaped as a drop is, or quoted when it holds a line break.
+    static func word(forPath path: String) -> String {
+        path.contains("\n") || path.contains("\r") ? Tmux.shellQuote(path) : GhosttyInput.shellEscape(path)
+    }
+
+    /// Whether `pane` is a Pane id that `client_pane` answers.
+    static func isPane(_ pane: String) -> Bool {
+        pane.hasPrefix("%") && Int(pane.dropFirst()) != nil
+    }
+
     /// stdin is binary, never the interactive terminal. Publish only a complete
     /// file, in a private per-file directory retained for the remote temp policy.
     static let uploadScript = """

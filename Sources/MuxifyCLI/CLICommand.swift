@@ -20,6 +20,10 @@ enum CLICommand: Equatable {
     case agent(AgentInvocation)
     case agentConversation(AgentConversationInvocation)
     case diagnosticsSummary(DiagnosticsSummaryInvocation)
+    /// The Host Server on stdin and stdout, which exits after `silence` seconds with no frame.
+    case server(silence: TimeInterval, paths: MuxifyPaths)
+    /// git's or ssh's question, asked through the socket that a Git View command names in `environment`.
+    case askpass(prompt: String, environment: [String: String])
 
     static var usage: String { CLIVerbs.usage }
 
@@ -130,18 +134,29 @@ enum CLICommand: Equatable {
         case .sessionOpen(let name):
             let result = try runner.run("tmux", arguments: ["has-session", "-t", "=\(name)"], quiet: true)
             guard result.status == 0 else { throw CLIError("no tmux session '\(name)'") }
-            try Self.open("muxify://select?session=\(Self.percentEncoded(name))", using: runner)
+            try Self.select(.session(name), using: runner)
         case .windowOpen(let target):
             let result = try runner.run("tmux", arguments: ["list-panes", "-t", target, "-F", "#{window_id}"], quiet: true)
             let window = result.output.components(separatedBy: "\n").first ?? ""
             guard result.status == 0, !window.isEmpty else { throw CLIError("no tmux Window or Pane '\(target)'") }
-            try Self.open("muxify://select?window=\(Self.percentEncoded(window))", using: runner)
+            try Self.select(.window(window), using: runner)
+        case .askpass(let prompt, let environment):
+            do { print(try GitAskpass.ask(prompt, environment: environment)) }
+            catch BrowserAgentChannel.Failure.unreachable(let reason) { throw CLIError("muxify askpass: cannot reach Muxify: \(reason)") }
+            catch BrowserAgentChannel.Failure.broken(let reason) { throw CLIError("muxify askpass: \(reason)") }
         case .request(let invocation): return try await invocation.run()
         case .sessionList(let invocation): try await invocation.run()
         case .topicSessionPaths(let invocation): try await invocation.run()
         case .agent(let invocation): try await invocation.run()
         case .agentConversation(let invocation): try invocation.run(using: runner)
         case .diagnosticsSummary(let invocation): try invocation.run()
+        case .server(let silence, let paths):
+            // The Host's Config, with its SessionPaths found as `topic session-paths` finds them, read for each request.
+            // This executable is the askpass helper of the Git View's network commands.
+            let context = HostServerContext(paths: paths, config: {
+                try await ConfigSessions.load(paths.configFile, cache: SessionPathCache(file: paths.sessionPathCache(remote: nil)))
+            }, gitNetwork: GitNetworkRunner(helper: executableURL.path, scratch: paths.state))
+            return await HostServer.run(build: BuildStamp.versionLine, silence: silence, context: context).exitCode
         }
         return 0
     }
@@ -153,6 +168,40 @@ enum CLICommand: Equatable {
         guard result.status == 0, !window.isEmpty else { throw CLIError("no tmux Window '\(target)'") }
         // Append so requests made before Muxify's next poll aren't overwritten.
         try check(runner.run("tmux", arguments: ["set-option", "-wa", "-t", window, Tmux.openOption, " " + urls.joined(separator: " ")], quiet: false), command: "tmux")
+    }
+
+    /// A view verb: the App Window shows `request` and comes to the front. On a Host, the Host Server that
+    /// `@muxify_browser_socket` names passes it to its Mac (ADR 0091); on a Mac, macOS `open` hands the app a
+    /// `muxify://select` URL.
+    static func select(_ request: SelectRequest, using runner: any CLICommandRunning = CLIProcessRunner()) throws {
+        if let socket = hostServerSocket(using: runner) {
+            let reply: BrowserAgentReply
+            do { reply = try BrowserAgentChannel.send(MacRequest.select(request), replyTimeout: 30, to: socket) }
+            catch let failure as BrowserAgentChannel.Failure { throw failure.cliError }
+            if case .failure(let message, let exitCode) = reply { throw CLIError(message, exitCode: exitCode) }
+            return
+        }
+        #if os(macOS)
+        try open(selectURL(request), using: runner)
+        #else
+        throw BrowserAgentChannel.Failure.unreachable("no Muxify shows this Host's tmux server").cliError
+        #endif
+    }
+
+    static func selectURL(_ request: SelectRequest) -> String {
+        switch request {
+        case .session(let name): "muxify://select?session=\(percentEncoded(name))"
+        case .window(let id): "muxify://select?window=\(percentEncoded(id))"
+        case .topic(let id): "muxify://select?topic=\(percentEncoded(id))"
+        }
+    }
+
+    /// The Host Server socket that `@muxify_browser_socket` names; nil when it names the Mac app's socket, or none.
+    private static func hostServerSocket(using runner: any CLICommandRunning) -> String? {
+        guard let result = try? runner.run("tmux", arguments: ["show-options", "-sqv", BrowserAgentChannel.option], quiet: true),
+              result.status == 0 else { return nil }
+        let path = result.output.trimmingCharacters(in: .newlines)
+        return BrowserAgentChannel.isHostServerSocket(path) ? path : nil
     }
 
     /// Hands a `muxify://` URL to the app. A view verb asks the app to show something; it changes no state.

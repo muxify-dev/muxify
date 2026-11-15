@@ -15,8 +15,8 @@ final class PaneFinder: Finder {
     /// The find field has Focus. What the user types there is the Terminal's, so Browser keybinds do not act.
     var findFieldHasFocus = false
 
-    /// Runs a tmux command on the App Window's Environment. False when it cannot run one now.
-    @ObservationIgnored var tmux: ([String], @escaping (Result<String, Error>) -> Void) -> Bool = { _, _ in false }
+    /// Runs a view command on the App Window's Environment. False when it cannot run one now.
+    @ObservationIgnored var view: (ViewCommand, @escaping (Result<String, Error>) -> Void) -> Bool = { _, _ in false }
     /// The Window whose active Pane the search starts in.
     @ObservationIgnored var windowID: () -> String? = { nil }
     /// `ui.find_colors` as tmux styles.
@@ -49,7 +49,7 @@ final class PaneFinder: Finder {
         guard isShown else { return }
         guard let pane else { return close() }
         let current = generation
-        let submitted = tmux(["display-message", "-p", "-t", pane, "#{pane_active}"]) { [weak self] result in
+        let submitted = view(.paneIsActive(pane: pane)) { [weak self] result in
             guard let self, self.generation == current, self.pane == pane,
                   case .success(let output) = result, output.trimmingCharacters(in: .whitespacesAndNewlines) == "1" else { return }
             self.close()
@@ -64,7 +64,7 @@ final class PaneFinder: Finder {
         findFieldHasFocus = false
         findStatus = .idle
         generation += 1
-        if let pane { _ = tmux(PaneSearch.cancel(pane: pane)) { _ in } }
+        if let pane { _ = view(.cancelFind(pane: pane)) { _ in } }
         pane = nil
     }
 
@@ -73,7 +73,7 @@ final class PaneFinder: Finder {
         generation += 1
         let current = generation
         let query = findQuery
-        let submitted = tmux(PaneSearch.commands(step, query: query, target: target, styles: styles())) { [weak self] result in
+        let submitted = view(.findInPane(step, query: query, target: target, styles: styles())) { [weak self] result in
             guard let self, self.generation == current else { return }
             guard case .success(let output) = result, let status = PaneSearch.Status(output) else {
                 // The Pane is gone: the next step starts in the Window's active Pane.
@@ -97,7 +97,7 @@ final class PaneFinder: Finder {
     }
 
     private func count(_ query: String, status: PaneSearch.Status, total: Int, generation current: Int) {
-        let submitted = tmux(PaneSearch.capture(status)) { [weak self] result in
+        let submitted = view(.capturePane(pane: status.pane, fromLine: status.line)) { [weak self] result in
             guard let self, self.generation == current else { return }
             let index = (try? result.get()).map { PaneSearch.index(of: query, in: $0, column: status.column, total: total) } ?? 0
             self.findStatus = .match(index: index, total: total)

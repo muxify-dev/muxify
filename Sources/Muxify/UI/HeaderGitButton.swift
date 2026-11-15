@@ -1,16 +1,17 @@
 import SwiftUI
 import MuxifyCore
 
-/// A lightweight HEAD read, independent of opening the much larger Git View snapshot.
-/// It runs through the Environment connection, so remote paths never read local repositories.
-/// The read also tells the store whether the folder is in a repository; the button hides when it is not, unless this
-/// Window's Git View is open, and the read goes on while it is hidden, so a `cd` into a repository brings it back.
+/// HEAD of the Window's folder, from the `repository` subscription through the store's link, independent of opening the
+/// much larger Git View snapshot: it runs on the repository's machine, so remote paths never read local repositories,
+/// and its events come when HEAD changes, with nothing polled (ADR 0087).
+/// Each event also tells the store whether the folder is in a repository; the button hides when it is not, unless this
+/// Window's Git View is open, and the subscription goes on while it is hidden, so a `cd` into a repository brings it
+/// back.
 struct HeaderGitButton: View {
     let store: WorkspaceStore
     let window: TmuxWindow
     let help: String
     @State private var head: String?
-    @State private var reading = false
     @Environment(\.interfaceFontSize) private var fontSize
 
     var body: some View {
@@ -33,20 +34,14 @@ struct HeaderGitButton: View {
                 .accessibilityValue(isOpen ? "on" : "off")
                 .padding(.trailing, 8)
             }
-            // Always here, so the read runs while the button is hidden.
+            // Always here, so the subscription runs while the button is hidden. A new folder, link or feature set
+            // subscribes again.
             Color.clear.frame(width: 0, height: 0)
-                .task {
-                    while !Task.isCancelled {
-                        if !reading {
-                            reading = true
-                            store.runGitScript(GitHeadRead.script, arguments: [window.path], timeout: 5) { result in
-                                let read = GitHeadRead(result)
-                                head = read.head
-                                store.recordHeadRead(read, of: window.path)
-                                reading = false
-                            }
-                        }
-                        do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                .task(id: "\(window.path) \(store.repositoryLink)") {
+                    let path = window.path
+                    for await event in store.repositoryEvents(path) {
+                        head = event.head
+                        store.recordHeadRead(event.headRead, of: path)
                     }
                 }
         }

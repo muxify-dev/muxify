@@ -37,4 +37,4 @@ Muxify does these commands itself, in its `WKWebView`. There is no Chromium and 
 - An Agent and the user see the same page, with the same logins.
 - The events are DOM events, not system input. Their `isTrusted` is false, so a page that accepts only trusted input ignores them. `press` does not move the focus with Tab, and a key does not do what the browser does for it, except Enter, which submits the form of a field, Backspace, which deletes a character, and a character, which goes into a text field. There is no file upload and no drag.
 - `snapshot` and the Refs see only the main frame, not the iframes.
-- A Remote Environment has no socket yet. Later, the app can forward the socket with `ssh -O forward -R` on the SSH master that it owns.
+- ~~A Remote Environment has no socket yet. Later, the app can forward the socket with `ssh -O forward -R` on the SSH master that it owns.~~ Superseded by [ADR 0091](0091-host-programs-reach-the-mac-through-a-socket-of-their-own-server.md): each Host Server listens on a socket of its own and passes each request to its Mac over its channel.

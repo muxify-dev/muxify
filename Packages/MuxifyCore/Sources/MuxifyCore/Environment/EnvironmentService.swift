@@ -13,13 +13,8 @@ public struct EnvironmentService: Sendable {
     public let topics: Config.Topics
     /// The Config's `notifications`: which Agent marks `environment show` shows.
     public let notifications: Config.Notifications
-    /// False on a Remote Environment: Topic records are local, so a command that reads or writes one fails there.
-    public let topicsAvailable: Bool
-    /// Runs the Muxify Worktree scripts on the Environment's machine.
-    public let scripts: any ScriptRunning
-    /// Nil on this Mac, else the Remote Environment's name, which the Muxify Worktree records keep.
-    public let environmentName: String?
-    /// The Config's `worktrees.root_path`.
+    /// The Config's `worktrees.root_path` on the machine whose records this service keeps: a Host's own, never the
+    /// Mac's (ADR 0090).
     public let worktreesRoot: String?
     /// The Request that the command line runs through this service; nil for every other caller. The store writes
     /// its ledger row, and a new Topic takes its id.
@@ -28,16 +23,12 @@ public struct EnvironmentService: Sendable {
 
     public init(paths: MuxifyPaths, server: any TmuxRunning = TmuxServer.local, sessionPaths: [SessionPath] = [],
                 topics: Config.Topics = Config.Topics(), notifications: Config.Notifications = Config.Notifications(),
-                topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(),
-                environmentName: String? = nil, worktreesRoot: String? = nil, request: PendingRequest? = nil) {
+                worktreesRoot: String? = nil, request: PendingRequest? = nil) {
         self.paths = paths
         self.server = server
         self.sessionPaths = sessionPaths
         self.topics = topics
         self.notifications = notifications
-        self.topicsAvailable = topicsAvailable
-        self.scripts = scripts
-        self.environmentName = environmentName
         self.worktreesRoot = worktreesRoot
         self.request = request
         store = TopicStore(paths: paths, inPlay: topics.inPlay, request: request)
@@ -50,9 +41,6 @@ public struct EnvironmentService: Sendable {
         guard request.version == EnvironmentRequest.currentVersion else {
             return .failed(TopicFailure(kind: .unsupported, phase: .nothingChanged,
                                         message: "The Topic request has version \(request.version). This Muxify reads version \(EnvironmentRequest.currentVersion)."))
-        }
-        guard topicsAvailable || !request.needsRecords else {
-            return .failed(failure(TopicRequestError.topicsUnavailable, phase: .nothingChanged))
         }
         switch request.command.lane {
         case .read(let read):
@@ -94,7 +82,6 @@ public struct EnvironmentService: Sendable {
 
     public func sessionPathChoices(for target: EnvironmentTarget) -> Result<TopicSessionPathChoices, TopicFailure> {
         do {
-            guard topicsAvailable else { throw TopicRequestError.topicsUnavailable }
             let records = try store.read().records
             let snapshot = try server.snapshot()
             let topic = try openTopic(target, caller: nil, records: records, snapshot: snapshot, client: nil)
@@ -262,7 +249,6 @@ public struct EnvironmentService: Sendable {
             case .branchCheckedOut: return .branchCheckedOut
             case .chooseSession: return .chooseSession
             case .topicEmpty: return .topicEmpty
-            case .topicsUnavailable: return .topicsUnavailable
             case .sessionNameInvalid: return .sessionNameInvalid
             case .sessionNameTaken: return .duplicateSession
             case .panesChanged: return .panesChanged
@@ -346,11 +332,72 @@ extension EnvironmentCommand {
         }
     }
 
+    /// Whether the command only reads. A command that is not a read changes something, so a channel that ends
+    /// before its answer leaves it uncertain.
+    public var onlyReads: Bool {
+        if case .read = lane { return true }
+        return false
+    }
+
+    /// Whether the command acts on Muxify Worktree records.
+    public var isWorktreeCommand: Bool {
+        switch self {
+        case .createWorktree, .removeWorktree, .listWorktrees: true
+        default: false
+        }
+    }
+
+    /// The Action's name, as a message about it says it: "<Environment> disconnected before Settle Topic finished."
+    public var actionName: String {
+        switch self {
+        case .list: "List Topics"
+        case .show: "Show Topic"
+        case .environmentShow: "Show Environment"
+        case .listWorktrees: "List Worktrees"
+        case .tags: "Change Tags"
+        case .note: "Set Topic Note"
+        case .pin: "Pin Topic"
+        case .unpin: "Unpin Topic"
+        case .moveCard: "Move Topic"
+        case .chooseInPlay: "Choose In Play"
+        case .replaceFromBench: "Replace from Bench"
+        case .makeGuest: "Make Guest"
+        case .benchTopic: "Bench Topic"
+        case .fillOpenPlace: "Fill Open Place"
+        case .markRead: "Mark as Read"
+        case .markAllRead: "Mark All as Read"
+        case .create: "New Topic"
+        case .addSession: "Add Session"
+        case .settle: "Settle Topic"
+        case .forget: "Forget Topic"
+        case .move: "Move"
+        case .removeFromTopic: "Remove from Topic"
+        case .removeAndKill: "Remove and Kill"
+        case .rename: "Rename Topic"
+        case .reopen: "Reopen Topic"
+        case .startFresh: "Start Fresh"
+        case .moveSession: "Move Session"
+        case .sortSessions: "Sort Sessions"
+        case .newWindow: "New Window"
+        case .newSession: "New Session"
+        case .renameSession: "Rename Session"
+        case .renameWindow: "Rename Window"
+        case .moveWindow: "Move Window"
+        case .zoomPane: "Zoom Pane"
+        case .killWindow: "Kill Window"
+        case .killSession: "Kill Session"
+        case .createWorktree: "New Worktree"
+        case .removeWorktree: "Remove Worktree"
+        case .forgetSettled: "Forget Settled Topics"
+        }
+    }
+
     /// Whether the command reads or writes a Topic record whatever its target.
-    var needsRecords: Bool {
+    public var needsRecords: Bool {
         switch self {
         case .newWindow, .newSession, .renameSession, .renameWindow, .moveWindow, .zoomPane, .killWindow, .killSession: return false
-        // A Remote Environment's Muxify Worktrees have no Topic; on this Mac the request also updates the Topics.
+        // A Muxify Worktree request is refused on its own where the Worktrees are unavailable (ADR 0090); where they
+        // are served, it also updates the Topics.
         case .createWorktree, .removeWorktree, .listWorktrees: return false
         // Agent Unread is in tmux. Only a Topic's Read state is in its record; Mark All as Read leaves the records
         // out where there are none.
@@ -365,9 +412,9 @@ extension EnvironmentCommand {
 }
 
 extension EnvironmentRequest {
-    /// Whether the request reads or writes a Topic record. Only the others run on a Remote Environment. A `.topic`
-    /// target is found through the records, so it needs them with any command.
-    var needsRecords: Bool {
+    /// Whether the request reads or writes a Topic record. Only the others run where there are no Topics, in a
+    /// Sessions-only App Window. A `.topic` target is found through the records, so it needs them with any command.
+    public var needsRecords: Bool {
         if case .topic? = target { return true }
         return command.needsRecords
     }
@@ -411,7 +458,6 @@ public enum TopicRequestError: Error, CustomStringConvertible {
     case branchCheckedOut(branch: String, worktree: String)
     case chooseSession(topic: String, sessions: [String])
     case topicEmpty(topic: String, id: String, dormant: Bool)
-    case topicsUnavailable
     case sessionNameInvalid(String)
     /// A Session outside the Topic has the name that the caller chose for a new Session of the Topic.
     case sessionNameTaken(String)
@@ -446,7 +492,6 @@ public enum TopicRequestError: Error, CustomStringConvertible {
             return dormant ? "The Topic \(topic) has no live Session. Reopen it first: muxify topic reopen --topic \(id). "
                              + "Or add one: muxify topic add-session <dir> --topic \(id)."
                            : "The Topic \(topic) has no Session. Add one first: muxify topic add-session <dir> --topic \(id)."
-        case .topicsUnavailable: return "Topics are not available in a Remote Environment."
         case .panesChanged: return "The Windows or Panes changed. Review them and confirm again."
         case .cardAtEnd(let card, let up, let pinned):
             return "\(card) is the \(up ? "first" : "last") card among the \(pinned ? "Pinned Topics" : "Topics that are not Pinned")."

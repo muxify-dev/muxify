@@ -162,6 +162,76 @@ final class BrowserAgentCommandTests: XCTestCase {
         XCTAssertFalse(answers.ran("set-option"), "the app opened the Tab, so @muxify_open stays empty")
     }
 
+    // MARK: - On a Host (ADR 0091)
+
+    /// A Host Server here, whose socket is `<dir>/s.muxify-browser.7`, and its Mac's end, which answers each request
+    /// with `answer`. No tmux runs: the server listens beside where tmux's socket would be.
+    private func hostServer(answer: @escaping @Sendable (ProtocolIncomingRequest) -> Void) async throws
+        -> (socket: String, client: ProtocolClient, server: ProtocolServer, directory: URL) {
+        let directory = URL(fileURLWithPath: "/tmp/mxc-" + UUID().uuidString.prefix(8), isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let up = Pipe(), down = Pipe()
+        let context = HostServerContext(paths: MuxifyPaths(environment: ["XDG_STATE_HOME": directory.path + "/state"], home: "/nonexistent"),
+                                        tmux: TmuxServer(socketPath: directory.path + "/s"), socketID: "7")
+        let server = HostServer.make(input: up.fileHandleForReading, output: down.fileHandleForWriting, build: "host", context: context)
+        server.start()
+        let client = ProtocolClient(input: down.fileHandleForReading, output: up.fileHandleForWriting, build: "mac", helloTimeout: 5,
+                                    onRequest: answer)
+        try await client.connect()
+        return (directory.path + "/s.muxify-browser.7", client, server, directory)
+    }
+
+    func testAScreenshotOverOneChunkComesFromTheMacThroughTheHostServerAndIsWrittenAsAPNG() async throws {
+        let picture = Data([0x89, 0x50, 0x4E, 0x47]) + Data((0..<(150 * 1024)).map { UInt8($0 % 253) })
+        let host = try await hostServer { request in
+            guard case .browser(let browser)? = try? request.body(MacRequest.self), browser.command == .screenshot else {
+                return request.fail(ProtocolError(.invalid, "not a screenshot"))
+            }
+            request.finish(browser: .png(picture))
+        }
+        defer { try? FileManager.default.removeItem(at: host.directory) }
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-test-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(at: out) }
+
+        try await command(["screenshot", "--out", out.path]).execute(using: tmux(socket: host.socket))
+        XCTAssertEqual(try Data(contentsOf: out), picture)
+        host.client.close()
+        _ = await host.server.wait()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: host.socket), "the socket outlived its server")
+    }
+
+    func testSessionOpenOnAHostSendsSelectThroughTheHostServersSocketNotOpen() async throws {
+        let selects = Requests()
+        let host = try await hostServer { request in
+            guard case .select(let select)? = try? request.body(MacRequest.self) else { return request.fail(ProtocolError(.invalid, "?")) }
+            if case .session(let name) = select { selects.append(BrowserAgentRequest(window: name, command: .tabs)) }
+            request.finish()
+        }
+        defer { try? FileManager.default.removeItem(at: host.directory) }
+        let answers = TmuxAnswers(["has-session": "", "show-options": host.socket + "\n"])
+
+        try await CLICommand.sessionOpen(name: "my work").execute(using: answers)
+        XCTAssertEqual(selects.all.map(\.window), ["my work"], "the Mac got no select for the Session")
+        XCTAssertFalse(answers.ranOpen, "on a Host, a view verb never runs macOS open")
+        host.client.close()
+        _ = await host.server.wait()
+    }
+
+    func testAViewVerbOnAHostWhoseMacServesNoneFailsWithCannotReachMuxify() async throws {
+        let host = try await hostServer { $0.fail(ProtocolError(.unavailable, "no App Window serves this request")) }
+        defer { try? FileManager.default.removeItem(at: host.directory) }
+        let answers = TmuxAnswers(["list-panes": "@12\n", "show-options": host.socket + "\n"])
+        do {
+            try await CLICommand.windowOpen(target: "%7").execute(using: answers)
+            XCTFail("a Mac that serves no select must fail the verb")
+        } catch let error as CLIError {
+            XCTAssertTrue(error.message.hasPrefix("cannot reach Muxify"), error.message)
+        }
+        XCTAssertFalse(answers.ranOpen)
+        host.client.close()
+        _ = await host.server.wait()
+    }
+
     func testListenerReplacesAStaleSocketAndLeavesTheFileOfANewerListener() throws {
         try serve(.value("1"))
         let newer = try BrowserAgentListener(path: socketPath) { _, respond in respond(.value("2")) }
@@ -203,5 +273,7 @@ private final class TmuxAnswers: CLICommandRunning {
     }
 
     func ran(_ subcommand: String) -> Bool { calls.contains { $0.first == subcommand } }
+    /// Whether it ran macOS `open` on a `muxify://` URL.
+    var ranOpen: Bool { calls.contains { $0.first?.hasPrefix("muxify://") == true } }
     func arguments(of subcommand: String) -> [String]? { calls.first { $0.first == subcommand } }
 }

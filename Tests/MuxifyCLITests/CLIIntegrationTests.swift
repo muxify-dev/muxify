@@ -82,6 +82,55 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertTrue(help.stdout.contains("muxify diagnostics summary [--date YYYY-MM-DD] [--folder PATH]"), help.stdout)
     }
 
+    /// `muxify server` speaks the Host Server protocol on stdin and stdout: `hello`, then `ping`, and it exits 0
+    /// when stdin ends.
+    func testServerAnswersHelloAndPingAndExitsZeroOnStdinEOF() async throws {
+        let server = try startServer()
+        defer { stopIfRunning(server.process) }
+        let session = try await server.client.connect()
+        XCTAssertEqual(session.protocolVersion, 1)
+        XCTAssertEqual(session.peerBuild, "muxify dev 0")
+        try await server.client.ping()
+        server.client.close()
+        try await waitForExit(server.process)
+        XCTAssertEqual(server.process.terminationStatus, 0)
+        XCTAssertTrue(server.stderr().contains("muxify server: exits, stdin ended"))
+    }
+
+    func testServerExitsZeroOnShutdown() async throws {
+        let server = try startServer()
+        defer { stopIfRunning(server.process) }
+        try await server.client.connect()
+        try await server.client.call(HostRequest.shutdown)
+        try await waitForExit(server.process)
+        XCTAssertEqual(server.process.terminationStatus, 0)
+        XCTAssertTrue(server.stderr().contains("muxify server: exits, asked to shut down"))
+    }
+
+    func testServerExitsAfterTheSilenceTimeout() async throws {
+        let server = try startServer(environment: ["MUXIFY_SERVER_SILENCE": "0.5"])
+        defer { stopIfRunning(server.process) }
+        try await server.client.connect()
+        try await server.client.ping()
+        let start = Date()
+        try await waitForExit(server.process)
+        XCTAssertGreaterThanOrEqual(Date().timeIntervalSince(start), 0.4)
+        XCTAssertEqual(server.process.terminationStatus, 0)
+        XCTAssertTrue(server.stderr().contains("muxify server: exits, no frame came in time"))
+    }
+
+    /// A running `muxify server` with a protocol client on its stdout and stdin, and its stderr.
+    private func startServer(environment: [String: String] = [:]) throws -> (process: Process, client: ProtocolClient, stderr: () -> String) {
+        let output = Pipe()
+        let errors = Pipe()
+        let input = Pipe()
+        let process = makeProcess(cli, arguments: ["server"], output: output, errors: errors, environment: environment)
+        process.standardInput = input
+        try process.run()
+        let client = ProtocolClient(input: output.fileHandleForReading, output: input.fileHandleForWriting, build: "muxify test")
+        return (process, client, { String(decoding: errors.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self) })
+    }
+
     /// Pins the exact bytes of `topic list` for valid records, so moving the reader into MuxifyCore cannot change them.
     func testTopicListPrintsTheSameBytesForValidRecords() async throws {
         let state = FileManager.default.temporaryDirectory.appendingPathComponent("muxify-cli-golden-" + UUID().uuidString)

@@ -32,6 +32,17 @@ struct SidebarView: View {
             // can finish and both lists keep their scroll positions as the Agents section appears or disappears.
             VStack(spacing: 0) {
                 if store.sessionsVisible {
+                    // Where Topics would be: why this Remote App Window shows Sessions only.
+                    if let note = store.topicsUnavailableNote {
+                        Text(note)
+                            .font(fontSize.font(11))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .accessibilityIdentifier("topics-unavailable")
+                    }
                     WorkSection(store: store)
                         .frame(maxHeight: .infinity)
                 }
@@ -318,7 +329,7 @@ private struct TopicsSection: View {
     }
 
     private func renameTopic(_ id: String) {
-        guard let topic = store.topicWatcher.records.first(where: { $0.id == id }) else { return }
+        guard let topic = store.records.first(where: { $0.id == id }) else { return }
         store.palette.begin(.text(.renameTopic(topic)), text: topic.title ?? "")
     }
 }
@@ -790,7 +801,7 @@ struct TopicCard: View, Equatable {
         guard let index = order.firstIndex(of: sessionID) else { return nil }
         return SessionOrdering(drag: sessionDrag,
                                above: index > 0 ? order[index - 1] : nil, below: index + 1 < order.count ? order[index + 1] : nil,
-                               isManual: store.topicWatcher.records.first { $0.id == id }?.hasManualSessionOrder ?? false)
+                               isManual: store.records.first { $0.id == id }?.hasManualSessionOrder ?? false)
     }
 
     private var formatted: SidebarFormats.Text { state.formatted }
@@ -1236,7 +1247,7 @@ private struct SessionsSection: View {
         Button("Reveal in Finder") {
             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: window.path)
         }
-        .disabled(store.isRemote)
+        .disabled(!store.link.isOnThisMac)
         Divider()
         Button("Kill Window…", role: .destructive) { confirmKill(window) }
     }

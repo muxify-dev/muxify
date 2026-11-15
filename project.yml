@@ -111,6 +111,10 @@ targets:
       - name: Stamp the Debug update key
         script: "\"$PROJECT_DIR/scripts/stamp-debug-update-key.sh\""
         basedOnDependencyAnalysis: false
+      # Every app carries its build line, which its hello to a Host Server sends.
+      - name: Stamp the build line
+        script: "\"$PROJECT_DIR/scripts/stamp-build-line.sh\""
+        basedOnDependencyAnalysis: false
   # Compile app code directly into an unhosted test bundle. Native-window tests
   # do not start Ghostty or attach to the user's tmux.
   MuxifyTests:

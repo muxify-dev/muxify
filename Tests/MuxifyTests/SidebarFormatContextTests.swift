@@ -94,7 +94,7 @@ final class SidebarFormatContextTests: XCTestCase {
                             agent: "codex", agentStatus: "working", unread: false)
         let model = TopicsModel(records: [], windows: [window], config: Config(), selection: TopicSelection())
         let contexts = SidebarFormatContexts(model: model, windows: [window], panes: [pane], agents: [], branches: branches,
-                                             records: [], sessionPaths: [], tabCounts: [:])
+                                             records: [], sessionPaths: [], tabCounts: [:], isOnThisMac: false, features: [.git])
         XCTAssertEqual(try SidebarFormat("#{branch}").expand(in: XCTUnwrap(contexts.sessions["$1"])), "")
         XCTAssertEqual(try SidebarFormat("#{branch}").expand(in: XCTUnwrap(contexts.panes["%1"])), "")
     }

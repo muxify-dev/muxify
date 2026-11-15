@@ -982,22 +982,22 @@ repository is read again and the counts of commits ahead of and behind the
 upstream update. While a fetch runs, f does nothing more. When it fails, the
 banner shows git's message, without its progress lines.
 
-The fetch runs in a pseudo-terminal with `LANG`, `LC_ALL` and `LC_MESSAGES` set to
-`C`, as lazygit runs it, so git's and ssh's questions are in English. Muxify
-watches its output for lazygit's credential prompts (`Password:`, `<user>'s
-password:`, `Password for '…':`, `Username for '…':`, `Enter passphrase for key
-'…':`, `Enter PIN for … key …:`, `Enter PIN for '…':` and `2FA Token`) and for
+The fetch runs on the repository's machine with `LANG`, `LC_ALL` and `LC_MESSAGES`
+set to `C`, as lazygit runs it, so git's and ssh's questions are in English. git
+and ssh ask them through an askpass helper, `muxify askpass` (`GIT_ASKPASS` and
+`SSH_ASKPASS`, with `SSH_ASKPASS_REQUIRE=force`), never on a terminal: locally
+the app's bundled `muxify` reaches the app through a socket of the fetch's own,
+and on a Host the Host CLI reaches its Host Server, which asks the Mac. Each
+question is asked in a Git View prompt whose title is git's or ssh's question;
 ssh's question about an unknown host ("Are you sure you want to continue
-connecting (yes/no/[fingerprint])?", shown with the host and fingerprint ssh
-named). Each is asked in a Git View prompt whose title is git's or ssh's
-question; for a password, passphrase, PIN or token what you type is hidden, and
-the prompt says "Hidden". ↩ writes the answer into the terminal, ⎋ stops the
-fetch and the banner says "Fetch cancelled.". The fetch's two-minute timeout
-doesn't run while a question waits. Selecting another Window keeps the question
-for when you come back; closing the Git View stops the fetch. On a Remote
-Environment the fetch runs over SSH with a remote terminal (`ssh -tt`), so the
-same questions come from the remote machine. Other git commands of the Git View
-run without a terminal and fail with git's message when they would ask.
+connecting (yes/no/[fingerprint])?") is shown with the host and fingerprint ssh
+named. A username or a host question shows what you type; anything else, such as
+a password, passphrase, PIN, token or a question Muxify doesn't know, is hidden
+and the prompt says "Hidden". ↩ gives git the answer, ⎋ stops the fetch at once
+and the banner says "Fetch cancelled.". The fetch, its questions included, may
+take ten minutes. Selecting another Window keeps the question for when you come
+back; closing the Git View stops the fetch. Other git commands of the Git View
+never ask, and fail with git's message when they would.
 
 P pushes the branch you're on and p pulls it, in every tab of the Git View.
 The push runs beside the other writes, as the fetch does, and the toolbar shows
@@ -1020,9 +1020,9 @@ asks for y. A branch with no upstream asks as push does, after which the pull
 takes that remote branch and sets it as the upstream. A pull that conflicts
 leaves the merge or the rebase in progress, with the conflicted files in
 Changes, and the banner says so; any other failure shows git's message, such as
-the question of how to reconcile divergent branches. Both run in the same
-pseudo-terminal as the fetch, with its credential prompts and its "Push
-cancelled." and "Pull cancelled." banners. A detached HEAD has no branch to push
+the question of how to reconcile divergent branches. Both ask git's and ssh's
+questions as the fetch does, with its "Push cancelled." and "Pull cancelled."
+banners. A detached HEAD has no branch to push
 or pull, and the banner says so.
 
 m, in every tab, goes on with a merge, rebase, cherry-pick, revert or `git am` that is in progress, as lazygit's

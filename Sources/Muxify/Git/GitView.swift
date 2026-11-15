@@ -446,10 +446,10 @@ final class GitView {
     @ObservationIgnored private var logWork: DispatchWorkItem?
     /// Git commands that change the repository, run one at a time.
     @ObservationIgnored private var writes: [Write] = []
-    /// The arguments of the writes waiting or running, for tests, which have no store to run them.
-    var queuedWriteArguments: [[String]] { writes.map(\.arguments) }
-    /// The arguments of the network commands started, for tests, which have no store to run them.
-    private(set) var networkArguments: [[String]] = []
+    /// The writes waiting or running, for tests, which have no store to run them.
+    var queuedWrites: [WriteCommand] { writes.map(\.command) }
+    /// The network commands started, for tests, which have no store to run them.
+    private(set) var networkCommands: [GitNetwork] = []
     /// The branch and commit whose history is being read.
     @ObservationIgnored private var readingLog: String?
     @ObservationIgnored private var shownScope = Scope.all
@@ -473,8 +473,9 @@ final class GitView {
     @ObservationIgnored private var fixedOutputs: [String: String] = [:]
     @ObservationIgnored private var refreshTimer: Timer?
     @ObservationIgnored private var activationObserver: Any?
-    /// What reports that the repository changed, so the Git View reads it again at once, set by the store: FSEvents
-    /// in the Local Environment, a 2-second probe in a Remote one. Without one it reads only on the timer.
+    /// What reports that the repository changed, so the Git View reads it again at once, set by the store: the
+    /// `repository` subscription through its link, fed by FSEvents in the Local Environment and by the Host Server's
+    /// watch on a Host. Without one it reads only on the timer.
     @ObservationIgnored var watcher: GitWatcher?
     /// How long changes must stop before a read starts, and the least time between two reads' starts, so build
     /// output in an ignored folder cannot flood it.
@@ -593,6 +594,14 @@ final class GitView {
         takeFocus()
         refresh()
         startRefreshing()
+    }
+
+    /// The store's link, or what it serves, changed: a watching Git View subscribes again on the new link, and an open
+    /// one reads again, so it shows the repository, or why the Git View is unavailable.
+    func linkChanged() {
+        guard isOpen else { return }
+        if isWatching { startWatching() }
+        if isCurrent { refresh() }
     }
 
     private func startRefreshing() {
@@ -1385,15 +1394,15 @@ final class GitView {
         guard let target = editorTarget else { return }
         writeError = nil
         let file = (root as NSString).appendingPathComponent(target.path)
-        store.runGitScript("[ -e \"$1\" ] && echo present || echo missing", arguments: [file], timeout: 10) { [weak self] result in
+        store.readGit(.fileExists(path: file), \.text) { [weak self] result in
             guard let self else { return }
             switch result {
             case .success(let output) where output.contains("missing"):
                 self.writeError = "\(target.path) is no longer in the working tree."
             case .success where !store.config.gitView.editorInWindow:
                 // The editor runs elsewhere, so the Git View keeps Focus.
-                let script = store.config.gitView.editorScript(file: file, line: target.line)
-                store.runGitScript(script, arguments: [root], timeout: 10) { [weak self] result in
+                let command = store.config.gitView.editorCommand(file: file, line: target.line)
+                store.writeGit(.openEditor(root: root, command: command)) { [weak self] result in
                     if case .failure(let error) = result { self?.writeError = Self.editorMessage(for: error) }
                 }
             case .success:
@@ -1450,7 +1459,7 @@ final class GitView {
             return
         }
         noteStaging(staging.stage)
-        write(staging.stage ? GitRepository.stageScript : GitRepository.unstageScript, arguments: [snapshot.root] + staging.paths)
+        write(staging.stage ? .stage(root: snapshot.root, paths: staging.paths) : .unstage(root: snapshot.root, paths: staging.paths))
     }
 
     /// a: stages every change, or once they all are, unstages them.
@@ -1458,7 +1467,7 @@ final class GitView {
         guard let snapshot, !snapshot.changes.isEmpty else { return }
         let staging = Self.staging(snapshot.changes, path: ".")
         noteStaging(staging.stage)
-        write(staging.stage ? GitRepository.stageScript : GitRepository.unstageScript, arguments: [snapshot.root] + staging.paths)
+        write(staging.stage ? .stage(root: snapshot.root, paths: staging.paths) : .unstage(root: snapshot.root, paths: staging.paths))
     }
 
     /// Whether to stage or unstage a file or folder with these changes, and
@@ -1471,7 +1480,7 @@ final class GitView {
     /// Lines picked in a change's diff, as git takes them: the files all
     /// of whose changed lines are picked, whole, and a patch of the rest.
     struct LineWrite: Equatable {
-        enum Mode: String { case stage, unstage, discard }
+        typealias Mode = GitWrite.PatchMode
 
         /// Files to stage, unstage or discard the unstaged changes of, and
         /// the paths renamed files came from.
@@ -1685,56 +1694,14 @@ final class GitView {
             keepCursor()
             return write(lines, .discard, root: snapshot.root)
         }
-        write(option == .all ? GitRepository.discardScript : GitRepository.discardUnstagedScript,
-              arguments: [snapshot.root] + discard.paths(option))
+        let paths = discard.paths(option)
+        write(option == .all ? .discard(root: snapshot.root, paths: paths) : .discardUnstaged(root: snapshot.root, paths: paths))
     }
 
     // MARK: Resetting the working tree
 
-    /// lazygit's reset options for the working tree, for D, by the argument the reset script takes.
-    enum WorkingTreeReset: String, CaseIterable {
-        case nuke, unstaged, untracked, staged, soft, mixed, hard
-
-        var title: String {
-            switch self {
-            case .nuke: "Nuke working tree"
-            case .unstaged: "Discard unstaged changes"
-            case .untracked: "Discard untracked files"
-            case .staged: "Discard staged changes"
-            case .soft: "Soft reset"
-            case .mixed: "Mixed reset"
-            case .hard: "Hard reset"
-            }
-        }
-
-        /// lazygit's key for it in the menu.
-        var key: String {
-            switch self {
-            case .nuke: "x"
-            case .unstaged: "u"
-            case .untracked: "c"
-            case .staged: "shift+s"
-            case .soft: "s"
-            case .mixed: "m"
-            case .hard: "h"
-            }
-        }
-
-        var note: String {
-            switch self {
-            case .nuke: "Back to the last commit. New and untracked files are deleted."
-            case .unstaged: "Tracked files go back to what's staged. Untracked files stay."
-            case .untracked: "Deletes the files git doesn't track. Ignored files stay."
-            case .staged: "Takes what's staged out of the files too; the rest stays. Needs git 2.35."
-            case .soft: "Every change stays as it is, staged or not."
-            case .mixed: "Unstages everything. The files keep their changes."
-            case .hard: "Tracked files go back to the last commit. Untracked files stay."
-            }
-        }
-
-        /// Soft and mixed change no file's content.
-        var isDestructive: Bool { self != .soft && self != .mixed }
-    }
+    /// lazygit's reset options for the working tree, for D.
+    typealias WorkingTreeReset = GitWrite.WorkingTreeReset
 
     /// Why this reset of the working tree would do nothing, else nil.
     func nothingToReset(_ reset: WorkingTreeReset) -> String? {
@@ -1779,7 +1746,7 @@ final class GitView {
 
     private func resetWorkingTree(_ reset: WorkingTreeReset) {
         guard let snapshot else { return }
-        write(GitRepository.resetWorkingTreeScript, arguments: [snapshot.root, reset.rawValue])
+        write(.resetWorkingTree(root: snapshot.root, option: reset))
     }
 
     // MARK: Stashing
@@ -1842,24 +1809,14 @@ final class GitView {
         guard let snapshot else { return }
         let message = message.split(whereSeparator: \.isNewline).joined(separator: " ").trimmingCharacters(in: .whitespaces)
         guardFiles("Stash changes", subject: .text(kind.title), symbol: "archivebox", confirm: "Stash them") { [weak self] in
-            self?.write(GitRepository.stashScript, arguments: [snapshot.root, kind.rawValue, message])
+            self?.write(.stash(root: snapshot.root, kind: kind, message: message))
         }
     }
 
     // MARK: Stash entries
 
     /// What lazygit's Stash panel does with the stash selected.
-    enum StashEntryAction: String {
-        /// space: the stash stays.
-        case apply
-        /// g: applies it and drops it, unless it conflicts.
-        case pop
-        /// d.
-        case drop
-
-        var verb: String { rawValue }
-        var symbol: String { self == .drop ? "trash" : self == .apply ? "tray.and.arrow.down" : "tray.and.arrow.up" }
-    }
+    typealias StashEntryAction = GitWrite.StashAction
 
     /// space, g or d on a stash: confirms in a menu of one choice, as lazygit does. Apply and pop change files, so
     /// the menu also lists the Agents working there; drop doesn't.
@@ -1880,7 +1837,7 @@ final class GitView {
 
     private func stashEntry(_ action: StashEntryAction, _ stash: GitStash) {
         guard let snapshot else { return }
-        write(GitRepository.stashEntryScript, arguments: [snapshot.root, action.rawValue, stash.ref, stash.sha])
+        write(.stashEntry(root: snapshot.root, action: action, ref: stash.ref, sha: stash.sha))
     }
 
     // MARK: Checking out
@@ -1911,13 +1868,13 @@ final class GitView {
             case .previous: "-"
             }
         }
-        var kind: String {
+        var kind: GitWrite.CheckoutKind {
             switch self {
-            case .branch: "branch"
-            case .commit: "commit"
-            case .remote: "remote"
-            case .newBranch: "new"
-            case .previous: "previous"
+            case .branch: .branch
+            case .commit: .commit
+            case .remote: .remote
+            case .newBranch: .new
+            case .previous: .previous
             }
         }
     }
@@ -1961,9 +1918,9 @@ final class GitView {
 
     private func runCheckout(_ target: CheckoutTarget, autostash: Bool) {
         guard let snapshot else { return }
-        var arguments = [snapshot.root, target.kind, target.ref, autostash ? "1" : "0"]
-        if case .newBranch(_, let base) = target { arguments.append(base) }
-        write(GitRepository.checkoutScript, arguments: arguments) { [weak self] result in
+        var base: String?
+        if case .newBranch(_, let from) = target { base = from }
+        write(.checkout(root: snapshot.root, kind: target.kind, target: target.ref, autostash: autostash, base: base)) { [weak self] result in
             self?.finishCheckout(target, result)
         }
     }
@@ -1971,7 +1928,7 @@ final class GitView {
     /// A checkout ended: says what went wrong, or, when only Changes were in the way, asks about stashing them.
     func finishCheckout(_ target: CheckoutTarget, _ result: Result<String, Error>) {
         guard case .failure(let error) = result else { return }
-        if case TmuxError.failed(_, let stderr) = error, stderr.hasPrefix(GitRepository.checkoutBlockedMarker) {
+        if Self.message(for: error).hasPrefix(GitWrites.checkoutBlockedMarker) {
             open(GitMenu(
                 id: "autostash", title: "Autostash?", subject: .text(target.name), symbol: "archivebox",
                 choices: [GitMenu.Choice(key: "y", title: "Stash, check out and pop",
@@ -2007,7 +1964,7 @@ final class GitView {
                        submitTitle: "Rename") { [weak self] typed in
             guard let self, let snapshot = self.snapshot else { return }
             let name = Self.branchName(typed)
-            if name != branch.name { self.write(GitRepository.renameBranchScript, arguments: [snapshot.root, branch.name, name]) }
+            if name != branch.name { self.write(.renameBranch(root: snapshot.root, branch: branch.name, name: name)) }
         })
     }
 
@@ -2016,16 +1973,15 @@ final class GitView {
     func openPullRequest(of branch: GitBranch) {
         guard list == .branches, let store, let root = snapshot?.root else { return }
         writeError = nil
-        store.runGitScript(GitRepository.pullRequestLinkScript, arguments: [root, branch.name], timeout: 10) { [weak self] result in
+        store.readGit(.upstream(root: root, branch: branch.name), \.remote) { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success(let output):
-                let lines = output.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-                guard lines.count >= 2 else {
+            case .success(let remote):
+                guard let upstream = remote.branch else {
                     self.writeError = GitHosting.Failure.noUpstream.message
                     return
                 }
-                switch GitHosting.pullRequestURL(remoteURL: lines[0], upstreamBranch: lines[1], services: store.config.gitView.services) {
+                switch GitHosting.pullRequestURL(remoteURL: remote.url, upstreamBranch: upstream, services: store.config.gitView.services) {
                 case .success(let url): self.openInBrowser(url)
                 case .failure(let failure): self.writeError = failure.message
                 }
@@ -2040,11 +1996,11 @@ final class GitView {
     func openCommitPage(_ commit: GitCommit) {
         guard let store, let root = snapshot?.root else { return }
         writeError = nil
-        store.runGitScript(GitRepository.commitLinkScript, arguments: [root], timeout: 10) { [weak self] result in
+        store.readGit(.origin(root: root), \.remote) { [weak self] result in
             guard let self else { return }
             switch result {
-            case .success(let output):
-                switch GitHosting.commitURL(remoteURL: output, hash: commit.sha, services: store.config.gitView.services) {
+            case .success(let remote):
+                switch GitHosting.commitURL(remoteURL: remote.url, hash: commit.sha, services: store.config.gitView.services) {
                 case .success(let url): self.openInBrowser(url)
                 case .failure(let failure): self.writeError = failure.message
                 }
@@ -2093,7 +2049,7 @@ final class GitView {
     /// The Topic records of the Environment, which are on this Mac: a Remote Environment's Git View finds none.
     /// `topicRecordsForTesting` stands in for them.
     private var topicRecords: [TopicRecord] {
-        topicRecordsForTesting ?? (store?.isRemote == true ? [] : store?.topicWatcher.records ?? [])
+        topicRecordsForTesting ?? (store?.link.features.contains(.topics) == true ? store?.records ?? [] : [])
     }
 
     @ObservationIgnored var topicRecordsForTesting: [TopicRecord]?
@@ -2147,7 +2103,7 @@ final class GitView {
     /// goes after it, under the rules of a local delete; a failed remote delete leaves the local branch.
     private func deleteRemote(_ branch: GitBranch, andLocal: Bool) {
         guard let root = snapshot?.root else { return }
-        runNetwork(GitRepository.deleteRemoteBranchScript, arguments: [root, branch.name], activity: Self.deletingRemote,
+        runNetwork(.deleteRemoteBranch(root: root, branch: branch.name), activity: Self.deletingRemote,
                    cancelled: "Delete cancelled.", refreshing: !andLocal) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -2175,7 +2131,7 @@ final class GitView {
 
     private func deleteBranch(_ branch: GitBranch, force: Bool) {
         guard let snapshot else { return }
-        write(GitRepository.deleteBranchScript, arguments: [snapshot.root, branch.name, force ? "1" : "0"]) { [weak self] result in
+        write(.deleteBranch(root: snapshot.root, branch: branch.name, force: force)) { [weak self] result in
             self?.finishDeleteBranch(branch, result)
         }
     }
@@ -2183,7 +2139,7 @@ final class GitView {
     /// A delete ended: asks to force when git refused for the branch not being fully merged, else says what went wrong.
     func finishDeleteBranch(_ branch: GitBranch, _ result: Result<String, Error>) {
         guard case .failure(let error) = result else { return }
-        if case TmuxError.failed(_, let stderr) = error, stderr.hasPrefix(GitRepository.branchNotMergedMarker) {
+        if Self.message(for: error).hasPrefix(GitWrites.branchNotMergedMarker) {
             open(deleteBranchMenu(
                 id: "force-delete-branch", title: "Force delete branch", branch,
                 choice: GitMenu.Choice(key: "y", title: "Force delete",
@@ -2279,15 +2235,14 @@ final class GitView {
 
     private func write(_ lines: LineWrite, _ mode: LineWrite.Mode, root: String) {
         if !lines.paths.isEmpty {
-            let script = switch mode {
-            case .stage: GitRepository.stageScript
-            case .unstage: GitRepository.unstageScript
-            case .discard: GitRepository.discardUnstagedScript
+            switch mode {
+            case .stage: write(.stage(root: root, paths: lines.paths))
+            case .unstage: write(.unstage(root: root, paths: lines.paths))
+            case .discard: write(.discardUnstaged(root: root, paths: lines.paths))
             }
-            write(script, arguments: [root] + lines.paths)
         }
         if !lines.patch.isEmpty {
-            write(GitRepository.applyPatchScript, arguments: [root, mode.rawValue, lines.patch] + (mode == .stage ? lines.newFiles : []))
+            write(.applyPatch(root: root, mode: mode, patch: lines.patch, newFiles: mode == .stage ? lines.newFiles : []))
         }
     }
 
@@ -2342,17 +2297,7 @@ final class GitView {
         asksToContinue = true
     }
 
-    private enum OperationStep: String {
-        case `continue`, skip, abort
-
-        var past: String {
-            switch self {
-            case .continue: "Continued"
-            case .skip: "Skipped"
-            case .abort: "Aborted"
-            }
-        }
-    }
+    typealias OperationStep = GitWrite.OperationStep
 
     /// m: lazygit's menu of what to do with the merge, rebase, cherry-pick, revert or `git am` in progress, through the
     /// Agent guard, for each of them changes files.
@@ -2396,8 +2341,8 @@ final class GitView {
     }
 
     private func run(_ step: OperationStep, noun: String, command: String?) {
-        guard let snapshot, let command else { return }
-        write(GitRepository.operationScript, arguments: [snapshot.root, command, step.rawValue], timeout: 600) { [weak self] result in
+        guard let snapshot, let command = command.flatMap(GitWrite.OperationCommand.init(rawValue:)) else { return }
+        write(.operation(root: snapshot.root, command: command, step: step)) { [weak self] result in
             switch result {
             case .success:
                 self?.store?.pills.show(Pill(.confirmation, title: step.past, value: noun))
@@ -2408,9 +2353,7 @@ final class GitView {
     }
 
     /// How M merges, by the argument the merge script takes.
-    enum MergeKind: String {
-        case fastForward = "ff", mergeCommit = "no-ff", squashAndCommit = "squash", squashAndLeave = "squash-leave"
-    }
+    typealias MergeKind = GitWrite.MergeKind
 
     /// M in Branches: lazygit's merge menu, on a branch other than the one you're on, through the Agent guard, for a
     /// merge changes files. A merge, rebase or the like already in progress is to be concluded or aborted first.
@@ -2442,7 +2385,7 @@ final class GitView {
 
     private func merge(_ branch: GitBranch, into: String, _ kind: MergeKind) {
         guard let snapshot else { return }
-        write(GitRepository.mergeScript, arguments: [snapshot.root, branch.name, kind.rawValue, into], timeout: 600) { [weak self] result in
+        write(.merge(root: snapshot.root, branch: branch.name, kind: kind, into: into)) { [weak self] result in
             switch result {
             case .success:
                 self?.store?.pills.show(Pill(.confirmation, title: "Merged", value: branch.name))
@@ -2477,7 +2420,7 @@ final class GitView {
 
     private func rebase(onto branch: GitBranch, head: String) {
         guard let snapshot else { return }
-        write(GitRepository.rebaseScript, arguments: [snapshot.root, branch.name, head], timeout: 600) { [weak self] result in
+        write(.rebase(root: snapshot.root, onto: branch.name, head: head)) { [weak self] result in
             switch result {
             case .success:
                 self?.store?.pills.show(Pill(.confirmation, title: "Rebased", value: head))
@@ -2541,7 +2484,7 @@ final class GitView {
 
     private func cherryPick(_ shas: [String]) {
         guard let snapshot, let key = copiedKey else { return }
-        write(GitRepository.cherryPickScript, arguments: [snapshot.root] + shas, timeout: 600) { [weak self] result in
+        write(.cherryPick(root: snapshot.root, commits: shas)) { [weak self] result in
             switch result {
             case .success:
                 self?.copiedStore.remove(shas, in: key)
@@ -2555,9 +2498,7 @@ final class GitView {
     // MARK: Resetting
 
     /// How g resets, by the argument the reset script takes.
-    enum ResetKind: String {
-        case soft, mixed, hard
-    }
+    typealias ResetKind = GitWrite.ResetKind
 
     /// g on a commit or a branch: lazygit's Reset menu, which moves the branch you're on to it. Soft and mixed run at
     /// once, as they change no file's content; a hard reset asks again (ADR 0041).
@@ -2598,7 +2539,7 @@ final class GitView {
 
     private func reset(to target: String, named name: String, _ kind: ResetKind) {
         guard let snapshot else { return }
-        write(GitRepository.resetScript, arguments: [snapshot.root, kind.rawValue, target]) { [weak self] result in
+        write(.reset(root: snapshot.root, kind: kind, target: target)) { [weak self] result in
             switch result {
             case .success:
                 self?.store?.pills.show(Pill(.confirmation, title: "Reset (\(kind.rawValue))", value: name))
@@ -2635,7 +2576,7 @@ final class GitView {
 
     private func amend() {
         guard let snapshot else { return }
-        write(GitRepository.amendScript, arguments: [snapshot.root], timeout: 600) { [weak self] result in
+        write(.amend(root: snapshot.root)) { [weak self] result in
             switch result {
             case .success(let output):
                 self?.store?.pills.show(Pill(.confirmation, title: "Amended", value: output.trimmingCharacters(in: .whitespacesAndNewlines)))
@@ -2664,9 +2605,7 @@ final class GitView {
         let description = commitDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         isCommitting = true
         commitError = nil
-        write(GitRepository.makeCommitScript,
-              arguments: [snapshot.root, description.isEmpty ? summary : summary + "\n\n" + description],
-              timeout: 600) { [weak self] result in
+        write(.commit(root: snapshot.root, message: description.isEmpty ? summary : summary + "\n\n" + description)) { [weak self] result in
             guard let self else { return }
             self.isCommitting = false
             switch result {
@@ -2687,22 +2626,36 @@ final class GitView {
     }
 
     /// A git command that changes the repository.
+    enum WriteCommand {
+        /// Runs on the repository's machine through the link (ADR 0087).
+        case git(GitWrite)
+        /// Talks to a remote, such as a pull, on the repository's machine; the toolbar names it.
+        case network(GitNetwork, activity: String, cancelled: String)
+    }
+
     private struct Write {
-        let script: String
-        let arguments: [String]
-        let timeout: TimeInterval
+        let command: WriteCommand
         let completion: ((Result<String, Error>) -> Void)?
-        /// A command that talks to a remote, such as a pull, runs in a pseudo-terminal; the toolbar names it.
-        var network: (activity: String, cancelled: String)?
+
+        var cancelled: String? {
+            if case .network(_, _, let cancelled) = command { cancelled } else { nil }
+        }
     }
 
     /// Runs commands that change the repository one at a time, so they
     /// don't race for its index, and reads it again after the last.
-    private func write(_ script: String, arguments: [String], timeout: TimeInterval = 30,
-                       network: (activity: String, cancelled: String)? = nil,
-                       completion: ((Result<String, Error>) -> Void)? = nil) {
+    private func write(_ change: GitWrite, completion: ((Result<String, Error>) -> Void)? = nil) {
+        enqueue(Write(command: .git(change), completion: completion))
+    }
+
+    /// A network command that changes files, such as a pull, in the same queue.
+    private func writeNetwork(_ network: GitNetwork, activity: String, cancelled: String) {
+        enqueue(Write(command: .network(network, activity: activity, cancelled: cancelled), completion: nil))
+    }
+
+    private func enqueue(_ write: Write) {
         writeError = nil
-        writes.append(Write(script: script, arguments: arguments, timeout: timeout, completion: completion, network: network))
+        writes.append(write)
         runNextWrite()
     }
 
@@ -2716,15 +2669,15 @@ final class GitView {
             if let completion = write.completion {
                 completion(result)
             } else if case .failure(let error) = result {
-                self.writeError = Self.message(for: error, cancelled: write.network?.cancelled)
+                self.writeError = Self.message(for: error, cancelled: write.cancelled)
             }
             if self.writes.isEmpty { self.refresh() } else { self.runNextWrite() }
         }
-        if let network = write.network {
-            runNetwork(write.script, arguments: write.arguments, activity: network.activity, cancelled: network.cancelled,
-                       refreshing: false, completion: finish)
-        } else {
-            store.runGitScript(write.script, arguments: write.arguments, timeout: write.timeout, completion: finish)
+        switch write.command {
+        case .git(let change):
+            store.writeGit(change, completion: finish)
+        case .network(let network, let activity, let cancelled):
+            runNetwork(network, activity: activity, cancelled: cancelled, refreshing: false, completion: finish)
         }
     }
 
@@ -2734,7 +2687,7 @@ final class GitView {
     /// repository is read again after it.
     func fetch() {
         guard !networkActivity.contains(Self.fetching), let root = snapshot?.root else { return }
-        runNetwork(GitRepository.fetchScript, arguments: [root], activity: Self.fetching, cancelled: "Fetch cancelled.")
+        runNetwork(.fetch(root: root), activity: Self.fetching, cancelled: "Fetch cancelled.")
     }
 
     static let fetching = "Fetching…"
@@ -2764,12 +2717,11 @@ final class GitView {
         }
     }
 
-    enum PushMode: String { case plain, upstream, force }
+    typealias PushMode = GitNetwork.Mode
 
     private func runPush(_ mode: PushMode, _ remote: String = "", _ branch: String = "") {
         guard let root = snapshot?.root, !networkActivity.contains(Self.pushing) else { return }
-        runNetwork(GitRepository.pushScript, arguments: [root, mode.rawValue, remote, branch], activity: Self.pushing,
-                   cancelled: "Push cancelled.")
+        runNetwork(.push(root: root, mode: mode, remote: remote, branch: branch), activity: Self.pushing, cancelled: "Push cancelled.")
     }
 
     /// p: pulls the branch you're on, following the user's git config, such as `pull.rebase`. It waits in the write
@@ -2790,8 +2742,8 @@ final class GitView {
     private func guardedPull(_ mode: PushMode, _ remote: String = "", _ branch: String = "") {
         guardFiles("Pull", subject: .text(snapshot?.head ?? ""), symbol: "arrow.down.circle", confirm: "Pull it") { [weak self] in
             guard let self, let root = self.snapshot?.root else { return }
-            self.write(GitRepository.pullScript, arguments: [root, mode.rawValue, remote, branch], timeout: 120,
-                       network: (Self.pulling, "Pull cancelled."))
+            self.writeNetwork(.pull(root: root, mode: mode, remote: remote, branch: branch),
+                              activity: Self.pulling, cancelled: "Pull cancelled.")
         }
     }
 
@@ -2809,29 +2761,28 @@ final class GitView {
         })
     }
 
-    /// Runs a command that talks to a remote, such as a fetch, in a pseudo-terminal beside the write queue, and
-    /// asks git's and ssh's questions for credentials in Git View prompts. The toolbar shows `activity` while it
-    /// runs; a failure shows git's message, and a cancelled question `cancelled`.
-    private func runNetwork(_ script: String, arguments: [String], activity: String, cancelled: String,
+    /// Runs a command that talks to a remote, such as a fetch, on the repository's machine beside the write queue, and
+    /// asks git's and ssh's questions for credentials, which come through askpass, in Git View prompts. The toolbar
+    /// shows `activity` while it runs; a failure shows git's message, and a cancelled question `cancelled`.
+    private func runNetwork(_ network: GitNetwork, activity: String, cancelled: String,
                             refreshing: Bool = true, completion: ((Result<String, Error>) -> Void)? = nil) {
-        networkArguments.append(arguments)
+        networkCommands.append(network)
         guard let store else { return }
         writeError = nil
         networkActivity.append(activity)
         let running = RunningCommand()
-        running.command = store.runGitNetworkScript(script, arguments: arguments, onPrompt: { [weak self] question in
-            guard let self else {
-                // The Git View is gone with its Window, so nobody can answer the question.
-                running.command?.cancel()
-                return
+        store.runGitNetwork(network, ask: { [weak self] question in
+            // The Git View is gone with its Window, so nobody can answer the question.
+            guard let self else { return nil }
+            return await withCheckedContinuation { continuation in
+                let answer = running.wait(continuation)
+                self.ask(Self.credentialPrompt(question, id: running.id, answer: { answer($0) }, cancel: { answer(nil) }))
             }
-            self.ask(Self.credentialPrompt(question, id: running.id, answer: { running.command?.answer($0) },
-                                           cancel: { running.command?.cancel() }))
         }, completion: { [weak self] result in
-            running.command = nil
+            // A question the command no longer waits for is refused.
+            running.finish()
             guard let self else { return }
             if let index = self.networkActivity.firstIndex(of: activity) { self.networkActivity.remove(at: index) }
-            // A question the command no longer waits for goes.
             self.waitingPrompts.removeAll { $0.id == running.id }
             if self.prompt?.id == running.id { self.closePrompt() }
             if let completion {
@@ -2843,10 +2794,27 @@ final class GitView {
         })
     }
 
-    /// Holds a network command for its questions; its prompts have its id.
+    /// The questions of one network command, which have its id. Each is answered once: by the user, by ⎋, or refused
+    /// when the command ends first.
+    @MainActor
     private final class RunningCommand {
         let id = "credential-" + UUID().uuidString
-        var command: TerminalCommand?
+        private var waiting: [Int: CheckedContinuation<String?, Never>] = [:]
+        private var nextID = 0
+
+        /// Holds a question's continuation, and answers what resumes it.
+        func wait(_ continuation: CheckedContinuation<String?, Never>) -> (String?) -> Void {
+            let key = nextID
+            nextID += 1
+            waiting[key] = continuation
+            return { [weak self] answer in self?.waiting.removeValue(forKey: key)?.resume(returning: answer) }
+        }
+
+        func finish() {
+            let all = waiting.values
+            waiting = [:]
+            all.forEach { $0.resume(returning: nil) }
+        }
     }
 
     /// The Git View prompt for a command's question: hidden text for a password, passphrase, PIN or token.
@@ -2855,7 +2823,7 @@ final class GitView {
         let symbol = switch question.kind {
         case .username: "person"
         case .hostKey: "server.rack"
-        case .password, .passphrase, .pin, .token: "key"
+        case .password, .passphrase, .pin, .token, .other: "key"
         }
         let placeholder = switch question.kind {
         case .username: "Username"
@@ -2864,6 +2832,7 @@ final class GitView {
         case .passphrase: "Passphrase"
         case .pin: "PIN"
         case .token: "Token"
+        case .other: "Answer"
         }
         return GitPrompt(id: id, title: question.question,
                          subject: question.context.isEmpty ? nil : .text(question.context.joined(separator: "\n")),
@@ -3271,11 +3240,11 @@ final class GitView {
         snapshotGeneration += 1
         let generation = snapshotGeneration
         if showingProgress { isReading = true }
-        store.runGitScript(GitRepository.snapshotScript, arguments: [folder]) { [weak self] result in
+        store.readGit(.status(folder: folder), \.snapshot) { [weak self] result in
             defer { done?() }
             guard let self, self.isOpen, self.snapshotGeneration == generation else { return }
             self.isReading = false
-            switch result.flatMap({ GitRepository.parseSnapshot($0).mapError { $0 as Error } }) {
+            switch result {
             case .success(let snapshot):
                 self.apply(snapshot)
             case .failure(let error):
@@ -3365,10 +3334,10 @@ final class GitView {
     private func runLog(of branch: GitBranch) {
         guard let store, let root = snapshot?.root else { return }
         readingLog = "\(branch.name) \(branch.sha)"
-        store.runGitScript(GitRepository.logScript, arguments: [root, branch.name]) { [weak self] result in
+        store.readGit(.log(root: root, branch: branch.name), \.log) { [weak self] result in
             guard let self, self.isOpen else { return }
             switch result {
-            case .success(let output): self.didRead(GitRepository.parseLog(output), of: branch)
+            case .success(let log): self.didRead(log, of: branch)
             case .failure(let error): self.didRead(GitLog(error: Self.message(for: error)), of: branch)
             }
         }
@@ -3441,9 +3410,9 @@ final class GitView {
     }
 
     private func run(_ request: Request) {
-        guard let store else { return }
+        guard let store, let read = request.read else { return }
         loadingID = request.id
-        store.runGitScript(request.script, arguments: request.arguments) { [weak self] result in
+        store.readGit(read, \.text) { [weak self] result in
             guard let self, self.isOpen, self.loadingID == request.id else { return }
             self.loadingID = nil
             switch result {
@@ -3475,9 +3444,9 @@ final class GitView {
             var patch: GitPatch
             switch header {
             case .change, .folder:
-                patch = GitPatch.joined(GitRepository.parseParts(output).map { ($0.group, GitPatch.parse($0.patch)) })
+                patch = GitPatch.joined(GitReads.parseParts(output).map { ($0.group, GitPatch.parse($0.patch)) })
             case .commit(let commit, _):
-                let parsed = GitRepository.parseCommitDetail(output)
+                let parsed = GitReads.parseCommitDetail(output)
                 header = .commit(commit, parsed.detail)
                 patch = GitPatch.parse(parsed.patch)
             default:
@@ -3518,12 +3487,12 @@ final class GitView {
         }
     }
 
-    /// A git command whose output the diff pane shows.
+    /// A git read whose output the diff pane shows.
     struct Request {
         let id: String
         let header: Content.Header
-        var script = ""
-        var arguments: [String] = []
+        /// The read; nil for what is shown without running git.
+        var read: GitRead?
         /// Commits and stashes, which never change; the rest is read again
         /// on every refresh.
         var isFixed = false
@@ -3545,34 +3514,29 @@ final class GitView {
                 return Request(id: "base:\(base.id)@\(from)", header: .comparison(base: base, target: nil), localOutput: "")
             }
             return Request(id: "compare:\(base.id)@\(from) \(item.id)@\(to)", header: .comparison(base: base, target: item),
-                           script: GitRepository.gitScript,
-                           arguments: [root, "diff", "--no-color", "--no-ext-diff", "-M", from, to, "--"], isFixed: true)
+                           read: .range(root: root, from: from, to: to), isFixed: true)
         }
         switch item {
         case .change(let change):
             let whole = wholeFiles.contains(change.path)
             return Request(id: "\(item.id):\(change.status)\(whole ? ":whole" : "")", header: .change(change),
-                           script: GitRepository.changeScript,
-                           arguments: [root, change.path, change.originalPath ?? "", whole ? "100000" : "3",
-                                       change.groups.map(\.rawValue).joined(separator: " ")])
+                           read: .change(root: root, path: change.path, from: change.originalPath, context: whole ? 100_000 : 3,
+                                         groups: change.groups))
         case .folder(_, let path):
             let changes = snapshot.changes.filter { GitTree.path($0.path, isIn: path) }
             let groups = GitChange.Group.allCases.filter { group in changes.contains { $0.groups.contains(group) } }
             let names = groups.map(\.rawValue).joined(separator: " ")
-            return Request(id: "\(item.id):\(names)", header: .folder(path, changes), script: GitRepository.changeScript,
-                           arguments: [root, path, "", "3", names])
+            return Request(id: "\(item.id):\(names)", header: .folder(path, changes),
+                           read: .change(root: root, path: path, from: nil, context: 3, groups: groups))
         case .branch(let branch):
             // Its card: the latest commits, read with its history.
             let log = log(of: branch)
             return Request(id: "\(item.id):\(log?.commits.first?.sha ?? log?.error ?? "reading")", header: .branch(branch, log),
                            localOutput: "")
         case .commit(let commit):
-            return Request(id: item.id, header: .commit(commit, nil), script: GitRepository.commitScript,
-                           arguments: [root, commit.sha], isFixed: true)
+            return Request(id: item.id, header: .commit(commit, nil), read: .commit(root: root, sha: commit.sha), isFixed: true)
         case .stash(let stash):
-            return Request(id: item.id, header: .stash(stash), script: GitRepository.gitScript,
-                           arguments: [root, "stash", "show", "--patch", "--no-color", "--no-ext-diff", "-M", stash.sha],
-                           isFixed: true)
+            return Request(id: item.id, header: .stash(stash), read: .stash(root: root, sha: stash.sha), isFixed: true)
         case .file:
             return nil
         }
@@ -3634,4 +3598,64 @@ final class GitView {
         }
     }
     #endif
+}
+
+/// How the D menu shows each reset option.
+extension GitWrite.WorkingTreeReset {
+    var title: String {
+        switch self {
+        case .nuke: "Nuke working tree"
+        case .unstaged: "Discard unstaged changes"
+        case .untracked: "Discard untracked files"
+        case .staged: "Discard staged changes"
+        case .soft: "Soft reset"
+        case .mixed: "Mixed reset"
+        case .hard: "Hard reset"
+        }
+    }
+
+    /// lazygit's key for it in the menu.
+    var key: String {
+        switch self {
+        case .nuke: "x"
+        case .unstaged: "u"
+        case .untracked: "c"
+        case .staged: "shift+s"
+        case .soft: "s"
+        case .mixed: "m"
+        case .hard: "h"
+        }
+    }
+
+    var note: String {
+        switch self {
+        case .nuke: "Back to the last commit. New and untracked files are deleted."
+        case .unstaged: "Tracked files go back to what's staged. Untracked files stay."
+        case .untracked: "Deletes the files git doesn't track. Ignored files stay."
+        case .staged: "Takes what's staged out of the files too; the rest stays. Needs git 2.35."
+        case .soft: "Every change stays as it is, staged or not."
+        case .mixed: "Unstages everything. The files keep their changes."
+        case .hard: "Tracked files go back to the last commit. Untracked files stay."
+        }
+    }
+
+    /// Soft and mixed change no file's content.
+    var isDestructive: Bool { self != .soft && self != .mixed }
+}
+
+/// What lazygit's Stash panel does with the stash selected: space applies, g pops and d drops.
+extension GitWrite.StashAction {
+    var verb: String { rawValue }
+    var symbol: String { self == .drop ? "trash" : self == .apply ? "tray.and.arrow.down" : "tray.and.arrow.up" }
+}
+
+/// How m's menu says each step was taken.
+extension GitWrite.OperationStep {
+    var past: String {
+        switch self {
+        case .continue: "Continued"
+        case .skip: "Skipped"
+        case .abort: "Aborted"
+        }
+    }
 }

@@ -1,0 +1,23 @@
+# The Host CLI's server lives on a channel of the attachment's SSH master
+
+A Remote App Window talks to the Host CLI in a server mode, which reads the Host's Topics and watches tmux and the Host's `muxify.db` on the Host. We decide that the server lives exactly as long as one SSH channel. The Mac opens it as a `-T` channel on the owned master of ADR 0006, as today's execs do (`ControlMaster=no`, `BatchMode=yes`, `ProxyCommand=/usr/bin/false`). It never signs in on its own, and no process of Muxify's outlives the channel on the Host. The server keeps no state that matters across a drop: the Topics are in the Host's `muxify.db`, and the rest is in tmux. Starting it costs about 1.5 ms. The expensive part of a reconnect is the new master, about 12 round trips, and a daemon would not save that.
+
+- **One server per channel, one channel per master.** Each App Window has its own master, so two App Windows on one Host, two Macs, or later the phone each get their own server. Servers share nothing. They coordinate through the Host's `muxify.db` (`data_version`; ADR 0080: the last write to a field wins) and through tmux. Each server sends events for its own writes and watches `data_version` for writes from other processes. Each runs its own control Client in the Watch Session.
+- **Start.** The Mac opens the server channel as soon as the master is ready, after the Host CLI install chain, and while the terminal attaches. The terminal never waits for the server. Until the server answers, the App Window shows Sessions as it does without a server.
+- **End.** The server exits on any of three things: stdin EOF (the master exits, the App Window closes, the Environment switches, or the Mac closes the channel); a shutdown message from the Mac; or 45 s with no frame from the Mac, which sends a ping every 15 s when it has sent nothing else. The silence timeout must stay longer than the Mac's own master timeout (`ServerAliveInterval=15` × `ServerAliveCountMax=2`), so a server never exits while the Mac still holds its master. It catches a Mac that slept or left the network while sshd on the Host still holds the dead TCP connection. There is no idle timeout while the Mac is there.
+- **A drop: no replay.** When the master dies, the Mac reconnects as it does today, with a new master and then a new server. The new server first sends the full state and then events. Every request still waiting on the old channel fails at once. A read is made again when its view subscribes again. A mutation reports that it may or may not have happened and is never retried (ADR 0006).
+- **The server dies, the master lives.** The Mac starts the server again on a new channel. After 3 failed starts within 60 s it stops for the rest of this attachment, and the App Window falls back to Sessions only, saying why Topics are unavailable. The next attachment tries again.
+- **Independent of tmux.** The server keeps running when the Host's tmux server exits, says so, and attaches its control Client again when a Session appears. Its lifetime follows the channel only.
+
+## Considered Options
+
+- **A daemon that outlives the connection, behind a thin proxy** (Zed, JetBrains Gateway, distant). Rejected: it helps only when a restart is expensive or the server holds state that cannot be rebuilt, and neither is true here. It brings PID files and stale-PID bugs, a socket on the Host to secure, killing or adopting an older server, and replay of unacked frames after a reconnect. Replay re-sends a mutation whose outcome is uncertain, which ADR 0006 forbids, and Zed's open bugs are requests that hang across a reconnect.
+- **A front process that reuses a shared server, which stops after an idle period** (VS Code Remote-SSH). Rejected for the same reasons. Sharing one server between clients needs a daemon and a socket, and the database and tmux already let separate servers coordinate.
+- **A connection of the server's own.** Rejected: it costs about 12 more round trips, and it signs in on its own, which ADR 0006 forbids. It could ask for a passphrase or a host key a second time.
+
+## Consequences
+
+- ADR 0006's "ties connection lifetime to the visible attachment" now covers the server too. The server is a channel of the attachment's master and never outlives it.
+- ADR 0076's Consequence "the app still runs no long-lived process on a Host" changes. The app runs one server per attachment on a Host, bound to that attachment's channel, and nothing else.
+- A Host with several clients runs several servers. Each runs its own control Client and its own watchers.
+- Whether the server also listens on a Unix socket for `muxify browser` callers on the Host is not decided here. That is part of the Host-to-Mac requests decision.

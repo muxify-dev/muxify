@@ -12,11 +12,15 @@ The context whose Sessions, Windows, Panes and Agents Muxify presents. Local is 
 _Avoid_: workspace, project
 
 **Remote Environment**:
-An Environment on another machine, presented in the local Muxify app. It has no Topics in the Mac app; its Host CLI keeps that machine's own.
+An Environment on another machine, presented in the local Muxify app. Its Topics are that machine's own, kept by its Host CLI; the Mac app shows them and keeps no copy. When the Host CLI cannot run there, its App Window shows only Sessions.
 _Avoid_: remote Session, SSH session (when you mean the Environment)
 
+**Host**:
+The machine of a Remote Environment. The Mac is never a Host of its own Local Environment.
+_Avoid_: remote, server, box, host (for the Mac)
+
 **Host CLI**:
-The `muxify` on a Remote Environment's machine, which Muxify installs and keeps up to date in `~/.local/bin`. The phone and the Agents on that machine use it, and it keeps that machine's Topics; the Mac app does not read them.
+The `muxify` on a Remote Environment's machine, which Muxify installs and keeps up to date in `~/.local/bin`. The Mac app, the phone and the Agents on that machine use it, and it keeps that machine's Topics.
 _Avoid_: remote helper, agent binary, remote CLI
 
 **Request**:
@@ -26,6 +30,10 @@ _Avoid_: idempotency key, transaction, operation id
 **Request ledger**:
 The Host's record of the Requests of the last 24 hours, in the state database. A Request is _started_ when it changed the Topic records, and _done_ when it has its answer. A second send of a started Request runs again only when its verb gives the same end state; else it fails as in doubt.
 _Avoid_: outbox, request log, dedupe table
+
+**Host Server**:
+The Host CLI serving one Remote App Window, over that window's SSH connection, from the moment the connection is ready until it closes. Through it the Mac app shows the Host's Topics and sees the Host's changes as they happen. When it cannot run, the App Window shows only Sessions and says why.
+_Avoid_: daemon, agent, remote server, helper
 
 **Active Environment**:
 The Environment shown in an App Window. Each App Window has one Active Environment.
@@ -85,7 +93,7 @@ One checkout of a repository at its own path, such as a folder inside a bare rep
 _Avoid_: checkout, clone, Session Path (when you mean one checkout)
 
 **Muxify Worktree**:
-A Worktree that Muxify made and remembers, so it can list and remove it. A Topic may own it, or none.
+A Worktree that Muxify made and remembers, so it can list and remove it. Its record is on the machine that has the Worktree: a Remote Environment's are kept by its Host CLI. A Topic may own it, or none.
 _Avoid_: managed worktree, created worktree
 
 **Worktree setup**:

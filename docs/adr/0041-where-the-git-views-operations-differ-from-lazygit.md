@@ -18,9 +18,11 @@ status: accepted
 
 ## Credentials, also on a Remote Environment
 
+_Superseded by [ADR 0089](0089-the-mac-app-reaches-every-environment-through-one-environmentlink.md): fetch, push, pull and deleting a remote branch run git with an askpass helper on both machines, `muxify askpass`, which reaches the Mac through a socket, and the Git View asks each question in a prompt. No PTY or prompt parsing remains._
+
 As in lazygit, fetch, pull, push and deleting a remote branch run under a PTY with `LANG=C`. The Git View watches their output for lazygit's credential prompts, and for ssh's question about an unknown host, and asks in a Git View prompt that hides what the user types for a secret. On a Remote Environment the command runs over SSH with a remote PTY, so the prompts work there too. Other git commands run as before, with no terminal, and fail with git's message when they would ask.
 
 ## Considered Options
 
-- **A `GIT_ASKPASS` and `SSH_ASKPASS` helper.** git and ssh would hand it the exact question, with nothing to parse. Rejected: on a Remote Environment the helper runs on the other machine and has no way back to Muxify.
+- **A `GIT_ASKPASS` and `SSH_ASKPASS` helper.** git and ssh would hand it the exact question, with nothing to parse. Rejected: on a Remote Environment the helper runs on the other machine and has no way back to Muxify. _Superseded by [ADR 0089](0089-the-mac-app-reaches-every-environment-through-one-environmentlink.md): the Host Server's own socket is that way back._
 - **Auto-fetch while the Git View is open, without lazygit's fast-forward.** Deferred, not rejected.

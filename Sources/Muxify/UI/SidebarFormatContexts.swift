@@ -11,7 +11,10 @@ struct SidebarFormatContexts {
     var panes: [String: Context] = [:]
 
     init(model: TopicsModel, windows: [TmuxWindow], panes: [TmuxPane], agents: [Agent],
-         branches: TopicBranches, records: [TopicRecord], sessionPaths: [SessionPath], tabCounts: [String: Int]) {
+         branches: TopicBranches, records: [TopicRecord], sessionPaths: [SessionPath], tabCounts: [String: Int],
+         isOnThisMac: Bool = true, features: EnvironmentFeatures = .all) {
+        // A branch is read from a HEAD file on this Mac, and a Topic only where the Environment serves Topics.
+        let servesTopics = features.contains(.topics)
         let panesByWindow = Dictionary(grouping: panes, by: \.windowID)
         let agentsByPane = Dictionary(agents.map { ($0.paneID, $0) }, uniquingKeysWith: { first, _ in first })
         let recordsByID = Dictionary(records.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -25,14 +28,14 @@ struct SidebarFormatContexts {
         }
         for (sessionID, members) in Dictionary(grouping: windows, by: \.sessionID) {
             guard let first = members.first else { continue }
-            let record = first.isRemote ? nil : first.topicID.flatMap { recordsByID[$0] }
+            let record = servesTopics ? first.topicID.flatMap { recordsByID[$0] } : nil
             let topicSession = model.topicSessions[sessionID]
             let sessionAgents = agents.filter { $0.sessionID == sessionID }
             let sessionValues = merged(counts(sessionAgents), [
                 .session_name: first.sessionName,
                 .session_base_name: topicSession?.baseName ?? SessionNaming.base(of: first.sessionName, topic: record),
-                .branch: first.isRemote ? "" : branches[.local(first.sessionPath)] ?? "",
-                .topic_title: first.isRemote ? "" : first.topicID.flatMap { model.titles[$0] } ?? "",
+                .branch: isOnThisMac ? branches[.local(first.sessionPath)] ?? "" : "",
+                .topic_title: servesTopics ? first.topicID.flatMap { model.titles[$0] } ?? "" : "",
                 .topic_tags: topicTags(record.map { model.tags?.shown($0.tags) ?? [] } ?? []),
                 .window_count: String(members.count),
                 .pane_count: String(members.reduce(0) { $0 + $1.paneCount }),
@@ -56,7 +59,7 @@ struct SidebarFormatContexts {
                         .pane_index: String(pane.index), .pane_label: pane.label, .pane_title: pane.title,
                         .pane_current_command: pane.command, .pane_current_path: pane.path,
                         .pane_active_flag: pane.isActive ? "1" : "0",
-                        .branch: window.isRemote ? "" : branches[.local(pane.path)] ?? "",
+                        .branch: isOnThisMac ? branches[.local(pane.path)] ?? "" : "",
                         .agent_kind: agent?.kind.displayName ?? "", .agent_status: agent?.status?.rawValue ?? "",
                         .agent_unread_flag: agent?.unread == true ? "1" : "0",
                         .agent_group: model.agentGroups[pane.id] ?? "",

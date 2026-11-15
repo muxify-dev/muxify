@@ -30,20 +30,44 @@ public enum HostCLI {
     }()
 
     /// Runs the install on the Environment's machine, off the calling thread, and gives `report` its result line
-    /// or its error, as `Host CLI: <Environment>: <line>`. Nothing waits for it, and nothing it finds changes the
-    /// connection.
+    /// or its error, as `Host CLI: <Environment>: <line>`. The terminal never waits for it. `completion` gets the
+    /// line alone once the install has run, so the Host Server starts after it.
     public static func install(over scripts: any ScriptRunning, environmentName: String, baseURL: String,
-                               report: @escaping @Sendable (String) -> Void) {
+                               report: @escaping @Sendable (String) -> Void,
+                               completion: (@Sendable (String) -> Void)? = nil) {
         DispatchQueue.global(qos: .utility).async {
-            let line: String
-            do {
-                let output = try scripts.runScript(script, arguments: [baseURL], timeout: timeout)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                line = output.isEmpty ? "failed: the install printed nothing" : output
-            } catch {
-                line = "failed: \(error)"
-            }
+            let line = run(over: scripts, baseURL: baseURL)
             report("Host CLI: \(environmentName): \(line)")
+            completion?(line)
         }
+    }
+
+    /// The install on the calling thread: its result line, or `failed:` with the error that stopped it.
+    public static func run(over scripts: any ScriptRunning, baseURL: String) -> String {
+        do {
+            let output = try scripts.runScript(script, arguments: [baseURL], timeout: timeout)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return output.isEmpty ? "failed: the install printed nothing" : output
+        } catch {
+            return "failed: \(error)"
+        }
+    }
+
+    /// Whether the install's result line says the Host itself cannot download: then the Mac sends the bytes
+    /// (chain B). A Host on a platform with no Host CLI, or with an app bundle's `muxify`, gets nothing from the Mac.
+    public static func hostCannotDownload(_ line: String) -> Bool {
+        ["failed: neither curl nor wget", "failed: cannot fetch ", "failed: cannot download "].contains { line.hasPrefix($0) }
+    }
+
+    /// The assets of `cli-latest`, one per platform that has a Host CLI, as `muxify-<os>-<arch>`.
+    public static let assets: Set<String> = ["muxify-linux-aarch64", "muxify-linux-x86_64", "muxify-darwin-arm64"]
+
+    /// `<short-sha> <commit-unix-time>` from a `muxify --version` line; nil for any other line, as the script's
+    /// `version` does.
+    public static func version(_ line: String) -> (sha: String, time: Int)? {
+        let words = line.split(separator: " ", omittingEmptySubsequences: false)
+        guard words.count == 3, words[0] == "muxify", !words[1].isEmpty, !words[2].isEmpty,
+              words[2].allSatisfy({ $0.isASCII && $0.isNumber }), let time = Int(words[2]) else { return nil }
+        return (String(words[1]), time)
     }
 }

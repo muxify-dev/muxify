@@ -108,13 +108,19 @@ final class AppWindows {
         store.serveBrowserAgent = { [weak self] socket in
             self?.browserAgent.serve(tmuxSocket: socket)
         }
+        // A Host's Browser commands come through this App Window's own Host Server, so its own Browsers serve them.
+        store.serveBrowserRequest = { [weak self, weak store] request in
+            guard let self, let store else { return .failure("Muxify is quitting") }
+            return await self.browserAgent.handle(request, in: [store])
+        }
+        store.onBringToFront = { [weak self] in self?.bringToFront(request.id) }
         return store
     }
 
     /// Reload Config: the local Config, and each Remote Environment's own.
     func reloadConfig() {
         configStore.reload()
-        for store in stores.values { store.loadRemoteConfig() }
+        for store in stores.values { store.reloadEnvironmentConfig() }
     }
 
     func newWindow() {
@@ -183,6 +189,7 @@ final class AppWindows {
         catalog.updateEnvironment(id, name: store.activeEnvironment?.name)
         nativeWindows[id]?.invalidateRestorableState()
         if focusedID == id { remember(store.activeEnvironment?.name) }
+        updateOpenConsumers()
     }
 
     private func focus(_ id: UUID) {
@@ -190,6 +197,26 @@ final class AppWindows {
         catalog.focus(id)
         focusedID = id
         remember(store.activeEnvironment?.name)
+        updateOpenConsumers()
+    }
+
+    /// Which App Window consumes `@muxify_open` follows focus, and on a Host its Host Server names its own socket in
+    /// `@muxify_browser_socket` (ADR 0091), so each store hears at once whether it is the one.
+    private func updateOpenConsumers() {
+        for store in stores.values { store.updateOpenConsumer() }
+    }
+
+    /// Shows the App Window in front, as `open muxify://select` does locally, after a program on its Host asked it
+    /// to show something. A verify run never takes focus from the user.
+    private func bringToFront(_ id: UUID) {
+        guard !isQuitting, let window = nativeWindows[id] else { return }
+        #if DEBUG
+        if TestDriver.isRunning { return }
+        #endif
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+        focus(id)
     }
 
     private func remember(_ name: String?) {
@@ -201,6 +228,7 @@ final class AppWindows {
         nativeWindows[id] = nil
         catalog.close(id)
         if focusedID == id { focusedID = nil }
+        updateOpenConsumers()
         guard let store = stores[id] else { return }
         store.shutdown { [weak self] in
             guard let self else { return }

@@ -85,23 +85,41 @@ final class TmuxEvents {
 /// A `tmux -C` client whose controlling terminal is a pty that only Muxify
 /// holds. A control client can outlive a dead parent that only closed its
 /// input; the pty hangup when Muxify ends, however it ends, stops it.
-private final class ControlClient {
+final class ControlClient: TmuxControlClient {
     private let pid: pid_t
+    private let master: Int32
     private let reader: DispatchSourceRead
     private let exitSource: DispatchSourceProcess
-    /// Only touched on the main thread.
-    private var exited = false
+    private let state = State()
 
-    /// Starts the client; call on the main thread. `onLines` gets each chunk
-    /// of complete output lines on a background queue.
-    init(binary: String, arguments: [String], onLines: @escaping ([String]) -> Void,
-         onExit: @escaping () -> Void) throws {
+    /// Whether the client was reaped, and whether its pty master was closed.
+    private final class State: @unchecked Sendable {
+        let lock = NSLock()
+        // `lock` guards these.
+        var exited = false
+        var closed = false
+    }
+
+    /// Starts a client for the Local Environment's publisher.
+    static let start: TmuxControlClientStart = { invocation, environment, onLines, onExit in
+        try ControlClient(binary: invocation.executable, arguments: invocation.arguments, environment: environment,
+                          onLines: onLines, onExit: onExit)
+    }
+
+    /// Starts the client. `onLines` gets each chunk of complete output lines on a background queue, and `onExit`
+    /// runs once on the main thread after the client has been reaped. Without `environment`, the client gets the
+    /// app's own.
+    init(binary: String, arguments: [String], environment: [String: String]? = nil,
+         onLines: @escaping ([String]) -> Void, onExit: @escaping () -> Void) throws {
         let argv = ([binary] + arguments).map { strdup($0) } + [nil]
         defer { argv.forEach { free($0) } }
+        let envp = environment.map { $0.map { strdup("\($0.key)=\($0.value)") } + [nil] }
+        defer { envp?.forEach { free($0) } }
         var master: Int32 = -1
-        let pid = muxify_forkpty_exec(binary, argv, environ, &master)
+        let pid = envp.map { muxify_forkpty_exec(binary, argv, $0, &master) } ?? muxify_forkpty_exec(binary, argv, environ, &master)
         guard pid > 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         self.pid = pid
+        self.master = master
         _ = fcntl(master, F_SETFL, fcntl(master, F_GETFL) | O_NONBLOCK)
 
         reader = DispatchSource.makeReadSource(fileDescriptor: master, queue: DispatchQueue(label: "muxify.tmux-events"))
@@ -124,26 +142,64 @@ private final class ControlClient {
             }
             if !lines.isEmpty { onLines(lines) }
         }
-        reader.setCancelHandler { close(master) }
+        let state = state
+        reader.setCancelHandler {
+            state.lock.lock()
+            state.closed = true
+            close(master)
+            state.lock.unlock()
+        }
         reader.resume()
 
         // The exit source keeps this client alive until it has reaped tmux.
         exitSource = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
-        exitSource.setEventHandler { [self] in reap(); onExit() }
+        exitSource.setEventHandler { [self] in
+            if reap() { onExit() }
+        }
         exitSource.resume()
         // A client that exited before the source was watching gets no event.
-        if waitpid(pid, nil, WNOHANG) == pid { exited = true; exitSource.cancel() }
+        if waitpid(pid, nil, WNOHANG) == pid {
+            state.lock.lock()
+            state.exited = true
+            state.lock.unlock()
+            exitSource.cancel()
+            reader.cancel()
+            DispatchQueue.main.async(execute: onExit)
+        }
     }
 
-    var isRunning: Bool { !exited }
+    var isRunning: Bool {
+        state.lock.lock()
+        defer { state.lock.unlock() }
+        return !state.exited
+    }
+
+    /// Writes one command line to the client through the pty.
+    func send(_ command: String) {
+        state.lock.lock()
+        defer { state.lock.unlock() }
+        guard !state.closed, !state.exited else { return }
+        let line = Array((command + "\n").utf8)
+        var offset = 0
+        while offset < line.count {
+            let written = line[offset...].withUnsafeBytes { write(master, $0.baseAddress, $0.count) }
+            if written < 0, errno == EINTR { continue }
+            guard written > 0 else { return }
+            offset += written
+        }
+    }
 
     /// Closing the master hangs the client up; the exit source then reaps it.
     func stop() { reader.cancel() }
 
-    private func reap() {
+    /// True when this call reaped the client.
+    private func reap() -> Bool {
         exitSource.cancel()
-        guard !exited else { return }
-        exited = true
+        state.lock.lock()
+        guard !state.exited else { state.lock.unlock(); return false }
+        state.exited = true
+        state.lock.unlock()
         _ = waitpid(pid, nil, 0)
+        return true
     }
 }

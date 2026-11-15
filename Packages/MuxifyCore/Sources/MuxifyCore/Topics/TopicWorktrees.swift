@@ -20,7 +20,7 @@ enum TopicWorktrees {
         let root = Folder.local(paths.worktrees.path)
         if worktree != root && root.contains(worktree) { return true }
         let records = (try? MuxifyWorktreeStore(paths: paths).all()) ?? []
-        return records.contains { $0.environment == nil && Folder.local($0.path) == worktree }
+        return records.contains { Folder.local($0.path) == worktree }
     }
 
     /// The Worktrees Settle may remove: those Muxify made (`isInside`) that the Topic created, with their branch merged.

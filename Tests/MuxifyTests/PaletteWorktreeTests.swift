@@ -10,7 +10,7 @@ final class PaletteWorktreeTests: XCTestCase {
     }
 
     private func summary(sessions: [String] = [], state: MuxifyWorktrees.State = .clean) -> MuxifyWorktreeSummary {
-        MuxifyWorktreeSummary(record: MuxifyWorktreeRecord(id: "w1", environment: nil, repository: "/work/game", name: "fix",
+        MuxifyWorktreeSummary(record: MuxifyWorktreeRecord(id: "w1", repository: "/work/game", name: "fix",
                                                            path: "/trees/game/fix", branch: "fix", base: "abc"),
                               state: state, sessions: sessions, topic: nil)
     }

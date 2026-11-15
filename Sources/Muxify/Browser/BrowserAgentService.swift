@@ -2,7 +2,8 @@ import AppKit
 import MuxifyCore
 
 /// Serves the Browser commands of the Local Environment's tmux server (ADR 0057, ADR 0058). It answers each
-/// request with the Browsers of the local App Windows.
+/// request with the Browsers of the local App Windows. A Host's commands come through the Host Server of one App
+/// Window, which `handle(_:in:)` answers with that window's store alone (ADR 0091).
 @MainActor
 final class BrowserAgentService {
     /// The local App Windows' stores. The first one consumes `@muxify_open`, so `open`, `tabs` and the active Tab
@@ -44,16 +45,20 @@ final class BrowserAgentService {
     /// A page that focuses an element, in `fill` or in its own click handler, makes AppKit focus its web view.
     /// A command never moves the user's focus, so each App Window gets back the responder it had.
     func handle(_ request: BrowserAgentRequest) async -> BrowserAgentReply {
+        await handle(request, in: stores())
+    }
+
+    /// Answers `request` with the Browsers of `stores`, the first of which serves `open`, `tabs` and the active Tab.
+    func handle(_ request: BrowserAgentRequest, in stores: [WorkspaceStore]) async -> BrowserAgentReply {
         let responders = NSApp.windows.map { ($0, $0.firstResponder) }
-        let reply = await reply(to: request)
+        let reply = await reply(to: request, in: stores)
         for (window, responder) in responders where window.firstResponder !== responder {
             window.makeFirstResponder(responder)
         }
         return reply
     }
 
-    private func reply(to request: BrowserAgentRequest) async -> BrowserAgentReply {
-        let stores = stores()
+    private func reply(to request: BrowserAgentRequest, in stores: [WorkspaceStore]) async -> BrowserAgentReply {
         guard let store = stores.first else { return .failure("Muxify shows no Local Environment") }
         switch request.command {
         case .tabs:

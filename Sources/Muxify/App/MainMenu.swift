@@ -84,7 +84,7 @@ import MuxifyCore
                 if let store { store.openConfig() } else { windows.configStore.openInEditor() }
             },
             item("Reload Config", KeyTrigger(modifiers: [.command, .shift], key: .character(","))) { [windows] in windows.reloadConfig() },
-            item("Install Extensions", enabled: store?.isRemote != true) { ExtensionInstaller.run() },
+            item("Install Extensions", enabled: store?.link.isOnThisMac != false) { ExtensionInstaller.run() },
             item("Install Command Line Tool") { CommandLineToolInstaller.run() },
             item("Settings…", KeyTrigger(modifiers: .command, key: .character(","))) { [windows] in windows.showSettings() },
             .separator(),
@@ -100,11 +100,11 @@ import MuxifyCore
 
     private func fileItems() -> [NSMenuItem] {
         let store = self.store
-        /// Topics live on this Mac, so only a Local App Window offers them.
-        let topicsAvailable = store.map { !$0.isRemote && !$0.changingTopic } ?? false
+        /// Only an App Window whose Environment serves Topics offers them.
+        let topicsAvailable = store.map { $0.link.features.contains(.topics) && !$0.changingTopic } ?? false
         let topicsEnabled = store?.topics.topicsEnabled == true
         let hasWindow = store?.selectedWindow != nil
-        let remoteActionEnabled = store.map { !$0.isRemote || $0.isConnected } ?? false
+        let remoteActionEnabled = store.map { $0.link.isOnThisMac || $0.isConnected } ?? false
         return [
             item("New Muxify Window", keybinds.firstTrigger(for: .newAppWindow)) { [windows] in windows.newWindow() },
             .separator(),

@@ -101,7 +101,7 @@ public struct TmuxWindow: Identifiable, Hashable {
 /// are space-separated (URLs never contain spaces); an empty Tab is
 /// `about:blank`. `@muxify_browser` holds the toggles (`off`: the Terminal,
 /// `on`: both, `only`: the Browser) and `@muxify_maximize` the Maximized side.
-public struct StoredBrowser: Hashable {
+public struct StoredBrowser: Hashable, Sendable {
     public var tabURLs: [String] = []
     public var activeTab = 0
     public var layout = PanelLayout()
@@ -211,6 +211,17 @@ public struct TmuxSnapshot {
     /// The full command line of each Pane's program. tmux does not give it, so a snapshot has none until the
     /// caller reads `ps` for it.
     public var commandLines = PaneCommandLines()
+
+    /// Marks the snapshot as a Host's, read over SSH or from its Host Server: its home, and each Window's home and
+    /// host name, for the Window's title.
+    public mutating func stampHost(home: String, hostName: String) {
+        homeDirectory = home
+        for index in windows.indices {
+            windows[index].homeDirectory = home
+            windows[index].hostName = hostName
+            windows[index].isRemote = true
+        }
+    }
 
     /// The Agents running in this snapshot's Panes, in tmux order.
     public var agents: [Agent] { Agent.list(panes: panes, windows: windows) }
