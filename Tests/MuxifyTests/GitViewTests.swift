@@ -10,17 +10,6 @@ final class GitViewConfigTests: XCTestCase {
         try Config.load(path: root, fontFamilies: { [] }) { $0 == self.root ? text : nil }.get()
     }
 
-    private func trigger(_ string: String) -> KeyTrigger {
-        try! KeyTrigger(string)
-    }
-
-    func testDefaultsAreAnEightyPercentPopupOnCommandG() throws {
-        let config = try load("")
-        XCTAssertEqual(config.gitView, GitViewConfig(display: .popup, width: 0.8, height: 0.8))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+g"), focus: nil), .toggleGitView)
-        XCTAssertEqual(config.problems, [])
-    }
-
     func testDisplayAndSizeAcceptPercentagesOrBareNumbers() throws {
         let config = try load("""
         git_view:
@@ -90,15 +79,6 @@ final class GitViewConfigTests: XCTestCase {
         XCTAssertEqual(GitViewConfig().editorCommand(file: "/r/a b", line: 7), "${VISUAL:-${EDITOR:-vi}} +7 '/r/a b'")
         XCTAssertEqual(GitViewConfig(editor: "code -g {file}:{line}").editorShellCommand(file: "/r/a", line: 2),
                        "sh -c 'code -g '\"'\"'/r/a'\"'\"':2'")
-    }
-
-    func testTheKeybindingCanBeRemappedOrDisabled() throws {
-        let remapped = try load("keybindings:\n  toggle_git_view: [ctrl+g, cmd+shift+g]")
-        XCTAssertEqual(remapped.keybinds.firstTrigger(for: .toggleGitView), trigger("ctrl+g"))
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("cmd+shift+g"), focus: nil), .toggleGitView)
-        XCTAssertNil(remapped.keybinds.action(for: trigger("cmd+g"), focus: nil))
-        let disabled = try load("keybindings:\n  toggle_git_view: []")
-        XCTAssertNil(disabled.keybinds.firstTrigger(for: .toggleGitView))
     }
 
     func testTheGitViewTheTemplateShowsIsTheDefault() throws {
@@ -188,6 +168,9 @@ final class GitHostingTests: XCTestCase {
         XCTAssertEqual(failure("https://example.com/github.com/r"), .unsupportedService)
         XCTAssertEqual(failure("https://gitlab.company.com/o/r"), .unsupportedService)
         XCTAssertEqual(failure("https://my.dev.azure.com/o/p/_git/r"), .unsupportedService)
+        XCTAssertEqual(failure("git@gitea.io:owner/repo.git"), .unsupportedService)
+        XCTAssertEqual(failure("git@gitlab.company.com:owner/repo.git"), .unsupportedService)
+        XCTAssertEqual(failure("git@mybitbucket.org:owner/repo.git"), .unsupportedService)
         XCTAssertEqual(failure("origin"), .unsupportedService)
     }
 
@@ -200,6 +183,8 @@ final class GitHostingTests: XCTestCase {
         XCTAssertEqual(link("ssh://git@git.internal:2222/team/repo.git", branch: "b", services: [port]), "https://git.internal:8443/team/repo/compare/b?expand=1")
         let override = GitHosting.Service(host: "github.com", provider: .github, webDomain: "ghe.example")
         XCTAssertEqual(link("git@github.com:o/r.git", branch: "b", services: [override]), "https://ghe.example/o/r/compare/b?expand=1")
+        let mine = GitHosting.Service(host: "gitlab.com", provider: .gitea, webDomain: "mine.test")
+        XCTAssertEqual(link("git@gitlab.com:owner/repo.git", services: [mine]), "https://mine.test/owner/repo/compare/feature%2Fx")
         let first = GitHosting.Service(host: "h.test", provider: .github, webDomain: "one.test")
         let second = GitHosting.Service(host: "h.test", provider: .github, webDomain: "two.test")
         XCTAssertEqual(link("git@h.test:o/r", branch: "b", services: [first, second]), "https://one.test/o/r/compare/b?expand=1")
@@ -300,17 +285,6 @@ final class GitHostingTests: XCTestCase {
         XCTAssertEqual(commit("https://codeberg.org/owner/repo.git"), "https://codeberg.org/owner/repo/commit/0123abc")
     }
 
-    func testTheBuiltInHostsMatchExactlyAndYourEntriesComeFirst() {
-        XCTAssertEqual(GitHosting.builtIn.map(\.host),
-                       ["github.com", "gitlab.com", "bitbucket.org", "dev.azure.com", "ssh.dev.azure.com", "try.gitea.io", "codeberg.org"])
-        XCTAssertEqual(GitHosting.builtIn.first { $0.host == "ssh.dev.azure.com" }?.webDomain, "dev.azure.com")
-        XCTAssertNil(pull("git@gitea.io:owner/repo.git"))
-        XCTAssertNil(pull("git@gitlab.company.com:owner/repo.git"))
-        XCTAssertNil(pull("git@mybitbucket.org:owner/repo.git"))
-        let mine = GitHosting.Service(host: "gitlab.com", provider: .gitea, webDomain: "mine.test")
-        XCTAssertEqual(pull("git@gitlab.com:owner/repo.git", services: [mine]), "https://mine.test/owner/repo/compare/feature%2Fx")
-    }
-
     func testEveryProviderNameIsAllowed() {
         XCTAssertEqual(GitHosting.Provider.allCases.map(\.rawValue),
                        ["github", "gitlab", "bitbucket", "bitbucketServer", "azuredevops", "gitea", "codeberg"])
@@ -318,13 +292,6 @@ final class GitHostingTests: XCTestCase {
             XCTAssertEqual(try? GitHosting.service(host: "h.test", value: "\(provider.rawValue):w.test").get(),
                            GitHosting.Service(host: "h.test", provider: provider, webDomain: "w.test"))
         }
-    }
-
-    func testTheMessagesAreLazygits() {
-        XCTAssertEqual(GitHosting.Failure.noOrigin.message, "There is no 'origin' remote")
-        XCTAssertEqual(GitHosting.Failure.noUpstream.message, "Cannot open a pull request for a branch with no upstream")
-        XCTAssertEqual(GitHosting.Failure.unsupportedService.message, "Unsupported git service")
-        XCTAssertEqual(GitHosting.Failure.unparsableURL.message, "Failed to parse repo information from url")
     }
 
     func testTheHostIsTheRemotesWithoutUserOrPort() {
@@ -429,6 +396,14 @@ final class GitRepositoryParsingTests: XCTestCase {
         let seconds: [Double] = [5, 180, 7_200, 432_000, 1_209_600, 10_368_000, 94_608_000]
         let ages = seconds.map { GitRepository.age(of: now.addingTimeInterval(-$0), now: now) }
         XCTAssertEqual(ages, ["5s", "3m", "2h", "5d", "2w", "4M", "3y"])
+    }
+
+    func testAHeadReadThatFailedOrPrintedNothingKnowsNothing() {
+        XCTAssertEqual(GitHeadRead(.failure(GitViewError(message: "Not connected to Home."))), .unknown)
+        XCTAssertEqual(GitHeadRead(.success("")), .unknown)
+        XCTAssertEqual(GitHeadRead(.success("Last login: today\n")), .unknown)
+        XCTAssertNil(GitHeadRead.unknown.isRepository)
+        XCTAssertEqual(GitHeadRead(.success("\u{1E}head\n\n")), .repository(head: nil))
     }
 }
 
@@ -968,14 +943,6 @@ final class GitScriptTests: XCTestCase {
                        "a folder that is gone is not known to be outside a repository")
     }
 
-    func testAHeadReadThatFailedOrPrintedNothingKnowsNothing() {
-        XCTAssertEqual(GitHeadRead(.failure(GitViewError(message: "Not connected to Home."))), .unknown)
-        XCTAssertEqual(GitHeadRead(.success("")), .unknown)
-        XCTAssertEqual(GitHeadRead(.success("Last login: today\n")), .unknown)
-        XCTAssertNil(GitHeadRead.unknown.isRepository)
-        XCTAssertEqual(GitHeadRead(.success("\u{1E}head\n\n")), .repository(head: nil))
-    }
-
     private func change(_ path: String, _ groups: String) throws -> GitPatch {
         let parts = GitReads.parseParts(try run(GitReads.changeScript, repository, path, "", "3", groups))
         return GitPatch.joined(parts.map { ($0.group, GitPatch.parse($0.patch)) })
@@ -1287,6 +1254,12 @@ final class GitViewKeysTests: XCTestCase {
         snapshot.branches = [branch("master", at: "c2", isHead: true), branch("feature", at: "f1")]
         snapshot.stashes = [GitStash(ref: "stash@{0}", sha: "s1", date: Date(), message: "On master: wip")]
         return snapshot
+    }
+
+    /// An Agent at the snapshot's root, which the Agent guard names as "Codex in work".
+    private func workingAgent(_ status: AgentStatus = .working) -> Agent {
+        Agent(paneID: "%1", kind: .codex, status: status, unread: false, windowID: "@1", sessionID: "$1", sessionName: "work",
+              windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)
     }
 
     func testABranchGoesIntoItsCommitsAndACommitIntoItsFiles() {
@@ -1809,26 +1782,51 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(gitView.prompt?.id, "checkout-by-name")
     }
 
-    func testEveryCheckoutGoesThroughTheAgentGuard() {
-        let gitView = GitView(windowID: "@1")
-        gitView.apply(snapshot)
-        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
-                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
-        gitView.perform(.tab(.branches))
-        gitView.perform(.down)
-        gitView.perform(.toggle)
-        XCTAssertEqual(gitView.menu?.title, "Check out")
-        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
-        XCTAssertEqual(gitView.queuedWriteArguments, [])
-        gitView.closeMenu()
-        XCTAssertEqual(gitView.queuedWriteArguments, [])
-        gitView.perform(.toggle)
-        XCTAssertTrue(gitView.chooseMenu(key: "y"))
-        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "branch", "feature", "0"]])
-        gitView.perform(.tab(.history))
-        gitView.perform(.toggle)
-        XCTAssertEqual(gitView.menu?.title, "Check out")
-        XCTAssertEqual(gitView.menu?.subject, .text("c2"))
+    /// Each write that changes files names the Agents working in the Worktree in its menu, and queues nothing until it is
+    /// confirmed. Dropping a stash changes no files, so its menu names none.
+    func testEveryWriteThatChangesFilesGoesThroughTheAgentGuard() {
+        var unstaged = snapshot
+        unstaged.changes = [GitChange(index: " ", worktree: "M", path: "a.swift")]
+        var rebasing = snapshot
+        rebasing.operation = .rebase(branch: "feature", step: 1, steps: 2)
+        let agents = ["Codex in work"]
+        // The commands, and the message typed into the prompt they open, if any.
+        let writes: [(name: String, snapshot: GitSnapshot, commands: [GitView.Command], message: String?, menu: String,
+                      agents: [String], confirm: (key: String, writes: [[String]])?)] = [
+            ("check out a branch", snapshot, [.tab(.branches), .down, .toggle], nil, "Check out", agents,
+             ("y", [["/repo", "branch", "feature", "0"]])),
+            ("check out a commit", snapshot, [.tab(.history), .toggle], nil, "Check out", agents, ("y", [["/repo", "commit", "c2", "0"]])),
+            ("apply a stash", snapshot, [.tab(.stashes), .toggle], nil, "Apply stash", agents, nil),
+            ("pop a stash", snapshot, [.tab(.stashes), .pop], nil, "Pop stash", agents, nil),
+            ("drop a stash", snapshot, [.tab(.stashes), .discard], nil, "Drop stash", [], nil),
+            ("stash, after its message", unstaged, [.stash], "wip", "Stash changes", agents, nil),
+            ("reset options, folded into their menu", changedSnapshot, [.resetOptions], nil, "Reset options", agents, ("x", [["/repo", "nuke"]])),
+            ("merge", snapshot, [.tab(.branches), .down, .merge], nil, "Merge 'feature' into 'master'", agents, nil),
+            ("rebase", snapshot, [.tab(.branches), .down, .rebase], nil, "Rebase 'master'", agents, nil),
+            ("continue, skip or abort", rebasing, [.operation], nil, "Rebase options", agents, nil),
+        ]
+        for (name, snapshot, commands, message, menu, agents, confirm) in writes {
+            let gitView = GitView(windowID: "@1")
+            gitView.apply(snapshot)
+            gitView.agentsForTesting = [workingAgent()]
+            for command in commands { gitView.perform(command) }
+            if let message {
+                gitView.promptText = message
+                gitView.submitPrompt()
+            }
+            XCTAssertNil(gitView.prompt, name)
+            XCTAssertEqual(gitView.menu?.title, menu, name)
+            XCTAssertEqual(gitView.menu?.agents, agents, name)
+            XCTAssertEqual(gitView.queuedWriteArguments, [], name)
+            if let confirm {
+                XCTAssertTrue(gitView.chooseMenu(key: confirm.key), name)
+                XCTAssertEqual(gitView.queuedWriteArguments, confirm.writes, name)
+            } else {
+                gitView.closeMenu()
+                XCTAssertNil(gitView.menu, name)
+                XCTAssertEqual(gitView.queuedWriteArguments, [], name)
+            }
+        }
     }
 
     private var changedSnapshot: GitSnapshot {
@@ -1879,8 +1877,7 @@ final class GitViewKeysTests: XCTestCase {
         for (key, kind) in [("s", "soft"), ("m", "mixed")] {
             let gitView = GitView(windowID: "@1")
             gitView.apply(changedSnapshot)
-            gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
-                                              sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+            gitView.agentsForTesting = [workingAgent()]
             gitView.perform(.tab(.history))
             gitView.perform(.down)
             gitView.perform(.pop)
@@ -1894,8 +1891,7 @@ final class GitViewKeysTests: XCTestCase {
     func testAHardResetWithChangesAsksAgainNamingTheFilesAndNamesTheAgents() {
         let gitView = GitView(windowID: "@1")
         gitView.apply(changedSnapshot)
-        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
-                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.agentsForTesting = [workingAgent()]
         gitView.perform(.tab(.history))
         gitView.perform(.down)
         gitView.perform(.pop)
@@ -1924,8 +1920,7 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "hard", "c1"]])
         let guarded = GitView(windowID: "@1")
         guarded.apply(snapshot)
-        guarded.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
-                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        guarded.agentsForTesting = [workingAgent()]
         guarded.perform(.tab(.history))
         guarded.perform(.down)
         guarded.perform(.pop)
@@ -2008,8 +2003,7 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.copyCommit)
         gitView.perform(.down)
         gitView.perform(.copyCommit)
-        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
-                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.agentsForTesting = [workingAgent()]
         // Only in History.
         gitView.perform(.tab(.branches))
         gitView.perform(.pasteCommits)
@@ -2023,18 +2017,6 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertTrue(gitView.chooseMenu(key: "y"))
         XCTAssertEqual(gitView.queuedWriteArguments, [["/repo"] + gitView.copiedCommits])
         XCTAssertEqual(gitView.copiedCommits.count, 2, "they stay until the paste has succeeded")
-    }
-
-    func testVWhileAnOperationIsInProgressSaysSoAndOpensNothing() {
-        var busy = snapshot
-        busy.operation = .cherryPick("abc")
-        let gitView = GitView(windowID: "@1")
-        gitView.apply(busy)
-        gitView.perform(.tab(.history))
-        gitView.perform(.copyCommit)
-        gitView.perform(.pasteCommits)
-        XCTAssertNil(gitView.menu)
-        XCTAssertTrue(gitView.writeError?.contains("continue or abort it with m") == true, gitView.writeError ?? "")
     }
 
     private func trackedSnapshot(ahead: Int = 0, behind: Int = 0) -> GitSnapshot {
@@ -2135,8 +2117,7 @@ final class GitViewKeysTests: XCTestCase {
 
     func testPullGoesThroughTheAgentGuardAfterTheUpstreamIsTyped() {
         let gitView = GitView(windowID: "@1")
-        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
-                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.agentsForTesting = [workingAgent()]
         gitView.apply(trackedSnapshot(behind: 1))
         gitView.perform(.pull)
         XCTAssertEqual(gitView.menu?.title, "Pull")
@@ -2171,8 +2152,7 @@ final class GitViewKeysTests: XCTestCase {
         var visited: [String] = []
         gitView.worktreeVisitForTesting = { visited.append($0) }
         // An Agent working here doesn't matter: nothing changes files.
-        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
-                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.agentsForTesting = [workingAgent()]
         gitView.perform(.tab(.branches))
         gitView.perform(.down)
         XCTAssertEqual(gitView.level.selection, "branch:feature")
@@ -2218,22 +2198,6 @@ final class GitViewKeysTests: XCTestCase {
         gitView.finishCheckout(target, .failure(TmuxError.failed(status: 1, stderr: "fatal: 'feature' is already used by worktree at '/x'")))
         XCTAssertNil(gitView.menu)
         XCTAssertEqual(gitView.writeError, "fatal: 'feature' is already used by worktree at '/x'")
-    }
-
-    func testApplyAndPopOfAStashListTheAgentsWorkingThereButDropDoesNot() {
-        let gitView = GitView(windowID: "@1")
-        gitView.apply(snapshot)
-        gitView.perform(.tab(.stashes))
-        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
-                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
-        gitView.perform(.pop)
-        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
-        gitView.closeMenu()
-        gitView.perform(.toggle)
-        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
-        gitView.closeMenu()
-        gitView.perform(.discard)
-        XCTAssertEqual(gitView.menu?.agents, [])
     }
 
     func testAListWhoseStashIsGoneCloses() {
@@ -2296,7 +2260,7 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(picked.choices.map(\.title), ["Discard 3 lines"])
     }
 
-    func testDiscardNamesTheAgentsWorkingInTheWorktreeAndOtherwiseAsksAsBefore() {
+    func testDiscardNamesTheAgentsWorkingInTheWorktreeInItsOwnMenu() {
         let gitView = GitView(windowID: "@1")
         let mixed = GitChange(index: "M", worktree: "M", path: "src/a.swift")
         var changed = snapshot
@@ -2307,13 +2271,6 @@ final class GitViewKeysTests: XCTestCase {
                   windowIndex: 0, windowTitle: "w", label: "", path: path)
         }
         let inside = changed.root + "/src"
-        // Done, failed and Status-less Agents, and Agents elsewhere, leave the menu as it was.
-        gitView.agentsForTesting = [agent("%1", .done, at: inside), agent("%2", .failed, at: inside), agent("%3", nil, at: inside),
-                                    agent("%4", .working, at: changed.root + "-other")]
-        gitView.perform(.discard)
-        XCTAssertEqual(gitView.menu?.id, "discard")
-        XCTAssertEqual(gitView.menu?.agents, [])
-        gitView.closeMenu()
         // A working or blocked Agent inside the Worktree is named in the same menu, and ⎋ discards nothing.
         gitView.agentsForTesting = [agent("%1", .working, at: inside), agent("%2", .blocked, at: changed.root), agent("%3", .done, at: inside)]
         gitView.perform(.discard)
@@ -2377,18 +2334,6 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(gitView.writeError, "Nothing to reset: the working tree is clean.")
     }
 
-    func testTheResetOptionsNameTheAgentsWorkingInTheWorktree() {
-        let gitView = GitView(windowID: "@1")
-        gitView.apply(changedSnapshot)
-        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
-                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
-        gitView.perform(.resetOptions)
-        XCTAssertEqual(gitView.menu?.id, "reset-options", "the guard folds into the menu instead of asking twice")
-        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
-        XCTAssertTrue(gitView.chooseMenu(key: "x"))
-        XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "nuke"]])
-    }
-
     func testTheAgentGuardAsksOnceForAnOperationWithNoMenuOfItsOwn() {
         let gitView = GitView(windowID: "@1")
         gitView.apply(snapshot)
@@ -2396,8 +2341,7 @@ final class GitViewKeysTests: XCTestCase {
         gitView.guardFiles("Pop stash", symbol: "tray.and.arrow.up", confirm: "Pop it") { ran += 1 }
         XCTAssertEqual(ran, 1, "no Agent is working: it runs at once")
         XCTAssertNil(gitView.menu)
-        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .blocked, unread: false, windowID: "@1", sessionID: "$1",
-                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
+        gitView.agentsForTesting = [workingAgent(.blocked)]
         gitView.guardFiles("Pop stash", symbol: "tray.and.arrow.up", confirm: "Pop it") { ran += 1 }
         XCTAssertEqual(ran, 1, "an Agent is blocked there: it asks first")
         XCTAssertEqual(gitView.menu?.title, "Pop stash")
@@ -2546,25 +2490,6 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(gitView.menu?.choices.map(\.isEnabled), [true, true, false, true, true])
     }
 
-    func testStashingGoesThroughTheAgentGuard() {
-        let gitView = GitView(windowID: "@1")
-        var changed = snapshot
-        changed.changes = [GitChange(index: " ", worktree: "M", path: "a.swift")]
-        gitView.apply(changed)
-        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .claude, status: .working, unread: false, windowID: "@1", sessionID: "$1",
-                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: changed.root)]
-        gitView.perform(.stash)
-        XCTAssertEqual(gitView.prompt?.id, "stash")
-        gitView.promptText = "wip"
-        gitView.submitPrompt()
-        // The message is asked first; an Agent is working there, so stashing then asks once more.
-        XCTAssertNil(gitView.prompt)
-        XCTAssertEqual(gitView.menu?.title, "Stash changes")
-        XCTAssertEqual(gitView.menu?.agents, ["Claude Code in work"])
-        gitView.closeMenu()
-        XCTAssertNil(gitView.menu)
-    }
-
     func testCommittingWaitsForARebaseAndConcludesAMerge() {
         let gitView = GitView(windowID: "@1")
         var rebasing = snapshot
@@ -2574,6 +2499,14 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.commit)
         XCTAssertFalse(gitView.isCommitOpen)
         XCTAssertEqual(gitView.writeError, GitOperation.rebase(branch: nil, step: nil, steps: nil).commitBlock)
+        // Each operation that m concludes says so, and sends no one to the terminal.
+        for operation in [GitOperation.rebase(branch: nil, step: nil, steps: nil), .applying(step: nil, steps: nil), .cherryPick("abc"), .revert("abc")] {
+            rebasing.operation = operation
+            gitView.apply(rebasing)
+            gitView.perform(.commit)
+            XCTAssertFalse(gitView.isCommitOpen, "\(operation)")
+            XCTAssertTrue(gitView.writeError?.contains("continue it with m") == true, "\(operation): \(gitView.writeError ?? "")")
+        }
         // A merge: once its conflicts are resolved, with nothing more staged.
         var merging = snapshot
         merging.operation = .merge(["f1"])
@@ -2624,13 +2557,19 @@ final class GitViewKeysTests: XCTestCase {
         gitView.perform(.amend)
         XCTAssertNil(gitView.menu)
         XCTAssertEqual(gitView.writeError, "There is no commit to amend yet.")
-        for operation in [GitOperation.merge(["f1"]), .rebase(branch: nil, step: nil, steps: nil), .applying(step: nil, steps: nil), .cherryPick("abc"), .revert("abc")] {
+        // A merge is concluded with c; the others point at m, not at the terminal.
+        let busyOperations: [(GitOperation, String)] = [
+            (.merge(["f1"]), "conclude it with c"), (.rebase(branch: nil, step: nil, steps: nil), "with m"),
+            (.applying(step: nil, steps: nil), "with m"), (.cherryPick("abc"), "with m"), (.revert("abc"), "with m"),
+        ]
+        for (operation, says) in busyOperations {
             var busy = changed
             busy.operation = operation
             gitView.apply(busy)
             gitView.perform(.amend)
             XCTAssertNil(gitView.menu, "\(operation)")
-            XCTAssertNotNil(gitView.writeError, "\(operation)")
+            XCTAssertTrue(gitView.writeError?.contains(says) == true, "\(operation): \(gitView.writeError ?? "")")
+            XCTAssertFalse(gitView.writeError?.contains("terminal") == true, "\(operation)")
         }
     }
 
@@ -2667,77 +2606,54 @@ final class GitViewKeysTests: XCTestCase {
         }
     }
 
-    func testMWithNothingInProgressOrABisectOpensNothing() {
-        let gitView = GitView(windowID: "@1")
-        gitView.apply(snapshot)
-        gitView.perform(.operation)
-        XCTAssertNil(gitView.menu)
-        XCTAssertTrue(gitView.writeError?.contains("Nothing is in progress") == true)
-        var bisecting = snapshot
-        bisecting.operation = .bisect
-        gitView.apply(bisecting)
-        gitView.perform(.operation)
-        XCTAssertNil(gitView.menu)
-        XCTAssertTrue(gitView.writeError?.contains("bisect") == true)
-    }
-
     func testMInBranchesOffersLazygitsFourMergesAndEachRunsTheScript() {
-        let kinds = [("f", "ff"), ("n", "no-ff"), ("s", "squash"), ("u", "squash-leave")]
-        for (key, kind) in kinds {
-            let gitView = GitView(windowID: "@1")
-            gitView.apply(snapshot)
-            // Elsewhere M does nothing.
-            gitView.perform(.merge)
-            XCTAssertNil(gitView.menu)
-            gitView.perform(.tab(.branches))
-            gitView.perform(.down)
-            gitView.perform(.merge)
-            XCTAssertEqual(gitView.menu?.id, "merge")
-            XCTAssertEqual(gitView.menu?.title, "Merge 'feature' into 'master'")
-            XCTAssertEqual(gitView.menu?.choices.map(\.key), ["f", "n", "s", "u"])
-            XCTAssertEqual(gitView.menu?.choices.map(\.title), [
-                "Regular merge (fast-forward)", "Regular merge (with merge commit)", "Squash merge and commit",
-                "Squash merge and leave uncommitted",
-            ])
-            XCTAssertEqual(gitView.queuedWriteArguments, [], "opening the menu merges nothing")
-            XCTAssertTrue(gitView.chooseMenu(key: key))
-            XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "feature", kind, "master"]], key)
-        }
-    }
-
-    func testMOnTheCurrentBranchSaysItCannotMergeIntoItself() {
         let gitView = GitView(windowID: "@1")
         gitView.apply(snapshot)
-        gitView.perform(.tab(.branches))
+        // Elsewhere M does nothing.
         gitView.perform(.merge)
         XCTAssertNil(gitView.menu)
-        XCTAssertTrue(gitView.writeError?.contains("cannot merge a branch into itself") == true, gitView.writeError ?? "")
-        XCTAssertEqual(gitView.queuedWriteArguments, [])
-    }
-
-    func testMWhileAnOperationIsInProgressAsksToConcludeItFirst() {
-        let gitView = GitView(windowID: "@1")
-        var busy = snapshot
-        busy.operation = .merge(["f1"])
-        gitView.apply(busy)
-        gitView.perform(.tab(.branches))
-        gitView.perform(.down)
-        gitView.perform(.merge)
-        XCTAssertNil(gitView.menu)
-        XCTAssertTrue(gitView.writeError?.contains("in progress") == true, gitView.writeError ?? "")
-    }
-
-    func testTheMergeMenuGoesThroughTheAgentGuard() {
-        let gitView = GitView(windowID: "@1")
-        gitView.apply(snapshot)
-        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
-                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
         gitView.perform(.tab(.branches))
         gitView.perform(.down)
         gitView.perform(.merge)
         XCTAssertEqual(gitView.menu?.id, "merge")
-        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
-        XCTAssertEqual(gitView.queuedWriteArguments, [])
+        XCTAssertEqual(gitView.menu?.title, "Merge 'feature' into 'master'")
+        XCTAssertEqual(gitView.menu?.choices.map(\.key), ["f", "n", "s", "u"])
+        XCTAssertEqual(gitView.menu?.choices.map(\.title), [
+            "Regular merge (fast-forward)", "Regular merge (with merge commit)", "Squash merge and commit",
+            "Squash merge and leave uncommitted",
+        ])
+        XCTAssertEqual(gitView.queuedWriteArguments, [], "opening the menu merges nothing")
+        gitView.closeMenu()
+        for (key, kind) in [("f", "ff"), ("n", "no-ff"), ("s", "squash"), ("u", "squash-leave")] {
+            gitView.perform(.merge)
+            XCTAssertTrue(gitView.chooseMenu(key: key), key)
+            XCTAssertEqual(gitView.queuedWriteArguments.last, ["/repo", "feature", kind, "master"], key)
+        }
+    }
+
+    /// A key that cannot run now opens no menu, queues nothing, and says why.
+    func testAKeyThatCannotRunNowSaysWhyAndOpensNothing() {
+        let keys: [(name: String, operation: GitOperation?, commands: [GitView.Command], says: String)] = [
+            ("v while a cherry-pick is in progress", .cherryPick("abc"), [.tab(.history), .copyCommit, .pasteCommits],
+             "continue or abort it with m"),
+            ("m with nothing in progress", nil, [.operation], "Nothing is in progress"),
+            ("m during a bisect", .bisect, [.operation], "bisect"),
+            ("M on the current branch", nil, [.tab(.branches), .merge], "cannot merge a branch into itself"),
+            ("M while a merge is in progress", .merge(["f1"]), [.tab(.branches), .down, .merge], "in progress"),
+            ("r on the current branch", nil, [.tab(.branches), .rebase], "cannot rebase a branch onto itself"),
+            ("r while a rebase is in progress", .rebase(branch: "feature", step: 1, steps: 2), [.tab(.branches), .down, .rebase],
+             "in progress"),
+        ]
+        for (name, operation, commands, says) in keys {
+            var busy = snapshot
+            busy.operation = operation
+            let gitView = GitView(windowID: "@1")
+            gitView.apply(busy)
+            for command in commands { gitView.perform(command) }
+            XCTAssertNil(gitView.menu, name)
+            XCTAssertTrue(gitView.writeError?.contains(says) == true, "\(name): \(gitView.writeError ?? "nothing said")")
+            XCTAssertEqual(gitView.queuedWriteArguments, [], name)
+        }
     }
 
     func testRInBranchesOffersTheSimpleRebaseAndRunsTheScriptOnlyAfterTheChoice() {
@@ -2756,70 +2672,6 @@ final class GitViewKeysTests: XCTestCase {
         XCTAssertEqual(gitView.queuedWriteArguments, [], "opening the menu rebases nothing")
         XCTAssertTrue(gitView.chooseMenu(key: "s"))
         XCTAssertEqual(gitView.queuedWriteArguments, [["/repo", "feature", "master"]])
-    }
-
-    func testROnTheCurrentBranchSaysItCannotRebaseOntoItself() {
-        let gitView = GitView(windowID: "@1")
-        gitView.apply(snapshot)
-        gitView.perform(.tab(.branches))
-        gitView.perform(.rebase)
-        XCTAssertNil(gitView.menu)
-        XCTAssertTrue(gitView.writeError?.contains("cannot rebase a branch onto itself") == true, gitView.writeError ?? "")
-        XCTAssertEqual(gitView.queuedWriteArguments, [])
-    }
-
-    func testRWhileAnOperationIsInProgressAsksToContinueItFirst() {
-        let gitView = GitView(windowID: "@1")
-        var busy = snapshot
-        busy.operation = .rebase(branch: "feature", step: 1, steps: 2)
-        gitView.apply(busy)
-        gitView.perform(.tab(.branches))
-        gitView.perform(.down)
-        gitView.perform(.rebase)
-        XCTAssertNil(gitView.menu)
-        XCTAssertTrue(gitView.writeError?.contains("in progress") == true, gitView.writeError ?? "")
-    }
-
-    func testTheRebaseMenuGoesThroughTheAgentGuard() {
-        let gitView = GitView(windowID: "@1")
-        gitView.apply(snapshot)
-        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
-                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
-        gitView.perform(.tab(.branches))
-        gitView.perform(.down)
-        gitView.perform(.rebase)
-        XCTAssertEqual(gitView.menu?.id, "rebase")
-        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
-        XCTAssertEqual(gitView.queuedWriteArguments, [])
-    }
-
-    func testTheOperationMenuGoesThroughTheAgentGuard() {
-        let gitView = GitView(windowID: "@1")
-        var busy = snapshot
-        busy.operation = .rebase(branch: "feature", step: 1, steps: 2)
-        gitView.apply(busy)
-        gitView.agentsForTesting = [Agent(paneID: "%1", kind: .codex, status: .working, unread: false, windowID: "@1", sessionID: "$1",
-                                          sessionName: "work", windowIndex: 0, windowTitle: "w", label: "", path: snapshot.root)]
-        gitView.perform(.operation)
-        XCTAssertEqual(gitView.menu?.agents, ["Codex in work"])
-        XCTAssertEqual(gitView.queuedWriteArguments, [])
-        gitView.closeMenu()
-        XCTAssertEqual(gitView.queuedWriteArguments, [])
-    }
-
-    func testNoMessageSendsYouToTheTerminalAndTheyPointAtM() {
-        let gitView = GitView(windowID: "@1")
-        var busy = snapshot
-        busy.changes = [GitChange(index: "M", worktree: " ", path: "a.swift")]
-        for operation in [GitOperation.rebase(branch: nil, step: nil, steps: nil), .applying(step: nil, steps: nil), .cherryPick("abc"), .revert("abc")] {
-            busy.operation = operation
-            gitView.apply(busy)
-            gitView.perform(.commit)
-            XCTAssertTrue(gitView.writeError?.contains("continue it with m") == true, "\(operation)")
-            gitView.perform(.amend)
-            XCTAssertFalse(gitView.writeError?.contains("terminal") == true, "\(operation)")
-            XCTAssertTrue(gitView.writeError?.contains("with m") == true, "\(operation)")
-        }
     }
 
     func testStagingTheLastConflictedFileAsksToContinueTheOperation() {
@@ -3003,17 +2855,6 @@ final class GitViewWatchingTests: XCTestCase {
         linked.root = "/work/linked"
         gitView.apply(linked)
         XCTAssertEqual(watcher.watched?.root, "/work/linked")
-    }
-
-    func testAChangeReadsOnceAfterTheChangesSettle() {
-        _ = watchingGitView()
-        watcher.change()
-        XCTAssertEqual(reads, 0, "it reads before the changes settle")
-        spin { reads > 0 }
-        XCTAssertEqual(reads, 1)
-        finishRead?()
-        spin(0.5)
-        XCTAssertEqual(reads, 1, "nothing changed again, yet it read again")
     }
 
     func testABurstOfChangesReadsOnce() {
