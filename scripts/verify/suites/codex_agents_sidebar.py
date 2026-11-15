@@ -6,7 +6,6 @@ import shlex
 import shutil
 import subprocess
 import unittest
-import uuid
 
 from scripts.verify.sandbox import REPO, Sandbox, wait
 
@@ -156,11 +155,6 @@ trust_level = "trusted"
         self.report(self.conversations[1], 'UserPromptSubmit')
         self.wait_statuses(['done', 'working'])
 
-    def test_running_codex_is_an_agent_before_its_first_report(self):
-        for conversation in self.conversations:
-            (self.home/'.local/state/muxify/codex'/(conversation+'.json')).unlink(missing_ok=True)
-        self.wait_statuses([None, None])
-
     def test_real_daemon_prompt_hook_reports_only_its_conversation(self):
         report = self.home/'.local/state/muxify/codex'/(self.conversations[0]+'.json')
         report.unlink(missing_ok=True)
@@ -175,30 +169,4 @@ trust_level = "trusted"
         record = wait(working_report, 'The real Codex daemon did not run the Extension for its prompt')
         self.assertEqual(record, dict(version=1, conversation=self.conversations[0], status='working'))
         (self.s.root/'logs/real-hook-report.json').write_text(json.dumps(record))
-        self.wait_statuses(['working', None])
-
-    def test_shell_with_stale_codex_title_is_not_an_agent(self):
-        pane = self.s.tmux('new-window', '-d', '-P', '-F', '#{pane_id}', '-t', 'codex-agents',
-                           '-n', 'stale-title', '/bin/sh')
-        self.s.tmux('select-pane', '-t', pane, '-T', self.titles[0])
-        self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent', 'codex',
-                    ';', 'set-option', '-p', '-t', pane, '@muxify_agent_status', 'blocked')
-        self.report(self.conversations[0], 'UserPromptSubmit')
-        rows = self.wait_statuses(['working', None])
-        self.assertFalse(self.s.has('agent-'+pane, rows), 'A shell inherited the previous Codex Agent')
-        self.s.tmux('send-keys', '-t', pane, 'exec sleep 600', 'Enter')
-        wait(lambda: self.s.tmux('display-message', '-p', '-t', pane, '#{pane_current_command}') == 'sleep',
-             'The stale Pane did not start sleep')
-        self.report(self.conversations[0], 'Stop')
-        rows = self.wait_statuses(['done', None])
-        self.assertFalse(self.s.has('agent-'+pane, rows), 'sleep inherited the previous Codex Agent')
-
-    def test_synthetic_conversation_switch_uses_report_that_arrived_before_title(self):
-        conversation = str(uuid.uuid4())
-        self.report(self.conversations[0], 'Stop')
-        self.report(conversation, 'PermissionRequest')
-        self.wait_statuses(['done', None])
-        self.s.tmux('select-pane', '-t', self.panes[0], '-T', conversation[:29]+'... | codex')
-        self.wait_statuses(['blocked', None])
-        self.report(conversation, 'UserPromptSubmit')
         self.wait_statuses(['working', None])

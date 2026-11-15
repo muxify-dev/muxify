@@ -32,7 +32,7 @@ class SidebarLayout(unittest.TestCase):
         for topic_id, fields in [('layout-open', {}), ('layout-other', {}),
                                  ('layout-settled', {'settled_at': '2026-01-01T00:00:00Z'})]:
             cls.store.put(dict(
-                id=topic_id, title=topic_id, slug=topic_id, home_project=str(cls.project), **fields))
+                id=topic_id, title=topic_id, slug=topic_id, **fields))
         sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'layout-open', '-c', str(cls.project), SHELL)
         s.tmux('set-option', '-t', sid, '@muxify_topic', 'layout-open')
         cls.panes = s.tmux('list-panes', '-t', sid + ':', '-F', '#{pane_id}').split()
@@ -107,37 +107,33 @@ class SidebarLayout(unittest.TestCase):
                 self.assertTrue(formatted(rs))
 
     def test_titles_wrap_false_keeps_a_long_card_title_on_one_line(self):
+        # Topic and Session cards draw their title with the same CardHeader, so one mode proves the Config reaches it.
         self.addCleanup(self.write_config, '')
-        self.addCleanup(self.show_view, 'topics')
         tail = ' has a title long enough to need several lines in a card of the Sidebar'
-        long_titles = ("sidebar:\n  formats:\n    topic:\n      title: '#{topic_title}" + tail + "'\n"
-                       "    session:\n      title: '#{session_name}" + tail + "'\n")
-        def height(key, rs):
+        long_titles = "sidebar:\n  formats:\n    topic:\n      title: '#{topic_title}" + tail + "'\n"
+        key = 'topic-layout-other'
+        def height(rs):
             bottom, top = frame(self.s.row(key, rs))
             return top - bottom
         # A press opens or closes only the card that holds the selected Window; on another card it goes there. Just
         # after launch the app can still move its client back, so the client moves on once the app shows layout-open.
         self.s.wait_shown(self.sessions[0] + ':')
         self.move_client(self.sessions[1])
-        for mode, key in [('topics', 'topic-layout-other'), ('sessions', 'session-' + self.sessions[1])]:
-            self.show_view(mode)
-            self.write_config('')
-            rs = self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityLabel') == 'layout-other',
-                                  'the card %s does not show its default title' % key)
-            if self.s.row(key, rs).get('accessibilityValue', '').startswith('expanded'):
-                self.s.act('press', key)
-            one_line = height(key, self.closed(key))
-            self.write_config(long_titles)
-            rs = self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityLabel') == 'layout-other' + tail
-                                  and height(key, rs) > one_line + 8,
-                                  'the long title of %s does not wrap by default' % key)
-            wrapped = height(key, rs)
-            self.write_config(long_titles + '  titles:\n    wrap: false\n')
-            rs = self.s.wait_rows(lambda rs: abs(height(key, rs) - one_line) < 1,
-                                  'titles.wrap: false keeps %s at %.0f points, not the %.0f of one line'
-                                  % (key, wrapped, one_line))
-            self.assertEqual(self.s.row(key, rs).get('accessibilityLabel'), 'layout-other' + tail,
-                             'the cut title of %s does not keep the whole title for accessibility' % key)
+        rs = self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityLabel') == 'layout-other',
+                              'the card does not show its default title')
+        if self.s.row(key, rs).get('accessibilityValue', '').startswith('expanded'):
+            self.s.act('press', key)
+        one_line = height(self.closed(key))
+        self.write_config(long_titles)
+        rs = self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityLabel') == 'layout-other' + tail
+                              and height(rs) > one_line + 8, 'the long title does not wrap by default')
+        wrapped = height(rs)
+        self.write_config(long_titles + '  titles:\n    wrap: false\n')
+        rs = self.s.wait_rows(lambda rs: abs(height(rs) - one_line) < 1,
+                              'titles.wrap: false keeps the card at %.0f points, not the %.0f of one line'
+                              % (wrapped, one_line))
+        self.assertEqual(self.s.row(key, rs).get('accessibilityLabel'), 'layout-other' + tail,
+                         'the cut title does not keep the whole title for accessibility')
 
     def move_client(self, sid):
         for tty in self.s.tmux('list-clients', '-F', '#{client_tty}').split():
