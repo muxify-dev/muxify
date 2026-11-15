@@ -81,17 +81,6 @@ final class GitViewConfigTests: XCTestCase {
                        "sh -c 'code -g '\"'\"'/r/a'\"'\"':2'")
     }
 
-    func testTheGitViewTheTemplateShowsIsTheDefault() throws {
-        let shown = Config.template.split(separator: "\n").filter { line in
-            line.hasPrefix("# git_view:") || line.hasPrefix("#   display:") || line.hasPrefix("#   width:")
-                || line.hasPrefix("#   height:")
-        }.map { $0.dropFirst(2) }
-        XCTAssertEqual(shown.count, 4)
-        let config = try load(shown.joined(separator: "\n"))
-        XCTAssertEqual(config.gitView, GitViewConfig())
-        XCTAssertEqual(config.problems, [])
-    }
-
     // MARK: services
 
     func testServicesMapAGitHostToAProviderAndWebDomainInOrder() throws {

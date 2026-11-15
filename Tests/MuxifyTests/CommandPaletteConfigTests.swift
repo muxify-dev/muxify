@@ -200,36 +200,6 @@ final class CommandPaletteConfigTests: XCTestCase {
         }
     }
 
-    func testMoveKeysCanBeReboundAndDisabled() throws {
-        let config = try load("""
-        keybindings:
-          command_palette:
-            toggle_include_tab: alt+1
-            choose_window: []
-        """)
-        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("alt+1")), .toggleIncludeTab)
-        XCTAssertEqual(config.paletteKeybinds.triggers[.choosePane], [])
-        XCTAssertNil(config.paletteKeybinds.action(for: trigger("alt+2")))
-        XCTAssertEqual(config.problems, [])
-    }
-
-    func testRowActionsCanBeBoundWithoutDefaultShortcuts() throws {
-        let defaults = try load("")
-        XCTAssertNil(defaults.paletteKeybinds.firstTrigger(for: .killWindow))
-        XCTAssertNil(defaults.paletteKeybinds.firstTrigger(for: .rename))
-        let config = try load("""
-        keybindings:
-          command_palette:
-            kill_window: cmd+backspace
-            rename: alt+r
-            remove_from_topic: alt+x
-        """)
-        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("cmd+backspace")), .killWindow)
-        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("alt+r")), .rename)
-        XCTAssertEqual(config.paletteKeybinds.action(for: trigger("alt+x")), .removeFromTopic)
-        XCTAssertEqual(config.problems, [])
-    }
-
     func testAnEmptyListRemovesEveryPalette() throws {
         let config = try load("command_palettes: []")
         XCTAssertEqual(config.commandPalettes, [])
@@ -337,8 +307,12 @@ final class CommandPaletteConfigTests: XCTestCase {
             copy_tmux_target: []
             copy_folder: ctrl+n
             reveal_in_finder: cmd+r
+            kill_window: alt+1
         """)
         let keys = config.paletteKeybinds
+        XCTAssertNil(PaletteKeybinds.defaults.firstTrigger(for: .killWindow), "a row action has no default")
+        XCTAssertEqual(keys.triggers[.killWindow], [trigger("alt+1")])
+        XCTAssertEqual(keys.triggers[.choosePane], [], "kill_window took alt+1 from choose_pane's defaults")
         XCTAssertEqual(keys.triggers[.jumpTo], [trigger("enter"), trigger("cmd+b")])
         XCTAssertEqual(keys.triggers[.selectNext], [trigger("ctrl+n")])
         XCTAssertEqual(keys.triggers[.selectPrev], [trigger("up"), trigger("ctrl+k")])

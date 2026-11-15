@@ -96,6 +96,16 @@ final class ConfigSettingTests: XCTestCase {
         XCTAssertEqual(config.problems, [])
     }
 
+    /// Each setting the template shows, set alone, gives the Config that leaves it out. Only these show an example.
+    func testTheTemplateShowsTheDefaultOfEverySettingButItsExamples() {
+        XCTAssertEqual(Config.settings.filter { !$0.isDefault }.map(\.id), [
+            "override", "ghostty.config_file", "git_view.editor", "sessions.paths", "sessions.aliases", "worktrees.root_path",
+            "command_palettes", "pick_lists", "remote_environments", "sidebar.agents", "sidebar.panes",
+            "sidebar.formats.topic.summary", "sidebar.formats.window.summary", "sidebar.formats.window.left",
+            "sidebar.formats.window.right", "sidebar.formats.agent.title", "update.channel", "topics.tags",
+        ])
+    }
+
     func testSettingsComeFromTheTemplate() throws {
         let fontSize = try XCTUnwrap(setting("ui.font_size"))
         XCTAssertEqual(fontSize.templateValue, "12")
