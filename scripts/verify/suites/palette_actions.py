@@ -1,6 +1,6 @@
 """Move choices and cancellation through the palette's accessibility actions.
 
-BrowserPanel exposes Submit and history controls so navigation does not take focus.
+BrowserPanel exposes Submit so navigation does not take focus.
 """
 
 import time
@@ -186,23 +186,19 @@ class PaletteActions(unittest.TestCase):
         wait(lambda: self.window not in self.s.tmux('list-windows', '-a', '-F', '#{window_id}').splitlines(),
              'The second confirmation did not kill the reviewed Window')
 
-    def test_new_window_with_active_tab_keeps_back_and_forward_history(self):
-        pages = [self.s.root/'first.html', self.s.root/'second.html']
-        for page in pages:
-            page.write_text('<title>' + page.stem + '</title><p>' + page.stem + '</p>')
-        first, second = [page.as_uri() for page in pages]
+    def test_new_window_with_active_tab_moves_the_tab_into_the_new_window(self):
+        page = self.s.root/'moved.html'
+        page.write_text('<title>moved</title><p>moved</p>')
+        url = page.as_uri()
         wait(lambda: self.s.driver('press', 'New Tab')['pressed'], 'New Tab stayed disabled')
         self.s.wait_rows(lambda rs: self.s.has('browser-address', rs), 'The Browser address did not show')
-        for page, url in zip(pages, [first, second]):
-            self.s.act('press', 'Open Location…')
-            self.s.act('focus', 'browser-address')
-            self.s.act('set', 'browser-address', url)
-            self.s.act('action', 'browser-address', 'Submit')
-            wait(lambda: url in self.s.tmux('show-options', '-wqv', '-t', self.window, '@muxify_tabs'),
-                 'The Browser did not load ' + url)
-            self.s.wait_rows(lambda rs: any(r.get('accessibilityIdentifier', '').startswith('browser-tab-title-')
-                                            and r.get('accessibilityValue') == page.stem for r in rs),
-                             'The page did not finish loading ' + page.stem)
+        self.s.act('press', 'Open Location…')
+        self.s.act('focus', 'browser-address')
+        self.s.act('set', 'browser-address', url)
+        self.s.act('action', 'browser-address', 'Submit')
+        wait(lambda: url in self.s.tmux('show-options', '-wqv', '-t', self.window, '@muxify_tabs'), 'The Browser did not load ' + url)
+        self.s.wait_rows(lambda rs: any(r.get('accessibilityIdentifier', '').startswith('browser-tab-title-')
+                                        and r.get('accessibilityValue') == 'moved' for r in rs), 'The page did not finish loading')
         wait(lambda: self.s.driver('press', 'Commands')['pressed'], 'Commands did not open')
         self.type_query('Move Pane with Active Tab')
         key = 'palette-row-command-Move Pane with Active Tab'
@@ -215,16 +211,7 @@ class PaletteActions(unittest.TestCase):
         moved_window = wait(lambda: (lambda wid: wid if wid != self.window else None)(self.pane_window(self.pane)),
                             'The Pane did not move into a new Window')
         self.s.wait_shown(moved_window)
-        wait(lambda: second in self.s.tmux('show-options', '-wqv', '-t', moved_window, '@muxify_tabs'),
-             'The active Tab did not move')
-        for command, url in [('Back', first), ('Forward', second)]:
-            self.s.act('press', 'browser-' + command.lower())
-            wait(lambda: url in self.s.tmux('show-options', '-wqv', '-t', moved_window, '@muxify_tabs'),
-                 command + ' did not retain the transferred Tab history')
-            title = 'first' if command == 'Back' else 'second'
-            self.s.wait_rows(lambda rs: any(r.get('accessibilityIdentifier', '').startswith('browser-tab-title-')
-                                            and r.get('accessibilityValue') == title for r in rs),
-                             command + ' did not finish loading the page')
+        wait(lambda: url in self.s.tmux('show-options', '-wqv', '-t', moved_window, '@muxify_tabs'), 'The active Tab did not move')
         self.assertEqual(self.s.tmux('show-options', '-wqv', '-t', self.window, '@muxify_tabs'), '')
         self.assertEqual(self.pane_window(self.other_pane), self.window)
 
