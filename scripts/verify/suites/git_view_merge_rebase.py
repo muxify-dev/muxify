@@ -129,15 +129,12 @@ class GitViewMergeRebase(GitViewFixture):
         return before
 
     def undo_rebase(self, before):
-        # The Git View reads the repository as this runs, so git can find its index locked: try again.
-        def retry(*args):
-            wait(lambda: self.git_try(*args).returncode == 0, 'git ' + ' '.join(args) + ' kept failing', seconds=10, step=.3)
         self.git_try('rebase', '--abort')
-        retry('checkout', '-q', '-f', 'main')
-        retry('branch', '-q', '-D', 'r-work')
-        retry('branch', '-q', '-D', 'r-base')
-        retry('reset', '-q', '--hard', before)
-        retry('stash', 'pop', '-q', '--index')
+        self.git_retry('checkout', '-q', '-f', 'main')
+        self.git_retry('branch', '-q', '-D', 'r-work')
+        self.git_retry('branch', '-q', '-D', 'r-base')
+        self.git_retry('reset', '-q', '--hard', before)
+        self.git_retry('stash', 'pop', '-q', '--index')
         # The Git View keeps what it last read, and the next check may show it before reading again: read it here.
         self.open_git_view()
         self.key('shift+r')

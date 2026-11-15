@@ -18,6 +18,11 @@ from scripts.verify.topics_sidebar import REFRESH_LIMIT, TopicsSidebar
 
 
 class TopicsOptionSidebar(TopicsSidebar):
+    @classmethod
+    def make_repositories(cls):
+        super().make_repositories()
+        cls.add_alpha_worktrees('new-topic-base')
+
     def test_app_answers_while_another_process_holds_the_topic_records(self):
         # The held write transaction stands in for another process that holds the database for seconds. A new Topic record and a
         # renamed Window of a Topic make the app read and write the records while it is held.
@@ -102,11 +107,11 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.assertLessEqual(latency, REFRESH_LIMIT, 'file write -> live Topic row took %.3f s' % latency)
 
     def test_sessions_view_lists_every_session_and_no_topics(self):
-        self.addCleanup(self.show_view, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'topics')
         self.new_session('listed', self.beta)
         self.new_session('alpha/listed-topic', self.alpha, topic='listed-topic')
         self.write_topic('listed-topic', 'Listed proof')
-        self.show_view('sessions')
+        self.s.show_sidebar_mode('sessions')
         live = dict(line.split('|', 1) for line in self.s.tmux('list-sessions', '-f', '#{!=:#{session_name},muxify-watch}',
                                                                '-F', '#{session_id}|#{session_name}').splitlines())
         complete = lambda rs: (all(self.s.has('session-' + sid, rs) for sid in live) and not self.topic_rows(rs)
@@ -118,9 +123,9 @@ class TopicsOptionSidebar(TopicsSidebar):
     def test_topics_view_shows_topics_and_no_session_rows(self):
         sid = self.new_session('alpha/view-back', self.alpha, topic='view-back')
         self.write_topic('view-back', 'View back proof')
-        self.show_view('sessions')
+        self.s.show_sidebar_mode('sessions')
         self.s.wait_rows(lambda rs: self.s.has('session-' + sid, rs), 'Sessions view has no row for %s' % sid)
-        self.show_view('topics')
+        self.s.show_sidebar_mode('topics')
         self.find('topic-view-back')
         live = self.s.tmux('list-sessions', '-F', '#{session_id}').split()
         latency, rs = self.rows_until(lambda rs: self.s.has('topic-view-back', rs)

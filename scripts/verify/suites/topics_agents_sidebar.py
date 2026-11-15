@@ -31,7 +31,7 @@ class TopicsAgentsSidebar(TopicsSidebar):
         """Sets View > Show Panes, one value for both Sidebar modes. probe is a Pane row that shows only while it is on.
         The driver presses the menu item without opening the menu."""
         if self.s.has(probe) != shown:
-            self.press_menu_item('Show Panes')
+            self.s.press_menu_item('Show Panes')
         self.s.wait_rows(lambda rs: self.s.has(probe, rs) == shown,
                          'Show Panes is not %s: no change to %s' % ('on' if shown else 'off', probe))
 
@@ -58,11 +58,11 @@ class TopicsAgentsSidebar(TopicsSidebar):
         self.wait_agents('Agents · No Topic', [pane_loose], [pane_a, pane_b], 'Window in No Topic')
 
     def test_agents_section_in_sessions_mode_lists_only_the_agents_of_the_selected_session(self):
-        self.addCleanup(self.show_view, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'topics')
         self.write_topic('scope-shared', 'Scope shared')
         sid_one, window_one, pane_one = self.agent_session('scope-one', topic='scope-shared')
         sid_two, window_two, pane_two = self.agent_session('scope-two', topic='scope-shared', status='blocked', unread=True)
-        self.show_view('sessions')
+        self.s.show_sidebar_mode('sessions')
 
         self.select_window(window_one)
         rs = self.wait_agents('Agents · scope-one', [pane_one], [pane_two], 'Window in Session scope-one')
@@ -72,7 +72,7 @@ class TopicsAgentsSidebar(TopicsSidebar):
         self.wait_agents('Agents · scope-two', [pane_two], [pane_one], 'Window in Session scope-two')
 
     def test_agents_scope_all_puts_the_topic_or_the_session_under_each_agent_and_never_the_window(self):
-        self.addCleanup(self.show_view, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'topics')
         self.addCleanup(lambda: (self.config.write_text(self.config_text),
                                  self.s.wait_rows(lambda rs: self.agents_header(rs).startswith('Agents · '),
                                                   'agents_scope did not return to active')))
@@ -88,14 +88,14 @@ class TopicsAgentsSidebar(TopicsSidebar):
 
         rs = self.wait_agents('Agents', [pane], [], 'agents_scope: all in Topics mode')
         self.s.wait_rows(lambda rs: (value(rs) or '').endswith(', Scope all'), 'Agent row %r has no Topic title' % value(rs))
-        self.show_view('sessions')
+        self.s.show_sidebar_mode('sessions')
         self.wait_agents('Agents', [pane], [], 'agents_scope: all in Sessions mode')
         rs = self.s.wait_rows(lambda rs: (value(rs) or '').endswith(', scope-all-session'),
                               'Agent row %r has no Session name' % value(self.s.rows()))
         self.assertNotIn('window-title', value(rs))
 
     def test_window_scope_shows_only_the_selected_windows_agents_in_both_modes(self):
-        self.addCleanup(self.show_view, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'topics')
         self.addCleanup(self.config.write_text, self.config_text)
         self.write_topic('scope-window', 'Scope window')
         sid, first, first_pane = self.agent_session('scope-window-session', topic='scope-window')
@@ -107,7 +107,7 @@ class TopicsAgentsSidebar(TopicsSidebar):
             self.s.tmux('select-pane', '-t', pane, '-T', title)
         self.config.write_text(self.config_text + 'sidebar:\n  agents_scope: window\n')
         for mode in ['topics', 'sessions']:
-            self.show_view(mode)
+            self.s.show_sidebar_mode(mode)
             self.select_window(first)
             self.wait_agents('Agents · Scope first', [first_pane], [second_pane], mode + ' first Window')
             self.select_window(second)
@@ -115,25 +115,25 @@ class TopicsAgentsSidebar(TopicsSidebar):
 
     def test_show_agents_is_remembered_separately_for_topics_and_sessions(self):
         self.addCleanup(self.set_show_agents, True)
-        self.addCleanup(self.show_view, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'topics')
         self.set_show_agents(False)
 
-        self.show_view('sessions')
+        self.s.show_sidebar_mode('sessions')
         self.s.wait_rows(lambda rs: self.s.has('agents-header', rs), 'Sessions mode took the Show Agents value of Topics mode')
-        self.show_view('topics')
+        self.s.show_sidebar_mode('topics')
         self.s.wait_rows(lambda rs: not self.s.has('agents-header', rs), 'Topics mode does not keep Agents hidden')
 
     def test_config_hides_agents_in_one_sidebar_mode_and_leaves_the_other_to_show_agents(self):
         def restore():
             self.config.write_text(self.config_text)
-            self.show_view('sessions')
+            self.s.show_sidebar_mode('sessions')
             self.s.wait_rows(lambda rs: self.s.has('agents-header', rs), 'Sessions mode did not return to Show Agents')
-            self.show_view('topics')
+            self.s.show_sidebar_mode('topics')
         self.addCleanup(restore)
         self.config.write_text(self.config_text + 'sidebar:\n  agents:\n    sessions: false\n')
-        self.show_view('sessions')
+        self.s.show_sidebar_mode('sessions')
         self.s.wait_rows(lambda rs: not self.s.has('agents-header', rs), 'the Config did not hide Agents in Sessions mode')
-        self.show_view('topics')
+        self.s.show_sidebar_mode('topics')
         self.s.wait_rows(lambda rs: self.s.has('agents-header', rs), 'the Config for Sessions mode hid Agents in Topics mode')
 
     def test_split_window_shows_one_pane_row_per_pane_and_a_one_pane_window_shows_none(self):
@@ -160,7 +160,7 @@ class TopicsAgentsSidebar(TopicsSidebar):
 
     def test_one_window_session_shows_pane_rows_in_place_of_the_window_row_in_both_modes(self):
         s = self.s
-        self.addCleanup(self.show_view, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'topics')
         sid = self.new_session('panes-only-window', self.beta)
         window, first = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id} #{pane_id}').split()
         second = self.split(window)
@@ -172,7 +172,7 @@ class TopicsAgentsSidebar(TopicsSidebar):
         self.assertFalse(s.has('topic-window-' + window, rs), 'the Window row shows next to its Pane rows')
         self.assertTrue(s.has('no-topic-session-' + sid, rs), 'no Session row above the Pane rows')
 
-        self.show_view('sessions')
+        self.s.show_sidebar_mode('sessions')
         rs = s.wait_rows(lambda rs: s.has('pane-' + first, rs) and s.has('pane-' + second, rs),
                          'Show Panes does not apply in Sessions mode')
         self.assertFalse(s.has('session-window-' + window, rs), 'the Window row shows next to its Pane rows')

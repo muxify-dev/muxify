@@ -30,17 +30,6 @@ class TopicsGroupsSidebar(TopicsSidebar):
                                 and self.s.row('palette-search', rs).get('accessibilityValue', '') == '14',
                                 '%s did not open the step with 14 in its field' % when)
 
-    def go_to(self, query):
-        def opened():
-            if not self.s.has('palette-search'):
-                self.s.driver('press', 'Go to…')
-            return self.s.has('palette-search')
-        wait(opened, 'Go to… did not open', seconds=20)
-        self.s.act('focus', 'palette-search')
-        self.s.act('set', 'palette-search', query)
-        return self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue', '') == query,
-                                'Go to… did not take the query %r' % query)
-
     def assert_group_row_in_view(self, rs, when):
         floor = frame(self.s.row('agents-header', rs))[1]
         ceiling = frame(self.s.row('topics-list', rs))[0]
@@ -89,7 +78,7 @@ class TopicsGroupsSidebar(TopicsSidebar):
         self.select_window('base:')
         s.wait_shown('base:')
         self.collapse('settled-topics')
-        self.go_to('Goto settled')
+        self.s.open_palette('Go to…', 'Goto settled')
         s.wait_rows(lambda rs: s.has('palette-row-topic-goto-settled', rs), 'Go to… does not list the Settled Topic')
         s.act('press', 'palette-row-topic-goto-settled')
         rs = s.wait_rows(lambda rs: self.expanded('settled-topics', rs) and self.grouped('topic-goto-settled', 'settled-topics', rs),
@@ -170,14 +159,8 @@ class TopicsGroupsSidebar(TopicsSidebar):
                     'the three Settled Topics are not in the Settled group')
 
         command = 'palette-row-command-' + self.FORGET_SETTLED
-        def listed():
-            if not s.has('palette-search'):
-                s.driver('press', 'Commands')
-            if not s.has('palette-search'):
-                return False
-            s.act('set', 'palette-search', 'Forget Settled')
-            return self.rows_until(lambda rs: s.has(command, rs), seconds=3)[0] is not None
-        wait(listed, 'Commands does not list %s' % self.FORGET_SETTLED, seconds=20)
+        s.open_palette('Commands', 'Forget Settled')
+        s.wait_rows(lambda rs: s.has(command, rs), 'Commands does not list %s' % self.FORGET_SETTLED)
         s.act('press', command)
         rs = self.wait_forget_settled_step('the Command')
         self.assertIn('2 Topics', self.describe('palette-row-forget-settled', rs), 'the live row of 14 days')

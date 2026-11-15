@@ -69,6 +69,7 @@ When a driver command times out, read `logs/app.log` and `driver/stall-<n>.txt` 
 - Do not sleep for a fixed time to let the app see a change. Wait for what the app shows: `sandbox.wait_shown(window)` after you move the client, or `sandbox.wait_rows(...)`. Sleep only before you assert that something did not happen.
 - To make the app show a Window before a check, use `sandbox.show(window)`. It asks the app, as `muxify window open` does. A `switch-client` to the Window that the client is already on does not move the client, so the app stays on an Empty Topic page.
 - `sandbox.select(window)` sends the same `muxify://select` link and does not wait, for a check of what the link does with the App Windows.
+- Reach the app's menus, palettes and Sidebar modes through the sandbox, not a copy in the suite: `sandbox.press_menu_item(title)` chooses a menu item once it is enabled, `sandbox.open_palette(name, query)` opens a palette such as Commands or Go to… and types the query, `sandbox.type_query(query)` types in the open palette, `sandbox.run_command(title)` runs a Command from Commands, and `sandbox.show_sidebar_mode(mode)` shows Topics or Sessions.
 - If a check fails because of a known app bug, mark it `@unittest.expectedFailure`. Write a one-line comment above it that names the bug. When the bug is fixed, the run reports "unexpected success". Then remove the mark.
 
 ## Topic records

@@ -22,12 +22,7 @@ class GitViewRemotes(GitViewFixture):
         origin = self.s.root/(name + '.git')
         subprocess.run(['/usr/bin/git', 'init', '-q', '--bare', str(origin)], check=True)
         self.git('push', '-q', str(origin), 'main:main')
-        clone = self.s.root/(name + '-clone')
-        subprocess.run(['/usr/bin/git', 'clone', '-q', '-b', 'main', str(origin), str(clone)], check=True)
-        (clone/'remote.txt').write_text('remote\n')
-        identity = ['-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid']
-        for args in [['add', 'remote.txt'], ['commit', '-q', '-m', 'remote commit'], ['push', '-q', 'origin', 'main']]:
-            subprocess.run(['/usr/bin/git', '-C', str(clone)] + identity + args, check=True)
+        self.push_from_a_clone(origin, name, 'remote.txt')
         self.git('remote', 'add', 'origin', url or str(origin))
         self.addCleanup(self.git, 'remote', 'remove', 'origin')
         self.git('config', 'branch.main.remote', 'origin')
@@ -67,12 +62,6 @@ class GitViewRemotes(GitViewFixture):
         self.git('config', 'core.sshCommand', shlex.quote(str(ssh)))
         self.addCleanup(self.git, 'config', '--unset', 'core.sshCommand')
         return go, answers
-
-    def answer_prompt(self, title, text):
-        self.wait_prompt(title)
-        self.s.act('set', 'git-prompt-field', text)
-        self.s.act('action', 'git-prompt', 'enter')
-        self.s.wait_rows(lambda rs: not self.s.has('git-prompt', rs), 'enter did not close the prompt')
 
     def test_a_passphrase_ssh_asks_is_asked_hidden_while_staging_goes_on_and_escape_cancels(self):
         go, answers = self.fake_ssh('fetch-ssh-bin')
@@ -114,13 +103,13 @@ class GitViewRemotes(GitViewFixture):
         return subprocess.run(['/usr/bin/git', '--git-dir', str(origin), 'rev-parse', '--verify', '-q', 'main'],
                               capture_output=True, text=True).stdout.strip()
 
-    def push_from_a_clone(self, origin, name):
-        """Another clone pushes a commit to the remote's main, and fetches nothing here."""
+    def push_from_a_clone(self, origin, name, file='clone.txt'):
+        """Another clone pushes a commit that adds `file` to the remote's main, and fetches nothing here."""
         clone = self.s.root/(name + '-clone')
         subprocess.run(['/usr/bin/git', 'clone', '-q', '-b', 'main', str(origin), str(clone)], check=True)
-        (clone/'clone.txt').write_text('clone\n')
+        (clone/file).write_text('clone\n')
         identity = ['-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid']
-        for args in [['add', 'clone.txt'], ['commit', '-q', '-m', 'clone commit'], ['push', '-q', 'origin', 'main']]:
+        for args in [['add', file], ['commit', '-q', '-m', 'clone commit'], ['push', '-q', 'origin', 'main']]:
             subprocess.run(['/usr/bin/git', '-C', str(clone)] + identity + args, check=True)
 
     def read_upstream(self):

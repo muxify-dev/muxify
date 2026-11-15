@@ -138,10 +138,7 @@ class Browser(unittest.TestCase):
                    for arg in (';', 'set-option', '-w', '-t', 'browser:' + name, option, value)]
         self.s.tmux('new-window', '-d', '-t', self.session + ':', '-n', name, SHELL, *options)
         window = self.s.tmux('display-message', '-p', '-t', 'browser:' + name, '#{window_id}')
-        for tty in self.s.tmux('list-clients', '-F', '#{client_tty} #{client_control_mode}').split('\n'):
-            if tty.endswith(' 0'):
-                self.s.tmux('switch-client', '-c', tty.split()[0], '-t', window)
-        self.s.wait_shown(window)
+        self.s.show(window)
         self.window = window
         self.wait_page(lambda page: True, 'the Tab does not show the fixture page')
 
@@ -171,10 +168,6 @@ class Browser(unittest.TestCase):
         option = lambda name: self.s.tmux('show-options', '-wqv', '-t', self.window, name)
         return option('@muxify_tabs').split(), option('@muxify_active_tab')
 
-    def press_menu(self, title):
-        # SwiftUI rebuilds the View menu a moment after the state it reads changes, and a press in that moment can miss.
-        wait(lambda: self.s.driver('press', title)['pressed'], '%s stays disabled' % title, seconds=10)
-
     def find_status(self, rs=None):
         row = self.s.row('browser-find-status', rs)
         return row.get('accessibilityValue') or row.get('accessibilityLabel') or row.get('accessibilityTitle') or ''
@@ -193,7 +186,7 @@ class Browser(unittest.TestCase):
 
     def reload_config(self, text):
         self.config.write_text(text)
-        wait(lambda: self.s.driver('press', 'Reload Config')['pressed'], 'Reload Config stays disabled', seconds=10)
+        self.s.press_menu_item('Reload Config')
 
     # Find in Page
 
@@ -343,16 +336,16 @@ class Browser(unittest.TestCase):
         url = self.page.as_uri() + '?case=shift-t'
         self.open_page('case=shift-t', left=[left])
         wait(lambda: self.stored_tabs() == ([left, url], '1'), 'the app did not store both Tabs')
-        self.press_menu('Close Tab')
+        self.s.press_menu_item('Close Tab')
         wait(lambda: self.stored_tabs()[0] == [left], 'Close Tab did not close the active Tab')
 
-        self.press_menu('Focus Browser')
+        self.s.press_menu_item('Focus Browser')
         self.wait_focus(('WKWebView', 'WKContentView', 'NSTextView'), 'Focus Browser did not give the Browser Focus')
         self.press_key('⇧⌘T')
         wait(lambda: self.stored_tabs() == ([left, url], '1'), '⇧⌘T with Browser Focus did not reopen the closed Tab')
         self.assertFalse(self.s.has('palette-row-new-topic'), '⇧⌘T with Browser Focus opened Move')
 
-        self.press_menu('Focus Terminal')
+        self.s.press_menu_item('Focus Terminal')
         self.wait_focus(('TerminalSurfaceView',), 'Focus Terminal did not give the Terminal Focus')
         self.press_key('⇧⌘T')
         self.s.wait_rows(lambda rs: self.s.has('palette-row-new-topic', rs), '⇧⌘T with Terminal Focus did not open Move')
@@ -373,14 +366,14 @@ class Browser(unittest.TestCase):
         self.open_page('case=cmd-w', left=[left])
         wait(lambda: self.stored_tabs() == ([left, url], '1'), 'the app did not store both Tabs')
 
-        self.press_menu('Focus Terminal')
+        self.s.press_menu_item('Focus Terminal')
         self.wait_focus(('TerminalSurfaceView',), 'Focus Terminal did not give the Terminal Focus')
         self.s.driver('action', 'quick-switch-input', 'Send ⌘W')
         wait(lambda: 'cmdw-reached-ghostty' in self.s.tmux('capture-pane', '-p', '-t', self.window),
              '⌘W with Terminal Focus did not reach the Ghostty keybind')
         self.assertEqual(self.stored_tabs(), ([left, url], '1'), '⌘W with Terminal Focus closed a Tab')
 
-        self.press_menu('Focus Browser')
+        self.s.press_menu_item('Focus Browser')
         self.wait_focus(('WKWebView', 'WKContentView', 'NSTextView'), 'Focus Browser did not give the Browser Focus')
         self.s.driver('action', 'quick-switch-input', 'Send ⌘W')
         wait(lambda: self.stored_tabs()[0] == [left], '⌘W with Browser Focus did not close the active Tab')
@@ -405,20 +398,8 @@ class Browser(unittest.TestCase):
         wait(lambda: 'WKWebView' in self.s.driver('responder')['responders'], 'Focus Browser did not give the page Focus')
         self.wait_page(lambda page: page['active'] == 'INPUT', 'the text field did not take focus')
         key = 'palette-row-session:' + sid
-        def opened():
-            self.s.driver('press', 'Go to…')
-            try:
-                self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'not yet', seconds=3)
-                return True
-            except AssertionError:
-                return False
-        # SwiftUI rebuilds the View menu a moment after the state it reads changes, and a press in that moment can miss.
-        wait(opened, 'the palette did not open', seconds=20)
-        def searched():
-            self.s.act('focus', 'palette-search')
-            self.s.act('set', 'palette-search', 'paste-into-page')
-            return self.s.has(key)
-        wait(searched, 'no palette row for the Session paste-into-page', seconds=20)
+        self.s.open_palette('Go to…', 'paste-into-page')
+        self.s.wait_rows(lambda rs: self.s.has(key, rs), 'no palette row for the Session paste-into-page')
         self.s.act('action', key, 'Paste Path')
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'the palette did not close after Paste Path')
         page = self.wait_page(lambda page: page['value'] != '', 'Paste Path typed nothing into the text field')

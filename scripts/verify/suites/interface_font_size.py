@@ -36,7 +36,6 @@ Run from the repo root after `make build`:
 
 import re
 import subprocess
-import time
 import unittest
 
 from scripts.verify.sandbox import Sandbox, frame, wait
@@ -351,16 +350,12 @@ class InterfaceFontSize(unittest.TestCase):
         return s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
 
     def open_git_view(self, window):
-        """Shows the Window and opens its Git View on Changes, through the View menu item. SwiftUI rebuilds the menu a
-        moment after the state it reads changes, and a press in that moment can miss."""
+        """Shows the Window and opens its Git View on Changes, through the View menu item."""
         s = self.s
         s.show(window)
         self.addCleanup(s.show, self.windows['fs-size'][0])
-
-        def opened():
-            s.driver('press', 'Show Git View')
-            return s.has('git-view')
-        wait(opened, 'the Git View did not open', seconds=10, step=.3)
+        s.press_menu_item('Show Git View')
+        s.wait_rows(lambda rs: s.has('git-view', rs), 'the Git View did not open')
         self.addCleanup(self.close_git_view)
         rs = s.wait_rows(lambda rs: s.has('git-toolbar', rs), 'the Git View did not read the repository')
         if s.row('git-tab-changes', rs).get('accessibilityValue') != 'selected':
@@ -646,36 +641,11 @@ class InterfaceFontSize(unittest.TestCase):
         self.assertEqual(measure(rs, TERMINAL_SIZES[-1]), (large_gutter, large_number),
                          'ui.font_size: 18 changed the line-number gutter or its numbers')
 
-    def open_palette(self, name):
-        """Presses the View menu item until the palette shows. SwiftUI rebuilds the menu a moment after the state it
-        reads changes, and a press in that moment can miss."""
-        s = self.s
-
-        def opened():
-            s.driver('press', name)
-            deadline = time.monotonic() + 3
-            while time.monotonic() < deadline:
-                if s.has(PALETTE_SEARCH):
-                    return True
-            return False
-        wait(opened, '%s did not open' % name, seconds=20)
-        self.addCleanup(self.close_palette)
-
     def close_palette(self):
         # A palette that the last action closed can still be in the dump, and gone at the Close.
         if self.s.has(PALETTE_SEARCH):
             self.s.driver('action', PALETTE_SEARCH, 'Close')
         self.s.wait_rows(lambda rs: not self.s.has(PALETTE_SEARCH, rs), 'the palette did not close')
-
-    def run_command(self, title):
-        """Opens Commands and presses the row of the Command `title`, as ↩ on it does."""
-        s = self.s
-        self.open_palette('Commands')
-        s.act('focus', PALETTE_SEARCH)
-        s.act('set', PALETTE_SEARCH, title)
-        key = 'palette-row-command-' + title
-        s.wait_rows(lambda rs: s.has(key, rs), 'Commands does not list %s' % title)
-        s.act('press', key)
 
     def assert_palette_in_app_window(self, rs, size):
         """The palette is as wide as at 12 times the factor, but never wider than the App Window less its margins, and
@@ -700,7 +670,8 @@ class InterfaceFontSize(unittest.TestCase):
         frames = {}
         for size in [12, 18]:
             self.set_size(size)
-            self.open_palette('Go to…')
+            s.open_palette('Go to…')
+            self.addCleanup(self.close_palette)
             rs = self.settled(keys, 'Go to… does not show the row of fs-size at %s' % size)
             frames[size] = {key: bounds(s.row(key, rs)) for key in keys}
             self.assertTrue(s.row(row, rs).get('accessibilityLabel', '').startswith('fs-size'),
@@ -742,7 +713,8 @@ class InterfaceFontSize(unittest.TestCase):
                 return (list_bottom - ROUNDING <= bottom and top <= list_top + ROUNDING
                         and abs(top - bottom - row_height) <= ROUNDING)
 
-            self.run_command('Choose In Play…')
+            self.addCleanup(self.close_palette)
+            s.run_command('Choose In Play…')
             rs = s.wait_rows(lambda rs: s.has(PALETTE_LIST, rs) and highlighted(rs) and in_view(highlighted(rs), rs),
                              'Choose In Play does not show its highlighted row at %s' % size)
             # 6.5 rows of the size, and one header, show before the list scrolls.

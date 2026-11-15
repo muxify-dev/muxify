@@ -36,18 +36,11 @@ class Panels(unittest.TestCase):
                    for arg in (';', 'set-option', '-w', '-t', 'panels:' + name, option, value)]
         self.s.tmux('new-window', '-d', '-t', self.session + ':', '-n', name, SHELL, *options)
         window = self.s.tmux('display-message', '-p', '-t', 'panels:' + name, '#{window_id}')
-        self.select_window(window)
+        self.s.show(window)
         if self.s.row('toggle-sidebar').get('accessibilityValue') == 'off':
             self.s.act('press', 'toggle-sidebar')
         self.wait_panels({'sidebar', 'terminal', 'browser'}, 'the new Window %s does not show its panels' % window)
         return window
-
-    def select_window(self, window):
-        """Moves the app's tmux client to the Window, as tmux navigation does."""
-        for tty in self.s.tmux('list-clients', '-F', '#{client_tty} #{client_control_mode}').split('\n'):
-            if tty.endswith(' 0'):
-                self.s.tmux('switch-client', '-c', tty.split()[0], '-t', window)
-        self.s.wait_shown(window)
 
     def panels(self, rs=None):
         return {name for key, name in PANELS.items() if self.s.has(key, rs)}
@@ -82,21 +75,12 @@ class Panels(unittest.TestCase):
     def test_the_zoom_pane_command_zooms_the_current_pane(self):
         target = 'panels:' + self.id().rsplit('.', 1)[-1][:24]
         self.s.tmux('split-window', '-d', '-t', target, SHELL)
-        self.run_command('Zoom Pane')
+        self.s.run_command('Zoom Pane')
         wait(lambda: self.s.tmux('display-message', '-p', '-t', target, '#{window_zoomed_flag}') == '1',
              'the Zoom Pane Command did not zoom the current Pane')
-        self.run_command('Zoom Pane')
+        self.s.run_command('Zoom Pane')
         wait(lambda: self.s.tmux('display-message', '-p', '-t', target, '#{window_zoomed_flag}') == '0',
              'the Zoom Pane Command did not show all the Panes again')
-
-    def run_command(self, title):
-        wait(lambda: self.s.driver('press', 'Commands')['pressed'], 'Commands did not open')
-        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'Commands field did not show')
-        self.s.act('focus', 'palette-search')
-        self.s.act('set', 'palette-search', title)
-        key = 'palette-row-command-' + title
-        self.s.wait_rows(lambda rs: self.s.has(key, rs), '%s was missing from Commands' % title)
-        self.s.act('press', key)
 
     def wait_toggles(self, expected, message):
         values = lambda rs: {key: self.s.row(key, rs).get('accessibilityValue') for key in expected}
@@ -116,12 +100,12 @@ class Panels(unittest.TestCase):
 
     def test_maximize_belongs_to_its_window(self):
         other = self.new_window('maximize-other')
-        self.select_window(self.window)
+        self.s.show(self.window)
         self.s.act('press', 'Maximize Terminal')
         self.wait_panels({'terminal'}, 'Maximize Terminal did not hide the Sidebar')
-        self.select_window(other)
+        self.s.show(other)
         self.wait_panels({'sidebar', 'terminal', 'browser'}, 'a Window without Maximize does not show the Sidebar')
-        self.select_window(self.window)
+        self.s.show(self.window)
         self.wait_panels({'terminal'}, 'the Maximized Window did not hide the Sidebar again')
         self.s.act('press', 'toggle-maximize')
         self.wait_panels({'sidebar', 'terminal', 'browser'}, 'Restore did not show what the toggles say')

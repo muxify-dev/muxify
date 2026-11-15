@@ -60,9 +60,7 @@ class HoverLabelsSidebar(unittest.TestCase):
         self.addCleanup(self.config.write_text, self.default_config)
 
     def show_mode(self, mode):
-        key = 'sidebar-view-' + mode
-        if self.s.row(key).get('accessibilityValue') != 'selected':
-            self.s.act('press', key)
+        self.s.show_sidebar_mode(mode)
         card = 'topic-hover' if mode == 'topics' else 'session-' + self.session
         self.s.wait_rows(lambda rs: self.s.has(card, rs), 'no card in ' + mode)
         if 'expanded' not in self.s.row(card).get('accessibilityValue', ''):

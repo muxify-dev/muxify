@@ -37,18 +37,6 @@ class SessionPathsPalette(unittest.TestCase):
         s.tmux('new-session', '-d', '-s', 'base', '-c', str(s.root), '/bin/zsh -f')
         s.launch(LAUNCH_ARGS)
 
-    def open_palette(self):
-        """Presses the View menu item until the palette shows. SwiftUI rebuilds the menu a moment after the app
-        starts, and a press in that moment can miss."""
-        def opened():
-            self.s.driver('press', 'Go to…')
-            deadline = time.monotonic() + 3
-            while time.monotonic() < deadline:
-                if self.s.has('palette-search'):
-                    return True
-            return False
-        wait(opened, 'the palette did not open', seconds=20)
-
     def row(self, path):
         return 'palette-row-session-path:' + str(path)
 
@@ -119,7 +107,7 @@ class SessionPathsPalette(unittest.TestCase):
         self.s.app_env['PATH'] = str(shim) + ':' + self.s.app_env['PATH']
 
         self.s.restart_app(LAUNCH_ARGS)
-        self.open_palette()
+        self.s.open_palette('Go to…')
         def listed():
             self.search('repo')
             return self.s.has(self.row(self.saved))

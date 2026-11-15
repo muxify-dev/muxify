@@ -112,6 +112,29 @@ class GitViewChanges(GitViewFixture):
         finally:
             path.unlink(missing_ok=True)
 
+    def agent_pane(self, name, folder, status):
+        """A Pane running `sleep` in its own Session, which Muxify takes for an Agent with this Status."""
+        pane = self.s.tmux('new-session', '-d', '-P', '-F', '#{pane_id}', '-s', name, '-c', str(folder), 'sleep 600')
+        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', name)
+        self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent', 'claude')
+        self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_status', status)
+        return pane
+
+    def discard_names_agents(self, name, shown):
+        """Opens the Discard menu of `name` until the Git View knows the Agents as they are, then returns the
+        guard's warning, or None. Muxify reads the Panes' options on its own timer, so the first menu may be early."""
+        found = []
+
+        def asked():
+            self.select_change(name)
+            rs = self.open_discard_menu()
+            found[:] = [self.s.row('git-menu-agents', rs).get('accessibilityLabel') if self.s.has('git-menu-agents', rs) else None]
+            self.s.act('action', 'git-menu', 'escape')
+            self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
+            return (found[0] is not None) == shown
+        wait(asked, 'the Discard menu %s the Agent' % ('does not name' if shown else 'still names'), seconds=15, step=.5)
+        return found[0]
+
     def open_reset_options(self):
         self.key('shift+d')
         return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Reset options', 'D did not open the reset options')
@@ -139,18 +162,11 @@ class GitViewChanges(GitViewFixture):
         self.git('add', 'staged.txt')
         (self.repo/'new.txt').write_text('new file\n')
 
-    def type_in_prompt(self, message, title='Stash changes'):
-        """Waits for the prompt, types a message in its field and submits it with ↩."""
-        self.s.wait_rows(lambda rs: self.s.row('git-prompt', rs).get('accessibilityLabel') == title, 'no prompt: ' + title)
-        self.s.act('set', 'git-prompt-field', message)
-        self.s.act('action', 'git-prompt', 'enter')
-        self.s.wait_rows(lambda rs: not self.s.has('git-prompt', rs), 'enter did not close the prompt')
-
     def test_s_asks_for_a_message_and_stashes_all_changes_but_untracked_files(self):
         self.wait_change('tracked.txt', bool, 'Changes do not list tracked.txt')
         before = self.stashes()
         self.key('s')
-        self.type_in_prompt('my note')
+        self.answer_prompt('Stash changes', 'my note')
         self.addCleanup(self.restore_fixture, len(before))
         wait(lambda: self.stashes()[:1] == ['On main: my note'], 'the stash is not git\'s stash of "my note"', seconds=10)
         self.assertEqual(self.porcelain(), ['?? new.txt'], 'the tree is not as git stash push leaves it')

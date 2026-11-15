@@ -185,12 +185,8 @@ class GitViewFixture(unittest.TestCase):
         return self.s.has('git-view', rs)
 
     def open_git_view(self):
-        """Presses the View menu item until the Git View shows. SwiftUI rebuilds the menu a moment after the state
-        it reads changes, and a press in that moment can miss."""
-        def opened():
-            self.s.driver('press', 'Show Git View')
-            return self.is_open()
-        wait(opened, 'the Git View did not open', seconds=10, step=.3)
+        self.s.press_menu_item('Show Git View')
+        self.s.wait_rows(self.is_open, 'the Git View did not open')
         self.s.wait_rows(lambda rs: self.s.has('git-toolbar', rs), 'the Git View did not read the repository')
 
     def close_palette(self):
@@ -248,35 +244,6 @@ class GitViewFixture(unittest.TestCase):
         self.key('d')
         return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == title, 'd did not open ' + title)
 
-    def agent_pane(self, name, folder, status):
-        """A Pane running `sleep` in its own Session, which Muxify takes for an Agent with this Status."""
-        pane = self.s.tmux('new-session', '-d', '-P', '-F', '#{pane_id}', '-s', name, '-c', str(folder), 'sleep 600')
-        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', name)
-        self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent', 'claude')
-        self.set_status(pane, status)
-        return pane
-
-    def set_status(self, pane, status):
-        if status:
-            self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_status', status)
-        else:
-            self.s.tmux('set-option', '-p', '-u', '-t', pane, '@muxify_agent_status')
-
-    def discard_names_agents(self, name, shown):
-        """Opens the Discard menu of `name` until the Git View knows the Agents as they are, then returns the
-        guard's warning, or None. Muxify reads the Panes' options on its own timer, so the first menu may be early."""
-        found = []
-
-        def asked():
-            self.select_change(name)
-            rs = self.open_discard_menu()
-            found[:] = [self.s.row('git-menu-agents', rs).get('accessibilityLabel') if self.s.has('git-menu-agents', rs) else None]
-            self.s.act('action', 'git-menu', 'escape')
-            self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the menu')
-            return (found[0] is not None) == shown
-        wait(asked, 'the Discard menu %s the Agent' % ('does not name' if shown else 'still names'), seconds=15, step=.5)
-        return found[0]
-
     def stashes(self):
         return self.git('stash', 'list', '--format=%gs').splitlines()
 
@@ -305,6 +272,13 @@ class GitViewFixture(unittest.TestCase):
     def wait_prompt(self, title):
         return self.s.wait_rows(lambda rs: self.prompt_label(rs) == title, 'no prompt: ' + title)
 
+    def answer_prompt(self, title, text):
+        """Waits for the prompt, types the text in its field and submits it with ↩."""
+        self.wait_prompt(title)
+        self.s.act('set', 'git-prompt-field', text)
+        self.s.act('action', 'git-prompt', 'enter')
+        self.s.wait_rows(lambda rs: not self.s.has('git-prompt', rs), 'enter did not close the prompt')
+
     def bare_remote(self, name, tracking=True):
         """Adds the remote origin, an empty bare repository, and with `tracking` pushes main to it, which then is main's
         upstream. Returns its path."""
@@ -329,3 +303,8 @@ class GitViewFixture(unittest.TestCase):
         """git, whose failure is no error: a merge that conflicts, or an operation that isn't in progress."""
         return subprocess.run(['/usr/bin/git', '-C', str(cls.repo), '-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid']
                               + list(args), capture_output=True, text=True)
+
+    def git_retry(self, *args):
+        """git until it succeeds: the Git View reads the repository as a check puts it back, so git can find its index
+        locked."""
+        wait(lambda: self.git_try(*args).returncode == 0, 'git ' + ' '.join(args) + ' kept failing', seconds=10, step=.3)

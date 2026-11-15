@@ -42,17 +42,8 @@ class SessionIdentity(unittest.TestCase):
         self.store.put(dict(id=name, title=name, slug=name))
         return name
 
-    def select(self, sid):
-        tty = wait(lambda: next((line for line in self.s.tmux('list-clients', '-F', '#{client_tty}|#{client_control_mode}').splitlines()
-                                 if line.endswith('|0')), None), 'no terminal client', seconds=10).split('|')[0]
-        self.s.tmux('switch-client', '-c', tty, '-t', sid + ':')
-        self.s.wait_shown(sid + ':')
-
     def search(self, query, key):
-        if not self.s.has('palette-search'):
-            self.s.act('press', 'Go to…')
-        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'palette did not open')
-        self.s.act('set', 'palette-search', query)
+        self.s.open_palette('Go to…', query)
         return self.s.wait_rows(lambda rs: self.s.has(key, rs), 'no palette row ' + key)
 
     def name(self, sid):
@@ -106,9 +97,9 @@ class SessionIdentity(unittest.TestCase):
         one = self.session('one/destination-topic', path, topic)
         two = self.session('two/destination-topic', path, topic)
         source = self.session('move-source', path)
-        self.select(source)
-        self.s.act('press', 'sidebar-view-topics')
         window = self.s.tmux('display-message', '-p', '-t', source + ':', '#{window_id}')
+        self.s.show(window)
+        self.s.act('press', 'sidebar-view-topics')
         row = 'topic-window-' + window
         self.s.reveal(row)
         self.s.act('action', row, 'Move Window to Topic…')

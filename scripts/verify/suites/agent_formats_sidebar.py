@@ -32,16 +32,8 @@ class AgentFormatsSidebar(unittest.TestCase):
         self.s.tmux('set-option', '-t', self.session, '@muxify_topic', 'formats')
         self.s.tmux('select-pane', '-t', self.pane, '-T', 'Agent task')
         self.s.tmux('select-pane', '-t', self.pane)
-        self.show_mode('topics')
+        self.s.show_sidebar_mode('topics')
         self.wait_text('Agent task, Format Topic')
-
-    def show_mode(self, mode):
-        key = 'sidebar-view-' + mode
-        self.s.wait_rows(lambda rs: self.s.has(key, rs), 'Sidebar mode control is missing')
-        if self.s.row(key).get('accessibilityValue') != 'selected':
-            self.s.act('press', key)
-        self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityValue') == 'selected',
-                         'Sidebar mode did not change to ' + mode)
 
     def text(self, rows):
         return self.s.row(self.key, rows).get('accessibilityValue', '')
@@ -62,7 +54,7 @@ class AgentFormatsSidebar(unittest.TestCase):
       summary: '#{session_name} / #{agent_status}'
 """)
         for mode, title in [('topics', 'Format Topic'), ('sessions', 'stable-window')]:
-            self.show_mode(mode)
+            self.s.show_sidebar_mode(mode)
             self.wait_text(title + ', format-session / working')
         self.config.write_text("""sidebar:
   agents_scope: window
@@ -86,7 +78,7 @@ class AgentFormatsSidebar(unittest.TestCase):
 """)
         index = self.s.tmux('display-message', '-p', '-t', self.window, '#{window_index}')
         for mode in ['topics', 'sessions']:
-            self.show_mode(mode)
+            self.s.show_sidebar_mode(mode)
             for selected, active in [(self.pane, '1'), (self.other, '0')]:
                 title = 'Changed task ' + mode + ' ' + active
                 self.s.tmux('select-pane', '-t', selected)

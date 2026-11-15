@@ -47,13 +47,13 @@ class PaletteTags(PaletteFixture):
         return [key[len('palette-row-'):] for key in self.s.ids(rs) if key.startswith('palette-row-tag-') or key == 'palette-row-new-tag']
 
     def new_topic(self):
-        self.run_command('New Topic')
+        self.s.run_command('New Topic')
         self.s.wait_rows(lambda rs: 'New Topic' in self.text('palette-breadcrumb', rs), 'New Topic did not open')
 
     def edit_tags(self, name, order, tags):
         """Edit Tags for a new Active Topic with `tags`; returns the dump once the chips show."""
         self.select(self.topic(name, order, session=True, tags=tags))
-        self.run_command('Edit Tags…')
+        self.s.run_command('Edit Tags…')
         shown = [tag for tag in TAGS if tag in tags] + sorted(tag for tag in tags if tag not in TAGS)
         return self.s.wait_rows(lambda rs: name + ' › Edit Tags' in self.text('palette-breadcrumb', rs) and self.chips(rs) == shown,
                                 'Edit Tags did not open with the Tags %s as chips, in Config order' % shown)
@@ -209,7 +209,7 @@ class PaletteTags(PaletteFixture):
         self.s.wait_rows(lambda rs: 'Add a Session' in self.text('palette-breadcrumb', rs), 'New Topic did not go on to Add a Session')
         self.s.act('action', 'palette-search', 'Close')
         self.select(self.topic('off-active', 31, session=True, tags=['ops']))
-        self.search('Edit Tags')
+        self.s.open_palette('Commands', 'Edit Tags')
         time.sleep(1)
         self.assertFalse(self.s.has('palette-row-command-Edit Tags…'), 'Edit Tags… is offered with Tags off')
         self.s.act('action', 'palette-search', 'Close')

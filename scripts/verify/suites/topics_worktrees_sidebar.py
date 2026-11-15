@@ -16,6 +16,31 @@ from scripts.verify.topics_sidebar import TopicsSidebar, remembered_session
 
 
 class TopicsWorktreesSidebar(TopicsSidebar):
+    @classmethod
+    def make_repositories(cls):
+        super().make_repositories()
+        projects = cls.s.root/'projects'
+        # Plain repositories like alpha: delta only for the legacy-Session check, epsilon only for the main-checkout check.
+        cls.delta = projects/'delta'
+        cls.epsilon = projects/'epsilon'
+        for repository in [cls.delta, cls.epsilon]:
+            cls.init_repository(repository)
+        cls.add_alpha_worktrees('worktree-base', 'worktree-row-base')
+        # A bare repository that sorts first in the Session Path list, used only by the Add Session Path check, whose rows
+        # show without a search.
+        cls.acme = projects/'acme'
+        subprocess.run(['/usr/bin/git', 'clone', '-q', '--bare', str(cls.alpha), str(cls.acme)], check=True)
+        subprocess.run(['/usr/bin/git', '-C', str(cls.acme), 'worktree', 'add', '-q', str(cls.acme/'main'), 'main'], check=True)
+        subprocess.run(['/usr/bin/git', '-C', str(cls.acme), 'worktree', 'add', '-q', str(cls.acme/'base'), '-b', 'base-line'], check=True)
+        # A bare repository with one Worktree folder per branch, as ~/Dev/work/game_server is.
+        cls.gamma = projects/'gamma'
+        subprocess.run(['/usr/bin/git', 'clone', '-q', '--bare', str(cls.alpha), str(cls.gamma)], check=True)
+        subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma/'main'), 'main'], check=True)
+        subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma/'release'), '-b', 'release-line'],
+                       check=True)
+        # The base of the Worktrees that the New Worktree checks create; no check opens a Session in it.
+        subprocess.run(['/usr/bin/git', '-C', str(cls.gamma), 'worktree', 'add', '-q', str(cls.gamma/'base'), '-b', 'base-line'], check=True)
+
     def new_topic(self, title, directory, worktree=False):
         """Creates a Topic, then adds the Session Path or Worktree row at directory from the empty-Topic view; returns the
         record once it remembers that Session. With worktree, the Session starts on a new Worktree from the HEAD of that

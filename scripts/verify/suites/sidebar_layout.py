@@ -71,7 +71,7 @@ class SidebarLayout(unittest.TestCase):
 
     def test_custom_window_and_pane_lines_follow_the_sidebar_mode(self):
         self.addCleanup(self.write_config, '')
-        self.addCleanup(self.show_view, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'topics')
         self.write_config("""sidebar:
   panes: true
   formats:
@@ -86,7 +86,7 @@ class SidebarLayout(unittest.TestCase):
 """)
         window = self.s.tmux('display-message', '-p', '-t', self.sessions[1] + ':', '#{window_id}')
         for mode in ['topics', 'sessions']:
-            self.show_view(mode)
+            self.s.show_sidebar_mode(mode)
             cards = (['topic-layout-open', 'topic-layout-other'] if mode == 'topics'
                      else ['session-' + sid for sid in self.sessions])
             window_key = ('topic-window-' if mode == 'topics' else 'session-window-') + window
@@ -149,8 +149,8 @@ class SidebarLayout(unittest.TestCase):
     def test_session_cards_one_keeps_only_the_location_card_open(self):
         self.addCleanup(self.move_client, self.sessions[0])
         self.addCleanup(self.write_config, '')
-        self.addCleanup(self.show_view, 'topics')
-        self.show_view('sessions')
+        self.addCleanup(self.s.show_sidebar_mode, 'topics')
+        self.s.show_sidebar_mode('sessions')
         first, second = ['session-' + sid for sid in self.sessions]
         def expanded(key, rs):
             return self.s.row(key, rs).get('accessibilityValue', '').startswith('expanded')
@@ -190,13 +190,6 @@ class SidebarLayout(unittest.TestCase):
             return heights[-2:] == [heights[-1]] * 2
         return self.s.wait_rows(settled, 'the card %s did not close' % key)
 
-    def show_view(self, name):
-        key = 'sidebar-view-' + name
-        self.s.wait_rows(lambda rs: self.s.has(key, rs), 'no button ' + key)
-        if self.s.row(key).get('accessibilityValue') != 'selected':
-            self.s.act('press', key)
-        self.s.wait_rows(lambda rs: self.s.row(key, rs).get('accessibilityValue') == 'selected', key + ' not selected')
-
     def assert_no_element_spans_two_cards(self, list_key, card_keys):
         """A click tool such as Homerow offers an anchor for each element and clicks at its centre. An element over
         several cards puts that centre on another card's header, so the anchor at the last card presses a different one."""
@@ -216,8 +209,8 @@ class SidebarLayout(unittest.TestCase):
         self.assert_no_element_spans_two_cards('topics-list', ['topic-layout-open', 'topic-layout-other'])
 
     def test_no_element_in_the_sessions_list_covers_two_session_cards(self):
-        self.show_view('sessions')
-        self.addCleanup(self.show_view, 'topics')
+        self.s.show_sidebar_mode('sessions')
+        self.addCleanup(self.s.show_sidebar_mode, 'topics')
         self.assert_no_element_spans_two_cards('sessions-list', ['session-' + sid for sid in self.sessions])
 
     def test_a_click_tool_clicks_a_closed_topic_card_on_its_title_line(self):

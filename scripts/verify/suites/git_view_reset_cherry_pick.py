@@ -30,11 +30,8 @@ class GitViewResetCherryPick(GitViewFixture):
         return target, tip
 
     def undo_reset(self, target):
-        # The Git View reads the repository as this runs, so git can find its index locked: try again.
-        def retry(*args):
-            wait(lambda: self.git_try(*args).returncode == 0, 'git ' + ' '.join(args) + ' kept failing', seconds=10, step=.3)
-        retry('reset', '-q', '--hard', target)
-        retry('stash', 'pop', '-q', '--index')
+        self.git_retry('reset', '-q', '--hard', target)
+        self.git_retry('stash', 'pop', '-q', '--index')
         (self.repo/'r.txt').unlink(missing_ok=True)
         self.open_git_view()
         self.key('shift+r')
@@ -109,9 +106,7 @@ class GitViewResetCherryPick(GitViewFixture):
 
     def undo_pick(self, original):
         """Puts main back to `original`, keeping the fixture's changes, and the Git View reading it."""
-        def retry(*args):
-            wait(lambda: self.git_try(*args).returncode == 0, 'git ' + ' '.join(args) + ' kept failing', seconds=10, step=.3)
-        retry('reset', '-q', '--keep', original)
+        self.git_retry('reset', '-q', '--keep', original)
         self.open_git_view()
         self.key('shift+r')
         self.go_to('2')

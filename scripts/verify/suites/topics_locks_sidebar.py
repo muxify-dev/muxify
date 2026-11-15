@@ -56,10 +56,10 @@ class TopicsLocksSidebar(TopicsSidebar):
         order = wait(lambda: self.lock_option(sid), 'Make a Guest did not set @muxify_lock')
         self.assertGreater(float(order), 1, '@muxify_lock %s is not after the last Topic' % order)
 
-        self.show_view('sessions')
+        self.s.show_sidebar_mode('sessions')
         rs = self.find('session-' + sid)
         self.assertIn('Guest', s.row('session-' + sid, rs).get('accessibilityValue', ''), self.describe('session-' + sid, rs))
-        self.show_view('topics')
+        self.s.show_sidebar_mode('topics')
 
     def test_bench_of_a_guest_session_removes_the_card_and_the_session_option(self):
         s = self.s

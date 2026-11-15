@@ -403,14 +403,14 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_go_to_session_on_a_session_card_goes_to_the_sessions_active_window(self):
         s = self.s
-        self.addCleanup(self.show_view, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'topics')
         sid = self.new_session('card-session', self.beta)
         first, second = self.windows(sid, 2)
         s.tmux('select-window', '-t', second)
         base = s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}')
         self.select_window(base)
         wait(lambda: base in self.client_windows(), 'the client did not move to ' + base, seconds=10)
-        self.show_view('sessions')
+        self.s.show_sidebar_mode('sessions')
         self.find('session-' + sid)
         s.act('action', 'session-' + sid, 'Go to Session')
         wait(lambda: second in self.client_windows(),
@@ -419,14 +419,14 @@ class TopicsCardsSidebar(TopicsSidebar):
 
     def test_a_click_on_another_session_card_goes_to_the_sessions_active_window(self):
         s = self.s
-        self.addCleanup(self.show_view, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'topics')
         sid = self.new_session('card-session-click', self.beta)
         first, second = self.windows(sid, 2)
         s.tmux('select-window', '-t', second)
         base = s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}')
         self.select_window(base)
         wait(lambda: base in self.client_windows(), 'the client did not move to ' + base, seconds=10)
-        self.show_view('sessions')
+        self.s.show_sidebar_mode('sessions')
         self.find('session-' + sid)
         s.act('click', 'session-' + sid)
         wait(lambda: second in self.client_windows(),
@@ -498,7 +498,7 @@ class TopicsCardsSidebar(TopicsSidebar):
                         wait(lambda: any(name.startswith(('WKWebView', 'WKContentView'))
                                          for name in s.driver('responder')['responders']),
                              'Reopen did not give the Browser keyboard focus while the Terminal was hidden')
-                self.press_menu_item('Focus Terminal')
+                self.s.press_menu_item('Focus Terminal')
                 time.sleep(REFRESH_LIMIT)
                 with self.subTest(saved_browser=True):
                     self.assertEqual(s.tmux('show-options', '-wqv', '-t', target, '@muxify_tabs').split(), tabs)
@@ -564,7 +564,7 @@ class TopicsCardsSidebar(TopicsSidebar):
         self.find('topic-choice-dormant')
         self.select_window(sid + ':')
         s.wait_shown(sid + ':')
-        self.press_menu_item('Settle Topic…')
+        self.s.press_menu_item('Settle Topic…')
         s.wait_rows(lambda rs: any(key.startswith('palette-row-session-') for key in s.ids(rs)), 'Settle choices did not load')
         rs = s.wait_rows(lambda rs: s.has('palette-note', rs), 'Settle did not show the Next Topic')
         note = s.row('palette-note', rs)

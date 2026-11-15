@@ -12,7 +12,7 @@ import subprocess
 import time
 import unittest
 
-from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.sandbox import Sandbox
 from scripts.verify.topic_records import TopicRecords
 
 
@@ -250,17 +250,13 @@ class SidebarSwipe(SwipeSteps, unittest.TestCase):
         self.sample('Swipe left')
         self.wait_mode('sessions')
 
-    def press_menu_item(self, title):
-        """The app updates its menu items a moment after a change, so a press can find the item still disabled."""
-        wait(lambda: self.s.driver('press', title)['pressed'], 'the menu item %s stays disabled' % title, seconds=10)
-
     def test_the_view_menu_item_switches_modes_without_changing_the_window_or_focus(self):
         before = self.s.tmux('list-clients', '-F', '#{client_tty}|#{window_id}')
         responder = self.s.driver('responder')['responders']
-        self.press_menu_item('Switch to Sessions')
+        self.s.press_menu_item('Switch to Sessions')
         rs = self.wait_mode('sessions')
         self.assertTrue(self.s.has('session-' + self.session, rs), 'Sessions has no Session card')
-        self.press_menu_item('Switch to Topics')
+        self.s.press_menu_item('Switch to Topics')
         rs = self.wait_mode('topics')
         self.assertTrue(self.s.has('topic-swipe', rs), 'Topics has no Topic card')
         self.assertEqual(self.s.tmux('list-clients', '-F', '#{client_tty}|#{window_id}'), before)
@@ -269,11 +265,11 @@ class SidebarSwipe(SwipeSteps, unittest.TestCase):
     def test_the_switch_shows_a_hidden_sidebar_in_the_other_mode(self):
         def show_sidebar():
             if not self.s.has('sidebar-view-topics'):
-                self.press_menu_item('Show Sidebar')
+                self.s.press_menu_item('Show Sidebar')
         self.addCleanup(show_sidebar)
-        self.press_menu_item('Hide Sidebar')
+        self.s.press_menu_item('Hide Sidebar')
         self.s.wait_rows(lambda rs: not self.s.has('sidebar-view-topics', rs), 'the Sidebar did not hide')
-        self.press_menu_item('Switch to Sessions')
+        self.s.press_menu_item('Switch to Sessions')
         rs = self.wait_mode('sessions')
         self.assertTrue(self.s.has('session-' + self.session, rs), 'the shown Sidebar has no Session card')
 
@@ -282,10 +278,7 @@ class SidebarSwipe(SwipeSteps, unittest.TestCase):
             if self.s.has('palette-search'):
                 self.s.act('action', 'palette-search', 'Close')
         self.addCleanup(close_palette)
-        self.press_menu_item('Commands')
-        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'Commands did not open')
-        self.s.act('focus', 'palette-search')
-        self.s.act('set', 'palette-search', 'Switch to')
+        self.s.open_palette('Commands', 'Switch to')
         key = 'palette-row-command-Switch to Sessions'
         rs = self.s.wait_rows(lambda rs: self.s.has(key, rs), 'Switch to Sessions was missing from Commands')
         self.assertFalse(self.s.has('palette-row-command-Switch to Topics', rs), 'Topics shows, yet Commands offers Switch to Topics')
@@ -306,10 +299,7 @@ class SidebarSwipe(SwipeSteps, unittest.TestCase):
         self.assertFalse(self.s.has('sidebar-swipe-input', rs), 'a disabled Sessions view can still be swiped to')
         time.sleep(1)
         self.assertFalse(self.s.driver('press', 'Switch to Sessions')['pressed'], 'the View menu item is enabled with Sessions off')
-        self.press_menu_item('Commands')
-        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'Commands did not open')
-        self.s.act('focus', 'palette-search')
-        self.s.act('set', 'palette-search', 'Switch to')
+        self.s.open_palette('Commands', 'Switch to')
         time.sleep(1)
         rs = self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == 'Switch to',
                               'Commands did not keep the query')

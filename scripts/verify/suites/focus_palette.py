@@ -25,7 +25,7 @@ class FocusPalette(PaletteFixture):
         return self.s.driver('responder')['responders']
 
     def focus_terminal(self):
-        wait(lambda: self.s.driver('press', 'Focus Terminal')['pressed'], 'Focus Terminal stays disabled')
+        self.s.press_menu_item('Focus Terminal')
         wait(lambda: 'TerminalSurfaceView' in self.responders(), 'the Terminal did not take Focus')
 
     def assert_focus(self, view, after):
@@ -50,13 +50,13 @@ class FocusPalette(PaletteFixture):
     def test_bench_topic_keeps_focus_in_the_terminal(self):
         self.shown_topic('fp-bench')
         self.focus_terminal()
-        self.run_command('Bench')
+        self.s.run_command('Bench')
         self.assert_focus('TerminalSurfaceView', 'Bench')
 
     def test_rename_topic_keeps_focus_in_the_terminal_after_accept(self):
         self.shown_topic('fp-rename')
         self.focus_terminal()
-        self.run_command('Rename Topic')
+        self.s.run_command('Rename Topic')
         self.s.wait_rows(lambda rs: 'Rename' in self.text('palette-breadcrumb', rs), 'Rename Topic did not open its step')
         self.s.act('set', 'palette-search', 'Renamed fp')
         self.s.act('action', 'palette-search', 'Accept')
@@ -75,9 +75,9 @@ class FocusPalette(PaletteFixture):
         self.addCleanup(self.s.tmux_ok, 'kill-window', '-t', window)
         self.addCleanup(self.select, self.base)
         self.bench('fp-browser')
-        self.addCleanup(self.run_command, 'Toggle Bench')
+        self.addCleanup(self.s.run_command, 'Toggle Bench')
         self.select(window)
-        wait(lambda: self.s.driver('press', 'Focus Browser')['pressed'], 'Focus Browser stays disabled')
+        self.s.press_menu_item('Focus Browser')
         wait(lambda: 'WKWebView' in self.responders(), 'the Browser did not take Focus')
-        self.run_command('Toggle Bench')
+        self.s.run_command('Toggle Bench')
         self.assert_focus('WKWebView', 'Toggle Bench')

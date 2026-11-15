@@ -26,10 +26,7 @@ class WindowPartsSidebar(unittest.TestCase):
         self.addCleanup(self.config.write_text, self.default_config)
 
     def show_mode(self, mode):
-        key = 'sidebar-view-' + mode
-        self.s.wait_rows(lambda rs: self.s.has(key, rs), 'Sidebar mode control is missing')
-        if self.s.row(key).get('accessibilityValue') != 'selected':
-            self.s.act('press', key)
+        self.s.show_sidebar_mode(mode)
         card = 'topic-parts' if mode == 'topics' else 'session-' + self.session
         self.s.wait_rows(lambda rs: self.s.has(card, rs), 'the card is missing in ' + mode)
         if 'expanded' not in self.s.row(card).get('accessibilityValue', ''):

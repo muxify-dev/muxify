@@ -25,25 +25,18 @@ notifications:
   manual_read: true
 '''
         cls.config.write_text(cls.config_text)
-        wait(lambda: cls.s.driver('press', 'Reload Config')['pressed'], 'the menu item Reload Config stays disabled', seconds=10)
+        cls.s.press_menu_item('Reload Config')
 
     def read_automatically(self):
         """Sets manual_read: false for this check only."""
         self.config.write_text(self.config_text.replace('manual_read: true', 'manual_read: false'))
-        self.press_menu_item('Reload Config')
-        self.addCleanup(self.press_menu_item, 'Reload Config')
+        self.s.press_menu_item('Reload Config')
+        self.addCleanup(self.s.press_menu_item, 'Reload Config')
         self.addCleanup(self.config.write_text, self.config_text)
 
     def search(self, palette, query, key):
-        self.press_menu_item(palette)
-        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'Palette did not open')
-        self.s.act('set', 'palette-search', query)
+        self.s.open_palette(palette, query)
         return self.s.wait_rows(lambda rs: self.s.has(key, rs), 'No row ' + key)
-
-    def command(self, title):
-        key = 'palette-row-command-' + title
-        self.search('Commands', title, key)
-        self.s.act('press', key)
 
     def mark_row(self, topic, action):
         key = 'palette-row-topic-' + topic
@@ -92,7 +85,7 @@ notifications:
         # A mark writes only its own column (ADR 0079); a field the app does not know no longer survives (a3308a1).
         self.write_empty_topic(topic, note='keep')
         self.enter_empty(topic)
-        self.command('Mark Unread')
+        self.s.run_command('Mark Unread')
         self.assert_unread(topic, True)
         self.s.wait_rows(lambda rs: 'unread' in self.describe('topic-' + topic, rs), 'No Topic Unread mark')
         time.sleep(2.2)
@@ -102,7 +95,7 @@ notifications:
         self.assert_unread(topic, False)
         self.press_shortcut('⇧⌘U')
         self.assert_unread(topic, True)
-        self.command('Mark Read')
+        self.s.run_command('Mark Read')
         self.assert_unread(topic, False)
 
     def test_shell_and_working_topics_mark_without_changing_agent_status(self):
@@ -131,7 +124,7 @@ notifications:
                          'Settled Topic did not show Unread')
         self.write_topic('hidden-read-target', 'hidden-read-target',
                          settled_at='2020-01-01T00:00:00Z', unread=True)
-        self.command('Mark All as Read')
+        self.s.run_command('Mark All as Read')
         self.assert_unread('hidden-read-target', False)
         for topic in ['dormant-read-target', 'settled-read-target']:
             self.assert_unread(topic, False)
@@ -157,9 +150,9 @@ notifications:
         self.addCleanup(self.s.tmux, 'new-session', '-d', '-s', 'base', '-c', str(self.beta), '/bin/zsh -f')
         self.s.tmux('kill-server')
         self.enter_empty(topic)
-        self.command('Mark Unread')
+        self.s.run_command('Mark Unread')
         self.assert_unread(topic, True)
-        self.command('Mark Read')
+        self.s.run_command('Mark Read')
         self.assert_unread(topic, False)
         self.assertNotEqual(self.s.tmux_ok('list-sessions').returncode, 0)
 
@@ -210,7 +203,7 @@ notifications:
         for topic in ['empty-auto-target', 'empty-auto-away']:
             self.write_empty_topic(topic)
         self.enter_empty('empty-auto-target')
-        self.command('Mark Unread')
+        self.s.run_command('Mark Unread')
         self.assert_unread('empty-auto-target', True)
         self.enter_empty('empty-auto-target')
         time.sleep(2.2)
