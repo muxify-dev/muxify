@@ -58,6 +58,8 @@ enum CLIVerbs {
                      --pane <id>         a tmux Pane, e.g. --pane %3
     A command that changes something prints the id of each Topic that it changes, else the Window or Session it makes or renames.
                      --json              print the full result as one line of JSON
+                     --request <uuid>    apply the change one time only: a second command with the
+                                         same id and arguments prints the first answer and changes nothing
     """
 
     private static let bindingFooter = "Optional tmux binding: bind T run-shell 'muxify window move --new-topic --pane #{pane_id} >/dev/null'"
@@ -467,10 +469,12 @@ enum CLIVerbs {
                 help: "Prints the Add a Session rows and other running Sessions for this Topic.") { parsed in
             .topicSessionPaths(try TopicSessionPathsInvocation(parsed: parsed))
         },
-        topicVerb(.topicAddSession, synopsis: "<dir> [--worktree [--base <ref> | --branch <name>]] \(topicTarget) [--json]",
-                  options: [.flag("--worktree"), .value("--base"), .value("--branch")],
+        topicVerb(.topicAddSession, synopsis: "<dir> [--name <name>] [--worktree [--base <ref> | --branch <name>]]\n\(topicTarget) [--json]",
+                  options: [.value("--name"), .flag("--worktree"), .value("--base"), .value("--branch")],
                   help: """
                   Creates another Session at <dir> in this Pane's Topic, even if that folder is already used.
+                    --name <name>    name the Session <name> in the Topic. When the Topic has a Session
+                                     with that name, the command finds it and creates nothing.
                     --worktree       start a new Worktree from it, on a new branch named from the Topic
                     --base <ref>     start the new branch at <ref>, not at HEAD
                     --branch <name>  check out the local branch <name> in the new Worktree. No other
@@ -478,13 +482,14 @@ enum CLIVerbs {
                                      and keeps the branch.
                   """) { parsed in
             let base = try plainValue("--base", in: parsed), branch = try plainValue("--branch", in: parsed)
+            let name = try plainValue("--name", in: parsed)
             guard parsed.operands.count == 1, base == nil || branch == nil else { throw CLIError.usage }
             guard parsed.flag("--worktree") else {
                 guard base == nil, branch == nil else { throw CLIError.usage }
-                return .addSession(directory: parsed.operands[0], newWorktree: nil)
+                return .addSession(directory: parsed.operands[0], newWorktree: nil, name: name)
             }
             let start: WorktreeStart = branch.map(WorktreeStart.branch) ?? base.map(WorktreeStart.ref) ?? .head
-            return .addSession(directory: parsed.operands[0], newWorktree: start)
+            return .addSession(directory: parsed.operands[0], newWorktree: start, name: name)
         },
         topicVerb(.topicForget, synopsis: "[--kill-sessions] [--remove-worktrees] \(topicTarget) [--json]",
                   options: [.flag("--kill-sessions"), .flag("--remove-worktrees")],

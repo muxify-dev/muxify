@@ -13,6 +13,9 @@ extension EnvironmentService {
         var sessionName: String? = nil
         var window: WindowID? = nil
         var stopped: [PaneID]? = nil
+        /// True when the plan found the Topic that an earlier run of the same Request made, so the answer says, as
+        /// that run's answer did, that the Request made the Topic.
+        var madeByRequest = false
     }
 
     /// `session move up|down` has one meaning for each Session: a Session in an open Topic takes one place among the
@@ -100,7 +103,7 @@ extension EnvironmentService {
             let selection = edit.selection == .made ? made.map { .paneID($0.pane.rawValue) } ?? .unchanged : edit.selection
             let shown = try executor.show(selection, client: client) ?? planned.shown
             return .changed(TopicChange(topicID: edit.completion?.topicID ?? edit.record?.id,
-                                        created: edit.record != nil && read == nil, shown: shown,
+                                        created: planned.madeByRequest || (edit.record != nil && read == nil), shown: shown,
                                         session: made?.session ?? planned.session, sessionName: made?.sessionName ?? planned.sessionName,
                                         window: made?.window ?? planned.window, pane: made?.pane, stopped: planned.stopped))
         } catch {
@@ -122,14 +125,23 @@ extension EnvironmentService {
             let tags = Set(tags ?? [])
             try checkDefined(.add(Array(tags)), on: [])
             let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            var record = TopicRecord(newTopic: UUID().uuidString.lowercased(), title: title, slug: TopicNaming.slug(title: title, records: records), now: Date())
+            // The Topic of a Request has the Request's id, so the Request finds the Topic that its first run made and
+            // makes no second one.
+            let id = self.request?.id.rawValue ?? UUID().uuidString.lowercased()
+            if let made = records.first(where: { $0.id == id }) {
+                return Planned(edit: TopicEdit(record: made, commands: [], selection: .emptyTopic(id)), madeByRequest: true)
+            }
+            var record = TopicRecord(newTopic: id, title: title, slug: TopicNaming.slug(title: title, records: records), now: Date())
             record.tags = tags
             return Planned(edit: TopicEdit(record: record, commands: [], selection: .emptyTopic(record.id)))
-        case .addSession(let repositoryPath, let choice, let name):
+        case .addSession(let repositoryPath, let choice, let name, let chosenName):
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             let sessionPath = try sessionPath(at: repositoryPath)
-            return Planned(edit: try TopicSessionPlan(topic: topic, sessionPath: sessionPath, workingCopy: workingCopy(choice, of: sessionPath),
-                                                      windows: snapshot.windows, sessionPaths: sessionPaths, order: topics.sessionOrder, baseName: name).edit)
+            let plan = try TopicSessionPlan(topic: topic, sessionPath: sessionPath, workingCopy: workingCopy(choice, of: sessionPath),
+                                            windows: snapshot.windows, sessionPaths: sessionPaths, order: topics.sessionOrder, baseName: name,
+                                            chosenName: chosenName)
+            return Planned(edit: plan.edit, session: plan.found.flatMap { SessionID(rawValue: $0.sessionID) }, sessionName: plan.found?.sessionName,
+                           window: plan.found.flatMap { WindowID(rawValue: $0.id) })
         case .settle(let choices):
             let topic = try openTopic(request.target, caller: request.caller, records: records, snapshot: snapshot, client: client)
             try checkMembership(request.expectedSessionIDs, choices: choices, topic: topic, snapshot: snapshot)

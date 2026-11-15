@@ -20,11 +20,15 @@ public struct TopicStore: Sendable {
     public let paths: MuxifyPaths
     /// The Config's `topics.in_play`. A write that takes a card out of an In Play place leaves an Open Place by it.
     public let inPlay: Int
+    /// The Request that the command line runs through this store. Each write puts its `started` row in the ledger, in
+    /// the transaction of the records, so the row is there exactly when the records changed. Nil in the app.
+    public let request: PendingRequest?
     private let database: StateConnection
 
-    public init(paths: MuxifyPaths, inPlay: Int = Config.Topics.defaultInPlay) {
+    public init(paths: MuxifyPaths, inPlay: Int = Config.Topics.defaultInPlay, request: PendingRequest? = nil) {
         self.paths = paths
         self.inPlay = inPlay
+        self.request = request
         database = StateConnection(paths: paths)
     }
 
@@ -71,6 +75,7 @@ public struct TopicStore: Sendable {
                 let result = try body(&transaction)
                 try TopicTable.save(from: start, to: TopicContents(records: transaction.records, openPlaces: transaction.openPlaces),
                                     connection)
+                if let request { try RequestTable.start(request, now: Date(), connection) }
                 return result
             }
         }!

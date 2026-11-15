@@ -188,6 +188,180 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(try sandbox.tmux(["display-message", "-p", "-t", caller.rawValue, "#{session_name}"]), "main", "the caller Pane stays")
     }
 
+    // MARK: - Requests
+
+    func testTopicNewTwiceWithOneRequestMakesOneTopicAndPrintsTheSameJSON() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let request = UUID().uuidString
+        let first = try await run(cli, arguments: ["topic", "new", "Fix login", "--json", "--request", request], environment: environment)
+        XCTAssertEqual(first.status, 0, first.output)
+        let id = try XCTUnwrap(try XCTUnwrap(try jsonLine(first.stdout)["changed"] as? [String: Any])["topic_id"] as? String)
+        XCTAssertEqual(id, request.lowercased(), "the Topic of a Request has the Request's id")
+        // The option goes anywhere before `--`, and its id is the same in upper and lower case.
+        let second = try await run(cli, arguments: ["--request=" + request.lowercased(), "topic", "new", "Fix login", "--json"], environment: environment)
+        XCTAssertEqual(second.status, 0, second.output)
+        XCTAssertEqual(second.stdout, first.stdout)
+        XCTAssertEqual(second.stderr, "")
+        XCTAssertEqual(try sandbox.records().compactMap { $0["slug"] as? String }, ["fix-login"], "one Topic, and no fix-login-2")
+
+        let other = try await run(cli, arguments: ["topic", "new", "Fix login", "--json", "--request", UUID().uuidString], environment: environment)
+        XCTAssertEqual(other.status, 0, other.output)
+        XCTAssertEqual(try sandbox.records().compactMap { $0["slug"] as? String }.sorted(), ["fix-login", "fix-login-2"], "a new id runs the command")
+    }
+
+    func testARequestIDWithOtherArgumentsFailsWithItsOwnStatusAndChangesNothing() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let request = UUID().uuidString.lowercased()
+        let first = try await run(cli, arguments: ["topic", "new", "Fix login", "--request", request], environment: environment)
+        XCTAssertEqual(first.status, 0, first.output)
+        for arguments in [["topic", "new", "Other"], ["topic", "rename", "Other", "--topic", request]] {
+            let mismatch = try await run(cli, arguments: arguments + ["--request", request], environment: environment)
+            XCTAssertEqual(mismatch.status, 3, mismatch.output)
+            XCTAssertEqual(mismatch.stdout, "")
+            XCTAssertTrue(mismatch.stderr.contains(request) && mismatch.stderr.contains("topic new"), mismatch.stderr)
+        }
+        XCTAssertEqual(try sandbox.records().map { $0["title"] as? String }, ["Fix login"])
+    }
+
+    func testARefusalIsKeptSoASecondSendGetsItAgainWithoutANewJudgment() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let made = try await run(cli, arguments: ["topic", "new", "Ship"], environment: environment)
+        XCTAssertEqual(made.status, 0, made.output)
+        let request = UUID().uuidString
+        let tag = ["topic", "tag", "add", "bazel", "--topic", "Ship", "--json"]
+        let refused = try await run(cli, arguments: tag + ["--request", request], environment: environment)
+        XCTAssertEqual(refused.status, 1, refused.output)
+        XCTAssertEqual(try XCTUnwrap(try jsonLine(refused.stdout)["failed"] as? [String: Any])["kind"] as? String, "tag_undefined")
+
+        try Data("sessions:\n  paths:\n    - path: \(sandbox.root.path)/work/*\ntopics:\n  tags:\n    bazel: {}\n".utf8).write(to: sandbox.config)
+        let again = try await run(cli, arguments: tag + ["--request", request], environment: environment)
+        XCTAssertEqual(again.status, refused.status)
+        XCTAssertEqual(again.stdout, refused.stdout)
+        XCTAssertEqual(again.stderr, refused.stderr)
+        XCTAssertNil(try XCTUnwrap(sandbox.records().only)["tags"], "the second send changes nothing")
+
+        let fresh = try await run(cli, arguments: tag + ["--request", UUID().uuidString], environment: environment)
+        XCTAssertEqual(fresh.status, 0, fresh.output)
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only)["tags"] as? [String], ["bazel"], "a new Request sees the Tag that the Config has now")
+    }
+
+    func testAFailureThatCanChangeIsNotKeptSoTheSameRequestCanRunLater() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let pane = try sandbox.pane(of: "main")
+        let request = UUID().uuidString
+        let arguments = ["window", "new", "--json", "--request", request]
+        try sandbox.stopServer()
+        let stopped = try await run(cli, arguments: arguments, environment: sandbox.cliEnvironment(pane: pane))
+        XCTAssertEqual(stopped.status, 1, stopped.output)
+        XCTAssertEqual(try XCTUnwrap(try jsonLine(stopped.stdout)["failed"] as? [String: Any])["kind"] as? String, "tmux_failed")
+
+        try sandbox.startServer()
+        XCTAssertEqual(try sandbox.pane(of: "main"), pane, "the new server gives its first Pane the same id")
+        let windows = try sandbox.tmux(["list-windows", "-a", "-F", "#{window_id}"]).split(separator: "\n").count
+        let started = try await run(cli, arguments: arguments, environment: sandbox.cliEnvironment(pane: pane))
+        XCTAssertEqual(started.status, 0, started.output)
+        XCTAssertEqual(try sandbox.tmux(["list-windows", "-a", "-F", "#{window_id}"]).split(separator: "\n").count, windows + 1)
+
+        let again = try await run(cli, arguments: arguments, environment: sandbox.cliEnvironment(pane: pane))
+        XCTAssertEqual(again.stdout, started.stdout)
+        XCTAssertEqual(try sandbox.tmux(["list-windows", "-a", "-F", "#{window_id}"]).split(separator: "\n").count, windows + 1,
+                       "the success is kept: a third send makes no second Window")
+    }
+
+    /// A run that ends after its record write leaves the changed records and a `started` row.
+    func testARequestThatChangedTheRecordsAndDidNotFinishRunsAgainOnlyWhenItsVerbConverges() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+
+        let new = UUID().uuidString.lowercased()
+        let made = try await run(cli, arguments: ["topic", "new", "Fix login", "--json", "--request", new], environment: environment)
+        XCTAssertEqual(made.status, 0, made.output)
+        try sandbox.leaveStarted(new)
+        let converged = try await run(cli, arguments: ["topic", "new", "Fix login", "--json", "--request", new], environment: environment)
+        XCTAssertEqual(converged.status, 0, converged.output)
+        XCTAssertEqual(converged.stdout, made.stdout, "topic new finds the Topic that has the Request's id")
+        XCTAssertEqual(try sandbox.records().compactMap { $0["slug"] as? String }, ["fix-login"])
+        XCTAssertEqual(try sandbox.requestState(new), "done")
+
+        let other = try await run(cli, arguments: ["topic", "new", "Plan"], environment: environment)
+        XCTAssertEqual(other.status, 0, other.output)
+        let move = UUID().uuidString.lowercased()
+        let listed = try await run(cli, arguments: ["topic", "list"], environment: environment).stdout
+        let top = try XCTUnwrap(listed.split(separator: "\n").first?.split(separator: "\t").first.map(String.init))
+        let moved = try await run(cli, arguments: ["topic", "move", "down", "--topic", top, "--request", move], environment: environment)
+        XCTAssertEqual(moved.status, 0, moved.output)
+        let order = try await run(cli, arguments: ["topic", "list"], environment: environment).stdout
+        try sandbox.leaveStarted(move)
+        let doubt = try await run(cli, arguments: ["topic", "move", "down", "--topic", top, "--request", move], environment: environment)
+        XCTAssertEqual(doubt.status, 4, doubt.output)
+        XCTAssertEqual(doubt.stdout, "")
+        XCTAssertTrue(doubt.stderr.contains(move) && doubt.stderr.contains("topic move"), doubt.stderr)
+        let after = try await run(cli, arguments: ["topic", "list"], environment: environment).stdout
+        XCTAssertEqual(after, order, "a move does not run a second time")
+        XCTAssertEqual(try sandbox.requestState(move), "started")
+    }
+
+    func testAddSessionWithANameAndARequestMakesOneSession() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let made = try await run(cli, arguments: ["topic", "new", "Ship"], environment: environment)
+        XCTAssertEqual(made.status, 0, made.output)
+        let request = UUID().uuidString.lowercased()
+        let add = ["topic", "add-session", sandbox.game.path, "--name", "api", "--topic", "Ship", "--json", "--request", request]
+        let first = try await run(cli, arguments: add, environment: environment)
+        XCTAssertEqual(first.status, 0, first.output)
+        XCTAssertEqual(try XCTUnwrap(try jsonLine(first.stdout)["changed"] as? [String: Any])["session_name"] as? String, "api/ship")
+        try sandbox.leaveStarted(request)
+        let again = try await run(cli, arguments: add, environment: environment)
+        XCTAssertEqual(again.status, 0, again.output)
+        XCTAssertEqual(try sandbox.sessions(), ["api/ship", "main"])
+        XCTAssertEqual((try XCTUnwrap(sandbox.records().only)["sessions"] as? [[String: Any]])?.count, 1, "the record gains no second entry")
+
+        let unnamed = UUID().uuidString.lowercased()
+        let plain = ["topic", "add-session", sandbox.game.path, "--topic", "Ship", "--request", unnamed]
+        let added = try await run(cli, arguments: plain, environment: environment)
+        XCTAssertEqual(added.status, 0, added.output)
+        try sandbox.leaveStarted(unnamed)
+        let doubt = try await run(cli, arguments: plain, environment: environment)
+        XCTAssertEqual(doubt.status, 4, "without a name, a second run would make a second Session: " + doubt.output)
+        XCTAssertEqual(try sandbox.sessions(), ["api/ship", "game/ship", "main"])
+    }
+
+    func testEnvironmentShowJSONListsTheRequestCapabilityAndAReadRefusesARequest() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let shown = try await run(cli, arguments: ["environment", "show", "--json"], environment: environment)
+        XCTAssertEqual(shown.status, 0, shown.output)
+        XCTAssertTrue(shown.stdout.contains(#""capabilities":["request"]"#), shown.stdout)
+        XCTAssertEqual(try jsonLine(shown.stdout)["capabilities"] as? [String], ["request"])
+        let text = try await run(cli, arguments: ["environment", "show"], environment: environment)
+        XCTAssertFalse(text.stdout.contains("capabilities"), text.stdout)
+
+        for verb in [["environment", "show"], ["topic", "list"], ["topic", "exec", "--topic", "Ship", "--request", UUID().uuidString, "--", "true"],
+                     ["session", "list"], ["agent", "list"]] {
+            let arguments = verb.contains("--") ? verb : verb + ["--request", UUID().uuidString]
+            let refused = try await run(cli, arguments: arguments, environment: environment)
+            XCTAssertEqual(refused.status, 2, refused.output)
+            XCTAssertEqual(refused.stdout, "")
+            XCTAssertTrue(refused.stderr.contains(verb.prefix(2).joined(separator: " ")) && refused.stderr.contains("--request"), refused.stderr)
+        }
+        let bad = try await run(cli, arguments: ["topic", "new", "Ship", "--request", "soon"], environment: environment)
+        XCTAssertEqual(bad.status, 2, bad.output)
+        XCTAssertEqual(try sandbox.records().count, 0)
+        // After `--`, the words are the command's own.
+        XCTAssertNoThrow(try CLICommand(arguments: ["topic", "exec", "--topic", "Ship", "--", "echo", "--request", "soon"], environment: [:]))
+    }
+
     func testWindowMoveToANewTopicMovesTheCallerPaneIntoAnUntitledTopic() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
@@ -503,7 +677,8 @@ final class CLIIntegrationTests: XCTestCase {
         let shown = try await run(cli, arguments: ["environment", "show", "--json"], environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(shown.status, 0, shown.output)
         let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(shown.stdout.utf8)) as? [String: Any], shown.stdout)
-        XCTAssertEqual(Set(object.keys), ["tags", "sessions", "pinned", "unpinned", "no_topic"], "the snapshot is the whole answer")
+        XCTAssertEqual(Set(object.keys), ["tags", "sessions", "pinned", "unpinned", "no_topic", "capabilities"],
+                       "the snapshot is the whole answer, with the capabilities of this command line")
     }
 
     func testTopicMakeGuestBenchAndFillPlaceMoveTopicsBetweenTheSections() async throws {
@@ -1616,7 +1791,6 @@ private final class TopicSandbox {
     /// The Topic records in the state database, each as the JSON object of the record, in id order, as the CLI
     /// wrote them.
     func records() throws -> [[String: Any]] {
-        let paths = MuxifyPaths(environment: ["XDG_STATE_HOME": root.appendingPathComponent("state").path], home: "/nonexistent")
         return try TopicStore(paths: paths).read().records.map { record in
             guard let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any] else {
                 throw CLIError("the record \(record.id) is not a JSON object")
@@ -1640,6 +1814,31 @@ private final class TopicSandbox {
     func repositoryPaths(of record: [String: Any]) -> [String] {
         ((record["sessions"] as? [[String: Any]]) ?? []).compactMap { $0["directory"] as? String }
             .map { path in realpath(path, nil).map { real in defer { free(real) }; return String(cString: real) } ?? path }
+    }
+
+    private var paths: MuxifyPaths {
+        MuxifyPaths(environment: ["XDG_STATE_HOME": root.appendingPathComponent("state").path], home: "/nonexistent")
+    }
+
+    /// Makes the ledger row of a finished Request the row that a run leaves when it ends after its record write.
+    func leaveStarted(_ request: String) throws {
+        try StateDatabase.open(paths).execute(
+            "UPDATE applied_requests SET state = 'started', stdout = NULL, stderr = NULL, exit_code = NULL WHERE id = ?", request)
+    }
+
+    func requestState(_ request: String) throws -> String? {
+        try StateDatabase.open(paths).query("SELECT state FROM applied_requests WHERE id = ?", request) { $0.text(0) }.first ?? nil
+    }
+
+    /// Stops this sandbox's server only, after it checks the socket path.
+    func stopServer() throws {
+        guard try ownsServer() else { throw CLIError("the sandbox server is not in \(root.path)") }
+        try tmux(["kill-server"])
+    }
+
+    func startServer() throws {
+        try tmux(["-f", "/dev/null", "new-session", "-d", "-s", "main", "-c", root.path])
+        guard try ownsServer() else { throw CLIError("the sandbox server is not in \(root.path)") }
     }
 
     private func ownsServer() throws -> Bool {

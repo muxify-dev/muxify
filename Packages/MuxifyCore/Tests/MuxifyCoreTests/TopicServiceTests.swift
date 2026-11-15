@@ -259,6 +259,56 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try server.snapshot().windows.count, sessions)
     }
 
+    /// The state that a run leaves when it ends after its record write: the Topic and a `started` row.
+    func testCreateWithARequestGivesTheTopicTheRequestIDAndASecondRunFindsThatTopic() throws {
+        let id = try XCTUnwrap(RequestID("3f2b8c1e-7a4d-4e9b-9c0a-5d6e7f8a9b0c"))
+        let pending = PendingRequest(id: id, verb: "topic new", words: ["Fix login"], callerPane: nil, workingDirectory: "/")
+        let requested = EnvironmentService(paths: paths, server: server, request: pending)
+        let first = try change(requested.handle(EnvironmentRequest(.create(title: "Fix login"))))
+        XCTAssertEqual(first.topicID, id.rawValue)
+        XCTAssertEqual(try RequestLedger(paths: paths).lookup(pending), .resume, "the record write starts the Request")
+
+        let second = try change(EnvironmentService(paths: paths, server: server, request: pending).handle(EnvironmentRequest(.create(title: "Fix login"))))
+        XCTAssertEqual(second, first, "the second run gives the answer of the first")
+        XCTAssertEqual(try records().map(\.slug), ["fix-login"], "no second Topic and no fix-login-2")
+
+        _ = try change(service().handle(EnvironmentRequest(.create(title: "Fix login"))))
+        XCTAssertEqual(try records().compactMap(\.slug).sorted(), ["fix-login", "fix-login-2"], "without a Request, each run makes a Topic")
+    }
+
+    func testAddSessionWithAChosenNameFindsTheSessionAndAddsNoSecondOne() throws {
+        let id = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Ship")))).topicID)
+        let add = EnvironmentRequest(.addSession(sessionPath: sessionPath.folder.path, workingCopy: .directory, chosenName: "api"), target: .topic(.id(id)))
+        let first = try change(service().handle(add))
+        XCTAssertEqual(first.sessionName, "api/ship")
+        let entry = try XCTUnwrap(records().first?.sessions.first)
+
+        let again = try change(service().handle(add))
+        XCTAssertEqual(again.session, first.session, "the Session is found")
+        XCTAssertEqual(again.sessionName, "api/ship")
+        XCTAssertEqual(try records().first?.sessions, [entry], "the record gains no second entry")
+        XCTAssertEqual(try server.snapshot().windows.filter { $0.topicID == id }.count, 1)
+
+        // A run that ended after its record write and before tmux made the Session.
+        try server.run(["kill-session", "-t", "=api/ship"])
+        let remade = try change(service().handle(add))
+        XCTAssertEqual(remade.sessionName, "api/ship")
+        XCTAssertEqual(try records().first?.sessions, [entry])
+        let window = try XCTUnwrap(server.snapshot().windows.first { $0.sessionName == "api/ship" })
+        XCTAssertEqual(window.topicID, id)
+        XCTAssertEqual(window.sessionRecordID, entry["id"]?.string, "the Session that tmux makes is the one that the record has")
+    }
+
+    func testAddSessionRefusesAChosenNameThatASessionOutsideTheTopicHas() throws {
+        let id = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Ship")))).topicID)
+        try server.run(["new-session", "-d", "-s", "api/ship", "-c", root.path])
+        let refused = try failure(service().handle(EnvironmentRequest(
+            .addSession(sessionPath: sessionPath.folder.path, workingCopy: .directory, chosenName: "api"), target: .topic(.id(id)))))
+        XCTAssertEqual(refused.kind, .duplicateSession)
+        XCTAssertEqual(refused.phase, .nothingChanged)
+        XCTAssertEqual(try records().first?.sessions, [])
+    }
+
     func testATagChangeDuringASettleOfTheSameTopicKeepsBothWrites() throws {
         let backend = Tag(name: "backend")!
         let id = try topicWithSession("Ship", at: sessionPath.folder.path, using: service())

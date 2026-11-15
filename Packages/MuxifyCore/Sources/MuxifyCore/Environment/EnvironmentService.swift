@@ -21,12 +21,15 @@ public struct EnvironmentService: Sendable {
     public let environmentName: String?
     /// The Config's `worktrees.root_path`.
     public let worktreesRoot: String?
+    /// The Request that the command line runs through this service; nil for every other caller. The store writes
+    /// its ledger row, and a new Topic takes its id.
+    public let request: PendingRequest?
     let store: TopicStore
 
     public init(paths: MuxifyPaths, server: any TmuxRunning = TmuxServer.local, sessionPaths: [SessionPath] = [],
                 topics: Config.Topics = Config.Topics(), notifications: Config.Notifications = Config.Notifications(),
                 topicsAvailable: Bool = true, scripts: any ScriptRunning = LocalScripts(),
-                environmentName: String? = nil, worktreesRoot: String? = nil) {
+                environmentName: String? = nil, worktreesRoot: String? = nil, request: PendingRequest? = nil) {
         self.paths = paths
         self.server = server
         self.sessionPaths = sessionPaths
@@ -36,7 +39,8 @@ public struct EnvironmentService: Sendable {
         self.scripts = scripts
         self.environmentName = environmentName
         self.worktreesRoot = worktreesRoot
-        store = TopicStore(paths: paths, inPlay: topics.inPlay)
+        self.request = request
+        store = TopicStore(paths: paths, inPlay: topics.inPlay, request: request)
     }
 
     /// `client` is the host's tmux client: the one that types keys for a plan and that switches to the result.
@@ -260,6 +264,7 @@ public struct EnvironmentService: Sendable {
             case .topicEmpty: return .topicEmpty
             case .topicsUnavailable: return .topicsUnavailable
             case .sessionNameInvalid: return .sessionNameInvalid
+            case .sessionNameTaken: return .duplicateSession
             case .panesChanged: return .panesChanged
             case .cardAtEnd: return .cardAtEnd
             case .sessionAtEnd: return .sessionAtEnd
@@ -408,6 +413,8 @@ public enum TopicRequestError: Error, CustomStringConvertible {
     case topicEmpty(topic: String, id: String, dormant: Bool)
     case topicsUnavailable
     case sessionNameInvalid(String)
+    /// A Session outside the Topic has the name that the caller chose for a new Session of the Topic.
+    case sessionNameTaken(String)
     case panesChanged
     case cardAtEnd(card: String, up: Bool, pinned: Bool)
     case sessionAtEnd(session: String, topic: String, up: Bool)
@@ -448,6 +455,7 @@ public enum TopicRequestError: Error, CustomStringConvertible {
         case .cardHidden(let message): return message
         case .windowNotInSession(let window, let anchor): return "The Window \(anchor) is not in the Session of the Window \(window)."
         case .sessionNameInvalid(let name): return "\(name) cannot name a tmux Session: it is empty, or it has a period, a colon or a control character."
+        case .sessionNameTaken(let name): return "A tmux Session that is not in the Topic has the name \(name)."
         case .branchUnavailable(let branch, let worktree): return "No local branch \(branch) is in the repository of \(worktree)."
         case .branchCheckedOut(let branch, let worktree):
             return "The branch \(branch) is checked out in the Worktree \(worktree). git checks out a branch in one Worktree only."
