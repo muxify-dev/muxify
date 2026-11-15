@@ -588,7 +588,8 @@ final class CLITopicIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(after, before, "a failed move changed the order")
     }
 
-    /// The app is a fake `open` first on the PATH, which the CLI runs through `/usr/bin/env`, so this runs on Linux too.
+    /// The app is a fake `open` first on the PATH, which the CLI runs through `/usr/bin/env`. A Linux Host with no Host
+    /// Server's socket has no Muxify to reach, so there `topic open` fails and runs no `open`.
     func testTopicOpenHandsTheAppTheURLOfTheTopicAndFailsWithoutOne() async throws {
         let sandbox = try TopicSandbox()
         defer { sandbox.stop() }
@@ -597,22 +598,33 @@ final class CLITopicIntegrationTests: CLIIntegrationTestCase {
         let opened = fake.appendingPathComponent("opened")
         try Data("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \(Tmux.shellQuote(opened.path))\n".utf8).write(to: fake.appendingPathComponent("open"))
         XCTAssertEqual(chmod(fake.appendingPathComponent("open").path, 0o755), 0)
+        let openedURLs = { (try? String(contentsOf: opened, encoding: .utf8)) ?? "" }
         let path = ["PATH": fake.path + ":/usr/bin:/bin"]
         let id = try await newTopic("Open view", in: sandbox.game, sandbox: sandbox)
 
         for (arguments, caller) in [(["topic", "open"], try sandbox.pane(of: "game/open-view")), (["topic", "open", "--topic", "Open view"], nil)] {
             let result = try await run(cli, arguments: arguments, environment: sandbox.cliEnvironment(pane: caller).merging(path) { $1 })
+            #if os(macOS)
             XCTAssertEqual(result.status, 0, "\(arguments): \(result.output)")
             XCTAssertEqual(result.stdout, "", "\(arguments)")
+            #else
+            XCTAssertEqual(result.status, 1, "\(arguments): \(result.output)")
+            XCTAssertTrue(result.stderr.contains("cannot reach Muxify"), "\(arguments): \(result.output)")
+            #endif
         }
+        #if os(macOS)
         let encoded = id.utf8.map { String(format: "%%%02x", $0) }.joined()
-        XCTAssertEqual(try String(contentsOf: opened, encoding: .utf8), String(repeating: "muxify://select?topic=\(encoded)\n", count: 2))
+        let urls = String(repeating: "muxify://select?topic=\(encoded)\n", count: 2)
+        #else
+        let urls = ""
+        #endif
+        XCTAssertEqual(openedURLs(), urls)
 
         let missing = try await run(cli, arguments: ["topic", "open", "--topic", "No such topic"],
                                     environment: sandbox.cliEnvironment(pane: nil).merging(path) { $1 })
         XCTAssertNotEqual(missing.status, 0, missing.output)
         XCTAssertNotEqual(missing.stderr, "")
-        XCTAssertEqual(try String(contentsOf: opened, encoding: .utf8).split(separator: "\n").count, 2, "a failed topic open opened a URL")
+        XCTAssertEqual(openedURLs(), urls, "a failed topic open opened a URL")
     }
 }
 
