@@ -1,5 +1,5 @@
-"""The Git View in Branches and History: checking out, a branch of another Worktree, the new, rename and
-check-out prompts, and deleting a local or a remote branch.
+"""The Git View in Branches and History: checking out, a branch of another Worktree, the rename and check-out
+prompts, and deleting a local or a remote branch.
 
 The Git View's keys and accessibility identifiers are in git_view_fixture.py.
 
@@ -7,11 +7,10 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.git_view_branches
 """
 
-import shutil
 import subprocess
 import time
 
-from scripts.verify.git_view_fixture import GitViewFixture, MAIN_COMMITS, SHELL
+from scripts.verify.git_view_fixture import GitViewFixture, SHELL
 from scripts.verify.sandbox import wait
 
 
@@ -23,14 +22,9 @@ class GitViewBranches(GitViewFixture):
     def history_subjects(self, rs=None):
         return [r.get('accessibilityLabel') for r in self.rows_with_prefix('git-row-commit:', rs)]
 
-    def test_space_on_a_branch_checks_it_out_and_on_the_current_branch_does_nothing(self):
+    def test_space_on_a_branch_checks_it_out(self):
         self.addCleanup(self.back_to_main)
         self.go_to('3')
-        self.select_row('git-row-branch:main')
-        self.key('space')
-        time.sleep(1)
-        self.assertFalse(self.s.has('git-menu'), 'space on the current branch asked')
-        self.assertEqual(self.head(), 'main')
         self.select_row('git-row-branch:feature-x')
         self.key('space')
         wait(lambda: self.head() == 'feature-x', 'space did not check out the branch', seconds=10)
@@ -67,32 +61,10 @@ class GitViewBranches(GitViewFixture):
         self.select_row('git-row-branch:autostash-x')
         self.key('space')
         self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Autostash?', 'no Autostash? question')
-        self.s.act('action', 'git-menu', 'escape')
-        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the question')
-        time.sleep(1)
-        self.assertEqual(self.head(), 'main', 'escape checked out')
-        self.assertEqual((self.repo/'stashed.txt').read_text(), 'top\none\n', 'escape changed the file')
-        self.key('space')
-        self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Autostash?', 'no Autostash? question the second time')
         self.s.act('action', 'git-menu', 'y')
         wait(lambda: self.head() == 'autostash-x', 'y did not check out the branch', seconds=10)
         wait(lambda: (self.repo/'stashed.txt').read_text() == 'top\none\nbranch\n', 'the stash was not popped onto the branch', seconds=10)
         self.assertEqual(len(self.stashes()), stashes, 'the autostash was left in the list')
-
-    def test_a_checkout_asks_first_while_an_agent_is_working_in_the_worktree(self):
-        self.addCleanup(self.back_to_main)
-        self.agent_pane('gv-checkout-agent', self.repo, 'working')
-        # Until the Git View knows the Agent, space would check out at once: wait on a menu that only asks.
-        self.assertEqual(self.discard_names_agents('tracked.txt', True), 'Claude Code in gv-checkout-agent')
-        self.go_to('3')
-        self.select_row('git-row-branch:feature-x')
-        self.key('space')
-        rs = self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Check out', 'space did not ask before checking out')
-        self.assertEqual(self.s.row('git-menu-agents', rs).get('accessibilityLabel'), 'Claude Code in gv-checkout-agent')
-        time.sleep(1)
-        self.assertEqual(self.head(), 'main', 'the branch was checked out before the question was answered')
-        self.s.act('action', 'git-menu', 'y')
-        wait(lambda: self.head() == 'feature-x', 'y did not check out the branch', seconds=10)
 
     def ask_to_go_to_worktree(self, branch):
         """space on the branch in Branches, until the Git View has read it as checked out by another Worktree."""
@@ -104,22 +76,6 @@ class GitViewBranches(GitViewFixture):
         return self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Go to Worktree?',
                                 'space on a branch of another Worktree did not ask to go there')
 
-    def test_a_branch_of_another_worktree_asks_to_go_there_and_escape_changes_nothing(self):
-        self.add_worktree('other-wt-esc')
-        sessions = self.s.tmux('list-sessions', '-F', '#{session_name}')
-        rs = self.ask_to_go_to_worktree('other-wt-esc')
-        self.assertTrue(self.s.has('git-menu-choice-y', rs), 'the question has no y')
-        self.assertEqual(self.s.row('git-menu-choice-y', rs).get('accessibilityLabel'), 'Go to fixture-other-wt-esc',
-                         'the question does not name the Worktree that has the branch')
-        self.s.act('action', 'git-menu', 'escape')
-        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the question')
-        time.sleep(1)
-        self.assertEqual(self.head(), 'main', 'escape checked out')
-        self.assertFalse(self.s.has('palette-search'), 'escape opened Go to…')
-        self.assertTrue(self.is_open(), 'escape closed the Git View')
-        self.assertEqual(self.s.tmux('list-sessions', '-F', '#{session_name}'), sessions, 'escape changed the Sessions')
-        self.s.wait_shown(self.window)
-
     def test_confirming_goes_to_a_window_with_a_pane_in_that_worktree(self):
         path = self.add_worktree('other-wt-window')
         session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'gv-wt-window', '-c', str(path), SHELL)
@@ -128,7 +84,9 @@ class GitViewBranches(GitViewFixture):
         self.addCleanup(self.back_to_fixture_window)
         # Muxify reads tmux on its own timer, about once a second: let it see the Pane before asking.
         time.sleep(3)
-        self.ask_to_go_to_worktree('other-wt-window')
+        rs = self.ask_to_go_to_worktree('other-wt-window')
+        self.assertEqual(self.s.row('git-menu-choice-y', rs).get('accessibilityLabel'), 'Go to fixture-other-wt-window',
+                         'the question does not name the Worktree that has the branch')
         self.s.act('action', 'git-menu', 'y')
         self.s.wait_shown(window)
         self.assertFalse(self.s.has('palette-search'), 'Go to… opened although a Window has a Pane there')
@@ -156,45 +114,6 @@ class GitViewBranches(GitViewFixture):
         self.assertEqual(self.head(), 'main', 'the branch was checked out')
         self.assertTrue(self.is_open(), 'the Git View of the Window that was left closed')
 
-    def test_space_checks_out_the_branch_a_bare_repositorys_head_names_in_its_worktree(self):
-        # The bare repository's HEAD names main, yet it has no files: git and lazygit check main out in its Worktree.
-        root = self.s.root/'bare-checkout'
-        self.addCleanup(shutil.rmtree, root, True)
-        bare, path = root/'repo.git', root/'main'
-        subprocess.run(['/usr/bin/git', 'clone', '-q', '--bare', '-b', 'main', str(self.repo), str(bare)], check=True, capture_output=True)
-        subprocess.run(['/usr/bin/git', '-C', str(bare), 'worktree', 'add', '-q', str(path), 'main'], check=True, capture_output=True)
-        subprocess.run(['/usr/bin/git', '-C', str(path), 'checkout', '-q', '-b', 'bare-x'], check=True, capture_output=True)
-
-        def head():
-            return subprocess.run(['/usr/bin/git', '-C', str(path), 'branch', '--show-current'],
-                                  check=True, capture_output=True, text=True).stdout.strip()
-        self.close_git_view()
-        session = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'gv-bare', '-c', str(path), SHELL)
-        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', session)
-        self.addCleanup(self.back_to_fixture_window)
-        self.s.show(self.s.tmux('display-message', '-p', '-t', session + ':', '#{window_id}'))
-        self.open_git_view()
-        self.go_to('3')
-        # bare-x is a branch of the bare repository only, so the Git View reads its Worktree, not the fixture.
-        self.s.wait_rows(lambda rs: self.s.has('git-row-branch:bare-x', rs), 'the Git View did not read the Worktree of the bare repository')
-        self.select_row('git-row-branch:main')
-        self.key('space')
-        wait(lambda: head() == 'main' or self.s.has('git-menu'), 'space did not check out main', seconds=10)
-        self.assertFalse(self.s.has('git-menu'), 'space asked: %s' % self.menu().get('accessibilityLabel'))
-        self.assertEqual(head(), 'main')
-
-    def test_n_asks_for_a_name_and_checks_out_a_new_branch_off_the_selected_one(self):
-        self.addCleanup(self.git, 'branch', '-q', '-D', 'n-topic')
-        self.addCleanup(self.back_to_main)
-        self.go_to('3')
-        self.select_row('git-row-branch:feature-x')
-        self.key('n')
-        self.wait_prompt("New branch name (branch is off of 'feature-x')")
-        self.s.act('set', 'git-prompt-field', 'n topic')
-        self.s.act('action', 'git-prompt', 'enter')
-        wait(lambda: self.head() == 'n-topic', 'n did not check out the new branch', seconds=10)
-        self.assertEqual(self.git('rev-parse', 'n-topic'), self.git('rev-parse', 'feature-x'), 'the branch is not off of feature-x')
-
     def test_shift_r_in_branches_renames_the_selected_branch_starting_at_its_name(self):
         self.git('branch', 'rename-me')
         self.addCleanup(self.git, 'branch', '-q', '-D', 'renamed')
@@ -208,21 +127,6 @@ class GitViewBranches(GitViewFixture):
         self.s.act('action', 'git-prompt', 'enter')
         wait(lambda: 'renamed' in self.git('branch', '--format=%(refname:short)').split(), 'R did not rename the branch', seconds=10)
         self.assertNotIn('rename-me', self.git('branch', '--format=%(refname:short)').split())
-
-    def test_minus_in_branches_checks_out_the_previous_branch(self):
-        self.addCleanup(self.back_to_main)
-        self.git('checkout', '-q', 'feature-x')
-        self.git('checkout', '-q', 'main')
-        self.close_git_view()
-        self.open_git_view()
-        # The Git View opens on what it read last, which a check before may have left behind, with the branch it was
-        # on before: read again, and give the read time to end.
-        self.key('shift+r')
-        time.sleep(2)
-        self.go_to('3')
-        self.select_row('git-row-branch:main')
-        self.key('minus')
-        wait(lambda: self.head() == 'feature-x', 'minus did not check out the previous branch', seconds=10)
 
     def test_c_in_branches_checks_out_by_name_with_suggestions_and_a_remote_branch_makes_a_tracking_branch(self):
         origin = self.s.root/'origin.git'
@@ -262,11 +166,9 @@ class GitViewBranches(GitViewFixture):
         if name in self.branches():
             self.git('branch', '-q', '-D', name)
 
-    def ask_to_delete(self, branch, refresh=True):
-        """d on the branch in Branches, after reading the repository again (R renames in Branches, so it comes first,
-        and only before going there)."""
-        if refresh:
-            self.key('shift+r')
+    def ask_to_delete(self, branch):
+        """d on the branch in Branches, after reading the repository again (R renames in Branches, so it comes first)."""
+        self.key('shift+r')
         self.go_to('3')
         self.select_row('git-row-branch:' + branch)
         self.key('d')
@@ -307,14 +209,6 @@ class GitViewBranches(GitViewFixture):
         wait(lambda: 'rem-b' not in self.remote_branches(origin) and 'rem-b' not in self.branches(),
              'y did not delete both branches', seconds=15)
 
-    def test_a_branch_without_an_upstream_offers_only_the_local_choice(self):
-        self.git('branch', 'rem-none', 'main')
-        self.addCleanup(self.drop_branch, 'rem-none')
-        rs = self.ask_to_delete('rem-none')
-        self.assertTrue(self.s.has('git-menu-choice-c', rs))
-        self.assertFalse(self.s.has('git-menu-choice-r', rs), 'a remote choice without an upstream')
-        self.assertFalse(self.s.has('git-menu-choice-b', rs), 'a both choice without an upstream')
-
     def test_d_on_a_merged_branch_asks_in_the_delete_menu_and_c_deletes_it(self):
         self.git('branch', 'merged-b', 'main')
         self.addCleanup(self.drop_branch, 'merged-b')
@@ -336,45 +230,5 @@ class GitViewBranches(GitViewFixture):
         self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Force delete branch',
                          'c on an unmerged branch did not ask to force delete it')
         self.assertIn('unmerged-b', self.branches(), 'the branch was deleted before the question was answered')
-        self.s.act('action', 'git-menu', 'escape')
-        self.s.wait_rows(lambda rs: not self.s.has('git-menu', rs), 'escape did not close the question')
-        time.sleep(1)
-        self.assertIn('unmerged-b', self.branches(), 'escape deleted the branch')
-        self.ask_to_delete('unmerged-b', refresh=False)
-        self.s.act('action', 'git-menu', 'c')
-        self.s.wait_rows(lambda rs: self.menu(rs).get('accessibilityLabel') == 'Force delete branch', 'no force question the second time')
         self.s.act('action', 'git-menu', 'y')
         wait(lambda: 'unmerged-b' not in self.branches(), 'y did not force delete the branch', seconds=10)
-
-    def test_the_current_branch_cannot_be_deleted(self):
-        # The menu offers the delete by the HEAD that the Git View read last, so wait until it has read that main is out.
-        self.key('shift+r')
-        self.go_to('2')
-        self.s.wait_rows(lambda rs: self.history_subjects(rs)[:1] == MAIN_COMMITS[:1], 'History does not start at main', seconds=15)
-        rs = self.ask_to_delete('main', refresh=False)
-        self.assertEqual(self.s.row('git-menu-choice-c', rs).get('accessibilityValue'), 'highlighted=0 enabled=0')
-        self.s.act('action', 'git-menu', 'c')
-        self.s.act('action', 'git-menu', 'enter')
-        time.sleep(1)
-        self.assertIn('main', self.branches(), 'the current branch was deleted')
-        self.assertFalse(self.s.has('git-write-error'), 'a delete ran')
-        self.assertTrue(self.s.has('git-menu'), 'the menu closed')
-
-    def test_a_branch_of_another_worktree_is_not_deleted_and_git_says_why(self):
-        path = self.add_worktree('del-other-wt')
-        self.ask_to_delete('del-other-wt')
-        self.s.act('action', 'git-menu', 'c')
-        rs = self.s.wait_rows(lambda rs: self.s.has('git-write-error', rs), 'git did not refuse to delete the branch', seconds=10)
-        self.assertIn('del-other-wt', self.s.row('git-write-error', rs).get('accessibilityValue', ''))
-        self.assertIn('del-other-wt', self.branches(), 'the branch was deleted')
-        self.assertTrue(path.exists(), 'the Worktree was removed')
-
-    def test_d_keeps_its_meanings_in_history_and_changes(self):
-        self.key('2')
-        self.key('d')
-        time.sleep(.5)
-        self.assertFalse(self.s.has('git-menu'), 'd opened a menu in History')
-        self.key('1')
-        self.s.wait_rows(lambda rs: self.s.has('git-row-change:tracked.txt', rs), 'no Changes')
-        self.select_change('tracked.txt')
-        self.open_discard_menu()

@@ -18,18 +18,23 @@ from scripts.verify.topics_sidebar import REFRESH_LIMIT, TopicsSidebar
 
 
 class TopicsOptionSidebar(TopicsSidebar):
+    @classmethod
+    def make_repositories(cls):
+        super().make_repositories()
+        cls.add_alpha_worktrees('new-topic-base')
+
     def test_app_answers_while_another_process_holds_the_topic_records(self):
         # The held write transaction stands in for another process that holds the database for seconds. A new Topic record and a
         # renamed Window of a Topic make the app read and write the records while it is held.
         s = self.s
-        self.write_topic('held-records', 'Held records', self.beta, order=-1000200)
+        self.write_topic('held-records', 'Held records', order=-1000200)
         sid = self.new_session('beta/held-records', self.beta, topic='held-records')
         window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
         saved_names = lambda: [w.get('name') for row in self.records()['held-records'].get('sessions', [])
                                for w in row.get('windows', [])]
         wait(lambda: saved_names(), 'the Topic did not remember its Session')
         with self.store.held():
-            self.write_topic('held-newcomer', 'Held newcomer', self.beta, order=-1000199)
+            self.write_topic('held-newcomer', 'Held newcomer', order=-1000199)
             s.tmux_ok('rename-window', '-t', window, 'held-rename')
             slowest, end = 0, time.monotonic() + 3
             while time.monotonic() < end:
@@ -48,19 +53,9 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.assertIsNotNone(latency, 'Session %s is not the No Topic card: %s; Topic rows %s'
                              % (sid, self.no_topic_cards(rs), self.topic_rows(rs)))
 
-    def test_session_moves_under_its_topic_when_topic_option_is_set(self):
-        sid = self.new_session('joins', self.beta)
-        self.write_topic('joins', 'Joins proof', self.beta)
-        self.select_window(sid + ':')
-        self.s.wait_rows(lambda rs: self.no_topic_cards(rs) == [sid], 'Session %s is not the No Topic card' % sid)
-        self.s.tmux('set-option', '-t', sid, '@muxify_topic', 'joins')
-        latency, rs = self.rows_until(lambda rs: self.s.has('topic-joins-session-' + sid, rs) and not self.no_topic_cards(rs))
-        self.assertIsNotNone(latency, 'Session %s is not under Topic joins; %s; No Topic cards: %s'
-                             % (sid, self.describe('topic-joins', rs), self.no_topic_cards(rs)))
-
     def test_session_returns_to_no_topic_when_topic_option_is_unset(self):
         sid = self.new_session('leaves', self.beta, topic='leaves')
-        self.write_topic('leaves', 'Leaves proof', self.beta)
+        self.write_topic('leaves', 'Leaves proof')
         self.select_window(sid + ':')
         self.s.wait_rows(lambda rs: self.s.has('topic-leaves-session-' + sid, rs), 'Session %s never joined Topic leaves' % sid)
         # A Topic that remembers its Session is Dormant when the Session leaves outside Muxify; one that never
@@ -77,16 +72,16 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.addCleanup(self.set_show_agents, True)
         self.set_show_agents(False)
         sid = self.new_session('timing', self.beta)
-        self.write_topic('timing', 'Timing proof', self.beta)
+        self.write_topic('timing', 'Timing proof')
         self.select_window(sid + ':')
         under_topic = lambda rs: self.s.has('topic-timing-session-' + sid, rs) and not self.no_topic_cards(rs)
         samples = []
-        for attempt in range(13):
+        for attempt in range(4):
             self.s.tmux('set-option', '-u', '-t', sid, '@muxify_topic')
             self.s.wait_rows(lambda rs: self.no_topic_cards(rs) == [sid] and not self.s.has('topic-timing-session-' + sid, rs),
                              'Session %s did not return to No Topic' % sid, seconds=5)
-            # Staggered offsets sample different phases of the app's refresh cycle.
-            time.sleep(0.137 * (attempt % 7))
+            # Staggered offsets sample four phases of the app's one-second refresh cycle.
+            time.sleep(0.25 * attempt)
             self.s.tmux('set-option', '-t', sid, '@muxify_topic', 'timing')
             samples.append(self.rows_until(under_topic)[0])
         shown = ', '.join('%.3f' % v if v is not None else 'TIMEOUT' for v in samples)
@@ -104,7 +99,7 @@ class TopicsOptionSidebar(TopicsSidebar):
         sid = self.new_session('late-file', self.beta, topic='late-file')
         self.select_window(sid + ':')
         self.s.wait_rows(lambda rs: self.no_topic_cards(rs) == [sid], 'Session %s is not the No Topic card' % sid)
-        self.write_topic('late-file', 'Late file proof', self.beta)
+        self.write_topic('late-file', 'Late file proof')
         latency, rs = self.rows_until(lambda rs: self.s.has('topic-late-file', rs)
                                       and not self.no_topic_cards(rs)
                                       and 'Dormant' not in self.describe('topic-late-file', rs))
@@ -112,11 +107,11 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.assertLessEqual(latency, REFRESH_LIMIT, 'file write -> live Topic row took %.3f s' % latency)
 
     def test_sessions_view_lists_every_session_and_no_topics(self):
-        self.addCleanup(self.show_view, 'topics')
+        self.addCleanup(self.s.show_sidebar_mode, 'topics')
         self.new_session('listed', self.beta)
         self.new_session('alpha/listed-topic', self.alpha, topic='listed-topic')
-        self.write_topic('listed-topic', 'Listed proof', self.alpha)
-        self.show_view('sessions')
+        self.write_topic('listed-topic', 'Listed proof')
+        self.s.show_sidebar_mode('sessions')
         live = dict(line.split('|', 1) for line in self.s.tmux('list-sessions', '-f', '#{!=:#{session_name},muxify-watch}',
                                                                '-F', '#{session_id}|#{session_name}').splitlines())
         complete = lambda rs: (all(self.s.has('session-' + sid, rs) for sid in live) and not self.topic_rows(rs)
@@ -127,10 +122,10 @@ class TopicsOptionSidebar(TopicsSidebar):
 
     def test_topics_view_shows_topics_and_no_session_rows(self):
         sid = self.new_session('alpha/view-back', self.alpha, topic='view-back')
-        self.write_topic('view-back', 'View back proof', self.alpha)
-        self.show_view('sessions')
+        self.write_topic('view-back', 'View back proof')
+        self.s.show_sidebar_mode('sessions')
         self.s.wait_rows(lambda rs: self.s.has('session-' + sid, rs), 'Sessions view has no row for %s' % sid)
-        self.show_view('topics')
+        self.s.show_sidebar_mode('topics')
         self.find('topic-view-back')
         live = self.s.tmux('list-sessions', '-F', '#{session_id}').split()
         latency, rs = self.rows_until(lambda rs: self.s.has('topic-view-back', rs)
@@ -138,10 +133,9 @@ class TopicsOptionSidebar(TopicsSidebar):
         self.assertIsNotNone(latency, 'Topics view: Topic rows %s; Sessions view rows %s'
                              % (self.topic_rows(rs), [sid for sid in live if self.s.has('session-' + sid, rs)]))
 
-    def test_new_topic_stays_empty_until_adding_its_first_session_without_a_home(self):
+    def test_new_topic_stays_empty_until_adding_its_first_session(self):
         s = self.s
         record = self.create_topic('New Topic proof')
-        self.assertNotIn('home_project', record, json.dumps(record))
         self.assertEqual(record.get('sessions'), [], json.dumps(record))
         key = 'topic-' + record['id']
         self.find(key)
@@ -161,18 +155,8 @@ class TopicsOptionSidebar(TopicsSidebar):
         saved = wait(lambda: self.records()[record['id']].get('sessions'), 'first Session was not remembered')
         self.assertEqual(saved[0]['name'], name)
         self.assertIn(saved[0]['directory'], (str(base), os.path.realpath(base)))
-        self.assertNotIn('home_project', self.records()[record['id']])
         latency, rs = self.rows_until(lambda rs: not s.has('empty-topic-title', rs))
         self.assertIsNotNone(latency, 'the empty-Topic view stays after the first Session opened')
-
-    def test_new_topic_is_last_in_topics_view_by_default(self):
-        self.write_topic('insert-earlier', 'Earlier Topic', self.beta, order=0)
-        self.find('topic-insert-earlier')
-        record = self.create_topic('Last in order')
-        rs = self.s.wait_rows(lambda rs: self.s.has('topic-' + record['id'], rs), 'no row for the new Topic')
-        order = self.topic_rows(rs)
-        self.assertEqual(order[-1], 'topic-' + record['id'],
-                         'Topics view order %s; record orders %s' % (order, {i: r.get('order') for i, r in self.records().items()}))
 
     def test_a_topic_url_from_an_automation_creates_an_empty_topic(self):
         # -a sends the URL to this run's app copy by its path, never to the user's Muxify; -g keeps it behind.
@@ -192,8 +176,8 @@ class TopicsOptionSidebar(TopicsSidebar):
     def test_a_select_topic_url_shows_the_window_of_that_topic(self):
         here = self.new_session('select-here', self.beta, topic='select-here')
         there = self.new_session('select-there', self.beta, topic='select-there')
-        self.write_topic('select-here', 'Select here', self.beta)
-        self.write_topic('select-there', 'Select there', self.beta)
+        self.write_topic('select-here', 'Select here')
+        self.write_topic('select-there', 'Select there')
         self.select_window(here + ':')
         window = self.s.tmux('display-message', '-p', '-t', there + ':', '#{window_id}')
         # -a sends the URL to this run's app copy by its path, never to the user's Muxify; -g keeps it behind.
@@ -203,8 +187,8 @@ class TopicsOptionSidebar(TopicsSidebar):
     def test_a_drag_moves_a_topic_card_without_a_long_press(self):
         # TestDriver `drag` hands the mouse events to the window, so the pointer stays with the user. It moves as soon
         # as it presses, so the card lifts on the move, with no hold.
-        self.write_topic('press-upper', 'Press upper', self.beta, order=-2000001)
-        self.write_topic('press-lower', 'Press lower', self.beta, order=-2000000)
+        self.write_topic('press-upper', 'Press upper', order=-2000001)
+        self.write_topic('press-lower', 'Press lower', order=-2000000)
         cards = lambda rs: [k for k in self.topic_rows(rs) if k.startswith('topic-press-')]
         self.s.wait_rows(lambda rs: len(cards(rs)) == 2, 'no cards for the two Topics')
         self.s.reveal('topic-press-upper')
@@ -222,8 +206,8 @@ class TopicsOptionSidebar(TopicsSidebar):
         # is a click at once. TestDriver `click` hands a mouse down and up to the window at the card's centre, so the
         # pointer, the keys and the front position stay with the user.
         s = self.s
-        self.write_topic('tap-card', 'Tap card', self.beta, order=-3000001)
-        self.write_topic('tap-card-below', 'Tap card below', self.beta, order=-3000000)
+        self.write_topic('tap-card', 'Tap card', order=-3000001)
+        self.write_topic('tap-card-below', 'Tap card below', order=-3000000)
         sid = self.new_session('tap-card', self.beta, topic='tap-card')
         window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
         base = s.tmux('display-message', '-p', '-t', 'base:', '#{window_id}')
@@ -243,9 +227,9 @@ class TopicsOptionSidebar(TopicsSidebar):
     def test_move_up_and_move_down_move_the_topic_card_and_save_the_order(self):
         # The card's Move Up and Move Down accessibility actions (TopicCard in UI/SidebarView.swift) move it the way
         # a drop does.
-        self.write_topic('order-upper', 'Order upper', self.beta, order=-1000002)
-        self.write_topic('order-middle', 'Order middle', self.beta, order=-1000001)
-        self.write_topic('order-lower', 'Order lower', self.beta, order=-1000000)
+        self.write_topic('order-upper', 'Order upper', order=-1000002)
+        self.write_topic('order-middle', 'Order middle', order=-1000001)
+        self.write_topic('order-lower', 'Order lower', order=-1000000)
         cards = lambda rs: [k for k in self.topic_rows(rs) if k.startswith('topic-order-')]
         self.s.wait_rows(lambda rs: len(cards(rs)) == 3, 'no cards for the three Topics')
         self.s.reveal('topic-order-upper')

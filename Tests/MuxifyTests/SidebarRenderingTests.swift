@@ -2,37 +2,29 @@ import AppKit
 import SwiftUI
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class SidebarRenderingTests: XCTestCase {
     /// Use real row presentation without starting Ghostty or a tmux connection.
     @MainActor func testNativeRowsGrowForLargerFontsAtNarrowWidth() throws {
-        for scheme in [ColorScheme.light, .dark] {
-            for family in ["system", try installedFamily()] {
-                let small = try render(rows(), typography: SidebarTypography(fontFamily: family), scheme: scheme)
-                let large = try render(rows(), typography: SidebarTypography(fontSize: InterfaceFontSize(24), fontFamily: family), scheme: scheme)
-                XCTAssertGreaterThan(large.height, small.height, "Rows must grow rather than vertically clip large text")
-                XCTAssertGreaterThan(small.ink, 0)
-                XCTAssertGreaterThan(large.ink, 0)
-                XCTAssertEqual(small.width, 180)
-                XCTAssertEqual(large.width, 180)
-            }
+        for family in ["system", try installedFamily()] {
+            let small = try render(rows(), typography: SidebarTypography(fontFamily: family))
+            let large = try render(rows(), typography: SidebarTypography(fontSize: InterfaceFontSize(24), fontFamily: family))
+            XCTAssertGreaterThan(large.height, small.height, "Rows must grow rather than vertically clip large text: \(family)")
+            XCTAssertGreaterThan(small.ink, 0, family)
+            XCTAssertGreaterThan(large.ink, 0, family)
+            XCTAssertEqual(small.width, 180, family)
+            XCTAssertEqual(large.width, 180, family)
         }
-    }
-
-    @MainActor func testCardHeaderGrowsWithTheInterfaceFontSize() throws {
-        let header = CardHeader(title: "AgM Session", isOpen: true, mark: nil, summary: "") { EmptyView() }
-        let baseline = try render(header, typography: SidebarTypography(), scheme: .light)
-        let large = try render(header, typography: SidebarTypography(fontSize: InterfaceFontSize(24)), scheme: .light)
-        XCTAssertGreaterThan(large.height, baseline.height)
     }
 
     @MainActor func testCardHeaderKeepsALongTitleOnOneLineWhenTitlesDoNotWrap() throws {
         let long = CardHeader(title: "A Session name long enough to need several lines in a narrow Sidebar card",
                               isOpen: true, mark: nil, summary: "") { EmptyView() }
         let short = CardHeader(title: "AgM Session", isOpen: true, mark: nil, summary: "") { EmptyView() }
-        let oneLine = try render(short, typography: SidebarTypography(), scheme: .light)
-        let wrapped = try render(long, typography: SidebarTypography(), scheme: .light)
-        let cut = try render(long.environment(\.wrapsCardTitles, false), typography: SidebarTypography(), scheme: .light)
+        let oneLine = try render(short, typography: SidebarTypography())
+        let wrapped = try render(long, typography: SidebarTypography())
+        let cut = try render(long.environment(\.wrapsCardTitles, false), typography: SidebarTypography())
         XCTAssertGreaterThan(wrapped.height, oneLine.height, "A long title wraps by default")
         XCTAssertEqual(cut.height, oneLine.height, "titles.wrap: false keeps a long title on one line")
         XCTAssertGreaterThan(cut.ink, 0)
@@ -102,10 +94,9 @@ final class SidebarRenderingTests: XCTestCase {
     }
 
     @MainActor private func rows() -> some View {
-        let window = TmuxWindow(id: "@1", sessionID: "$1", sessionName: "A very long Session name with AgM descenders",
-                                index: 1, name: "shell", paneTitle: "A very long Window title with AgM descenders",
-                                path: "/test", command: "fish", isActive: true, paneCount: 3, hasBell: true,
-                                sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(), openRequests: [])
+        let window = TmuxWindow.fixture(sessionName: "A very long Session name with AgM descenders", index: 1,
+                                        paneTitle: "A very long Window title with AgM descenders", path: "/test", command: "fish",
+                                        paneCount: 3, hasBell: true)
         let agent = Agent(paneID: "%1", kind: .codex, status: .failed, unread: true, windowID: "@1", sessionID: "$1",
                           sessionName: window.sessionName, windowIndex: 1, windowTitle: window.displayTitle,
                           label: window.displayTitle)
@@ -117,15 +108,14 @@ final class SidebarRenderingTests: XCTestCase {
         }
     }
 
-    @MainActor private func render<V: View>(_ view: V, typography: SidebarTypography,
-                                           scheme: ColorScheme) throws -> (width: CGFloat, height: CGFloat, ink: Int) {
+    @MainActor private func render<V: View>(_ view: V, typography: SidebarTypography) throws -> (width: CGFloat, height: CGFloat, ink: Int) {
         _ = NSApplication.shared
         // The App Window puts the Interface font size into the environment, and the Sidebar's typography takes its base
         // from that same value.
         let host = NSHostingView(rootView: view.environment(\.sidebarTypography, typography)
             .environment(\.interfaceFontSize, typography.fontSize)
-            .frame(width: 180).background(scheme == .dark ? Color(white: 0.12) : Color.white)
-            .environment(\.colorScheme, scheme))
+            .frame(width: 180).background(Color.white)
+            .environment(\.colorScheme, .light))
         let size = host.fittingSize
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class PaneLabelTests: XCTestCase {
     private func pane(_ id: String = "%1", active: Bool = false, title: String = "", command: String = "zsh",
@@ -9,10 +10,8 @@ final class PaneLabelTests: XCTestCase {
     }
 
     private func window(paneTitle: String, command: String) -> TmuxWindow {
-        TmuxWindow(id: "@1", sessionID: "$1", sessionName: "app", index: 2, name: command,
-                   paneTitle: paneTitle, path: Paths.home + "/work/app", command: command, isActive: true,
-                   paneCount: 2, hasBell: false, sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(),
-                   openRequests: [])
+        .fixture(sessionName: "app", index: 2, name: command, paneTitle: paneTitle, path: Paths.home + "/work/app", command: command,
+                 paneCount: 2)
     }
 
     func testTitleComesFirstWithoutItsLeadingGlyph() {

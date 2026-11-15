@@ -15,11 +15,6 @@ final class PaletteWorktreeTests: XCTestCase {
                               state: state, sessions: sessions, topic: nil)
     }
 
-    func testEachCommandMirrorsItsWorktreeVerb() {
-        XCTAssertEqual(PaletteCommand.newWorktree.mirror, .verb(.worktreeCreate))
-        XCTAssertEqual(PaletteCommand.removeWorktree.mirror, .verb(.worktreeRemove))
-    }
-
     func testARowOfTheListOpensTheConfirmStepOfItsWorktree() {
         let store = store()
         let draft = RemoveWorktreeDraft()

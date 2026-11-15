@@ -52,30 +52,18 @@ final class GitDiffMetricsTests: XCTestCase {
         }
     }
 
-    func testFiveDigitsFitAtSize17AndAtSize12() {
-        for fontSize: CGFloat in [12, 17] {
-            for widest in [10_000, 99_999] {
-                let metrics = metrics(fontSize, widestNumber: widest)
-                let room = metrics.numberWidth - 2 * metrics.numberPadding
-                XCTAssertGreaterThanOrEqual(room, typesetWidth(String(widest), fontSize: fontSize),
-                                            "\(widest) does not fit its column at \(fontSize)")
-            }
-        }
-        // The fixed 46 points held only three digits whole at 17.
-        XCTAssertLessThan(46 - 9, typesetWidth("9999", fontSize: 17))
-    }
-
     func testTheColumnFitsTheWidestLineNumberShownAndAtLeastFourDigits() {
         for fontSize: CGFloat in [12, 17] {
             let four = metrics(fontSize, widestNumber: 9999)
             let five = metrics(fontSize, widestNumber: 10_000)
+            let fiveNines = metrics(fontSize, widestNumber: 99_999)
             let seven = metrics(fontSize, widestNumber: 1_234_567)
             XCTAssertGreaterThan(five.numberWidth, four.numberWidth)
             XCTAssertGreaterThan(seven.numberWidth, five.numberWidth)
             XCTAssertEqual(five.codeX - four.codeX, 2 * (five.numberWidth - four.numberWidth))
-            for (metrics, widest) in [(four, "9999"), (five, "10000"), (seven, "1234567")] {
+            for (metrics, widest) in [(four, "9999"), (five, "10000"), (fiveNines, "99999"), (seven, "1234567")] {
                 XCTAssertGreaterThanOrEqual(metrics.numberWidth - 2 * metrics.numberPadding,
-                                            typesetWidth(widest, fontSize: fontSize))
+                                            typesetWidth(widest, fontSize: fontSize), "\(widest) does not fit its column at \(fontSize)")
             }
         }
     }

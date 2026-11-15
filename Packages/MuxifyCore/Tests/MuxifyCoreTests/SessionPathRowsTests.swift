@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// The rows of the New Topic list, which the app and `muxify sessionPath list` share. Real git in a temp folder.
 final class SessionPathRowsTests: XCTestCase {
@@ -74,9 +75,6 @@ final class SessionPathRowsTests: XCTestCase {
     }
 
     private func window(_ id: String, session: String, topic: String, directory: String) -> TmuxWindow {
-        TmuxWindow(id: id, sessionID: session, sessionName: "s" + session, index: 0,
-                   name: "shell", paneTitle: "", path: directory, command: "zsh",
-                   isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
-                   storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, sessionPath: directory)
+        .fixture(id: id, sessionID: session, sessionName: "s" + session, path: directory, topicID: topic, sessionPath: directory)
     }
 }

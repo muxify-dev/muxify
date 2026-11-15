@@ -21,12 +21,6 @@ class PaletteNextTopic(unittest.TestCase):
         s.tmux('set-option', '-g', 'detach-on-destroy', 'off')
         s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES'])
 
-    def select_window(self, window):
-        for tty in self.s.tmux('list-clients', '-F', '#{client_tty} #{client_control_mode}').splitlines():
-            if tty.endswith(' 0'):
-                self.s.tmux('switch-client', '-c', tty.split()[0], '-t', window)
-        self.s.wait_shown(window)
-
     def check_next(self, placement):
         s = self.s
         prefix = 'settle-' + placement
@@ -34,7 +28,7 @@ class PaletteNextTopic(unittest.TestCase):
         windows = {}
         for index, name in enumerate(names):
             self.store.put(dict(
-                id=name, title=name, slug=name, home_project=str(self.project),
+                id=name, title=name, slug=name,
                 created_at='2026-01-0%dT00:00:00Z' % (index + 1)))
             self.addCleanup(self.store.remove, name)
             sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name,
@@ -42,17 +36,15 @@ class PaletteNextTopic(unittest.TestCase):
             s.tmux('set-option', '-t', sid, '@muxify_topic', name)
             windows[name] = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
             self.addCleanup(s.tmux_ok, 'kill-session', '-t', sid)
-        self.addCleanup(self.select_window, self.base)
-        s.wait_rows(lambda rs: s.has('sidebar-view-topics', rs), 'The Sidebar did not show')
-        if s.row('sidebar-view-topics').get('accessibilityValue') != 'selected':
-            s.act('press', 'sidebar-view-topics')
+        self.addCleanup(self.s.show, self.base)
+        s.show_sidebar_mode('topics')
         rs = s.wait_rows(lambda rs: all(s.has('topic-' + name, rs) for name in names), 'The Topic cards did not show')
         order = sorted(names, key=lambda name: -frame(s.row('topic-' + name, rs))[1])
         current = order[-1] if placement == 'last' else order[0]
         # The last card that shows has no card below it, so the first In Play card opens.
         expected = order[0] if placement == 'last' else order[1] if placement == 'below' else None
-        self.select_window(windows[current])
-        wait(lambda: s.driver('press', 'Settle Topic…')['pressed'], 'Settle stayed disabled')
+        self.s.show(windows[current])
+        s.press_menu_item('Settle Topic…')
         s.wait_rows(lambda rs: any(key.startswith('palette-row-session-') for key in s.ids(rs)),
                     'Settle choices did not load')
         rs = s.wait_rows(lambda rs: s.has('palette-note', rs), 'The next Topic preview did not show')

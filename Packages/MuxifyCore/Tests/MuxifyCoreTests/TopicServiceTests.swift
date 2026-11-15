@@ -2,13 +2,14 @@ import XCTest
 @testable import MuxifyCore
 import MuxifyTestSupport
 
-/// The service against a throwaway tmux server and state folder in the test's own run directory.
-final class TopicServiceTests: XCTestCase {
-    private var root: URL!
-    private var paths: MuxifyPaths!
-    private var server: TmuxServer!
-    private var sessionPath: SessionPath!
-    private var tools: SessionPath!
+/// The service against a throwaway tmux server and state folder in the test's own run directory. The tests of one class
+/// run in order, in one process, so the tests are in one class for each area, and xcodebuild runs the classes side by side.
+class TopicServiceTestCase: XCTestCase {
+    fileprivate var root: URL!
+    fileprivate var paths: MuxifyPaths!
+    fileprivate var server: TmuxServer!
+    fileprivate var sessionPath: SessionPath!
+    fileprivate var tools: SessionPath!
 
     override func setUpWithError() throws {
         _ = try requireTmux()
@@ -34,34 +35,75 @@ final class TopicServiceTests: XCTestCase {
         if let root { try? FileManager.default.removeItem(at: root) }
     }
 
-    private func service(tags: [String] = ["backend", "release"]) -> EnvironmentService {
+    fileprivate func service(tags: [String] = ["backend", "release"]) -> EnvironmentService {
         var topics = Config.Topics()
         topics.tags = ConfigTags(tags.map { TagDefinition(tag: Tag(name: $0)!) })
         return EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, tools], topics: topics)
     }
 
-    private func records() throws -> [TopicRecord] { try TopicStore(paths: paths).read().records }
+    fileprivate func records() throws -> [TopicRecord] { try TopicStore(paths: paths).read().records }
 
-    private func change(_ response: EnvironmentResponse, file: StaticString = #filePath, line: UInt = #line) throws -> TopicChange {
+    fileprivate func change(_ response: EnvironmentResponse, file: StaticString = #filePath, line: UInt = #line) throws -> TopicChange {
         guard case .changed(let change) = response else { XCTFail("\(response)", file: file, line: line); throw CancellationError() }
         return change
     }
 
-    private func failure(_ response: EnvironmentResponse, file: StaticString = #filePath, line: UInt = #line) throws -> TopicFailure {
+    fileprivate func failure(_ response: EnvironmentResponse, file: StaticString = #filePath, line: UInt = #line) throws -> TopicFailure {
         guard case .failed(let failure) = response else { XCTFail("\(response)", file: file, line: line); throw CancellationError() }
         return failure
     }
 
     /// A Topic with one Session at `path`, as the palette's New Topic makes it: an Empty Topic, then Add a Session.
-    private func topicWithSession(_ title: String, at path: String, tags: [Tag]? = nil, using service: EnvironmentService) throws -> String {
+    fileprivate func topicWithSession(_ title: String, at path: String, tags: [Tag]? = nil, using service: EnvironmentService) throws -> String {
         let id = try XCTUnwrap(change(service.handle(EnvironmentRequest(.create(title: title, tags: tags)))).topicID)
         _ = try change(service.handle(EnvironmentRequest(.addSession(sessionPath: path, workingCopy: .directory), target: .topic(.id(id)))))
         return id
     }
 
-    private func assertThrowawayServer() throws {
+    fileprivate func assertThrowawayServer() throws {
         let socket = try server.run(["display-message", "-p", "#{socket_path}"]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard socket.hasPrefix(root.path + "/") else { throw CancellationError() }
+    }
+
+    /// The Topics list as the app orders it: Topic ids, `lock:` with the Session name for a Locked Session, and `_` for
+    /// an Open Place.
+    fileprivate func topicList() throws -> [String] {
+        let windows = try server.snapshot().windows
+        let openPlaces = try TopicStore(paths: paths).read().openPlaces
+        return TopicOrder.sorted(TopicListEntry.all(records: try records(), windows: windows, openPlaces: openPlaces)).map { entry in
+            switch entry {
+            case .topic(let record): return record.title ?? record.id
+            case .lock(let lock): return "lock:" + (windows.first { $0.sessionID == lock.sessionID }?.sessionName ?? "?")
+            case .openPlace: return "_"
+            }
+        }
+    }
+
+    /// A Topic with a Session in game and one in tools.
+    fileprivate func twoSessionPathTopic(_ title: String) throws -> String {
+        let id = try topicWithSession(title, at: sessionPath.folder.path, using: service())
+        _ = try change(service().handle(EnvironmentRequest(.addSession(sessionPath: tools.folder.path, workingCopy: .directory), target: .topic(.id(id)))))
+        return id
+    }
+
+    fileprivate func sessions(of topic: String) throws -> [String] {
+        Set(try server.snapshot().windows.filter { $0.topicID == topic }.map(\.sessionName)).sorted()
+    }
+
+    /// A Topic whose Session the user took out remembers no Session: it is Empty, and Reopen does not make it again.
+    fileprivate func assertEmpty(_ id: String, file: StaticString = #filePath, line: UInt = #line) throws {
+        let record = try XCTUnwrap(records().first { $0.id == id }, file: file, line: line)
+        XCTAssertEqual(record.sessions, [], file: file, line: line)
+        XCTAssertNil(record.settledAt, file: file, line: line)
+        XCTAssertFalse(try server.snapshot().windows.contains { $0.topicID == id }, file: file, line: line)
+    }
+}
+
+/// New Topic, Sessions added to it, Tags, Notes, Unread, the list, failures, Settle, Forget and Reopen.
+final class TopicServiceTests: TopicServiceTestCase {
+    /// Each Window's place and Panes, without its name, which tmux changes by itself once its shell starts.
+    private func layout() throws -> [String] {
+        try server.snapshot().windows.map { "\($0.id) \($0.sessionID) \($0.sessionName) \($0.topicID ?? "-") \($0.activePaneID) \($0.paneCount)" }
     }
 
     func testConfirmationRejectsChangedSessionsBeforeAnyEdits() throws {
@@ -72,20 +114,14 @@ final class TopicServiceTests: XCTestCase {
             for index in reviewed.indices { reviewed[index].disposition = .keep }
             _ = try change(service().handle(EnvironmentRequest(.addSession(sessionPath: tools.folder.path, workingCopy: .directory), target: .topic(.id(id)))))
             let before = try records()
-            let windows = try server.snapshot().windows
+            let windows = try layout()
             for command in [EnvironmentCommand.settle(choices: reviewed), .forget(choices: reviewed, worktrees: [])] {
                 try assertThrowawayServer()
                 let failed = try failure(service().handle(EnvironmentRequest(command, target: .topic(.id(id)), expectedSessionIDs: reviewed.map(\.id))))
                 XCTAssertEqual(failed.kind, .topicMembershipChanged)
                 XCTAssertEqual(failed.phase, .nothingChanged)
                 XCTAssertEqual(try records(), before)
-                let after = try server.snapshot().windows
-                XCTAssertEqual(after.map(\.id), windows.map(\.id))
-                XCTAssertEqual(after.map(\.sessionID), windows.map(\.sessionID))
-                XCTAssertEqual(after.map(\.sessionName), windows.map(\.sessionName))
-                XCTAssertEqual(after.map(\.topicID), windows.map(\.topicID))
-                XCTAssertEqual(after.map(\.activePaneID), windows.map(\.activePaneID))
-                XCTAssertEqual(after.map(\.paneCount), windows.map(\.paneCount))
+                XCTAssertEqual(try layout(), windows)
             }
         }
     }
@@ -102,14 +138,14 @@ final class TopicServiceTests: XCTestCase {
                 _ = try server.run(["split-window", "-d", "-t", window.id])
             }
             let before = try records()
-            let panes = Set(try server.snapshot().panes.map(\.id))
+            let windows = try layout()
             for command in [EnvironmentCommand.settle(choices: choices), .forget(choices: choices, worktrees: [])] {
                 try assertThrowawayServer()
                 let failed = try failure(service().handle(EnvironmentRequest(command, target: .topic(.id(id)), expectedSessionIDs: choices.map(\.id))))
                 XCTAssertEqual(failed.kind, .topicMembershipChanged)
                 XCTAssertEqual(failed.phase, .nothingChanged)
                 XCTAssertEqual(try records(), before)
-                XCTAssertEqual(Set(try server.snapshot().panes.map(\.id)), panes)
+                XCTAssertEqual(try layout(), windows)
             }
             var refreshed = try service().settleChoices(for: .topic(.id(id))).get()
             for index in refreshed.indices { refreshed[index].disposition = .kill }
@@ -175,65 +211,10 @@ final class TopicServiceTests: XCTestCase {
         }
     }
 
-    func testForgetRemovesAnUnmergedCleanWorktreeAndKeepsItsBranch() throws {
-        let app = try repository()
-        _ = try addNewWorktree(of: app, start: .head, title: "Forget clean")
-        let id = try XCTUnwrap(records().first?.id)
-        let path = paths.worktrees.appendingPathComponent("app/forget-clean").path
-        try git(["commit", "-q", "--allow-empty", "-m", "unmerged"], in: path)
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [app])
-        XCTAssertTrue(try service.settleChoices(for: .topic(.id(id))).get().allSatisfy { $0.worktree == nil })
-        XCTAssertEqual(try service.forgetChoices(for: .topic(.id(id))).get().worktrees.filter(\.isClean).map(\.id), [path])
-        try assertThrowawayServer()
-        var killed = try service.forgetChoices(for: .topic(.id(id))).get().sessions
-        for index in killed.indices { killed[index].disposition = .kill }
-        _ = try change(service.handle(EnvironmentRequest(.forget(choices: killed, worktrees: [path]), target: .topic(.id(id)))))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: path))
-        XCTAssertFalse(try git(["branch", "--list", "forget-clean"], in: app.folder.path).isEmpty)
-    }
-
-    func testForgetOfASettledTopicRemovesItsRememberedWorktree() throws {
-        let app = try repository()
-        _ = try addNewWorktree(of: app, start: .head, title: "Remembered")
-        let id = try XCTUnwrap(records().first?.id)
-        let path = paths.worktrees.appendingPathComponent("app/remembered").path
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [app])
-        try assertThrowawayServer()
-        var killed = try service.settleChoices(for: .topic(.id(id))).get()
-        for index in killed.indices { killed[index].disposition = .kill }
-        _ = try change(service.handle(EnvironmentRequest(.settle(choices: killed), target: .topic(.id(id)))))
-        let choices = try service.forgetChoices(for: .topic(.id(id))).get()
-        XCTAssertTrue(choices.sessions.isEmpty)
-        XCTAssertEqual(choices.worktrees.map(\.id), [path])
-        try assertThrowawayServer()
-        _ = try change(service.handle(EnvironmentRequest(.forget(choices: [], worktrees: [path]), target: .topic(.id(id)))))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: path))
-        XCTAssertTrue(try records().isEmpty)
-    }
-
-    func testForgetKeepsDirtyWorktreesAndWorktreesUsedByKeptSessions() throws {
-        let app = try repository()
-        for dirty in [false, true] {
-            let title = dirty ? "Dirty" : "Kept"
-            _ = try addNewWorktree(of: app, start: .head, title: title)
-            let id = try XCTUnwrap(records().first { $0.title == title }?.id)
-            let path = paths.worktrees.appendingPathComponent("app/" + title.lowercased()).path
-            if dirty { try "draft".write(toFile: path + "/draft", atomically: true, encoding: .utf8) }
-            let service = EnvironmentService(paths: paths, server: server, sessionPaths: [app])
-            var choices = try service.forgetChoices(for: .topic(.id(id))).get()
-            XCTAssertEqual(choices.worktrees.first?.isClean, !dirty)
-            if !dirty { choices.sessions[0].disposition = .keep }
-            try assertThrowawayServer()
-            _ = try change(service.handle(EnvironmentRequest(.forget(choices: choices.sessions, worktrees: [path]), target: .topic(.id(id)))))
-            XCTAssertTrue(FileManager.default.fileExists(atPath: path))
-            XCTAssertFalse(try records().contains { $0.id == id })
-        }
-    }
-
     func testCreateFromAPaneMakesAnEmptyTopicAndLeavesThePane() throws {
         let pane = try XCTUnwrap(PaneID(rawValue: try server.run(["display-message", "-p", "-t", "=main:", "#{pane_id}"])
             .trimmingCharacters(in: .whitespacesAndNewlines)))
-        let windows = try server.snapshot().windows
+        let windows = try layout()
         let created = try change(service().handle(EnvironmentRequest(.create(title: "Fix reward"), target: .pane(pane), caller: .pane(pane))))
         let record = try XCTUnwrap(records().first)
         XCTAssertEqual(created.topicID, record.id)
@@ -241,13 +222,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(record.title, "Fix reward")
         XCTAssertEqual(record.sessions, [])
         XCTAssertEqual(created.shown, .emptyTopic(.topic(record.id)))
-        // Not the whole Window: tmux renames it by itself once its shell starts, which a slow machine shows here.
-        let after = try server.snapshot().windows
-        XCTAssertEqual(after.map(\.id), windows.map(\.id), "an Empty Topic starts and moves nothing in tmux")
-        XCTAssertEqual(after.map(\.sessionID), windows.map(\.sessionID))
-        XCTAssertEqual(after.map(\.topicID), windows.map(\.topicID))
-        XCTAssertEqual(after.map(\.activePaneID), windows.map(\.activePaneID))
-        XCTAssertEqual(after.map(\.paneCount), windows.map(\.paneCount))
+        XCTAssertEqual(try layout(), windows, "an Empty Topic starts and moves nothing in tmux")
     }
 
     func testCreateWithNoSessionPathAndNoTargetMakesATopicWithNoSession() throws {
@@ -327,55 +302,6 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(record.tags, [backend], "the Tag change's write landed")
     }
 
-    func testMoveTakesAWholeSessionIntoTheTopicThatARefNames() throws {
-        try server.run(["new-session", "-d", "-s", "loose", "-c", sessionPath.folder.path])
-        let topic = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Release")))).topicID)
-        let loose = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "loose" })
-        let moved = try change(service().handle(EnvironmentRequest(.move(to: .topic(.named("Release"))),
-                                                             target: .session(SessionID(rawValue: loose.sessionID)!))))
-        XCTAssertEqual(moved.shown, .window(WindowID(rawValue: loose.id)!))
-        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.id == loose.id })
-        XCTAssertEqual(window.topicID, topic)
-        XCTAssertEqual(window.sessionName, "loose/release")
-        let again = try change(service().handle(EnvironmentRequest(.move(to: .topic(.id(topic))), target: .session(SessionID(rawValue: loose.sessionID)!))))
-        XCTAssertNil(again.topicID, "a second move changes nothing")
-    }
-
-    /// The Topics list as the app orders it: Topic ids, `lock:` with the Session name for a Locked Session, and `_` for
-    /// an Open Place.
-    private func topicList() throws -> [String] {
-        let windows = try server.snapshot().windows
-        let openPlaces = try TopicStore(paths: paths).read().openPlaces
-        return TopicOrder.sorted(TopicListEntry.all(records: try records(), windows: windows, openPlaces: openPlaces)).map { entry in
-            switch entry {
-            case .topic(let record): return record.title ?? record.id
-            case .lock(let lock): return "lock:" + (windows.first { $0.sessionID == lock.sessionID }?.sessionName ?? "?")
-            case .openPlace: return "_"
-            }
-        }
-    }
-
-    func testMakeAGuestPutsANoTopicSessionAtTheEndOfTheGuestsAndBenchEndsIt() throws {
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        _ = try change(service().handle(EnvironmentRequest(.create(title: "First"))))
-        _ = try topicWithSession("Second", at: sessionPath.folder.path, using: service())
-        let locked = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
-        XCTAssertNil(locked.topicID)
-        XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes"])
-        _ = try change(service().handle(EnvironmentRequest(.create(title: "Third"))))
-        _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["First", "Second", "Third", "lock:notes"], "a Guest Session keeps its place under the places")
-
-        let inTopic = try failure(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("game/second"))))
-        XCTAssertEqual(inTopic.kind, .cardNotBenched, "a Session in a Topic names the Topic's card, which is In Play")
-        XCTAssertEqual(inTopic.phase, .nothingChanged)
-        XCTAssertEqual(try failure(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("missing")))).kind, .sourceUnavailable)
-
-        _ = try change(service().handle(EnvironmentRequest(.benchTopic, target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["First", "Second", "Third"])
-        XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "notes", SessionLock.option]), "")
-    }
-
     func testTagsChangeOnlyTheTagsOfTheTargetsOpenTopicAndANewTopicGetsItsTags() throws {
         let backend = Tag(name: "backend")!, release = Tag(name: "release")!
         let id = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Fix", tags: [release])))).topicID)
@@ -401,7 +327,7 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(noTarget.kind, .noTarget)
     }
 
-    func testATopicNoteChangesOnlyTheNoteOfTheTargetsOpenTopicAndSettleClearsIt() throws {
+    func testATopicNoteChangesOnlyTheNoteOfTheTargetsOpenTopicAndASettledTopicRefusesIt() throws {
         let id = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Fix")))).topicID)
         func current() throws -> TopicRecord { try XCTUnwrap(records().first { $0.id == id }) }
         let before = try current()
@@ -409,15 +335,8 @@ final class TopicServiceTests: XCTestCase {
         var expected = before
         expected.note = "Waiting on Ana's review"
         XCTAssertEqual(try current(), expected, "a Note change changes nothing else in the record")
-        _ = try change(service().handle(EnvironmentRequest(.note(nil), target: .topic(.id(id)))))
-        XCTAssertEqual(try current(), before, "nil clears the Note")
-        _ = try change(service().handle(EnvironmentRequest(.note("Bisect"), target: .topic(.id(id)))))
-        _ = try change(service().handle(EnvironmentRequest(.note("   "), target: .topic(.id(id)))))
-        XCTAssertNil(try current().note, "an empty Note clears it")
 
-        _ = try change(service().handle(EnvironmentRequest(.note("Bisect from v2"), target: .topic(.id(id)))))
         _ = try change(service().handle(EnvironmentRequest(.settle(choices: []), target: .topic(.id(id)))))
-        XCTAssertNil(try current().note, "Settle clears the Note")
         let settled = try failure(service().handle(EnvironmentRequest(.note("Later"), target: .topic(.id(id)))))
         XCTAssertEqual(settled.kind, .topicUnavailable)
         XCTAssertEqual(settled.phase, .nothingChanged)
@@ -449,26 +368,6 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertFalse(try records().contains { $0.title == "Untagged" }, "a refused New Topic writes no record")
     }
 
-    func testALockedSessionThatGoesIntoATopicLosesItsLock() throws {
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        try server.run(["new-session", "-d", "-s", "chores", "-c", tools.folder.path])
-        _ = try change(service().handle(EnvironmentRequest(.create(title: "First"))))
-        _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
-        _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("chores"))))
-        _ = try change(service().handle(EnvironmentRequest(.create(title: "Second"))))
-        XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes", "lock:chores"])
-
-        let notes = try XCTUnwrap(SessionID(rawValue: try server.snapshot().windows.first { $0.sessionName == "notes" }!.sessionID))
-        let created = try change(service().handle(EnvironmentRequest(.move(to: .newTopic(title: "Notes work")), target: .session(notes))))
-        XCTAssertTrue(created.created)
-        XCTAssertEqual(try topicList(), ["First", "Second", "Notes work", "lock:chores"], "the new Topic takes the Lock's place")
-
-        let chores = try XCTUnwrap(SessionID(rawValue: try server.snapshot().windows.first { $0.sessionName == "chores" }!.sessionID))
-        _ = try change(service().handle(EnvironmentRequest(.move(to: .topic(.named("Second"))), target: .session(chores))))
-        XCTAssertEqual(try topicList(), ["First", "Second", "Notes work"], "the Topic that the Session moves to keeps its place")
-        XCTAssertTrue(try server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
-    }
-
     func testForgetSettledCountsTheDaysFromTheTimeTheUserReviewed() throws {
         let calendar = Calendar.autoupdatingCurrent
         let now = Date()
@@ -484,376 +383,6 @@ final class TopicServiceTests: XCTestCase {
         guard case .topics(let forgotten) = response else { return XCTFail("\(response)") }
         XCTAssertEqual(forgotten.map(\.id), ["sixteen"], "Settled 15 days before asOf: forgotten")
         XCTAssertEqual(try records().map(\.id), ["fifteen"], "Settled 15 days before now but 14 before asOf: kept")
-    }
-
-    func testAReturningTopicGoesAfterAGuestSessionAndSavesNormalizedLockRanks() throws {
-        let one = service(inPlay: 1)
-        _ = try change(one.handle(EnvironmentRequest(.create(title: "First"))))
-        let returning = try XCTUnwrap(change(one.handle(EnvironmentRequest(.create(title: "Returning")))).topicID)
-        XCTAssertEqual(try topicList(), ["First", "Returning"])
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        try server.run(["set-option", "-t", "notes", SessionLock.option, String(Double.greatestFiniteMagnitude)])
-        try TopicStore(paths: paths).write { try $0.update(returning) { $0.settledAt = "2026-10-01T00:00:00Z" } }
-        _ = try change(one.handle(EnvironmentRequest(.reopen, target: .topic(.id(returning)))))
-        XCTAssertEqual(try topicList(), ["First", "lock:notes", "Returning"])
-        let lockOrder = try XCTUnwrap(Double(server.run(["show-options", "-qv", "-t", "notes", SessionLock.option]).trimmingCharacters(in: .whitespacesAndNewlines)))
-        XCTAssertLessThan(lockOrder, Double.greatestFiniteMagnitude, "Reopen must save normalized Lock ranks to tmux")
-        try TopicStore(paths: paths).write { try $0.update(returning) { $0.settledAt = "2026-10-01T00:00:00Z" } }
-        _ = try change(one.handle(EnvironmentRequest(.startFresh, target: .topic(.id(returning)))))
-        XCTAssertEqual(try topicList(), ["First", "lock:notes", "Returning"])
-    }
-
-    func testANewOrReturningTopicGoesToTheTopOfTheBench() throws {
-        var topics = Config.Topics()
-        topics.inPlay = 2
-        let inPlay = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath], topics: topics)
-        func settle(_ title: String) throws -> String {
-            let id = try XCTUnwrap(records().first { $0.title == title }).id
-            try TopicStore(paths: paths).write { try $0.update(id) { $0.settledAt = "2026-10-01T00:00:00Z" } }
-            return id
-        }
-        _ = try change(inPlay.handle(EnvironmentRequest(.create(title: "First"))))
-        _ = try change(inPlay.handle(EnvironmentRequest(.create(title: "Second"))))
-        XCTAssertEqual(try topicList(), ["First", "Second"], "with fewer cards than in_play, a new Topic goes last")
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
-        _ = try change(inPlay.handle(EnvironmentRequest(.create(title: "Pinned"))))
-        _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("Pinned")))))
-        _ = try change(inPlay.handle(EnvironmentRequest(.create(title: "Third"))))
-        XCTAssertEqual(try topicList(), ["Pinned", "First", "Second", "lock:notes", "Third"],
-                       "a Pinned Topic and a Guest do not count")
-
-        _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.before(.topic(.named("First")))), target: .sessionName("notes"))))
-        _ = try change(inPlay.handle(EnvironmentRequest(.create(title: "Fourth"))))
-        XCTAssertEqual(try topicList(), ["Pinned", "lock:notes", "First", "Second", "Fourth", "Third"], "a Guest Session does not count")
-
-        _ = try change(inPlay.handle(EnvironmentRequest(.reopen, target: .topic(.id(settle("Second"))))))
-        XCTAssertEqual(try topicList(), ["Pinned", "lock:notes", "First", "Fourth", "Second", "Third"], "Reopen")
-        _ = try change(inPlay.handle(EnvironmentRequest(.startFresh, target: .topic(.id(settle("Third"))))))
-        XCTAssertEqual(try topicList(), ["Pinned", "lock:notes", "First", "Fourth", "Third", "Second"], "Start Fresh")
-    }
-
-    /// A service with `topics.in_play` set to `count`.
-    private func service(inPlay count: Int) -> EnvironmentService {
-        var topics = Config.Topics()
-        topics.inPlay = count
-        return EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath], topics: topics)
-    }
-
-    /// The Session `name`'s tmux id.
-    private func sessionID(_ name: String) throws -> SessionID {
-        try XCTUnwrap(SessionID(rawValue: try server.snapshot().windows.first { $0.sessionName == name }!.sessionID))
-    }
-
-    /// The open Topics that have the Guest mark, by title.
-    private func guests() throws -> Set<String> {
-        Set(try records().filter { $0.isGuest && $0.settledAt == nil }.compactMap(\.title))
-    }
-
-    func testChooseInPlayFillsThePlacesInTheChosenOrderAndLeavesTheOthersOpen() throws {
-        let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "C", "D", "Pinned"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
-        _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("Pinned")))))
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
-        let notes = try sessionID("notes")
-        XCTAssertEqual(try topicList(), ["Pinned", "A", "B", "lock:notes", "D", "C"],
-                       "a new Topic goes to the top of the Bench, and a Lock is a Guest at the end of In Play")
-        func choose(_ cards: [TopicListRef]) -> EnvironmentResponse { inPlay.handle(EnvironmentRequest(.chooseInPlay(cards))) }
-
-        _ = try change(choose([.topic(.named("C")), .topic(.named("A"))]))
-        XCTAssertEqual(try topicList(), ["Pinned", "C", "A", "lock:notes", "B", "D"], "the Guest stays a Guest")
-        _ = try change(choose([.topic(.named("D")), .topic(.named("A")), .topic(.named("B"))]))
-        XCTAssertEqual(try topicList(), ["Pinned", "D", "A", "lock:notes", "B", "C"], "the card after the last place leads the Bench")
-        _ = try change(choose([.topic(.named("B"))]))
-        XCTAssertEqual(try topicList(), ["Pinned", "B", "_", "lock:notes", "D", "A", "C"], "with fewer cards than places, a place is open")
-
-        let refused: [(EnvironmentService, [TopicListRef], TopicFailure.Kind)] = [
-            (inPlay, [.topic(.named("A")), .topic(.named("Pinned"))], .cardPinned),
-            (inPlay, [.topic(.named("A")), .lock(notes)], .cardGuest),
-            (inPlay, [.topic(.named("A")), .topic(.named("A"))], .unsupported),
-            (inPlay, [.topic(.named("Missing"))], .topicUnavailable),
-        ]
-        for (service, cards, kind) in refused {
-            let refusal = try failure(service.handle(EnvironmentRequest(.chooseInPlay(cards))))
-            XCTAssertEqual(refusal.kind, kind, "\(cards)")
-            XCTAssertEqual(refusal.phase, .nothingChanged)
-        }
-        XCTAssertEqual(try topicList(), ["Pinned", "B", "_", "lock:notes", "D", "A", "C"])
-    }
-
-    func testReplaceFromBenchPutsTheBenchedCardInThePlaceAndGivesItTheMarkOfAGuest() throws {
-        let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "C", "Pinned"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
-        _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("Pinned")))))
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["Pinned", "A", "B", "lock:notes", "C"])
-
-        let came = try change(inPlay.handle(EnvironmentRequest(.replaceFromBench(with: .topic(.named("C"))), target: .topic(.named("A")))))
-        XCTAssertEqual(came.topicID, try records().first { $0.title == "C" }?.id)
-        XCTAssertEqual(try topicList(), ["Pinned", "C", "B", "lock:notes", "A"], "the replaced card goes to the end of the Bench")
-        _ = try change(inPlay.handle(EnvironmentRequest(.replaceFromBench(with: .topic(.named("A"))), target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["Pinned", "C", "B", "A"], "the Lock of a Guest Session ends")
-        XCTAssertEqual(try guests(), ["A"], "the card that comes In Play takes the Guest mark")
-        XCTAssertTrue(try server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
-
-        _ = try change(inPlay.handle(EnvironmentRequest(.create(title: "E"))))
-        _ = try change(inPlay.handle(EnvironmentRequest(.replaceFromBench(with: .topic(.named("E"))), target: .topic(.named("A")))))
-        XCTAssertEqual(try topicList(), ["Pinned", "C", "B", "E", "A"], "a Guest Topic goes to the end of the Bench")
-        XCTAssertEqual(try guests(), ["E"])
-
-        let refused: [(EnvironmentService, EnvironmentTarget, TopicListRef, TopicFailure.Kind)] = [
-            (inPlay, .topic(.named("A")), .topic(.named("B")), .cardNotInPlay),
-            (inPlay, .topic(.named("Pinned")), .topic(.named("A")), .cardNotInPlay),
-            (inPlay, .topic(.named("B")), .topic(.named("C")), .cardNotBenched),
-        ]
-        for (service, target, benched, kind) in refused {
-            let refusal = try failure(service.handle(EnvironmentRequest(.replaceFromBench(with: benched), target: target)))
-            XCTAssertEqual(refusal.kind, kind, "\(target) with \(benched)")
-            XCTAssertEqual(refusal.phase, .nothingChanged)
-        }
-        XCTAssertEqual(try topicList(), ["Pinned", "C", "B", "E", "A"])
-    }
-
-    func testATradeExchangesThePlacesOfTwoCardsAndEachCardTakesTheMarkOfItsNewSection() throws {
-        let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "C", "D", "Pinned"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
-        _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("Pinned")))))
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
-        let notes = try sessionID("notes")
-        XCTAssertEqual(try topicList(), ["Pinned", "A", "B", "lock:notes", "D", "C"])
-
-        _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.trade(.topic(.named("C")))), target: .topic(.named("A")))))
-        XCTAssertEqual(try topicList(), ["Pinned", "C", "B", "lock:notes", "D", "A"], "A takes the place of C, not the end of the Bench")
-        XCTAssertEqual(try guests(), [], "a trade of a regular card does not touch the Guests")
-        let traded = try change(inPlay.handle(EnvironmentRequest(.moveCard(.trade(.topic(.named("D")))), target: .sessionName("notes"))))
-        XCTAssertEqual(traded.session, notes)
-        XCTAssertEqual(try topicList(), ["Pinned", "C", "B", "D", "A"], "the Lock of a Guest Session ends")
-        XCTAssertEqual(try guests(), ["D"])
-        _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.trade(.topic(.named("A")))), target: .topic(.named("D")))))
-        XCTAssertEqual(try topicList(), ["Pinned", "C", "B", "A", "D"], "a Guest Topic goes to the Bench as a usual card")
-        XCTAssertEqual(try guests(), ["A"])
-        _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.trade(.topic(.named("A")))), target: .topic(.named("B")))))
-        XCTAssertEqual(try topicList(), ["Pinned", "C", "A", "B", "D"], "across the Guests line, the Guest comes In Play without its mark")
-        XCTAssertEqual(try guests(), ["B"], "and the In Play card takes it")
-        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
-
-        let refused: [(EnvironmentTarget, TopicListRef, TopicFailure.Kind)] = [
-            (.topic(.named("Pinned")), .topic(.named("A")), .cardPinned),
-            (.topic(.named("A")), .topic(.named("Pinned")), .cardPinned),
-            (.topic(.named("A")), .topic(.named("Missing")), .topicUnavailable),
-            (.topic(.named("A")), .lock(notes), .cardGuest),
-        ]
-        for (target, other, kind) in refused {
-            let refusal = try failure(inPlay.handle(EnvironmentRequest(.moveCard(.trade(other)), target: target)))
-            XCTAssertEqual(refusal.kind, kind, "\(target) with \(other)")
-            XCTAssertEqual(refusal.phase, .nothingChanged)
-        }
-        XCTAssertEqual(try topicList(), ["Pinned", "C", "A", "B", "lock:notes", "D"])
-    }
-
-    func testMakeAGuestPutsABenchedTopicAtTheEndOfTheGuestsAndBenchTopicPutsItAtTheTopOfTheBench() throws {
-        let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
-        XCTAssertEqual(try topicList(), ["A", "B", "D", "C"])
-
-        let made = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("C")))))
-        XCTAssertEqual(made.topicID, try records().first { $0.title == "C" }?.id)
-        XCTAssertEqual(try topicList(), ["A", "B", "C", "D"], "no other card goes to the Bench")
-        XCTAssertEqual(try guests(), ["C"])
-        let observer = TopicStore(paths: paths)
-        let token = observer.changeToken()
-        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("C")))))
-        XCTAssertEqual(observer.changeToken(), token, "a Guest that is made a Guest again does not change")
-
-        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("D")))))
-        XCTAssertEqual(try topicList(), ["A", "B", "C", "D"])
-        _ = try change(inPlay.handle(EnvironmentRequest(.benchTopic, target: .topic(.named("C")))))
-        XCTAssertEqual(try topicList(), ["A", "B", "D", "C"], "a Guest leaves no Open Place")
-        XCTAssertEqual(try guests(), ["D"])
-        _ = try change(inPlay.handle(EnvironmentRequest(.benchTopic, target: .topic(.named("A")))))
-        XCTAssertEqual(try topicList(), ["_", "B", "D", "A", "C"], "a Topic from a place leaves an Open Place and goes to the top of the Bench")
-
-        _ = try change(inPlay.handle(EnvironmentRequest(.fillOpenPlace(place: 1), target: .topic(.named("C")))))
-        XCTAssertEqual(try topicList(), ["C", "B", "D", "A"], "the Benched Topic fills the Open Place, and no other card moves")
-        _ = try change(inPlay.handle(EnvironmentRequest(.benchTopic, target: .topic(.named("B")))))
-        _ = try change(inPlay.handle(EnvironmentRequest(.fillOpenPlace(place: 2), target: .topic(.named("D")))))
-        XCTAssertEqual(try topicList(), ["C", "D", "B", "A"], "a Guest fills it without its mark")
-        XCTAssertEqual(try guests(), [])
-
-        let refused: [(EnvironmentService, EnvironmentCommand, String, TopicFailure.Kind)] = [
-            (inPlay, .makeGuest, "C", .cardNotBenched),
-            (inPlay, .benchTopic, "A", .cardNotInPlay),
-            (inPlay, .fillOpenPlace(place: 1), "A", .placeNotOpen),
-        ]
-        for (service, command, title, kind) in refused {
-            let refusal = try failure(service.handle(EnvironmentRequest(command, target: .topic(.named(title)))))
-            XCTAssertEqual(refusal.kind, kind, "\(command) \(title)")
-            XCTAssertEqual(refusal.phase, .nothingChanged)
-        }
-    }
-
-    private func move(_ direction: CardMove, _ title: String, using service: EnvironmentService) -> EnvironmentResponse {
-        service.handle(EnvironmentRequest(.moveCard(direction), target: .topic(.named(title))))
-    }
-
-    func testMoveCrossesTheGuestsLineAndTheBenchLineOneSectionPerStep() throws {
-        let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
-        XCTAssertEqual(try topicList(), ["A", "B", "D", "C"])
-
-        _ = try change(move(.down, "A", using: inPlay))
-        XCTAssertEqual(try topicList(), ["B", "A", "D", "C"], "inside the places, a step swaps with the neighbor")
-        _ = try change(move(.down, "A", using: inPlay))
-        XCTAssertEqual(try topicList(), ["B", "_", "A", "D", "C"], "Down from the last place makes the top Guest and leaves an Open Place")
-        XCTAssertEqual(try guests(), ["A"])
-        _ = try change(move(.up, "A", using: inPlay))
-        XCTAssertEqual(try topicList(), ["B", "A", "D", "C"], "Up from the top Guest fills the Open Place")
-        XCTAssertEqual(try guests(), [])
-
-        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("C")))))
-        XCTAssertEqual(try topicList(), ["B", "A", "C", "D"])
-        _ = try change(move(.up, "C", using: inPlay))
-        XCTAssertEqual(try topicList(), ["B", "C", "A", "D"], "with every place full, Up from the top Guest is a Trade with the last place")
-        XCTAssertEqual(try guests(), ["A"])
-
-        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("D")))))
-        _ = try change(move(.down, "A", using: inPlay))
-        XCTAssertEqual(try topicList(), ["B", "C", "D", "A"], "inside the Guests, a step reorders")
-        XCTAssertEqual(try guests(), ["A", "D"])
-        _ = try change(move(.down, "A", using: inPlay))
-        XCTAssertEqual(try topicList(), ["B", "C", "D", "A"], "Down from the last Guest is Bench: the Topic leads the Bench, with no mark")
-        XCTAssertEqual(try guests(), ["D"])
-        XCTAssertFalse(try topicList().contains("_"), "a Guest that is benched leaves no Open Place")
-
-        _ = try change(move(.up, "A", using: inPlay))
-        XCTAssertEqual(try topicList(), ["B", "C", "D", "A"])
-        XCTAssertEqual(try guests(), ["A", "D"], "Up from the top of the Bench is Make a Guest")
-    }
-
-    func testMoveStepsInsideTheBenchAndStopsAtItsEnd() throws {
-        let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "C", "D", "E"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
-        XCTAssertEqual(try topicList(), ["A", "B", "E", "D", "C"])
-
-        _ = try change(move(.up, "D", using: inPlay))
-        XCTAssertEqual(try topicList(), ["A", "B", "D", "E", "C"])
-        _ = try change(move(.down, "D", using: inPlay))
-        XCTAssertEqual(try topicList(), ["A", "B", "E", "D", "C"])
-        XCTAssertEqual(try failure(move(.down, "C", using: inPlay)).kind, .cardAtEnd, "the last Benched card has no Down")
-        _ = try change(move(.up, "E", using: inPlay))
-        XCTAssertEqual(try guests(), ["E"], "Up from the top of the Bench is Make a Guest")
-        XCTAssertEqual(try topicList(), ["A", "B", "E", "D", "C"])
-        XCTAssertEqual(try failure(move(.up, "A", using: inPlay)).kind, .cardAtEnd, "the first place has no Up")
-    }
-
-    func testMoveUpOnAnUnlockedSessionLocksItAsTheLastGuestAndDownRefuses() throws {
-        let wide = service(inPlay: 3)
-        for title in ["A", "B", "C"] { _ = try change(wide.handle(EnvironmentRequest(.create(title: title)))) }
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        let notes = EnvironmentRequest(.moveCard(.down), target: .sessionName("notes"))
-        let down = try failure(wide.handle(notes))
-        XCTAssertEqual(down.kind, .cardHidden)
-        XCTAssertTrue(down.message.contains("Make it a Guest first: muxify topic make-guest --session"), down.message)
-
-        XCTAssertFalse(try server.snapshot().windows.contains { $0.sessionName == "notes" && $0.lockOrder != nil })
-        _ = try change(wide.handle(EnvironmentRequest(.moveSession(to: .up), target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["A", "B", "C", "lock:notes"], "Up on an unlocked Session is Make a Guest")
-        XCTAssertTrue(try server.snapshot().windows.contains { $0.sessionName == "notes" && $0.lockOrder != nil })
-    }
-
-    func testMoveUpTakesTheNextPlaceWhenThereIsRoomAndRefusesAGuestSession() throws {
-        let narrow = service(inPlay: 2)
-        for title in ["A", "B", "C"] { _ = try change(narrow.handle(EnvironmentRequest(.create(title: title)))) }
-        _ = try change(narrow.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("C")))))
-        XCTAssertEqual(try guests(), ["C"])
-        _ = try change(move(.up, "C", using: service(inPlay: 3)))
-        XCTAssertEqual(try guests(), [], "with room in the places and no Open Place, the Guest takes the next place")
-        XCTAssertEqual(try topicList(), ["A", "B", "C"])
-
-        let wide = service(inPlay: 3)
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        _ = try change(wide.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["A", "B", "C", "lock:notes"])
-        let refusal = try failure(wide.handle(EnvironmentRequest(.moveCard(.up), target: .sessionName("notes"))))
-        XCTAssertEqual(refusal.kind, .cardGuest, "a Guest Session cannot take a place")
-        XCTAssertEqual(refusal.phase, .nothingChanged)
-
-        _ = try change(move(.down, "C", using: wide))
-        XCTAssertEqual(try topicList(), ["A", "B", "_", "C", "lock:notes"], "the card from the last place leads the Guests")
-        _ = try change(wide.handle(EnvironmentRequest(.moveCard(.up), target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["A", "B", "_", "lock:notes", "C"])
-        XCTAssertEqual(try failure(wide.handle(EnvironmentRequest(.moveCard(.up), target: .sessionName("notes")))).kind, .cardGuest,
-                       "an Open Place does not change that")
-
-        _ = try change(wide.handle(EnvironmentRequest(.moveCard(.down), target: .sessionName("notes"))))
-        _ = try change(wide.handle(EnvironmentRequest(.moveCard(.down), target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["A", "B", "_", "C"], "Down from the last Guest Unlocks the Session")
-        XCTAssertFalse(try server.snapshot().windows.contains { $0.sessionName == "notes" && $0.lockOrder != nil })
-    }
-
-    func testMoveOfAPinnedTopicStaysAmongTheCardsWithItsPin() throws {
-        let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "P", "Q"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
-        for title in ["P", "Q"] { _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named(title))))) }
-        XCTAssertEqual(try topicList(), ["P", "Q", "A", "B"])
-        _ = try change(move(.down, "P", using: inPlay))
-        XCTAssertEqual(try topicList(), ["Q", "P", "A", "B"])
-        XCTAssertEqual(try failure(move(.down, "P", using: inPlay)).kind, .cardAtEnd, "a Pinned Topic does not cross into the places")
-    }
-
-    func testTheSidebarDragPutsAnInPlayCardNextToAnOpenPlace() throws {
-        let inPlay = service(inPlay: 3)
-        for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
-        _ = try change(inPlay.handle(EnvironmentRequest(.benchTopic, target: .topic(.named("B")))))
-        XCTAssertEqual(try topicList(), ["A", "_", "C", "B", "D"])
-        let open = try XCTUnwrap(TopicStore(paths: paths).read().openPlaces.first).id
-
-        _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.after(.openPlace(open))), target: .topic(.named("A")))))
-        XCTAssertEqual(try topicList(), ["_", "A", "C", "B", "D"], "A goes down past the Open Place")
-        _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.before(.openPlace(open))), target: .topic(.named("C")))))
-        XCTAssertEqual(try topicList(), ["C", "_", "A", "B", "D"], "C goes up past it, and the Bench does not change")
-    }
-
-    func testARegularCardThatLeavesAPlaceLeavesAnOpenPlaceAndALeavingGuestLeavesNone() throws {
-        let inPlay = service(inPlay: 2)
-        for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
-        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("C")))))
-        XCTAssertEqual(try topicList(), ["A", "B", "lock:notes", "C", "D"])
-
-        _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("A")))))
-        XCTAssertEqual(try topicList(), ["A", "_", "B", "lock:notes", "C", "D"], "D does not move up")
-        _ = try change(inPlay.handle(EnvironmentRequest(.benchTopic, target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["A", "_", "B", "C", "D"], "the end of a Guest Session leaves no Open Place")
-        _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("C")))))
-        XCTAssertEqual(try topicList(), ["A", "C", "_", "B", "D"])
-        XCTAssertEqual(try guests(), [], "Pin ends the Guest mark")
-        _ = try change(inPlay.handle(EnvironmentRequest(.unpin, target: .topic(.named("C")))))
-        XCTAssertEqual(try topicList(), ["A", "_", "B", "C", "D"], "with in_play, Unpin puts the Topic at the top of the Bench")
-    }
-
-    func testSettingInPlayGathersTheLocksAtTheEndOfInPlayAndANewTopicFromAGuestSessionIsAGuest() throws {
-        for title in ["A", "B", "C"] { _ = try change(service().handle(EnvironmentRequest(.create(title: title)))) }
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
-        _ = try change(service().handle(EnvironmentRequest(.moveCard(.before(.topic(.named("A")))), target: .sessionName("notes"))))
-        XCTAssertEqual(try topicList(), ["lock:notes", "A", "B", "C"])
-
-        XCTAssertNil(service(inPlay: 2).gatherGuests())
-        XCTAssertEqual(try topicList(), ["A", "B", "lock:notes", "C"])
-        let observer = TopicStore(paths: paths)
-        let token = observer.changeToken()
-        XCTAssertNil(service(inPlay: 2).gatherGuests())
-        XCTAssertEqual(observer.changeToken(), token, "a second gather writes nothing")
-
-        let created = try change(service(inPlay: 2).handle(EnvironmentRequest(.move(to: .newTopic(title: "Notes work")), target: .session(sessionID("notes")))))
-        XCTAssertTrue(created.created)
-        XCTAssertEqual(try topicList(), ["A", "B", "Notes work", "C"], "the new Topic takes the place of the Lock")
-        XCTAssertEqual(try guests(), ["Notes work"], "and its Guest mark")
     }
 
     func testAPathThroughASymlinkFindsTheSessionPathThatTheConfigNames() throws {
@@ -912,15 +441,21 @@ final class TopicServiceTests: XCTestCase {
         #endif
     }
 
-    func testListGivesTheOpenTopicsWithTheirLabelsAndSkipsInvalidEntries() throws {
-        try paths.seedTopicRecordsFile(entries: [
-            #"{"id":"a","title":"Fix"}"#, #"{"id":"b","slug":"fix-login"}"#, #"{"id":"c","title":""}"#,
-            #"{"id":"d","title":"Done","settled_at":"2026-10-01T10:00:00Z"}"#,
-            #"{"id":"e","title":7}"#, #"{"id":"a","title":"Twin"}"#,
+    func testListGivesTheOpenTopicsWithTheirLabelsAndPinsAndASecondPinChangesNothing() throws {
+        var fix = TopicRecord(id: "a", title: "Fix")
+        fix.isPinned = true
+        var done = TopicRecord(id: "d", title: "Done")
+        done.settledAt = "2026-10-01T10:00:00Z"
+        try paths.seedTopicRecords(fix, TopicRecord(id: "b", slug: "fix-login"), TopicRecord(id: "c", title: ""), done)
+        let listed = EnvironmentResponse.topics([
+            TopicSummary(id: "a", label: "Fix", pinned: true), TopicSummary(id: "b", label: "Untitled 1"), TopicSummary(id: "c", label: "Untitled 2"),
         ])
-        XCTAssertEqual(service().handle(EnvironmentRequest(.list)), .topics([
-            TopicSummary(id: "a", label: "Fix"), TopicSummary(id: "b", label: "Untitled 1"), TopicSummary(id: "c", label: "Untitled 2"),
-        ]))
+        XCTAssertEqual(service().handle(EnvironmentRequest(.list)), listed)
+        let observer = TopicStore(paths: paths)
+        let token = observer.changeToken()
+        _ = try change(service().handle(EnvironmentRequest(.pin, target: .topic(.id("a")))))
+        XCTAssertEqual(observer.changeToken(), token, "a second Pin of the same Topic changes nothing")
+        XCTAssertEqual(service().handle(EnvironmentRequest(.list)), listed)
     }
 
     func testTheSettlePreviewOffersEachLiveSessionAndChangesNothing() throws {
@@ -931,15 +466,702 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try paths.storedTopicRows(), before)
     }
 
-    /// A Topic with a Session in game and one in tools.
-    private func twoSessionPathTopic(_ title: String) throws -> String {
-        let id = try topicWithSession(title, at: sessionPath.folder.path, using: service())
-        _ = try change(service().handle(EnvironmentRequest(.addSession(sessionPath: tools.folder.path, workingCopy: .directory), target: .topic(.id(id)))))
-        return id
+    func testSettleKillsOrKeepsEachSessionAsChosen() throws {
+        let id = try twoSessionPathTopic("Ship")
+        var choices = try service().settleChoices(for: .topic(.id(id))).get()
+        XCTAssertEqual(choices.map(\.disposition), [.kill, .kill])
+        let toolsIndex = try XCTUnwrap(choices.firstIndex { $0.name == "tools/ship" })
+        choices[toolsIndex].disposition = .keep
+        _ = try change(service().handle(EnvironmentRequest(.settle(choices: choices), target: .topic(.id(id)))))
+        let record = try XCTUnwrap(records().first { $0.id == id })
+        XCTAssertNotNil(record.settledAt)
+        XCTAssertEqual(record.sessions.compactMap { $0["directory"]?.string }, [sessionPath.folder.path, tools.folder.path])
+        let names = try server.snapshot().windows.map(\.sessionName)
+        XCTAssertFalse(names.contains("game/ship"), "the killed Session is gone")
+        XCTAssertEqual(try server.snapshot().windows.filter { $0.sessionName == "tools" }.map(\.topicID), [nil],
+                       "the kept Session stays with no Topic")
+        XCTAssertEqual(service().handle(EnvironmentRequest(.list)), .topics([]))
     }
 
-    private func sessions(of topic: String) throws -> [String] {
-        Set(try server.snapshot().windows.filter { $0.topicID == topic }.map(\.sessionName)).sorted()
+    func testRenameChangesTheTitleAndRenamesEverySessionOfTheTopic() throws {
+        let id = try twoSessionPathTopic("Ship")
+        let before = Set(try server.snapshot().windows.filter { $0.topicID == id }.map(\.sessionID))
+        _ = try change(service().handle(EnvironmentRequest(.rename(title: " Ship it "), target: .topic(.id(id)))))
+        let record = try XCTUnwrap(records().first { $0.id == id })
+        XCTAssertEqual(record.title, "Ship it")
+        XCTAssertEqual(record.slug, "ship-it")
+        XCTAssertEqual(try sessions(of: id), ["game/ship-it", "tools/ship-it"])
+        XCTAssertEqual(Set(try server.snapshot().windows.filter { $0.topicID == id }.map(\.sessionID)), before, "the same Sessions, renamed")
+    }
+
+    func testReopenCreatesTheRememberedSessionsAndWindowsOfASettledTopic() throws {
+        let id = try topicWithSession("Ship", at: sessionPath.folder.path, using: service())
+        try server.run(["rename-window", "-t", "=game/ship:", "notes"])
+        try server.run(["new-window", "-d", "-t", "=game/ship:", "-n", "logs", "-c", root.path])
+        try waitForPath(sessionPath.folder.path, of: "=game/ship:notes")
+        try waitForPath(root.path, of: "=game/ship:logs")
+        _ = try change(service().handle(EnvironmentRequest(.settle(choices: []), target: .topic(.id(id)))))
+        XCTAssertEqual(try sessions(of: id), [])
+        let reopened = try change(service().handle(EnvironmentRequest(.reopen, target: .topic(.id(id)))))
+        XCTAssertEqual(reopened.topicID, id)
+        let record = try XCTUnwrap(records().first { $0.id == id })
+        XCTAssertNil(record.settledAt)
+        let windows = try server.snapshot().windows.filter { $0.topicID == id }.sorted { $0.index < $1.index }
+        XCTAssertEqual(windows.map(\.sessionName), ["game/ship", "game/ship"])
+        XCTAssertEqual(windows.map(\.name), ["notes", "logs"])
+        // tmux reports /tmp as /private/tmp.
+        XCTAssertEqual(windows.map { ($0.path as NSString).resolvingSymlinksInPath }, [sessionPath.folder.path, root.path])
+        XCTAssertEqual(reopened.shown, WindowID(rawValue: windows[0].id).map { .window($0) })
+    }
+
+    func testAddSessionAnswersWithTheIdsOfTheSessionWindowAndPaneThatItMade() throws {
+        let id = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Ids")))).topicID)
+        let added = try change(service().handle(EnvironmentRequest(.addSession(sessionPath: sessionPath.folder.path, workingCopy: .directory),
+                                                                   target: .topic(.id(id)))))
+        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
+        XCTAssertEqual(added.topicID, id)
+        XCTAssertEqual(added.session?.rawValue, window.sessionID)
+        XCTAssertEqual(added.sessionName, "game/ids")
+        XCTAssertEqual(added.window?.rawValue, window.id)
+        XCTAssertEqual(added.pane?.rawValue, window.activePaneID)
+        let text = String(decoding: try JSONEncoder().encode(EnvironmentResponse.changed(TopicChange(topicID: id))), as: UTF8.self)
+        XCTAssertFalse(text.contains("window"), "a change that made nothing in tmux names no ids: \(text)")
+    }
+
+    func testMarkReadChangesTheTopicUnreadOnlyForATopicAndEachAgentInItsScope() throws {
+        let id = try topicWithSession("Read it", at: sessionPath.folder.path, using: service())
+        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
+        let main = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "main" })
+        func agent(in window: TmuxWindow, status: String, unread: Bool) throws -> PaneID {
+            // exec: Linux's sh, dash, would otherwise stay the Pane's command in front of sleep.
+            let pane = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", window.id, "exec sleep 600"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            try server.run(["set-option", "-p", "-t", pane, "@muxify_agent", "claude", ";", "set-option", "-p", "-t", pane, "@muxify_agent_status", status]
+                           + (unread ? [";", "set-option", "-p", "-t", pane, "@muxify_agent_unread", "1"] : []))
+            let deadline = Date().addingTimeInterval(5)
+            while try server.snapshot().panes.first(where: { $0.id == pane })?.command != "sleep", Date() < deadline { usleep(20_000) }
+            return try XCTUnwrap(PaneID(rawValue: pane))
+        }
+        let done = try agent(in: window, status: "done", unread: false)
+        _ = try agent(in: window, status: "working", unread: false)
+        let outside = try agent(in: main, status: "failed", unread: true)
+        func unreadPanes() throws -> Set<String> { Set(try server.snapshot().panes.filter(\.unread).map(\.id)) }
+        func topicUnread() throws -> Bool { try XCTUnwrap(records().first { $0.id == id }).isUnread }
+
+        XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.unread, scope: .topic), target: .topic(.id(id)))),
+                       .readChanged(TopicReadChange(topicIDs: [id], paneIDs: [done])), "a working Agent does not become Unread")
+        XCTAssertTrue(try topicUnread())
+        XCTAssertEqual(try unreadPanes(), [done.rawValue, outside.rawValue])
+
+        XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.read, scope: .session), target: .pane(done))),
+                       .readChanged(TopicReadChange(paneIDs: [done])), "a Session leaves the Topic Unread as it is")
+        XCTAssertTrue(try topicUnread())
+        XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.read, scope: .pane), target: .pane(done))),
+                       .readChanged(TopicReadChange()), "nothing to change is a success")
+
+        XCTAssertEqual(service().handle(EnvironmentRequest(.markAllRead)), .readChanged(TopicReadChange(topicIDs: [id], paneIDs: [outside])))
+        XCTAssertFalse(try topicUnread())
+        XCTAssertEqual(try unreadPanes(), [])
+
+        try TopicStore(paths: paths).write { try $0.update(id) { $0.settledAt = "2026-10-01T00:00:00Z" } }
+        XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.unread, scope: .topic), target: .topic(.id(id)))),
+                       .readChanged(TopicReadChange(topicIDs: [id], paneIDs: [done])), "a Settled Topic named by ref shows its Unread mark in the Settled list")
+        XCTAssertTrue(try topicUnread())
+        XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.read, scope: .topic), target: .topic(.id(id)))),
+                       .readChanged(TopicReadChange(topicIDs: [id], paneIDs: [done])))
+        XCTAssertFalse(try topicUnread())
+    }
+
+    func testTopicMarkChangesOnlyTheTopicUnreadAndASecondCallChangesNothing() throws {
+        let id = try topicWithSession("Mark only", at: sessionPath.folder.path, using: service())
+        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
+        let pane = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", window.id, "exec sleep 600"])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try server.run(["set-option", "-p", "-t", pane, "@muxify_agent", "claude", ";", "set-option", "-p", "-t", pane, "@muxify_agent_status", "done",
+                        ";", "set-option", "-p", "-t", pane, "@muxify_agent_unread", "1"])
+        try TopicStore(paths: paths).write { try $0.update(id) { $0.isUnread = true } }
+        func unreadPanes() throws -> Set<String> { Set(try server.snapshot().panes.filter(\.unread).map(\.id)) }
+        func topicUnread() throws -> Bool { try XCTUnwrap(records().first { $0.id == id }).isUnread }
+        let read = EnvironmentRequest(.markRead(.read, scope: .topicMark), target: .topic(.id(id)))
+
+        XCTAssertEqual(service().handle(read), .readChanged(TopicReadChange(topicIDs: [id])))
+        XCTAssertFalse(try topicUnread())
+        XCTAssertEqual(try unreadPanes(), [pane], "the Agent keeps its Unread")
+        XCTAssertEqual(service().handle(read), .readChanged(TopicReadChange()), "a second call changes nothing and succeeds")
+
+        XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.unread, scope: .topicMark), target: .topic(.id(id)))),
+                       .readChanged(TopicReadChange(topicIDs: [id])))
+        XCTAssertTrue(try topicUnread())
+    }
+
+    func testKillRunsOnlyWhileThePanesAreTheReviewedOnesAndTheLastSessionLeavesTheTopicEmpty() throws {
+        let id = try topicWithSession("Stop it", at: sessionPath.folder.path, using: service())
+        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
+        let reviewed = Set(try server.snapshot().panes.filter { $0.windowID == window.id }.compactMap { PaneID(rawValue: $0.id) })
+        let agent = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", window.id, "exec sleep 600"]).trimmingCharacters(in: .whitespacesAndNewlines)
+        try server.run(["set-option", "-p", "-t", agent, "@muxify_agent", "claude"])
+        let session = try XCTUnwrap(SessionID(rawValue: window.sessionID))
+        let changed = try failure(service().handle(EnvironmentRequest(.killSession, target: .session(session), expectedPaneIDs: reviewed)))
+        XCTAssertEqual(changed.kind, .panesChanged)
+        XCTAssertEqual(changed.phase, .nothingChanged)
+        XCTAssertTrue(try server.snapshot().windows.contains { $0.sessionID == window.sessionID }, "a changed review killed nothing")
+
+        let all = reviewed.union([PaneID(rawValue: agent)!])
+        let killed = try change(service().handle(EnvironmentRequest(.killSession, target: .session(session), expectedPaneIDs: all)))
+        XCTAssertEqual(killed.topicID, id)
+        XCTAssertEqual(killed.stopped, [PaneID(rawValue: agent)!])
+        XCTAssertFalse(try server.snapshot().windows.contains { $0.sessionID == window.sessionID })
+        let record = try XCTUnwrap(records().first { $0.id == id })
+        XCTAssertNil(record.settledAt, "the Topic stays open")
+        XCTAssertEqual(record.sessions, [], "the user stopped its last Session, so the Topic is Empty")
+    }
+
+    /// Settle remembers each Window's current path. Until a new shell has started, tmux reports its own folder.
+    private func waitForPath(_ path: String, of window: String) throws {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            let current = try server.run(["display-message", "-p", "-t", window, "#{pane_current_path}"])
+            if (current.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).resolvingSymlinksInPath == path { return }
+            usleep(20_000)
+        }
+        XCTFail("\(window) is not in \(path)")
+    }
+}
+
+/// The Worktrees that Add a Session makes, and what Settle, Forget, Remove and Kill and Reopen do with them.
+final class TopicServiceWorktreeTests: TopicServiceTestCase {
+    func testForgetRemovesAnUnmergedCleanWorktreeAndKeepsItsBranch() throws {
+        let app = try repository()
+        _ = try addNewWorktree(of: app, start: .head, title: "Forget clean")
+        let id = try XCTUnwrap(records().first?.id)
+        let path = paths.worktrees.appendingPathComponent("app/forget-clean").path
+        try git(["commit", "-q", "--allow-empty", "-m", "unmerged"], in: path)
+        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [app])
+        XCTAssertTrue(try service.settleChoices(for: .topic(.id(id))).get().allSatisfy { $0.worktree == nil })
+        XCTAssertEqual(try service.forgetChoices(for: .topic(.id(id))).get().worktrees.filter(\.isClean).map(\.id), [path])
+        try assertThrowawayServer()
+        var killed = try service.forgetChoices(for: .topic(.id(id))).get().sessions
+        for index in killed.indices { killed[index].disposition = .kill }
+        _ = try change(service.handle(EnvironmentRequest(.forget(choices: killed, worktrees: [path]), target: .topic(.id(id)))))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path))
+        XCTAssertFalse(try git(["branch", "--list", "forget-clean"], in: app.folder.path).isEmpty)
+    }
+
+    func testForgetOfASettledTopicRemovesItsRememberedWorktree() throws {
+        let app = try repository()
+        _ = try addNewWorktree(of: app, start: .head, title: "Remembered")
+        let id = try XCTUnwrap(records().first?.id)
+        let path = paths.worktrees.appendingPathComponent("app/remembered").path
+        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [app])
+        try assertThrowawayServer()
+        var killed = try service.settleChoices(for: .topic(.id(id))).get()
+        for index in killed.indices { killed[index].disposition = .kill }
+        _ = try change(service.handle(EnvironmentRequest(.settle(choices: killed), target: .topic(.id(id)))))
+        let choices = try service.forgetChoices(for: .topic(.id(id))).get()
+        XCTAssertTrue(choices.sessions.isEmpty)
+        XCTAssertEqual(choices.worktrees.map(\.id), [path])
+        try assertThrowawayServer()
+        _ = try change(service.handle(EnvironmentRequest(.forget(choices: [], worktrees: [path]), target: .topic(.id(id)))))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: path))
+        XCTAssertTrue(try records().isEmpty)
+    }
+
+    func testForgetKeepsDirtyWorktreesAndWorktreesUsedByKeptSessions() throws {
+        let app = try repository()
+        for dirty in [false, true] {
+            let title = dirty ? "Dirty" : "Kept"
+            _ = try addNewWorktree(of: app, start: .head, title: title)
+            let id = try XCTUnwrap(records().first { $0.title == title }?.id)
+            let path = paths.worktrees.appendingPathComponent("app/" + title.lowercased()).path
+            if dirty { try "draft".write(toFile: path + "/draft", atomically: true, encoding: .utf8) }
+            let service = EnvironmentService(paths: paths, server: server, sessionPaths: [app])
+            var choices = try service.forgetChoices(for: .topic(.id(id))).get()
+            XCTAssertEqual(choices.worktrees.first?.isClean, !dirty)
+            if !dirty { choices.sessions[0].disposition = .keep }
+            try assertThrowawayServer()
+            _ = try change(service.handle(EnvironmentRequest(.forget(choices: choices.sessions, worktrees: [path]), target: .topic(.id(id)))))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: path))
+            XCTAssertFalse(try records().contains { $0.id == id })
+        }
+    }
+
+    func testRemoveAndKillRemovesTheCleanWorktreeOnlyWhenTheRequestNamesIt() throws {
+        let app = try repository()
+        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
+        for remove in [false, true] {
+            let title = remove ? "Remove tree" : "Keep tree"
+            let session = try addNewWorktree(of: app, start: .head, title: title)
+            let id = try XCTUnwrap(records().first { $0.title == title }?.id)
+            let worktree = try XCTUnwrap(session["worktree_path"]?.string)
+            let live = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
+            try assertThrowawayServer()
+            _ = try change(service.handle(EnvironmentRequest(.removeAndKill(worktrees: remove ? [worktree] : []),
+                                                       target: .session(try XCTUnwrap(SessionID(rawValue: live.sessionID))))))
+            try assertEmpty(id)
+            XCTAssertEqual(FileManager.default.fileExists(atPath: worktree), !remove)
+            XCTAssertNoThrow(try git(["rev-parse", "--verify", "refs/heads/" + (session["branch"]?.string ?? "")], in: app.folder.path))
+        }
+    }
+
+    @discardableResult
+    private func git(_ arguments: [String], in directory: String) throws -> String {
+        try Shell.run("/usr/bin/git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgSign=false"] + arguments, directory: directory)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A plain repository `work/app` whose main branch has the commits `first`, tagged `v1`, and `second`.
+    private func repository() throws -> SessionPath {
+        let path = root.appendingPathComponent("work/app").path
+        try git(["init", "-q", "-b", "main", path], in: root.path)
+        try git(["commit", "-q", "--allow-empty", "-m", "first"], in: path)
+        try git(["-c", "tag.gpgSign=false", "tag", "-a", "-m", "v1", "v1"], in: path)
+        try git(["commit", "-q", "--allow-empty", "-m", "second"], in: path)
+        return SessionPath(path: path, name: "app", layout: RepositoryLayout.detect(at: path))
+    }
+
+    /// Adds `app` to a new Topic `title` with a new Worktree from the main checkout. Returns the remembered Session.
+    private func addNewWorktree(of app: SessionPath, start: WorktreeStart, title: String) throws -> JSONValue {
+        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
+        let id = try XCTUnwrap(change(service.handle(EnvironmentRequest(.create(title: title)))).topicID)
+        _ = try change(service.handle(EnvironmentRequest(.addSession(sessionPath: app.folder.path, workingCopy: .newWorktree(from: app.folder.path, start: start)),
+                                                   target: .topic(.id(id)))))
+        return try XCTUnwrap(records().first { $0.id == id }?.sessions.first)
+    }
+
+    func testANewWorktreeStartsAtTheBaseHeadOrTheCommitThatARefNamesAndTheRecordKeepsThatCommit() throws {
+        let app = try repository()
+        let session = try addNewWorktree(of: app, start: .head, title: "Ship")
+        let head = try git(["rev-parse", "HEAD"], in: app.folder.path)
+        let worktree = paths.worktrees.appendingPathComponent("app/ship").path
+        XCTAssertEqual(session["base"], .string(head))
+        XCTAssertEqual(session["worktree_path"], .string(worktree))
+        XCTAssertEqual(session["branch"], .string("ship"))
+        XCTAssertEqual(session["worktree_created"], .bool(true))
+        XCTAssertEqual(try git(["rev-parse", "HEAD"], in: worktree), head)
+        XCTAssertEqual(try git(["symbolic-ref", "--short", "HEAD"], in: worktree), "ship")
+
+        let hotfix = try addNewWorktree(of: app, start: .ref("v1"), title: "Hotfix")
+        let tagged = try git(["rev-parse", "v1^{commit}"], in: app.folder.path)
+        XCTAssertNotEqual(tagged, head)
+        XCTAssertEqual(hotfix["base"], .string(tagged))
+        XCTAssertEqual(try git(["rev-parse", "HEAD"], in: paths.worktrees.appendingPathComponent("app/hotfix").path), tagged)
+    }
+
+    func testANewWorktreeOnABranchChecksItOutAndSettleRemovesTheWorktreeAndKeepsTheBranch() throws {
+        let app = try repository()
+        try git(["branch", "feature/hover"], in: app.folder.path)
+        let commit = try git(["rev-parse", "feature/hover"], in: app.folder.path)
+        let session = try addNewWorktree(of: app, start: .branch("feature/hover"), title: "Hover")
+        let worktree = paths.worktrees.appendingPathComponent("app/feature-hover").path
+        XCTAssertEqual(session["worktree_path"], .string(worktree))
+        XCTAssertEqual(session["branch"], .string("feature/hover"))
+        XCTAssertEqual(session["worktree_created"], .bool(true), "Muxify made the Worktree, so Settle may remove it")
+        XCTAssertEqual(session["base"], .string(commit))
+        XCTAssertEqual(try git(["symbolic-ref", "--short", "HEAD"], in: worktree), "feature/hover")
+
+        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
+        let id = try XCTUnwrap(records().first { $0.title == "Hover" }?.id)
+        var choices = try service.settleChoices(for: .topic(.id(id))).get()
+        for index in choices.indices { choices[index].disposition = .kill; choices[index].removeWorktree = true }
+        try git(["update-ref", "refs/heads/main", commit], in: app.folder.path)
+        _ = try change(service.handle(EnvironmentRequest(.settle(choices: choices), target: .topic(.id(id)))))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: worktree), "Settle kept the merged Worktree that Muxify made")
+        XCTAssertEqual(try git(["rev-parse", "feature/hover"], in: app.folder.path), commit, "the branch stays")
+    }
+
+    func testAStartThatNamesNoBranchACheckedOutBranchOrNoCommitFailsAndMakesNoWorktree() throws {
+        let app = try repository()
+        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
+        let id = try XCTUnwrap(change(service.handle(EnvironmentRequest(.create(title: "Ship")))).topicID)
+        let cases: [(start: WorktreeStart, kind: TopicFailure.Kind, message: String)] = [
+            (.branch("nope"), .branchUnavailable, "No local branch nope is in the repository of \(app.folder.path)."),
+            (.branch("main"), .branchCheckedOut, "checked out in the Worktree"),
+            (.ref("nope"), .gitFailed, "No commit matches nope in \(app.folder.path)."),
+        ]
+        for (start, kind, message) in cases {
+            let failed = try failure(service.handle(EnvironmentRequest(.addSession(sessionPath: app.folder.path,
+                                                                                   workingCopy: .newWorktree(from: app.folder.path, start: start)),
+                                                                      target: .topic(.id(id)))))
+            XCTAssertEqual(failed.kind, kind, "\(start)")
+            XCTAssertEqual(failed.phase, .nothingChanged, "\(start)")
+            XCTAssertTrue(failed.message.contains(message), "\(start): \(failed.message)")
+        }
+        XCTAssertEqual(try records().first { $0.id == id }?.sessions, [])
+        XCTAssertEqual((try? FileManager.default.contentsOfDirectory(atPath: paths.worktrees.appendingPathComponent("app").path)) ?? [], [])
+        XCTAssertEqual(try service.worktreeStarts(from: app.folder.path).get().first { $0.branch == "main" }?.checkedOutAt.map(Folder.local),
+                       app.folder, "the start step shows where main is checked out")
+    }
+
+    /// A Settled Topic whose new Worktree `app/ship` and branch `ship` are both gone, and whose SessionPath HEAD moved on.
+    private func settledWithGoneWorktree(of app: SessionPath) throws -> (id: String, base: String) {
+        let session = try addNewWorktree(of: app, start: .head, title: "Ship")
+        let id = try XCTUnwrap(records().first?.id)
+        let base = try XCTUnwrap(session["base"]?.string)
+        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
+        _ = try change(service.handle(EnvironmentRequest(.settle(choices: []), target: .topic(.id(id)))))
+        try git(["worktree", "remove", "--force", paths.worktrees.appendingPathComponent("app/ship").path], in: app.folder.path)
+        try git(["branch", "-D", "ship"], in: app.folder.path)
+        try git(["commit", "-q", "--allow-empty", "-m", "third"], in: app.folder.path)
+        XCTAssertNotEqual(try git(["rev-parse", "HEAD"], in: app.folder.path), base)
+        return (id, base)
+    }
+
+    func testReopenStartsAGoneBranchAgainAtTheRecordedBase() throws {
+        let app = try repository()
+        let (id, base) = try settledWithGoneWorktree(of: app)
+        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
+        _ = try change(service.handle(EnvironmentRequest(.reopen, target: .topic(.id(id)))))
+        let worktree = paths.worktrees.appendingPathComponent("app/ship").path
+        XCTAssertEqual(try git(["rev-parse", "ship"], in: app.folder.path), base, "the new branch starts at the recorded base, not at HEAD")
+        XCTAssertEqual(try git(["symbolic-ref", "--short", "HEAD"], in: worktree), "ship")
+        let record = try XCTUnwrap(records().first { $0.id == id })
+        XCTAssertNil(record.settledAt)
+        XCTAssertEqual(record.sessions.first?["base"], .string(base))
+    }
+
+    func testReopenFailsAndChangesNothingWhenTheRecordedBaseIsGone() throws {
+        let app = try repository()
+        let (id, base) = try settledWithGoneWorktree(of: app)
+        let missing = String(repeating: "0", count: 40)
+        try paths.withStateDatabase { try $0.execute("UPDATE topics SET sessions = replace(sessions, ?, ?)", base, missing) }
+        let before = try records()
+        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
+        let worktree = paths.worktrees.appendingPathComponent("app/ship").path
+        let failed = try failure(service.handle(EnvironmentRequest(.reopen, target: .topic(.id(id)))))
+        XCTAssertEqual(failed, TopicFailure(kind: .gitFailed, phase: .nothingChanged, message: "The Worktree \(worktree) and its branch are gone, "
+                       + "and the repository does not have their base commit \(missing). Muxify did not make the Worktree again."))
+        XCTAssertEqual(try records(), before)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: worktree))
+        XCTAssertEqual(try git(["branch", "--list", "ship"], in: app.folder.path), "")
+        XCTAssertEqual(try sessions(of: id), [])
+    }
+
+    func testSettleRefusesToRemoveAWorktreeWithUncommittedWorkAndChangesNothing() throws {
+        let app = try repository()
+        _ = try addNewWorktree(of: app, start: .head, title: "Ship")
+        let id = try XCTUnwrap(records().first?.id)
+        let worktree = paths.worktrees.appendingPathComponent("app/ship").path
+        try "draft".write(toFile: worktree + "/notes.txt", atomically: true, encoding: .utf8)
+        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
+        var choices = try service.settleChoices(for: .topic(.id(id))).get()
+        XCTAssertEqual(choices.map(\.worktree?.path), [worktree], "Settle offers to remove the merged Worktree")
+        choices[0].removeWorktree = true
+        choices[0].disposition = .kill
+        let before = try records()
+        let failed = try failure(service.handle(EnvironmentRequest(.settle(choices: choices), target: .topic(.id(id)))))
+        XCTAssertEqual(failed, TopicFailure(kind: .gitFailed, phase: .nothingChanged,
+                                            message: "The Worktree \(worktree) has uncommitted changes. Commit or remove them, or keep the Worktree."))
+        XCTAssertEqual(try records(), before, "the Topic is not Settled")
+        XCTAssertEqual(try sessions(of: id), ["app/ship"])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: worktree + "/notes.txt"))
+    }
+}
+
+/// The cards of the Topics list: In Play, the Guests, the Bench, Locks and Pins.
+final class TopicServiceCardTests: TopicServiceTestCase {
+    func testMakeAGuestPutsANoTopicSessionAtTheEndOfTheGuestsAndBenchEndsIt() throws {
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        _ = try change(service().handle(EnvironmentRequest(.create(title: "First"))))
+        _ = try topicWithSession("Second", at: sessionPath.folder.path, using: service())
+        let locked = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
+        XCTAssertNil(locked.topicID)
+        XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes"])
+        _ = try change(service().handle(EnvironmentRequest(.create(title: "Third"))))
+        _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
+        XCTAssertEqual(try topicList(), ["First", "Second", "Third", "lock:notes"], "a Guest Session keeps its place under the places")
+
+        let inTopic = try failure(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("game/second"))))
+        XCTAssertEqual(inTopic.kind, .cardNotBenched, "a Session in a Topic names the Topic's card, which is In Play")
+        XCTAssertEqual(inTopic.phase, .nothingChanged)
+        XCTAssertEqual(try failure(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("missing")))).kind, .sourceUnavailable)
+
+        _ = try change(service().handle(EnvironmentRequest(.benchTopic, target: .sessionName("notes"))))
+        XCTAssertEqual(try topicList(), ["First", "Second", "Third"])
+        XCTAssertEqual(try server.run(["show-options", "-qv", "-t", "notes", SessionLock.option]), "")
+    }
+
+    func testALockedSessionThatGoesIntoATopicLosesItsLock() throws {
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        try server.run(["new-session", "-d", "-s", "chores", "-c", tools.folder.path])
+        _ = try change(service().handle(EnvironmentRequest(.create(title: "First"))))
+        _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
+        _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("chores"))))
+        _ = try change(service().handle(EnvironmentRequest(.create(title: "Second"))))
+        XCTAssertEqual(try topicList(), ["First", "Second", "lock:notes", "lock:chores"])
+
+        let notes = try XCTUnwrap(SessionID(rawValue: try server.snapshot().windows.first { $0.sessionName == "notes" }!.sessionID))
+        let created = try change(service().handle(EnvironmentRequest(.move(to: .newTopic(title: "Notes work")), target: .session(notes))))
+        XCTAssertTrue(created.created)
+        XCTAssertEqual(try topicList(), ["First", "Second", "Notes work", "lock:chores"], "the new Topic takes the Lock's place")
+
+        let chores = try XCTUnwrap(SessionID(rawValue: try server.snapshot().windows.first { $0.sessionName == "chores" }!.sessionID))
+        _ = try change(service().handle(EnvironmentRequest(.move(to: .topic(.named("Second"))), target: .session(chores))))
+        XCTAssertEqual(try topicList(), ["First", "Second", "Notes work"], "the Topic that the Session moves to keeps its place")
+        XCTAssertTrue(try server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
+    }
+
+    func testAReturningTopicGoesAfterAGuestSessionAndSavesNormalizedLockRanks() throws {
+        let one = service(inPlay: 1)
+        _ = try change(one.handle(EnvironmentRequest(.create(title: "First"))))
+        let returning = try XCTUnwrap(change(one.handle(EnvironmentRequest(.create(title: "Returning")))).topicID)
+        XCTAssertEqual(try topicList(), ["First", "Returning"])
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        try server.run(["set-option", "-t", "notes", SessionLock.option, String(Double.greatestFiniteMagnitude)])
+        try TopicStore(paths: paths).write { try $0.update(returning) { $0.settledAt = "2026-10-01T00:00:00Z" } }
+        _ = try change(one.handle(EnvironmentRequest(.reopen, target: .topic(.id(returning)))))
+        XCTAssertEqual(try topicList(), ["First", "lock:notes", "Returning"])
+        let lockOrder = try XCTUnwrap(Double(server.run(["show-options", "-qv", "-t", "notes", SessionLock.option]).trimmingCharacters(in: .whitespacesAndNewlines)))
+        XCTAssertLessThan(lockOrder, Double.greatestFiniteMagnitude, "Reopen must save normalized Lock ranks to tmux")
+        try TopicStore(paths: paths).write { try $0.update(returning) { $0.settledAt = "2026-10-01T00:00:00Z" } }
+        _ = try change(one.handle(EnvironmentRequest(.startFresh, target: .topic(.id(returning)))))
+        XCTAssertEqual(try topicList(), ["First", "lock:notes", "Returning"])
+    }
+
+    func testANewOrReturningTopicGoesToTheTopOfTheBench() throws {
+        let inPlay = service(inPlay: 2)
+        func settle(_ title: String) throws -> String {
+            let id = try XCTUnwrap(records().first { $0.title == title }).id
+            try TopicStore(paths: paths).write { try $0.update(id) { $0.settledAt = "2026-10-01T00:00:00Z" } }
+            return id
+        }
+        for title in ["First", "Second", "Third", "Fourth"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        XCTAssertEqual(try topicList(), ["First", "Second", "Fourth", "Third"], "a new Topic")
+        _ = try change(inPlay.handle(EnvironmentRequest(.reopen, target: .topic(.id(settle("Second"))))))
+        XCTAssertEqual(try topicList(), ["First", "Fourth", "Second", "Third"], "Reopen")
+        _ = try change(inPlay.handle(EnvironmentRequest(.startFresh, target: .topic(.id(settle("Third"))))))
+        XCTAssertEqual(try topicList(), ["First", "Fourth", "Third", "Second"], "Start Fresh")
+    }
+
+    /// A service with `topics.in_play` set to `count`.
+    private func service(inPlay count: Int) -> EnvironmentService {
+        var topics = Config.Topics()
+        topics.inPlay = count
+        return EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath], topics: topics)
+    }
+
+    /// The Session `name`'s tmux id.
+    private func sessionID(_ name: String) throws -> SessionID {
+        try XCTUnwrap(SessionID(rawValue: try server.snapshot().windows.first { $0.sessionName == name }!.sessionID))
+    }
+
+    /// The open Topics that have the Guest mark, by title.
+    private func guests() throws -> Set<String> {
+        Set(try records().filter { $0.isGuest && $0.settledAt == nil }.compactMap(\.title))
+    }
+
+    func testChooseInPlayFillsThePlacesInTheChosenOrderAndLeavesTheOthersOpen() throws {
+        let inPlay = service(inPlay: 2)
+        for title in ["A", "B", "C", "D", "Pinned"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("Pinned")))))
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
+        let notes = try sessionID("notes")
+        XCTAssertEqual(try topicList(), ["Pinned", "A", "B", "lock:notes", "D", "C"],
+                       "a new Topic goes to the top of the Bench, and a Lock is a Guest at the end of In Play")
+
+        _ = try change(inPlay.handle(EnvironmentRequest(.chooseInPlay([.topic(.named("C")), .topic(.named("A"))]))))
+        XCTAssertEqual(try topicList(), ["Pinned", "C", "A", "lock:notes", "B", "D"], "the Guest stays a Guest")
+
+        let refused: [(EnvironmentService, [TopicListRef], TopicFailure.Kind)] = [
+            (inPlay, [.topic(.named("A")), .topic(.named("Pinned"))], .cardPinned),
+            (inPlay, [.topic(.named("A")), .lock(notes)], .cardGuest),
+            (inPlay, [.topic(.named("A")), .topic(.named("A"))], .unsupported),
+            (inPlay, [.topic(.named("Missing"))], .topicUnavailable),
+        ]
+        for (service, cards, kind) in refused {
+            let refusal = try failure(service.handle(EnvironmentRequest(.chooseInPlay(cards))))
+            XCTAssertEqual(refusal.kind, kind, "\(cards)")
+            XCTAssertEqual(refusal.phase, .nothingChanged)
+        }
+        XCTAssertEqual(try topicList(), ["Pinned", "C", "A", "lock:notes", "B", "D"])
+    }
+
+    func testReplaceFromBenchPutsTheBenchedCardInThePlaceAndGivesItTheMarkOfAGuest() throws {
+        let inPlay = service(inPlay: 2)
+        for title in ["A", "B", "C", "D", "Pinned"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("Pinned")))))
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
+        XCTAssertEqual(try topicList(), ["Pinned", "A", "B", "lock:notes", "D", "C"])
+
+        let came = try change(inPlay.handle(EnvironmentRequest(.replaceFromBench(with: .topic(.named("C"))), target: .sessionName("notes"))))
+        XCTAssertEqual(came.topicID, try records().first { $0.title == "C" }?.id)
+        XCTAssertEqual(try topicList(), ["Pinned", "A", "B", "C", "D"], "the Lock of a Guest Session ends")
+        XCTAssertEqual(try guests(), ["C"], "the card that comes In Play takes the Guest mark")
+        XCTAssertTrue(try server.snapshot().windows.allSatisfy { $0.lockOrder == nil })
+
+        let refused: [(EnvironmentService, EnvironmentTarget, TopicListRef, TopicFailure.Kind)] = [
+            (inPlay, .topic(.named("D")), .topic(.named("B")), .cardNotInPlay),
+            (inPlay, .topic(.named("Pinned")), .topic(.named("D")), .cardNotInPlay),
+            (inPlay, .topic(.named("B")), .topic(.named("A")), .cardNotBenched),
+        ]
+        for (service, target, benched, kind) in refused {
+            let refusal = try failure(service.handle(EnvironmentRequest(.replaceFromBench(with: benched), target: target)))
+            XCTAssertEqual(refusal.kind, kind, "\(target) with \(benched)")
+            XCTAssertEqual(refusal.phase, .nothingChanged)
+        }
+        XCTAssertEqual(try topicList(), ["Pinned", "A", "B", "C", "D"])
+    }
+
+    func testATradeExchangesThePlacesOfTwoCardsAndEachCardTakesTheMarkOfItsNewSection() throws {
+        let inPlay = service(inPlay: 2)
+        for title in ["A", "B", "C", "D", "Pinned"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("Pinned")))))
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
+        let notes = try sessionID("notes")
+        XCTAssertEqual(try topicList(), ["Pinned", "A", "B", "lock:notes", "D", "C"])
+
+        let traded = try change(inPlay.handle(EnvironmentRequest(.moveCard(.trade(.topic(.named("D")))), target: .sessionName("notes"))))
+        XCTAssertEqual(traded.session, notes)
+        XCTAssertEqual(try topicList(), ["Pinned", "A", "B", "D", "C"], "the Lock of a Guest Session ends")
+        XCTAssertEqual(try guests(), ["D"])
+        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
+
+        let refused: [(EnvironmentTarget, TopicListRef, TopicFailure.Kind)] = [
+            (.topic(.named("Pinned")), .topic(.named("A")), .cardPinned),
+            (.topic(.named("A")), .topic(.named("Pinned")), .cardPinned),
+            (.topic(.named("A")), .topic(.named("Missing")), .topicUnavailable),
+            (.topic(.named("A")), .lock(notes), .cardGuest),
+        ]
+        for (target, other, kind) in refused {
+            let refusal = try failure(inPlay.handle(EnvironmentRequest(.moveCard(.trade(other)), target: target)))
+            XCTAssertEqual(refusal.kind, kind, "\(target) with \(other)")
+            XCTAssertEqual(refusal.phase, .nothingChanged)
+        }
+        XCTAssertEqual(try topicList(), ["Pinned", "A", "B", "D", "lock:notes", "C"])
+    }
+
+    func testMakeAGuestPutsABenchedTopicAtTheEndOfTheGuestsAndBenchTopicPutsItAtTheTopOfTheBench() throws {
+        let inPlay = service(inPlay: 2)
+        for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        XCTAssertEqual(try topicList(), ["A", "B", "D", "C"])
+
+        let made = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("C")))))
+        XCTAssertEqual(made.topicID, try records().first { $0.title == "C" }?.id)
+        XCTAssertEqual(try topicList(), ["A", "B", "C", "D"], "no other card goes to the Bench")
+        XCTAssertEqual(try guests(), ["C"])
+        let observer = TopicStore(paths: paths)
+        let token = observer.changeToken()
+        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("C")))))
+        XCTAssertEqual(observer.changeToken(), token, "a Guest that is made a Guest again does not change")
+
+        _ = try change(inPlay.handle(EnvironmentRequest(.benchTopic, target: .topic(.named("A")))))
+        XCTAssertEqual(try topicList(), ["_", "B", "C", "A", "D"], "a Topic from a place leaves an Open Place and goes to the top of the Bench")
+        _ = try change(inPlay.handle(EnvironmentRequest(.fillOpenPlace(place: 1), target: .topic(.named("D")))))
+        XCTAssertEqual(try topicList(), ["D", "B", "C", "A"], "the Benched Topic fills the Open Place, and no other card moves")
+
+        let refused: [(EnvironmentService, EnvironmentCommand, String, TopicFailure.Kind)] = [
+            (inPlay, .makeGuest, "B", .cardNotBenched),
+            (inPlay, .benchTopic, "A", .cardNotInPlay),
+            (inPlay, .fillOpenPlace(place: 1), "A", .placeNotOpen),
+        ]
+        for (service, command, title, kind) in refused {
+            let refusal = try failure(service.handle(EnvironmentRequest(command, target: .topic(.named(title)))))
+            XCTAssertEqual(refusal.kind, kind, "\(command) \(title)")
+            XCTAssertEqual(refusal.phase, .nothingChanged)
+        }
+    }
+
+    private func move(_ direction: CardMove, _ title: String, using service: EnvironmentService) -> EnvironmentResponse {
+        service.handle(EnvironmentRequest(.moveCard(direction), target: .topic(.named(title))))
+    }
+
+    func testMoveAppliesTheStepOfTheCardAndARefusedStepChangesNothing() throws {
+        let inPlay = service(inPlay: 2)
+        for title in ["A", "B", "C"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
+        XCTAssertEqual(try topicList(), ["A", "B", "lock:notes", "C"])
+
+        let refused: [(CardMove, EnvironmentTarget, TopicFailure.Kind)] = [
+            (.up, .topic(.named("A")), .cardAtEnd),
+            (.down, .topic(.named("C")), .cardAtEnd),
+            (.up, .sessionName("notes"), .cardGuest),
+        ]
+        for (direction, target, kind) in refused {
+            let refusal = try failure(inPlay.handle(EnvironmentRequest(.moveCard(direction), target: target)))
+            XCTAssertEqual(refusal.kind, kind, "\(direction) \(target)")
+            XCTAssertEqual(refusal.phase, .nothingChanged)
+        }
+        XCTAssertEqual(try topicList(), ["A", "B", "lock:notes", "C"], "a refused step changes nothing")
+
+        _ = try change(move(.down, "B", using: inPlay))
+        XCTAssertEqual(try topicList(), ["A", "_", "B", "lock:notes", "C"], "Down from the last place makes the top Guest and leaves an Open Place")
+        XCTAssertEqual(try guests(), ["B"])
+        _ = try change(move(.up, "B", using: inPlay))
+        XCTAssertEqual(try topicList(), ["A", "B", "lock:notes", "C"], "Up from the top Guest fills the Open Place")
+        XCTAssertEqual(try guests(), [])
+    }
+
+    func testMoveUpOnAnUnlockedSessionLocksItAsTheLastGuestAndDownRefuses() throws {
+        let wide = service(inPlay: 3)
+        for title in ["A", "B", "C"] { _ = try change(wide.handle(EnvironmentRequest(.create(title: title)))) }
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        let notes = EnvironmentRequest(.moveCard(.down), target: .sessionName("notes"))
+        let down = try failure(wide.handle(notes))
+        XCTAssertEqual(down.kind, .cardHidden)
+        XCTAssertTrue(down.message.contains("Make it a Guest first: muxify topic make-guest --session"), down.message)
+
+        XCTAssertFalse(try server.snapshot().windows.contains { $0.sessionName == "notes" && $0.lockOrder != nil })
+        _ = try change(wide.handle(EnvironmentRequest(.moveSession(to: .up), target: .sessionName("notes"))))
+        XCTAssertEqual(try topicList(), ["A", "B", "C", "lock:notes"], "Up on an unlocked Session is Make a Guest")
+        XCTAssertTrue(try server.snapshot().windows.contains { $0.sessionName == "notes" && $0.lockOrder != nil })
+    }
+
+    func testTheSidebarDragPutsAnInPlayCardNextToAnOpenPlace() throws {
+        let inPlay = service(inPlay: 3)
+        for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        _ = try change(inPlay.handle(EnvironmentRequest(.benchTopic, target: .topic(.named("B")))))
+        XCTAssertEqual(try topicList(), ["A", "_", "C", "B", "D"])
+        let open = try XCTUnwrap(TopicStore(paths: paths).read().openPlaces.first).id
+
+        _ = try change(inPlay.handle(EnvironmentRequest(.moveCard(.after(.openPlace(open))), target: .topic(.named("A")))))
+        XCTAssertEqual(try topicList(), ["_", "A", "C", "B", "D"], "A goes down past the Open Place, and the Bench does not change")
+    }
+
+    func testPinOfACardInAPlaceLeavesAnOpenPlaceAndUnpinPutsItAtTheTopOfTheBench() throws {
+        let inPlay = service(inPlay: 2)
+        for title in ["A", "B", "C", "D"] { _ = try change(inPlay.handle(EnvironmentRequest(.create(title: title)))) }
+        _ = try change(inPlay.handle(EnvironmentRequest(.makeGuest, target: .topic(.named("C")))))
+        XCTAssertEqual(try topicList(), ["A", "B", "C", "D"])
+
+        _ = try change(inPlay.handle(EnvironmentRequest(.pin, target: .topic(.named("A")))))
+        XCTAssertEqual(try topicList(), ["A", "_", "B", "C", "D"], "D does not move up")
+        _ = try change(inPlay.handle(EnvironmentRequest(.unpin, target: .topic(.named("A")))))
+        XCTAssertEqual(try topicList(), ["_", "B", "C", "A", "D"], "with in_play, Unpin puts the Topic at the top of the Bench")
+    }
+
+    func testTheUpgradeGatherPutsTheLocksAtTheEndOfInPlayAndASecondGatherWritesNothing() throws {
+        for title in ["A", "B", "C"] { _ = try change(service().handle(EnvironmentRequest(.create(title: title)))) }
+        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
+        _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
+        _ = try change(service().handle(EnvironmentRequest(.moveCard(.before(.topic(.named("A")))), target: .sessionName("notes"))))
+        XCTAssertEqual(try topicList(), ["lock:notes", "A", "B", "C"])
+
+        XCTAssertNil(service(inPlay: 2).gatherGuests())
+        XCTAssertEqual(try topicList(), ["A", "B", "lock:notes", "C"])
+        let observer = TopicStore(paths: paths)
+        let token = observer.changeToken()
+        XCTAssertNil(service(inPlay: 2).gatherGuests())
+        XCTAssertEqual(observer.changeToken(), token, "a second gather writes nothing")
+    }
+}
+
+/// Sessions, Windows and Panes moved into, out of and among Topics.
+final class TopicServiceSessionTests: TopicServiceTestCase {
+    func testMoveTakesAWholeSessionIntoTheTopicThatARefNames() throws {
+        try server.run(["new-session", "-d", "-s", "loose", "-c", sessionPath.folder.path])
+        let topic = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Release")))).topicID)
+        let loose = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "loose" })
+        let moved = try change(service().handle(EnvironmentRequest(.move(to: .topic(.named("Release"))),
+                                                             target: .session(SessionID(rawValue: loose.sessionID)!))))
+        XCTAssertEqual(moved.shown, .window(WindowID(rawValue: loose.id)!))
+        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.id == loose.id })
+        XCTAssertEqual(window.topicID, topic)
+        XCTAssertEqual(window.sessionName, "loose/release")
+        let again = try change(service().handle(EnvironmentRequest(.move(to: .topic(.id(topic))), target: .session(SessionID(rawValue: loose.sessionID)!))))
+        XCTAssertNil(again.topicID, "a second move changes nothing")
     }
 
     func testMovingASessionKeepsTheTopicsSessionsInThatOrderAndSortingByCreationLetsThemGo() throws {
@@ -992,54 +1214,6 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try failure(step(.up, .sessionName("chores"))).kind, .cardGuest, "a Guest Session takes no In Play place")
     }
 
-    func testSettleKillsOrKeepsEachSessionAsChosen() throws {
-        let id = try twoSessionPathTopic("Ship")
-        var choices = try service().settleChoices(for: .topic(.id(id))).get()
-        XCTAssertEqual(choices.map(\.disposition), [.kill, .kill])
-        let toolsIndex = try XCTUnwrap(choices.firstIndex { $0.name == "tools/ship" })
-        choices[toolsIndex].disposition = .keep
-        _ = try change(service().handle(EnvironmentRequest(.settle(choices: choices), target: .topic(.id(id)))))
-        let record = try XCTUnwrap(records().first { $0.id == id })
-        XCTAssertNotNil(record.settledAt)
-        XCTAssertEqual(record.sessions.compactMap { $0["directory"]?.string }, [sessionPath.folder.path, tools.folder.path])
-        let names = try server.snapshot().windows.map(\.sessionName)
-        XCTAssertFalse(names.contains("game/ship"), "the killed Session is gone")
-        XCTAssertEqual(try server.snapshot().windows.filter { $0.sessionName == "tools" }.map(\.topicID), [nil],
-                       "the kept Session stays with no Topic")
-        XCTAssertEqual(service().handle(EnvironmentRequest(.list)), .topics([]))
-    }
-
-    func testRenameChangesTheTitleAndRenamesEverySessionOfTheTopic() throws {
-        let id = try twoSessionPathTopic("Ship")
-        let before = Set(try server.snapshot().windows.filter { $0.topicID == id }.map(\.sessionID))
-        _ = try change(service().handle(EnvironmentRequest(.rename(title: " Ship it "), target: .topic(.id(id)))))
-        let record = try XCTUnwrap(records().first { $0.id == id })
-        XCTAssertEqual(record.title, "Ship it")
-        XCTAssertEqual(record.slug, "ship-it")
-        XCTAssertEqual(try sessions(of: id), ["game/ship-it", "tools/ship-it"])
-        XCTAssertEqual(Set(try server.snapshot().windows.filter { $0.topicID == id }.map(\.sessionID)), before, "the same Sessions, renamed")
-    }
-
-    func testReopenCreatesTheRememberedSessionsAndWindowsOfASettledTopic() throws {
-        let id = try topicWithSession("Ship", at: sessionPath.folder.path, using: service())
-        try server.run(["rename-window", "-t", "=game/ship:", "notes"])
-        try server.run(["new-window", "-d", "-t", "=game/ship:", "-n", "logs", "-c", root.path])
-        try waitForPath(sessionPath.folder.path, of: "=game/ship:notes")
-        try waitForPath(root.path, of: "=game/ship:logs")
-        _ = try change(service().handle(EnvironmentRequest(.settle(choices: []), target: .topic(.id(id)))))
-        XCTAssertEqual(try sessions(of: id), [])
-        let reopened = try change(service().handle(EnvironmentRequest(.reopen, target: .topic(.id(id)))))
-        XCTAssertEqual(reopened.topicID, id)
-        let record = try XCTUnwrap(records().first { $0.id == id })
-        XCTAssertNil(record.settledAt)
-        let windows = try server.snapshot().windows.filter { $0.topicID == id }.sorted { $0.index < $1.index }
-        XCTAssertEqual(windows.map(\.sessionName), ["game/ship", "game/ship"])
-        XCTAssertEqual(windows.map(\.name), ["notes", "logs"])
-        // tmux reports /tmp as /private/tmp.
-        XCTAssertEqual(windows.map { ($0.path as NSString).resolvingSymlinksInPath }, [sessionPath.folder.path, root.path])
-        XCTAssertEqual(reopened.shown, WindowID(rawValue: windows[0].id).map { .window($0) })
-    }
-
     func testNewTopicFromPaneMovesThePanesWindowIntoANewUntitledTopic() throws {
         try server.run(["new-session", "-d", "-s", "loose", "-c", sessionPath.folder.path])
         let windowID = try server.run(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "=loose:", "-c", sessionPath.folder.path])
@@ -1056,21 +1230,6 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(topicWindows.map(\.id), [windowID], "the new Session holds only the moved Window")
         XCTAssertEqual(topicWindows.first?.sessionName, "loose/" + (record.slug ?? ""))
         XCTAssertEqual(try server.snapshot().windows.filter { $0.sessionName == "loose" }.count, 1, "the other Window stays")
-    }
-
-    func testNewTopicFromPaneTakesOnlyThatPaneOutOfASplitWindow() throws {
-        try server.run(["new-session", "-d", "-s", "loose", "-c", sessionPath.folder.path])
-        let paneID = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=loose:", "-c", sessionPath.folder.path])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let source = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "loose" })
-        let moved = try change(service().handle(EnvironmentRequest(.move(to: .newTopic(title: "")), target: .pane(try XCTUnwrap(PaneID(rawValue: paneID))))))
-        let record = try XCTUnwrap(records().first)
-        let topicWindows = try server.snapshot().windows.filter { $0.topicID == record.id }
-        XCTAssertEqual(topicWindows.map(\.paneCount), [1])
-        XCTAssertEqual(moved.shown, topicWindows.first.flatMap { WindowID(rawValue: $0.id) }.map { .window($0) })
-        let paneWindow = try server.run(["display-message", "-p", "-t", paneID, "#{window_id}"]).trimmingCharacters(in: .whitespacesAndNewlines)
-        XCTAssertEqual(topicWindows.map(\.id), [paneWindow])
-        XCTAssertEqual(try server.snapshot().windows.filter { $0.id == source.id }.map(\.paneCount), [1], "the other Pane stays in its Window")
     }
 
     func testMovePaneToExistingOrNewTopicKeepsItsProcessAndOtherPanes() throws {
@@ -1184,14 +1343,6 @@ final class TopicServiceTests: XCTestCase {
         }
     }
 
-    /// A Topic whose Session the user took out remembers no Session: it is Empty, and Reopen does not make it again.
-    private func assertEmpty(_ id: String, file: StaticString = #filePath, line: UInt = #line) throws {
-        let record = try XCTUnwrap(records().first { $0.id == id }, file: file, line: line)
-        XCTAssertEqual(record.sessions, [], file: file, line: line)
-        XCTAssertNil(record.settledAt, file: file, line: line)
-        XCTAssertFalse(try server.snapshot().windows.contains { $0.topicID == id }, file: file, line: line)
-    }
-
     func testRemovingTheOnlySessionLeavesTheTopicEmptyAndTheSessionLive() throws {
         let id = try topicWithSession("Only", at: sessionPath.folder.path, using: service())
         let session = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
@@ -1255,127 +1406,6 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertFalse(try server.snapshot().windows.contains { $0.sessionID == killed.sessionID })
         XCTAssertEqual(try records().first { $0.id == id }?.sessions.compactMap { $0["directory"]?.string }, [sessionPath.folder.path])
         XCTAssertEqual(removed.shown, .window(try XCTUnwrap(WindowID(rawValue: other.id))))
-    }
-
-    func testRemoveAndKillRemovesTheCleanWorktreeOnlyWhenTheRequestNamesIt() throws {
-        let app = try repository()
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
-        for remove in [false, true] {
-            let title = remove ? "Remove tree" : "Keep tree"
-            let session = try addNewWorktree(of: app, start: .head, title: title)
-            let id = try XCTUnwrap(records().first { $0.title == title }?.id)
-            let worktree = try XCTUnwrap(session["worktree_path"]?.string)
-            let live = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
-            try assertThrowawayServer()
-            _ = try change(service.handle(EnvironmentRequest(.removeAndKill(worktrees: remove ? [worktree] : []),
-                                                       target: .session(try XCTUnwrap(SessionID(rawValue: live.sessionID))))))
-            try assertEmpty(id)
-            XCTAssertEqual(FileManager.default.fileExists(atPath: worktree), !remove)
-            XCTAssertNoThrow(try git(["rev-parse", "--verify", "refs/heads/" + (session["branch"]?.string ?? "")], in: app.folder.path))
-        }
-    }
-
-    @discardableResult
-    private func git(_ arguments: [String], in directory: String) throws -> String {
-        try Shell.run("/usr/bin/git", ["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgSign=false"] + arguments, directory: directory)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// A plain repository `work/app` whose main branch has the commits `first`, tagged `v1`, and `second`.
-    private func repository() throws -> SessionPath {
-        let path = root.appendingPathComponent("work/app").path
-        try git(["init", "-q", "-b", "main", path], in: root.path)
-        try git(["commit", "-q", "--allow-empty", "-m", "first"], in: path)
-        try git(["-c", "tag.gpgSign=false", "tag", "-a", "-m", "v1", "v1"], in: path)
-        try git(["commit", "-q", "--allow-empty", "-m", "second"], in: path)
-        return SessionPath(path: path, name: "app", layout: RepositoryLayout.detect(at: path))
-    }
-
-    /// Adds `app` to a new Topic `title` with a new Worktree from the main checkout. Returns the remembered Session.
-    private func addNewWorktree(of app: SessionPath, start: WorktreeStart, title: String) throws -> JSONValue {
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
-        let id = try XCTUnwrap(change(service.handle(EnvironmentRequest(.create(title: title)))).topicID)
-        _ = try change(service.handle(EnvironmentRequest(.addSession(sessionPath: app.folder.path, workingCopy: .newWorktree(from: app.folder.path, start: start)),
-                                                   target: .topic(.id(id)))))
-        return try XCTUnwrap(records().first { $0.id == id }?.sessions.first)
-    }
-
-    func testANewWorktreeStartsAtTheBaseHeadAndTheRecordKeepsThatCommit() throws {
-        let app = try repository()
-        let session = try addNewWorktree(of: app, start: .head, title: "Ship")
-        let head = try git(["rev-parse", "HEAD"], in: app.folder.path)
-        let worktree = paths.worktrees.appendingPathComponent("app/ship").path
-        XCTAssertEqual(session["base"], .string(head))
-        XCTAssertEqual(session["worktree_path"], .string(worktree))
-        XCTAssertEqual(session["branch"], .string("ship"))
-        XCTAssertEqual(session["worktree_created"], .bool(true))
-        XCTAssertEqual(try git(["rev-parse", "HEAD"], in: worktree), head)
-        XCTAssertEqual(try git(["symbolic-ref", "--short", "HEAD"], in: worktree), "ship")
-    }
-
-    func testANewWorktreeFromABaseRefStartsAtTheCommitThatTheRefNames() throws {
-        let app = try repository()
-        let session = try addNewWorktree(of: app, start: .ref("v1"), title: "Hotfix")
-        let tagged = try git(["rev-parse", "v1^{commit}"], in: app.folder.path)
-        XCTAssertNotEqual(tagged, try git(["rev-parse", "HEAD"], in: app.folder.path))
-        XCTAssertEqual(session["base"], .string(tagged))
-        XCTAssertEqual(try git(["rev-parse", "HEAD"], in: paths.worktrees.appendingPathComponent("app/hotfix").path), tagged)
-    }
-
-    func testANewWorktreeOnABranchChecksItOutAndSettleRemovesTheWorktreeAndKeepsTheBranch() throws {
-        let app = try repository()
-        try git(["branch", "feature/hover"], in: app.folder.path)
-        let commit = try git(["rev-parse", "feature/hover"], in: app.folder.path)
-        let session = try addNewWorktree(of: app, start: .branch("feature/hover"), title: "Hover")
-        let worktree = paths.worktrees.appendingPathComponent("app/feature-hover").path
-        XCTAssertEqual(session["worktree_path"], .string(worktree))
-        XCTAssertEqual(session["branch"], .string("feature/hover"))
-        XCTAssertEqual(session["worktree_created"], .bool(true), "Muxify made the Worktree, so Settle may remove it")
-        XCTAssertEqual(session["base"], .string(commit))
-        XCTAssertEqual(try git(["symbolic-ref", "--short", "HEAD"], in: worktree), "feature/hover")
-
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
-        let id = try XCTUnwrap(records().first { $0.title == "Hover" }?.id)
-        var choices = try service.settleChoices(for: .topic(.id(id))).get()
-        for index in choices.indices { choices[index].disposition = .kill; choices[index].removeWorktree = true }
-        try git(["update-ref", "refs/heads/main", commit], in: app.folder.path)
-        _ = try change(service.handle(EnvironmentRequest(.settle(choices: choices), target: .topic(.id(id)))))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: worktree), "Settle kept the merged Worktree that Muxify made")
-        XCTAssertEqual(try git(["rev-parse", "feature/hover"], in: app.folder.path), commit, "the branch stays")
-    }
-
-    func testABranchThatIsMissingOrCheckedOutFailsAndMakesNoWorktree() throws {
-        let app = try repository()
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
-        let id = try XCTUnwrap(change(service.handle(EnvironmentRequest(.create(title: "Ship")))).topicID)
-        func add(_ branch: String) throws -> TopicFailure {
-            try failure(service.handle(EnvironmentRequest(.addSession(sessionPath: app.folder.path,
-                                                                       workingCopy: .newWorktree(from: app.folder.path, start: .branch(branch))),
-                                                          target: .topic(.id(id)))))
-        }
-        XCTAssertEqual(try add("nope"), TopicFailure(kind: .branchUnavailable, phase: .nothingChanged,
-                                                     message: "No local branch nope is in the repository of \(app.folder.path)."))
-        let checkedOut = try add("main")
-        XCTAssertEqual(checkedOut.kind, .branchCheckedOut)
-        XCTAssertEqual(checkedOut.phase, .nothingChanged)
-        XCTAssertTrue(checkedOut.message.contains("checked out in the Worktree"), checkedOut.message)
-        XCTAssertEqual(try records().first { $0.id == id }?.sessions, [])
-        XCTAssertEqual(try service.worktreeStarts(from: app.folder.path).get().first { $0.branch == "main" }?.checkedOutAt.map(Folder.local),
-                       app.folder, "the start step shows where main is checked out")
-    }
-
-    func testAddSessionAnswersWithTheIdsOfTheSessionWindowAndPaneThatItMade() throws {
-        let id = try XCTUnwrap(change(service().handle(EnvironmentRequest(.create(title: "Ids")))).topicID)
-        let added = try change(service().handle(EnvironmentRequest(.addSession(sessionPath: sessionPath.folder.path, workingCopy: .directory),
-                                                                   target: .topic(.id(id)))))
-        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
-        XCTAssertEqual(added.topicID, id)
-        XCTAssertEqual(added.session?.rawValue, window.sessionID)
-        XCTAssertEqual(added.sessionName, "game/ids")
-        XCTAssertEqual(added.window?.rawValue, window.id)
-        XCTAssertEqual(added.pane?.rawValue, window.activePaneID)
-        let text = String(decoding: try JSONEncoder().encode(EnvironmentResponse.changed(TopicChange(topicID: id))), as: UTF8.self)
-        XCTAssertFalse(text.contains("window"), "a change that made nothing in tmux names no ids: \(text)")
     }
 
     func testNewWindowGoesToTheTargetsSessionAndAnswersWithItsIds() throws {
@@ -1493,230 +1523,6 @@ final class TopicServiceTests: XCTestCase {
         XCTAssertEqual(try ids("other"), [other])
         XCTAssertEqual(try server.run(["display-message", "-p", "-t", "order:", "#{window_id}"]).trimmingCharacters(in: .whitespacesAndNewlines), current,
                        "the Session keeps its current Window")
-    }
-
-    func testMarkReadChangesTheTopicUnreadOnlyForATopicAndEachAgentInItsScope() throws {
-        let id = try topicWithSession("Read it", at: sessionPath.folder.path, using: service())
-        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
-        let main = try XCTUnwrap(try server.snapshot().windows.first { $0.sessionName == "main" })
-        func agent(in window: TmuxWindow, status: String, unread: Bool) throws -> PaneID {
-            // exec: Linux's sh, dash, would otherwise stay the Pane's command in front of sleep.
-            let pane = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", window.id, "exec sleep 600"])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            try server.run(["set-option", "-p", "-t", pane, "@muxify_agent", "claude", ";", "set-option", "-p", "-t", pane, "@muxify_agent_status", status]
-                           + (unread ? [";", "set-option", "-p", "-t", pane, "@muxify_agent_unread", "1"] : []))
-            let deadline = Date().addingTimeInterval(5)
-            while try server.snapshot().panes.first(where: { $0.id == pane })?.command != "sleep", Date() < deadline { usleep(20_000) }
-            return try XCTUnwrap(PaneID(rawValue: pane))
-        }
-        let done = try agent(in: window, status: "done", unread: false)
-        _ = try agent(in: window, status: "working", unread: false)
-        let outside = try agent(in: main, status: "failed", unread: true)
-        func unreadPanes() throws -> Set<String> { Set(try server.snapshot().panes.filter(\.unread).map(\.id)) }
-        func topicUnread() throws -> Bool { try XCTUnwrap(records().first { $0.id == id }).isUnread }
-
-        XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.unread, scope: .topic), target: .topic(.id(id)))),
-                       .readChanged(TopicReadChange(topicIDs: [id], paneIDs: [done])), "a working Agent does not become Unread")
-        XCTAssertTrue(try topicUnread())
-        XCTAssertEqual(try unreadPanes(), [done.rawValue, outside.rawValue])
-
-        XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.read, scope: .session), target: .pane(done))),
-                       .readChanged(TopicReadChange(paneIDs: [done])), "a Session leaves the Topic Unread as it is")
-        XCTAssertTrue(try topicUnread())
-        XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.read, scope: .pane), target: .pane(done))),
-                       .readChanged(TopicReadChange()), "nothing to change is a success")
-
-        XCTAssertEqual(service().handle(EnvironmentRequest(.markAllRead)), .readChanged(TopicReadChange(topicIDs: [id], paneIDs: [outside])))
-        XCTAssertFalse(try topicUnread())
-        XCTAssertEqual(try unreadPanes(), [])
-
-        try TopicStore(paths: paths).write { try $0.update(id) { $0.settledAt = "2026-10-01T00:00:00Z" } }
-        XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.unread, scope: .topic), target: .topic(.id(id)))),
-                       .readChanged(TopicReadChange(topicIDs: [id], paneIDs: [done])), "a Settled Topic named by ref shows its Unread mark in the Settled list")
-        XCTAssertTrue(try topicUnread())
-        XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.read, scope: .topic), target: .topic(.id(id)))),
-                       .readChanged(TopicReadChange(topicIDs: [id], paneIDs: [done])))
-        XCTAssertFalse(try topicUnread())
-    }
-
-    func testTopicMarkChangesOnlyTheTopicUnreadAndASecondCallChangesNothing() throws {
-        let id = try topicWithSession("Mark only", at: sessionPath.folder.path, using: service())
-        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
-        let pane = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", window.id, "exec sleep 600"])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        try server.run(["set-option", "-p", "-t", pane, "@muxify_agent", "claude", ";", "set-option", "-p", "-t", pane, "@muxify_agent_status", "done",
-                        ";", "set-option", "-p", "-t", pane, "@muxify_agent_unread", "1"])
-        try TopicStore(paths: paths).write { try $0.update(id) { $0.isUnread = true } }
-        func unreadPanes() throws -> Set<String> { Set(try server.snapshot().panes.filter(\.unread).map(\.id)) }
-        func topicUnread() throws -> Bool { try XCTUnwrap(records().first { $0.id == id }).isUnread }
-        let read = EnvironmentRequest(.markRead(.read, scope: .topicMark), target: .topic(.id(id)))
-
-        XCTAssertEqual(service().handle(read), .readChanged(TopicReadChange(topicIDs: [id])))
-        XCTAssertFalse(try topicUnread())
-        XCTAssertEqual(try unreadPanes(), [pane], "the Agent keeps its Unread")
-        XCTAssertEqual(service().handle(read), .readChanged(TopicReadChange()), "a second call changes nothing and succeeds")
-
-        XCTAssertEqual(service().handle(EnvironmentRequest(.markRead(.unread, scope: .topicMark), target: .topic(.id(id)))),
-                       .readChanged(TopicReadChange(topicIDs: [id])))
-        XCTAssertTrue(try topicUnread())
-    }
-
-    func testKillRunsOnlyWhileThePanesAreTheReviewedOnesAndTheLastSessionLeavesTheTopicEmpty() throws {
-        let id = try topicWithSession("Stop it", at: sessionPath.folder.path, using: service())
-        let window = try XCTUnwrap(try server.snapshot().windows.first { $0.topicID == id })
-        let reviewed = Set(try server.snapshot().panes.filter { $0.windowID == window.id }.compactMap { PaneID(rawValue: $0.id) })
-        let agent = try server.run(["split-window", "-d", "-P", "-F", "#{pane_id}", "-t", window.id, "exec sleep 600"]).trimmingCharacters(in: .whitespacesAndNewlines)
-        try server.run(["set-option", "-p", "-t", agent, "@muxify_agent", "claude"])
-        let session = try XCTUnwrap(SessionID(rawValue: window.sessionID))
-        let changed = try failure(service().handle(EnvironmentRequest(.killSession, target: .session(session), expectedPaneIDs: reviewed)))
-        XCTAssertEqual(changed.kind, .panesChanged)
-        XCTAssertEqual(changed.phase, .nothingChanged)
-        XCTAssertTrue(try server.snapshot().windows.contains { $0.sessionID == window.sessionID }, "a changed review killed nothing")
-
-        let all = reviewed.union([PaneID(rawValue: agent)!])
-        let killed = try change(service().handle(EnvironmentRequest(.killSession, target: .session(session), expectedPaneIDs: all)))
-        XCTAssertEqual(killed.topicID, id)
-        XCTAssertEqual(killed.stopped, [PaneID(rawValue: agent)!])
-        XCTAssertFalse(try server.snapshot().windows.contains { $0.sessionID == window.sessionID })
-        let record = try XCTUnwrap(records().first { $0.id == id })
-        XCTAssertNil(record.settledAt, "the Topic stays open")
-        XCTAssertEqual(record.sessions, [], "the user stopped its last Session, so the Topic is Empty")
-    }
-
-    func testPinPutsTheTopicLastAmongThePinnedAndListGivesTheListOrderWithThePin() throws {
-        for title in ["First", "Second", "Third"] { _ = try change(service().handle(EnvironmentRequest(.create(title: title)))) }
-        let third = try XCTUnwrap(change(service().handle(EnvironmentRequest(.pin, target: .topic(.named("Third"))))).topicID)
-        _ = try change(service().handle(EnvironmentRequest(.pin, target: .topic(.named("Second")))))
-        _ = try change(service().handle(EnvironmentRequest(.pin, target: .topic(.named("Second")))))
-        func list() throws -> [String] {
-            guard case .topics(let topics) = service().handle(EnvironmentRequest(.list)) else { throw CancellationError() }
-            return topics.map { $0.label + ($0.pinned ? " (pinned)" : "") }
-        }
-        XCTAssertEqual(try list(), ["Third (pinned)", "Second (pinned)", "First"], "a second Pin of the same Topic changes nothing")
-
-        _ = try change(service().handle(EnvironmentRequest(.unpin, target: .topic(.id(third)))))
-        XCTAssertEqual(try list(), ["Second (pinned)", "First", "Third"], "Unpin puts the Topic where a new Topic goes")
-    }
-
-    func testMoveStepsAmongTheCardsAndFailsAtTheEnd() throws {
-        try server.run(["new-session", "-d", "-s", "notes", "-c", sessionPath.folder.path])
-        for title in ["First", "Second", "Third"] { _ = try change(service().handle(EnvironmentRequest(.create(title: title)))) }
-        _ = try change(service().handle(EnvironmentRequest(.makeGuest, target: .sessionName("notes"))))
-        func move(_ move: CardMove, _ target: EnvironmentTarget) -> EnvironmentResponse {
-            service().handle(EnvironmentRequest(.moveCard(move), target: target))
-        }
-
-        _ = try change(move(.up, .topic(.named("Third"))))
-        XCTAssertEqual(try topicList(), ["First", "Third", "Second", "lock:notes"])
-        _ = try change(move(.down, .topic(.named("First"))))
-        XCTAssertEqual(try topicList(), ["Third", "First", "Second", "lock:notes"])
-        XCTAssertEqual(try failure(move(.up, .sessionName("notes"))).kind, .cardGuest, "a Guest Session takes no In Play place")
-
-        let atEnd = try failure(move(.up, .topic(.named("Third"))))
-        XCTAssertEqual(atEnd.kind, .cardAtEnd)
-        XCTAssertEqual(atEnd.phase, .nothingChanged)
-        XCTAssertEqual(try topicList(), ["Third", "First", "Second", "lock:notes"], "a failed move changes nothing")
-    }
-
-    func testABaseRefThatNamesNoCommitFailsAndMakesNoWorktree() throws {
-        let app = try repository()
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
-        let id = try XCTUnwrap(change(service.handle(EnvironmentRequest(.create(title: "Ship")))).topicID)
-        let failed = try failure(service.handle(EnvironmentRequest(.addSession(sessionPath: app.folder.path, workingCopy: .newWorktree(from: app.folder.path, start: .ref("nope"))),
-                                                             target: .topic(.id(id)))))
-        XCTAssertEqual(failed, TopicFailure(kind: .gitFailed, phase: .nothingChanged, message: "No commit matches nope in \(app.folder.path)."))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.worktrees.appendingPathComponent("app/ship").path))
-        XCTAssertEqual(try records().first { $0.id == id }?.sessions, [])
-    }
-
-    /// A Settled Topic whose new Worktree `app/ship` and branch `ship` are both gone, and whose SessionPath HEAD moved on.
-    private func settledWithGoneWorktree(of app: SessionPath) throws -> (id: String, base: String) {
-        let session = try addNewWorktree(of: app, start: .head, title: "Ship")
-        let id = try XCTUnwrap(records().first?.id)
-        let base = try XCTUnwrap(session["base"]?.string)
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
-        _ = try change(service.handle(EnvironmentRequest(.settle(choices: []), target: .topic(.id(id)))))
-        try git(["worktree", "remove", "--force", paths.worktrees.appendingPathComponent("app/ship").path], in: app.folder.path)
-        try git(["branch", "-D", "ship"], in: app.folder.path)
-        try git(["commit", "-q", "--allow-empty", "-m", "third"], in: app.folder.path)
-        XCTAssertNotEqual(try git(["rev-parse", "HEAD"], in: app.folder.path), base)
-        return (id, base)
-    }
-
-    func testReopenStartsAGoneBranchAgainAtTheRecordedBase() throws {
-        let app = try repository()
-        let (id, base) = try settledWithGoneWorktree(of: app)
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
-        _ = try change(service.handle(EnvironmentRequest(.reopen, target: .topic(.id(id)))))
-        let worktree = paths.worktrees.appendingPathComponent("app/ship").path
-        XCTAssertEqual(try git(["rev-parse", "ship"], in: app.folder.path), base, "the new branch starts at the recorded base, not at HEAD")
-        XCTAssertEqual(try git(["symbolic-ref", "--short", "HEAD"], in: worktree), "ship")
-        let record = try XCTUnwrap(records().first { $0.id == id })
-        XCTAssertNil(record.settledAt)
-        XCTAssertEqual(record.sessions.first?["base"], .string(base))
-    }
-
-    func testReopenFailsAndChangesNothingWhenTheRecordedBaseIsGone() throws {
-        let app = try repository()
-        let (id, base) = try settledWithGoneWorktree(of: app)
-        let missing = String(repeating: "0", count: 40)
-        try paths.withStateDatabase { try $0.execute("UPDATE topics SET sessions = replace(sessions, ?, ?)", base, missing) }
-        let before = try records()
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
-        let worktree = paths.worktrees.appendingPathComponent("app/ship").path
-        let failed = try failure(service.handle(EnvironmentRequest(.reopen, target: .topic(.id(id)))))
-        XCTAssertEqual(failed, TopicFailure(kind: .gitFailed, phase: .nothingChanged, message: "The Worktree \(worktree) and its branch are gone, "
-                       + "and the repository does not have their base commit \(missing). Muxify did not make the Worktree again."))
-        XCTAssertEqual(try records(), before)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: worktree))
-        XCTAssertEqual(try git(["branch", "--list", "ship"], in: app.folder.path), "")
-        XCTAssertEqual(try sessions(of: id), [])
-    }
-
-    func testSettleRefusesToRemoveAWorktreeWithUncommittedWorkAndChangesNothing() throws {
-        let app = try repository()
-        _ = try addNewWorktree(of: app, start: .head, title: "Ship")
-        let id = try XCTUnwrap(records().first?.id)
-        let worktree = paths.worktrees.appendingPathComponent("app/ship").path
-        try "draft".write(toFile: worktree + "/notes.txt", atomically: true, encoding: .utf8)
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
-        var choices = try service.settleChoices(for: .topic(.id(id))).get()
-        XCTAssertEqual(choices.map(\.worktree?.path), [worktree], "Settle offers to remove the merged Worktree")
-        choices[0].removeWorktree = true
-        choices[0].disposition = .kill
-        let before = try records()
-        let failed = try failure(service.handle(EnvironmentRequest(.settle(choices: choices), target: .topic(.id(id)))))
-        XCTAssertEqual(failed, TopicFailure(kind: .gitFailed, phase: .nothingChanged,
-                                            message: "The Worktree \(worktree) has uncommitted changes. Commit or remove them, or keep the Worktree."))
-        XCTAssertEqual(try records(), before, "the Topic is not Settled")
-        XCTAssertEqual(try sessions(of: id), ["app/ship"])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: worktree + "/notes.txt"))
-    }
-
-    func testSettleRemovesAMergedWorktreeInTheServicesOwnWorktreesFolder() throws {
-        let app = try repository()
-        _ = try addNewWorktree(of: app, start: .head, title: "Ship")
-        let id = try XCTUnwrap(records().first?.id)
-        let worktree = paths.worktrees.appendingPathComponent("app/ship").path
-        let service = EnvironmentService(paths: paths, server: server, sessionPaths: [sessionPath, app])
-        var choices = try service.settleChoices(for: .topic(.id(id))).get()
-        choices[0].removeWorktree = true
-        choices[0].disposition = .kill
-        guard case .changed = service.handle(EnvironmentRequest(.settle(choices: choices), target: .topic(.id(id)))) else {
-            return XCTFail("Settle failed")
-        }
-        XCTAssertFalse(FileManager.default.fileExists(atPath: worktree), "Settle kept the Worktree")
-    }
-
-    /// Settle remembers each Window's current path. Until a new shell has started, tmux reports its own folder.
-    private func waitForPath(_ path: String, of window: String) throws {
-        let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline {
-            let current = try server.run(["display-message", "-p", "-t", window, "#{pane_current_path}"])
-            if (current.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).resolvingSymlinksInPath == path { return }
-            usleep(20_000)
-        }
-        XCTFail("\(window) is not in \(path)")
     }
 }
 

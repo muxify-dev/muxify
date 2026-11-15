@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 /// The palette shows a running Session in place of the folder row with the same launch name. So a Session that
 /// leaves its Topic must not take the launch name of a folder it does not run in.
@@ -12,9 +13,7 @@ final class LeavingTopicNamingTests: XCTestCase {
         Worktree(path: "/work/tool/main", branch: "main"), Worktree(path: "/work/tool/feat", branch: "feat")]))]
 
     private func window(_ name: String, in folder: String) -> TmuxWindow {
-        TmuxWindow(id: "@1", sessionID: "$1", sessionName: name, index: 0, name: "shell", paneTitle: "",
-            path: folder, command: "zsh", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0,
-            agent: "", storedBrowser: StoredBrowser(), openRequests: [], topicID: "topic", sessionPath: folder)
+        .fixture(sessionName: name, path: folder, topicID: "topic", sessionPath: folder)
     }
 
     private func names(_ commands: [TopicPlan.Command]) -> [String] {

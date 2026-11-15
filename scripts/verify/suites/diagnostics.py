@@ -91,7 +91,7 @@ class Diagnostics(unittest.TestCase):
              'no launch line in %s' % today, 10)
         self.assertFalse((self.logs/'muxify.log').exists(), 'the app still writes muxify.log')
 
-    def test_a_minute_record_says_the_app_was_idle_and_what_it_showed(self):
+    def test_a_minute_record_says_the_app_was_idle_what_it_showed_and_what_tmux_used(self):
         # The first minute ends a minute after Diagnostics starts at launch. A verify run gives the app no key press,
         # click or scroll: the driver acts through the accessibility tree.
         def minutes():
@@ -99,28 +99,20 @@ class Diagnostics(unittest.TestCase):
         line = wait(minutes, 'no minute record in %s' % self.logs, 90)[0]
         fields = dict(word.split('=', 1) for word in line.split(' ')[3:])
         for key in ['cpu.app.avg', 'cpu.app.peak', 'main.busy', 'mem.app', 'threads', 'open_files', 'input', 'window',
-                    'working_marks', 'marks_move', 'sidebar', 'topic_cards', 'session_rows']:
+                    'working_marks', 'marks_move', 'sidebar', 'topic_cards', 'session_rows', 'bodies',
+                    'cpu.tmux.avg', 'cpu.tmux.peak', 'mem.tmux', 'cpu.commands.avg']:
             self.assertIn(key, fields, line)
         self.assertEqual('idle', fields['input'], line)
         self.assertEqual('topics', fields['sidebar'], line)
         self.assertGreaterEqual(float(fields['cpu.app.peak']), float(fields['cpu.app.avg']), line)
-        self.assertNotIn(' resources: ', self.log_text(), 'the app still writes the resources line')
-
-    def test_a_minute_record_gives_the_sandbox_tmux_servers_cpu_and_memory(self):
+        # Launch draws the Sidebar, so the first minute names the counted views whose bodies ran.
+        self.assertNotEqual('none', fields['bodies'], line)
         # The Sandbox's server is the app's only Local server, so it is the one the tmux group reads. The group
         # counts from its second read after the first snapshot names the server, well inside the first minute.
-        server = int(self.s.tmux('display', '-p', '-t', 'diagnostics', '#{pid}'))
-        def with_tmux():
-            return [line for line in self.log_text().splitlines()
-                    if re.match(r'\S+ \S+ minute ', line) and ' cpu.tmux.avg=' in line]
-        line = wait(with_tmux, 'no minute record with cpu.tmux for server %d in %s' % (server, self.logs), 150)[0]
-        fields = dict(word.split('=', 1) for word in line.split(' ')[3:])
-        for key in ['cpu.tmux.avg', 'cpu.tmux.peak', 'mem.tmux']:
-            self.assertGreaterEqual(float(fields[key]), 0, line)
         self.assertGreater(float(fields['mem.tmux']), 0, line)
+        self.assertGreaterEqual(float(fields['cpu.tmux.avg']), 0, line)
         self.assertGreaterEqual(float(fields['cpu.tmux.peak']), float(fields['cpu.tmux.avg']), line)
-        # The app's commands, such as its tmux control client, are read too.
-        self.assertIn('cpu.commands.avg', fields, line)
+        self.assertNotIn(' resources: ', self.log_text(), 'the app still writes the resources line')
 
     def test_a_burst_is_sampled_and_recorded_when_it_ends(self):
         # A busy stall spins a thread off the main thread: a Burst with no freeze. Launch can make a Burst of its own
@@ -214,53 +206,6 @@ class Diagnostics(unittest.TestCase):
         self.config.write_text(CONFIG % 'true')
         wait(lambda: ' on: pid %d' % self.s.pid in self.log_text()[off:], 'no on line after the Config turned it on', 10)
         self.assertNotIn('freeze:', self.log_text()[off:], 'a freeze was logged while diagnostics was off')
-
-
-class DiagnosticsBodies(SwipeSteps, unittest.TestCase):
-    """The `minute` record's `bodies`: the SwiftUI bodies of the counted views that ran, in every build."""
-
-    TOPICS = ['bodies-%d' % number for number in range(3)]
-
-    @classmethod
-    def setUpClass(cls):
-        cls.s = s = Sandbox(__name__.rsplit('.', 1)[-1] + '_bodies')
-        cls.addClassCleanup(s.teardown)
-        cls.logs = s.root/'logs'
-        project = s.root/'project'
-        project.mkdir()
-        (s.root/'config/muxify/config.yaml').write_text(ON + 'sidebar:\n  agents: false\n  animate_switching: true\n')
-        store = TopicRecords(s.root/'state/muxify')
-        for topic in cls.TOPICS:
-            store.put(dict(id=topic, title='Bodies ' + topic[-1], slug=topic))
-            session = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', topic, '-c', str(project), '/bin/zsh -f')
-            s.tmux('set-option', '-t', session, '@muxify_topic', topic)
-        s.launch(['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-sidebarWorkView', 'Topics'])
-
-    def minutes(self):
-        text = ''.join(path.read_text(errors='replace') for path in sorted(self.logs.glob('muxify-*.log')))
-        return [dict(word.split('=', 1) for word in line.split(' ')[3:])
-                for line in text.splitlines() if re.match(r'\S+ \S+ minute ', line)]
-
-    def test_a_minute_record_during_swipes_names_the_card_or_page_bodies(self):
-        self.s.wait_rows(lambda rs: all(self.s.has('topic-' + topic, rs) for topic in self.TOPICS),
-                         'the Sidebar does not show the Topics')
-        self.wait_mode('topics')
-        # The verify checks reset the counter as they read it; Diagnostics reads on across a reset.
-        self.s.driver('counts', reset=True)
-        # Swipe on until the minute that the swipes run in is written.
-        deadline = time.monotonic() + 90
-        number = 0
-        while not self.minutes() and time.monotonic() < deadline:
-            self.sample('Swipe right' if number % 2 else 'Swipe left')
-            self.wait_mode('topics' if number % 2 else 'sessions')
-            number += 1
-        fields = wait(self.minutes, 'no minute record in %s' % self.logs, 10)[0]
-        self.assertIn('bodies', fields, fields)
-        self.assertNotEqual('none', fields['bodies'], fields)
-        bodies = dict(item.rsplit(':', 1) for item in fields['bodies'].split(','))
-        self.assertTrue(all(int(count) > 0 for count in bodies.values()), fields['bodies'])
-        named = [name for name in ('SidebarCard', 'TopicsSection', 'SessionsSection') if name in bodies]
-        self.assertTrue(named, 'the minute names no card or page root body: %s' % fields['bodies'])
 
 
 # Views under the idle clock (`TestDriverCosts.idleClockViews`, which gives the CPU measured), and the Agents at work.

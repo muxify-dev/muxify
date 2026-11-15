@@ -11,22 +11,10 @@ Run from the repo root after `make build`:
 import unittest
 
 from scripts.verify.palette_fixture import PaletteFixture
-from scripts.verify.sandbox import wait
 
 
 class PaletteGoToTags(PaletteFixture):
     TAGS = {'gssect': '{}', 'gfilter': '{}', 'gplain': '{color: green}', 'gempty': '{}'}
-
-    def go_to(self, query):
-        def opened():
-            if not self.s.has('palette-search'):
-                self.s.driver('press', 'Go to…')
-            return self.s.has('palette-search')
-        wait(opened, 'Go to… did not open', seconds=20)
-        self.s.act('focus', 'palette-search')
-        self.s.act('set', 'palette-search', query)
-        return self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue', '') == query,
-                                'Go to… did not take the query %r' % query)
 
     def chips(self, rs):
         return [key[len('palette-tag-'):] for key in self.s.ids(rs) if key.startswith('palette-tag-')]
@@ -35,7 +23,7 @@ class PaletteGoToTags(PaletteFixture):
         s = self.s
         self.topic('gs-one', 1, tags=['gssect'])
         self.topic('gs-untagged', 2)
-        rs = self.go_to('')
+        rs = self.s.open_palette('Go to…', '')
         self.assertFalse(s.has('palette-section-tags', rs), 'the empty Go to… lists Tags')
         rs = s.wait_rows(lambda rs: s.has('palette-row-topic-gs-one', rs) and s.has('palette-row-topic-gs-untagged', rs),
                          'the empty Go to… did not list the Topics')
@@ -43,7 +31,7 @@ class PaletteGoToTags(PaletteFixture):
                       'a Topic row in the empty Go to… does not show its Tags')
         self.assertNotIn('#', s.row('palette-row-topic-gs-untagged', rs).get('accessibilityLabel', ''),
                          'a Topic with no Tags shows a Tag')
-        self.go_to('gs')
+        self.s.type_query('gs')
         rs = s.wait_rows(lambda rs: s.has('palette-row-tag-gssect', rs) and s.has('palette-row-topic-gs-one', rs),
                          'the query "gs" did not show the Tag and the Topic')
         ids = s.ids(rs)
@@ -53,12 +41,12 @@ class PaletteGoToTags(PaletteFixture):
     def test_tags_show_their_name_and_a_tag_with_no_topic_or_no_definition_is_not_listed(self):
         s = self.s
         self.topic('gd-one', 31, tags=['gplain', 'gorphan'])
-        rs = self.go_to('#')
+        rs = self.s.open_palette('Go to…', '#')
         rs = s.wait_rows(lambda rs: s.has('palette-row-tag-gplain', rs), 'the Tag is not listed')
         self.assertIn('#gplain', self.text('palette-row-tag-gplain', rs), 'the Tag row does not show the Tag name')
         self.assertFalse(s.has('palette-row-tag-gorphan', rs), 'a Tag the Config does not define is listed')
         self.assertFalse(s.has('palette-row-tag-gempty', rs), 'a Tag that no Topic has is listed as a filter')
-        self.go_to('#gpla')
+        self.s.type_query('#gpla')
         rs = s.wait_rows(lambda rs: s.has('palette-row-tag-gplain', rs), 'the name of a Tag does not find it')
         self.assertIn('#gplain', s.row('palette-row-topic-gd-one', rs).get('accessibilityLabel', ''),
                       'the Topic row does not show the name of its Tag')
@@ -71,7 +59,7 @@ class PaletteGoToTags(PaletteFixture):
         self.topic('gf-open', 11, tags=['gfilter'])
         self.topic('gf-settled', 13, tags=['gfilter'], settled_at='2026-01-01T00:00:00Z')
         self.topic('gf-other', 14)
-        self.go_to('#gfilter')
+        self.s.open_palette('Go to…', '#gfilter')
         s.wait_rows(lambda rs: s.has('palette-row-tag-gfilter', rs), 'the Tag row did not show')
         s.act('press', 'palette-row-tag-gfilter')
         rs = s.wait_rows(lambda rs: self.chips(rs) == ['gfilter'] and s.has('palette-row-topic-gf-open', rs),

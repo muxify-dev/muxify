@@ -1,6 +1,7 @@
 import Foundation
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class TranscriptTests: XCTestCase {
     private struct Row: Equatable, CustomStringConvertible {
@@ -135,10 +136,7 @@ final class TranscriptTests: XCTestCase {
             .object(["agent": .string("codex"), "agent_conversation": .string("old")]),
             .object(["agent": .string("nobody"), "agent_conversation": .string("unknown kind")]),
         ])])]
-        let window = TmuxWindow(id: "@1", sessionID: "$1", sessionName: "s", index: 0, name: "", paneTitle: "", path: "/",
-                                command: "", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
-                                storedBrowser: StoredBrowser(), openRequests: [], topicID: "topic", sessionPath: "/",
-                                activePaneID: "%1", startCommand: "")
+        let window = TmuxWindow.fixture(name: "", path: "/", command: "", topicID: "topic", sessionPath: "/", activePaneID: "%1")
         let pane = TmuxPane(id: "%1", windowID: "@1", command: "claude", agent: "claude", agentStatus: "working", unread: false,
                             agentConversation: "live")
         let snapshot = TmuxSnapshot(windows: [window], clients: [], panes: [pane], lastWindowID: nil, serverRunning: true)

@@ -36,7 +36,7 @@ class PaletteCurrentCommands(PaletteFixture):
         before = self.s.tmux('list-panes', '-a', '-F', '#{session_id} #{window_id} #{pane_id}')
         for scope in ['Pane', 'Window', 'Session']:
             title = 'Move ' + scope
-            self.run_command(title)
+            self.s.run_command(title)
             self.s.wait_rows(lambda rs: self.text('palette-breadcrumb', rs).startswith(scope + ' '), 'Wrong scope for ' + title)
             self.back(title)
         self.assertEqual(self.s.tmux('list-panes', '-a', '-F', '#{session_id} #{window_id} #{pane_id}'), before)
@@ -47,7 +47,7 @@ class PaletteCurrentCommands(PaletteFixture):
         original = self.store.get(topic)
         for title, step in [('Add a Session', 'Add a Session'), ('Settle Topic', 'Settle'), ('Forget Topic', 'Forget'),
                             ('Rename Topic', 'Rename')]:
-            self.run_command(title)
+            self.s.run_command(title)
             self.s.wait_rows(lambda rs: step in self.text('palette-breadcrumb', rs), title + ' did not open its step')
             if title == 'Rename Topic':
                 # Rename starts with the title in the field, and Back works only in an empty field.
@@ -65,13 +65,13 @@ class PaletteCurrentCommands(PaletteFixture):
                                        and 'Before rename' in row.get('accessibilityLabel', '') for row in rs),
                          'the Sidebar did not receive the Window name')
         title = 'Rename a Window'
-        self.run_command(title)
+        self.s.run_command(title)
         self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == 'Before rename',
                          'Rename did not prefill the current Window name')
         self.s.act('set', 'palette-search', '')
         self.back(title)
         self.assertEqual(self.s.tmux('display-message', '-p', '-t', window, '#{window_name}'), 'Before rename')
-        self.run_command(title)
+        self.s.run_command(title)
         self.s.act('set', 'palette-search', 'After rename')
         self.s.act('action', 'palette-search', 'Accept')
         wait(lambda: self.s.tmux('display-message', '-p', '-t', window, '#{window_name}') == 'After rename',
@@ -86,7 +86,7 @@ class PaletteCurrentCommands(PaletteFixture):
     def test_set_topic_note_starts_with_the_note_keeps_back_and_an_empty_field_clears_it(self):
         note = "Waiting on Ana's review"
         self.current_topic('note-set')
-        self.run_command('Set Topic Note')
+        self.s.run_command('Set Topic Note')
         self.s.wait_rows(lambda rs: 'Topic Note' in self.text('palette-breadcrumb', rs)
                          and self.s.row('palette-search', rs).get('accessibilityValue', '') == '',
                          'Set Topic Note did not open an empty field for a Topic with no Note')
@@ -95,14 +95,14 @@ class PaletteCurrentCommands(PaletteFixture):
         wait(lambda: self.record('note-set').get('note') == note, 'Set Topic Note did not save the Note')
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Set Topic Note did not close the palette')
 
-        self.run_command('Set Topic Note')
+        self.s.run_command('Set Topic Note')
         self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == note,
                          'Set Topic Note did not start with the current Note')
         self.s.act('set', 'palette-search', '')
         self.back('Set Topic Note')
         self.assertEqual(self.record('note-set').get('note'), note, 'Back changed the Note')
 
-        self.run_command('Set Topic Note')
+        self.s.run_command('Set Topic Note')
         self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == note,
                          'Set Topic Note did not start with the current Note')
         self.s.act('set', 'palette-search', '')
@@ -112,42 +112,31 @@ class PaletteCurrentCommands(PaletteFixture):
     def test_clear_topic_note_shows_only_while_the_active_topic_has_a_note_and_clears_it_at_once(self):
         window = self.topic('note-clear', session=True, note='Bisect from v2')
         self.select(window)
-        self.run_command('Clear Topic Note')
+        self.s.run_command('Clear Topic Note')
         wait(lambda: 'note' not in self.record('note-clear'), 'Clear Topic Note did not clear the Note')
         self.assertEqual(self.record('note-clear').get('title'), 'note-clear', 'Clear Topic Note changed the title')
         self.assertTrue(self.absent('Clear Topic Note'), 'Clear Topic Note shows for a Topic with no Note')
-
-    def go_to(self, query):
-        def opened():
-            if not self.s.has('palette-search'):
-                self.s.driver('press', 'Go to…')
-            return self.s.has('palette-search')
-        wait(opened, 'Go to… did not open', seconds=20)
-        self.s.act('focus', 'palette-search')
-        self.s.act('set', 'palette-search', query)
-        return self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue', '') == query,
-                                'Go to… did not take the query %r' % query)
 
     def test_a_topic_row_shows_its_note_and_its_actions_set_and_clear_it(self):
         s = self.s
         self.topic('note-row', note='Repro with seed 4411')
         self.topic('note-row-settled', note='Wait for the release', settled_at='2026-01-01T00:00:00Z')
-        self.go_to('note-row')
+        self.s.open_palette('Go to…', 'note-row')
         key, settled = 'palette-row-topic-note-row', 'palette-row-topic-note-row-settled'
         rs = s.wait_rows(lambda rs: s.has(key, rs) and s.has(settled, rs), 'Go to… did not list the Topics')
         self.assertIn('Repro with seed 4411', self.text(key, rs), 'a Topic row does not show its Note')
         self.assertIn('Wait for the release · ', self.text(settled, rs), 'a Settled row does not show its Note before its Settle date')
         s.act('action', 'palette-search', 'Close')
-        self.go_to('seed 4411')
+        self.s.open_palette('Go to…', 'seed 4411')
         rs = s.wait_rows(lambda rs: s.has('palette-search', rs), 'Go to… closed')
         self.assertFalse(s.has(key, rs), 'a search matches the text of a Note')
         s.act('action', 'palette-search', 'Close')
 
-        self.go_to('note-row')
+        self.s.open_palette('Go to…', 'note-row')
         s.wait_rows(lambda rs: s.has(key, rs), 'Go to… did not list the Topic')
         s.act('action', key, 'Clear Topic Note')
         wait(lambda: 'note' not in self.record('note-row'), 'the Clear Topic Note action did not clear the Note')
-        self.go_to('note-row')
+        self.s.open_palette('Go to…', 'note-row')
         s.wait_rows(lambda rs: s.has(key, rs), 'Go to… did not list the Topic')
         s.act('action', key, 'Set Topic Note')
         s.wait_rows(lambda rs: 'Topic Note' in self.text('palette-breadcrumb', rs), 'the Set Topic Note action did not open its step')
@@ -170,7 +159,7 @@ class PaletteCurrentCommands(PaletteFixture):
 
     def test_remove_session_from_topic_leaves_the_topic_empty_and_the_session_live(self):
         self.remembered(self.current_topic('remove-empty'))
-        self.run_command('Remove Session from Topic')
+        self.s.run_command('Remove Session from Topic')
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Remove Session from Topic did not close Commands')
         wait(lambda: self.s.tmux('show-options', '-qv', '-t', 'remove-empty', '@muxify_topic') == '',
              'the Session is still in the Topic')
@@ -178,7 +167,7 @@ class PaletteCurrentCommands(PaletteFixture):
 
     def test_command_return_on_remove_session_from_topic_kills_the_session_after_a_confirm_step(self):
         self.remembered(self.current_topic('remove-kill'))
-        self.search('Remove Session from Topic')
+        self.s.open_palette('Commands', 'Remove Session from Topic')
         self.s.wait_rows(lambda rs: 'Remove and Kill' in self.text('palette-note', rs),
                          'the note does not show the ⌘↩ variant')
         self.s.act('action', 'palette-search', 'Confirm')
@@ -193,12 +182,12 @@ class PaletteCurrentCommands(PaletteFixture):
         for title in ['Add a Session', 'Settle Topic', 'Move Pane with Active Tab',
                       'Remove Session from Topic', 'Forget Topic', 'Rename Topic', 'Move Topic Down',
                       'Pin Topic', 'Set Topic Note', 'Clear Topic Note']:
-            self.search(title)
+            self.s.open_palette('Commands', title)
             self.assertFalse(self.s.has('palette-row-command-' + title), title + ' had no target')
             self.s.act('action', 'palette-search', 'Close')
 
     def absent(self, title):
-        self.search(title)
+        self.s.open_palette('Commands', title)
         present = self.s.has('palette-row-command-' + title)
         self.s.act('action', 'palette-search', 'Close')
         return not present
@@ -209,14 +198,14 @@ class PaletteCurrentCommands(PaletteFixture):
         self.current_topic('move-current')
         order = lambda name: self.record(name).get('order', 0)
         wait(lambda: order('move-current') > order('move-upper'), 'the Active Topic did not start below the other Topic')
-        self.search('Move Topic Up')
+        self.s.open_palette('Commands', 'Move Topic Up')
         key = 'palette-row-command-Move Topic Up'
         rs = self.s.wait_rows(lambda rs: self.s.has(key, rs), 'Move Topic Up was missing from Commands')
         self.assertIn('⌥⌘↑', self.text(key, rs), 'Move Topic Up does not show its shortcut')
         self.s.act('press', key)
         wait(lambda: order('move-current') < order('move-upper'), 'Move Topic Up did not move the Active Topic above the other Topic')
         self.assertTrue(self.absent('Move Topic Up'), 'Move Topic Up moves a card that is not Pinned above a Pinned card')
-        self.run_command('Move Topic Down')
+        self.s.run_command('Move Topic Down')
         wait(lambda: order('move-current') > order('move-upper'), 'Move Topic Down did not move the Active Topic back')
 
     def cards(self, prefix):
@@ -254,24 +243,24 @@ class PaletteCurrentCommands(PaletteFixture):
 
     def test_pin_topic_flips_to_unpin_topic(self):
         self.current_topic('pin-current')
-        self.run_command('Pin Topic')
+        self.s.run_command('Pin Topic')
         wait(lambda: self.record('pin-current').get('pinned') is True, 'Pin Topic did not Pin the Active Topic')
         self.assertTrue(self.absent('Pin Topic'), 'Pin Topic shows for a Pinned Topic')
-        self.run_command('Unpin Topic')
+        self.s.run_command('Unpin Topic')
         wait(lambda: not self.record('pin-current').get('pinned'), 'Unpin Topic did not Unpin the Active Topic')
 
     def test_layout_commands_show_their_shortcut_and_change_the_window(self):
-        self.search('Maximize Terminal')
+        self.s.open_palette('Commands', 'Maximize Terminal')
         key = 'palette-row-command-Maximize Terminal'
         rs = self.s.wait_rows(lambda rs: self.s.has(key, rs), 'Maximize Terminal was missing from Commands')
         row = self.s.row(key, rs)
         self.assertIn('⌥⌘J', row.get('accessibilityLabel', '') + row.get('accessibilityValue', ''),
                       'Maximize Terminal does not show its shortcut: %s' % row)
         self.s.act('action', 'palette-search', 'Close')
-        self.run_command('Show Browser')
+        self.s.run_command('Show Browser')
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'Show Browser did not close Commands')
         wait(lambda: self.s.tmux('show-options', '-wqv', '-t', self.base, '@muxify_browser') == 'on',
              'Show Browser did not turn the Browser toggle on')
-        self.run_command('Hide Browser')
+        self.s.run_command('Hide Browser')
         wait(lambda: self.s.tmux('show-options', '-wqv', '-t', self.base, '@muxify_browser') == '',
              'Hide Browser did not turn the Browser toggle off')

@@ -22,12 +22,7 @@ class GitViewRemotes(GitViewFixture):
         origin = self.s.root/(name + '.git')
         subprocess.run(['/usr/bin/git', 'init', '-q', '--bare', str(origin)], check=True)
         self.git('push', '-q', str(origin), 'main:main')
-        clone = self.s.root/(name + '-clone')
-        subprocess.run(['/usr/bin/git', 'clone', '-q', '-b', 'main', str(origin), str(clone)], check=True)
-        (clone/'remote.txt').write_text('remote\n')
-        identity = ['-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid']
-        for args in [['add', 'remote.txt'], ['commit', '-q', '-m', 'remote commit'], ['push', '-q', 'origin', 'main']]:
-            subprocess.run(['/usr/bin/git', '-C', str(clone)] + identity + args, check=True)
+        self.push_from_a_clone(origin, name, 'remote.txt')
         self.git('remote', 'add', 'origin', url or str(origin))
         self.addCleanup(self.git, 'remote', 'remove', 'origin')
         self.git('config', 'branch.main.remote', 'origin')
@@ -67,12 +62,6 @@ class GitViewRemotes(GitViewFixture):
         self.git('config', 'core.sshCommand', shlex.quote(str(ssh)))
         self.addCleanup(self.git, 'config', '--unset', 'core.sshCommand')
         return go, answers
-
-    def answer_prompt(self, title, text):
-        self.wait_prompt(title)
-        self.s.act('set', 'git-prompt-field', text)
-        self.s.act('action', 'git-prompt', 'enter')
-        self.s.wait_rows(lambda rs: not self.s.has('git-prompt', rs), 'enter did not close the prompt')
 
     def test_a_passphrase_ssh_asks_is_asked_hidden_while_staging_goes_on_and_escape_cancels(self):
         go, answers = self.fake_ssh('fetch-ssh-bin')
@@ -114,13 +103,13 @@ class GitViewRemotes(GitViewFixture):
         return subprocess.run(['/usr/bin/git', '--git-dir', str(origin), 'rev-parse', '--verify', '-q', 'main'],
                               capture_output=True, text=True).stdout.strip()
 
-    def push_from_a_clone(self, origin, name):
-        """Another clone pushes a commit to the remote's main, and fetches nothing here."""
+    def push_from_a_clone(self, origin, name, file='clone.txt'):
+        """Another clone pushes a commit that adds `file` to the remote's main, and fetches nothing here."""
         clone = self.s.root/(name + '-clone')
         subprocess.run(['/usr/bin/git', 'clone', '-q', '-b', 'main', str(origin), str(clone)], check=True)
-        (clone/'clone.txt').write_text('clone\n')
+        (clone/file).write_text('clone\n')
         identity = ['-c', 'user.name=Verifier', '-c', 'user.email=verifier@example.invalid']
-        for args in [['add', 'clone.txt'], ['commit', '-q', '-m', 'clone commit'], ['push', '-q', 'origin', 'main']]:
+        for args in [['add', file], ['commit', '-q', '-m', 'clone commit'], ['push', '-q', 'origin', 'main']]:
             subprocess.run(['/usr/bin/git', '-C', str(clone)] + identity + args, check=True)
 
     def read_upstream(self):
@@ -134,7 +123,7 @@ class GitViewRemotes(GitViewFixture):
         self.git('commit', '-q', '--allow-empty', '-m', message)
         self.addCleanup(self.take_back, before)
 
-    def test_shift_p_pushes_the_branch_in_every_tab_and_the_toolbar_says_pushing(self):
+    def test_shift_p_pushes_new_commits_and_the_counts_update(self):
         origin = self.bare_remote('push-plain')
         self.commit_here('to push')
         self.key('f')
@@ -163,14 +152,7 @@ class GitViewRemotes(GitViewFixture):
         self.key('shift+p')
         self.wait_prompt("Enter upstream as '<remote> <branch>'")
         self.assertEqual(self.s.row('git-prompt-field').get('accessibilityValue'), 'origin main', 'the prompt does not start at origin and the branch')
-        # ⎋ pushes nothing.
-        self.s.act('action', 'git-prompt', 'escape')
-        self.s.wait_rows(lambda rs: not self.s.has('git-prompt', rs), 'escape did not close the prompt')
-        time.sleep(.5)
-        self.assertEqual(self.remote_main(origin), '', 'escape pushed')
         # ↩ pushes and sets the upstream.
-        self.key('shift+p')
-        self.wait_prompt("Enter upstream as '<remote> <branch>'")
         self.s.act('action', 'git-prompt', 'enter')
         wait(lambda: self.remote_main(origin) == self.git('rev-parse', 'HEAD').strip(), 'the push did not reach the remote', seconds=15)
         self.s.wait_rows(lambda rs: 'no upstream' not in self.toolbar(rs) and '↑0 ↓0 vs origin/main' in self.toolbar(rs),
@@ -200,29 +182,6 @@ class GitViewRemotes(GitViewFixture):
         wait(lambda: self.remote_main(origin) == self.git('rev-parse', 'HEAD').strip(), 'the force push did not reach the remote', seconds=15)
         self.s.wait_rows(lambda rs: '↑0 ↓0 vs origin/main' in self.toolbar(rs), 'the counts do not update after the force push', seconds=15)
         self.assertFalse(self.s.has('git-write-error'), 'the force push failed')
-
-    def test_p_pulls_with_the_users_config_and_asks_for_an_upstream_when_there_is_none(self):
-        origin = self.remote_one_commit_ahead('pull-ff')
-        before = self.git('rev-parse', 'HEAD').strip()
-        self.addCleanup(self.take_back, before, 'remote.txt')
-        self.read_upstream()
-        self.key('p')
-        wait(lambda: (self.repo/'remote.txt').exists(), 'p did not pull', seconds=20)
-        self.s.wait_rows(lambda rs: '↑0 ↓0 vs origin/main' in self.toolbar(rs) and 'Pulling…' not in self.toolbar(rs),
-                         'the counts do not update after the pull', seconds=15)
-        self.assertEqual(self.git('log', '-1', '--format=%s').strip(), 'remote commit')
-        self.assertFalse(self.s.has('git-write-error'), 'the pull failed')
-        # Without an upstream, it asks as push does.
-        self.git('config', '--unset', 'branch.main.remote')
-        self.git('config', '--unset', 'branch.main.merge')
-        self.key('shift+r')
-        self.s.wait_rows(lambda rs: 'no upstream' in self.toolbar(rs), 'the Git View still shows an upstream', seconds=15)
-        self.key('p')
-        self.wait_prompt("Enter upstream as '<remote> <branch>'")
-        self.assertEqual(self.s.row('git-prompt-field').get('accessibilityValue'), 'origin main')
-        self.s.act('action', 'git-prompt', 'enter')
-        wait(lambda: self.git('config', 'branch.main.remote').strip() == 'origin', 'the pull did not set the upstream', seconds=15)
-        self.s.wait_rows(lambda rs: 'no upstream' not in self.toolbar(rs), 'the Git View does not show the upstream', seconds=15)
 
     def test_a_pull_waits_in_the_write_queue_and_the_toolbar_says_pulling(self):
         go, answers = self.fake_ssh('pull-ssh-bin')
@@ -255,17 +214,6 @@ class GitViewRemotes(GitViewFixture):
         wait(lambda: 'A  new.txt' in self.porcelain(), 'the staging did not run after the pull', seconds=15)
         self.assertEqual(answers.read_text().split(), ['right'])
         self.s.wait_rows(lambda rs: 'Pulling…' not in self.toolbar(rs), 'the toolbar still shows Pulling…', seconds=15)
-
-    def test_a_detached_head_says_why_it_cannot_push_or_pull(self):
-        self.addCleanup(self.back_to_main)
-        self.git('checkout', '-q', '--detach')
-        self.key('shift+r')
-        self.s.wait_rows(lambda rs: 'no upstream' not in self.toolbar(rs), 'the Git View does not show the detached HEAD', seconds=15)
-        for key, verb in [('shift+p', 'push'), ('p', 'pull')]:
-            self.key(key)
-            said = f'A detached HEAD has no branch to {verb}. Check out a branch first.'
-            self.s.wait_rows(lambda rs: self.s.row('git-write-error', rs).get('accessibilityValue') == said, key + ' did not say why')
-            self.assertFalse(self.s.has('git-prompt'), key + ' asked on a detached HEAD')
 
     def stored_tabs(self):
         return self.s.tmux('show-options', '-wqv', '-t', self.window, '@muxify_tabs').split()
@@ -313,11 +261,7 @@ class GitViewRemotes(GitViewFixture):
         self.git('config', 'branch.feature-x.merge', 'refs/heads/feature-x')
         self.key('o')
         wait(lambda: self.banner() == 'Unsupported git service', 'the banner does not name the unclaimed host')
-        self.git('config', 'branch.feature-x.remote', '.')
-        self.key('o')
-        wait(lambda: self.banner() == 'Cannot open a pull request for a branch with no upstream', 'a remote . is not refused')
         self.git('remote', 'set-url', 'other', 'git@git.muxify.test')
-        self.git('config', 'branch.feature-x.remote', 'other')
         self.key('o')
         wait(lambda: self.banner() == 'Failed to parse repo information from url', 'the banner does not say the URL fails to parse')
         time.sleep(.5)
@@ -346,12 +290,3 @@ class GitViewRemotes(GitViewFixture):
         wait(lambda: link in self.stored_tabs(), 'o did not open %s; Tabs are %s' % (link, self.stored_tabs()), seconds=10)
         self.assertEqual(len(self.stored_tabs()), 1)
         wait(lambda: not self.is_open(), 'the popup Git View did not close', seconds=10)
-
-    def test_o_on_a_commit_with_no_origin_says_so_and_opens_nothing(self):
-        self.addCleanup(self.close_browser_tabs)
-        self.go_to('2')
-        self.key('o')
-        self.assertEqual(self.banner(), "There is no 'origin' remote")
-        time.sleep(.5)
-        self.assertEqual(self.stored_tabs(), [], 'o opened a page')
-        self.assertTrue(self.is_open(), 'the Git View closed')

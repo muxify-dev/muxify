@@ -27,7 +27,7 @@ class PaletteInPlay(PaletteFixture):
         return [r['id'] for r in sorted(records, key=lambda r: r.get('order', 0))]
 
     def absent(self, title):
-        self.search(title)
+        self.s.open_palette('Commands', title)
         present = self.s.has('palette-row-command-' + title)
         self.s.act('action', 'palette-search', 'Close')
         return not present
@@ -41,7 +41,7 @@ class PaletteInPlay(PaletteFixture):
         rows = lambda rs: [k for k in s.ids(rs) if k.startswith('palette-row-topic-cip-')]
         checked = lambda rs: [k for k in rows(rs) if 'checked' in s.row(k, rs).get('accessibilityValue', '')]
         s.wait_rows(lambda rs: s.has('topic-cip-b', rs), 'the Topics did not appear')
-        self.run_command('Choose In Play…')
+        self.s.run_command('Choose In Play…')
         rs = s.wait_rows(lambda rs: 'Choose In Play › Check' in self.text('palette-breadcrumb', rs) and len(rows(rs)) == 4,
                          'Choose In Play did not list the cards: %s' % rows(s.rows()))
         self.assertEqual(rows(rs), [key('a'), key('b'), key('c'), key('d')], 'the step lists a Pinned Topic, or not in list order')
@@ -95,7 +95,7 @@ class PaletteInPlay(PaletteFixture):
         rows = lambda rs: [k for k in s.ids(rs) if k.startswith('palette-row-topic-cig-')]
         checked = lambda rs: [k for k in rows(rs) if 'checked' in s.row(k, rs).get('accessibilityValue', '')]
         s.wait_rows(lambda rs: s.has('topic-cig-g', rs), 'the Topics did not appear')
-        self.run_command('Choose In Play…')
+        self.s.run_command('Choose In Play…')
         rs = s.wait_rows(lambda rs: 'Choose In Play › Check' in self.text('palette-breadcrumb', rs) and len(rows(rs)) == 4,
                          'Choose In Play did not list the Guest Topic: %s' % rows(s.rows()))
         self.assertEqual(checked(rs), [key('a'), key('b'), key('g')], 'the In Play cards and the Guest Topic do not start checked')
@@ -120,7 +120,7 @@ class PaletteInPlay(PaletteFixture):
         s.wait_rows(lambda rs: s.has('topic-rfb-a', rs), 'the Topic did not appear')
         self.assertTrue(self.absent('Replace from Bench…'), 'Replace from Bench… shows on No Topic')
         self.select(window)
-        self.run_command('Replace from Bench…')
+        self.s.run_command('Replace from Bench…')
         rs = s.wait_rows(lambda rs: 'rfb-a › Replace from Bench' in self.text('palette-breadcrumb', rs)
                          and s.has('palette-row-topic-rfb-d', rs), 'Replace from Bench did not list the Bench')
         rows = [key for key in s.ids(rs) if key.startswith('palette-row-topic-rfb-')]
@@ -144,18 +144,18 @@ class PaletteInPlay(PaletteFixture):
         self.select(window)
         guest = lambda: bool(self.record('mv-b').get('guest'))
 
-        self.run_command('Move Topic Down')
+        self.s.run_command('Move Topic Down')
         wait(lambda: guest() and len(self.store.open_places()) == 1,
              'Down from the last place did not make the Topic the top Guest and leave an Open Place')
-        self.run_command('Move Topic Down')
+        self.s.run_command('Move Topic Down')
         wait(lambda: not guest(), 'Down from the last Guest did not bench the Topic')
         self.assertEqual(self.order('mv-'), ['mv-a', 'mv-b', 'mv-c', 'mv-d'], 'Bench did not put the Topic at the top of the Bench')
         self.assertEqual(len(self.store.open_places()), 1, 'Bench of a Guest left no Open Place, and put it back')
         s.wait_shown(window)
 
-        self.run_command('Move Topic Up')
+        self.s.run_command('Move Topic Up')
         wait(guest, 'Up from the top of the hidden Bench did not make the Topic a Guest')
-        self.run_command('Move Topic Up')
+        self.s.run_command('Move Topic Up')
         wait(lambda: not guest() and not self.store.open_places(), 'Up from the top Guest did not fill the Open Place')
         self.assertEqual(self.order('mv-'), ['mv-a', 'mv-b', 'mv-c', 'mv-d'])
         s.wait_shown(window)
@@ -170,7 +170,7 @@ class PaletteInPlay(PaletteFixture):
         self.assertEqual(lock(), '', 'the No Topic Session starts Locked')
         self.assertTrue(self.absent('Move Topic Down'), 'Move Topic Down shows on the No Topic Session')
 
-        self.run_command('Move Topic Up')
+        self.s.run_command('Move Topic Up')
         wait(lambda: lock() != '', 'Move Topic Up did not Lock the No Topic Session, which makes it a Guest')
         s.wait_shown(self.base)
 

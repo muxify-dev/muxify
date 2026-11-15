@@ -90,7 +90,7 @@ class BrowserHistory(unittest.TestCase):
 
     def new_tab(self):
         count = len(self.tab_titles())
-        wait(lambda: self.s.driver('press', 'New Tab')['pressed'], 'New Tab stayed disabled')
+        self.s.press_menu_item('New Tab')
         self.s.wait_rows(lambda rs: len(self.tab_titles(rs)) == count + 1, 'New Tab did not add a Tab')
 
     def tab_titles(self, rs=None):
@@ -197,12 +197,7 @@ class BrowserHistory(unittest.TestCase):
         self.new_tab()
         self.load_from_the_field(window, 'cleared')
         self.wait_recorded('cleared')
-        wait(lambda: self.s.driver('press', 'Commands')['pressed'], 'Commands did not open')
-        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'Commands search did not show')
-        self.s.act('focus', 'palette-search')
-        self.s.act('set', 'palette-search', 'Clear Browser History')
-        self.s.wait_rows(lambda rs: self.s.has('palette-row-command-Clear Browser History', rs), 'no Clear Browser History row')
-        self.s.act('press', 'palette-row-command-Clear Browser History')
+        self.s.run_command('Clear Browser History')
         ranges = ['Last hour', 'Last 6 hours', 'Last day', 'Last 3 days', 'Last 7 days', 'All time']
         rs = self.s.wait_rows(lambda rs: all(self.s.has('palette-row-clear-' + r, rs) for r in ranges),
                               'the Command did not list the ranges')

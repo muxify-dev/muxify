@@ -62,36 +62,26 @@ import MuxifyCore
         XCTAssertEqual(model.buttonText, "Update Available")
     }
 
-    func testSkipAnswersSkipAndHidesTheButton() {
-        let model = model()
-        var choices: [UpdateChoice] = []
-        model.found(offer) { choices.append($0) }
-        model.skip()
-        XCTAssertEqual(choices, [.skip])
-        XCTAssertEqual(model.state, .idle)
-        XCTAssertNil(model.buttonText)
-        XCTAssertEqual(logged.last, "update: skipped 0.2.0 (build 101)")
-        // A second answer to the same offer never reaches Sparkle.
-        model.later()
-        XCTAssertEqual(choices, [.skip])
-    }
-
-    func testLaterAnswersLaterAndHidesTheButton() {
-        let model = model()
-        var choices: [UpdateChoice] = []
-        model.found(offer) { choices.append($0) }
-        model.later()
-        XCTAssertEqual(choices, [.later])
-        XCTAssertEqual(model.state, .idle)
-        XCTAssertEqual(logged.last, "update: later for 0.2.0 (build 101)")
-    }
-
-    func testInstallAnswersInstall() {
-        let model = model()
-        var choices: [UpdateChoice] = []
-        model.found(offer) { choices.append($0) }
-        model.install()
-        XCTAssertEqual(choices, [.install])
+    func testSkipAndLaterAnswerSparkleOnceAndHideTheButton() {
+        let answers: [(String, (UpdateModel) -> Void, UpdateChoice, String)] = [
+            ("Skip", { $0.skip() }, .skip, "update: skipped 0.2.0 (build 101)"),
+            ("Later", { $0.later() }, .later, "update: later for 0.2.0 (build 101)"),
+        ]
+        for (name, answer, choice, log) in answers {
+            let model = model()
+            var choices: [UpdateChoice] = []
+            model.found(offer) { choices.append($0) }
+            answer(model)
+            XCTAssertEqual(choices, [choice], name)
+            XCTAssertEqual(model.state, .idle, name)
+            XCTAssertNil(model.buttonText, name)
+            XCTAssertEqual(logged.last, log, name)
+            // A second answer to the same offer never reaches Sparkle.
+            model.skip()
+            model.later()
+            model.install()
+            XCTAssertEqual(choices, [choice], name)
+        }
     }
 
     func testNotFoundShowsForFiveSecondsThenHides() {
@@ -259,43 +249,35 @@ import MuxifyCore
         return NSError(domain: "SUSparkleErrorDomain", code: code, userInfo: info)
     }
 
-    private func assertFailure(after progress: (UpdateModel) -> Void, error: NSError, shows message: String,
-                               line: UInt = #line) {
-        let (model, _) = installingModel()
-        progress(model)
-        var acknowledged = 0
-        model.failed(error, acknowledge: { acknowledged += 1 })
-        XCTAssertEqual(model.state, .failed(message), line: line)
-        XCTAssertEqual(model.buttonText, "Update Failed", line: line)
-        XCTAssertTrue(model.opensPopover, line: line)
-        XCTAssertTrue(logged.last?.hasPrefix("update: failed: \(message) (SUSparkleErrorDomain \(error.code)") == true,
-                      "\(logged.last ?? "")", line: line)
-        // Retry acknowledges the failure and checks again, so the update shows again.
-        model.retry()
-        XCTAssertEqual(acknowledged, 1, line: line)
-        XCTAssertEqual(checks, 1, line: line)
-        checks = 0
-    }
-
-    func testAFailedDownloadShowsUpdateFailedWithSparklesMessage() {
+    func testAFailedDownloadSignatureOrInstallShowsUpdateFailedWithSparklesMessage() {
         let offline = NSError(domain: NSURLErrorDomain, code: -1004, userInfo: [NSLocalizedDescriptionKey: "Could not connect"])
-        assertFailure(after: { $0.downloadStarted(); $0.downloadExpects(100); $0.downloadReceived(10) },
-                      error: sparkleError(2001, "An error occurred while downloading the update.", underlying: offline),
-                      shows: "An error occurred while downloading the update.")
+        let failures: [(String, (UpdateModel) -> Void, NSError)] = [
+            ("a failed download", { $0.downloadStarted(); $0.downloadExpects(100); $0.downloadReceived(10) },
+             sparkleError(2001, "An error occurred while downloading the update.", underlying: offline)),
+            ("a bad signature", { $0.downloadStarted(); $0.preparingStarted(); $0.preparing(0.5) },
+             sparkleError(4005, "The update is improperly signed and could not be validated.")),
+            ("a failed install", { $0.downloadStarted(); $0.preparingStarted(); $0.installStarted(applicationTerminated: false) },
+             sparkleError(4004, "An error occurred while relaunching Muxify, but the new version will be available next time you run Muxify.")),
+        ]
+        for (name, progress, error) in failures {
+            let (model, _) = installingModel()
+            progress(model)
+            var acknowledged = 0
+            model.failed(error, acknowledge: { acknowledged += 1 })
+            let message = error.localizedDescription
+            XCTAssertEqual(model.state, .failed(message), name)
+            XCTAssertEqual(model.buttonText, "Update Failed", name)
+            XCTAssertTrue(model.opensPopover, name)
+            XCTAssertTrue(logged.last?.hasPrefix("update: failed: \(message) (SUSparkleErrorDomain \(error.code)") == true,
+                          "\(name): \(logged.last ?? "")")
+            // Retry acknowledges the failure and checks again, so the update shows again.
+            model.retry()
+            XCTAssertEqual(acknowledged, 1, name)
+            XCTAssertEqual(checks, 1, name)
+            checks = 0
+        }
         XCTAssertTrue(logged.contains { $0.hasSuffix("(SUSparkleErrorDomain 2001; NSURLErrorDomain -1004: Could not connect)") },
-                      "\(logged)")
-    }
-
-    func testABadSignatureShowsUpdateFailedWithSparklesMessage() {
-        assertFailure(after: { $0.downloadStarted(); $0.preparingStarted(); $0.preparing(0.5) },
-                      error: sparkleError(4005, "The update is improperly signed and could not be validated."),
-                      shows: "The update is improperly signed and could not be validated.")
-    }
-
-    func testAFailedInstallShowsUpdateFailedWithSparklesMessage() {
-        assertFailure(after: { $0.downloadStarted(); $0.preparingStarted(); $0.installStarted(applicationTerminated: false) },
-                      error: sparkleError(4004, "An error occurred while relaunching Muxify, but the new version will be available next time you run Muxify."),
-                      shows: "An error occurred while relaunching Muxify, but the new version will be available next time you run Muxify.")
+                      "a failed download logs its underlying error: \(logged)")
     }
 
     func testATranslocatedOrReadOnlyCopySaysToMoveMuxifyToApplications() {

@@ -18,11 +18,10 @@ class QuickSwitchHints(unittest.TestCase):
         cls.addClassCleanup(s.teardown)
         (s.root/'config/muxify/config.yaml').write_text('keybindings:\n  select_window_1: ctrl+w\n')
         store = TopicRecords(s.root/'state/muxify')
-        # The Dormant Topic remembers no Session and has no Home Session Path, so going to it shows its empty Topic view.
-        for name, title, pinned, home in [('first', 'Pinned Topic', True, str(s.root)), ('dormant', 'Dormant Topic', False, None)]:
-            store.put(dict(
-                id=name, title=title, slug=name, home_project=home, pinned=pinned,
-                created_at='2026-01-01T00:00:00Z', order=0 if pinned else 1))
+        # The Dormant Topic remembers no Session, so going to it shows its empty Topic view.
+        for name, title, pinned in [('first', 'Pinned Topic', True), ('dormant', 'Dormant Topic', False)]:
+            store.put(dict(id=name, title=title, slug=name, pinned=pinned, created_at='2026-01-01T00:00:00Z',
+                           order=0 if pinned else 1))
         cls.session, cls.first = s.tmux('new-session', '-d', '-P', '-F', '#{session_id} #{window_id}',
                                       '-s', 'topic', '-c', str(s.root), '/bin/zsh -f').split()
         s.tmux('set-option', '-t', cls.session, '@muxify_topic', 'first')
@@ -72,7 +71,6 @@ class QuickSwitchHints(unittest.TestCase):
                                'combined Hints did not appear')
         self.assertEqual(self.s.row('hint-topic-first', rows).get('accessibilityValue'), '⌃1')
         self.assertEqual(self.s.row('hint-window-' + self.first, rows).get('accessibilityValue'), '⌃W')
-        self.s.act('snapshot', '', str(self.s.root/'hints.png'))
         self.input('Release modifiers')
         self.s.wait_rows(lambda rows: self.value('hint-topic-first', rows) == '1', 'release did not restore rest Hint')
 
@@ -120,20 +118,9 @@ class QuickSwitchHints(unittest.TestCase):
                                'the Browser did not show both Tab Hints')
         self.assertTrue(self.s.has('hint-terminal', rows))
 
-    def test_key_suppression_exact_modifiers_and_palette_reset(self):
-        self.input('Hold Control Command')
-        time.sleep(0.45)
-        self.assertEqual(self.value('hint-topic-first'), '1', 'extra modifier matched Control')
-        self.input('Release modifiers')
+    def test_opening_the_palette_clears_held_hints(self):
         self.input('Hold Control')
-        self.s.wait_rows(lambda rows: self.value('hint-topic-first', rows) == '⌃1', 'no Hint')
-        self.input('Other key')
-        self.input('Hold Control')
-        time.sleep(0.45)
-        self.assertEqual(self.value('hint-topic-first'), '1', 'key suppression restarted Hints')
-        self.input('Release modifiers')
-        self.input('Hold Control')
-        self.s.wait_rows(lambda rows: self.value('hint-topic-first', rows) == '⌃1', 'no Hint after release')
+        self.s.wait_rows(lambda rows: self.value('hint-topic-first', rows) == '⌃1', 'no held Hint')
         self.s.act('action', 'topic-first', 'Rename Topic…')
         self.s.wait_rows(lambda rows: self.s.has('palette-search', rows) and self.value('hint-topic-first', rows) == '1',
                          'palette did not clear Hints')
@@ -162,7 +149,6 @@ class QuickSwitchHints(unittest.TestCase):
                                'rest Tab Hints missing')
         self.assertEqual(sorted(self.value(key, rows) for key in self.s.ids(rows) if key.startswith('hint-tab-')), ['1', '2'])
         self.assertFalse(self.s.has('hint-terminal'))
-        self.s.act('snapshot', '', str(self.s.root/'hints-rest.png'))
         self.configure('hints:\n  windows: {always: true}\n', '  select_card_1: [ctrl+j, ctrl+k]\n')
         self.s.wait_rows(lambda rows: self.value('hint-topic-first', rows) == 'J'
                          and self.value('hint-window-' + self.first, rows) == '1', 'live rest keys did not update')
@@ -176,22 +162,6 @@ class QuickSwitchHints(unittest.TestCase):
         self.input('Press ⌃2')
         self.s.wait_rows(lambda rows: self.s.has('empty-topic-title', rows), 'disabled Hints disabled shortcut')
 
-    def test_live_zero_delay_and_false_delay(self):
-        self.input('Hold Control')
-        self.s.wait_rows(lambda rows: self.value('hint-topic-first', rows) == '⌃1', 'hold Hint missing')
-        self.configure('hints: {hold_delay: false}\n')
-        self.s.wait_rows(lambda rows: self.value('hint-topic-first', rows) == '1'
-                         and not self.s.has('hint-terminal', rows), 'false did not clear active hold')
-        self.input('Release modifiers')
-        self.input('Hold Control')
-        time.sleep(0.45)
-        self.assertEqual(self.value('hint-topic-first'), '1')
-        self.configure('hints: {hold_delay: 0}\n')
-        self.s.wait_rows(lambda rows: self.value('hint-topic-first', rows) == '⌃1', 'zero delay did not show held Hint')
-        self.input('Release modifiers')
-        self.input('Hold Option')
-        self.assertTrue(self.s.has('hint-terminal'), 'zero delay did not show immediately')
-
     def test_window_shortcut_uses_current_session_order(self):
         self.select(self.second)
         self.press_when_bound('⌃W')
@@ -201,36 +171,10 @@ class QuickSwitchHints(unittest.TestCase):
         wait(lambda: self.s.driver('action', 'quick-switch-input', 'Press ' + symbol)['pressed'],
              symbol + ' is not bound from the Config')
 
-    def test_topic_step_goes_to_the_row_below_and_wraps(self):
-        self.configure(keybindings='  select_next_topic: ctrl+alt+j\n  select_prev_topic: ctrl+alt+k\n')
-        self.press_when_bound('⌃⌥J')
-        self.s.wait_rows(lambda rows: self.value('empty-topic-title', rows) == 'Dormant Topic',
-                         'the Topic below the Pinned Topic is not shown')
-        self.input('Press ⌃⌥J')
-        self.s.wait_shown(self.first)
-        self.input('Press ⌃⌥K')
-        self.s.wait_rows(lambda rows: self.value('empty-topic-title', rows) == 'Dormant Topic',
-                         'the Topic above the first row did not wrap to the last row')
-
-    def test_session_step_in_topics_mode_stays_in_the_active_topic(self):
+    def test_topic_session_and_topic_window_steps_run_from_their_shortcuts(self):
+        """Each step binding reaches its step. HintTests prove the lists the steps walk and where they wrap."""
         session, window = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id} #{window_id}',
                                       '-s', 'topic-steps', '-c', str(self.s.root), '/bin/zsh -f').split()
-        self.addCleanup(self.s.tmux, 'kill-session', '-t', session)
-        self.s.tmux('set-option', '-t', session, '@muxify_topic', 'first')
-        self.s.wait_rows(lambda rows: self.s.has('topic-window-' + window, rows), 'the second Session is not in the Topic')
-        self.configure(keybindings='  select_next_session: ctrl+alt+n\n  select_prev_session: ctrl+alt+p\n')
-        self.press_when_bound('⌃⌥N')
-        self.s.wait_shown(window)
-        self.input('Press ⌃⌥N')
-        self.s.wait_shown(self.first)
-        self.input('Press ⌃⌥P')
-        self.s.wait_shown(window)
-        self.input('Press ⌃⌥P')
-        self.s.wait_shown(self.first)
-
-    def test_topic_window_step_goes_through_every_window_of_the_active_topic(self):
-        session, window = self.s.tmux('new-session', '-d', '-P', '-F', '#{session_id} #{window_id}',
-                                      '-s', 'topic-windows', '-c', str(self.s.root), '/bin/zsh -f').split()
         self.addCleanup(self.s.tmux, 'kill-session', '-t', session)
         self.s.tmux('set-option', '-t', session, '@muxify_topic', 'first')
         rows = self.s.wait_rows(lambda rows: self.s.has('topic-window-' + window, rows)
@@ -239,16 +183,22 @@ class QuickSwitchHints(unittest.TestCase):
         order = [key.removeprefix('topic-window-') for key in self.s.ids(rows)
                  if key.removeprefix('topic-window-') in topic_windows and key.startswith('topic-window-')]
         self.assertEqual(sorted(order), sorted(topic_windows), f'Sidebar Window rows: {order}')
-        start = order.index(self.first)
-        self.configure(keybindings='  select_next_topic_window: ctrl+alt+w\n  select_prev_topic_window: ctrl+alt+q\n')
-        self.press_when_bound('⌃⌥W')
-        self.s.wait_shown(order[(start + 1) % 3])
-        self.input('Press ⌃⌥W')
-        self.s.wait_shown(order[(start + 2) % 3])
-        self.input('Press ⌃⌥W')
+        self.configure(keybindings='  select_next_topic: ctrl+alt+j\n  select_prev_topic: ctrl+alt+k\n'
+                                   '  select_next_session: ctrl+alt+n\n  select_prev_session: ctrl+alt+p\n'
+                                   '  select_next_topic_window: ctrl+alt+w\n  select_prev_topic_window: ctrl+alt+q\n')
+        self.press_when_bound('⌃⌥J')
+        self.s.wait_rows(lambda rows: self.value('empty-topic-title', rows) == 'Dormant Topic',
+                         'the Topic below the Pinned Topic is not shown')
+        self.input('Press ⌃⌥K')
         self.s.wait_shown(self.first)
+        self.input('Press ⌃⌥N')
+        self.s.wait_shown(window)
+        self.input('Press ⌃⌥P')
+        self.s.wait_shown(self.first)
+        self.input('Press ⌃⌥W')
+        self.s.wait_shown(order[(order.index(self.first) + 1) % 3])
         self.input('Press ⌃⌥Q')
-        self.s.wait_shown(order[(start - 1) % 3])
+        self.s.wait_shown(self.first)
 
 
 if __name__ == '__main__':

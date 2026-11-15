@@ -1,14 +1,12 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class WindowTitleTests: XCTestCase {
     private func window(title: String, name: String = "fish", remote: Bool = true,
                         host: String = "Yauhens-MacBook-Air.local") -> TmuxWindow {
-        TmuxWindow(id: "@0", sessionID: "$0", sessionName: "main", index: 0, name: name,
-                   paneTitle: title, path: "/Users/user/projects/muxify-mobile", command: "fish",
-                   isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
-                   storedBrowser: StoredBrowser(), openRequests: [], homeDirectory: "/Users/user",
-                   hostName: host, isRemote: remote)
+        .fixture(name: name, paneTitle: title, path: "/Users/user/projects/muxify-mobile", command: "fish",
+                 homeDirectory: "/Users/user", hostName: host, isRemote: remote)
     }
 
     func testRemoteFishHostPrefixIsHiddenOnlyInTheDisplayTitle() {

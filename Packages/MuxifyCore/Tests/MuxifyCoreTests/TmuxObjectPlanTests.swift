@@ -1,13 +1,11 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class TmuxObjectPlanTests: XCTestCase {
     private func window(_ id: String, session: String, name: String, topic: String?, active: Bool = true, created: Int = 0) -> TmuxWindow {
-        var window = TmuxWindow(id: id, sessionID: session, sessionName: name, index: 0, name: "w", paneTitle: "", path: "/work/" + name,
-                                command: "zsh", isActive: active, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
-                                storedBrowser: StoredBrowser(), openRequests: [], topicID: topic)
-        window.sessionCreated = created
-        return window
+        .fixture(id: id, sessionID: session, sessionName: name, name: "w", path: "/work/" + name, isActive: active, topicID: topic,
+                 sessionCreated: created)
     }
 
     func testANewWindowGoesToTheTopicsOnlyLiveSessionAndNeverChoosesOrMakesOne() {

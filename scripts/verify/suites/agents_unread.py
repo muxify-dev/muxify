@@ -30,21 +30,27 @@ class AgentsUnread(TopicsSidebar):
     keybinding: cmd+alt+p
     sources: [windows]
 ''' + 'notifications:\n  manual_read: ' + ('true' if manual_read else 'false') + '\n' + extra)
-        self.press_menu_item('Reload Config')
+        self.s.press_menu_item('Reload Config')
 
     def unread(self, pane):
         return self.s.tmux('display-message', '-p', '-t', pane, '#{@muxify_agent_unread}') == '1'
 
     def assert_read(self, *panes):
         wait(lambda: all(not self.unread(pane) for pane in panes), 'Agents stayed Unread')
+
+    def assert_unread(self, *panes):
+        wait(lambda: all(self.unread(pane) for pane in panes), 'Agents stayed read')
+
+    def assert_stays(self, read=(), unread=()):
+        """With manual_read off, a visit reads the Agents it shows, so a mark that shows can still flip after the
+        app's next reads of tmux."""
+        self.assert_read(*read)
+        self.assert_unread(*unread)
         time.sleep(2.2)
-        self.assertEqual([self.unread(pane) for pane in panes], [False] * len(panes))
+        self.assertEqual([self.unread(pane) for pane in [*read, *unread]], [False] * len(read) + [True] * len(unread))
 
     def search(self, palette, query, key):
-        self.press_menu_item(palette)
-        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), palette + ' did not open')
-        self.s.act('focus', 'palette-search')
-        self.s.act('set', 'palette-search', query)
+        self.s.open_palette(palette, query)
         return self.s.wait_rows(lambda rs: self.s.has(key, rs), 'No palette row ' + key)
 
     def mark_row(self, query, key, palette='Read targets', action='Mark Read'):
@@ -53,7 +59,7 @@ class AgentsUnread(TopicsSidebar):
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), action + ' did not close the palette')
 
     def test_navigation_keeps_unread_and_command_reads_only_its_window_in_sessions_mode(self):
-        self.write_topic('manual-topic', 'Manual topic', self.beta)
+        self.write_topic('manual-topic', 'Manual topic')
         _, first, one = self.agent_session('manual-one', topic='manual-topic', status='done', unread=True)
         _, _, two = self.agent_session('manual-two', topic='manual-topic', status='failed', unread=True)
         _, _, other = self.agent_session('manual-other', status='done', unread=True)
@@ -65,7 +71,7 @@ class AgentsUnread(TopicsSidebar):
         time.sleep(2.2)
         self.assertTrue(self.unread(one))
         self.assertTrue(self.unread(two))
-        self.show_view('sessions')
+        self.s.show_sidebar_mode('sessions')
         key = 'palette-row-command-Mark Read'
         rows = self.search('Commands', 'Mark Read', key)
         self.assertIn('⇧⌘R', self.describe(key, rows))
@@ -99,7 +105,7 @@ class AgentsUnread(TopicsSidebar):
         self.assertTrue(self.unread(one))
 
     def test_row_targets_clear_only_their_agents_and_keep_the_blocked_mark(self):
-        self.write_topic('manual-rows', 'Manual rows', self.beta)
+        self.write_topic('manual-rows', 'Manual rows')
         _, window, one = self.agent_session('manual-row-one', topic='manual-rows', status='blocked', unread=True)
         _, _, other = self.agent_session('manual-row-other', topic='manual-rows', status='done', unread=True)
         self.select_window(window)
@@ -135,21 +141,15 @@ class AgentsUnread(TopicsSidebar):
 
     def test_disabling_manual_read_reads_only_the_visited_window(self):
         self.configure(manual_read=False)
-        self.write_topic('automatic-topic', 'Automatic topic', self.beta)
+        self.write_topic('automatic-topic', 'Automatic topic')
         _, _, one = self.agent_session('automatic-one', topic='automatic-topic', status='done', unread=True)
         _, _, two = self.agent_session('automatic-two', topic='automatic-topic', status='failed', unread=True)
         self.find('topic-automatic-topic')
         self.s.act('action', 'topic-automatic-topic', 'Go to Topic')
-        self.assert_read(one)
-        self.assertTrue(self.unread(two))
-
-    def assert_unread(self, *panes):
-        wait(lambda: all(self.unread(pane) for pane in panes), 'Agents stayed read')
-        time.sleep(2.2)
-        self.assertEqual([self.unread(pane) for pane in panes], [True] * len(panes))
+        self.assert_stays(read=[one], unread=[two])
 
     def test_mark_unread_command_uses_window_and_all_read_clears_environment(self):
-        self.write_topic('unread-topic', 'Unread topic', self.beta)
+        self.write_topic('unread-topic', 'Unread topic')
         _, first, one = self.agent_session('unread-one', topic='unread-topic', status='done')
         _, _, two = self.agent_session('unread-two', topic='unread-topic', status='failed')
         _, _, working = self.agent_session('unread-working', topic='unread-topic', status='working')
@@ -171,7 +171,7 @@ class AgentsUnread(TopicsSidebar):
         self.assert_read(one, two, other)
 
     def test_unread_row_targets_only_the_selected_agents(self):
-        self.write_topic('unread-rows', 'Unread rows', self.beta)
+        self.write_topic('unread-rows', 'Unread rows')
         _, window, one = self.agent_session('unread-row-one', topic='unread-rows', status='blocked')
         _, _, other = self.agent_session('unread-row-other', topic='unread-rows', status='done')
         self.mark_row('claude', 'palette-row-agent:' + one, action='Mark Unread')
@@ -192,7 +192,7 @@ class AgentsUnread(TopicsSidebar):
         self.select_window(window)
         self.s.wait_shown(window)
         self.mark_row('unread-auto', 'palette-row-window:' + window, palette='Read windows', action='Mark Unread')
-        self.assert_unread(pane)
+        self.assert_stays(unread=[pane])
         self.search('Read windows', 'unread-away', 'palette-row-window:' + away)
         self.s.act('press', 'palette-row-window:' + away)
         self.s.wait_shown(away)
@@ -201,31 +201,19 @@ class AgentsUnread(TopicsSidebar):
         self.s.wait_shown(window)
         self.assert_read(pane)
 
-    def test_remapped_unread_and_all_read_shortcuts_use_session_and_environment(self):
-        self.configure('keybindings:\n  mark_unread: ctrl+alt+u\n  mark_all_read: ctrl+alt+a\n')
-        _, window, pane = self.agent_session('unread-remap', status='done')
+    def test_remapped_read_unread_and_all_read_shortcuts_use_session_and_environment(self):
+        self.configure('keybindings:\n  mark_read: ctrl+alt+r\n  mark_unread: ctrl+alt+u\n  mark_all_read: ctrl+alt+a\n')
+        _, window, pane = self.agent_session('unread-remap', status='done', unread=True)
         _, _, other = self.agent_session('unread-remap-other', status='working', unread=True)
         self.select_window(window)
         self.s.wait_shown(window)
-        self.s.wait_rows(lambda rs: self.s.has('agent-' + pane, rs), 'No Agent for Mark Unread')
+        self.s.wait_rows(lambda rs: self.s.has('agent-' + pane, rs), 'No Agent for the remapped shortcuts')
+        self.press_shortcut('⌃⌥R')
+        self.assert_read(pane)
         self.press_shortcut('⌃⌥U')
         self.assert_unread(pane)
         self.press_shortcut('⌃⌥A')
         self.assert_read(pane, other)
-
-    def test_remapped_shortcut_runs_mark_read(self):
-        self.configure('keybindings:\n  mark_read: ctrl+alt+r\n')
-        _, window, pane = self.agent_session('manual-remap', status='done', unread=True)
-        self.select_window(window)
-        self.s.wait_shown(window)
-        self.s.wait_rows(lambda rs: self.s.has('agent-' + pane, rs), 'No Agent for the remapped shortcut')
-        self.press_shortcut('⌃⌥R')
-        self.assert_read(pane)
-
-    def run_command(self, title):
-        key = 'palette-row-command-' + title
-        self.search('Commands', title, key)
-        self.s.act('press', key)
 
     def split_agent(self, window, status='blocked', unread=True):
         pane = self.s.tmux('split-window', '-d', '-P', '-F', '#{pane_id}', '-t', window, 'sleep 600')
@@ -241,8 +229,9 @@ class AgentsUnread(TopicsSidebar):
         two = self.split_agent(window)
         self.s.show(window)
         self.s.wait_shown(window)
-        self.run_command('Zoom Pane')
+        self.zoom_and_wait_for_the_zoomed_target('Mark Read')
         self.press_shortcut('⇧⌘R')
+        self.pill('Marked Read', 'explanation: Zoomed Pane · 1 hidden Pane is still Unread')
         self.assert_read(one)
         self.assert_unread(two)
         key = 'palette-row-command-Mark Unread'
@@ -252,7 +241,7 @@ class AgentsUnread(TopicsSidebar):
         self.assert_unread(one, two)
         self.mark_row('zoom-read-target', 'palette-row-window:' + window, palette='Read windows')
         self.assert_read(one, two)
-        self.run_command('Zoom Pane')
+        self.s.run_command('Zoom Pane')
         self.press_shortcut('⇧⌘U')
         self.assert_unread(one, two)
         key = 'palette-row-command-Mark Read'
@@ -264,7 +253,7 @@ class AgentsUnread(TopicsSidebar):
     def zoom_and_wait_for_the_zoomed_target(self, command):
         """The Command Summary of Mark Read or Mark Unread, whichever the Zoomed Pane's Agent takes, names the Zoomed
         Pane only after the app reads the Zoom from tmux. Before that, the current target is the whole Window."""
-        self.run_command('Zoom Pane')
+        self.s.run_command('Zoom Pane')
         key = 'palette-row-command-' + command
         self.search('Commands', command, key)
         self.s.wait_rows(lambda rs: 'Zoomed Pane:' in self.describe(key, rs), 'the app did not see the Zoom')
@@ -293,16 +282,6 @@ class AgentsUnread(TopicsSidebar):
         self.assertEqual(self.s.row('pill').get('accessibilityLabel'), 'Not marked Read')
         self.assert_unread(hidden)
 
-    def test_mark_read_on_a_zoomed_pane_clears_it_and_says_a_hidden_pane_is_still_unread(self):
-        _, window, shown = self.agent_session('zoom-partial-read', status='done', unread=True)
-        hidden = self.split_agent(window, status='done', unread=True)
-        self.s.show(window)
-        self.zoom_and_wait_for_the_zoomed_target('Mark Read')
-        self.press_shortcut('⇧⌘R')
-        self.pill('Marked Read', 'explanation: Zoomed Pane · 1 hidden Pane is still Unread')
-        self.assert_read(shown)
-        self.assert_unread(hidden)
-
     def test_automatic_same_window_visit_reads_only_the_zoomed_pane(self):
         self.configure(manual_read=False)
         _, window, one = self.agent_session('zoom-auto-target', status='done', unread=True)
@@ -310,13 +289,11 @@ class AgentsUnread(TopicsSidebar):
         self.s.tmux('resize-pane', '-Z', '-t', one)
         self.s.show(window)
         self.s.wait_shown(window)
-        self.assert_read(one)
-        self.assert_unread(two)
+        self.assert_stays(read=[one], unread=[two])
         self.press_shortcut('⇧⌘U')
-        self.assert_unread(one)
+        self.assert_stays(unread=[one])
         self.s.show(window)
-        self.assert_read(one)
-        self.assert_unread(two)
+        self.assert_stays(read=[one], unread=[two])
 
     def test_hidden_terminal_visit_preserves_unread_and_explicit_command_still_reads(self):
         self.configure(manual_read=False)
@@ -326,15 +303,15 @@ class AgentsUnread(TopicsSidebar):
         self.assert_read(pane)
         self.s.tmux('set-option', '-w', '-t', window, '@muxify_open', 'about:blank')
         self.s.wait_rows(lambda rs: self.s.has('browser-panel', rs), 'Browser did not open')
-        self.press_menu_item('Maximize Browser')
+        self.s.press_menu_item('Maximize Browser')
         self.s.wait_rows(lambda rs: not self.s.has('terminal-panel', rs), 'Terminal stayed visible')
         self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_unread', '1')
         self.s.show(window)
         self.s.wait_shown(window)
-        self.assert_unread(pane)
+        self.assert_stays(unread=[pane])
         self.press_shortcut('⇧⌘R')
         self.assert_read(pane)
-        self.press_menu_item('Restore')
+        self.s.press_menu_item('Restore')
 
     def test_git_view_visit_preserves_unread(self):
         self.configure(manual_read=False)
@@ -345,12 +322,12 @@ class AgentsUnread(TopicsSidebar):
         self.s.show(window)
         self.s.wait_shown(window)
         self.assert_read(pane)
-        self.press_menu_item('Show Git View')
+        self.s.press_menu_item('Show Git View')
         self.s.wait_rows(lambda rs: self.s.has('git-view', rs), 'Git View did not open')
         self.s.tmux('set-option', '-p', '-t', pane, '@muxify_agent_unread', '1')
         self.s.show(window)
         self.s.wait_shown(window)
-        self.assert_unread(pane)
+        self.assert_stays(unread=[pane])
         self.s.act('action', 'git-view', 'q')
 
 

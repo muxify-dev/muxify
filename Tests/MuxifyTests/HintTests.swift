@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class HintTests: XCTestCase {
     func testDelayDuplicateEventsAndChangedModifiers() {
@@ -208,15 +209,17 @@ final class HintTests: XCTestCase {
         }
     }
 
+    /// Window `@<id>`, alone in Session `$<id>` unless `session` names another.
+    private func window(_ id: String, session: String? = nil, index: Int = 0, topic: String? = nil, lock: Double? = nil) -> TmuxWindow {
+        let session = session ?? id
+        return .fixture(id: "@" + id, sessionID: "$" + session, sessionName: "session-" + session, index: index, paneTitle: "shell",
+                        path: "/tmp", isActive: index == 0, topicID: topic, lockOrder: lock)
+    }
+
     func testTopicsModeCardsArePinnedThenDormantTopicsWithoutNoTopicSessions() {
         var pinned = TopicRecord(id: "pinned")
         pinned.isPinned = true
         let records = [TopicRecord(id: "dormant"), pinned]
-        func window(_ id: String) -> TmuxWindow {
-            TmuxWindow(id: "@" + id, sessionID: "$" + id, sessionName: "session-" + id, index: 0,
-                       name: "shell", paneTitle: "shell", path: "/tmp", command: "zsh", isActive: true,
-                       paneCount: 1, hasBell: false, sessionActivity: 0, agent: "", storedBrowser: .init(), openRequests: [])
-        }
         let windows = [window("1"), window("2")]
         let sessions = windows.map { SessionGroup(id: $0.sessionID, name: $0.sessionName, windows: [$0]) }
         let topics = TopicsModel(records: records, windows: windows, config: Config(), selection: TopicSelection())
@@ -225,7 +228,7 @@ final class HintTests: XCTestCase {
         var selection = TopicSelection()
         selection.windowID = "@1"
         let opened = TopicsModel(records: records, windows: windows, config: Config(), selection: selection,
-                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window))
+                        location: selection.windowLocation)
         XCTAssertEqual(opened.openedNoTopicSession?.id.session, "$1")
         XCTAssertEqual(QuickSwitchTargets(model: opened, sessions: sessions, windows: windows, tabIDs: []).cards,
                        [.topic("pinned"), .topic("dormant")])
@@ -243,19 +246,12 @@ final class HintTests: XCTestCase {
         first.order = 0
         var last = TopicRecord(id: "last")
         last.order = 2
-        func window(_ id: String, lock: Double?) -> TmuxWindow {
-            var window = TmuxWindow(id: "@" + id, sessionID: "$" + id, sessionName: "session-" + id, index: 0,
-                                    name: "shell", paneTitle: "shell", path: "/tmp", command: "zsh", isActive: true,
-                                    paneCount: 1, hasBell: false, sessionActivity: 0, agent: "", storedBrowser: .init(), openRequests: [])
-            window.lockOrder = lock
-            return window
-        }
         let windows = [window("1", lock: 1), window("2", lock: nil)]
         let sessions = windows.map { SessionGroup(id: $0.sessionID, name: $0.sessionName, windows: [$0]) }
         var selection = TopicSelection()
         selection.windowID = "@1"
         let topics = TopicsModel(records: [last, first, pinned], windows: windows, config: Config(), selection: selection,
-                        location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window))
+                        location: selection.windowLocation)
         XCTAssertEqual(QuickSwitchTargets(model: topics, sessions: sessions, windows: windows, tabIDs: []).cards,
                        [.topic("pinned"), .topic("first"), .topic("last"), .locked("$1")],
                        "a Lock that an older Muxify kept among the Topics is a Guest too")
@@ -294,14 +290,6 @@ final class HintTests: XCTestCase {
         work.order = 0
         var dormant = TopicRecord(id: "dormant")
         dormant.order = 2
-        func window(_ id: String, topic: String? = nil, lock: Double? = nil) -> TmuxWindow {
-            var window = TmuxWindow(id: "@" + id, sessionID: "$" + id, sessionName: "session-" + id, index: 0,
-                                    name: "shell", paneTitle: "shell", path: "/tmp", command: "zsh", isActive: true,
-                                    paneCount: 1, hasBell: false, sessionActivity: 0, agent: "", storedBrowser: .init(), openRequests: [])
-            window.topicID = topic
-            window.lockOrder = lock
-            return window
-        }
         let windows = [window("1", topic: "work"), window("2"), window("3", topic: "work"), window("4", lock: 3),
                        window("5", topic: "pinned"), window("6")]
         let sessions = windows.map { SessionGroup(id: $0.sessionID, name: $0.sessionName, windows: [$0]) }
@@ -310,7 +298,7 @@ final class HintTests: XCTestCase {
             selection.windowID = windowID
             let model = TopicsModel(records: [dormant, work, pinned], windows: windows, config: Config(),
                                     selection: selection,
-                                                    location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), mode: mode)
+                                                    location: selection.windowLocation, mode: mode)
             return QuickSwitchTargets(model: model, sessions: sessions, windows: [], tabIDs: [])
         }
         let rows: [QuickSwitchTarget] = [.topic("pinned"), .topic("work"), .topic("dormant"), .locked("$4")]
@@ -336,13 +324,6 @@ final class HintTests: XCTestCase {
     func testTopicWindowStepGoesThroughEveryWindowOfTheActiveTopic() {
         var work = TopicRecord(id: "work")
         work.order = 0
-        func window(_ id: String, session: String, index: Int, topic: String? = nil) -> TmuxWindow {
-            var window = TmuxWindow(id: "@" + id, sessionID: "$" + session, sessionName: "session-" + session, index: index,
-                                    name: "shell", paneTitle: "shell", path: "/tmp", command: "zsh", isActive: index == 0,
-                                    paneCount: 1, hasBell: false, sessionActivity: 0, agent: "", storedBrowser: .init(), openRequests: [])
-            window.topicID = topic
-            return window
-        }
         let windows = [window("1", session: "1", index: 0, topic: "work"), window("2", session: "1", index: 1, topic: "work"),
                        window("3", session: "2", index: 0, topic: "work"), window("4", session: "2", index: 1, topic: "work"),
                        window("5", session: "3", index: 0)]
@@ -353,7 +334,7 @@ final class HintTests: XCTestCase {
             var selection = TopicSelection()
             selection.windowID = windowID
             let model = TopicsModel(records: [work], windows: windows, config: Config(), selection: selection,
-                            location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), mode: mode)
+                            location: selection.windowLocation, mode: mode)
             let session = windows.first { $0.id == windowID }?.sessionID
             return QuickSwitchTargets(model: model, sessions: sessions, windows: windows.filter { $0.sessionID == session },
                                       tabIDs: [])

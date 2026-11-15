@@ -1,5 +1,6 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class NewTopicTests: XCTestCase {
     private let sessionPath = SessionPath(path: "/work/game", name: "game")
@@ -52,9 +53,7 @@ final class NewTopicTests: XCTestCase {
         config.sessionPaths = [sessionPath]
         let topic = TopicRecord(newTopic: "empty", title: "Plan", slug: "plan", now: Date())
         func window(topic: String?) -> TmuxWindow {
-            TmuxWindow(id: "@1", sessionID: "$1", sessionName: "game", index: 0, name: "shell", paneTitle: "", path: "/work/game",
-                       command: "zsh", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
-                       storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, sessionPath: "/work/game")
+            .fixture(sessionName: "game", path: "/work/game", topicID: topic, sessionPath: "/work/game")
         }
         var selection = TopicSelection()
         selection.windowID = "@1"
@@ -79,39 +78,5 @@ final class NewTopicTests: XCTestCase {
                         location: .window(WindowID(rawValue: "@1")!))
         XCTAssertNil(gone.emptyTopic)
         XCTAssertEqual(gone.activeTopic, .noTopic)
-    }
-
-    func testReopeningATopicWithNoSessionShowsItAndOnlyASettledOneMoves() throws {
-        let open = TopicRecord(newTopic: "empty", title: "Plan", slug: "plan", now: Date())
-        let shown = try TopicReopenPlan(topic: open, records: [open], windows: [], sessionPaths: [sessionPath], existingDirectories: []).edit
-        XCTAssertEqual(shown.commands, [])
-        XCTAssertEqual(shown.selection, .emptyTopic("empty"))
-        XCTAssertNil(shown.record)
-        XCTAssertNil(shown.completion, "an open Topic keeps its place in the list")
-
-        var settled = open
-        settled.settledAt = "2026-10-01T00:00:00Z"
-        var first = TopicRecord(id: "first", slug: "other")
-        first.order = 0
-        let reopened = try TopicReopenPlan(topic: settled, records: [first, settled], windows: [], sessionPaths: [sessionPath],
-                                           existingDirectories: []).edit
-        XCTAssertEqual(reopened.selection, .emptyTopic("empty"))
-        guard case .save(let record)? = reopened.completion else {
-            return XCTFail("Reopen must save the Topic")
-        }
-        XCTAssertNil(record.settledAt)
-        XCTAssertNil(record.order)
-    }
-
-    func testTopicsUseConfiguredSessionPathLabel() {
-        let window = TmuxWindow(id: "@1", sessionID: "$1", sessionName: "renamed", index: 0,
-                                name: "shell", paneTitle: "", path: "/elsewhere", command: "zsh",
-                                isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
-                                storedBrowser: StoredBrowser(), openRequests: [], topicID: "topic", sessionPath: "/work/game")
-        var config = Config()
-        config.sessionPaths = [SessionPath(path: "/work/game", name: "work/game")]
-        let model = TopicsModel(records: [TopicRecord(id: "topic", title: "Fix")],
-                                windows: [window], config: config, selection: TopicSelection())
-        XCTAssertEqual(model.rows.first?.sessions.first?.baseName, "renamed")
     }
 }

@@ -166,28 +166,23 @@ class ClientTerminal(unittest.TestCase):
         self.type_in_plain_client(shown)
         self.assertEqual(self.answer(pane), 'local')
 
-    def test_marker_whose_client_is_not_attached_answers_no(self):
+    def test_script_and_command_agree_for_a_remote_marker_a_detached_client_and_an_unreadable_tmux(self):
         pane = self.sandbox.tmux('display-message', '-p', '-c', self.fields[1], '#{pane_id}')
-        gone = max(self.clients()) + 100000
-        self.sandbox.tmux('set-option', '-s', self.option, '␟'.join([str(gone)] + self.fields[1:]))
-        self.assertEqual(self.answer(pane), 'no')
-
-    def test_unreadable_tmux_fails_with_status_two_and_a_reason(self):
-        pane = self.sandbox.tmux('display-message', '-p', '-c', self.fields[1], '#{pane_id}')
-        missing = str(self.sandbox.root/'no-such-socket')
-        env = dict(self.sandbox.env, TMUX_PANE=pane, TMUX=missing + ',1,0')
-        cli = self.sandbox.app/'Contents/Resources/bin/muxify'
-        answer = subprocess.run([str(cli), 'browser', 'available'], env=env, capture_output=True, text=True)
-        self.assertEqual((answer.returncode, answer.stdout), (2, ''), answer.stderr)
-        self.assertIn('cannot read tmux', answer.stderr)
-        self.assertIn('no-such-socket', answer.stderr, 'tmux\'s own reason reaches stderr')
-        script = subprocess.run(['/bin/sh', str(self.check)], env=env, capture_output=True, text=True)
-        self.assertEqual((script.returncode, script.stdout), (2, ''), script.stderr)
-
-    def test_remote_marker_matches_script_and_command(self):
-        pane = self.sandbox.tmux('display-message', '-p', '-c', self.fields[1], '#{pane_id}')
-        self.sandbox.tmux('set-option', '-s', self.option, '␟'.join(self.fields[:-1] + ['remote']))
-        self.assertEqual(self.answer(pane), 'remote')
+        gone = str(max(self.clients()) + 100000)
+        for word, marker in [('remote', self.fields[:-1] + ['remote']), ('no', [gone] + self.fields[1:])]:
+            with self.subTest(word):
+                self.sandbox.tmux('set-option', '-s', self.option, '␟'.join(marker))
+                self.assertEqual(self.answer(pane), word)
+        with self.subTest('unreadable'):
+            missing = str(self.sandbox.root/'no-such-socket')
+            env = dict(self.sandbox.env, TMUX_PANE=pane, TMUX=missing + ',1,0')
+            cli = self.sandbox.app/'Contents/Resources/bin/muxify'
+            answer = subprocess.run([str(cli), 'browser', 'available'], env=env, capture_output=True, text=True)
+            self.assertEqual((answer.returncode, answer.stdout), (2, ''), answer.stderr)
+            self.assertIn('cannot read tmux', answer.stderr)
+            self.assertIn('no-such-socket', answer.stderr, 'tmux\'s own reason reaches stderr')
+            script = subprocess.run(['/bin/sh', str(self.check)], env=env, capture_output=True, text=True)
+            self.assertEqual((script.returncode, script.stdout), (2, ''), script.stderr)
 
     def test_marker_is_removed_on_reattach_and_detach(self):
         sandbox, option = self.sandbox, self.option

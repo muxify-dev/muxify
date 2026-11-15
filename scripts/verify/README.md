@@ -25,6 +25,12 @@ While it runs, `make verify` wakes the display and holds it awake with `caffeina
 
 The runner stops a suite after 120 seconds without a check starting or ending. Import, discovery, and class fixtures have the same limit. Output does not extend it. A suite can take longer than 120 seconds while its checks make progress. After a timeout, the suite has 60 seconds to clean up before the runner kills its process group. The last completed checks and the active timeout remain in the results even if cleanup cannot finish. Previous suite times set the run order, not the timeout.
 
+The runner's own tests are in `test_run.py`, beside `run.py` and not in `suites/`, because they never launch the app: they run probe suites through `run.py` and check its timeouts, reruns and FLAKY and alone verdicts. `make test` runs them, and `make verify` does not. Run them alone, from the repo root:
+
+```sh
+python3 -m unittest -v scripts.verify.test_run
+```
+
 Run one check. Build the app first, because this command does not build it:
 
 ```sh
@@ -53,6 +59,7 @@ When a driver command times out, read `logs/app.log` and `driver/stall-<n>.txt` 
 
 ## Add a check
 
+- Before you add a check, ask whether a Swift test can prove the behavior. If it can, write the Swift test instead. See "Prove each behaviour once" in `docs/testing.md`.
 - Test one behavior in each check.
 - Name the check for that behavior. Use the terms in `CONTEXT.md`. Example: `test_session_with_unknown_topic_stays_under_no_topic`.
 - Make the fixture state that the check needs in the check. Use Session and Topic names that no other check uses. The check must pass alone and in any order.
@@ -63,11 +70,12 @@ When a driver command times out, read `logs/app.log` and `driver/stall-<n>.txt` 
 - Do not sleep for a fixed time to let the app see a change. Wait for what the app shows: `sandbox.wait_shown(window)` after you move the client, or `sandbox.wait_rows(...)`. Sleep only before you assert that something did not happen.
 - To make the app show a Window before a check, use `sandbox.show(window)`. It asks the app, as `muxify window open` does. A `switch-client` to the Window that the client is already on does not move the client, so the app stays on an Empty Topic page.
 - `sandbox.select(window)` sends the same `muxify://select` link and does not wait, for a check of what the link does with the App Windows.
+- Reach the app's menus, palettes and Sidebar modes through the sandbox, not a copy in the suite: `sandbox.press_menu_item(title)` chooses a menu item once it is enabled, `sandbox.open_palette(name, query)` opens a palette such as Commands or Go to… and types the query, `sandbox.type_query(query)` types in the open palette, `sandbox.run_command(title)` runs a Command from Commands, and `sandbox.show_sidebar_mode(mode)` shows Topics or Sessions.
 - If a check fails because of a known app bug, mark it `@unittest.expectedFailure`. Write a one-line comment above it that names the bug. When the bug is fixed, the run reports "unexpected success". Then remove the mark.
 
 ## Topic records
 
-The sandbox's Topic records are rows in `state/muxify/muxify.db`, the state database. Read and seed them through `TopicRecords` in `topic_records.py`, which uses Python's `sqlite3` and takes no lock of Muxify's own: `put`, `remove`, `get`, `ids` and `set_open_places`, and `held()` to hold the database's write lock for a block, as another process in a long transaction does. A record is a dict in the shape of the old `topics.json` entry. To prove the import of an old records file, write `state/muxify/topics.json` before the app's first launch, as `topics_reopen_at_launch` does: the first open of the database imports it and renames it to `topics.json.migrated`. The Muxify Worktree records are rows of the `worktrees` table there: read them through `TopicRecords.worktrees()`, as `worktrees_cli` does.
+The sandbox's Topic records are rows in `state/muxify/muxify.db`, the state database. Read and seed them through `TopicRecords` in `topic_records.py`, which uses Python's `sqlite3` and takes no lock of Muxify's own: `put`, `remove`, `get`, `ids` and `set_open_places`, and `held()` to hold the database's write lock for a block, as another process in a long transaction does. A record is a dict in the shape of the old `topics.json` entry. To prove the import of an old records file, write `state/muxify/topics.json` before the app's first launch, as `topics_reopen_at_launch` does: the first open of the database imports it and renames it to `topics.json.migrated`.
 
 ## Do not take focus
 

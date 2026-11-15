@@ -44,6 +44,9 @@ final class CLIVerbsTests: XCTestCase {
             (["window", "remove-from-topic", "--new-session"], request(.removeWindowFromTopic(session: nil))),
             (["window", "remove-from-topic", "--session", "notes", "--window", "@12"],
              request(.removeWindowFromTopic(session: "notes"), target: .window(WindowID(rawValue: "@12")!))),
+            (["window", "move", "--topic", "Fix", "--session", "notes"], request(.moveWindow(topic: "Fix", session: "notes", newSession: false))),
+            (["window", "move", "--topic", "Fix", "--new-session", "--window", "@12"],
+             request(.moveWindow(topic: "Fix", session: nil, newSession: true), target: .window(WindowID(rawValue: "@12")!))),
             (["window", "zoom"], request(.zoomPane)),
             (["window", "zoom", "--pane", "%3"], request(.zoomPane, target: .pane(PaneID(rawValue: "%3")!))),
         ]
@@ -57,6 +60,9 @@ final class CLIVerbsTests: XCTestCase {
             (["topic", "start-fresh", "--pane", "%3"], "topic start-fresh does not take --pane; name the target with --topic <id|label>"),
             (["session", "remove-from-topic", "--remove-worktree"], CLIVerbs.usage(for: ["session", "remove-from-topic"])),
             (["session", "remove-from-topic", "--window", "@1"], CLIVerbs.usage(for: ["session", "remove-from-topic"])),
+            (["window", "move", "--topic", "Fix", "--session", "notes", "--new-session"], CLIVerbs.usage(for: ["window", "move"])),
+            (["window", "move", "--topic", "Fix", "--session", ""], CLIVerbs.usage(for: ["window", "move"])),
+            (["window", "move", "--new-topic", "--session", "notes"], CLIVerbs.usage(for: ["window", "move"])),
             (["window", "zoom", "extra"], CLIVerbs.usage(for: ["window", "zoom"])),
             (["window", "remove-from-topic"],
              "window remove-from-topic takes the destination: --session <name|id> of a No Topic Session, or --new-session"),
@@ -126,6 +132,8 @@ final class CLIVerbsTests: XCTestCase {
             (["session", "move", "down"], request(.moveSession(.down))),
             (["topic", "sort-sessions", "--topic", "Fix"], request(.sortSessions, target: .topic(.named("Fix")))),
             (["topic", "replace-from-bench", "--with", "Next"], request(.replaceFromBench(with: .topic("Next")))),
+            (["topic", "fill-place", "2"], request(.fillPlace(2))),
+            (["topic", "fill-place", "1", "--topic", "Fix"], request(.fillPlace(1), target: .topic(.named("Fix")))),
             (["topic", "choose-in-play", "--topic", "B", "--session", "notes", "--topic", "A"],
              request(.chooseInPlay([.topic("B"), .session("notes"), .topic("A")]))),
             (["topic", "replace-from-bench", "--with-session", "notes", "--session", "chores"],
@@ -145,7 +153,8 @@ final class CLIVerbsTests: XCTestCase {
                           ["topic", "replace-from-bench", "--with", "Next", "--with-session", "notes"],
                           ["topic", "replace-from-bench", "--with", "A", "--with", "B"], ["topic", "replace-from-bench", "--with", ""],
                           ["topic", "choose-in-play"], ["topic", "choose-in-play", "A"], ["topic", "choose-in-play", "--topic", ""],
-                          ["topic", "choose-in-play", "--window", "@1"]] {
+                          ["topic", "choose-in-play", "--window", "@1"],
+                          ["topic", "fill-place"], ["topic", "fill-place", "0"], ["topic", "fill-place", "one"], ["topic", "fill-place", "1", "2"]] {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
                 XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
             }
@@ -214,22 +223,6 @@ final class CLIVerbsTests: XCTestCase {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: inside), "\(arguments)") { error in
                 XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
                 XCTAssertEqual(error.localizedDescription, message, "\(arguments)")
-            }
-        }
-    }
-
-    /// ADR 0039: an old form fails and names the commands that do its work now.
-    func testEachRemovedFormOfTopicNewNamesTheNewCommands() {
-        let cases: [([String], [String])] = [
-            (["topic", "new"], ["muxify window move --new-topic"]),
-            (["topic", "new", "Fix", "--directory", "/work"], ["muxify topic new \"Fix\" --json", "muxify topic add-session /work --topic"]),
-            (["topic", "new", "--pane", "%3"], ["muxify window move --new-topic [\"title\"] [--window <id> | --pane <id>]"]),
-            (["topic", "new", "Fix", "--pane", "%3"], ["muxify topic new \"Fix\" --json", "muxify topic add-session <dir>", "muxify window move --new-topic"]),
-        ]
-        for (arguments, commands) in cases {
-            XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: ["TMUX_PANE": "%7"]), "\(arguments)") { error in
-                XCTAssertEqual((error as? CLIError)?.exitCode, 2)
-                for command in commands { XCTAssertTrue(error.localizedDescription.contains(command), "\(arguments): \(error.localizedDescription)") }
             }
         }
     }

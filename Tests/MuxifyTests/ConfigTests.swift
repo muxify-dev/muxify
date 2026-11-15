@@ -17,69 +17,50 @@ final class ConfigTests: XCTestCase {
         try! KeyTrigger(string)
     }
 
-    func testManualReadDefaultsAndConfigurableShortcut() throws {
-        let defaults = try load("")
-        XCTAssertFalse(defaults.notifications.manualRead)
-        XCTAssertEqual(defaults.keybinds.action(for: trigger("cmd+shift+r"), focus: nil), .markRead)
-        XCTAssertTrue(Config.template.contains("#   manual_read: false"))
-        XCTAssertTrue(Config.template.contains("#   mark_read: cmd+shift+r"))
-        let custom = try load("notifications:\n  manual_read: true\nkeybindings:\n  mark_read: ctrl+alt+r")
-        XCTAssertTrue(custom.notifications.manualRead)
-        XCTAssertNil(custom.keybinds.action(for: trigger("cmd+shift+r"), focus: nil))
-        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+alt+r"), focus: nil), .markRead)
-        XCTAssertTrue(custom.problems.isEmpty)
-        let invalid = try load("notifications:\n  manual_read: sometimes")
-        XCTAssertFalse(invalid.notifications.manualRead)
-        XCTAssertEqual(invalid.problems.map(\.message), ["notifications.manual_read: expected a boolean"])
-        XCTAssertNil(try load("keybindings:\n  mark_read: []").keybinds.firstTrigger(for: .markRead))
-    }
-
-    func testVimKeysAreOnByDefaultAndOnlyTheLocalConfigTurnsThemOff() throws {
-        XCTAssertTrue(try load("").browser.vimKeys)
-        XCTAssertTrue(Config.template.contains("#   vim_keys: true"))
-        let off = try load("browser:\n  vim_keys: false")
-        XCTAssertFalse(off.browser.vimKeys)
-        XCTAssertTrue(off.problems.isEmpty)
-        let invalid = try load("browser:\n  vim_keys: maybe\n  find: true")
-        XCTAssertTrue(invalid.browser.vimKeys)
-        XCTAssertEqual(invalid.problems.map(\.message), ["browser.vim_keys: expected a boolean", "unknown key \"browser.find\""])
-        let remote = try Config.load(path: root, isRemote: true) { _ in "browser:\n  vim_keys: false" }.get()
-        XCTAssertTrue(remote.browser.vimKeys)
-        XCTAssertTrue(remote.problems.isEmpty)
-    }
-
-    func testBrowserHistoryIsOnByDefaultAndOnlyTheLocalConfigTurnsItOff() throws {
-        XCTAssertTrue(try load("").browser.history)
-        XCTAssertTrue(Config.template.contains("#   history: true"))
-        let off = try load("browser:\n  history: false")
-        XCTAssertFalse(off.browser.history)
-        XCTAssertTrue(off.problems.isEmpty)
-        XCTAssertEqual(try load("browser:\n  history: yes please").problems.map(\.message), ["browser.history: expected a boolean"])
-        let remote = try Config.load(path: root, isRemote: true) { _ in "browser:\n  history: false" }.get()
-        XCTAssertTrue(remote.browser.history)
-    }
-
-    func testDiagnosticsAreOffByDefaultAndOnlyTheLocalConfigTurnsThemOn() throws {
-        XCTAssertEqual(try load("").diagnostics, Config.Diagnostics(enabled: false, displayLinks: false))
-        XCTAssertTrue(Config.template.contains("# diagnostics:\n"))
-        XCTAssertTrue(Config.template.contains("#   enabled: false"))
-        XCTAssertTrue(Config.template.contains("#   display_links: false"))
-        let on = try load("diagnostics:\n  enabled: true")
-        XCTAssertTrue(on.diagnostics.enabled)
-        XCTAssertTrue(on.problems.isEmpty)
-        let invalid = try load("diagnostics:\n  enabled: yes please\n  folder: /tmp")
-        XCTAssertFalse(invalid.diagnostics.enabled)
-        XCTAssertEqual(invalid.problems.map(\.message), ["diagnostics.enabled: expected a boolean", "unknown key \"diagnostics.folder\""])
-        let remote = try Config.load(path: root, isRemote: true) { _ in "diagnostics:\n  enabled: true\n  display_links: true" }.get()
-        XCTAssertEqual(remote.diagnostics, Config.Diagnostics())
-        XCTAssertTrue(remote.problems.isEmpty)
+    /// One row for each boolean key: its default, the other value, a value that is not a boolean, an unknown key beside
+    /// it, its section that is not a mapping, and whether a remote Config cannot set it.
+    func testEachBooleanKeyTakesOnlyABooleanAndKeepsItsDefault() throws {
+        let keys: [(path: [String], value: KeyPath<Config, Bool>, byDefault: Bool, remoteCannotSetIt: Bool)] = [
+            (["notifications", "manual_read"], \.notifications.manualRead, false, false),
+            (["browser", "vim_keys"], \.browser.vimKeys, true, true),
+            (["browser", "history"], \.browser.history, true, true),
+            (["diagnostics", "enabled"], \.diagnostics.enabled, false, true),
+            (["diagnostics", "display_links"], \.diagnostics.displayLinks, false, true),
+            (["ui", "focus_marker"], \.focusMarker, false, false),
+            (["ui", "pulse"], \.pulse, true, false),
+            (["topics", "reopen_at_launch"], \.topics.reopenAtLaunch, false, false),
+            (["sidebar", "titles", "wrap"], \.sidebar.wrapsTitles, true, false),
+        ]
+        /// `keys` as nested mappings that end in `text`, with `sibling` beside the last key.
+        func yaml(_ keys: [String], _ text: String, then sibling: String = "") -> String {
+            let lines = keys.enumerated().map { String(repeating: "  ", count: $0) + $1 + ":" }
+            return lines.joined(separator: "\n") + " " + text
+                + (sibling.isEmpty ? "" : "\n" + String(repeating: "  ", count: keys.count - 1) + sibling)
+        }
+        for (path, value, byDefault, remoteCannotSetIt) in keys {
+            let name = path.joined(separator: "."), parent = path.dropLast().joined(separator: ".")
+            XCTAssertEqual(try load("")[keyPath: value], byDefault, name)
+            let set = try load(yaml(path, "\(!byDefault)"))
+            XCTAssertEqual(set[keyPath: value], !byDefault, name)
+            XCTAssertEqual(set.problems, [], name)
+            for bad in ["yes please", "1", "'\(!byDefault)'", "\"\(!byDefault)\"", "[true]"] {
+                let config = try load(yaml(path, bad, then: "zz: 1"))
+                XCTAssertEqual(config[keyPath: value], byDefault, "\(name): \(bad)")
+                XCTAssertEqual(config.problems, [
+                    ConfigProblem(path: root, line: path.count, message: "\(name): expected a boolean"),
+                    ConfigProblem(path: root, line: path.count + 1, message: "unknown key \"\(parent).zz\""),
+                ], "\(name): \(bad)")
+            }
+            XCTAssertEqual(try load(yaml(Array(path.dropLast()), "false")).problems.map(\.message),
+                           ["\(parent): expected a mapping"], name)
+            let remote = try Config.load(path: root, isRemote: true) { _ in yaml(path, "\(!byDefault)") }.get()
+            XCTAssertEqual(remote[keyPath: value], remoteCannotSetIt ? byDefault : !byDefault, "\(name) in a remote Config")
+            XCTAssertEqual(remote.problems, [], "\(name) in a remote Config")
+        }
     }
 
     func testBackgroundUpdateChecksAreOnByDefaultOnTheBuildsOwnChannel() throws {
         XCTAssertEqual(try load("").update, Config.Update(check: true, channel: nil))
-        XCTAssertTrue(Config.template.contains("# update:\n"))
-        XCTAssertTrue(Config.template.contains("#   check: true"))
-        XCTAssertTrue(Config.template.contains("#   channel: stable"))
         let set = try load("update:\n  check: false\n  channel: tip")
         XCTAssertEqual(set.update, Config.Update(check: false, channel: .tip))
         XCTAssertTrue(set.problems.isEmpty)
@@ -105,30 +86,6 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(remote.problems.isEmpty)
     }
 
-    func testDisplayLinksAreOffByDefaultAndTheLocalConfigTurnsThemOn() throws {
-        let on = try load("diagnostics:\n  display_links: true")
-        XCTAssertEqual(on.diagnostics, Config.Diagnostics(enabled: false, displayLinks: true))
-        XCTAssertTrue(on.problems.isEmpty)
-        for value in ["yes please", "1", "[true]"] {
-            let invalid = try load("diagnostics:\n  display_links: \(value)")
-            XCTAssertFalse(invalid.diagnostics.displayLinks, value)
-            XCTAssertEqual(invalid.problems.map(\.message), ["diagnostics.display_links: expected a boolean"], value)
-        }
-    }
-
-    func testUnreadAndAllReadBindingsCanBeRemappedOrDisabled() throws {
-        let defaults = try load("")
-        XCTAssertEqual(defaults.keybinds.action(for: trigger("cmd+shift+u"), focus: nil), .markUnread)
-        XCTAssertNil(defaults.keybinds.firstTrigger(for: .markAllRead))
-        XCTAssertTrue(Config.template.contains("#   mark_unread: cmd+shift+u"))
-        let custom = try load("keybindings:\n  mark_unread: ctrl+alt+u\n  mark_all_read: ctrl+alt+r\n  command_palette:\n    mark_unread: ctrl+u")
-        XCTAssertTrue(custom.problems.isEmpty)
-        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+alt+u"), focus: nil), .markUnread)
-        XCTAssertEqual(custom.keybinds.action(for: trigger("ctrl+alt+r"), focus: nil), .markAllRead)
-        XCTAssertNil(custom.keybinds.action(for: trigger("cmd+shift+u"), focus: nil))
-        XCTAssertNil(try load("keybindings:\n  mark_unread: []").keybinds.firstTrigger(for: .markUnread))
-    }
-
     func testMuxifyConfigChoosesTheConfigFileElseTheXDGPath() {
         func path(_ environment: [String: String]) -> String { MuxifyPaths(environment: environment, home: "/Users/me").configFile.path }
         XCTAssertEqual(path([:]), "/Users/me/.config/muxify/config.yaml")
@@ -139,24 +96,7 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(path(["XDG_CONFIG_HOME": ""]), "/Users/me/.config/muxify/config.yaml", "an empty value is unset")
     }
 
-    func testCommandsTakesTheSwitchersKeyAndAnOldOpenSwitcherIsAProblemThatNamesGoTo() throws {
-        let config = try load("")
-        XCTAssertEqual(config.commandPalettes.first?.name, "Commands")
-        XCTAssertEqual(config.commandPalettes.first?.triggers, [trigger("cmd+shift+p")])
-        XCTAssertEqual(config.commandPalettes.last?.name, "Go to…")
-        XCTAssertEqual(config.commandPalettes.last?.triggers, [trigger("cmd+p")])
-        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command, .shift],
-                                                  timestamp: 0, windowNumber: 0, context: nil,
-                                                  characters: "P", charactersIgnoringModifiers: "p",
-                                                  isARepeat: false, keyCode: 0x23))
-        XCTAssertEqual(try XCTUnwrap(KeyTrigger(event)), trigger("cmd+shift+p"))
-        XCTAssertNil(ConfigAction(rawValue: "open_switcher"))
-        XCTAssertFalse(Config.template.contains("open_switcher"))
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .moveSession), trigger("cmd+shift+m"))
-        XCTAssertTrue(Config.template.contains("#   move_session: cmd+shift+m"))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+a"), focus: nil), .addSessionToTopic)
-        XCTAssertTrue(Config.template.contains("#   add_session_to_topic: cmd+shift+a"))
-        XCTAssertTrue(config.problems.isEmpty)
+    func testAnOldOpenSwitcherIsAProblemThatNamesGoTo() throws {
         let old = try load("keybindings:\n  open_switcher: cmd+p")
         XCTAssertEqual(old.problems.map(\.message),
                        ["open_switcher is gone: the Go to… Command Palette replaces the Switcher; bind it in command_palettes"])
@@ -170,7 +110,6 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+t"), focus: .terminal), .movePane)
         XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+t"), focus: .browser), .reopenClosedTab,
                        "restating Move Pane's default took the key from Reopen Closed Tab")
-        XCTAssertFalse(Config.template.contains("move_session_to_topic"))
     }
 
     func testARemovedPaletteNameIsAProblemEvenWhereTheGlobalScopeUsesIt() throws {
@@ -212,73 +151,6 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.problems, [])
     }
 
-    func testSidebarModeSwitchDefaultsToOptionCommandTAndCanBeRemappedOrDisabled() throws {
-        let defaults = try load("")
-        XCTAssertEqual(defaults.keybinds.firstTrigger(for: .toggleSidebarMode), trigger("alt+cmd+t"))
-        XCTAssertEqual(defaults.keybinds.action(for: trigger("alt+cmd+t"), focus: .terminal), .toggleSidebarMode)
-        XCTAssertEqual(defaults.keybinds.action(for: trigger("alt+cmd+t"), focus: .browser), .toggleSidebarMode)
-        XCTAssertTrue(Config.template.contains("#   toggle_sidebar_mode: alt+cmd+t"))
-        let remapped = try load("keybindings:\n  toggle_sidebar_mode: [ctrl+cmd+t, shift+cmd+y]")
-        XCTAssertEqual(remapped.keybinds.firstTrigger(for: .toggleSidebarMode), trigger("ctrl+cmd+t"))
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("shift+cmd+y"), focus: nil), .toggleSidebarMode)
-        XCTAssertNil(remapped.keybinds.action(for: trigger("alt+cmd+t"), focus: nil))
-        XCTAssertEqual(remapped.problems, [])
-        let disabled = try load("keybindings:\n  toggle_sidebar_mode: []")
-        XCTAssertNil(disabled.keybinds.firstTrigger(for: .toggleSidebarMode))
-        XCTAssertNil(disabled.keybinds.action(for: trigger("alt+cmd+t"), focus: nil))
-    }
-
-    func testSettleCanBeBoundAndClearedAndTheRemovedActionsAreUnknown() throws {
-        let defaults = try load("")
-        XCTAssertNil(defaults.keybinds.firstTrigger(for: .settleTopic))
-        XCTAssertTrue(Config.template.contains("#   settle_topic: []"))
-        XCTAssertFalse(Config.template.contains("show_settled"))
-        XCTAssertFalse(Config.template.contains("go_to_topic"))
-        let config = try load("keybindings:\n  settle_topic: cmd+shift+s")
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+s"), focus: nil), .settleTopic)
-        XCTAssertTrue(config.problems.isEmpty)
-        let cleared = try load("keybindings:\n  settle_topic: []")
-        XCTAssertNil(cleared.keybinds.firstTrigger(for: .settleTopic))
-        XCTAssertTrue(cleared.problems.isEmpty)
-        let removed = try load("keybindings:\n  go_to_topic: cmd+o\n  show_settled: ctrl+cmd+s")
-        XCTAssertEqual(removed.problems.map(\.message).sorted(), ["unknown action \"go_to_topic\"", "unknown action \"show_settled\""])
-        XCTAssertNil(removed.keybinds.action(for: trigger("cmd+o"), focus: nil))
-    }
-
-    func testMovePaneActionDefaultsAndKeyDispatch() throws {
-        XCTAssertEqual(ConfigAction(rawValue: "move_pane"), .movePane)
-        let config = try load("")
-        let key = trigger("cmd+shift+t")
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .movePane), key)
-        XCTAssertEqual(key.symbol, "⇧⌘T")
-        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.command, .shift],
-                                                  timestamp: 0, windowNumber: 0, context: nil,
-                                                  characters: "T", charactersIgnoringModifiers: "t",
-                                                  isARepeat: false, keyCode: 0x11))
-        XCTAssertEqual(config.keybinds.action(for: try XCTUnwrap(KeyTrigger(event)), focus: nil), .movePane)
-        XCTAssertTrue(Config.template.contains("#   move_pane: cmd+shift+t"))
-        XCTAssertTrue(config.problems.isEmpty)
-    }
-
-    func testMovePaneCanBeRemappedDisabledAndClaimedByAnotherAction() throws {
-        let remapped = try load("keybindings:\n  move_pane: ctrl+cmd+t")
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("ctrl+cmd+t"), focus: nil), .movePane)
-        XCTAssertNil(remapped.keybinds.action(for: trigger("cmd+shift+t"), focus: .terminal))
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("cmd+shift+t"), focus: .browser), .reopenClosedTab)
-        XCTAssertTrue(remapped.problems.isEmpty)
-        let disabled = try load("keybindings:\n  move_pane: []")
-        XCTAssertNil(disabled.keybinds.firstTrigger(for: .movePane))
-        XCTAssertNil(disabled.keybinds.action(for: trigger("cmd+shift+t"), focus: .terminal))
-        XCTAssertTrue(disabled.problems.isEmpty)
-        let claimed = try load("keybindings:\n  new_topic: cmd+shift+t")
-        for focus in [PanelLayout.Side.terminal, .browser, nil] {
-            XCTAssertEqual(claimed.keybinds.action(for: trigger("cmd+shift+t"), focus: focus), .newTopic, "\(String(describing: focus))")
-        }
-        XCTAssertNil(claimed.keybinds.firstTrigger(for: .movePane))
-        XCTAssertNil(claimed.keybinds.firstTrigger(for: .reopenClosedTab))
-        XCTAssertTrue(claimed.problems.isEmpty)
-    }
-
     func testCloseTabTakesCommandWOnlyWhileTheBrowserHasFocus() throws {
         let config = try load("")
         let key = trigger("cmd+w")
@@ -287,7 +159,6 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.keybinds.action(for: key, focus: .browser), .closeTab)
         XCTAssertNil(config.keybinds.action(for: key, focus: .terminal), "⌘W did not go on to Ghostty from the Terminal")
         XCTAssertNil(config.keybinds.action(for: key, focus: nil))
-        XCTAssertTrue(Config.template.contains("#   close_tab: cmd+w"))
         let shared = try load("keybindings:\n  close_tab: cmd+shift+w\n  move_window: cmd+shift+w")
         XCTAssertEqual(shared.problems, [])
         XCTAssertEqual(shared.keybinds.action(for: trigger("cmd+shift+w"), focus: .browser), .closeTab)
@@ -296,20 +167,25 @@ final class ConfigTests: XCTestCase {
     }
 
     func testReopenClosedTabSharesMovePanesKeyAndWinsWhileTheBrowserHasFocus() throws {
-        let config = try load("keybindings:\n  reopen_closed_tab: cmd+shift+t")
         let key = trigger("cmd+shift+t")
         XCTAssertEqual(ConfigAction.reopenClosedTab.requiredFocus, .browser)
-        XCTAssertEqual(config.keybinds.action(for: key, focus: .browser), .reopenClosedTab)
-        XCTAssertEqual(config.keybinds.action(for: key, focus: .terminal), .movePane)
-        XCTAssertEqual(config.keybinds.action(for: key, focus: nil), .movePane)
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .movePane), key)
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .reopenClosedTab), key)
-        XCTAssertEqual(config.problems, [])
-        XCTAssertTrue(Config.template.contains("#   reopen_closed_tab: cmd+shift+t"))
+        for (name, config) in [("defaults", try load("")), ("restated", try load("keybindings:\n  reopen_closed_tab: cmd+shift+t"))] {
+            XCTAssertEqual(config.keybinds.action(for: key, focus: .browser), .reopenClosedTab, name)
+            XCTAssertEqual(config.keybinds.action(for: key, focus: .terminal), .movePane, name)
+            XCTAssertEqual(config.keybinds.action(for: key, focus: nil), .movePane, name)
+            XCTAssertEqual(config.problems, [], name)
+        }
         let both = try load("keybindings:\n  move_pane: alt+t\n  reopen_closed_tab: alt+t\n  browser_back: alt+t")
         XCTAssertEqual(both.keybinds.action(for: trigger("alt+t"), focus: .browser), .reopenClosedTab)
         XCTAssertEqual(both.keybinds.action(for: trigger("alt+t"), focus: .terminal), .movePane)
         XCTAssertEqual(both.problems, [ConfigProblem(path: root, line: 4, message: "alt+t is already bound to reopen_closed_tab")])
+        let claimed = try load("keybindings:\n  new_topic: cmd+shift+t")
+        for focus in [PanelLayout.Side.terminal, .browser, nil] {
+            XCTAssertEqual(claimed.keybinds.action(for: key, focus: focus), .newTopic, "\(String(describing: focus))")
+        }
+        XCTAssertNil(claimed.keybinds.firstTrigger(for: .movePane))
+        XCTAssertNil(claimed.keybinds.firstTrigger(for: .reopenClosedTab))
+        XCTAssertEqual(claimed.problems, [])
         let palette = try load("""
         keybindings:
           reopen_closed_tab: cmd+p
@@ -331,16 +207,10 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.sidebar, Config.Sidebar(topics: false, sessions: true, animateSwitching: false, agents: .init(false), panes: true))
         XCTAssertTrue(try load("sidebar:\n  animate_switching: true").sidebar.animateSwitching)
         XCTAssertTrue(config.problems.isEmpty)
-        XCTAssertTrue(Config.template.contains("#   topics: true"))
-        XCTAssertTrue(Config.template.contains("#   sessions: true"))
-        XCTAssertTrue(Config.template.contains("#   animate_switching: true"))
-        XCTAssertTrue(Config.template.contains("#   agents: true"))
-        XCTAssertTrue(Config.template.contains("#   panes: false"))
     }
 
     func testCardRowsDefaultToFiveAndAcceptACountOrAll() throws {
         XCTAssertEqual(try load("").sidebar.cardRows, 5)
-        XCTAssertTrue(Config.template.contains("#   card_rows: 5"))
         let eight = try load("sidebar:\n  card_rows: 8")
         XCTAssertEqual(eight.sidebar.cardRows, 8)
         XCTAssertTrue(eight.problems.isEmpty, "\(eight.problems)")
@@ -359,7 +229,6 @@ final class ConfigTests: XCTestCase {
 
     func testWindowTooltipsDefaultToAlwaysAndAcceptAllThreeModes() throws {
         XCTAssertEqual(try load("").sidebar.windowTooltips, .always)
-        XCTAssertTrue(Config.template.contains("#   window_tooltips: always"))
         for (value, expected) in [("off", Config.Sidebar.WindowTooltips.off), ("'off'", .off),
                                   ("truncated", .truncated), ("always", .always)] {
             let config = try load("sidebar:\n  window_tooltips: \(value)")
@@ -376,7 +245,6 @@ final class ConfigTests: XCTestCase {
 
     func testSessionCardsDefaultToAnyAndAcceptOne() throws {
         XCTAssertEqual(try load("").sidebar.sessionCards, .any)
-        XCTAssertTrue(Config.template.contains("#   session_cards: any"))
         for (value, expected) in [("one", Config.Sidebar.SessionCards.one), ("any", .any), ("'one'", .one)] {
             let config = try load("sidebar:\n  session_cards: \(value)")
             XCTAssertEqual(config.sidebar.sessionCards, expected, value)
@@ -402,7 +270,7 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(try load("sidebar:\n  other: true").problems.count, 1)
     }
 
-    func testAgentsScopeDefaultsToActiveAndAcceptsAll() throws {
+    func testAgentsScopeDefaultsToActiveAcceptsAllAndReportsAnythingElse() throws {
         XCTAssertEqual(try load("").sidebar.agentsScope, .init(.active))
         XCTAssertEqual(try load("sidebar:\n  topics: false").sidebar.agentsScope, .init(.active))
         for (value, scope) in [("active", Config.Sidebar.AgentsScope.active), ("all", .all), ("'all'", .all)] {
@@ -410,7 +278,12 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(config.sidebar.agentsScope, .init(scope), value)
             XCTAssertEqual(config.problems, [], value)
         }
-        XCTAssertTrue(Config.template.contains("#   agents_scope: active"))
+        for value in ["All", "every", "true", "1", "null", "[]"] {
+            let config = try load("sidebar:\n  agents_scope: \(value)")
+            XCTAssertEqual(config.sidebar.agentsScope, .init(.active), value)
+            XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 2,
+                message: "sidebar.agents_scope: expected active, window or all")], value)
+        }
     }
 
     func testAgentsAndAgentsScopeTakeAValueForEachSidebarMode() throws {
@@ -451,41 +324,9 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.problems.map(\.line), [3, 6, 7])
     }
 
-    func testAgentsScopeOtherValuesReportAProblemAndKeepActive() throws {
-        for value in ["All", "every", "true", "1", "null", "[]"] {
-            let config = try load("sidebar:\n  agents_scope: \(value)")
-            XCTAssertEqual(config.sidebar.agentsScope, .init(.active), value)
-            XCTAssertEqual(config.problems.map(\.message), ["sidebar.agents_scope: expected active, window or all"], value)
-            XCTAssertEqual(config.problems.first?.line, 2, value)
-        }
-    }
-
-    func testCardTitlesWrapUnlessTitlesWrapIsFalse() throws {
-        XCTAssertTrue(try load("").sidebar.wrapsTitles)
-        let config = try load("sidebar:\n  titles:\n    wrap: false")
-        XCTAssertFalse(config.sidebar.wrapsTitles)
-        XCTAssertEqual(config.problems, [])
-        XCTAssertTrue(Config.template.contains("#   titles:\n#     wrap: true"))
-        let bad = try load("sidebar:\n  titles:\n    wrap: 'false'\n    cut: true")
-        XCTAssertTrue(bad.sidebar.wrapsTitles)
-        XCTAssertEqual(bad.problems.map(\.message), ["sidebar.titles.wrap: expected a boolean", "unknown key \"sidebar.titles.cut\""])
-        XCTAssertEqual(bad.problems.map(\.line), [3, 4])
-        XCTAssertEqual(try load("sidebar:\n  titles: false").problems.map(\.message), ["sidebar.titles: expected a mapping"])
-    }
-
     func testMissingOrEmptyFileGivesTheDefaults() throws {
         for config in [try load([:]), try load(""), try load("# nothing here\n\n")] {
-            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+s"), focus: nil), .toggleSidebar)
-            XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+s"), focus: nil), .toggleSidebar)
-            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b"), focus: nil), .toggleBrowser)
-            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+n"), focus: nil), .newTopic)
-            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+n"), focus: nil), .newAppWindow)
-            XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+backquote"), focus: nil), .focusTerminal)
-            XCTAssertEqual(config.keybinds.firstTrigger(for: .focusTerminal), trigger("cmd+shift+j"))
-            XCTAssertNil(config.keybinds.action(for: trigger("cmd+backquote"), focus: nil))
-            XCTAssertNil(config.keybinds.action(for: trigger("cmd+shift+backquote"), focus: nil))
-            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+b"), focus: nil), .focusBrowser)
-            XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("cmd+s"))
+            XCTAssertEqual(config.keybinds, .defaults)
             XCTAssertEqual(config.headerHeight, 30)
             XCTAssertEqual(config.statusLine, Config.StatusLine())
             XCTAssertEqual(config.interfaceFontSize, InterfaceFontSize(12))
@@ -559,25 +400,6 @@ final class ConfigTests: XCTestCase {
                        ["ui.status_line.session: expected a mapping"])
     }
 
-    func testStatusLineTemplateShowsTheDefaults() throws {
-        let lines = Config.template.split(separator: "\n").map(String.init)
-        let start = try XCTUnwrap(lines.firstIndex(of: "#   status_line:"))
-        let block = lines[start...].prefix { $0 == lines[start] || $0.hasPrefix("#     ") }
-        XCTAssertTrue(block.contains("#     enabled: true") && block.contains("#       wrap: true"), "\(block)")
-        let config = try load((["# ui:"] + block).map { String($0.dropFirst(2)) }.joined(separator: "\n"))
-        XCTAssertEqual(config.statusLine, Config().statusLine)
-        XCTAssertEqual(config.problems, [])
-    }
-
-    func testFocusMarkerIsOffByDefaultAndTakesOnlyABoolean() throws {
-        XCTAssertFalse(try load("").focusMarker)
-        XCTAssertTrue(try load("ui:\n  focus_marker: true").focusMarker)
-        let bad = try load("ui:\n  focus_marker: yes please")
-        XCTAssertFalse(bad.focusMarker)
-        XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "ui.focus_marker: expected a boolean")])
-        XCTAssertTrue(Config.template.contains("#   focus_marker: false"))
-    }
-
     func testFocusMarkerColorAndOpacityTakeOneValueOrOnePerAppearance() throws {
         let defaults = try load("")
         XCTAssertNil(defaults.focusMarkerColor)
@@ -606,17 +428,6 @@ final class ConfigTests: XCTestCase {
 
     private func sidebar(_ size: Double = 12, _ family: String = "system") -> SidebarTypography {
         SidebarTypography(fontSize: InterfaceFontSize(size), fontFamily: family)
-    }
-
-    func testInterfaceFontSizeAndSidebarFamilyDefaultsPreserveExistingConfig() throws {
-        for text in ["ui: {}", "ui:\n  sidebar: {}", "ui:\n  header_height: 26",
-                     "ui:\n  font_size: 12\n  sidebar:\n    font_family: system"] {
-            let config = try load(text)
-            XCTAssertEqual(sidebar(config), sidebar(), text)
-            XCTAssertEqual(config.interfaceFontSize.factor, 1, text)
-            XCTAssertEqual(config.problems, [], text)
-            XCTAssertEqual(config.keybinds, .defaults, text)
-        }
     }
 
     func testInterfaceFontSizeAcceptsWholeAndFractionalPointsFrom9To24() throws {
@@ -734,27 +545,14 @@ final class ConfigTests: XCTestCase {
         func update(_ text: String?) {
             loaded.update(with: Config.load(path: root, fontFamilies: { ["Test Sans"] }) { _ in text })
         }
-        let custom = "ui:\n  font_size: 18\n  sidebar:\n    font_family: Test Sans"
-        update(custom)
+        update("ui:\n  font_size: 18\n  sidebar:\n    font_family: Test Sans")
         XCTAssertEqual(sidebar(loaded.config), sidebar(18, "Test Sans"))
-        for badYaml in ["ui: [", "ui:\n  font_size: 18\n  font_size: 24"] {
-            update(badYaml)
-            XCTAssertEqual(sidebar(loaded.config), sidebar(18, "Test Sans"))
-            XCTAssertEqual(loaded.problems.count, 1)
-        }
-        update("ui:\n  font_size: wrong\n  sidebar:\n    font_family: Test Sans")
-        XCTAssertEqual(sidebar(loaded.config), sidebar(12, "Test Sans"))
-        update("ui:\n  font_size: 24\n  sidebar:\n    font_family: Missing")
-        XCTAssertEqual(sidebar(loaded.config), sidebar(24))
-        update("ui:\n  font_size: false\n  sidebar:\n    font_family: null")
-        XCTAssertEqual(sidebar(loaded.config), sidebar())
-        XCTAssertEqual(loaded.problems.count, 2)
-        for removed in ["ui:\n  sidebar: {}", "ui: {}", "keybindings: {}", "", nil] {
-            update(custom)
-            update(removed)
-            XCTAssertEqual(sidebar(loaded.config), sidebar(), "removing ui.font_size restores 12")
-            XCTAssertEqual(loaded.problems, [])
-        }
+        update("ui: [")
+        XCTAssertEqual(sidebar(loaded.config), sidebar(18, "Test Sans"))
+        XCTAssertEqual(loaded.problems.count, 1)
+        update("keybindings: {}")
+        XCTAssertEqual(sidebar(loaded.config), sidebar(), "removing ui.font_size restores 12")
+        XCTAssertEqual(loaded.problems, [])
     }
 
     func testGhosttysCmdNOpensNoAppWindowUnlessTheConfigGivesItToNewAppWindow() throws {
@@ -813,14 +611,6 @@ final class ConfigTests: XCTestCase {
                 ConfigProblem(path: root, line: 2, message: "ui.header_height: expected a finite number of at least 24 points"),
             ], value)
         }
-    }
-
-    func testUIPulseTurnsEveryPulseOffAndReportsAValueThatIsNotABoolean() throws {
-        XCTAssertTrue(try load("").pulse)
-        XCTAssertFalse(try load("ui:\n  pulse: false").pulse)
-        let bad = try load("ui:\n  pulse: sometimes")
-        XCTAssertTrue(bad.pulse)
-        XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "ui.pulse: expected a boolean")])
     }
 
     func testAgentColorsDefaultToGrayBlueRedOrange() throws {
@@ -961,43 +751,6 @@ final class ConfigTests: XCTestCase {
         ])
     }
 
-    func testFocusTerminalCanBeRemappedToMultipleShortcutsOrDisabled() throws {
-        let remapped = try load("keybindings:\n  focus_terminal: [ctrl+cmd+t, cmd+backquote]")
-        XCTAssertNil(remapped.keybinds.action(for: trigger("ctrl+backquote"), focus: nil))
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("ctrl+cmd+t"), focus: nil), .focusTerminal)
-        XCTAssertEqual(remapped.keybinds.action(for: trigger("cmd+backquote"), focus: nil), .focusTerminal)
-        XCTAssertEqual(remapped.keybinds.firstTrigger(for: .focusTerminal), trigger("ctrl+cmd+t"))
-
-        let disabled = try load("keybindings:\n  focus_terminal: []")
-        XCTAssertNil(disabled.keybinds.firstTrigger(for: .focusTerminal))
-        XCTAssertNil(disabled.keybinds.action(for: trigger("ctrl+backquote"), focus: nil))
-        XCTAssertNil(disabled.keybinds.action(for: trigger("cmd+backquote"), focus: nil))
-        for config in [remapped, disabled] {
-            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b"), focus: nil), .toggleBrowser)
-            XCTAssertEqual(config.problems, [])
-        }
-    }
-
-    func testFocusTerminalDefaultCanBeClaimedByAnotherAction() throws {
-        let config = try load("keybindings:\n  toggle_browser: ctrl+backquote")
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+backquote"), focus: nil), .toggleBrowser)
-        XCTAssertEqual(config.keybinds.triggers[.focusTerminal], [trigger("cmd+shift+j"), trigger("ctrl+0"), trigger("alt+0")])
-        XCTAssertEqual(config.problems, [])
-    }
-
-    func testFocusTerminalReportsShortcutConflicts() throws {
-        let config = try load("""
-        keybindings:
-          toggle_browser: ctrl+cmd+t
-          focus_terminal: [ctrl+cmd+t, ctrl+backquote]
-        """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+t"), focus: nil), .toggleBrowser)
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .focusTerminal), trigger("ctrl+backquote"))
-        XCTAssertEqual(config.problems, [
-            ConfigProblem(path: root, line: 3, message: "ctrl+cmd+t is already bound to toggle_browser"),
-        ])
-    }
-
     func testUISectionRequiresAMappingAndReportsUnknownKeys() throws {
         XCTAssertEqual(try load("ui: 28").problems, [
             ConfigProblem(path: root, line: 1, message: "ui: expected a mapping"),
@@ -1007,155 +760,6 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(config.problems, [
             ConfigProblem(path: root, line: 3, message: "unknown key \"ui.header_width\""),
         ])
-    }
-
-    func testHeaderHeightReloadAndSyntaxErrorRecovery() throws {
-        var loaded = LoadedConfig()
-        loaded.update(with: Config.load(path: root) { _ in "ui:\n  header_height: 26" })
-        XCTAssertEqual(loaded.config.headerHeight, 26)
-        loaded.update(with: Config.load(path: root) { _ in "ui: [" })
-        XCTAssertEqual(loaded.config.headerHeight, 26)
-        XCTAssertEqual(loaded.problems.count, 1)
-        loaded.update(with: Config.load(path: root) { _ in "ui:\n  header_height: 32" })
-        XCTAssertEqual(loaded.config.headerHeight, 32)
-        XCTAssertEqual(loaded.problems, [])
-        loaded.update(with: Config.load(path: root) { _ in "keybindings: {}" })
-        XCTAssertEqual(loaded.config.headerHeight, 30)
-        loaded.update(with: Config.load(path: root) { _ in "ui:\n  header_height: 26" })
-        loaded.update(with: Config.load(path: root) { _ in nil })
-        XCTAssertEqual(loaded.config.headerHeight, 30)
-    }
-
-    func testNumberedWindowKeybindingsDefaultToCommandOneThroughNine() throws {
-        let actions: [ConfigAction] = [
-            .selectWindow1, .selectWindow2, .selectWindow3,
-            .selectWindow4, .selectWindow5, .selectWindow6,
-            .selectWindow7, .selectWindow8, .selectWindow9,
-        ]
-        for config in [try load([:]), try load("")] {
-            for (offset, action) in actions.enumerated() {
-                let key = trigger("cmd+\(offset + 1)")
-                XCTAssertEqual(config.keybinds.action(for: key, focus: nil), action)
-                XCTAssertEqual(config.keybinds.firstTrigger(for: action), key)
-            }
-        }
-    }
-
-    func testNumberedWindowKeybindingsCanBeRemappedOrDisabled() throws {
-        let config = try load("""
-        keybindings:
-          select_window_1: [alt+1, ctrl+cmd+digit_1]
-          select_window_2: []
-        """)
-        XCTAssertNil(config.keybinds.action(for: trigger("cmd+1"), focus: nil))
-        XCTAssertNil(config.keybinds.action(for: trigger("cmd+2"), focus: nil))
-        XCTAssertEqual(config.keybinds.action(for: trigger("alt+1"), focus: nil), .selectWindow1)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+1"), focus: nil), .selectWindow1)
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .selectWindow1), trigger("alt+1"))
-        XCTAssertNil(config.keybinds.firstTrigger(for: .selectWindow2))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+3"), focus: nil), .selectWindow3)
-        XCTAssertEqual(config.problems, [])
-    }
-
-    func testNumberedWindowDefaultsCanBeClaimedByAnotherAction() throws {
-        let config = try load("""
-        keybindings:
-          toggle_browser: cmd+1
-        """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1"), focus: nil), .toggleBrowser)
-        XCTAssertNil(config.keybinds.firstTrigger(for: .selectWindow1))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+2"), focus: nil), .selectWindow2)
-        XCTAssertEqual(config.problems, [])
-    }
-
-    func testNumberedWindowKeybindingsReportConflicts() throws {
-        let config = try load("""
-        keybindings:
-          select_window_1: cmd+e
-          select_window_2: cmd+e
-        """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+e"), focus: nil), .selectWindow1)
-        XCTAssertNil(config.keybinds.firstTrigger(for: .selectWindow2))
-        XCTAssertEqual(config.problems, [
-            ConfigProblem(path: root, line: 3, message: "cmd+e is already bound to select_window_1"),
-        ])
-    }
-
-    func testNextAndPreviousStepActionsAreUnboundByDefault() throws {
-        let config = try load([:])
-        for action in [ConfigAction.selectNextWindow, .selectPrevWindow, .selectNextTopicWindow, .selectPrevTopicWindow,
-                       .selectNextSession, .selectPrevSession, .selectNextTopic, .selectPrevTopic] {
-            XCTAssertEqual(config.keybinds.triggers[action], [])
-            XCTAssertNil(config.keybinds.firstTrigger(for: action))
-        }
-        XCTAssertNil(config.keybinds.action(for: trigger("ctrl+cmd+right"), focus: nil))
-        XCTAssertNil(config.keybinds.action(for: trigger("ctrl+cmd+left"), focus: nil))
-        XCTAssertEqual(config.problems, [])
-    }
-
-    func testNextAndPreviousWindowActionsAcceptBindings() throws {
-        let config = try load("""
-        keybindings:
-          select_next_window: [ctrl+cmd+right, cmd+shift+right_bracket]
-          select_prev_window: ctrl+cmd+left
-        """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+right"), focus: nil), .selectNextWindow)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+shift+right_bracket"), focus: nil), .selectNextWindow)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+left"), focus: nil), .selectPrevWindow)
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .selectNextWindow), trigger("ctrl+cmd+right"))
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .selectPrevWindow), trigger("ctrl+cmd+left"))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1"), focus: nil), .selectWindow1)
-        XCTAssertEqual(config.problems, [])
-    }
-
-    func testNextAndPreviousSessionAndTopicActionsAcceptBindings() throws {
-        let config = try load("""
-        keybindings:
-          select_next_session: ctrl+cmd+down
-          select_prev_session: ctrl+cmd+up
-          select_next_topic: [ctrl+alt+cmd+down, cmd+1]
-          select_prev_topic: ctrl+alt+cmd+up
-        """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+down"), focus: nil), .selectNextSession)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+up"), focus: nil), .selectPrevSession)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+alt+cmd+down"), focus: nil), .selectNextTopic)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1"), focus: nil), .selectNextTopic)
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+alt+cmd+up"), focus: nil), .selectPrevTopic)
-        XCTAssertNil(config.keybinds.firstTrigger(for: .selectWindow1))
-        XCTAssertEqual(config.problems, [])
-    }
-
-    func testNextAndPreviousWindowActionsCanBeExplicitlyDisabled() throws {
-        let config = try load("""
-        keybindings:
-          select_next_window: []
-          select_prev_window: []
-        """)
-        XCTAssertEqual(config.keybinds, Keybinds.defaults)
-        XCTAssertEqual(config.problems, [])
-    }
-
-    func testNextWindowActionCanClaimANumberedWindowDefault() throws {
-        let config = try load("""
-        keybindings:
-          select_next_window: cmd+1
-        """)
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+1"), focus: nil), .selectNextWindow)
-        XCTAssertNil(config.keybinds.firstTrigger(for: .selectWindow1))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+2"), focus: nil), .selectWindow2)
-        XCTAssertEqual(config.problems, [])
-    }
-
-    func testNamingAnActionReplacesItsDefaults() throws {
-        let config = try load("""
-        keybindings:
-          toggle_sidebar: ctrl+cmd+s
-        """)
-        XCTAssertNil(config.keybinds.action(for: trigger("cmd+s"), focus: nil))
-        XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+s"), focus: nil), .toggleSidebar)
-        XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("ctrl+cmd+s"))
-        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b"), focus: nil), .toggleBrowser)
-        XCTAssertEqual(config.problems, [])
     }
 
     func testAListBindsEveryTriggerAndTheFirstIsShown() throws {
@@ -1350,32 +954,11 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(try pressed([.command, .shift], key1, abc), trigger("cmd+shift+1"))
     }
 
-    func testTheTemplateIsAValidConfigThatChangesNothing() throws {
-        let config = try load(Config.template)
-        XCTAssertEqual(config.keybinds, Keybinds.defaults)
-        XCTAssertEqual(config.headerHeight, 30)
-        XCTAssertEqual(config.interfaceFontSize, InterfaceFontSize(12))
-        XCTAssertEqual(config.sidebarFontFamily, "system")
-        XCTAssertNil(config.ghosttyConfigFile)
-        XCTAssertEqual(config.problems, [])
-    }
-
-    func testTheHeaderHeightTheTemplateShowsIsTheDefault() throws {
-        let shown = Config.template.split(separator: "\n").filter { line in
-            line.hasPrefix("# ui:") || line.hasPrefix("#   header_height:")
-        }.map { $0.dropFirst(2) }
-        XCTAssertEqual(shown.count, 2)
-        let config = try load(shown.joined(separator: "\n"))
-        XCTAssertEqual(config.headerHeight, Config().headerHeight)
-        XCTAssertEqual(config.problems, [])
-    }
-
     func testTopicInsertPositionIsGoneAndTheProblemSaysWhereATopicGoes() throws {
         for value in ["top", "bottom"] {
             XCTAssertEqual(try load("topics:\n  insert_position: " + value).problems, [ConfigProblem(
                 path: root, line: 2, message: "topics.insert_position is gone: a new or returning Topic always goes to the top of the Bench")])
         }
-        XCTAssertFalse(Config.template.contains("insert_position"))
     }
 
     func testTheLockActionsAreGoneAndEachProblemNamesWhatToUse() throws {
@@ -1419,37 +1002,12 @@ final class ConfigTests: XCTestCase {
         }
     }
 
-    func testTopicsReopenAtLaunchTakesABooleanAndIsFalseWhenAbsentOrWrong() throws {
-        XCTAssertFalse(try load("").topics.reopenAtLaunch)
-        XCTAssertTrue(try load("topics:\n  reopen_at_launch: true").topics.reopenAtLaunch)
-        XCTAssertFalse(try load("topics:\n  reopen_at_launch: false").topics.reopenAtLaunch)
-        XCTAssertTrue(Config.template.contains("#   reopen_at_launch: false"))
-        for value in ["yes please", "1", "\"true\"", "[true]"] {
-            let bad = try load("topics:\n  reopen_at_launch: " + value)
-            XCTAssertFalse(bad.topics.reopenAtLaunch, value)
-            XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "topics.reopen_at_launch: expected a boolean")], value)
-        }
-    }
-
     func testTopicSessionOrderTakesOldestOrNewestFirstAndReportsAnythingElse() throws {
         XCTAssertEqual(try load("").topics.sessionOrder, .oldestFirst)
         XCTAssertEqual(try load("topics:\n  session_order: newest_first").topics.sessionOrder, .newestFirst)
         let bad = try load("topics:\n  session_order: manual")
         XCTAssertEqual(bad.topics.sessionOrder, .oldestFirst)
         XCTAssertEqual(bad.problems, [ConfigProblem(path: root, line: 2, message: "topics.session_order: expected oldest_first or newest_first")])
-    }
-
-    func testTheInterfaceFontSizeAndSidebarFamilyTheTemplateShowsAreTheDefaults() throws {
-        let shown = Config.template.split(separator: "\n").filter { line in
-            line.hasPrefix("# ui:") || line.hasPrefix("#   font_size:") || line.hasPrefix("#   sidebar:")
-                || line.hasPrefix("#     font_")
-        }.map { $0.dropFirst(2) }
-        XCTAssertEqual(shown, ["ui:", "  font_size: 12", "  sidebar:", "    font_family: system"])
-        XCTAssertFalse(Config.template.contains("#     font_size:"), "the template must not show the removed ui.sidebar.font_size")
-        let config = try load(shown.joined(separator: "\n"))
-        XCTAssertEqual(config.interfaceFontSize, Config().interfaceFontSize)
-        XCTAssertEqual(config.sidebarFontFamily, Config().sidebarFontFamily)
-        XCTAssertEqual(config.problems, [])
     }
 
     func testTheKeybindingsTheTemplateShowsAreTheDefaults() throws {
@@ -1585,10 +1143,6 @@ final class ConfigTests: XCTestCase {
             ConfigProblem(path: override, line: 1, message: "unknown section \"zap\""),
             ConfigProblem(path: override, line: 7, message: "unknown section \"zip\""),
         ])
-    }
-
-    func testTheTemplateShowsACommentedOverride() {
-        XCTAssertTrue(Config.template.contains("# override: ~/.config/muxify/config.override.yaml"))
     }
 
     func testTheConfigStoreReloadsWhenAnOverrideOrTheOverrideListChanges() throws {

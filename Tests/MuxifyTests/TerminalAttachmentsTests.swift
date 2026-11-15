@@ -78,25 +78,19 @@ final class TerminalAttachmentsTests: XCTestCase {
     }
 
     func testSSHUploadPastesIntoCapturedPaneAfterClientSwitches() throws {
-        let tmux = try requireTmux()
-        let root = try TestDirectory()
-        defer { withExtendedLifetime(root) {} }
+        let host = try TestRemoteHost()
+        defer { withExtendedLifetime(host) {} }
+        let root = host.root
         let fm = FileManager.default
-        let bin = root.url.appendingPathComponent("bin")
-        try fm.createDirectory(at: bin, withIntermediateDirectories: false)
-        let socket = root.url.appendingPathComponent("t").path
-        let shim = bin.appendingPathComponent("tmux")
-        try ("#!/bin/sh\nexec " + Tmux.shellQuote(tmux) + " -S " + Tmux.shellQuote(socket) + " -f /dev/null \"$@\"\n")
-            .write(to: shim, atomically: true, encoding: .utf8)
         let started = root.url.appendingPathComponent("upload-started")
         let hold = root.url.appendingPathComponent("upload-hold")
         try Data().write(to: hold)
-        let ssh = bin.appendingPathComponent("ssh")
+        let ssh = host.bin.appendingPathComponent("ssh")
         try """
         #!/bin/bash
         unset TMUX TMUX_PANE
         export TMUX_TMPDIR=\(Tmux.shellQuote(root.url.path)) TMPDIR=\(Tmux.shellQuote(root.url.path))
-        export PATH=\(Tmux.shellQuote(bin.path + ":/usr/bin:/bin"))
+        export PATH=\(Tmux.shellQuote(host.bin.path + ":/usr/bin:/bin"))
         for arg do command=$arg; done
         if [[ "$command" == *'folder=$(mktemp'* ]]; then
             touch \(Tmux.shellQuote(started.path))
@@ -105,39 +99,24 @@ final class TerminalAttachmentsTests: XCTestCase {
         exec /bin/sh -c "$command"
 
         """.write(to: ssh, atomically: true, encoding: .utf8)
-        for file in [shim, ssh] { try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path) }
-        var environment = ProcessInfo.processInfo.environment
-        environment["TMUX"] = nil
-        environment["TMUX_PANE"] = nil
-        environment["TMUX_TMPDIR"] = root.url.path
-        environment["TERM"] = "xterm-256color"
-        let runner = CommandRunner()
-        func raw(_ args: [String]) throws -> String {
-            if args.first == "kill-server" {
-                let actual = try runner.run(CommandInvocation(executable: shim.path,
-                    arguments: ["display-message", "-p", "#{socket_path}"]), environment: environment)
-                guard actual.trimmingCharacters(in: .newlines) == socket else { throw TmuxError.notReady }
-            }
-            return try runner.run(CommandInvocation(executable: shim.path, arguments: args), environment: environment)
-        }
-        defer { _ = try? raw(["kill-server"]) }
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: ssh.path)
         let output = root.url.appendingPathComponent("input")
         let ready = root.url.appendingPathComponent("ready")
         let command = "stty raw -echo; printf '\\033[?2004h'; touch " + Tmux.shellQuote(ready.path)
             + "; exec cat > " + Tmux.shellQuote(output.path)
-        let pane = try raw(["new-session", "-d", "-s", "paste", "-P", "-F", "#{pane_id}", command])
+        let pane = try host.raw(["new-session", "-d", "-s", "paste", "-P", "-F", "#{pane_id}", command])
             .trimmingCharacters(in: .newlines)
         let terminal = Process()
         terminal.executableURL = URL(fileURLWithPath: "/usr/bin/script")
-        terminal.arguments = ["-q", "/dev/null", shim.path, "attach-session", "-t", "paste"]
-        terminal.environment = environment
+        terminal.arguments = ["-q", "/dev/null", host.shim.path, "attach-session", "-t", "paste"]
+        terminal.environment = host.environment
         let input = Pipe()
         terminal.standardInput = input
         terminal.standardOutput = FileHandle.nullDevice
         terminal.standardError = FileHandle.nullDevice
         try terminal.run()
         defer {
-            if terminal.isRunning { terminal.terminate(); terminal.waitUntilExit() }
+            host.stop(terminal)
             withExtendedLifetime(input) {}
         }
         func eventually(_ condition: () -> Bool) throws {
@@ -150,7 +129,7 @@ final class TerminalAttachmentsTests: XCTestCase {
         }
         var client: [String] = []
         try eventually {
-            client = ((try? raw(["list-clients", "-F", "#{client_tty}|#{client_pid}"])) ?? "")
+            client = ((try? host.raw(["list-clients", "-F", "#{client_tty}|#{client_pid}"])) ?? "")
                 .trimmingCharacters(in: .newlines).components(separatedBy: "|")
             return client.count == 2 && !client[0].isEmpty && fm.fileExists(atPath: ready.path)
         }
@@ -158,8 +137,8 @@ final class TerminalAttachmentsTests: XCTestCase {
                                             sshExecutable: ssh.path)
         let remote = try XCTUnwrap(connection.remote)
         defer { connection.retire(); connection.cleanup() }
-        _ = try raw(["set-option", "-sq", remote.markerOption,
-                     [client[1], client[0], root.url.path, "fixture", "remote"].joined(separator: Tmux.separator)])
+        _ = try host.raw(["set-option", "-sq", remote.markerOption,
+                          [client[1], client[0], root.url.path, "fixture", "remote"].joined(separator: Tmux.separator)])
         let board = NSPasteboard.withUniqueName()
         defer { board.releaseGlobally() }
         let bytes = Data((0..<10000).map { UInt8($0 % 256) })
@@ -174,8 +153,8 @@ final class TerminalAttachmentsTests: XCTestCase {
             finished.fulfill()
         }
         try eventually { fm.fileExists(atPath: started.path) }
-        _ = try raw(["new-window", "-t", "paste:", "sleep 60"])
-        XCTAssertNotEqual(try raw(["display-message", "-p", "-c", client[0], "#{pane_id}"]).trimmingCharacters(in: .newlines), pane)
+        _ = try host.raw(["new-window", "-t", "paste:", "sleep 60"])
+        XCTAssertNotEqual(try host.raw(["display-message", "-p", "-c", client[0], "#{pane_id}"]).trimmingCharacters(in: .newlines), pane)
         try fm.removeItem(at: hold)
         wait(for: [finished], timeout: 10)
         var pasted = ""

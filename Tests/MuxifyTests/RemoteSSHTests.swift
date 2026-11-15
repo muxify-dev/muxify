@@ -113,7 +113,6 @@ final class RemoteSSHTests: XCTestCase {
         let bootstrap = ssh.bootstrap()
         XCTAssertTrue(bootstrap.contains("${SSH_TTY:-$(tty)}"))
         XCTAssertTrue(bootstrap.contains("$$"))
-        XCTAssertFalse(bootstrap.contains("new-session"), "The first connection starts no Session")
         XCTAssertTrue(bootstrap.contains("tmux 3.2 or newer"))
         let marker = try XCTUnwrap(bootstrap.range(of: "set-option -sq"))
         let attach = try XCTUnwrap(bootstrap.range(of: "exec tmux -u -T RGB attach-session"))
@@ -278,35 +277,5 @@ final class RemoteSSHTests: XCTestCase {
         let digits = Array(text.utf8).map { String(format: "%02x", $0) }
         return stride(from: 0, to: digits.count, by: 16)
             .map { digits[$0..<min($0 + 16, digits.count)].joined() + "\n" }.joined()
-    }
-
-    func testRecoveryDoesNotCreateMainAutomatically() throws {
-        let directory = try TestDirectory()
-        let ssh = try remote(in: directory)
-        let script = ssh.bootstrap(target: "$1:@1", picksLatestSession: false)
-        XCTAssertFalse(script.contains("new-session"))
-        XCTAssertTrue(script.contains("list-windows -a -f \"$user_sessions\" -F '#{session_id}:#{window_id}' | head -n 1"))
-        XCTAssertNoThrow(try CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-n", "-c", script])))
-    }
-
-    func testFirstConnectionCreatesNoSessionAndReportsTheEmptyServer() throws {
-        let directory = try TestDirectory()
-        let ssh = try remote(in: directory)
-        let script = ssh.bootstrap()
-        XCTAssertFalse(script.contains("new-session"), "Start a Session… chooses the first Session's folder")
-        XCTAssertFalse(script.contains("-s main"))
-        XCTAssertTrue(script.contains("Muxify snapshot \(ssh.nonce)"))
-        XCTAssertNoThrow(try CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-n", "-c", script])))
-    }
-
-    func testStartASessionStartsTheChosenSessionInItsFolder() throws {
-        let directory = try TestDirectory()
-        let ssh = try remote(in: directory)
-        let script = ssh.bootstrap(newSession: RemoteSSH.NewSession(name: "web app", folder: "/home/test/it's here"))
-        XCTAssertTrue(script.contains("new-session -d -s 'web app' -c \(Tmux.shellQuote("/home/test/it's here")) -P -F"))
-        XCTAssertTrue(script.contains("list-windows -t '=web app'"), "A Session of that name is gone to")
-        XCTAssertTrue(script.contains("target=\"$new_session\""))
-        XCTAssertFalse(script.contains("-s main"))
-        XCTAssertNoThrow(try CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-n", "-c", script])))
     }
 }

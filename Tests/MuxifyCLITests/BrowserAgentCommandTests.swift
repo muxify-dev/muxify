@@ -147,8 +147,9 @@ final class BrowserAgentCommandTests: XCTestCase {
             XCTAssertTrue(error.message.hasPrefix("cannot reach Muxify"), error.message)
         }
         XCTAssertFalse(stale.ran("set-option"), "@muxify_open would open a new Tab, not load into the Tab")
-        try await command(["open", "localhost:3000"]).execute(using: stale)
-        XCTAssertEqual(stale.arguments(of: "set-option"), ["set-option", "-wa", "-t", "@12", "@muxify_open", " localhost:3000"])
+        try await command(["open", "localhost:3000", "https://example.com"]).execute(using: stale)
+        XCTAssertEqual(stale.arguments(of: "set-option"), ["set-option", "-wa", "-t", "@12", "@muxify_open", " localhost:3000 https://example.com"],
+                       "the URLs joined with a space")
     }
 
     func testOpenGoesThroughTheAppWhenItServes() async throws {

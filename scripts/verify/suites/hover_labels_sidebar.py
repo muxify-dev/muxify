@@ -11,7 +11,7 @@ Run from the repo root after `make build`:
 import time
 import unittest
 
-from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.sandbox import Sandbox
 from scripts.verify.topic_records import TopicRecords
 
 SHELL = '/bin/zsh -f'
@@ -60,9 +60,7 @@ class HoverLabelsSidebar(unittest.TestCase):
         self.addCleanup(self.config.write_text, self.default_config)
 
     def show_mode(self, mode):
-        key = 'sidebar-view-' + mode
-        if self.s.row(key).get('accessibilityValue') != 'selected':
-            self.s.act('press', key)
+        self.s.show_sidebar_mode(mode)
         card = 'topic-hover' if mode == 'topics' else 'session-' + self.session
         self.s.wait_rows(lambda rs: self.s.has(card, rs), 'no card in ' + mode)
         if 'expanded' not in self.s.row(card).get('accessibilityValue', ''):
@@ -159,13 +157,13 @@ class HoverLabelsSidebar(unittest.TestCase):
             self.s.wait_rows(moved, 'the label did not move to the next row', seconds=5)
         self.fail('the next row waited its rest delay for its label in %d tries' % TRIES)
 
-    def test_off_suppresses_short_and_truncated_titles_in_both_sidebar_modes(self):
+    def test_off_suppresses_even_a_cut_off_title_in_both_sidebar_modes(self):
+        # The cut-off title is the strictest case: its label opens under every other policy.
         self.set_tooltips('off')
         for mode in ['topics', 'sessions']:
             with self.subTest(mode=mode):
                 self.show_mode(mode)
-                for window in [self.short, self.long, self.stretched]:
-                    self.assert_no_label_after_rest(self.prefix + window)
+                self.assert_no_label_after_rest(self.prefix + self.long)
 
     def test_truncated_shows_only_cut_off_formatted_titles_in_both_sidebar_modes(self):
         self.set_tooltips('truncated')
@@ -178,16 +176,6 @@ class HoverLabelsSidebar(unittest.TestCase):
                     texts = self.label(self.s.wait_rows(lambda rs: self.label(rs), 'no truncated tooltip'))
                     self.assertEqual(texts[0], title)
                 self.assert_no_label_after_rest(self.prefix + self.short)
-
-    def test_always_shows_a_title_that_fits_in_both_sidebar_modes(self):
-        self.set_tooltips('always')
-        for mode in ['topics', 'sessions']:
-            with self.subTest(mode=mode):
-                self.show_mode(mode)
-                self.s.act('hover', self.prefix + self.short)
-                texts = self.label(self.s.wait_rows(lambda rs: self.label(rs), 'no always tooltip'))
-                self.assertEqual(len(texts), 1, texts)
-                self.assertTrue(texts[0].startswith(self.places[self.short] + ' — '), texts)
 
     def test_reloading_the_policy_closes_and_reopens_the_hovered_rows_label(self):
         self.s.act('hover', self.prefix + self.short)

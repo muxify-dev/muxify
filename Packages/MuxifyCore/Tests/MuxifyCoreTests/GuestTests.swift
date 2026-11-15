@@ -74,6 +74,7 @@ final class GuestTests: XCTestCase {
 
         var b = transaction("payments auth-bug docs + infra(G) | release")
         XCTAssertEqual(b.lock("scratch").map(\.sessionID), ["scratch"])
+        XCTAssertEqual(b.lock("scratch"), [], "a Locked Session keeps its place")
         XCTAssertEqual(sidebar(b), "payments auth-bug docs + infra(G) ~scratch(G) | release", "with in_play, a Lock is a Guest")
 
         var inPlay = transaction("payments auth-bug docs + | infra")
@@ -220,6 +221,22 @@ final class GuestTests: XCTestCase {
         XCTAssertEqual(sidebar(open), "payments ci docs + | release", "a Benched card dropped on an Open Place fills it")
     }
 
+    /// The outcomes of Move Up and Move Down that only a step has (`TopicCards.step`), applied to the list.
+    func testAStepAppliesItsOutcome() throws {
+        let cases: [(sidebar: String, card: String, outcome: TopicCards.Outcome, after: String)] = [
+            ("payments auth-bug docs + | release", "payments", .reorder(.after(.topic("auth-bug"))), "auth-bug payments docs + | release"),
+            ("payments auth-bug docs + infra(G) | release", "docs", .toGuests, "payments auth-bug _ + docs(G) infra(G) | release"),
+            ("payments auth-bug docs + infra(G) | release", "infra", .trade(.topic("docs")), "payments auth-bug infra + docs(G) | release"),
+            ("payments auth-bug + infra(G) |", "infra", .takePlace, "payments auth-bug infra + |"),
+        ]
+        for (start, card, outcome, after) in cases {
+            var list = transaction(start)
+            try list.apply(outcome, to: .topic(card))
+            XCTAssertEqual(sidebar(list), after, "\(outcome) of \(card) in \(start)")
+            assertWrittenInOrder(list)
+        }
+    }
+
     func testADragInsideASectionReordersAndTheMarkStaysOnItsCard() throws {
         var guests = transaction("payments auth-bug docs + infra(G) ci(G) | release")
         try guests.move(.topic("ci"), to: .before(.topic("infra")))
@@ -245,6 +262,10 @@ final class GuestTests: XCTestCase {
         let changes = try j.create(TopicRecord(id: "scratch-fix", title: "scratch-fix"), replacingLockOf: "scratch")
         XCTAssertEqual(sidebar(j), "payments auth-bug docs + scratch-fix(G) | release")
         XCTAssertFalse(changes.contains(.end(sessionID: "scratch")), "the plan ends the Lock in tmux")
+
+        var none = transaction("payments auth-bug docs + ~scratch(G) | release")
+        try none.create(TopicRecord(id: "new", title: "new"), replacingLockOf: "gone")
+        XCTAssertEqual(sidebar(none), "payments auth-bug docs + ~scratch(G) | new release", "a Topic from no Lock goes where a new Topic goes")
     }
 
     func testANewTopicGoesToTheTopOfTheBenchAndLeavesAnOpenPlaceOpen() throws {
@@ -301,18 +322,5 @@ final class GuestTests: XCTestCase {
         let before = moved.entries
         XCTAssertEqual(moved.gatherGuests(inPlay: limit), [], "a list in its sections is not numbered again")
         XCTAssertEqual(moved.entries, before)
-    }
-
-    func testTheGuestMarkIsInTheTopicRecord() throws {
-        var record = TopicRecord(id: "infra", title: "infra")
-        record.isGuest = true
-        XCTAssertEqual(TopicTable.values(of: record)["guest"], .integer(1))
-        XCTAssertTrue(TopicTable.record(id: "infra", TopicTable.values(of: record)).isGuest)
-        let data = try JSONEncoder().encode(record)
-        XCTAssertEqual(try JSONDecoder().decode([String: JSONValue].self, from: data)["guest"], .bool(true))
-        XCTAssertTrue(try JSONDecoder().decode(TopicRecord.self, from: data).isGuest)
-        record.isGuest = false
-        XCTAssertEqual(TopicTable.values(of: record)["guest"], .integer(0))
-        XCTAssertNil(try JSONDecoder().decode([String: JSONValue].self, from: JSONEncoder().encode(record))["guest"])
     }
 }

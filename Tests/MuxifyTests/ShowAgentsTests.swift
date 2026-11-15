@@ -2,36 +2,21 @@ import XCTest
 @testable import MuxifyCore
 
 final class ShowAgentsTests: XCTestCase {
-    private var defaults: UserDefaults!
-    private let suite = "ShowAgentsTests"
+    func testEachModeKeepsItsOwnValueAndStartsFromTheSingleEarlierOne() {
+        let unset = ShowAgents(defaults: isolatedDefaults())
+        XCTAssertTrue(unset[.topics], "no stored value shows Agents in Topics")
+        XCTAssertTrue(unset[.sessions], "no stored value shows Agents in Sessions")
 
-    override func setUp() {
-        defaults = UserDefaults(suiteName: suite)
-        defaults.removePersistentDomain(forName: suite)
-    }
+        let hidden = isolatedDefaults()
+        hidden.set(false, forKey: "agentsVisible")
+        XCTAssertFalse(ShowAgents(defaults: hidden)[.topics], "Topics starts from the earlier false")
+        XCTAssertFalse(ShowAgents(defaults: hidden)[.sessions], "Sessions starts from the earlier false")
 
-    override func tearDown() {
-        defaults.removePersistentDomain(forName: suite)
-    }
-
-    func testBothModesStartFromTheSingleEarlierValue() {
-        defaults.set(false, forKey: "agentsVisible")
-        let showAgents = ShowAgents(defaults: defaults)
-        XCTAssertFalse(showAgents[.topics])
-        XCTAssertFalse(showAgents[.sessions])
-    }
-
-    func testBothModesShowAgentsWithNoStoredValue() {
-        let showAgents = ShowAgents(defaults: defaults)
-        XCTAssertTrue(showAgents[.topics])
-        XCTAssertTrue(showAgents[.sessions])
-    }
-
-    func testTogglingOneModeKeepsTheOtherModesValue() {
-        defaults.set(true, forKey: "agentsVisible")
-        var showAgents = ShowAgents(defaults: defaults)
+        let shown = isolatedDefaults()
+        shown.set(true, forKey: "agentsVisible")
+        var showAgents = ShowAgents(defaults: shown)
         showAgents[.topics] = false
-        XCTAssertFalse(ShowAgents(defaults: defaults)[.topics], "the Topics value is remembered")
-        XCTAssertTrue(ShowAgents(defaults: defaults)[.sessions], "the Sessions value still starts from the earlier value")
+        XCTAssertFalse(ShowAgents(defaults: shown)[.topics], "the Topics value is remembered")
+        XCTAssertTrue(ShowAgents(defaults: shown)[.sessions], "the Sessions value still starts from the earlier value")
     }
 }

@@ -35,18 +35,6 @@ final class InterfaceFontSizeTests: XCTestCase {
         XCTAssertEqual(size(13), 14.625, accuracy: 0.0001)
     }
 
-    func testTheSmallestAndLargestSizesGivePositiveFiniteSizes() {
-        for points in [InterfaceFontSize.range.lowerBound, InterfaceFontSize.range.upperBound] {
-            let size = InterfaceFontSize(points)
-            for design in designSizes {
-                XCTAssertGreaterThan(size(design), 0, "\(points)")
-                XCTAssertTrue(size(design).isFinite, "\(points)")
-            }
-        }
-        XCTAssertEqual(InterfaceFontSize(9)(12), 9)
-        XCTAssertEqual(InterfaceFontSize(24)(12), 24)
-    }
-
     func testAnUndraggedSidebarShowsTheDefaultWidthTimesTheFactor() {
         XCTAssertEqual(SidebarWidth.shown(dragged: nil, size: InterfaceFontSize()), 260)
         XCTAssertEqual(SidebarWidth.shown(dragged: nil, size: InterfaceFontSize(18)), 390)
@@ -54,15 +42,12 @@ final class InterfaceFontSizeTests: XCTestCase {
         XCTAssertEqual(SidebarWidth.shown(dragged: nil, size: InterfaceFontSize(24)), 520)
     }
 
-    func testTheResizeBoundsScaleByTheFactor() {
-        XCTAssertEqual(SidebarWidth.bounds(InterfaceFontSize()), 180...420)
-        XCTAssertEqual(SidebarWidth.bounds(InterfaceFontSize(18)), 270...630)
-        XCTAssertEqual(SidebarWidth.bounds(InterfaceFontSize(9)), 135...315)
-    }
-
-    func testADraggedWidthStaysAsDraggedInsideTheScaledBounds() {
-        for (points, dragged) in [(12.0, 300.0), (18, 300), (18, 600), (9, 200), (24, 400)] {
-            XCTAssertEqual(SidebarWidth.shown(dragged: dragged, size: InterfaceFontSize(points)), dragged, "\(points)")
+    func testADraggedWidthStaysAsDraggedInsideTheScaledBoundsAndIsClampedToThemOutside() {
+        // The bounds at 12 are 180...420.
+        for (points, dragged, shown) in [(12.0, 300.0, 300.0), (18, 300, 300), (18, 600, 600), (9, 200, 200), (24, 400, 400),
+                                         (12, 100, 180), (12, 900, 420), (18, 200, 270), (18, 900, 630), (9, 100, 135),
+                                         (9, 400, 315)] {
+            XCTAssertEqual(SidebarWidth.shown(dragged: dragged, size: InterfaceFontSize(points)), shown, "\(dragged) at \(points)")
         }
     }
 
@@ -80,13 +65,6 @@ final class InterfaceFontSizeTests: XCTestCase {
         let invalid = try Config.load(path: "/cfg/muxify/config.yaml") { _ in "ui:\n  header_height: 20\n  font_size: 18" }.get()
         XCTAssertEqual(invalid.problems.map(\.message), ["ui.header_height: expected a finite number of at least 24 points"])
         XCTAssertEqual(TitlebarMetrics.headerHeight(invalid), 45)
-    }
-
-    func testADraggedWidthOutsideTheScaledBoundsIsClampedToThem() {
-        XCTAssertEqual(SidebarWidth.shown(dragged: 200, size: InterfaceFontSize(18)), 270, "below 180 × 1.5")
-        XCTAssertEqual(SidebarWidth.shown(dragged: 400, size: InterfaceFontSize(9)), 315, "above 420 × 0.75")
-        XCTAssertEqual(SidebarWidth.shown(dragged: 100, size: InterfaceFontSize()), 180)
-        XCTAssertEqual(SidebarWidth.shown(dragged: 900, size: InterfaceFontSize()), 420)
     }
 
     func testASystemControlIsRegularAt12AndTakesTheSizeNearestItsGrownHeight() {

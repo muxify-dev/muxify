@@ -6,15 +6,16 @@ import XCTest
 final class EnvironmentSelectorTests: XCTestCase {
     /// Render the real Menu through AppKit, not just its isolated SwiftUI label:
     /// the borderless-menu regression discards that label's background/colors.
-    @MainActor func testNativeRemoteMenuKeepsBlueBadgeInEveryConnectionState() throws {
+    /// The regression does not depend on the connection state, so each scheme renders one: the two states that draw
+    /// an indicator. EnvironmentBadgeTests maps each state to its indicator.
+    @MainActor func testNativeRemoteMenuKeepsBlueBadgeInBothSchemesWhileItsIndicatorShows() throws {
         let remote = RemoteEnvironment(name: "Macbook Home", host: "home", username: "user")
-        for scheme in [ColorScheme.light, .dark] {
-            for (connected, hasError) in [(true, false), (false, false), (false, true)] {
-                let image = try render(EnvironmentSelector(environments: [remote], activeEnvironment: remote,
-                                                           isConnected: connected, hasConnectionError: hasError,
-                                                           status: "Remote", onSelect: { _ in }), scheme: scheme)
-                XCTAssertGreaterThan(bluePixels(in: image), 300, "Native Menu lost the blue badge")
-            }
+        let renders: [(String, ColorScheme, Bool)] = [("connecting, light", .light, false), ("disconnected, dark", .dark, true)]
+        for (name, scheme, hasError) in renders {
+            let image = try render(EnvironmentSelector(environments: [remote], activeEnvironment: remote,
+                                                       isConnected: false, hasConnectionError: hasError,
+                                                       status: "Remote", onSelect: { _ in }), scheme: scheme)
+            XCTAssertGreaterThan(bluePixels(in: image), 300, "Native Menu lost the blue badge: \(name)")
         }
     }
 

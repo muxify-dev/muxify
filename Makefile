@@ -42,6 +42,9 @@ build: project
 
 test: project
 	./scripts/check-folder-paths.sh
+	./scripts/check-palette-structure.sh
+	# The verify runner's own tests (scripts/verify/test_run.py). They never launch the app, so they run here, not in make verify.
+	python3 -m unittest scripts.verify.test_run
 	# xcodebuild gives a test only the variables named TEST_RUNNER_<name>, as <name>.
 	TEST_RUNNER_MUXIFY_REQUIRE_TMUX="$$MUXIFY_REQUIRE_TMUX" xcodebuild -project Muxify.xcodeproj -scheme Muxify -configuration Debug -destination "platform=macOS,arch=arm64" \
 		-derivedDataPath build -clonedSourcePackagesDirPath build/SourcePackages $(XCODEBUILD_SETTINGS) $(XCODEBUILD_EXTRA_SETTINGS) test

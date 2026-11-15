@@ -451,6 +451,41 @@ class Sandbox:
         """The first UI dump for which predicate(rows) holds."""
         return wait(lambda: (lambda rs: rs if predicate(rs) else None)(self.rows()), message, seconds)
 
+    def show_sidebar_mode(self, mode):
+        """Shows the Sidebar mode, `topics` or `sessions`, with its button, and waits until the button is selected."""
+        key = 'sidebar-view-' + mode
+        rs = self.wait_rows(lambda rs: self.has(key, rs), 'no Sidebar mode button ' + key)
+        if self.row(key, rs).get('accessibilityValue') != 'selected':
+            self.act('press', key)
+        return self.wait_rows(lambda rs: self.row(key, rs).get('accessibilityValue') == 'selected', key + ' is not selected')
+
+    def press_menu_item(self, title):
+        """Chooses the menu item by its title, without opening the menu. The app enables an item a moment after its
+        App Window or the state the item follows changes, so the press waits until the item is enabled."""
+        wait(lambda: self.driver('press', title)['pressed'], 'the menu item %s stays disabled' % title)
+
+    def open_palette(self, name, query=None):
+        """Opens the palette `name`, such as Commands or Go to…, from its View menu item, and with `query` types the
+        query in its field; returns the rows. The item toggles its palette, so it is for a palette that is closed."""
+        self.press_menu_item(name)
+        rs = self.wait_rows(lambda rs: self.has('palette-search', rs), name + ' did not open')
+        return rs if query is None else self.type_query(query)
+
+    def type_query(self, query):
+        """Types the query in the open palette's field, and waits until the field has it; returns the rows."""
+        # A set without focus fills the field but not its binding; a user focuses the field before typing.
+        self.act('focus', 'palette-search')
+        self.act('set', 'palette-search', query)
+        return self.wait_rows(lambda rs: self.row('palette-search', rs).get('accessibilityValue', '') == query,
+                              'the palette did not take the query %r' % query)
+
+    def run_command(self, title):
+        """Opens Commands and presses the row of the Command `title`, as ↩ on it does."""
+        key = 'palette-row-command-' + title
+        self.open_palette('Commands', title)
+        self.wait_rows(lambda rs: self.has(key, rs), '%s is missing from Commands' % title)
+        self.act('press', key)
+
 
 def frame(row):
     """(bottom, top) of a dump row's accessibilityFrame, in screen points: a larger value is higher on screen."""

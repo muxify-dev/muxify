@@ -1,15 +1,14 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class TopicEditTests: XCTestCase {
     private let path = SessionPath(path: "/work/game", name: "game")
     private let topic = TopicRecord(id: "topic", title: "Fix", slug: "fix")
 
     private func window(_ session: String = "$1", name: String = "debug/fix", topicID: String? = "topic", panes: Int = 1) -> TmuxWindow {
-        TmuxWindow(id: "@" + session.dropFirst(), sessionID: session, sessionName: name, index: 0,
-            name: "shell", paneTitle: "", path: "/work/game/api", command: "zsh", isActive: true,
-            paneCount: panes, hasBell: false, sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(),
-            openRequests: [], topicID: topicID, sessionPath: path.folder.path, activePaneID: "%1")
+        .fixture(id: "@" + session.dropFirst(), sessionID: session, sessionName: name, path: "/work/game/api", paneCount: panes,
+                 topicID: topicID, sessionPath: path.folder.path, activePaneID: "%1")
     }
 
     func testRenameUsesActualNamesAndAllowsSeveralSessionsInOneDirectory() throws {

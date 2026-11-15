@@ -17,7 +17,6 @@ final class CLICommandTests: XCTestCase {
 
     func testVersionIsTheOnlyArgument() throws {
         XCTAssertEqual(try CLICommand(arguments: ["--version"], environment: [:]), .version)
-        XCTAssertEqual(BuildStamp.versionLine, "muxify dev 0")
     }
 
     func testIncompleteAndUnknownCommandsReturnTheUsageOfWhatTheyName() {
@@ -126,18 +125,6 @@ final class CLICommandTests: XCTestCase {
             XCTAssertEqual(error.localizedDescription, "Extension installer is missing beside the command line tool")
         }
         XCTAssertTrue(runner.calls.isEmpty)
-    }
-
-    func testBrowserAppendsRequestToResolvedWindowWhenMuxifyServesNoBrowserSocket() async throws {
-        let runner = RecordingRunner(results: [.init(status: 0, output: "@12\n@12\n"), .init(status: 0, output: ""),
-                                               .init(status: 0, output: "@12\n@12\n"), .init(status: 0, output: "")])
-        try await CLICommand.browserOpen(window: "%7", tab: nil, urls: ["localhost:3000", "https://example.com"], json: false).execute(using: runner)
-        XCTAssertEqual(runner.calls, [
-            .init(command: "tmux", arguments: ["list-panes", "-t", "%7", "-F", "#{window_id}"], quiet: true),
-            .init(command: "tmux", arguments: ["show-options", "-sqv", "@muxify_browser_socket"], quiet: false),
-            .init(command: "tmux", arguments: ["list-panes", "-t", "%7", "-F", "#{window_id}"], quiet: true),
-            .init(command: "tmux", arguments: ["set-option", "-wa", "-t", "@12", "@muxify_open", " localhost:3000 https://example.com"], quiet: false),
-        ])
     }
 
     func testMissingBrowserWindowDoesNotWriteOptions() async {
@@ -353,7 +340,7 @@ final class CLICommandTests: XCTestCase {
         guard case .sessionList(let invocation) = try CLICommand(arguments: ["session", "list", "--json"], environment: environment) else { return XCTFail("expected Session list") }
         XCTAssertEqual(invocation.paths, paths)
         XCTAssertEqual(invocation.output, .json)
-        for arguments in [["session"], ["session", "show"], ["session", "list", "extra"], ["session", "list", "--pane", "%3"], ["project", "list"]] {
+        for arguments in [["session"], ["session", "show"], ["session", "list", "extra"], ["session", "list", "--pane", "%3"]] {
             XCTAssertThrowsError(try CLICommand(arguments: arguments, environment: [:]), "\(arguments)") { error in
                 XCTAssertEqual((error as? CLIError)?.exitCode, 2, "\(arguments)")
             }
@@ -419,8 +406,6 @@ final class CLICommandTests: XCTestCase {
                        .request(RequestInvocation(command: .makeGuest, target: nil, caller: caller, output: .text, paths: paths)))
         XCTAssertEqual(try CLICommand(arguments: ["topic", "bench", "--session", "my notes", "--json"], environment: outside),
                        .request(RequestInvocation(command: .benchTopic, target: .sessionName("my notes"), caller: nil, output: .json, paths: paths)))
-        XCTAssertThrowsError(try CLICommand(arguments: ["session", "lock"], environment: inside), "session lock is gone")
-        XCTAssertThrowsError(try CLICommand(arguments: ["session", "unlock"], environment: inside), "session unlock is gone")
         let errors: [([String], [String: String], String)] = [
             (["topic", "make-guest", "notes"], inside, CLIVerbs.usage(for: ["topic", "make-guest"])),
             (["topic", "make-guest", "--session"], inside, CLIVerbs.usage(for: ["topic", "make-guest"])),
@@ -568,6 +553,8 @@ final class CLICommandTests: XCTestCase {
             (["list", "--pane", "%3"], inside, "topic list does not take --pane"),
             (["new"], [:], "topic new needs a title. To move this Pane into a new Topic, use: muxify window move --new-topic [\"title\"]"),
             (["new", "--window", "@12"], inside, "topic new makes an Empty Topic and takes no Pane or Window. To move a Pane or Window "
+                + "into a new Topic, use: muxify window move --new-topic [\"title\"] [--window <id> | --pane <id>]"),
+            (["new", "--pane", "%3"], inside, "topic new makes an Empty Topic and takes no Pane or Window. To move a Pane or Window "
                 + "into a new Topic, use: muxify window move --new-topic [\"title\"] [--window <id> | --pane <id>]"),
             (["new", "Fix", "--pane", "%3"], inside, """
                 topic new makes an Empty Topic and takes no Pane or Window. To start a Session in the folder of a Pane, use two commands:

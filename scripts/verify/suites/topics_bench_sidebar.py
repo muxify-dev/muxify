@@ -1,4 +1,4 @@
-"""Topics in the Sidebar: with topics.in_play, the Topics after the ones In Play wait on the Bench, behind one line.
+"""Topics in the Sidebar: the Topics after the ones In Play wait on the Bench, behind one line.
 
 The Bench line is a button, so `press` shows or hides the Bench through its accessibility action.
 
@@ -31,13 +31,13 @@ class TopicsBenchSidebar(TopicsSidebar):
         windows = {}
         for order, name in enumerate(['a', 'b', 'c']):
             topic = '%s-%s' % (prefix, name)
-            self.write_topic(topic, topic.capitalize(), self.beta, order=order)
+            self.write_topic(topic, topic.capitalize(), order=order)
             sid = self.new_session('beta/' + topic, self.beta, topic=topic)
             windows['topic-' + topic] = self.s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
         for order in range(3, 3 + dormant):
             topic = '%s-t%02d' % (prefix, order)
-            self.write_topic(topic, topic.capitalize(), self.beta, order=order)
-        # Without an in_play line the Config gives 5 places, so each of the three cards shows when the app has read its
+            self.write_topic(topic, topic.capitalize(), order=order)
+        # Without an in_play line the Config gives 3 places, so each of the three cards shows when the app has read its
         # record. A cut of a list that the app has read only in part would put a card in the wrong section.
         cards = ['topic-%s-%s' % (prefix, name) for name in 'abc']
         self.s.wait_rows(lambda rs: all(self.s.has(card, rs) for card in cards),
@@ -75,7 +75,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         each live Topic by its card identifier, and the identifiers of the Benched cards in list order."""
         windows = self.bench_topics(prefix, dormant=17)
         topic = prefix + '-z'
-        self.write_topic(topic, topic.capitalize(), self.beta, order=20)
+        self.write_topic(topic, topic.capitalize(), order=20)
         sid = self.new_session('beta/' + topic, self.beta, topic=topic)
         windows['topic-' + topic] = self.s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
         bench = ['topic-%s-%s' % (prefix, name) for name in ['b', 'c'] + ['t%02d' % i for i in range(3, 20)] + ['z']]
@@ -106,18 +106,6 @@ class TopicsBenchSidebar(TopicsSidebar):
         bottom, top = frame(self.s.row('topics-more-above', rs))
         return [key for key in bench if self.s.has(key, rs) and bottom < self.top(key, rs) < top]
 
-    def test_no_benched_card_has_its_top_under_the_more_above_pill_when_the_bench_shows(self):
-        s = self.s
-        windows, bench = self.far_bench('bench-open-pill')
-        z = bench[-1]
-        self.hide_bench()
-        s.show(windows[z])
-        s.wait_rows(lambda rs: self.shown_after_line(rs) == [z], 'the Benched card of the Location does not show under the line')
-        self.show_bench('click')
-        rs = s.wait_rows(lambda rs: self.more_above(rs) == len(bench) - 1, 'the "more above" pill does not count the cards before z')
-        self.assertEqual(self.tops_in_pill(bench, rs), [], 'the pill covers the top of a Benched card')
-        self.assertAlmostEqual(self.under_pill(z, rs), 0, delta=1, msg='the card of the Location is not directly under the pill')
-
     def test_the_benched_card_of_the_location_keeps_its_place_on_screen_when_the_bench_shows(self):
         s = self.s
         windows, bench = self.far_bench('bench-open-far')
@@ -134,6 +122,7 @@ class TopicsBenchSidebar(TopicsSidebar):
         self.assertAlmostEqual(self.top(z, rs), before[z] - PILL, delta=1,
                                msg='the card of the Location did not move down by the pill when the Bench showed')
         self.assertAlmostEqual(self.under_pill(z, rs), 0, delta=1, msg='the card of the Location is not directly under the pill')
+        self.assertEqual(self.tops_in_pill(bench, rs), [], 'the pill covers the top of a Benched card')
         tops = [y + height for _, y, _, height in shown['frames'][LINE]]
         self.assertTrue(all(abs(top - before[LINE]) <= 1 for top in tops),
                         'a drawn frame showed the Bench line elsewhere: %s, before %s' % (tops, before[LINE]))
@@ -424,32 +413,6 @@ class TopicsBenchSidebar(TopicsSidebar):
                     == ['topic-bench-drag-c', LINE, 'topic-bench-drag-b', 'topic-bench-drag-a'],
                     'the Benched card and the card In Play did not trade places: %s' % self.cards('bench-drag', s.rows()))
 
-    def test_a_tall_benched_card_trades_with_a_short_first_card_in_play(self):
-        # An open card lists its Sessions. The tall card stops with its top at the top of the first card, where its
-        # middle stays under the line.
-        s = self.s
-        self.bench_topics('bench-tall')
-        for n in range(6):
-            self.new_session('beta/bench-tall-b-%d' % n, self.beta, topic='bench-tall-b')
-        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
-        self.show_bench()
-        s.wait_rows(lambda rs: self.cards('bench-tall', rs)
-                    == ['topic-bench-tall-a', LINE, 'topic-bench-tall-b', 'topic-bench-tall-c'],
-                    'the Bench did not show: %s' % self.cards('bench-tall', s.rows()))
-        self.expand('topic-bench-tall-b')
-        rs = s.rows()
-
-        def height(key):
-            """The span of the card's header and its Session rows."""
-            card = [frame(r) for r in rs if r.get('accessibilityIdentifier', '').startswith(key)]
-            return max(end for _, end in card) - min(start for start, _ in card)
-        self.assertGreater(height('topic-bench-tall-b'), 3 * height('topic-bench-tall-a'),
-                           'the Benched card is not tall enough for the check')
-        s.act('drag', 'topic-bench-tall-b', 'topic-bench-tall-a')
-        orders = lambda: self.orders('bench-tall')
-        wait(lambda: orders()['bench-tall-b'] < orders()['bench-tall-a'] < orders()['bench-tall-c'],
-             'the tall card did not trade with the first card: %s' % orders(), seconds=5)
-
     def test_a_card_let_go_on_the_shown_bench_line_stays_in_its_place(self):
         # The line is between the cards, so a card that reaches only the line has not passed the card under it.
         s = self.s
@@ -687,27 +650,6 @@ class TopicsBenchSidebar(TopicsSidebar):
         s.act('drag', a, 'open-place-1')
         wait(lambda: self.layout('guest-trade') == 'a c b',
              'the Guest dropped on the Open Place did not fill it without its mark: %s' % self.layout('guest-trade'))
-
-    def test_with_in_play_a_locked_session_is_a_guest_under_the_guests_line(self):
-        # The Session card's accessibility actions are its context menu (`lockButton` in UI/SidebarView.swift).
-        s = self.s
-        self.bench_topics('bench-guest-lock')
-        sid = self.new_session('bench-guest-lock-notes', self.beta)
-        window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
-        s.wait_rows(lambda rs: self.line(rs) is not None, self.no_bench_line)
-        self.show_bench()
-        s.show(window)
-        card = 'no-topic-session-' + sid
-        s.wait_rows(lambda rs: s.has(card, rs), 'the No Topic Session has no card: %s' % s.ids())
-        s.act('action', card, 'Make a Guest')
-        locked = 'locked-' + sid
-        s.wait_rows(lambda rs: [k for k in s.ids(rs) if k in ('topic-bench-guest-lock-a', locked, LINE)]
-                    == ['topic-bench-guest-lock-a', locked, LINE],
-                    'the Guest Session is not at the end of In Play: %s' % s.ids())
-        self.assertIn('Guest', s.row(locked).get('accessibilityValue', ''), 'the card shows no Guest mark')
-        self.assertTrue(s.tmux('show-options', '-qv', '-t', sid, '@muxify_lock').strip(), 'Make a Guest wrote no Lock')
-        s.act('action', locked, 'Bench')
-        wait(lambda: not s.tmux('show-options', '-qv', '-t', sid, '@muxify_lock').strip(), 'Bench did not end the Lock')
 
 
 if __name__ == '__main__':

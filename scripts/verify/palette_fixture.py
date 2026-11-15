@@ -2,7 +2,7 @@
 
 PaletteFixture has no checks. Each suite subclasses it, so each suite makes its own Sandbox and app.
 
-The driver cannot type keys. run_command opens Commands from its View menu item, and a check calls the search
+The driver cannot type keys. Sandbox.run_command opens Commands from its View menu item, and a check calls the search
 field's accessibility actions for the keys (UI/CommandPaletteView.swift).
 """
 
@@ -42,8 +42,7 @@ class PaletteFixture(unittest.TestCase):
     def setUp(self):
         if self.s.has('palette-search'):
             self.s.act('action', 'palette-search', 'Close')
-        if self.s.row('sidebar-view-topics').get('accessibilityValue') != 'selected':
-            self.s.act('press', 'sidebar-view-topics')
+        self.s.show_sidebar_mode('topics')
         self.select(self.base)
 
     def select(self, window):
@@ -74,19 +73,5 @@ class PaletteFixture(unittest.TestCase):
         row = self.s.row(key, rs)
         return row.get('accessibilityLabel', '') + row.get('accessibilityValue', '')
 
-    def search(self, title):
-        wait(lambda: self.s.driver('press', 'Commands')['pressed'], 'Commands did not open')
-        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'the Commands field did not show')
-        self.s.act('focus', 'palette-search')
-        self.s.act('set', 'palette-search', title)
-        self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == title,
-                         'Commands did not keep the query')
-
     def press_key(self, symbol):
         wait(lambda: self.s.driver('action', 'quick-switch-input', 'Press ' + symbol)['pressed'], 'the app offers no Press ' + symbol)
-
-    def run_command(self, title):
-        self.search(title)
-        key = 'palette-row-command-' + title
-        self.s.wait_rows(lambda rs: self.s.has(key, rs), title + ' was missing from Commands')
-        self.s.act('press', key)

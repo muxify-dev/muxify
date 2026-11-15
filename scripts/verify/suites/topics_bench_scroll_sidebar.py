@@ -41,12 +41,12 @@ class TopicsBenchScrollSidebar(TopicsSidebar):
         self.addCleanup(self.store.set_open_places, [])
         self.config.write_text(self.config_text + 'topics:\n  in_play: 1\n')
         topic = prefix + '-a'
-        self.write_topic(topic, topic.capitalize(), self.beta, order=0)
+        self.write_topic(topic, topic.capitalize(), order=0)
         self.new_session('beta/' + topic, self.beta, topic=topic)
         bench = []
         for order in range(1, BENCHED + 1):
             topic = '%s-t%02d' % (prefix, order)
-            self.write_topic(topic, topic.capitalize(), self.beta, order=order)
+            self.write_topic(topic, topic.capitalize(), order=order)
             bench.append('topic-' + topic)
         s.wait_rows(lambda rs: s.has(LINE, rs) and s.has('topic-%s-a' % prefix, rs), 'the Topics list has no Bench line')
         if s.row(LINE).get('accessibilityLabel') == 'Bench':

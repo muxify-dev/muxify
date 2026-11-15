@@ -2,14 +2,15 @@
 on a server with no Session of the user's.
 
 The app saves each discovery's output in the state folder. After a restart the palette lists those Session Paths at
-once, and the new discovery replaces them when it finishes. A `git` first in the app's PATH makes discovery slow
-after the restart, so the check sees the saved list before the new one.
+once, and the new discovery replaces them when it finishes. A `git` first in the app's PATH holds discovery after the
+restart until the check lets it go, so the check sees the saved list before the new one.
 
 Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.session_paths_palette
 """
 
 import os
+import shlex
 import shutil
 import subprocess
 import time
@@ -17,7 +18,6 @@ import unittest
 
 from scripts.verify.sandbox import Sandbox, wait
 
-SLOW_DISCOVERY = 30
 LAUNCH_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES']
 
 
@@ -36,18 +36,6 @@ class SessionPathsPalette(unittest.TestCase):
         cls.cache = s.root/'state/muxify/session-paths/local.json'
         s.tmux('new-session', '-d', '-s', 'base', '-c', str(s.root), '/bin/zsh -f')
         s.launch(LAUNCH_ARGS)
-
-    def open_palette(self):
-        """Presses the View menu item until the palette shows. SwiftUI rebuilds the menu a moment after the app
-        starts, and a press in that moment can miss."""
-        def opened():
-            self.s.driver('press', 'Go to…')
-            deadline = time.monotonic() + 3
-            while time.monotonic() < deadline:
-                if self.s.has('palette-search'):
-                    return True
-            return False
-        wait(opened, 'the palette did not open', seconds=20)
 
     def row(self, path):
         return 'palette-row-session-path:' + str(path)
@@ -106,32 +94,34 @@ class SessionPathsPalette(unittest.TestCase):
         wait(self.cache.exists, 'the first discovery saved no output at %s' % self.cache, seconds=20)
         newcomer = self.projects/'newcomer'
         newcomer.mkdir()
-        shim = self.s.root/'slow-git'
+        # Discovery waits in the shim until the file `go` exists. A check that ends before it lets discovery go on.
+        shim = self.s.root/'held-git'
         shim.mkdir()
+        go = shim/'go'
+        self.addCleanup(go.touch)
         real_git = shutil.which('git', path=self.s.app_env['PATH']) or '/usr/bin/git'
-        (shim/'git').write_text('#!/bin/sh\ncase " $* " in *" config --bool core.bare "*) sleep %d ;; esac\nexec %s "$@"\n'
-                                % (SLOW_DISCOVERY, real_git))
+        (shim/'git').write_text('#!/bin/sh\n'
+                                f'case " $* " in *" config --bool core.bare "*) while [ ! -e {shlex.quote(str(go))} ]; do sleep .1; done ;; esac\n'
+                                f'exec {shlex.quote(real_git)} "$@"\n')
         os.chmod(shim/'git', 0o755)
         self.s.app_env['PATH'] = str(shim) + ':' + self.s.app_env['PATH']
 
-        started = time.monotonic()
         self.s.restart_app(LAUNCH_ARGS)
-        self.open_palette()
+        self.s.open_palette('Go to…')
         def listed():
             self.search('repo')
             return self.s.has(self.row(self.saved))
         wait(listed, 'the saved Session Path is not in the palette after the restart', seconds=10)
-        shown = time.monotonic() - started
-        self.assertLess(shown, SLOW_DISCOVERY, 'the row showed only after discovery could finish')
         self.search('newcomer')
         time.sleep(1)
         self.assertFalse(self.s.has(self.row(newcomer)),
-                         'a folder made after the save is listed %.1f s after the restart, so the list is not the saved one' % shown)
+                         'a folder made after the save is listed while discovery waits, so the list is not the saved one')
+        go.touch()
 
         def discovered():
             self.search('newcomer')
             return self.s.has(self.row(newcomer))
-        wait(discovered, 'the finished discovery did not replace the saved Session Paths', seconds=SLOW_DISCOVERY + 30)
+        wait(discovered, 'the finished discovery did not replace the saved Session Paths', seconds=30)
 
 
 if __name__ == '__main__':

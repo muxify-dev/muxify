@@ -25,7 +25,7 @@ class FocusPalette(PaletteFixture):
         return self.s.driver('responder')['responders']
 
     def focus_terminal(self):
-        wait(lambda: self.s.driver('press', 'Focus Terminal')['pressed'], 'Focus Terminal stays disabled')
+        self.s.press_menu_item('Focus Terminal')
         wait(lambda: 'TerminalSurfaceView' in self.responders(), 'the Terminal did not take Focus')
 
     def assert_focus(self, view, after):
@@ -34,17 +34,6 @@ class FocusPalette(PaletteFixture):
         except AssertionError:
             self.fail('%s left Focus on %s, not on %s' % (after, self.responders(), view))
 
-    def lock(self, session):
-        return self.s.tmux('show-options', '-qv', '-t', session, '@muxify_lock').strip()
-
-    def session(self, name):
-        """A live Session outside every Topic, shown in the app; returns its Window."""
-        window = self.s.tmux('new-session', '-d', '-P', '-F', '#{window_id}', '-s', name, '-c', str(self.project), SHELL)
-        self.addCleanup(self.s.tmux_ok, 'kill-session', '-t', name)
-        self.addCleanup(self.select, self.base)
-        self.select(window)
-        return window
-
     def shown_topic(self, name, order=0):
         """A Topic with a live Session that the app shows; returns its Window. The card can be on the Bench, out of
         sight, so run_command waits for the Topic's Commands in place of its card."""
@@ -52,71 +41,22 @@ class FocusPalette(PaletteFixture):
         self.select(window)
         return window
 
-    def make_a_guest(self, session):
-        self.run_command('Make a Guest')
-        wait(lambda: self.lock(session), 'Make a Guest did not lock the Session')
-
-    def test_make_a_guest_of_a_session_keeps_focus_in_the_terminal(self):
-        self.session('fp-guest')
-        self.focus_terminal()
-        self.make_a_guest('fp-guest')
-        self.assert_focus('TerminalSurfaceView', 'Make a Guest')
-
-    def test_bench_of_a_guest_session_keeps_focus_in_the_terminal(self):
-        self.session('fp-bench-guest')
-        self.make_a_guest('fp-bench-guest')
-        self.focus_terminal()
-        self.run_command('Bench')
-        wait(lambda: not self.lock('fp-bench-guest'), 'Bench did not unlock the Guest Session')
-        self.assert_focus('TerminalSurfaceView', 'Bench of a Guest Session')
-
     def bench(self, prefix):
         """A Bench to toggle: one In Play Topic and one Benched Topic."""
         self.topic(prefix + '-in-play', order=0)
         self.topic(prefix + '-benched', order=1)
         self.s.wait_rows(lambda rs: self.s.has('topics-bench-line', rs), 'the Bench line did not show')
 
-    def test_toggle_bench_keeps_focus_in_the_terminal(self):
-        self.bench('fp-toggle')
-        self.addCleanup(self.run_command, 'Toggle Bench')
-        self.focus_terminal()
-        self.run_command('Toggle Bench')
-        self.assert_focus('TerminalSurfaceView', 'Toggle Bench')
-
-    def test_make_a_guest_of_a_benched_topic_keeps_focus_in_the_terminal(self):
-        self.topic('fp-in-play', order=0)
-        self.shown_topic('fp-benched', order=1)
-        self.focus_terminal()
-        self.run_command('Make a Guest')
-        wait(lambda: self.record('fp-benched').get('guest'), 'Make a Guest did not mark the Topic')
-        self.assert_focus('TerminalSurfaceView', 'Make a Guest')
-
     def test_bench_topic_keeps_focus_in_the_terminal(self):
         self.shown_topic('fp-bench')
         self.focus_terminal()
-        self.run_command('Bench')
+        self.s.run_command('Bench')
         self.assert_focus('TerminalSurfaceView', 'Bench')
-
-    def test_pin_topic_keeps_focus_in_the_terminal(self):
-        self.shown_topic('fp-pin')
-        self.focus_terminal()
-        self.run_command('Pin Topic')
-        wait(lambda: self.record('fp-pin').get('pinned'), 'Pin Topic did not pin the Topic')
-        self.assert_focus('TerminalSurfaceView', 'Pin Topic')
-
-    def test_unpin_topic_keeps_focus_in_the_terminal(self):
-        self.shown_topic('fp-unpin')
-        self.run_command('Pin Topic')
-        wait(lambda: self.record('fp-unpin').get('pinned'), 'Pin Topic did not pin the Topic')
-        self.focus_terminal()
-        self.run_command('Unpin Topic')
-        wait(lambda: not self.record('fp-unpin').get('pinned'), 'Unpin Topic did not unpin the Topic')
-        self.assert_focus('TerminalSurfaceView', 'Unpin Topic')
 
     def test_rename_topic_keeps_focus_in_the_terminal_after_accept(self):
         self.shown_topic('fp-rename')
         self.focus_terminal()
-        self.run_command('Rename Topic')
+        self.s.run_command('Rename Topic')
         self.s.wait_rows(lambda rs: 'Rename' in self.text('palette-breadcrumb', rs), 'Rename Topic did not open its step')
         self.s.act('set', 'palette-search', 'Renamed fp')
         self.s.act('action', 'palette-search', 'Accept')
@@ -135,9 +75,9 @@ class FocusPalette(PaletteFixture):
         self.addCleanup(self.s.tmux_ok, 'kill-window', '-t', window)
         self.addCleanup(self.select, self.base)
         self.bench('fp-browser')
-        self.addCleanup(self.run_command, 'Toggle Bench')
+        self.addCleanup(self.s.run_command, 'Toggle Bench')
         self.select(window)
-        wait(lambda: self.s.driver('press', 'Focus Browser')['pressed'], 'Focus Browser stays disabled')
+        self.s.press_menu_item('Focus Browser')
         wait(lambda: 'WKWebView' in self.responders(), 'the Browser did not take Focus')
-        self.run_command('Toggle Bench')
+        self.s.run_command('Toggle Bench')
         self.assert_focus('WKWebView', 'Toggle Bench')

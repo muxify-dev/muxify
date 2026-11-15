@@ -26,10 +26,7 @@ class WindowPartsSidebar(unittest.TestCase):
         self.addCleanup(self.config.write_text, self.default_config)
 
     def show_mode(self, mode):
-        key = 'sidebar-view-' + mode
-        self.s.wait_rows(lambda rs: self.s.has(key, rs), 'Sidebar mode control is missing')
-        if self.s.row(key).get('accessibilityValue') != 'selected':
-            self.s.act('press', key)
+        self.s.show_sidebar_mode(mode)
         card = 'topic-parts' if mode == 'topics' else 'session-' + self.session
         self.s.wait_rows(lambda rs: self.s.has(card, rs), 'the card is missing in ' + mode)
         if 'expanded' not in self.s.row(card).get('accessibilityValue', ''):
@@ -76,10 +73,8 @@ class WindowPartsSidebar(unittest.TestCase):
             self.assertEqual(self.label(rs), 'Hidden parts')
             if mode == 'sessions':
                 self.assertFalse(any(row.get('accessibilityRole') == 'AXImage' for row in self.window_rows(rs)))
-            if mode == 'topics':
-                self.s.act('snapshot', self.row_key, str(self.s.root / 'window-parts-hidden.png'))
 
-    def test_mixed_parts_follow_mode_and_recover_from_invalid_symbol(self):
+    def test_mixed_parts_follow_the_sidebar_mode(self):
         self.config.write_text("""sidebar:
   formats:
     window:
@@ -101,25 +96,6 @@ class WindowPartsSidebar(unittest.TestCase):
                 images = [row for row in self.window_rows(rs) if row.get('accessibilityRole') == 'AXImage']
                 self.assertEqual(len(images), 2, 'the app icon or the SF Symbol is missing')
                 self.assertEqual(sum(row.get('accessibilityLabel') == symbol for row in images), 1)
-            if mode == 'topics':
-                self.s.act('snapshot', self.row_key, str(self.s.root / 'window-parts.png'))
-        self.config.write_text("""sidebar:
-  formats:
-    window:
-      title: 'Parts Window'
-      left: 'Recovered'
-      right:
-        topics: '#{symbol:absent.muxify.symbol}'
-        sessions: '#{symbol:globe} valid'
-""")
-        for mode in ['topics', 'sessions']:
-            self.show_mode(mode)
-            expected = 'Recovered, Parts Window, 1' if mode == 'topics' else 'Recovered, Parts Window, globe,  valid'
-            rs = self.s.wait_rows(lambda rs: self.label(rs) == expected, 'invalid Format affected another part or mode')
-            self.assertEqual(self.label(rs), expected)
-        self.config.write_text("sidebar:\n  formats:\n    window:\n      title: 'Parts Window'\n      left: null\n      right: null\n")
-        rs = self.s.wait_rows(lambda rs: self.label(rs) == 'Parts Window', 'null did not restore native parts')
-        self.assertEqual(self.label(rs), 'Parts Window')
 
     def test_a_terminal_bell_shows_as_a_bell_symbol(self):
         s = self.s

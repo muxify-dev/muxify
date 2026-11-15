@@ -50,23 +50,21 @@ final class ClearBrowserHistoryTests: XCTestCase {
     }
 
     func testARangeRemovesOnlyItsVisits() throws {
-        let ago = [30 * minute, 3 * hour, 2 * day, 10 * day]
+        // As recording leaves it: the visit of 10 days ago is more than 7 days before the next, so it is folded.
+        let entry = HistoryEntry(key: "k", url: "https://example.com", title: "", folded: .init(score: 1, at: now - 10 * day),
+                                 recent: [2 * day, 3 * hour, 30 * minute].map { .init(at: now - $0, weight: 1) }, topics: [])
         let expected: [(ClearRange, [TimeInterval])] = [
             (.lastHour, [3 * hour, 2 * day]), (.last6Hours, [2 * day]), (.lastDay, [2 * day]),
             (.last3Days, []), (.last7Days, []),
         ]
         for (range, kept) in expected {
-            let directory = try TestDirectory()
-            let history = history(directory)
-            history.setEnabled(true)
-            record(history, "https://example.com", ago: ago)
-            history.clear(range, now: now)
-            let entry = try XCTUnwrap(history.entries["https://example.com"], "\(range)")
-            XCTAssertEqual(entry.recent.map(\.at), kept.sorted(by: >).map { now - $0 }, "\(range)")
-            XCTAssertEqual(entry.folded?.at, now - 10 * day, "\(range) keeps the visit of 10 days ago")
+            var cleared = entry
+            cleared.removeVisits(since: now - (try XCTUnwrap(range.duration, "\(range)")))
+            XCTAssertEqual(cleared.recent.map(\.at), kept.sorted(by: >).map { now - $0 }, "\(range)")
+            XCTAssertEqual(cleared.folded?.at, now - 10 * day, "\(range) keeps the visit of 10 days ago")
             let score = ([10 * day] + kept).reduce(0) { $0 + pow(0.5, $1 / HistoryEntry.halfLife) }
-            XCTAssertEqual(entry.score(at: now), score, accuracy: 1e-9, "\(range)")
-            XCTAssertEqual(entry.lastVisit, now - (kept.min() ?? 10 * day), "\(range)")
+            XCTAssertEqual(cleared.score(at: now), score, accuracy: 1e-9, "\(range)")
+            XCTAssertEqual(cleared.lastVisit, now - (kept.min() ?? 10 * day), "\(range)")
         }
     }
 

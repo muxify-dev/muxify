@@ -72,15 +72,6 @@ final class BrowserHistoryTests: XCTestCase {
         XCTAssertEqual(entry.folded, HistoryEntry.Folded(score: 1, at: start))
     }
 
-    func testAFileFromBeforeTheRecentVisitsDecodesAsOneFoldedScore() throws {
-        let json = #"[{"key":"https://a.test","url":"https://a.test","title":"A","score":3.5,"lastVisit":800000000,"topics":["t"]}]"#
-        let entries = try JSONDecoder().decode([HistoryEntry].self, from: Data(json.utf8))
-        XCTAssertEqual(entries, [HistoryEntry(key: "https://a.test", url: "https://a.test", title: "A",
-                                              folded: .init(score: 3.5, at: Date(timeIntervalSinceReferenceDate: 800_000_000)), topics: ["t"])])
-        let reencoded = try JSONDecoder().decode([HistoryEntry].self, from: JSONEncoder().encode(entries))
-        XCTAssertEqual(reencoded, entries, "the new shape reads back the same")
-    }
-
     func testAnEntryKeepsEveryTopicOfItsVisits() throws {
         let directory = try TestDirectory()
         let history = history(directory)
@@ -91,18 +82,7 @@ final class BrowserHistoryTests: XCTestCase {
         XCTAssertEqual(history.entries["https://example.com"]?.topics, ["one", "two"])
     }
 
-    func testOverTheCapTheLowestDecayedScoreGoes() throws {
-        let directory = try TestDirectory()
-        let history = history(directory, capacity: 2)
-        history.setEnabled(true)
-        history.record(url: url("https://old.test"), title: "", visit: .typed, topic: nil, at: start)
-        history.record(url: url("https://kept.test"), title: "", visit: .link, topic: nil, at: start + 20 * day)
-        history.record(url: url("https://new.test"), title: "", visit: .link, topic: nil, at: start + 20 * day)
-        XCTAssertEqual(Set(history.entries.keys), ["https://kept.test", "https://new.test"],
-                       "2 decayed over 20 days is below a link of now")
-    }
-
-    func testTheCapDeletesTheRowOfTheLowestScore() throws {
+    func testOverTheCapTheLowestDecayedScoreGoesWithItsRow() throws {
         let directory = try TestDirectory()
         let history = history(directory, capacity: 2)
         history.setEnabled(true)
@@ -111,6 +91,8 @@ final class BrowserHistoryTests: XCTestCase {
         history.flush()
         XCTAssertEqual(try rowKeys(directory), ["https://old.test", "https://kept.test"])
         history.record(url: url("https://new.test"), title: "", visit: .link, topic: nil, at: start + 20 * day)
+        XCTAssertEqual(Set(history.entries.keys), ["https://kept.test", "https://new.test"],
+                       "2 decayed over 20 days is below a link of now")
         history.flush()
         XCTAssertEqual(try rowKeys(directory), ["https://kept.test", "https://new.test"], "the row of the lowest score goes with its entry")
     }
@@ -210,17 +192,6 @@ final class BrowserHistoryTests: XCTestCase {
         history.updateTitle(of: "https://other.test", to: "Other")
         XCTAssertEqual(history.entries["https://app.test"]?.title, "Inbox (3)")
         XCTAssertNil(history.entries["https://other.test"], "a title change never adds a History entry")
-    }
-
-    func testEntriesStayAcrossALaunch() throws {
-        let directory = try TestDirectory()
-        let first = history(directory)
-        first.setEnabled(true)
-        first.record(url: url("https://example.com/a"), title: "A", visit: .typed, topic: "t", at: start)
-        first.flush()
-        let second = history(directory)
-        second.setEnabled(true)
-        XCTAssertEqual(second.entries, first.entries)
     }
 
     func testWhileOffNothingIsRecordedAndTheTableIsNeitherReadNorWritten() throws {

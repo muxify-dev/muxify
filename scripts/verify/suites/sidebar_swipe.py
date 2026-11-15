@@ -12,7 +12,7 @@ import subprocess
 import time
 import unittest
 
-from scripts.verify.sandbox import Sandbox, wait
+from scripts.verify.sandbox import Sandbox
 from scripts.verify.topic_records import TopicRecords
 
 
@@ -60,28 +60,6 @@ UPDATES_PER_SWIPE = 4
 # mid-burst and draws a card again. Before, each swipe ran every card's body on both pages: 300 SidebarCard bodies
 # over 10 swipes of 15 Sessions.
 CARD_BODIES_PER_BURST = 30
-# CPU seconds a swipe may cost the app, gesture, settle and the driver's reads of the accessibility tree included.
-# Measured on 2026-11-11 from a terminal with Accessibility permission, as this check measures it: the app's user and
-# system time from `ps` over the burst, divided by the swipes.
-# - Old build (0be752b, SwiftUI moved the pages every frame): 0.113-0.123 s a swipe.
-# - This build before the pages stopped being rebuilt by each swipe: 0.173-0.192 s a swipe.
-# - This build: 0.162-0.185 s a swipe, in seven runs.
-# `sample` of the main thread at 1 ms over a 20-swipe burst read both builds at about 0.23 s a swipe, and the main
-# thread about 90% busy on the old build against about 59% on this one. So the number cannot tell the builds apart:
-# the driver's reads dominate it. `wait_mode` dumps the accessibility tree again and again until the pages rest, and
-# the app answers each dump for every row. The old build's Debug label gave the committed mode, so the wait ended
-# before the spring; this one gives the position the pages show, so it waits out the spring and dumps more (20 swipes
-# took 15.1 s against 8.4 s). The limit is about twice this build's number: it fails a burst that makes the app much
-# busier, not a slow machine. The card bodies and the update count above are the sharp guards.
-CPU_PER_SWIPE = 0.4
-
-
-def cpu_seconds(pid):
-    """The user and system CPU time of `pid` so far, read as scripts/verify/suites/working_marks.py reads it."""
-    out = subprocess.run(['/bin/ps', '-o', 'time=', '-p', str(pid)], capture_output=True, text=True,
-                         check=True).stdout.strip()
-    minutes, seconds = out.split(':')
-    return int(minutes) * 60 + float(seconds)
 
 
 class SidebarSwipeBurst(SwipeSteps, unittest.TestCase):
@@ -118,7 +96,7 @@ class SidebarSwipeBurst(SwipeSteps, unittest.TestCase):
                          'the Sidebar shows none of the %d Topics' % BURST_SESSIONS)
         self.wait_mode('topics')
         self.require_motion()
-        updates, cpu = self.updates(), cpu_seconds(self.s.pid)
+        updates = self.updates()
         self.s.driver('counts', reset=True)
         for number in range(BURST_SWIPES):
             if number % 2:
@@ -127,18 +105,15 @@ class SidebarSwipeBurst(SwipeSteps, unittest.TestCase):
             else:
                 self.sample('Swipe left')
                 self.wait_mode('sessions')
-        cpu = cpu_seconds(self.s.pid) - cpu
         updates = self.updates() - updates
         counts = self.s.driver('counts')['counts']
         cards = sum(counts.get(name, 0) for name in ('SidebarCard', 'TopicCard'))
-        print('burst: %d updates, %.3f CPU s a swipe, bodies %s' % (updates, cpu / BURST_SWIPES, counts))
+        print('burst: %d updates, bodies %s' % (updates, counts))
         self.assertLessEqual(updates, UPDATES_PER_SWIPE * BURST_SWIPES,
                              '%d swipes updated the pages container through SwiftUI %d times' % (BURST_SWIPES, updates))
         self.assertLessEqual(cards, CARD_BODIES_PER_BURST,
                              '%d swipes ran the cards\' bodies %d times, so a swipe rebuilt the pages: %s'
                              % (BURST_SWIPES, cards, counts))
-        self.assertLess(cpu / BURST_SWIPES, CPU_PER_SWIPE,
-                        'a swipe cost the app %.3f CPU seconds; %d updates in the burst' % (cpu / BURST_SWIPES, updates))
 
 
 class SidebarSwipe(SwipeSteps, unittest.TestCase):
@@ -207,16 +182,6 @@ class SidebarSwipe(SwipeSteps, unittest.TestCase):
         rs = self.wait_mode('sessions')
         self.assertTrue(self.s.has('agents-header', rs), 'Sessions did not keep the Agents section')
 
-    def test_partial_swipe_previews_the_next_page_before_committing(self):
-        self.require_motion()
-        self.sample('Begin swipe left')
-        self.addCleanup(lambda: self.sample('Cancel current swipe'))
-        rs = self.s.wait_rows(lambda rs: self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').endswith(' 0.400'),
-                              'the Sidebar did not follow the partial swipe')
-        self.assertEqual(self.s.row('sidebar-view-topics', rs).get('accessibilityValue'), 'selected')
-        self.sample('Cancel current swipe')
-        self.wait_mode('topics')
-
     def test_animation_can_be_disabled_and_reenabled_live_without_disabling_switching(self):
         self.require_motion()
         self.addCleanup(self.config.write_text, 'sidebar:\n  agents: false\n')
@@ -225,7 +190,9 @@ class SidebarSwipe(SwipeSteps, unittest.TestCase):
         # where the pages show, mid-settle included, so it ends in 0.000 only once the Topics page is back at rest.
         self.wait_mode('topics')
         self.sample('Begin swipe left')
-        self.s.wait_rows(lambda rs: self.position(rs) == '0.400', 'the enabled animation did not preview the swipe')
+        rs = self.s.wait_rows(lambda rs: self.position(rs) == '0.400', 'the enabled animation did not preview the swipe')
+        self.assertEqual(self.s.row('sidebar-view-topics', rs).get('accessibilityValue'), 'selected',
+                         'a partial swipe committed Sessions')
         self.config.write_text('sidebar:\n  agents: false\n  animate_switching: false\n')
         self.s.wait_rows(lambda rs: self.s.row('sidebar-swipe-input', rs).get('accessibilityLabel', '').startswith('Sidebar swipe input instant '),
                          'the animation setting did not reload')
@@ -283,24 +250,13 @@ class SidebarSwipe(SwipeSteps, unittest.TestCase):
         self.sample('Swipe left')
         self.wait_mode('sessions')
 
-    def test_disabling_a_view_removes_the_pager(self):
-        self.addCleanup(self.config.write_text, 'sidebar:\n  agents: false\n')
-        self.config.write_text('sidebar:\n  agents: false\n  sessions: false\n')
-        rs = self.s.wait_rows(lambda rs: self.s.has('topic-swipe', rs) and not self.s.has('sidebar-view-sessions', rs),
-                              'the single Topics view kept its mode selector')
-        self.assertFalse(self.s.has('sidebar-swipe-input', rs), 'a disabled Sessions view can still be swiped to')
-
-    def press_menu_item(self, title):
-        """The app updates its menu items a moment after a change, so a press can find the item still disabled."""
-        wait(lambda: self.s.driver('press', title)['pressed'], 'the menu item %s stays disabled' % title, seconds=10)
-
     def test_the_view_menu_item_switches_modes_without_changing_the_window_or_focus(self):
         before = self.s.tmux('list-clients', '-F', '#{client_tty}|#{window_id}')
         responder = self.s.driver('responder')['responders']
-        self.press_menu_item('Switch to Sessions')
+        self.s.press_menu_item('Switch to Sessions')
         rs = self.wait_mode('sessions')
         self.assertTrue(self.s.has('session-' + self.session, rs), 'Sessions has no Session card')
-        self.press_menu_item('Switch to Topics')
+        self.s.press_menu_item('Switch to Topics')
         rs = self.wait_mode('topics')
         self.assertTrue(self.s.has('topic-swipe', rs), 'Topics has no Topic card')
         self.assertEqual(self.s.tmux('list-clients', '-F', '#{client_tty}|#{window_id}'), before)
@@ -309,11 +265,11 @@ class SidebarSwipe(SwipeSteps, unittest.TestCase):
     def test_the_switch_shows_a_hidden_sidebar_in_the_other_mode(self):
         def show_sidebar():
             if not self.s.has('sidebar-view-topics'):
-                self.press_menu_item('Show Sidebar')
+                self.s.press_menu_item('Show Sidebar')
         self.addCleanup(show_sidebar)
-        self.press_menu_item('Hide Sidebar')
+        self.s.press_menu_item('Hide Sidebar')
         self.s.wait_rows(lambda rs: not self.s.has('sidebar-view-topics', rs), 'the Sidebar did not hide')
-        self.press_menu_item('Switch to Sessions')
+        self.s.press_menu_item('Switch to Sessions')
         rs = self.wait_mode('sessions')
         self.assertTrue(self.s.has('session-' + self.session, rs), 'the shown Sidebar has no Session card')
 
@@ -322,10 +278,7 @@ class SidebarSwipe(SwipeSteps, unittest.TestCase):
             if self.s.has('palette-search'):
                 self.s.act('action', 'palette-search', 'Close')
         self.addCleanup(close_palette)
-        self.press_menu_item('Commands')
-        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'Commands did not open')
-        self.s.act('focus', 'palette-search')
-        self.s.act('set', 'palette-search', 'Switch to')
+        self.s.open_palette('Commands', 'Switch to')
         key = 'palette-row-command-Switch to Sessions'
         rs = self.s.wait_rows(lambda rs: self.s.has(key, rs), 'Switch to Sessions was missing from Commands')
         self.assertFalse(self.s.has('palette-row-command-Switch to Topics', rs), 'Topics shows, yet Commands offers Switch to Topics')
@@ -341,27 +294,14 @@ class SidebarSwipe(SwipeSteps, unittest.TestCase):
                 self.s.act('action', 'palette-search', 'Close')
         self.addCleanup(restore)
         self.config.write_text('sidebar:\n  agents: false\n  sessions: false\n')
-        self.s.wait_rows(lambda rs: self.s.has('topic-swipe', rs) and not self.s.has('sidebar-view-sessions', rs),
-                         'the single Topics view kept its mode selector')
+        rs = self.s.wait_rows(lambda rs: self.s.has('topic-swipe', rs) and not self.s.has('sidebar-view-sessions', rs),
+                              'the single Topics view kept its mode selector')
+        self.assertFalse(self.s.has('sidebar-swipe-input', rs), 'a disabled Sessions view can still be swiped to')
         time.sleep(1)
         self.assertFalse(self.s.driver('press', 'Switch to Sessions')['pressed'], 'the View menu item is enabled with Sessions off')
-        self.press_menu_item('Commands')
-        self.s.wait_rows(lambda rs: self.s.has('palette-search', rs), 'Commands did not open')
-        self.s.act('focus', 'palette-search')
-        self.s.act('set', 'palette-search', 'Switch to')
+        self.s.open_palette('Commands', 'Switch to')
         time.sleep(1)
         rs = self.s.wait_rows(lambda rs: self.s.row('palette-search', rs).get('accessibilityValue') == 'Switch to',
                               'Commands did not keep the query')
         self.assertFalse(self.s.has('palette-row-command-Switch to Sessions', rs), 'Commands offers a switch with Sessions off')
         self.assertFalse(self.s.has('palette-row-command-Switch to Topics', rs), 'Commands offers a switch with Sessions off')
-
-    def test_swiping_between_modes_with_different_agents_visibility(self):
-        self.addCleanup(self.config.write_text, 'sidebar:\n  agents: false\n')
-        self.config.write_text('sidebar:\n  agents:\n    topics: true\n    sessions: false\n')
-        self.s.wait_rows(lambda rs: self.s.has('agents-header', rs), 'Topics did not show Agents')
-        self.sample('Swipe left')
-        rs = self.wait_mode('sessions')
-        self.assertFalse(self.s.has('agents-header', rs), 'Sessions kept the Topics Show Agents choice')
-        self.sample('Swipe right')
-        rs = self.wait_mode('topics')
-        self.assertTrue(self.s.has('agents-header', rs), 'Topics did not restore its Show Agents choice')

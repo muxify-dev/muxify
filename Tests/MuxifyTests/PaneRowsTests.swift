@@ -1,12 +1,11 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class PaneRowsTests: XCTestCase {
     private func window(_ id: String, session: String, topic: String? = "t") -> TmuxWindow {
-        TmuxWindow(id: id, sessionID: session, sessionName: "app-" + session, index: 0, name: "editor",
-                   paneTitle: "editor", path: "/work/app", command: "zsh", isActive: true, paneCount: 1, hasBell: false,
-                   sessionActivity: 0, agent: "", storedBrowser: StoredBrowser(), openRequests: [], topicID: topic,
-                   sessionPath: "/work/app")
+        .fixture(id: id, sessionID: session, sessionName: "app-" + session, name: "editor", paneTitle: "editor", path: "/work/app",
+                 topicID: topic, sessionPath: "/work/app")
     }
 
     private func pane(_ id: String, window: String, index: Int, active: Bool = false, agent: String = "") -> TmuxPane {
@@ -19,7 +18,7 @@ final class PaneRowsTests: XCTestCase {
         var selection = TopicSelection()
         selection.select(windowID: windows[0].id, activeTopic: .topic("t"))
         return TopicsModel(records: [TopicRecord(id: "t", title: "T")], windows: windows, config: Config(),
-                           selection: selection, location: selection.windowID.flatMap(WindowID.init(rawValue:)).map(Location.window), mode: mode,
+                           selection: selection, location: selection.windowLocation, mode: mode,
                            agents: Agent.list(panes: panes ?? [], windows: windows, ordered: false), panes: panes)
     }
 

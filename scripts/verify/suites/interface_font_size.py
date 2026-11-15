@@ -1,36 +1,29 @@
 """The Interface font size, `ui.font_size`: Muxify's own text keeps its ratio to 12, and the fixed sizes that hold it
-grow with it (ADR 0068). Each check rewrites the sandbox Config, at 12 and then at 18, and measures elements in the
-dump. Paddings and spacing do not scale, so a check compares the part of an element that holds its text: the element's
-height less its padding.
-
-The Bench's geometry follows the edge pill, whose band grows with the size, so the Bench's rules also hold at 18: a
-Benched card stands directly below the Bench line or the "more above" pill, and neither covers it (ADR 0063).
+grow with it (ADR 0068). The unit tests prove each surface's sizes (`InterfaceFontSizeTests`, `SidebarTypographyTests`
+and `GitDiffMetricsTests`), so this suite measures a few representative surfaces in the running app. Each check
+rewrites the sandbox Config, at 12 and then at 18, and measures elements in the dump. Paddings and spacing do not scale,
+so a check compares the part of an element that holds its text: the element's height less its padding.
 
 The App Window header's height, `ui.header_height`, is a length at 12 that grows by the same factor, so its buttons,
-which grow too, still fit in it. A maximum width that grows, such as the Git button's, gives way in a header without
-room for it, so no button leaves the App Window.
+which grow too, still fit in it. The removed `ui.sidebar.font_size` is a Config problem that the Config problems banner
+shows with its line, and it changes no size.
 
-The Git View's list rows, list headers, tabs and bars hold their text in fixed heights that grow by the factor, and the
-List pane's width bounds grow too, so a file name keeps its room. Its keys, its scrolling to the selection and a click
-select the row that is drawn there at every size.
-
-The Git View's popups, the commit box and a Git View menu, hold their text in fixed heights and widths that grow by the
-factor too, but never past the Git View, so a popup stays in the App Window. A Git View menu leaves the keys with the
-Git View, and a Git View prompt gives them to its field, at every size.
+The Git View's list rows and tabs hold their text in fixed heights that grow by the factor, and the List pane's width
+bounds grow too, so a file name keeps its room. Its keys, its scrolling to the selection and a click select the row that
+is drawn there at every size. A Git View menu leaves the keys with the Git View, and the commit box and a Git View
+prompt give them to their field, at every size.
 
 The Git View's code text does not follow `ui.font_size`: it is the Terminal's `font-size` less one point, and its
 line-number gutter grows with it, wide enough for the diff's widest line number, so a 5-digit number shows whole.
 
-A Command Palette's rows, section headers and search field hold their text in fixed heights that grow by the factor, and
-its width grows too, but never past the App Window less its margins. The list still shows six and a half rows. Its
-keys, its scrolling to the highlighted row and a click choose the row that is drawn there at every size. The driver
-cannot type keys, so a check opens a palette from its View menu item and calls the search field's accessibility actions
-for them (Sources/Muxify/UI/CommandPaletteView.swift).
+A Command Palette's rows and search field hold their text in fixed heights that grow by the factor, and its width grows
+too, but never past the App Window less its margins. The list still shows six and a half rows. Its keys, its scrolling
+to the highlighted row and a click choose the row that is drawn there at every size. The driver cannot type keys, so a
+check opens a palette from its View menu item and calls the search field's accessibility actions for them
+(Sources/Muxify/UI/CommandPaletteView.swift).
 
-The overlays over an App Window hold their text in fixed heights and widths that grow by the factor too: a Pill, the
-Config problems banner, Find in Pane's bar, a Hint, an Empty Topic page's title and a hover label, whose panel is
-outside the App Window's view tree and takes the size from the row it labels. A width that grows is a maximum, so an
-overlay never leaves the App Window or what it overlays.
+Find in Pane's bar, over the Terminal, holds its text in a fixed height and width that grow by the factor. Its width is
+a maximum, so the bar never leaves the Terminal.
 
 The Browser's chrome, its tab strip, Tabs, toolbar and address field, holds its text in fixed heights that grow by the
 factor, and a Tab's width bounds grow too, so its title keeps its room. The page inside it keeps its own zoom: its
@@ -41,10 +34,8 @@ Run from the repo root after `make build`:
     python3 -m unittest -v scripts.verify.suites.interface_font_size
 """
 
-import math
 import re
 import subprocess
-import time
 import unittest
 
 from scripts.verify.sandbox import Sandbox, frame, wait
@@ -56,21 +47,6 @@ SHELL = '/bin/zsh -f'
 CARD_HEADER_PADDING = 7 + 3 + 2
 # `WindowRow` in Sources/Muxify/UI/SidebarView.swift has 4 points above and below its text.
 WINDOW_ROW_PADDING = 4 + 4
-# `PaneRow` in Sources/Muxify/UI/SidebarView.swift has 3 points above and below its text, and 1 between its title and
-# its Summary.
-PANE_ROW_PADDING = 3 + 3 + 1
-# A closed card's header has 4 points more padding at its bottom than an open card's (`CardHeader` in
-# Sources/Muxify/UI/SidebarCard.swift), and 2 of spacing and 1 of padding above its Summary line. So the closed header
-# of a card whose title is on one line is the open header of such a card, these 7 points, and the Summary line.
-SUMMARY_PADDING = 4 + 2 + 1
-# `TagChip` in Sources/Muxify/UI/CardTags.swift has 1 point above and below its text, and 5 on each side.
-CHIP_PADDING = 1 + 1
-CHIP_SIDES = 5 + 5
-# The room between the items of the Topics list (`TopicsSection.contentSpacing` in Sources/Muxify/UI/SidebarView.swift).
-SPACING = 6
-# The band of the "more above" pill at 12 (`EdgePill.designHeight` in Sources/Muxify/UI/TopicsListEdge.swift).
-PILL = 30
-LINE = 'topics-bench-line'
 # A frame is rounded to the display's pixels, so each height can be off by up to a point.
 ROUNDING = 1
 # The Sidebar's default width at 12, when the user never dragged it: `SidebarWidth.designDefault`.
@@ -84,16 +60,10 @@ HEADER_BUTTONS = ['toggle-git-view', 'header-environment-selector', 'toggle-maxi
                   'toggle-terminal', 'toggle-browser']
 # `HeaderTextButton` has 8 points on each side of its text.
 HEADER_BUTTON_SIDES = 8 + 8
-# Pane rows with a Summary, and Tag chips on their own line. After the part a check writes, so that part keeps its
-# line numbers.
-FIXTURE = ("sidebar:\n  panes: true\n  tag_placement: line\n  formats:\n    pane:\n      summary: 'Pane Summary'\n"
-           'topics:\n  tags:\n    work: {color: blue}\n')
 IN_PLAY = '  in_play: 1\n'
 # Every Topic of setUpClass In Play, so each card shows, when a check sets no `topics.in_play`. The default is 3 (#134).
 ALL_IN_PLAY = '  in_play: 5\n'
 LAUNCH_ARGS = ['-sidebarVisible', 'YES', '-sessionsVisible', 'YES', '-agentsVisible', 'YES', '-sidebarWorkView', 'Topics']
-# The Git button's maximum width at 12, with its 16 points of padding (`HeaderGitButton`).
-GIT_BUTTON_MAX = 180 + HEADER_BUTTON_SIDES
 # The Git View's width in the Git View checks. Its List pane takes 30% of it, but at least 240 points at 12 and 360 at 18
 # (`GitListMetrics` in Sources/Muxify/UI/GitListMetrics.swift), and at 760 both are less than half of it. So the List
 # pane is at its least width at both sizes, and that grows by the factor.
@@ -103,19 +73,7 @@ TAB_BAR_PADDING = 8 + 8 + 2 + 2
 # A file name that fits in its row in the List pane at 12.
 LONG_NAME = 'a-long-file-name.txt'
 GIT_ROW = 'git-row-change:'
-# The Git View's width in the popup checks. A popup leaves 48 points beside it in the Git View (`GitPopupMetrics` in
-# Sources/Muxify/UI/GitPopupMetrics.swift), so at 1000 the commit box, 620 points wide at 12 and 930 at 18, and a Git
-# View menu, 460 and 690, grow by the factor.
-POPUP_GIT_VIEW_WIDTH = 1000
 STAGED_NAME = 'a-staged-file.txt'
-# The parts of the commit box that grow with their text (`GitCommitBox` in Sources/Muxify/UI/GitViewPanel.swift), each
-# with its padding that does not grow: the summary field, one line of its text; the description editor, in 124 points
-# at 12 with 10 above and 10 below it, so it is 20 points shorter than what grows (a padding of -20); the texts of a
-# staged file's row; the Commit button, 30 points high at 12; and the footer around it, 58.
-COMMIT_PARTS = {'git-commit-summary': 0, 'git-commit-description': -(10 + 10), 'git-commit-file:' + STAGED_NAME: 0,
-                'git-commit-submit': 0, 'git-commit-footer': 0}
-# The Discard menu's first choice, on the root row of Changes: 48 points high at 12, with its note.
-MENU_CHOICE = 'git-menu-choice-x'
 # The view of the Git View that has the keys: it takes them while a Git View menu shows (`GitKeyCatcher` in
 # Sources/Muxify/UI/GitViewPanel.swift).
 KEY_VIEW = 'KeyView'
@@ -138,37 +96,11 @@ PALETTE_WIDTH = 700
 PALETTE_MARGIN = 48
 # Dormant Topics, so that Choose In Play, which lists every Topic that is not Pinned, lists more rows than it shows.
 PICK_TOPICS = ['fs-pick-%02d' % n for n in range(10)]
-# A Pill holds its title and value in 38 points at 12, with nothing above or below them (`PillView` in
-# Sources/Muxify/UI/Pill.swift). Across it, beside its mark and texts, which grow, it has 8 points before the mark, 8
-# after it, 8 between the title and the value, 2 before the value and 16 after it.
-PILL_HEIGHT = 38
-PILL_SIDES = 8 + 8 + 8 + 2 + 16
-# Mark Read on a Window with nothing Unread explains itself in a Pill (`Pill(readRefusal:in:)` in
-# Sources/Muxify/UI/ReadPills.swift).
-PILL_TITLE = 'Not marked Read'
-PILL_VALUE = 'explanation: Nothing is Unread in this Window'
-# The Config problems banner is at most 560 points wide at 12, and its close button is 18 points square
-# (`ConfigProblemsBanner` in Sources/Muxify/UI/ContentView.swift). It stands 10 points inside the App Window.
-BANNER_WIDTH = 560
-BANNER_MARGIN = 10 + 10
-BANNER_CLOSE = 18
-REMOVED_KEY = 'ui.sidebar.font_size is gone: use ui.font_size'
 # Find in Pane's bar is 34 points high at 12 and at most 420 wide, 10 points inside the Terminal's corner (`findBar` in
 # Sources/Muxify/UI/ContentView.swift).
 FIND_BAR_HEIGHT = 34
 FIND_BAR_WIDTH = 420
 FIND_BAR_MARGIN = 10 + 10
-# A Hint: a card's key at rest is at least 16 points square at 12 (`CardRestKey` in Sources/Muxify/UI/HintView.swift),
-# and the badge that a held modifier shows has 2 points above and below its keys and 5 on each side (`HintBadge`).
-REST_KEY = 16
-BADGE_PADDING = 2 + 2
-BADGE_SIDES = 5 + 5
-# A Topic with no Session and no Home Session Path: going to it shows its Empty Topic page.
-EMPTY_TOPIC = 'fs-empty'
-# A hover label has 4 points above its text and 5 below it, and 7 before and 8 after it (`HoverLabelView` in
-# Sources/Muxify/UI/HoverLabel.swift).
-HOVER_LABEL_PADDING = 4 + 5
-HOVER_LABEL_SIDES = 7 + 8
 # The Browser's chrome at 12, with nothing above or below its text: the tab strip is 36 points high, a Tab 26, the
 # toolbar 40, its buttons 26 square and the address field 30, and a Tab's close button is 16 square (`TabStrip`, `TabItem`
 # and `TabContent` in Sources/Muxify/Browser/BrowserPanel.swift). A Tab is between 110 and 220 points wide at 12
@@ -233,34 +165,23 @@ class InterfaceFontSize(unittest.TestCase):
         store = TopicRecords(s.root/'state/muxify')
         cls.store = store
         cls.windows = {}
-        for topic_id, names in [('fs-size', [WINDOW_NAME]), ('fs-keep', ['keep-one', 'keep-two']), ('fs-other', ['other']),
-                                ('fs-panes', ['split']), ('fs-tags', ['tagged'])]:
-            store.put(dict(id=topic_id, title=topic_id, slug=topic_id, home_project=str(cls.project),
-                           tags=['work'] if topic_id == 'fs-tags' else []))
+        for topic_id, names in [('fs-size', [WINDOW_NAME]), ('fs-keep', ['keep-one', 'keep-two']), ('fs-other', ['other'])]:
+            store.put(dict(id=topic_id, title=topic_id, slug=topic_id))
             sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', topic_id, '-n', names[0],
                          '-c', str(cls.project), SHELL)
             s.tmux('set-option', '-t', sid, '@muxify_topic', topic_id)
             for name in names[1:]:
                 s.tmux('new-window', '-d', '-t', sid + ':', '-n', name, '-c', str(cls.project), SHELL)
             cls.windows[topic_id] = s.tmux('list-windows', '-t', sid + ':', '-F', '#{window_id}').split()
-        cls.panes = s.tmux('list-panes', '-t', cls.windows['fs-panes'][0], '-F', '#{pane_id}').split()
-        cls.panes.append(s.tmux('split-window', '-d', '-t', cls.windows['fs-panes'][0], '-P', '-F', '#{pane_id}',
-                                '-c', str(cls.project), SHELL))
         s.launch(LAUNCH_ARGS)
         s.wait_rows(lambda rs: all(s.has('topic-' + topic_id, rs) for topic_id in cls.windows), 'the Topic cards do not show')
 
-    def restart_app(self, args):
-        """Starts the app again, and waits until its Terminal's tmux client is attached and its Topic cards show. Before
-        that, the app drops a request to show a Window."""
-        s = self.s
-        s.restart_app(args)
-        wait(lambda: '0' in s.tmux('list-clients', '-F', '#{client_control_mode}').split(), 'the app attached no client')
-        s.wait_rows(lambda rs: all(s.has('topic-' + topic_id, rs) for topic_id in self.windows), 'the Topic cards do not show')
-
     @classmethod
     def write_config(cls, extra, topics=''):
-        """The Config with `extra` after the Session Paths, then the FIXTURE, whose `topics` section ends with `topics`."""
-        cls.config.write_text('sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n' + extra + FIXTURE + (topics or ALL_IN_PLAY))
+        """The Config with `extra` after the Session Paths, so that `extra` keeps its line numbers, then a `topics`
+        section that ends with `topics`."""
+        cls.config.write_text('sessions:\n  paths:\n    - path: ' + str(cls.project) + '\n' + extra + 'topics:\n'
+                              + (topics or ALL_IN_PLAY))
 
     def set_size(self, size, topics='', extra=''):
         """Writes `ui.font_size`, then `extra`, and waits until the Sidebar has the width of an undragged Sidebar at that
@@ -334,131 +255,6 @@ class InterfaceFontSize(unittest.TestCase):
         self.assertEqual(self.s.row(card, rs).get('accessibilityLabel'), 'fs-size')
         self.assert_hover_label_shows_only_the_place(row)
 
-    def test_at_18_a_pane_row_with_its_summary_grows_by_half_and_shows_its_whole_title(self):
-        self.addCleanup(self.write_config, '')
-        row = 'pane-' + self.panes[1]
-        self.s.show(self.windows['fs-panes'][0])
-        small, _ = self.heights([row], 12, 'the open card does not show its Pane row at %s')
-        large, rs = self.heights([row], 18, 'the open card does not show its Pane row at %s')
-        # The row's title and its Summary are both in it: at 12 it is two lines of text tall.
-        self.assert_text_grows_by_half(row, PANE_ROW_PADDING, small[row], large[row])
-        self.assert_hover_label_shows_only_the_place(row)
-
-    def test_at_18_a_closed_cards_summary_grows_by_half_and_shows_its_whole_text(self):
-        self.addCleanup(self.write_config, '')
-        opened, closed = 'topic-fs-size', 'topic-fs-other'
-        self.s.show(self.windows['fs-size'][0])
-        lines, widths = {}, {}
-        for size in [12, 18]:
-            measured, rs = self.heights([opened, closed], size, 'the cards do not show at %s')
-            self.assertIn('expanded', self.s.row(opened, rs).get('accessibilityValue', ''), 'the card of the shown Window is closed')
-            self.assertIn('collapsed', self.s.row(closed, rs).get('accessibilityValue', ''), 'the other card is open')
-            # Both titles are on one line, so the closed header is the open one with the Summary line and its room.
-            lines[size] = measured[closed] - measured[opened]
-            widths[size] = width(self.s.row(closed, rs))
-            # The card's hint is the Summary that the Format gives, whole.
-            self.assertEqual(self.s.row(closed, rs).get('accessibilityHelp'), 'fs-other · 1 Window')
-        self.assert_text_grows_by_half('the Summary line of ' + closed, SUMMARY_PADDING, lines[12], lines[18])
-        # The Summary is one line, cut with "…" only when it is wider than its room: the card's width less padding that
-        # does not grow and the corner, which grows by the factor. A card at least 1.5 times as wide gives the Summary,
-        # 1.5 times as wide, at least the room it had at 12, where it shows whole.
-        self.assertGreaterEqual(widths[18], 1.5 * widths[12] - ROUNDING,
-                                'the closed card is %.0f points wide at 12 and %.0f at 18, too narrow for its Summary'
-                                % (widths[12], widths[18]))
-
-    def test_at_18_a_tag_chip_grows_by_half_and_shows_its_whole_tag(self):
-        self.addCleanup(self.write_config, '')
-        chip = 'tags-topic-fs-tags'
-        frames = {}
-        for size in [12, 18]:
-            _, rs = self.heights([chip], size, 'the card does not show its Tag chip at %s')
-            self.assertEqual(self.s.row(chip, rs).get('accessibilityValue'), 'work')
-            frames[size] = (height(self.s.row(chip, rs)), width(self.s.row(chip, rs)))
-        self.assert_text_grows_by_half(chip, CHIP_PADDING, frames[12][0], frames[18][0])
-        # The chip does not cut its text, so the text in it is about 1.5 times as wide too.
-        self.assert_text_grows_by_half(chip, CHIP_SIDES, frames[12][1], frames[18][1], side='wide')
-
-    def test_at_18_the_bench_line_grows_by_half_and_shows_its_whole_title(self):
-        self.addCleanup(self.write_config, '')
-        small, rs = self.heights([LINE], 12, 'the Topics list has no Bench line at %s', IN_PLAY)
-        title = self.s.row(LINE, rs).get('accessibilityLabel')
-        large, rs = self.heights([LINE], 18, 'the Topics list has no Bench line at %s', IN_PLAY)
-        # The line is as tall as its text needs, with no padding above or below it.
-        self.assert_text_grows_by_half(LINE, 0, small[LINE], large[LINE])
-        self.assertIn(title, ['Bench', 'Hide Bench'])
-        self.assertEqual(self.s.row(LINE, rs).get('accessibilityLabel'), title, 'the Bench line changed its title at 18')
-
-    def test_at_18_the_benched_cards_fit_the_bench_under_the_line_and_under_the_more_above_pill(self):
-        s = self.s
-        self.addCleanup(self.write_config, '')
-        # An Open Place that the check leaves would take an In Play place.
-        self.addCleanup(self.store.set_open_places, [])
-        self.set_size(18, IN_PLAY)
-        # Dormant Topics make the Bench much longer than the Sidebar, and the last Benched card is a live Topic.
-        for order in range(100, 118):
-            topic = 'fs-bench-%d' % order
-            self.addCleanup(self.store.remove, topic)
-            self.store.put(dict(id=topic, title=topic, slug=topic, home_project=str(self.project), order=order))
-        last, key = 'fs-bench-last', 'topic-fs-bench-last'
-        self.addCleanup(self.store.remove, last)
-        self.store.put(dict(id=last, title=last, slug=last, home_project=str(self.project), order=200))
-        sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', last, '-c', str(self.project), SHELL)
-        self.addCleanup(s.tmux_ok, 'kill-session', '-t', sid)
-        self.addCleanup(s.show, self.windows['fs-size'][0])
-        s.tmux('set-option', '-t', sid, '@muxify_topic', last)
-        window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
-        s.wait_rows(lambda rs: s.has(LINE, rs), 'the Topics list has no Bench line')
-        if s.row(LINE).get('accessibilityLabel') == 'Hide Bench':
-            s.act('press', LINE)
-        s.show(window)
-        rs = s.wait_rows(lambda rs: self.after_line(rs) == [key] and s.row(LINE, rs).get('accessibilityLabel') == 'Bench',
-                         lambda: 'the Benched card of the Location does not show alone under the hidden line: %s'
-                         % self.after_line(s.rows()))
-        before = self.top(key, rs)
-        # A click, as the user's: after the driver's press the scroll that keeps the card in place lands late or never.
-        s.act('click', LINE)
-        rs = s.wait_rows(lambda rs: s.row(LINE, rs).get('accessibilityLabel') == 'Hide Bench'
-                         and abs(self.under_pill(key, rs)) <= ROUNDING,
-                         lambda: 'the card of the Location is not directly under the "more above" pill: %s'
-                         % self.under_pill(key, s.rows()))
-        bench = self.after_line(rs)
-        pill = height(s.row('topics-more-above', rs))
-        self.assertAlmostEqual(pill, 1.5 * PILL, delta=ROUNDING, msg='the "more above" pill did not grow by half')
-        # The card stays where it stood, moved down only by the pill's band, out from under the pill (ADR 0063).
-        self.assertAlmostEqual(self.top(key, rs), before - pill, delta=ROUNDING,
-                               msg='the card of the Location did not move down by the pill when the Bench showed')
-        bottom, top = frame(s.row('topics-more-above', rs))
-        self.assertEqual([card for card in bench if bottom < self.top(card, rs) < top], [],
-                         'the pill covers the top of a Benched card')
-        # At the top of the Bench, the highest Benched card stands directly under the line, and no card covers it.
-        s.act('scroll', 'topics-list', from_end=100000)
-
-        def highest_under_line(rs):
-            """How far the top of the highest Benched card is from where a card directly under the line has its top. The
-            dump has only the cards in view, so they are the cards under the line in this dump."""
-            return max(self.top(card, rs) for card in self.after_line(rs)) - (frame(s.row(LINE, rs))[0] - SPACING)
-        s.wait_rows(lambda rs: abs(highest_under_line(rs)) <= ROUNDING,
-                    lambda: 'the highest Benched card is not directly under the Bench line at the top of the Bench: %s'
-                    % highest_under_line(s.rows()))
-
-    def top(self, key, rs):
-        return frame(self.s.row(key, rs))[1]
-
-    def after_line(self, rs):
-        """The cards under the Bench line, in Sidebar order."""
-        ids = self.s.ids(rs)
-        if LINE not in ids:
-            return None
-        return [key for key in ids[ids.index(LINE) + 1:] if key.startswith('topic-') and not key.startswith('topic-window-')
-                and '-session-' not in key and not key.endswith('-more') and not key.startswith('topic-agent-mark-')]
-
-    def under_pill(self, key, rs):
-        """How far the card's top is from where a card directly under the "more above" pill has its top, or infinity
-        while no pill shows."""
-        if not self.s.has('topics-more-above', rs) or not self.s.has(key, rs):
-            return math.inf
-        return self.top(key, rs) - (frame(self.s.row('topics-more-above', rs))[0] - SPACING)
-
     def test_at_18_the_header_and_its_session_name_grow_by_half_and_its_buttons_fit_in_it(self):
         self.addCleanup(self.write_config, '')
         window = self.windows['fs-size'][0]
@@ -494,40 +290,6 @@ class InterfaceFontSize(unittest.TestCase):
             self.assert_text_grows_by_half(key, 0, small[key][3], large[key][3])
         # The Window's title is monospaced and never cut inline, so the whole title is 1.5 times as wide at 18.
         self.assert_text_grows_by_half(selector, HEADER_BUTTON_SIDES, small[selector][2], large[selector][2], side='wide')
-
-    def test_at_24_beside_the_widest_sidebar_a_long_branch_gives_way_and_no_header_button_leaves_the_app_window(self):
-        s = self.s
-        repo = s.root/'projects/fs-branch'
-        repo.mkdir(parents=True, exist_ok=True)
-        branch = 'fs-branch/' + 'long-' * 30 + 'end'
-        init_repository(s, repo, branch)
-        sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', 'fs-branch', '-c', str(repo), SHELL)
-        self.addCleanup(s.tmux_ok, 'kill-session', '-t', sid)
-        window = s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
-        self.addCleanup(self.write_config, '')
-        # The Sidebar as wide as a drag can make it, through the width a drag stores. At 24 the header beside it has
-        # less room than its controls take with the Git button at its maximum, so that maximum must give way.
-        self.addCleanup(self.restart_app, LAUNCH_ARGS)
-        self.restart_app(LAUNCH_ARGS + ['-sidebarWidth', '10000'])
-        self.write_config('ui:\n  font_size: 24\n')
-        s.show(window)
-        # The Sidebar's widest bound, 420 at 12 (`SidebarWidth.designBounds`), at 24.
-        widest = 420 * 2
-        rs = s.wait_rows(lambda rs: s.row('toggle-git-view', rs).get('accessibilityLabel') == branch
-                         and abs(width(s.row('sidebar-panel', rs)) - widest) < 1
-                         and abs(height(s.row(HEADER, rs)) - 60) < 1,
-                         'the header does not show the branch beside a %d-point Sidebar at ui.font_size: 24' % widest)
-        rs = self.settled([HEADER, 'toggle-git-view'] + HEADER_BUTTONS, 'the header does not settle at 24')
-        app_window = self.app_window(rs)
-        for key in ['header-session-name'] + HEADER_BUTTONS:
-            x, _, w, _ = bounds(s.row(key, rs))
-            self.assertTrue(app_window[0] - ROUNDING <= x and x + w <= app_window[0] + app_window[2] + ROUNDING,
-                            '%s is pushed off the App Window: it is at %.0f to %.0f, the App Window at %.0f to %.0f'
-                            % (key, x, x + w, app_window[0], app_window[0] + app_window[2]))
-        git = width(s.row('toggle-git-view', rs))
-        self.assertLess(git, 2 * GIT_BUTTON_MAX - ROUNDING,
-                        'the Git button keeps its whole maximum of %d points in a header without room for it, so the '
-                        'check tests nothing: it is %.0f points wide' % (2 * GIT_BUTTON_MAX, git))
 
     def test_ui_sidebar_font_size_is_gone_with_a_problem_and_changes_no_size(self):
         self.addCleanup(self.write_config, '')
@@ -588,16 +350,12 @@ class InterfaceFontSize(unittest.TestCase):
         return s.tmux('display-message', '-p', '-t', sid + ':', '#{window_id}')
 
     def open_git_view(self, window):
-        """Shows the Window and opens its Git View on Changes, through the View menu item. SwiftUI rebuilds the menu a
-        moment after the state it reads changes, and a press in that moment can miss."""
+        """Shows the Window and opens its Git View on Changes, through the View menu item."""
         s = self.s
         s.show(window)
         self.addCleanup(s.show, self.windows['fs-size'][0])
-
-        def opened():
-            s.driver('press', 'Show Git View')
-            return s.has('git-view')
-        wait(opened, 'the Git View did not open', seconds=10, step=.3)
+        s.press_menu_item('Show Git View')
+        s.wait_rows(lambda rs: s.has('git-view', rs), 'the Git View did not open')
         self.addCleanup(self.close_git_view)
         rs = s.wait_rows(lambda rs: s.has('git-toolbar', rs), 'the Git View did not read the repository')
         if s.row('git-tab-changes', rs).get('accessibilityValue') != 'selected':
@@ -721,17 +479,6 @@ class InterfaceFontSize(unittest.TestCase):
         return subprocess.run(['git', '-C', str(repo), *args], env=self.s.env, check=True, capture_output=True,
                               text=True).stdout
 
-    def assert_in_app_window(self, key, rs, size):
-        """The element is drawn whole inside the App Window and inside the Git View, whose toolbar spans it."""
-        x, y, w, h = bounds(self.s.row(key, rs))
-        app_x, app_y, app_w, app_h = self.app_window(rs)
-        git_x, _, git_w, _ = bounds(self.s.row('git-toolbar', rs))
-        self.assertTrue(app_x - ROUNDING <= x and x + w <= app_x + app_w + ROUNDING
-                        and app_y - ROUNDING <= y and y + h <= app_y + app_h + ROUNDING,
-                        '%s, at %s, leaves the App Window, at %s, at %s' % (key, (x, y, w, h), (app_x, app_y, app_w, app_h), size))
-        self.assertTrue(git_x - ROUNDING <= x and x + w <= git_x + git_w + ROUNDING,
-                        '%s, %.0f to %.0f, leaves the Git View, %.0f to %.0f, at %s' % (key, x, x + w, git_x, git_x + git_w, size))
-
     def responder(self):
         return self.s.driver('responder')
 
@@ -753,44 +500,7 @@ class InterfaceFontSize(unittest.TestCase):
                     's did not open the Stash changes prompt at %s' % size)
         self.assert_field_has_the_keys('the prompt field', size)
 
-    def test_at_18_the_commit_box_and_a_git_view_menus_choice_row_grow_by_half_show_their_text_whole_and_fit_the_app_window(self):
-        s = self.s
-        self.addCleanup(self.write_config, '')
-        window, _ = self.staged_git_window('fs-git-popups')
-        self.open_git_view(window)
-        boxes, menus = {}, {}
-        for size in [12, 18]:
-            self.set_git_view_size(size, POPUP_GIT_VIEW_WIDTH)
-            s.wait_rows(lambda rs: s.has(GIT_ROW + STAGED_NAME, rs), 'Changes do not list %s at %s' % (STAGED_NAME, size))
-            s.act('action', 'git-view', 'c')
-            rs = self.settled(['git-commit-box', *COMMIT_PARTS], 'the commit box does not show its parts at %s' % size)
-            boxes[size] = {key: bounds(s.row(key, rs)) for key in ['git-commit-box', *COMMIT_PARTS]}
-            self.assert_in_app_window('git-commit-box', rs, size)
-            # The summary has the keys, and shows its text whole.
-            self.assert_field_has_the_keys('the summary', size)
-            s.act('action', 'git-view', 'escape')
-            s.wait_rows(lambda rs: not s.has('git-commit-box', rs), 'escape did not close the commit box at %s' % size)
-            # d on the root row, where < puts the selection, asks in the Discard menu.
-            s.act('action', 'git-view', 'shift+comma')
-            s.act('action', 'git-view', 'd')
-            rs = self.settled(['git-menu', MENU_CHOICE], 'the Discard menu does not show its choices at %s' % size)
-            menus[size] = {key: bounds(s.row(key, rs)) for key in ['git-menu', MENU_CHOICE]}
-            self.assert_in_app_window('git-menu', rs, size)
-            s.act('action', 'git-menu', 'escape')
-            s.wait_rows(lambda rs: not s.has('git-menu', rs), 'escape did not close the Discard menu at %s' % size)
-        for key, padding in COMMIT_PARTS.items():
-            self.assert_text_grows_by_half(key, padding, boxes[12][key][3], boxes[18][key][3])
-        self.assert_text_grows_by_half(MENU_CHOICE, 0, menus[12][MENU_CHOICE][3], menus[18][MENU_CHOICE][3])
-        # Each popup is 1.5 times as wide, in a Git View with room for it. Its text is 1.5 times as wide, and its padding
-        # does not grow, so a row 1.5 times as wide as at 12 gives its text at least the room it shows whole in at 12:
-        # the menu's choice, and the commit box's rows, which span it less its padding.
-        for frames, popup in [(boxes, 'git-commit-box'), (menus, 'git-menu')]:
-            self.assert_text_grows_by_half(popup, 0, frames[12][popup][2], frames[18][popup][2], side='wide')
-        self.assertGreaterEqual(menus[18][MENU_CHOICE][2], 1.5 * menus[12][MENU_CHOICE][2] - ROUNDING,
-                                '%s is %.0f points wide at 12 and %.0f at 18, too narrow for its text'
-                                % (MENU_CHOICE, menus[12][MENU_CHOICE][2], menus[18][MENU_CHOICE][2]))
-
-    def test_at_12_and_18_a_git_view_menu_and_prompt_keep_the_keys_in_the_git_view_and_enter_and_escape_work(self):
+    def test_at_12_and_18_a_git_view_menu_keeps_the_keys_and_the_commit_box_and_a_prompt_take_them_and_give_them_back(self):
         s = self.s
         self.addCleanup(self.write_config, '')
         window, repo = self.staged_git_window('fs-git-keys')
@@ -802,9 +512,16 @@ class InterfaceFontSize(unittest.TestCase):
                  lambda: 'the Git View does not have the keys %s at %s: %s' % (after, size, self.responder()['responders']))
 
         for size in [12, 18]:
-            self.set_git_view_size(size, POPUP_GIT_VIEW_WIDTH)
+            self.set_git_view_size(size)
             s.wait_rows(lambda rs: s.has(row, rs), 'Changes do not list %s at %s' % (STAGED_NAME, size))
             git_view_has_the_keys('once it shows')
+            # The commit box's summary has the keys, and shows its text whole. ⎋ closes the box and gives them back.
+            s.act('action', 'git-view', 'c')
+            s.wait_rows(lambda rs: s.has('git-commit-box', rs), 'c did not open the commit box at %s' % size)
+            self.assert_field_has_the_keys('the summary', size)
+            s.act('action', 'git-view', 'escape')
+            s.wait_rows(lambda rs: not s.has('git-commit-box', rs), 'escape did not close the commit box at %s' % size)
+            git_view_has_the_keys('after the commit box')
             # A Git View menu leaves the keys with the Git View, which gives them to the menu. ⎋ closes it.
             s.act('action', 'git-view', 'd')
             s.wait_rows(lambda rs: s.has('git-menu', rs), 'd did not open the Discard menu at %s' % size)
@@ -924,36 +641,11 @@ class InterfaceFontSize(unittest.TestCase):
         self.assertEqual(measure(rs, TERMINAL_SIZES[-1]), (large_gutter, large_number),
                          'ui.font_size: 18 changed the line-number gutter or its numbers')
 
-    def open_palette(self, name):
-        """Presses the View menu item until the palette shows. SwiftUI rebuilds the menu a moment after the state it
-        reads changes, and a press in that moment can miss."""
-        s = self.s
-
-        def opened():
-            s.driver('press', name)
-            deadline = time.monotonic() + 3
-            while time.monotonic() < deadline:
-                if s.has(PALETTE_SEARCH):
-                    return True
-            return False
-        wait(opened, '%s did not open' % name, seconds=20)
-        self.addCleanup(self.close_palette)
-
     def close_palette(self):
         # A palette that the last action closed can still be in the dump, and gone at the Close.
         if self.s.has(PALETTE_SEARCH):
             self.s.driver('action', PALETTE_SEARCH, 'Close')
         self.s.wait_rows(lambda rs: not self.s.has(PALETTE_SEARCH, rs), 'the palette did not close')
-
-    def run_command(self, title):
-        """Opens Commands and presses the row of the Command `title`, as ↩ on it does."""
-        s = self.s
-        self.open_palette('Commands')
-        s.act('focus', PALETTE_SEARCH)
-        s.act('set', PALETTE_SEARCH, title)
-        key = 'palette-row-command-' + title
-        s.wait_rows(lambda rs: s.has(key, rs), 'Commands does not list %s' % title)
-        s.act('press', key)
 
     def assert_palette_in_app_window(self, rs, size):
         """The palette is as wide as at 12 times the factor, but never wider than the App Window less its margins, and
@@ -978,7 +670,8 @@ class InterfaceFontSize(unittest.TestCase):
         frames = {}
         for size in [12, 18]:
             self.set_size(size)
-            self.open_palette('Go to…')
+            s.open_palette('Go to…')
+            self.addCleanup(self.close_palette)
             rs = self.settled(keys, 'Go to… does not show the row of fs-size at %s' % size)
             frames[size] = {key: bounds(s.row(key, rs)) for key in keys}
             self.assertTrue(s.row(row, rs).get('accessibilityLabel', '').startswith('fs-size'),
@@ -1002,7 +695,7 @@ class InterfaceFontSize(unittest.TestCase):
         s = self.s
         self.addCleanup(self.write_config, '')
         for order, topic_id in enumerate(PICK_TOPICS):
-            self.store.put(dict(id=topic_id, title=topic_id, slug=topic_id, home_project=str(self.project), order=100 + order))
+            self.store.put(dict(id=topic_id, title=topic_id, slug=topic_id, order=100 + order))
             self.addCleanup(self.store.remove, topic_id)
         rows = lambda rs: [key for key in s.ids(rs) if key.startswith('palette-row-topic-')]
         value = lambda key, rs: s.row(key, rs).get('accessibilityValue', '')
@@ -1020,14 +713,15 @@ class InterfaceFontSize(unittest.TestCase):
                 return (list_bottom - ROUNDING <= bottom and top <= list_top + ROUNDING
                         and abs(top - bottom - row_height) <= ROUNDING)
 
-            self.run_command('Choose In Play…')
+            self.addCleanup(self.close_palette)
+            s.run_command('Choose In Play…')
             rs = s.wait_rows(lambda rs: s.has(PALETTE_LIST, rs) and highlighted(rs) and in_view(highlighted(rs), rs),
                              'Choose In Play does not show its highlighted row at %s' % size)
             # 6.5 rows of the size, and one header, show before the list scrolls.
             list_bottom, list_top = frame(s.row(PALETTE_LIST, rs))
             self.assertAlmostEqual(list_top - list_bottom, PALETTE_VISIBLE_ROWS * row_height, delta=ROUNDING,
                                    msg='the list of %d rows is %.0f points tall at %s'
-                                   % (len(PICK_TOPICS) + 5, list_top - list_bottom, size))
+                                   % (len(PICK_TOPICS) + len(self.windows), list_top - list_bottom, size))
             # ↓ moves the highlight to the row drawn directly under it, and on past the rows shown at first, scrolling
             # each one into view.
             moved = [highlighted(rs)]
@@ -1063,84 +757,6 @@ class InterfaceFontSize(unittest.TestCase):
     def text(self, key, rs):
         row = self.s.row(key, rs)
         return row.get('accessibilityValue') or row.get('accessibilityLabel')
-
-    def mark_read_pill(self, size):
-        """Mark Read, on the shown Window with nothing Unread, shows its explanation Pill. A press while the app is
-        busy does nothing, so it presses until the Pill shows. The Pill lives 3.5 seconds and springs in, so it is
-        measured once its frame stands still."""
-        s = self.s
-        s.wait_rows(lambda rs: not s.has('pill', rs), 'the last Pill did not go at %s' % size, seconds=10)
-
-        def shown():
-            s.driver('press', 'Mark Read')
-            return s.row('pill').get('accessibilityValue') == PILL_VALUE
-        wait(shown, lambda: 'Mark Read showed no explanation Pill at %s: %r' % (size, s.row('pill')), seconds=10)
-        frames = []
-
-        def still(rs):
-            frames.append(s.row('pill', rs).get('accessibilityFrame'))
-            return frames[-1] and frames[-2:] == [frames[-1]] * 2
-        return s.wait_rows(still, 'the Pill did not stand still at %s' % size, seconds=3)
-
-    def test_at_18_a_pill_grows_by_half_shows_its_whole_text_and_fits_the_app_window(self):
-        s = self.s
-        self.addCleanup(self.write_config, '')
-        s.show(self.windows['fs-size'][0])
-        frames = {}
-        for size in [12, 18]:
-            self.set_size(size)
-            rs = self.mark_read_pill(size)
-            frames[size] = bounds(s.row('pill', rs))
-            self.assertEqual(s.row('pill', rs).get('accessibilityLabel'), PILL_TITLE)
-            x, _, w, _ = frames[size]
-            app_x, _, app_w, _ = self.app_window(rs)
-            # The Pill takes the palette's width at most, so in an App Window with room it is narrower than that.
-            self.assertTrue(app_x - ROUNDING <= x and x + w <= app_x + app_w + ROUNDING,
-                            'the Pill, %.0f to %.0f, leaves the App Window, %.0f to %.0f, at %s'
-                            % (x, x + w, app_x, app_x + app_w, size))
-            # It is as wide as its texts, up to the palette's width, so while it is narrower than that it shows its
-            # whole value, which it cuts in the middle only for want of room.
-            self.assertLess(w, min(PALETTE_WIDTH * size / 12, app_w - PALETTE_MARGIN) - ROUNDING,
-                            'the Pill is as wide as it may be at %s, so it may cut its value off' % size)
-        small, large = frames[12], frames[18]
-        self.assertAlmostEqual(small[3], PILL_HEIGHT, delta=ROUNDING, msg='the Pill is not %d points high at 12' % PILL_HEIGHT)
-        self.assert_text_grows_by_half('pill', 0, small[3], large[3])
-        self.assertGreater(large[2] - PILL_SIDES, 1.3 * (small[2] - PILL_SIDES),
-                           'the Pill is %.0f points wide at 12 and %.0f at 18: its texts did not grow' % (small[2], large[2]))
-
-    def test_at_18_the_config_problems_banner_grows_by_half_and_shows_its_whole_title(self):
-        s = self.s
-        self.addCleanup(self.write_config, '')
-        keys = ['config-problems', 'config-problems-title', 'config-problems-close']
-        frames = {}
-        for size in [12, 18]:
-            # A removed key is a problem, which the banner shows.
-            self.set_size(size, extra='  sidebar:\n    font_size: 14\n')
-            rs = self.settled(keys, 'the Config problems banner does not show at %s' % size)
-            self.assertTrue(any(REMOVED_KEY in row.get('accessibilityLabel', '') + row.get('accessibilityValue', '')
-                                for row in rs), 'the banner does not show "%s" at %s' % (REMOVED_KEY, size))
-            frames[size] = {key: bounds(s.row(key, rs)) for key in keys}
-            x, _, w, _ = frames[size]['config-problems']
-            app_x, _, app_w, _ = self.app_window(rs)
-            self.assertAlmostEqual(w, min(BANNER_WIDTH * size / 12, app_w - BANNER_MARGIN), delta=ROUNDING,
-                                   msg='the banner is %.0f points wide in an App Window %.0f wide at %s' % (w, app_w, size))
-            self.assertTrue(app_x - ROUNDING <= x and x + w <= app_x + app_w + ROUNDING,
-                            'the banner leaves the App Window at %s' % size)
-        small, large = frames[12], frames[18]
-        self.assertGreaterEqual(self.app_window()[2], BANNER_WIDTH * 1.5 + BANNER_MARGIN, 'the App Window is too narrow for the check')
-        self.assert_text_grows_by_half('config-problems', 0, small['config-problems'][2], large['config-problems'][2], side='wide')
-        # The title grows on one line, and it ends before the room of the banner's texts ends, 8 points before the close
-        # button, so it shows whole: a title without room wraps there.
-        self.assert_text_grows_by_half('config-problems-title', 0, small['config-problems-title'][3],
-                                       large['config-problems-title'][3])
-        for size, frame_of in frames.items():
-            title_x, _, title_w, _ = frame_of['config-problems-title']
-            self.assertLess(title_x + title_w, frame_of['config-problems-close'][0] - 8 - ROUNDING,
-                            'the banner has no room beside its title at %s, so it wraps or cuts it' % size)
-        for side in [2, 3]:
-            self.assertAlmostEqual(small['config-problems-close'][side], BANNER_CLOSE, delta=ROUNDING)
-            self.assertAlmostEqual(large['config-problems-close'][side], 1.5 * BANNER_CLOSE, delta=ROUNDING,
-                                   msg='the close button did not grow by half: %s' % (large['config-problems-close'],))
 
     def test_at_18_find_in_panes_bar_grows_by_half_shows_its_whole_status_and_fits_over_the_terminal(self):
         s = self.s
@@ -1183,97 +799,13 @@ class InterfaceFontSize(unittest.TestCase):
         self.assert_text_grows_by_half('terminal-find-status', 0, small['terminal-find-status'][3],
                                        large['terminal-find-status'][3])
 
-    def test_at_18_a_hint_grows_by_half_and_shows_its_whole_key(self):
-        s = self.s
-        self.addCleanup(self.write_config, '')
-        rest = lambda rs: next((key for key in s.ids(rs) if key.startswith('hint-topic-')
-                                and len(s.row(key, rs).get('accessibilityValue') or '') == 1), None)
-        held = lambda key, rs: (s.row(key, rs).get('accessibilityValue') or '').startswith('⌃')
-        keys, badges = {}, {}
-        for size in [12, 18]:
-            self.set_size(size)
-            # A card's key at rest.
-            rs = s.wait_rows(lambda rs: rest(rs), 'no card shows its key at rest at %s' % size)
-            key = rest(rs)
-            rs = self.settled([key], 'the key at rest does not show at %s' % size)
-            keys[size] = bounds(s.row(key, rs))
-            # Holding Control shows the card's badge in its place.
-            s.act('action', 'quick-switch-input', 'Hold Control')
-            self.addCleanup(s.act, 'action', 'quick-switch-input', 'Release modifiers')
-            s.wait_rows(lambda rs: held(key, rs), 'holding Control shows no badge on %s at %s' % (key, size))
-            rs = self.settled([key], 'the badge does not show at %s' % size)
-            badges[size] = bounds(s.row(key, rs))
-            s.act('action', 'quick-switch-input', 'Release modifiers')
-            s.wait_rows(lambda rs: not held(key, rs), 'releasing Control does not hide the badge at %s' % size)
-        for side in [2, 3]:
-            self.assertAlmostEqual(keys[12][side], REST_KEY, delta=ROUNDING, msg='the key at rest is %s at 12' % (keys[12],))
-            self.assertAlmostEqual(keys[18][side], 1.5 * REST_KEY, delta=ROUNDING,
-                                   msg='the key at rest did not grow by half: %s' % (keys[18],))
-        # The badge is as wide as its keys, which it never cuts.
-        self.assert_text_grows_by_half('the badge', BADGE_PADDING, badges[12][3], badges[18][3])
-        self.assertGreater(badges[18][2] - BADGE_SIDES, 1.3 * (badges[12][2] - BADGE_SIDES),
-                           'the badge is %.0f points wide at 12 and %.0f at 18: its keys did not grow'
-                           % (badges[12][2], badges[18][2]))
-
-    def test_at_18_the_empty_topic_pages_title_grows_by_half_and_shows_whole(self):
-        s = self.s
-        self.addCleanup(self.write_config, '')
-        self.store.put(dict(id=EMPTY_TOPIC, title=EMPTY_TOPIC, slug=EMPTY_TOPIC, home_project=None))
-        self.addCleanup(self.store.remove, EMPTY_TOPIC)
-        self.addCleanup(s.show, self.windows['fs-size'][0])
-        s.wait_rows(lambda rs: s.has('topic-' + EMPTY_TOPIC, rs), 'the card of %s does not show' % EMPTY_TOPIC)
-        s.act('action', 'topic-' + EMPTY_TOPIC, 'Go to Topic')
-        frames = {}
-        for size in [12, 18]:
-            self.set_size(size)
-            rs = self.settled(['empty-topic-title'], 'the Empty Topic page does not show at %s' % size)
-            self.assertEqual(self.text('empty-topic-title', rs), EMPTY_TOPIC)
-            frames[size] = bounds(s.row('empty-topic-title', rs))
-            # The page has 24 points of padding on each side, and the title is narrower than the room inside it, so it
-            # shows whole: a title without room wraps there.
-            self.assertLess(frames[size][2], bounds(s.row('terminal-panel', rs))[2] - 24 - 24 - ROUNDING,
-                            'the Empty Topic page has no room beside its title at %s' % size)
-        # The title grows on one line.
-        self.assert_text_grows_by_half('empty-topic-title', 0, frames[12][3], frames[18][3])
-
-    def test_at_18_a_hover_labels_panel_grows_by_half_with_its_detail(self):
-        s = self.s
-        self.addCleanup(self.write_config, '')
-        row = 'pane-' + self.panes[1]
-        s.show(self.windows['fs-panes'][0])
-        self.addCleanup(s.act, 'hover', 'agents-header')
-        frames = {}
-        for size in [12, 18]:
-            self.set_size(size)
-            s.wait_rows(lambda rs: s.has(row, rs), 'the open card does not show its Pane row at %s' % size)
-            s.act('hover', row)
-            rs = s.wait_rows(lambda rs: self.hover_label(rs), 'no hover label on %s at %s' % (row, size), seconds=5)
-            # The Pane's title fits its row, so the label shows only its detail: the Pane's path.
-            self.assertEqual(len(self.hover_label(rs)), 1, 'the hover label shows %s at %s' % (self.hover_label(rs), size))
-            label = bounds(s.row('hover-label', rs))
-            ids = s.ids(rs)
-            detail = bounds(next(r for r in rs[ids.index('hover-label') + 1:] if r.get('accessibilityRole') == 'AXStaticText'))
-            frames[size] = label, detail
-            # The panel is as large as its detail and its padding, which do not cut it.
-            self.assertAlmostEqual(label[2], detail[2] + HOVER_LABEL_SIDES, delta=ROUNDING * 2,
-                                   msg='the hover label, %s, is not its detail, %s, and its padding at %s' % (label, detail, size))
-            self.assertAlmostEqual(label[3], detail[3] + HOVER_LABEL_PADDING, delta=ROUNDING * 2,
-                                   msg='the hover label, %s, is not its detail, %s, and its padding at %s' % (label, detail, size))
-            s.act('hover', 'agents-header')
-            s.wait_rows(lambda rs: not self.hover_label(rs), 'the hover label did not close at %s' % size, seconds=5)
-        (small, small_detail), (large, large_detail) = frames[12], frames[18]
-        self.assert_text_grows_by_half('the hover label\'s detail', 0, small_detail[3], large_detail[3])
-        self.assert_text_grows_by_half('hover-label', HOVER_LABEL_PADDING, small[3], large[3])
-        self.assertGreater(large_detail[2], 1.3 * small_detail[2],
-                           'the hover label\'s detail is %.0f points wide at 12 and %.0f at 18' % (small_detail[2], large_detail[2]))
-
     def browser_window(self):
         """A Window of its own Topic whose Browser shows the fixture page in its only Tab, shown in the app. The Sidebar
         is hidden until the check ends."""
         s = self.s
         page = s.root/'font-size-page.html'
         page.write_text(BROWSER_PAGE)
-        self.store.put(dict(id=BROWSER_TOPIC, title=BROWSER_TOPIC, slug=BROWSER_TOPIC, home_project=str(self.project)))
+        self.store.put(dict(id=BROWSER_TOPIC, title=BROWSER_TOPIC, slug=BROWSER_TOPIC))
         self.addCleanup(self.store.remove, BROWSER_TOPIC)
         # One tmux call, so the app never reads the Window without its Browser options.
         options = [arg for option, value in [('@muxify_tabs', page.as_uri()), ('@muxify_active_tab', '0'),

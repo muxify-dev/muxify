@@ -1,13 +1,12 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class EnvironmentSnapshotTests: XCTestCase {
     private func window(_ session: String, name: String? = nil, topic: String? = nil, lock: Double? = nil, created: Int = 0,
                         activity: Int = 0, index: Int = 0, active: Bool = true) -> TmuxWindow {
-        TmuxWindow(id: "@\(UUID().uuidString.prefix(8))", sessionID: session, sessionName: name ?? "s" + session.dropFirst(),
-                   index: index, name: "shell", paneTitle: "", path: "/work", command: "zsh", isActive: active, paneCount: 1, hasBell: false,
-                   sessionActivity: activity, agent: "", storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, lockOrder: lock,
-                   sessionCreated: created)
+        .fixture(id: "@\(UUID().uuidString.prefix(8))", sessionID: session, sessionName: name ?? "s" + session.dropFirst(),
+                 index: index, isActive: active, sessionActivity: activity, topicID: topic, lockOrder: lock, sessionCreated: created)
     }
 
     private func topic(_ id: String, order: Double, title: String? = nil) -> TopicRecord {

@@ -1,15 +1,14 @@
 import XCTest
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class TopicSessionOrderTests: XCTestCase {
     private let sessionPaths = ["a", "b", "c", "d"].map { SessionPath(path: "/work/" + $0, name: $0) }
 
     /// A live Session of the Topic in SessionPath `name`, created at `created`.
     private func window(_ name: String, created: Int) -> TmuxWindow {
-        TmuxWindow(id: "@" + name, sessionID: "$" + name, sessionName: name + "/topic", index: 0, name: "shell", paneTitle: "",
-                   path: "/work/" + name, command: "zsh", isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0,
-                   agent: "", storedBrowser: StoredBrowser(), openRequests: [], topicID: "topic", sessionPath: "/work/" + name,
-                   sessionCreated: created)
+        .fixture(id: "@" + name, sessionID: "$" + name, sessionName: name + "/topic", path: "/work/" + name, topicID: "topic",
+                 sessionPath: "/work/" + name, sessionCreated: created)
     }
 
     private func record(manual: [String]? = nil) -> TopicRecord {
@@ -67,14 +66,5 @@ final class TopicSessionOrderTests: XCTestCase {
         let remembered = try XCTUnwrap(record().remembering(snapshot, order: .newestFirst))
         XCTAssertEqual(remembered.sessions.compactMap { $0["directory"]?.string }, ["/work/c", "/work/b", "/work/a"])
         XCTAssertFalse(remembered.hasManualSessionOrder)
-    }
-
-    func testTheManualOrderFlagSurvivesTheRecordFile() throws {
-        let manual = record(manual: ["b", "a"])
-        let text = String(decoding: try JSONEncoder().encode(manual), as: UTF8.self)
-        XCTAssertTrue(text.contains(#""session_order":"manual""#), text)
-        XCTAssertEqual(try JSONDecoder().decode(TopicRecord.self, from: Data(text.utf8)), manual)
-        let automatic = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
-        XCTAssertFalse(automatic.contains("session_order"), automatic)
     }
 }

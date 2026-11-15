@@ -1,6 +1,7 @@
 import XCTest
 @testable import MuxifyCLI
 @testable import MuxifyCore
+import MuxifyTestSupport
 
 final class TopicSessionPathsInvocationTests: XCTestCase {
     func testTargetsAndUsage() throws {
@@ -158,9 +159,6 @@ final class TopicSessionPathsInvocationTests: XCTestCase {
     }
 
     private func window(_ id: String, session: String, topic: String?, directory: String) -> TmuxWindow {
-        TmuxWindow(id: id, sessionID: session, sessionName: "s" + session, index: 0,
-                   name: "shell", paneTitle: "", path: directory, command: "zsh",
-                   isActive: true, paneCount: 1, hasBell: false, sessionActivity: 0, agent: "",
-                   storedBrowser: StoredBrowser(), openRequests: [], topicID: topic, sessionPath: directory)
+        .fixture(id: id, sessionID: session, sessionName: "s" + session, path: directory, topicID: topic, sessionPath: directory)
     }
 }

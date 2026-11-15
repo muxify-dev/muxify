@@ -40,18 +40,13 @@ final class SuggestionRankerTests: XCTestCase {
         guard case .prefix(let host, _) = rows[0] else { return XCTFail("the first row is \(rows[0]), not the host") }
         XCTAssertEqual(host.url, "https://github.com")
         XCTAssertEqual(Set(host.keys).count, 3, "the host holds its three pages")
+        guard case .prefix = rows[1] else { return XCTFail("\(rows[1]) is not the prefix of its pages") }
     }
 
     func testAPrefixHoldsTwoOrMorePagesAndAChainOfOneChildFoldsIntoOnePrefix() {
         let prefixes = HistoryPrefix.all(entries(github)).map(\.display).sorted()
         XCTAssertEqual(prefixes, ["github.com", "github.com/glebglazov/muxify"],
                        "github.com/glebglazov folds into muxify; gist, docs and gitlab hold one page each")
-    }
-
-    func testThePageOfAPrefixShowsOnceAsThePrefix() {
-        let rows = rank("gi", entries(github))
-        XCTAssertEqual(rows.filter { $0.url == "https://github.com/glebglazov/muxify" }.count, 1)
-        guard case .prefix = rows[1] else { return XCTFail("\(rows[1]) is not the prefix of its pages") }
     }
 
     func testAnEntryOfTheActiveTopicCountsTwice() {
