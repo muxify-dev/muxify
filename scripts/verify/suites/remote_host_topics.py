@@ -283,9 +283,12 @@ exec /bin/sh -c "$command"
         self.s.wait_rows(lambda rs: self.s.has('topics-unavailable', rs), 'the window does not show Sessions only', seconds=30)
         window, pane = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id} #{pane_id}', '-t', 'start:', '-n', 'fallback',
                                    '/bin/sh').split()
-        result = self.agent_muxify(pane, 'browser', 'tabs')
+        result = self.agent_muxify(pane, 'browser', 'snapshot')
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertTrue(result.stderr.startswith('muxify: cannot reach Muxify'), result.stderr)
+        # Only tabs falls back: it lists the Tabs that tmux stores on the Window, none here (ADR 0084).
+        result = self.agent_muxify(pane, 'browser', 'tabs')
+        self.assertEqual((result.returncode, result.stdout), (0, ''), result.stderr)
         url = 'http://127.0.0.1:9/fallback'
         self.agent_ok(pane, 'browser', 'open', url)
         # The Tab waits in @muxify_open for the window's next read, which opens it and clears the option.
