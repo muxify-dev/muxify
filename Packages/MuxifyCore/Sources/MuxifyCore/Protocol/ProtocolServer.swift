@@ -28,6 +28,8 @@ public final class ProtocolServer: @unchecked Sendable {
     private let log: (String) -> Void
     private let lock = NSLock()
     private var exit: Exit?
+    /// `exit` once the exit handlers have run: `wait` returns only then.
+    private var exited: Exit?
     /// The exit that `stop` asked for, which comes once what was queued is written.
     private var stopping: Exit?
     private var peer: ProtocolHello?
@@ -129,7 +131,7 @@ public final class ProtocolServer: @unchecked Sendable {
     public func wait() async -> Exit {
         await withCheckedContinuation { continuation in
             lock.lock()
-            guard let exit else {
+            guard let exit = exited else {
                 waiters.append(continuation)
                 lock.unlock()
                 return
@@ -157,8 +159,6 @@ public final class ProtocolServer: @unchecked Sendable {
         lock.lock()
         guard self.exit == nil else { lock.unlock(); return }
         self.exit = exit
-        let waiting = waiters
-        waiters = []
         let timer = timer
         let handlers = exitHandlers
         exitHandlers = []
@@ -166,6 +166,12 @@ public final class ProtocolServer: @unchecked Sendable {
         timer?.cancel()
         log("muxify server: exits, \(Self.describe(exit))")
         for handler in handlers { handler() }
+        // A `wait` that comes while the handlers run waits for them too.
+        lock.lock()
+        exited = exit
+        let waiting = waiters
+        waiters = []
+        lock.unlock()
         for waiter in waiting { waiter.resume(returning: exit) }
     }
 
