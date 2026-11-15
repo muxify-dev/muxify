@@ -1,4 +1,5 @@
 import AppKit
+import MuxifyCore
 import Observation
 import WebKit
 
@@ -180,18 +181,6 @@ final class BrowserTab: NSObject, Identifiable {
         loadedPageView = nil
         loadedWebView = nil
         observations = []
-    }
-
-    /// Key for "is this URL already open": ignores the fragment, a trailing
-    /// slash, and the case of the scheme and host.
-    static func matchKey(_ string: String) -> String {
-        guard var components = URLComponents(string: string) else { return string }
-        components.fragment = nil
-        components.scheme = components.scheme?.lowercased()
-        components.host = components.host?.lowercased()
-        var key = components.string ?? string
-        while key.hasSuffix("/") { key.removeLast() }
-        return key
     }
 
     private func observe(_ webView: WKWebView) {
@@ -417,46 +406,6 @@ extension BrowserTab: WKNavigationDelegate, WKUIDelegate {
         }
         if isMainFrame { historyLoads.decide(navigationAction.navigationType, byAgent: agentCommands > 0) }
         decisionHandler(.allow)
-    }
-}
-
-enum Omnibox {
-    static func url(for rawInput: String) -> URL? {
-        let input = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !input.isEmpty else { return nil }
-
-        if let url = URL(string: input), let scheme = url.scheme?.lowercased(),
-           ["http", "https", "file", "about"].contains(scheme) {
-            return url
-        }
-        if input.hasPrefix("/") || input.hasPrefix("~/") {
-            return URL(fileURLWithPath: (input as NSString).expandingTildeInPath)
-        }
-        if looksLikeHost(input) {
-            let local = isLocal(input)
-            return URL(string: (local ? "http://" : "https://") + input)
-        }
-        return searchURL(for: input)
-    }
-
-    static func searchURL(for query: String) -> URL? {
-        var components = URLComponents(string: "https://www.google.com/search")!
-        components.queryItems = [URLQueryItem(name: "q", value: query.trimmingCharacters(in: .whitespacesAndNewlines))]
-        return components.url
-    }
-
-    private static func looksLikeHost(_ input: String) -> Bool {
-        guard !input.contains(" ") else { return false }
-        if isLocal(input) { return true }
-        let host = input.split(whereSeparator: { "/:?#".contains($0) }).first.map(String.init) ?? input
-        return host.contains(".") && !host.hasPrefix(".") && !host.hasSuffix(".")
-    }
-
-    private static func isLocal(_ input: String) -> Bool {
-        let host = input.split(whereSeparator: { "/:?#".contains($0) }).first.map { $0.lowercased() } ?? ""
-        return host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" || host == "[::1]"
-            || host.hasSuffix(".localhost") || host.hasSuffix(".local") || host.hasSuffix(".test")
-            || (input.first?.isNumber == true && input.contains(":"))
     }
 }
 
