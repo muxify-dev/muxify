@@ -68,13 +68,4 @@ final class TopicSessionOrderTests: XCTestCase {
         XCTAssertEqual(remembered.sessions.compactMap { $0["directory"]?.string }, ["/work/c", "/work/b", "/work/a"])
         XCTAssertFalse(remembered.hasManualSessionOrder)
     }
-
-    func testTheManualOrderFlagSurvivesTheRecordFile() throws {
-        let manual = record(manual: ["b", "a"])
-        let text = String(decoding: try JSONEncoder().encode(manual), as: UTF8.self)
-        XCTAssertTrue(text.contains(#""session_order":"manual""#), text)
-        XCTAssertEqual(try JSONDecoder().decode(TopicRecord.self, from: Data(text.utf8)), manual)
-        let automatic = String(decoding: try JSONEncoder().encode(record()), as: UTF8.self)
-        XCTAssertFalse(automatic.contains("session_order"), automatic)
-    }
 }

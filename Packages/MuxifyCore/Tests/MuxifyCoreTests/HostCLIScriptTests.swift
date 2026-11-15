@@ -133,20 +133,31 @@ final class HostCLIScriptTests: XCTestCase {
         XCTAssertEqual(try String(contentsOfFile: "\(dir)/muxify.new.11111", encoding: .utf8), "partial")
     }
 
-    func testAnOlderOneIsUpdated() throws {
-        for shell in shells {
-            try reset()
-            try executable(printing: "muxify old1234 100", at: installed)
-            XCTAssertEqual(try run(shell), "updated old1234 100 -> abc1234 200", shell)
-            XCTAssertEqual(try versionLine(installed), published, shell)
-            XCTAssertFalse(leftover, shell)
+    /// The answer for each installed `muxify`: an older one, an unstamped build and one whose `--version` exits 2 are
+    /// updated, the same one is current, and a newer one is kept as it is.
+    func testTheInstalledVersionDecidesTheAnswer() throws {
+        let cases: [(installed: String, answer: String)] = [
+            ("echo 'muxify old1234 100'", "updated old1234 100 -> abc1234 200"),
+            ("echo 'muxify dev 0'", "updated dev 0 -> abc1234 200"),
+            ("echo 'usage: muxify <command>'\nexit 2", "updated unknown -> abc1234 200"),
+            ("echo '\(published)'", "current abc1234 200"),
+            ("echo 'muxify new1234 300'", "kept new1234 300 (newer than abc1234 200)"),
+        ]
+        for (script, answer) in cases {
+            for shell in shells {
+                let name = "\(shell): \(answer)"
+                try reset()
+                try write("#!/bin/sh\n\(script)\n", to: installed, mode: 0o755)
+                let before = try Data(contentsOf: URL(fileURLWithPath: installed))
+                XCTAssertEqual(try run(shell), answer, name)
+                if answer.hasPrefix("updated") {
+                    XCTAssertEqual(try versionLine(installed), published, name)
+                } else {
+                    XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: installed)), before, name)
+                }
+                XCTAssertFalse(leftover, name)
+            }
         }
-    }
-
-    func testAnUnstampedBuildIsUpdated() throws {
-        try reset()
-        try executable(printing: "muxify dev 0", at: installed)
-        XCTAssertEqual(try run("/bin/sh"), "updated dev 0 -> abc1234 200")
     }
 
     func testAnOlderOneOnThePathIsLeftAndOneIsInstalledInLocalBin() throws {
@@ -156,25 +167,6 @@ final class HostCLIScriptTests: XCTestCase {
         XCTAssertEqual(try run("/bin/sh"), "updated old1234 100 -> abc1234 200")
         XCTAssertEqual(try String(contentsOfFile: "\(tools)/muxify", encoding: .utf8), before)
         XCTAssertEqual(try versionLine(installed), published)
-    }
-
-    func testTheSameOneIsCurrent() throws {
-        for shell in shells {
-            try reset()
-            try executable(printing: published, at: installed)
-            XCTAssertEqual(try run(shell), "current abc1234 200", shell)
-        }
-    }
-
-    func testANewerOneIsKeptUnchanged() throws {
-        for shell in shells {
-            try reset()
-            try executable(printing: "muxify new1234 300", at: installed)
-            let before = try Data(contentsOf: URL(fileURLWithPath: installed))
-            XCTAssertEqual(try run(shell), "kept new1234 300 (newer than abc1234 200)", shell)
-            XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: installed)), before, shell)
-            XCTAssertFalse(leftover, shell)
-        }
     }
 
     func testOneInsideAMuxifyAppIsSkipped() throws {
@@ -201,15 +193,6 @@ final class HostCLIScriptTests: XCTestCase {
             try executable(printing: "muxify old1234 100", at: bundled)
             try machine("Linux", "aarch64")
             XCTAssertEqual(try run(shell), "installed abc1234 200", shell)
-            XCTAssertEqual(try versionLine(installed), published, shell)
-        }
-    }
-
-    func testAVersionThatExitsTwoIsUpdated() throws {
-        for shell in shells {
-            try reset()
-            try write("#!/bin/sh\necho 'usage: muxify <command>'\nexit 2\n", to: installed, mode: 0o755)
-            XCTAssertEqual(try run(shell), "updated unknown -> abc1234 200", shell)
             XCTAssertEqual(try versionLine(installed), published, shell)
         }
     }

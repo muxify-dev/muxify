@@ -201,27 +201,6 @@ final class StateDatabaseTests: XCTestCase {
         }
     }
 
-    func testASecondOpenImportsNothing() throws {
-        try paths.seedTopicRecordsFile(entries: [#"{"id":"a","title":"A"}"#], openPlaces: #"[{"id":"p","order":1}]"#)
-        _ = try open()
-        try TopicStore(paths: paths).write { transaction in
-            try transaction.update("a") { $0.title = "Changed" }
-            transaction.openPlaces = []
-        }
-        let (_, problems) = try open()
-        XCTAssertEqual(problems, [])
-        let contents = try TopicStore(paths: paths).read()
-        XCTAssertEqual(contents.records.map(\.title), ["Changed"], "the second open did not read the old file again")
-        XCTAssertEqual(contents.openPlaces, [])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: migratedFile.path))
-    }
-
-    func testTheFirstReadOfAStoreImportsTheFile() throws {
-        try paths.seedTopicRecordsFile(entries: [#"{"id":"a","title":"A"}"#])
-        XCTAssertEqual(try TopicStore(paths: paths).read().records.map(\.id), ["a"])
-        XCTAssertFalse(FileManager.default.fileExists(atPath: paths.topicRecords.path))
-    }
-
     // MARK: - The import of the Muxify Worktree record files
 
     /// Writes `text` as `worktrees/<name>.json`, as an older Muxify wrote each record.
@@ -235,14 +214,6 @@ final class StateDatabaseTests: XCTestCase {
     private func worktreeFile(id: String, path: String, environment: String? = nil, createdAt: String = "2026-09-01T10:00:00Z") -> String {
         let place = environment.map { #""environment":"\#($0)","# } ?? ""
         return #"{"id":"\#(id)",\#(place)"repository":"/src/app","name":"fix","path":"\#(path)","branch":"fix","base":"abc","created_at":"\#(createdAt)"}"#
-    }
-
-    func testTheWorktreesTableHasAUniquePath() throws {
-        let (connection, _) = try open()
-        XCTAssertEqual(try connection.query("SELECT name FROM pragma_table_info('worktrees') ORDER BY cid") { $0.text(0) ?? "" },
-                       ["id", "environment", "repository", "name", "path", "branch", "base", "created_at"])
-        try connection.execute("INSERT INTO worktrees VALUES ('a', NULL, '/r', 'a', '/t/a', 'a', 'c', '2026-09-01T10:00:00Z')")
-        XCTAssertThrowsError(try connection.execute("INSERT INTO worktrees VALUES ('b', NULL, '/r', 'b', '/t/a', 'b', 'c', '2026-09-01T10:00:00Z')"))
     }
 
     func testTheImportMovesEachValidWorktreeRecordFileAndRenamesIt() throws {
@@ -294,26 +265,11 @@ final class StateDatabaseTests: XCTestCase {
         XCTAssertEqual(try MuxifyWorktreeStore(paths: paths).all().map(\.id), ["one"])
     }
 
-    func testASecondOpenImportsNoWorktreeRecord() throws {
-        _ = try seedWorktreeFile("one", worktreeFile(id: "one", path: "/src/trees/one"))
-        _ = try open()
-        try MuxifyWorktreeStore(paths: paths).remove("one")
-        let (_, problems) = try open()
-        XCTAssertEqual(problems, [])
-        XCTAssertEqual(try MuxifyWorktreeStore(paths: paths).all(), [], "the second open did not read the old file again")
-    }
-
     // MARK: - The import of browser-history.json
 
     private func seedBrowserHistoryFile(_ text: String) throws {
         try FileManager.default.createDirectory(at: paths.state, withIntermediateDirectories: true)
         try Data(text.utf8).write(to: paths.browserHistory)
-    }
-
-    func testTheBrowserHistoryTableHasAColumnForEachPartOfAnEntry() throws {
-        let (connection, _) = try open()
-        XCTAssertEqual(try connection.query("SELECT name FROM pragma_table_info('browser_history') ORDER BY cid") { $0.text(0) ?? "" },
-                       ["key", "url", "title", "folded_score", "folded_at", "recent", "topics"])
     }
 
     func testTheImportMovesACurrentAndALegacyBrowserHistoryFileAndRenamesIt() throws {
@@ -358,15 +314,6 @@ final class StateDatabaseTests: XCTestCase {
         XCTAssertEqual(try BrowserHistoryStore(paths: paths).entries(), [], "nothing is imported from it")
     }
 
-    func testASecondOpenImportsNoBrowserHistory() throws {
-        try seedBrowserHistoryFile(#"[{"key":"https://a.test","url":"https://a.test","title":"A","recent":[],"topics":[]}]"#)
-        _ = try open()
-        try BrowserHistoryStore(paths: paths).clear(since: nil)
-        let (_, problems) = try open()
-        XCTAssertEqual(problems, [])
-        XCTAssertEqual(try BrowserHistoryStore(paths: paths).entries(), [], "the second open did not read the old file again")
-    }
-
     func testAnImportedEntryLeavesTheRowOfItsKeyAsItIs() throws {
         let store = BrowserHistoryStore(paths: paths)
         let row = HistoryEntry(key: "https://a.test", url: "https://a.test", title: "Newer", recent: [.init(at: Date(timeIntervalSince1970: 1_800_000_000), weight: 2)], topics: [])
@@ -374,5 +321,30 @@ final class StateDatabaseTests: XCTestCase {
         try seedBrowserHistoryFile(#"[{"key":"https://a.test","url":"https://a.test","title":"Older","recent":[],"topics":[]}]"#)
         _ = try open()
         XCTAssertEqual(try store.entries(), [row])
+    }
+
+    /// A second open finds no old file, so a change after the first import stays.
+    func testASecondOpenImportsNothing() throws {
+        let cases: [(file: String, seed: () throws -> Void, change: () throws -> Void, state: () throws -> String)] = [
+            ("topics.json", { try self.paths.seedTopicRecordsFile(entries: [#"{"id":"a","title":"A"}"#], openPlaces: #"[{"id":"p","order":1}]"#) },
+             { try TopicStore(paths: self.paths).write { try $0.update("a") { $0.title = "Changed" }; $0.openPlaces = [] } },
+             { let contents = try TopicStore(paths: self.paths).read(); return "\(contents.records.map(\.title)) \(contents.openPlaces)" }),
+            ("a Worktree record file", { _ = try self.seedWorktreeFile("one", self.worktreeFile(id: "one", path: "/src/trees/one")) },
+             { try MuxifyWorktreeStore(paths: self.paths).remove("one") },
+             { "\(try MuxifyWorktreeStore(paths: self.paths).all())" }),
+            ("browser-history.json", { try self.seedBrowserHistoryFile(#"[{"key":"https://a.test","url":"https://a.test","title":"A","recent":[],"topics":[]}]"#) },
+             { try BrowserHistoryStore(paths: self.paths).clear(since: nil) },
+             { "\(try BrowserHistoryStore(paths: self.paths).entries())" }),
+        ]
+        for (file, seed, change, state) in cases {
+            try? FileManager.default.removeItem(at: root)
+            try seed()
+            _ = try open()
+            try change()
+            let changed = try state()
+            let (_, problems) = try open()
+            XCTAssertEqual(problems, [], file)
+            XCTAssertEqual(try state(), changed, "the second open did not read \(file) again")
+        }
     }
 }

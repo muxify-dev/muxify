@@ -222,14 +222,14 @@ final class CLIIntegrationTests: XCTestCase {
         let client = try sandbox.attachClient(to: "main")
         let made = try await run(cli, arguments: ["topic", "new", "Ship it"], environment: sandbox.cliEnvironment(pane: caller))
         XCTAssertEqual(made.status, 0, made.output)
-        let id = try XCTUnwrap(sandbox.records().only?["id"] as? String)
+        let id = try XCTUnwrap(sandbox.records().only?.id)
         XCTAssertEqual(made.output, id + "\n")
         let result = try await run(cli, arguments: ["topic", "add-session", sandbox.game.path, "--topic", id],
                                    environment: sandbox.cliEnvironment(pane: caller))
         XCTAssertEqual(result.status, 0, result.output)
         XCTAssertEqual(result.output, id + "\n")
         let record = try XCTUnwrap(sandbox.records().only)
-        XCTAssertEqual(record["title"] as? String, "Ship it")
+        XCTAssertEqual(record.title, "Ship it")
         XCTAssertEqual(sandbox.repositoryPaths(of: record), [sandbox.game.path])
         XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "game/ship-it:", "@muxify_topic"]), id)
         XCTAssertEqual(try sandbox.clientSession(client), "main", "a command changes what the terminal shows only when asked")
@@ -287,11 +287,11 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(second.status, 0, second.output)
         XCTAssertEqual(second.stdout, first.stdout)
         XCTAssertEqual(second.stderr, "")
-        XCTAssertEqual(try sandbox.records().compactMap { $0["slug"] as? String }, ["fix-login"], "one Topic, and no fix-login-2")
+        XCTAssertEqual(try sandbox.records().compactMap(\.slug), ["fix-login"], "one Topic, and no fix-login-2")
 
         let other = try await run(cli, arguments: ["topic", "new", "Fix login", "--json", "--request", UUID().uuidString], environment: environment)
         XCTAssertEqual(other.status, 0, other.output)
-        XCTAssertEqual(try sandbox.records().compactMap { $0["slug"] as? String }.sorted(), ["fix-login", "fix-login-2"], "a new id runs the command")
+        XCTAssertEqual(try sandbox.records().compactMap(\.slug).sorted(), ["fix-login", "fix-login-2"], "a new id runs the command")
     }
 
     func testARequestIDWithOtherArgumentsFailsWithItsOwnStatusAndChangesNothing() async throws {
@@ -307,7 +307,7 @@ final class CLIIntegrationTests: XCTestCase {
             XCTAssertEqual(mismatch.stdout, "")
             XCTAssertTrue(mismatch.stderr.contains(request) && mismatch.stderr.contains("topic new"), mismatch.stderr)
         }
-        XCTAssertEqual(try sandbox.records().map { $0["title"] as? String }, ["Fix login"])
+        XCTAssertEqual(try sandbox.records().map(\.title), ["Fix login"])
     }
 
     func testARefusalIsKeptSoASecondSendGetsItAgainWithoutANewJudgment() async throws {
@@ -327,11 +327,11 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(again.status, refused.status)
         XCTAssertEqual(again.stdout, refused.stdout)
         XCTAssertEqual(again.stderr, refused.stderr)
-        XCTAssertNil(try XCTUnwrap(sandbox.records().only)["tags"], "the second send changes nothing")
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only).tags, [], "the second send changes nothing")
 
         let fresh = try await run(cli, arguments: tag + ["--request", UUID().uuidString], environment: environment)
         XCTAssertEqual(fresh.status, 0, fresh.output)
-        XCTAssertEqual(try XCTUnwrap(sandbox.records().only)["tags"] as? [String], ["bazel"], "a new Request sees the Tag that the Config has now")
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only).tags.map(\.name).sorted(), ["bazel"], "a new Request sees the Tag that the Config has now")
     }
 
     func testAFailureThatCanChangeIsNotKeptSoTheSameRequestCanRunLater() async throws {
@@ -371,7 +371,7 @@ final class CLIIntegrationTests: XCTestCase {
         let converged = try await run(cli, arguments: ["topic", "new", "Fix login", "--json", "--request", new], environment: environment)
         XCTAssertEqual(converged.status, 0, converged.output)
         XCTAssertEqual(converged.stdout, made.stdout, "topic new finds the Topic that has the Request's id")
-        XCTAssertEqual(try sandbox.records().compactMap { $0["slug"] as? String }, ["fix-login"])
+        XCTAssertEqual(try sandbox.records().compactMap(\.slug), ["fix-login"])
         XCTAssertEqual(try sandbox.requestState(new), "done")
 
         let other = try await run(cli, arguments: ["topic", "new", "Plan"], environment: environment)
@@ -407,7 +407,7 @@ final class CLIIntegrationTests: XCTestCase {
         let again = try await run(cli, arguments: add, environment: environment)
         XCTAssertEqual(again.status, 0, again.output)
         XCTAssertEqual(try sandbox.sessions(), ["api/ship", "main"])
-        XCTAssertEqual((try XCTUnwrap(sandbox.records().only)["sessions"] as? [[String: Any]])?.count, 1, "the record gains no second entry")
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only).sessions.count, 1, "the record gains no second entry")
 
         let unnamed = UUID().uuidString.lowercased()
         let plain = ["topic", "add-session", sandbox.game.path, "--topic", "Ship", "--request", unnamed]
@@ -454,9 +454,9 @@ final class CLIIntegrationTests: XCTestCase {
         let result = try await run(cli, arguments: ["window", "move", "--new-topic"], environment: sandbox.cliEnvironment(pane: pane))
         XCTAssertEqual(result.status, 0, result.output)
         let record = try XCTUnwrap(sandbox.records().only)
-        let id = try XCTUnwrap(record["id"] as? String)
+        let id = record.id
         XCTAssertEqual(result.output, id + "\n")
-        XCTAssertNil(record["title"] as? String)
+        XCTAssertNil(record.title)
         XCTAssertEqual(try sandbox.tmux(["display-message", "-p", "-t", pane.rawValue, "#{session_name}"]), "loose/untitled-1")
         XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "loose/untitled-1:", "@muxify_topic"]), id)
         XCTAssertEqual(try sandbox.tmux(["list-windows", "-t", "=loose", "-F", "#{window_id}"]).split(separator: "\n").count, 1,
@@ -471,8 +471,8 @@ final class CLIIntegrationTests: XCTestCase {
         for (title, caller) in [("Fix it", Optional(pane)), ("Plan it", nil)] {
             let result = try await run(cli, arguments: ["topic", "new", title], environment: sandbox.cliEnvironment(pane: caller))
             XCTAssertEqual(result.status, 0, result.output)
-            let record = try XCTUnwrap(sandbox.records().first { $0["title"] as? String == title })
-            XCTAssertEqual(result.output, try XCTUnwrap(record["id"] as? String) + "\n")
+            let record = try XCTUnwrap(sandbox.records().first { $0.title == title })
+            XCTAssertEqual(result.output, record.id + "\n")
             XCTAssertEqual(sandbox.repositoryPaths(of: record), [], "an Empty Topic has no Session")
         }
         XCTAssertEqual(try sandbox.sessions(), ["loose", "main"], "topic new starts no Session")
@@ -517,9 +517,9 @@ final class CLIIntegrationTests: XCTestCase {
                                    environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(result.status, 0, result.output)
         let session = try XCTUnwrap(sandbox.session(of: try XCTUnwrap(sandbox.records().only), in: server))
-        XCTAssertEqual(sandbox.real(session["worktree_path"]), server.path + "/release")
-        XCTAssertEqual(session["branch"] as? String, "release")
-        XCTAssertEqual(session["worktree_created"] as? Bool, false)
+        XCTAssertEqual(sandbox.real(session["worktree_path"]?.string), server.path + "/release")
+        XCTAssertEqual(session["branch"]?.string, "release")
+        XCTAssertEqual(session["worktree_created"], .bool(false))
         XCTAssertEqual(sandbox.real(try sandbox.tmux(["display-message", "-p", "-t", "=server/release/ship:", "#{session_path}"])), server.path + "/release")
     }
 
@@ -535,11 +535,11 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(result.stdout, id + "\n")
         let worktree = sandbox.root.path + "/state/muxify/worktrees/server/ship"
         let session = try XCTUnwrap(sandbox.session(of: try XCTUnwrap(sandbox.records().only), in: server))
-        XCTAssertEqual(sandbox.real(session["worktree_path"]), worktree)
-        XCTAssertEqual(session["branch"] as? String, "ship")
-        XCTAssertEqual(session["worktree_created"] as? Bool, true)
-        XCTAssertEqual(session["base"] as? String, try sandbox.git(["rev-parse", "HEAD"], in: release), "the HEAD of the row's Worktree")
-        XCTAssertEqual(try sandbox.git(["rev-parse", "HEAD"], in: worktree), session["base"] as? String)
+        XCTAssertEqual(sandbox.real(session["worktree_path"]?.string), worktree)
+        XCTAssertEqual(session["branch"]?.string, "ship")
+        XCTAssertEqual(session["worktree_created"], .bool(true))
+        XCTAssertEqual(session["base"]?.string, try sandbox.git(["rev-parse", "HEAD"], in: release), "the HEAD of the row's Worktree")
+        XCTAssertEqual(try sandbox.git(["rev-parse", "HEAD"], in: worktree), session["base"]?.string)
         XCTAssertEqual(try sandbox.git(["symbolic-ref", "--short", "HEAD"], in: worktree), "ship")
         XCTAssertEqual(sandbox.real(try sandbox.tmux(["display-message", "-p", "-t", "=server/release/ship:", "#{session_path}"])), worktree)
         XCTAssertEqual(try sandbox.topicOption(of: "server/release/ship"), id)
@@ -558,7 +558,7 @@ final class CLIIntegrationTests: XCTestCase {
         let main = try sandbox.git(["rev-parse", "main"], in: release)
         XCTAssertNotEqual(main, try sandbox.git(["rev-parse", "HEAD"], in: release))
         let session = try XCTUnwrap(sandbox.session(of: try XCTUnwrap(sandbox.records().only), in: server))
-        XCTAssertEqual(session["base"] as? String, main)
+        XCTAssertEqual(session["base"]?.string, main)
         XCTAssertEqual(try sandbox.git(["rev-parse", "HEAD"], in: sandbox.root.path + "/state/muxify/worktrees/server/ship"), main)
     }
 
@@ -572,7 +572,7 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(result.status, 2, result.output)
         XCTAssertEqual(result.stdout, "")
         XCTAssertEqual(result.stderr, "muxify: --worktree needs a git repository, and \(sandbox.tools.path) is not one\n")
-        XCTAssertEqual(try sandbox.records() as NSArray, before as NSArray)
+        XCTAssertEqual(try sandbox.records(), before)
         XCTAssertEqual(try sandbox.sessions(), ["game/ship", "main"])
     }
 
@@ -613,7 +613,7 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(result.stdout, "")
         XCTAssertEqual(result.stderr, "muxify: The Worktree \(worktree) has uncommitted changes. Commit or remove them, or keep the Worktree. "
                        + "No changes were made.\n")
-        XCTAssertEqual(try sandbox.records() as NSArray, before as NSArray, "the Topic is not Settled")
+        XCTAssertEqual(try sandbox.records(), before, "the Topic is not Settled")
         XCTAssertEqual(try sandbox.sessions(), sessions)
         XCTAssertTrue(FileManager.default.fileExists(atPath: worktree + "/notes.txt"))
     }
@@ -627,7 +627,7 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(result.status, 0, result.output)
         XCTAssertEqual(result.stdout, id + "\n", "a write prints the id of the Topic it changed")
         XCTAssertEqual(result.stderr, "")
-        XCTAssertNotNil(try XCTUnwrap(sandbox.records().only)["settled_at"] as? String)
+        XCTAssertNotNil(try XCTUnwrap(sandbox.records().only).settledAt)
         XCTAssertEqual(try sandbox.sessions(), ["main"])
     }
 
@@ -639,20 +639,20 @@ final class CLIIntegrationTests: XCTestCase {
                                 environment: sandbox.cliEnvironment(pane: try sandbox.pane(of: "game/ship")))
         XCTAssertEqual(add.status, 0, add.output)
         XCTAssertEqual(add.stdout, id + "\n", "a write prints the id of the Topic it changed")
-        XCTAssertEqual(try XCTUnwrap(sandbox.records().only)["tags"] as? [String], ["backend", "release"])
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only).tags.map(\.name).sorted(), ["backend", "release"])
         let undefined = try await run(cli, arguments: ["topic", "tag", "set", "backend", "bazel", "--topic", "Ship"],
                                       environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertNotEqual(undefined.status, 0, undefined.output)
         XCTAssertTrue(undefined.stderr.contains("#bazel") && undefined.stderr.contains("topics.tags"), undefined.stderr)
-        XCTAssertEqual(try XCTUnwrap(sandbox.records().only)["tags"] as? [String], ["backend", "release"],
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only).tags.map(\.name).sorted(), ["backend", "release"],
                        "a Tag that the Config does not define writes nothing")
         let remove = try await run(cli, arguments: ["topic", "tag", "remove", "release", "--topic", "Ship"], environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(remove.status, 0, remove.output)
-        XCTAssertEqual(try XCTUnwrap(sandbox.records().only)["tags"] as? [String], ["backend"])
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only).tags.map(\.name).sorted(), ["backend"])
         let set = try await run(cli, arguments: ["topic", "tag", "set", "--topic", id, "--json"], environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(set.status, 0, set.output)
         XCTAssertEqual(try XCTUnwrap(try jsonLine(set.stdout)["changed"] as? [String: Any], set.stdout)["topic_id"] as? String, id)
-        XCTAssertNil(try XCTUnwrap(sandbox.records().only)["tags"], "set with no Tag removes the key")
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only).tags, [], "set with no Tag removes the key")
         XCTAssertEqual(try sandbox.sessions(), ["game/ship", "main"], "a Tag change changes nothing in tmux")
     }
 
@@ -664,10 +664,10 @@ final class CLIIntegrationTests: XCTestCase {
         let added = try await run(cli, arguments: ["topic", "add-session", sandbox.game.path, "--topic", id], environment: environment)
         XCTAssertEqual(added.status, 0, added.output)
         let record = try XCTUnwrap(sandbox.records().only)
-        let sessions = try XCTUnwrap(record["sessions"] as? [[String: Any]])
-        XCTAssertEqual(sessions.compactMap { $0["name"] as? String }, ["game/repeated", "game+2/repeated"])
-        XCTAssertEqual(Set(sessions.compactMap { $0["id"] as? String }).count, 2)
-        XCTAssertEqual(sessions.compactMap { $0["directory"] as? String }, [sandbox.game.path, sandbox.game.path])
+        let sessions = record.sessions
+        XCTAssertEqual(sessions.compactMap { $0["name"]?.string }, ["game/repeated", "game+2/repeated"])
+        XCTAssertEqual(Set(sessions.compactMap { $0["id"]?.string }).count, 2)
+        XCTAssertEqual(sessions.compactMap { $0["directory"]?.string }, [sandbox.game.path, sandbox.game.path])
         let listed = try await run(cli, arguments: ["session", "list", "--json"], environment: environment)
         let rows = try XCTUnwrap(try jsonLine(listed.stdout)["sessions"] as? [[String: Any]])
         XCTAssertEqual(rows.filter { ($0["name"] as? String)?.hasSuffix("/repeated") == true }.count, 2)
@@ -749,7 +749,7 @@ final class CLIIntegrationTests: XCTestCase {
                                      environment: environment)
         XCTAssertEqual(replaced.status, 0, replaced.output)
         XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "notes", "@muxify_lock"]), "", "the Lock of the Guest Session ends")
-        XCTAssertEqual(try sandbox.records().filter { $0["guest"] as? Bool == true }.compactMap { $0["title"] as? String }, ["Second"],
+        XCTAssertEqual(try sandbox.records().filter(\.isGuest).compactMap(\.title), ["Second"],
                        "the Topic that comes In Play gets the Guest mark")
     }
 
@@ -792,7 +792,7 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(ended.status, 0, ended.output)
         let afterEnd = try await order()
         XCTAssertEqual(afterEnd, [first, second, third], "Second is at the top of the Bench")
-        XCTAssertFalse(try sandbox.records().contains { $0["guest"] as? Bool == true })
+        XCTAssertFalse(try sandbox.records().contains { $0.isGuest })
 
         let benched = try await run(cli, arguments: ["topic", "bench", "--topic", "First"], environment: environment)
         XCTAssertEqual(benched.status, 0, benched.output)
@@ -928,7 +928,7 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(result.status, 1, result.output)
         XCTAssertEqual(result.stdout, "")
         XCTAssertEqual(result.stderr, "muxify: No open Topic matches Nope. No changes were made.\n")
-        XCTAssertEqual(try sandbox.records() as NSArray, before as NSArray)
+        XCTAssertEqual(try sandbox.records(), before)
         XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", "main:", "@muxify_topic"]), "")
     }
 
@@ -952,7 +952,7 @@ final class CLIIntegrationTests: XCTestCase {
         let result = try await run(cli, arguments: ["topic", "settle", "--kill-sessions", "--topic", id], environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(result.status, 0, result.output)
         XCTAssertEqual(result.stdout, id + "\n")
-        XCTAssertNotNil(try XCTUnwrap(sandbox.records().only)["settled_at"] as? String)
+        XCTAssertNotNil(try XCTUnwrap(sandbox.records().only).settledAt)
         XCTAssertEqual(try sandbox.sessions(), ["main"])
     }
 
@@ -975,7 +975,7 @@ final class CLIIntegrationTests: XCTestCase {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         try JSONSerialization.data(withJSONObject: ["open_places": [], "records": records]).write(to: file)
         let environment = sandbox.cliEnvironment(pane: nil)
-        func ids() throws -> [String] { try sandbox.records().compactMap { $0["id"] as? String }.sorted() }
+        func ids() throws -> [String] { try sandbox.records().map(\.id).sorted() }
 
         let byConfig = try await run(cli, arguments: ["topic", "forget-settled"], environment: environment)
         XCTAssertEqual(byConfig.status, 0, byConfig.output)
@@ -1038,7 +1038,7 @@ final class CLIIntegrationTests: XCTestCase {
         let result = try await run(cli, arguments: ["window", "move", "--new-topic", "--pane", pane.rawValue],
                                    environment: sandbox.cliEnvironment(pane: caller))
         XCTAssertEqual(result.status, 0, result.output)
-        let id = try XCTUnwrap(sandbox.records().only?["id"] as? String)
+        let id = try XCTUnwrap(sandbox.records().only?.id)
         XCTAssertEqual(result.stdout, id + "\n")
         XCTAssertEqual(try sandbox.session(of: pane), "loose/untitled-1")
         XCTAssertEqual(try sandbox.topicOption(of: "loose/untitled-1"), id)
@@ -1055,7 +1055,7 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(result.status, 1, result.output)
         XCTAssertEqual(result.stdout, "")
         XCTAssertEqual(result.stderr, "muxify: No open Topic matches Nope. No changes were made.\n")
-        XCTAssertEqual(try sandbox.records() as NSArray, before as NSArray)
+        XCTAssertEqual(try sandbox.records(), before)
         XCTAssertEqual(try sandbox.sessions(), ["game/ship", "main"])
     }
 
@@ -1075,7 +1075,7 @@ final class CLIIntegrationTests: XCTestCase {
                                  environment: sandbox.cliEnvironment(pane: try sandbox.pane(of: "main")))
         XCTAssertEqual(json.status, 1, json.output)
         XCTAssertEqual((try jsonLine(json.stdout)["failed"] as? [String: Any])?["kind"] as? String, "topic_ambiguous", json.stdout)
-        XCTAssertEqual(try sandbox.records() as NSArray, before as NSArray)
+        XCTAssertEqual(try sandbox.records(), before)
         XCTAssertEqual(try sandbox.sessions(), sessions)
     }
 
@@ -1094,7 +1094,7 @@ final class CLIIntegrationTests: XCTestCase {
                                  environment: sandbox.cliEnvironment(pane: try sandbox.pane(of: "game/ship")))
         XCTAssertEqual(json.status, 1, json.output)
         XCTAssertEqual((try jsonLine(json.stdout)["failed"] as? [String: Any])?["kind"] as? String, "source_has_no_topic", json.stdout)
-        XCTAssertEqual(try sandbox.records() as NSArray, before as NSArray)
+        XCTAssertEqual(try sandbox.records(), before)
         XCTAssertEqual(try sandbox.sessions(), ["game/ship", "main"])
     }
 
@@ -1104,7 +1104,7 @@ final class CLIIntegrationTests: XCTestCase {
         let result = try await run(cli, arguments: ["topic", "new", "Ship", "--json"], environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(result.status, 0, result.output)
         XCTAssertEqual(result.stderr, "")
-        let id = try XCTUnwrap(sandbox.records().only?["id"] as? String)
+        let id = try XCTUnwrap(sandbox.records().only?.id)
         let change = try XCTUnwrap(try jsonLine(result.stdout)["changed"] as? [String: Any], result.stdout)
         XCTAssertEqual(change["topic_id"] as? String, id)
         XCTAssertEqual(change["created"] as? Bool, true)
@@ -1326,9 +1326,7 @@ final class CLIIntegrationTests: XCTestCase {
                                   environment: sandbox.cliEnvironment(pane: nil))
         XCTAssertEqual(added.status, 0, added.output)
         let worktree = sandbox.root.path + "/state/muxify/worktrees/server/ship"
-        let recorded = try XCTUnwrap(sandbox.records().only.flatMap { record in
-            (record["sessions"] as? [[String: Any]])?.compactMap { $0["base"] as? String }.first
-        })
+        let recorded = try XCTUnwrap(sandbox.records().only?.sessions.compactMap { $0["base"]?.string }.first)
         // main moves on and the Worktree takes it, so the merge base with main is no longer the recorded base.
         try Data("main\n".utf8).write(to: URL(fileURLWithPath: server.path + "/main/main.txt"))
         _ = try sandbox.git(["add", "main.txt"], in: server.path + "/main")
@@ -1871,20 +1869,14 @@ private final class TopicSandbox {
         return String(line.dropFirst(tty.count + 1))
     }
 
-    /// The Topic records in the state database, each as the JSON object of the record, in id order, as the CLI
-    /// wrote them.
-    func records() throws -> [[String: Any]] {
-        return try TopicStore(paths: paths).read().records.map { record in
-            guard let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any] else {
-                throw CLIError("the record \(record.id) is not a JSON object")
-            }
-            return object
-        }
+    /// The Topic records in the state database, in id order, as the CLI wrote them.
+    func records() throws -> [TopicRecord] {
+        try TopicStore(paths: paths).read().records
     }
 
     /// The remembered Session of `record` in `sessionPath`.
-    func session(of record: [String: Any], in sessionPath: URL) -> [String: Any]? {
-        ((record["sessions"] as? [[String: Any]]) ?? []).first { real($0["repository_path"]) == real(sessionPath.path) }
+    func session(of record: TopicRecord, in sessionPath: URL) -> JSONValue? {
+        record.sessions.first { real($0["repository_path"]?.string) == real(sessionPath.path) }
     }
 
     /// The path with symlinks resolved, so `/tmp` and `/private/tmp` compare equal; nil when it is no path.
@@ -1894,8 +1886,8 @@ private final class TopicSandbox {
         return String(cString: resolved)
     }
 
-    func repositoryPaths(of record: [String: Any]) -> [String] {
-        ((record["sessions"] as? [[String: Any]]) ?? []).compactMap { $0["directory"] as? String }
+    func repositoryPaths(of record: TopicRecord) -> [String] {
+        record.sessions.compactMap { $0["directory"]?.string }
             .map { path in realpath(path, nil).map { real in defer { free(real) }; return String(cString: real) } ?? path }
     }
 
