@@ -78,3 +78,31 @@ public enum TabOpening: Equatable {
         }
     }
 }
+
+extension StoredBrowser {
+    /// The Tabs that the app shows for this Window when it next reads it: the stored Tabs, then each request
+    /// queued in `@muxify_open`, opened as the app opens it. `browser tabs` lists them while no app serves the
+    /// Window's tmux server (ADR 0084). A stored Tab has no page title and no id yet, so it gets an empty title
+    /// and an id from its position, the same for each read until the Tabs change.
+    public func agentTabs(opening requests: [String]) -> [BrowserAgentTab] {
+        var urls = tabURLs.map { $0 == "about:blank" ? "" : $0 }
+        var active = urls.isEmpty ? nil : min(max(activeTab, 0), urls.count - 1)
+        for request in requests {
+            guard let url = Omnibox.url(for: request)?.absoluteString else { continue }
+            switch TabOpening(url, tabURLs: urls, activeTab: active) {
+            case .activate(let index): active = index
+            case .load(let index): urls[index] = url
+            case .append:
+                urls.append(url)
+                active = urls.count - 1
+            }
+        }
+        return urls.enumerated().map { index, url in
+            BrowserAgentTab(id: Self.storedTabID(index), url: url, title: "", active: index == active)
+        }
+    }
+
+    private static func storedTabID(_ index: Int) -> UUID {
+        UUID(uuidString: String(format: "00000000-0000-0000-0000-%012X", index))!
+    }
+}

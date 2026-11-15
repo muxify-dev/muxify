@@ -188,6 +188,40 @@ final class CLIIntegrationTests: XCTestCase {
         XCTAssertEqual(try sandbox.tmux(["display-message", "-p", "-t", caller.rawValue, "#{session_name}"]), "main", "the caller Pane stays")
     }
 
+    // MARK: - Browser
+
+    /// With no app on the server, `browser tabs` lists the Tabs that the app shows when it starts: the stored
+    /// Tabs, then the queued opens. A queued page that a Tab already has selects that Tab, as in the app.
+    func testBrowserTabsWithoutTheAppListsTheStoredTabsAndTheQueuedOpens() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let pane = try sandbox.pane(of: "main")
+        let window = try sandbox.tmux(["display-message", "-p", "-t", pane.rawValue, "#{window_id}"])
+        _ = try sandbox.tmux(["set-option", "-w", "-t", window, "@muxify_tabs", "https://github.com/ about:blank"])
+        _ = try sandbox.tmux(["set-option", "-w", "-t", window, "@muxify_active_tab", "1"])
+        _ = try sandbox.tmux(["set-option", "-w", "-t", window, "@muxify_open",
+                              " example.com https://GitHub.com#readme https://example.com/"])
+        let expected = [
+            BrowserAgentTab(id: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!,
+                            url: "https://github.com/", title: "", active: false),
+            BrowserAgentTab(id: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                            url: "https://example.com", title: "", active: true),
+        ]
+
+        let noApp = try await run(cli, arguments: ["browser", "tabs", "--json"], environment: sandbox.cliEnvironment(pane: pane))
+        XCTAssertEqual(noApp.status, 0, noApp.output)
+        XCTAssertEqual(try JSONDecoder().decode([BrowserAgentTab].self, from: Data(noApp.output.utf8)), expected)
+
+        // An app that stopped without removing its socket option is no app either.
+        _ = try sandbox.tmux(["set-option", "-s", BrowserAgentChannel.option, sandbox.root.appendingPathComponent("gone.sock").path])
+        let stale = try await run(cli, arguments: ["browser", "tabs", "--window", window, "--json"],
+                                  environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(stale.status, 0, stale.output)
+        XCTAssertEqual(try JSONDecoder().decode([BrowserAgentTab].self, from: Data(stale.output.utf8)), expected)
+        XCTAssertEqual(try sandbox.tmux(["show-options", "-wqv", "-t", window, "@muxify_open"]),
+                       "example.com https://GitHub.com#readme https://example.com/", "a read leaves the queue for the app")
+    }
+
     // MARK: - Requests
 
     func testTopicNewTwiceWithOneRequestMakesOneTopicAndPrintsTheSameJSON() async throws {
