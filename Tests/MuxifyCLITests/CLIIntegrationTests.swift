@@ -41,12 +41,36 @@ class CLIIntegrationTestCase: XCTestCase {
         return String(id)
     }
 
+    /// The names of the live Sessions of the Topic, in its order, as topic show --json gives them.
+    fileprivate func topicSessions(_ id: String, sandbox: TopicSandbox) async throws -> [String] {
+        let shown = try await run(cli, arguments: ["topic", "show", "--topic", id, "--json"], environment: sandbox.cliEnvironment(pane: nil))
+        guard shown.status == 0 else { throw CLIError("topic show: \(shown.output)") }
+        let sessions = (try jsonLine(shown.stdout)["topic"] as? [String: Any])?["sessions"] as? [[String: Any]] ?? []
+        return sessions.compactMap { $0["name"] as? String }
+    }
+
+    /// The open Topics, in the order of the Sidebar, as topic list --json gives them.
+    fileprivate func topicList(sandbox: TopicSandbox) async throws -> [NSDictionary] {
+        let listed = try await run(cli, arguments: ["topic", "list", "--json"], environment: sandbox.cliEnvironment(pane: nil))
+        guard listed.status == 0 else { throw CLIError("topic list: \(listed.output)") }
+        return try XCTUnwrap(try jsonLine(listed.stdout)["topics"] as? [NSDictionary], listed.stdout)
+    }
+
+    /// Waits for what a program in a Pane does in its own time, such as a hook or the command of a new Window.
+    fileprivate func wait(_ message: String, seconds: TimeInterval = 10, until done: () throws -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(seconds)
+        while try !done() {
+            guard Date() < deadline else { return XCTFail(message) }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
     fileprivate func makeProcess(_ tool: URL, arguments: [String], output: Pipe, errors: Pipe,
-                                 environment: [String: String] = [:]) -> Process {
+                                 environment: [String: String] = [:], in directory: URL? = nil) -> Process {
         let process = Process()
         process.executableURL = tool
         process.arguments = arguments
-        process.currentDirectoryURL = tool.deletingLastPathComponent()
+        process.currentDirectoryURL = directory ?? tool.deletingLastPathComponent()
         var inherited = ProcessInfo.processInfo.environment
         inherited["PATH"] = "/usr/bin:/bin"
         inherited.removeValue(forKey: "TMUX")
@@ -57,10 +81,10 @@ class CLIIntegrationTestCase: XCTestCase {
         return process
     }
 
-    fileprivate func run(_ tool: URL, arguments: [String], environment: [String: String] = [:]) async throws -> CLIRun {
+    fileprivate func run(_ tool: URL, arguments: [String], environment: [String: String] = [:], in directory: URL? = nil) async throws -> CLIRun {
         let output = Pipe()
         let errors = Pipe()
-        let process = makeProcess(tool, arguments: arguments, output: output, errors: errors, environment: environment)
+        let process = makeProcess(tool, arguments: arguments, output: output, errors: errors, environment: environment, in: directory)
         try process.run()
         defer { stopIfRunning(process) }
         try await waitForExit(process)
@@ -88,8 +112,8 @@ class CLIIntegrationTestCase: XCTestCase {
     }
 }
 
-/// Topics: list, new, add-session and its Worktrees, settle, tag, forget-settled, the In Play verbs, the failures and
-/// --json.
+/// Topics: list, new, add-session and its Worktrees, settle, rename, reopen and start-fresh, forget, tag, forget-settled,
+/// pin, the In Play verbs, open, the failures and --json.
 final class CLITopicIntegrationTests: CLIIntegrationTestCase {
     /// One line per open Topic: its id, its label on one line, and its Tags.
     func testTopicListPrintsTheIdLabelAndTagsOfEachOpenTopicOnALine() async throws {
@@ -452,10 +476,148 @@ final class CLITopicIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(result.status, 0, result.output)
         XCTAssertEqual(result.stdout, #"{"topics":[{"id":""# + id + #"","label":"Ship","pinned":false,"tags":["backend"]}]}"# + "\n")
     }
+
+    func testTopicForgetForgetsALiveOrASettledTopicAndItsSession() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        for settled in [false, true] {
+            let id = try await newTopic("Forget", in: sandbox.game, sandbox: sandbox)
+            if settled {
+                let settle = try await run(cli, arguments: ["topic", "settle", "--topic", id], environment: environment)
+                XCTAssertEqual(settle.status, 0, settle.output)
+            }
+            let forgot = try await run(cli, arguments: ["topic", "forget", "--topic", id, "--json"], environment: environment)
+            XCTAssertEqual(forgot.status, 0, forgot.output)
+            XCTAssertEqual(try sandbox.records(), [], "settled: \(settled)")
+            XCTAssertFalse(try sandbox.sessions().contains("game/forget"), "settled: \(settled)")
+        }
+    }
+
+    func testTopicRenameThenSettleReopenAndStartFreshBringTheSessionBack() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let id = try await newTopic("Reopen", in: sandbox.game, sandbox: sandbox)
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let renamed = try await run(cli, arguments: ["topic", "rename", "Reopen renamed", "--topic", id], environment: environment)
+        XCTAssertEqual(renamed.status, 0, renamed.output)
+        XCTAssertEqual(renamed.stdout, id + "\n")
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only).title, "Reopen renamed")
+
+        for verb in ["reopen", "start-fresh"] {
+            let settled = try await run(cli, arguments: ["topic", "settle", "--kill-sessions", "--topic", id], environment: environment)
+            XCTAssertEqual(settled.status, 0, settled.output)
+            XCTAssertEqual(try sandbox.sessions(), ["main"], "Settle kept a Session")
+            let reopened = try await run(cli, arguments: ["topic", verb, "--topic", id], environment: environment)
+            XCTAssertEqual(reopened.status, 0, "\(verb): \(reopened.output)")
+            let sessions = try await topicSessions(id, sandbox: sandbox)
+            XCTAssertEqual(sessions.count, 1, "\(verb) made no Session")
+        }
+    }
+
+    func testTopicAddSessionJsonGivesTheIdsOfTheSessionWindowAndPaneThatItMade() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let made = try await run(cli, arguments: ["topic", "new", "Ids"], environment: environment)
+        let id = made.stdout.trimmingCharacters(in: .newlines)
+        let added = try await run(cli, arguments: ["topic", "add-session", sandbox.game.path, "--topic", id, "--json"], environment: environment)
+        XCTAssertEqual(added.status, 0, added.output)
+        let changed = try XCTUnwrap(try jsonLine(added.stdout)["changed"] as? [String: Any], added.stdout)
+        XCTAssertEqual(changed["session_name"] as? String, "game/ids")
+        let pane = try XCTUnwrap(changed["pane"] as? String, added.stdout)
+        XCTAssertEqual(try sandbox.tmux(["display-message", "-p", "-t", pane, "#{session_id} #{window_id} #{pane_id} #{@muxify_topic}"]),
+                       [changed["session"] as? String, changed["window"] as? String, pane, id].compactMap { $0 }.joined(separator: " "))
+    }
+
+    func testTopicPinPutsTheTopicFirstAndUnpinPutsItAtTheTopOfTheBench() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let config = try String(contentsOf: sandbox.config, encoding: .utf8)
+        try Data(config.replacingOccurrences(of: "topics:\n", with: "topics:\n  in_play: 1\n").utf8).write(to: sandbox.config)
+        let environment = sandbox.cliEnvironment(pane: nil)
+        // One place: the next Topics go to the Bench, each new one to its top.
+        var ids: [String] = []
+        for title in ["Pin in play", "Pin pinned", "Pin benched"] {
+            ids.append(try await run(cli, arguments: ["topic", "new", title], environment: environment).stdout.trimmingCharacters(in: .newlines))
+        }
+        let (inPlay, pinned, benched) = (ids[0], ids[1], ids[2])
+        let pin = try await run(cli, arguments: ["topic", "pin", "--topic", pinned], environment: environment)
+        XCTAssertEqual(pin.status, 0, pin.output)
+        let topics = try await topicList(sandbox: sandbox)
+        XCTAssertEqual(topics.compactMap { $0["id"] as? String }, [pinned, inPlay, benched])
+        XCTAssertEqual(topics.first?["pinned"] as? Bool, true)
+
+        let unpin = try await run(cli, arguments: ["topic", "unpin", "--topic", pinned], environment: environment)
+        XCTAssertEqual(unpin.status, 0, unpin.output)
+        let after = try await topicList(sandbox: sandbox)
+        XCTAssertFalse(after.contains { $0["pinned"] as? Bool == true }, "a Pin stays")
+        XCTAssertEqual(after.compactMap { $0["id"] as? String }, [inPlay, pinned, benched], "Unpin puts the Topic at the top of the Bench")
+    }
+
+    func testTopicMoveStepsTheCardAndFailsAtTheEndOrForASettledTopic() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        func new(_ title: String) async throws -> String {
+            try await run(cli, arguments: ["topic", "new", title], environment: environment).stdout.trimmingCharacters(in: .newlines)
+        }
+        func ids() async throws -> [String] { try await topicList(sandbox: sandbox).compactMap { $0["id"] as? String } }
+        // The Settled Topic is Settled before the others exist, so the Open Place that it leaves is not between them.
+        let settled = try await new("Move settled")
+        let settle = try await run(cli, arguments: ["topic", "settle", "--topic", settled], environment: environment)
+        XCTAssertEqual(settle.status, 0, settle.output)
+        let top = try await new("Move top"), moved = try await new("Move moved")
+        let chosen = try await run(cli, arguments: ["topic", "choose-in-play", "--topic", top, "--topic", moved], environment: environment)
+        XCTAssertEqual(chosen.status, 0, chosen.output)
+        let start = try await ids()
+        XCTAssertEqual(Array(start.prefix(2)), [top, moved])
+
+        let up = try await run(cli, arguments: ["topic", "move", "up", "--topic", moved], environment: environment)
+        XCTAssertEqual(up.status, 0, up.output)
+        let stepped = try await ids()
+        XCTAssertEqual(Array(stepped.prefix(2)), [moved, top], "the card did not step up")
+
+        let before = try await topicList(sandbox: sandbox)
+        for (topic, kind) in [(moved, "card_at_end"), (settled, "topic_unavailable")] {
+            let refused = try await run(cli, arguments: ["topic", "move", "up", "--topic", topic, "--json"], environment: environment)
+            XCTAssertEqual(refused.status, 1, refused.output)
+            XCTAssertEqual(try XCTUnwrap(try jsonLine(refused.stdout)["failed"] as? [String: Any], refused.stdout)["kind"] as? String, kind)
+        }
+        let after = try await topicList(sandbox: sandbox)
+        XCTAssertEqual(after, before, "a failed move changed the order")
+    }
+
+    /// The app is a fake `open` first on the PATH, which the CLI runs through `/usr/bin/env`, so this runs on Linux too.
+    func testTopicOpenHandsTheAppTheURLOfTheTopicAndFailsWithoutOne() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let fake = sandbox.root.appendingPathComponent("fake-open", isDirectory: true)
+        try FileManager.default.createDirectory(at: fake, withIntermediateDirectories: true)
+        let opened = fake.appendingPathComponent("opened")
+        try Data("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \(Tmux.shellQuote(opened.path))\n".utf8).write(to: fake.appendingPathComponent("open"))
+        XCTAssertEqual(chmod(fake.appendingPathComponent("open").path, 0o755), 0)
+        let path = ["PATH": fake.path + ":/usr/bin:/bin"]
+        let id = try await newTopic("Open view", in: sandbox.game, sandbox: sandbox)
+
+        for (arguments, caller) in [(["topic", "open"], try sandbox.pane(of: "game/open-view")), (["topic", "open", "--topic", "Open view"], nil)] {
+            let result = try await run(cli, arguments: arguments, environment: sandbox.cliEnvironment(pane: caller).merging(path) { $1 })
+            XCTAssertEqual(result.status, 0, "\(arguments): \(result.output)")
+            XCTAssertEqual(result.stdout, "", "\(arguments)")
+        }
+        let encoded = id.utf8.map { String(format: "%%%02x", $0) }.joined()
+        XCTAssertEqual(try String(contentsOf: opened, encoding: .utf8), String(repeating: "muxify://select?topic=\(encoded)\n", count: 2))
+
+        let missing = try await run(cli, arguments: ["topic", "open", "--topic", "No such topic"],
+                                    environment: sandbox.cliEnvironment(pane: nil).merging(path) { $1 })
+        XCTAssertNotEqual(missing.status, 0, missing.output)
+        XCTAssertNotEqual(missing.stderr, "")
+        XCTAssertEqual(try String(contentsOf: opened, encoding: .utf8).split(separator: "\n").count, 2, "a failed topic open opened a URL")
+    }
 }
 
-/// Windows and Sessions: window move, session list, the Sessions of one folder, and the git state of each Session of a
-/// Topic (topic status and diff).
+/// Windows and Sessions: window move, new, rename and kill, session new, rename, kill and move, remove-from-topic, session
+/// list, the Sessions of one folder, and the git state of each Session of a Topic (topic status and diff).
 final class CLIWindowAndSessionIntegrationTests: CLIIntegrationTestCase {
     func testRepeatedDirectorySessionsHaveIndependentNamesAndExactSelectors() async throws {
         let sandbox = try TopicSandbox()
@@ -666,6 +828,218 @@ final class CLIWindowAndSessionIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(result.stdout.split(separator: "\n").map { $0.split(separator: "\t").first.map(String.init) },
                        ["main", "game", "tools"])
     }
+
+    func testSessionRemoveFromTopicWithKillRemovesTheWorktreeThatTheTopicMadeAndKeepsTheBranch() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let server = try sandbox.makeBareRepository("server", worktrees: ["main"])
+        let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let added = try await run(cli, arguments: ["topic", "add-session", server.path + "/main", "--worktree", "--topic", id], environment: environment)
+        XCTAssertEqual(added.status, 0, added.output)
+        let worktree = sandbox.root.path + "/state/muxify/worktrees/server/ship"
+        XCTAssertTrue(FileManager.default.fileExists(atPath: worktree))
+
+        let removed = try await run(cli, arguments: ["session", "remove-from-topic", "--kill", "--remove-worktree", "--session", "server/main/ship"],
+                                    environment: environment)
+        XCTAssertEqual(removed.status, 0, removed.output)
+        XCTAssertEqual(try sandbox.sessions(), ["game/ship", "main"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: worktree), "the Worktree that the Topic made is still there")
+        XCTAssertEqual(try sandbox.git(["branch", "--list", "ship"], in: server.path), "ship", "the branch is gone")
+        let sessions = try await topicSessions(id, sandbox: sandbox)
+        XCTAssertEqual(sessions, ["game/ship"])
+
+        let again = try await run(cli, arguments: ["session", "remove-from-topic", "--kill", "--remove-worktree", "--session", "game/ship"],
+                                  environment: environment)
+        XCTAssertEqual(again.status, 1, again.output)
+        XCTAssertTrue(again.stderr.contains("no Worktree that Muxify made"), again.stderr)
+        XCTAssertEqual(try sandbox.sessions(), ["game/ship", "main"], "a failed request killed the Session")
+    }
+
+    func testSessionAndWindowRemoveFromTopicLeaveThemRunningInNoTopic() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let id = try await newTopic("Ship", in: sandbox.game, sandbox: sandbox)
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let added = try await run(cli, arguments: ["topic", "add-session", sandbox.tools.path, "--topic", id], environment: environment)
+        XCTAssertEqual(added.status, 0, added.output)
+
+        let session = try sandbox.tmux(["display-message", "-p", "-t", "=tools/ship:", "#{session_id}"])
+        let removed = try await run(cli, arguments: ["session", "remove-from-topic", "--session", "tools/ship"], environment: environment)
+        XCTAssertEqual(removed.status, 0, removed.output)
+        let sessions = try await topicSessions(id, sandbox: sandbox)
+        XCTAssertEqual(sessions, ["game/ship"])
+        XCTAssertTrue(try sandbox.tmux(["list-sessions", "-F", "#{session_id}"]).split(separator: "\n").contains(Substring(session)),
+                      "the removed Session stopped")
+        XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", session + ":", "@muxify_topic"]), "", "the Session is still in a Topic")
+
+        let window = try sandbox.tmux(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "=game/ship:"])
+        let intoTopic = try await run(cli, arguments: ["window", "remove-from-topic", "--window", window, "--session", "game/ship"],
+                                      environment: environment)
+        XCTAssertEqual(intoTopic.status, 1, "a Session in a Topic is no destination: \(intoTopic.output)")
+        XCTAssertTrue(intoTopic.stderr.contains("is in the Topic"), intoTopic.stderr)
+        let moved = try await run(cli, arguments: ["window", "remove-from-topic", "--window", window, "--new-session"], environment: environment)
+        XCTAssertEqual(moved.status, 0, moved.output)
+        XCTAssertNotEqual(try sandbox.tmux(["display-message", "-p", "-t", window, "#{session_name}"]), "game/ship", "the Window did not leave the Session")
+        XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", window, "@muxify_topic"]), "", "the Window is still in a Topic")
+    }
+
+    func testWindowNewInATopicGoesToItsOnlySessionAndFailsWithNoneOrSeveral() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let empty = try await run(cli, arguments: ["topic", "new", "Window empty"], environment: environment).stdout.trimmingCharacters(in: .newlines)
+        let none = try await run(cli, arguments: ["window", "new", "--topic", empty], environment: environment)
+        XCTAssertEqual(none.status, 1, none.output)
+        XCTAssertTrue(none.stderr.contains("muxify topic add-session <dir> --topic " + empty), none.stderr)
+
+        let id = try await newTopic("Window one", in: sandbox.game, sandbox: sandbox)
+        let marker = sandbox.root.appendingPathComponent("window-new-ran")
+        let made = try await run(cli, arguments: ["window", "new", "--topic", id, "--json", "--", "sh", "-c", "pwd > \(Tmux.shellQuote(marker.path)); sleep 600"],
+                                 environment: environment)
+        XCTAssertEqual(made.status, 0, made.output)
+        let window = try XCTUnwrap((try jsonLine(made.stdout)["changed"] as? [String: Any])?["window"] as? String, made.stdout)
+        XCTAssertEqual(try sandbox.tmux(["display-message", "-p", "-t", window, "#{session_name}"]), "game/window-one")
+        func ran() -> String { (try? String(contentsOf: marker, encoding: .utf8))?.trimmingCharacters(in: .newlines) ?? "" }
+        try await wait("the command did not run in the new Window") { !ran().isEmpty }
+        XCTAssertEqual(sandbox.real(ran()), sandbox.game.path)
+
+        let added = try await run(cli, arguments: ["topic", "add-session", sandbox.tools.path, "--topic", id], environment: environment)
+        XCTAssertEqual(added.status, 0, added.output)
+        let windows = try sandbox.tmux(["list-windows", "-a", "-F", "#{window_id}"])
+        let several = try await run(cli, arguments: ["window", "new", "--topic", id], environment: environment)
+        XCTAssertEqual(several.status, 1, several.output)
+        XCTAssertTrue(several.stderr.contains("Choose one with --session") && several.stderr.contains("tools/window-one ($"), several.stderr)
+        XCTAssertEqual(try sandbox.tmux(["list-windows", "-a", "-F", "#{window_id}"]), windows, "a failed window new made a Window")
+    }
+
+    func testSessionNewStartsANoTopicSessionAndATakenNameGetsPlusTwo() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        var names: [String] = []
+        for _ in 0..<2 {
+            let made = try await run(cli, arguments: ["session", "new", sandbox.tools.path, "--json"], environment: environment)
+            XCTAssertEqual(made.status, 0, made.output)
+            let changed = try XCTUnwrap(try jsonLine(made.stdout)["changed"] as? [String: Any], made.stdout)
+            names.append(try XCTUnwrap(changed["session_name"] as? String))
+            let session = try XCTUnwrap(changed["session"] as? String)
+            XCTAssertEqual(try sandbox.tmux(["show-options", "-qv", "-t", session + ":", "@muxify_topic"]), "", "the Session is in a Topic")
+        }
+        XCTAssertEqual(names, ["tools", "tools+2"])
+        let named = try await run(cli, arguments: ["session", "new", sandbox.tools.path, "--name", "tools-debug"], environment: environment)
+        XCTAssertEqual(named.status, 0, named.output)
+        XCTAssertEqual(try sandbox.tmux(["display-message", "-p", "-t", named.stdout.trimmingCharacters(in: .newlines), "#{session_name}"]), "tools-debug")
+    }
+
+    func testSessionAndWindowRenameKeepTheTopicSlug() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let id = try await newTopic("Rename tmux", in: sandbox.game, sandbox: sandbox)
+        let pane = try sandbox.pane(of: "game/rename-tmux")
+        let renamed = try await run(cli, arguments: ["session", "rename", "renamed"], environment: sandbox.cliEnvironment(pane: pane))
+        XCTAssertEqual(renamed.status, 0, renamed.output)
+        XCTAssertEqual(renamed.stdout, "renamed/rename-tmux\n")
+        XCTAssertEqual(try sandbox.tmux(["display-message", "-p", "-t", pane.rawValue, "#{session_name} #{@muxify_topic}"]), "renamed/rename-tmux " + id)
+        let window = try await run(cli, arguments: ["window", "rename", "logs", "--pane", pane.rawValue], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(window.status, 0, window.output)
+        XCTAssertEqual(try sandbox.tmux(["display-message", "-p", "-t", pane.rawValue, "#{window_id} #{window_name}"]),
+                       window.stdout.trimmingCharacters(in: .newlines) + " logs")
+    }
+
+    func testWindowKillAndSessionKillFromTheirOwnPaneAndTheLastSessionLeavesTheTopicEmpty() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let id = try await newTopic("Kill", in: sandbox.game, sandbox: sandbox)
+        // A Pane of the sandbox's server has the server's environment, which names no state folder or Config.
+        func inPane(_ arguments: [String]) -> String {
+            (["env", "XDG_STATE_HOME=" + sandbox.root.appendingPathComponent("state").path, "MUXIFY_CONFIG=" + sandbox.config.path, cli.path] + arguments)
+                .map(Tmux.shellQuote).joined(separator: " ")
+        }
+        let window = try sandbox.tmux(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "=game/kill:"])
+        let pane = try sandbox.tmux(["display-message", "-p", "-t", window, "#{pane_id}"])
+        try sandbox.tmux(["respawn-pane", "-k", "-t", pane, inPane(["window", "kill"])])
+        try await wait("window kill from its own Pane left the Window") {
+            !(try sandbox.tmux(["list-windows", "-a", "-F", "#{window_id}"]).split(separator: "\n").contains(Substring(window)))
+        }
+
+        // The kill closes the Pane that runs the CLI, so the record must be written before the kill.
+        try sandbox.tmux(["respawn-pane", "-k", "-t", try sandbox.pane(of: "game/kill").rawValue, inPane(["session", "kill"])])
+        try await wait("session kill from its own Pane left the Session") { try sandbox.sessions() == ["main"] }
+        let record = try XCTUnwrap(sandbox.records().only)
+        XCTAssertNil(record.settledAt, "the Topic is not open")
+        XCTAssertEqual(record.sessions, [], "the Topic is not Empty")
+
+        let other = try await newTopic("Kill json", in: sandbox.tools, sandbox: sandbox)
+        let killed = try await run(cli, arguments: ["session", "kill", "--session", "tools/kill-json", "--json"], environment: sandbox.cliEnvironment(pane: nil))
+        XCTAssertEqual(killed.status, 0, killed.output)
+        XCTAssertEqual((try jsonLine(killed.stdout)["changed"] as? [String: Any])?["topic_id"] as? String, other)
+        XCTAssertNotEqual(other, id)
+    }
+
+    func testSessionMoveStepsASessionAmongItsTopicsSessionsAndSortSessionsGivesBackTheCreationOrder() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let id = try await newTopic("Order", in: sandbox.game, sandbox: sandbox)
+        let added = try await run(cli, arguments: ["topic", "add-session", sandbox.tools.path, "--topic", id], environment: environment)
+        XCTAssertEqual(added.status, 0, added.output)
+        let other = try await run(cli, arguments: ["topic", "new", "Other"], environment: environment)
+        XCTAssertEqual(other.status, 0, other.output)
+        let cards = try await topicList(sandbox: sandbox)
+        let created = ["game/order", "tools/order"]
+        let start = try await topicSessions(id, sandbox: sandbox)
+        XCTAssertEqual(start, created)
+
+        let up = try await run(cli, arguments: ["session", "move", "up", "--session", created[1]], environment: environment)
+        XCTAssertEqual(up.status, 0, up.output)
+        let stepped = try await topicSessions(id, sandbox: sandbox)
+        XCTAssertEqual(stepped, Array(created.reversed()), "session move up did not step the Session")
+        let after = try await topicList(sandbox: sandbox)
+        XCTAssertEqual(after, cards, "session move moved a Topic card")
+        let atEnd = try await run(cli, arguments: ["session", "move", "up", "--session", created[1], "--json"], environment: environment)
+        XCTAssertEqual(atEnd.status, 1, atEnd.output)
+        XCTAssertEqual(try XCTUnwrap(try jsonLine(atEnd.stdout)["failed"] as? [String: Any], atEnd.stdout)["kind"] as? String, "session_at_end")
+        let unchanged = try await topicSessions(id, sandbox: sandbox)
+        XCTAssertEqual(unchanged, Array(created.reversed()), "a failed move changed the order")
+
+        let sorted = try await run(cli, arguments: ["topic", "sort-sessions"], environment: sandbox.cliEnvironment(pane: try sandbox.pane(of: created[0])))
+        XCTAssertEqual(sorted.status, 0, sorted.output)
+        XCTAssertEqual(sorted.stdout, id + "\n")
+        let back = try await topicSessions(id, sandbox: sandbox)
+        XCTAssertEqual(back, created, "topic sort-sessions did not give back the creation order")
+    }
+
+    func testWindowMoveBeforeAndAfterReordersTheWindowsOfASessionAndFailsForAnotherSessionsWindow() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        try sandbox.tmux(["new-session", "-d", "-s", "order", "-c", sandbox.root.path])
+        for _ in 0..<2 { try sandbox.tmux(["new-window", "-d", "-t", "=order:"]) }
+        func order() throws -> [String] { try sandbox.tmux(["list-windows", "-t", "=order", "-F", "#{window_id}"]).split(separator: "\n").map(String.init) }
+        func current() throws -> String { try sandbox.tmux(["display-message", "-p", "-t", "=order:", "#{window_id}"]) }
+        let windows = try order()
+        let (a, b, c) = (windows[0], windows[1], windows[2])
+        let shown = try current()
+
+        let pane = try XCTUnwrap(PaneID(rawValue: try sandbox.tmux(["display-message", "-p", "-t", c, "#{pane_id}"])))
+        let before = try await run(cli, arguments: ["window", "move", "--before", a], environment: sandbox.cliEnvironment(pane: pane))
+        XCTAssertEqual(before.status, 0, before.output)
+        XCTAssertEqual(before.stdout, c + "\n")
+        XCTAssertEqual(try order(), [c, a, b], "window move --before from the Window's own Pane")
+
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let after = try await run(cli, arguments: ["window", "move", "--after", b, "--window", c, "--json"], environment: environment)
+        XCTAssertEqual(after.status, 0, after.output)
+        XCTAssertEqual((try jsonLine(after.stdout)["changed"] as? [String: Any])?["window"] as? String, c)
+        XCTAssertEqual(try order(), [a, b, c], "window move --after --window")
+        XCTAssertEqual(try current(), shown, "the Session changed its current Window")
+
+        let other = try sandbox.tmux(["display-message", "-p", "-t", "=main:", "#{window_id}"])
+        let elsewhere = try await run(cli, arguments: ["window", "move", "--before", other, "--window", a, "--json"], environment: environment)
+        XCTAssertEqual(elsewhere.status, 1, elsewhere.output)
+        XCTAssertEqual(try XCTUnwrap(try jsonLine(elsewhere.stdout)["failed"] as? [String: Any], elsewhere.stdout)["kind"] as? String, "window_not_in_session")
+        XCTAssertEqual(try order(), [a, b, c], "a failed move changed the order")
+    }
 }
 
 /// topic exec: a command in the folder of each live Session of a Topic.
@@ -758,8 +1132,144 @@ final class CLITopicExecIntegrationTests: CLIIntegrationTestCase {
     }
 }
 
-/// Agents, and what topic show gives of a Topic's Sessions and Agents. The command line itself: the installed binary,
-/// --version, environment show, the Config and --request.
+/// Muxify Worktrees: worktree create, list and remove, run in a repository folder, and the Worktree of a Topic.
+final class CLIWorktreeIntegrationTests: CLIIntegrationTestCase {
+    /// A .worktree.json in the format of the user's script, with a comment and trailing commas.
+    private static let setup = """
+        // The user's script reads this file too.
+        {
+          "sync": {
+            "copyFiles": [".envrc", "missing.env",],
+            "symlinkDirs": ["shared"],
+          },
+          "hooks": {
+            "postCreate": ["echo \\"$MUXIFY_WORKTREE_NAME\\" > post-created.log"],
+            "preDelete": ["echo \\"$MUXIFY_WORKTREE_BRANCH\\" >> ../pre-deleted.log"],
+          },
+        }
+        """
+
+    /// A repository in `work/<name>` with an uncommitted .worktree.json and the local files that it copies and links,
+    /// all ignored.
+    private func makeRepository(_ name: String, setup: String?, sandbox: TopicSandbox) throws -> URL {
+        let folder = sandbox.root.appendingPathComponent("work/" + name, isDirectory: true)
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("shared"), withIntermediateDirectories: true)
+        try Data(".worktree.json\n.envrc\nshared\n*.log\n".utf8).write(to: folder.appendingPathComponent(".gitignore"))
+        for arguments in [["init", "-q", "-b", "main"], ["add", ".gitignore"], ["commit", "-q", "-m", "first"]] {
+            _ = try sandbox.git(arguments, in: folder.path)
+        }
+        if let setup { try Data(setup.utf8).write(to: folder.appendingPathComponent(".worktree.json")) }
+        try Data("export SECRET=1\n".utf8).write(to: folder.appendingPathComponent(".envrc"))
+        return folder
+    }
+
+    private func worktree(_ repository: String, _ name: String, sandbox: TopicSandbox) -> URL {
+        sandbox.root.appendingPathComponent("state/muxify/worktrees/\(repository)/\(name)", isDirectory: true)
+    }
+
+    /// The contents of the file, or "" while it is missing.
+    private func text(_ file: URL) -> String { (try? String(contentsOf: file, encoding: .utf8)) ?? "" }
+
+    func testWorktreeCreateSyncsRunsPostCreateAndMakesANoTopicSession() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let repository = try makeRepository("app", setup: Self.setup, sandbox: sandbox)
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let made = try await run(cli, arguments: ["worktree", "create", "fix-login", "--no-open", "--json"], environment: environment, in: repository)
+        XCTAssertEqual(made.status, 0, made.output)
+        let change = try XCTUnwrap(try jsonLine(made.stdout)["changed"] as? [String: Any], made.stdout)
+        let worktree = worktree("app", "fix-login", sandbox: sandbox)
+        XCTAssertEqual(change["session_name"] as? String, "app/fix-login")
+        XCTAssertTrue((change["output"] as? String)?.contains("skip copy (missing): missing.env") == true, "\(change)")
+        XCTAssertEqual(text(worktree.appendingPathComponent(".envrc")), "export SECRET=1\n", "the setup did not copy .envrc")
+        XCTAssertNotNil(try? FileManager.default.destinationOfSymbolicLink(atPath: worktree.appendingPathComponent("shared").path),
+                        "the setup did not link shared")
+        XCTAssertEqual(try sandbox.git(["symbolic-ref", "--short", "HEAD"], in: worktree.path), "fix-login")
+        try await wait("postCreate did not run in the new Session") { !text(worktree.appendingPathComponent("post-created.log")).isEmpty }
+        XCTAssertEqual(text(worktree.appendingPathComponent("post-created.log")), "fix-login\n")
+        XCTAssertEqual(try sandbox.topicOption(of: "app/fix-login"), "", "the Session has a Topic")
+        let record = try XCTUnwrap(sandbox.worktrees().only)
+        XCTAssertEqual(record.id, change["worktree_id"] as? String)
+        XCTAssertEqual(record.branch, "fix-login")
+        XCTAssertEqual(record.path, worktree.path)
+
+        let again = try await run(cli, arguments: ["worktree", "create", "fix-login", "--no-open"], environment: environment, in: repository)
+        XCTAssertNotEqual(again.status, 0, again.output)
+        XCTAssertTrue(again.stderr.contains("is already a Muxify Worktree"), again.stderr)
+    }
+
+    func testWorktreeListShowsOnlyTheMuxifyWorktreesOfTheRepository() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let repository = try makeRepository("app", setup: nil, sandbox: sandbox)
+        let other = try makeRepository("other", setup: nil, sandbox: sandbox)
+        _ = try sandbox.git(["worktree", "add", "-q", "-b", "by-hand", sandbox.root.appendingPathComponent("by-hand").path], in: repository.path)
+        let environment = sandbox.cliEnvironment(pane: nil)
+        for (folder, name) in [(repository, "listed"), (other, "elsewhere")] {
+            let made = try await run(cli, arguments: ["worktree", "create", name, "--no-open"], environment: environment, in: folder)
+            XCTAssertEqual(made.status, 0, made.output)
+        }
+        let listed = try await run(cli, arguments: ["worktree", "list"], environment: environment, in: repository)
+        XCTAssertEqual(listed.status, 0, listed.output)
+        let rows = listed.stdout.split(separator: "\n").map { $0.split(separator: "\t", omittingEmptySubsequences: false).map(String.init) }
+        XCTAssertEqual(rows.map { Array($0.prefix(3)) + [$0.count > 4 ? $0[4] : ""] }, [["listed", "listed", "clean", "app/listed"]], listed.stdout)
+        let every = try await run(cli, arguments: ["worktree", "list", "--all", "--json"], environment: environment, in: sandbox.root)
+        XCTAssertEqual(every.status, 0, every.output)
+        let names = Set(try XCTUnwrap(try jsonLine(every.stdout)["worktrees"] as? [[String: Any]], every.stdout).compactMap { $0["name"] as? String })
+        XCTAssertEqual(names, ["listed", "elsewhere"])
+    }
+
+    func testWorktreeRemoveNeedsKillForAUsedWorktreeRunsPreDeleteAndKeepsTheBranch() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let repository = try makeRepository("app", setup: Self.setup, sandbox: sandbox)
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let made = try await run(cli, arguments: ["worktree", "create", "remove-me", "--no-open"], environment: environment, in: repository)
+        XCTAssertEqual(made.status, 0, made.output)
+        let worktree = worktree("app", "remove-me", sandbox: sandbox)
+        try await wait("postCreate did not run") { !text(worktree.appendingPathComponent("post-created.log")).isEmpty }
+
+        let refused = try await run(cli, arguments: ["worktree", "remove", "remove-me"], environment: environment, in: repository)
+        XCTAssertNotEqual(refused.status, 0, refused.output)
+        XCTAssertTrue(refused.stderr.contains("app/remove-me"), refused.stderr)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: worktree.path), "a refused Remove removed the Worktree")
+
+        let removed = try await run(cli, arguments: ["worktree", "remove", "remove-me", "--kill"], environment: environment, in: repository)
+        XCTAssertEqual(removed.status, 0, removed.output)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: worktree.path), "Remove kept the Worktree")
+        XCTAssertEqual(text(worktree.deletingLastPathComponent().appendingPathComponent("pre-deleted.log")), "remove-me\n",
+                       "preDelete did not run in the Worktree")
+        XCTAssertEqual(try sandbox.sessions(), ["main"], "--kill kept the Session")
+        XCTAssertEqual(try sandbox.git(["branch", "--list", "remove-me"], in: repository.path), "remove-me", "Remove deleted the branch")
+        XCTAssertEqual(try sandbox.worktrees(), [], "Remove kept the record")
+    }
+
+    func testATopicsWorktreeGetsARecordAndRemoveMakesTheTopicForgetIt() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let repository = try makeRepository("app", setup: Self.setup, sandbox: sandbox)
+        let environment = sandbox.cliEnvironment(pane: nil)
+        let id = try await run(cli, arguments: ["topic", "new", "Worktree topic"], environment: environment).stdout.trimmingCharacters(in: .newlines)
+        let added = try await run(cli, arguments: ["topic", "add-session", repository.path, "--worktree", "--topic", id], environment: environment)
+        XCTAssertEqual(added.status, 0, added.output)
+        let worktree = worktree("app", "worktree-topic", sandbox: sandbox)
+        XCTAssertEqual(text(worktree.appendingPathComponent(".envrc")), "export SECRET=1\n", "the Topic Worktree did not get its sync")
+        try await wait("postCreate did not run in the Topic Session") { !text(worktree.appendingPathComponent("post-created.log")).isEmpty }
+        let record = try XCTUnwrap(sandbox.worktrees().only)
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only).sessions.compactMap { $0["worktree_id"]?.string }, [record.id])
+        let listed = try await run(cli, arguments: ["worktree", "list", "--json"], environment: environment, in: repository)
+        let shown = try XCTUnwrap(try jsonLine(listed.stdout)["worktrees"] as? [[String: Any]], listed.stdout).first { $0["id"] as? String == record.id }
+        XCTAssertEqual(shown?["topic"] as? String, "Worktree topic")
+
+        let removed = try await run(cli, arguments: ["worktree", "remove", "worktree-topic", "--kill"], environment: environment, in: repository)
+        XCTAssertEqual(removed.status, 0, removed.output)
+        XCTAssertEqual(try XCTUnwrap(sandbox.records().only).sessions.filter { $0["worktree_path"]?.string != nil }, [],
+                       "the Topic still remembers the removed Worktree")
+    }
+}
+
+/// Agents, their Unread marks, and what topic show gives of a Topic's Sessions and Agents. The command line itself: the
+/// installed binary, --version, environment show, the Config and --request.
 final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
     /// A copy of the binary with no resource bundle or app beside it, run from its folder and through a symlink, as an
     /// install leaves it. A test build has no stamp, and `--version` needs no tmux, no Config and no records file.
@@ -1061,6 +1571,51 @@ final class CLIAgentAndEnvironmentIntegrationTests: CLIIntegrationTestCase {
         XCTAssertEqual(result.status, 1, result.output)
         XCTAssertEqual(result.stdout, "")
         XCTAssertEqual(result.stderr, "muxify: No open Topic matches Nope.\n")
+    }
+
+    func testMarkReadVerbsChangeTheTopicAndEachAgentInTheirScopeAndMarkAllReadClearsBoth() async throws {
+        let sandbox = try TopicSandbox()
+        defer { sandbox.stop() }
+        let id = try await newTopic("Read", in: sandbox.game, sandbox: sandbox)
+        let done = try sandbox.fakeAgent(in: "game/read", status: "done", unread: false)
+        let working = try sandbox.fakeAgent(in: "game/read", status: "working", unread: false)
+        let other = try sandbox.fakeAgent(in: "main", status: "done", unread: false)
+        let environment = sandbox.cliEnvironment(pane: nil)
+        /// Unread of the Topic, then of the done and the working Agent in it, then of the Agent outside it.
+        func state() throws -> [Bool] {
+            try [XCTUnwrap(sandbox.records().only).isUnread] + [done, working, other].map {
+                try sandbox.tmux(["display-message", "-p", "-t", $0.rawValue, "#{@muxify_agent_unread}"]) == "1"
+            }
+        }
+        func readChanged(_ result: CLIRun) throws -> NSDictionary? { try jsonLine(result.stdout)["read_changed"] as? NSDictionary }
+
+        let marked = try await run(cli, arguments: ["topic", "mark-unread", "--topic", id, "--json"], environment: environment)
+        XCTAssertEqual(marked.status, 0, marked.output)
+        XCTAssertEqual(try readChanged(marked), ["topic_ids": [id], "pane_ids": [done.rawValue]] as NSDictionary)
+        XCTAssertEqual(try state(), [true, true, false, false], "Mark Unread changes the Topic and each Agent in it that is not working")
+
+        for changed in [[id], []] {
+            let only = try await run(cli, arguments: ["topic", "mark-read", "--topic-only", "--topic", id, "--json"], environment: environment)
+            XCTAssertEqual(only.status, 0, only.output)
+            XCTAssertEqual(try readChanged(only), ["topic_ids": changed, "pane_ids": [String]()] as NSDictionary)
+            XCTAssertEqual(try state(), [false, true, false, false], "--topic-only changed an Agent, or left the Topic Unread")
+        }
+        let again = try await run(cli, arguments: ["topic", "mark-unread", "--topic", id], environment: environment)
+        XCTAssertEqual(again.status, 0, again.output)
+
+        let read = try await run(cli, arguments: ["agent", "mark-read"], environment: sandbox.cliEnvironment(pane: done))
+        XCTAssertEqual(read.status, 0, read.output)
+        XCTAssertEqual(try state(), [true, false, false, false], "agent mark-read changes only the Agent of its Pane")
+
+        let window = try await run(cli, arguments: ["window", "mark-unread", "--pane", done.rawValue], environment: environment)
+        XCTAssertEqual(window.status, 0, window.output)
+        XCTAssertEqual(try state(), [true, true, false, false], "window mark-unread changes only the Agents of that Window")
+
+        let unread = try await run(cli, arguments: ["agent", "mark-unread"], environment: sandbox.cliEnvironment(pane: other))
+        XCTAssertEqual(unread.status, 0, unread.output)
+        let cleared = try await run(cli, arguments: ["mark-all-read", "--json"], environment: environment)
+        XCTAssertEqual(cleared.status, 0, cleared.output)
+        XCTAssertEqual(try state(), [false, false, false, false], "mark-all-read left an Unread")
     }
 
     func testATopicEditStopsWithTheConfigSyntaxError() async throws {
@@ -1491,6 +2046,11 @@ private final class TopicSandbox {
     /// The Topic records in the state database, in id order, as the CLI wrote them.
     func records() throws -> [TopicRecord] {
         try TopicStore(paths: paths).read().records
+    }
+
+    /// The Muxify Worktree records in the state database, oldest first.
+    func worktrees() throws -> [MuxifyWorktreeRecord] {
+        try MuxifyWorktreeStore(paths: paths).all()
     }
 
     /// The remembered Session of `record` in `sessionPath`.
