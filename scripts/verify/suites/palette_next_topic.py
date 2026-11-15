@@ -34,7 +34,7 @@ class PaletteNextTopic(unittest.TestCase):
         windows = {}
         for index, name in enumerate(names):
             self.store.put(dict(
-                id=name, title=name, slug=name, home_project=str(self.project),
+                id=name, title=name, slug=name,
                 created_at='2026-01-0%dT00:00:00Z' % (index + 1)))
             self.addCleanup(self.store.remove, name)
             sid = s.tmux('new-session', '-d', '-P', '-F', '#{session_id}', '-s', name,

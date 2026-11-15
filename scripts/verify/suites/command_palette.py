@@ -67,7 +67,7 @@ class CommandPalette(unittest.TestCase):
             self.s.tmux('set-option', '-t', sid, '@muxify_topic', topic)
         return sid
 
-    def write_topic(self, topic_id, title, home, **fields):
+    def write_topic(self, topic_id, title, **fields):
         """A Topic record, written as a script writes one. Reopen names the Session after the title's slug, so a title
         such as "Sw dormant" for id sw-dormant keeps the Session name predictable."""
         self.store.put(dict(id=topic_id, title=title, slug=topic_id, **fields))
@@ -170,7 +170,7 @@ class CommandPalette(unittest.TestCase):
         self.s.wait_rows(lambda rs: not self.s.has('palette-search', rs), 'a second Escape did not close the palette')
 
     def test_return_on_a_dormant_topic_reopens_it_and_goes_there(self):
-        self.write_topic('sw-dormant', 'Sw dormant', self.beta,
+        self.write_topic('sw-dormant', 'Sw dormant',
                          sessions=[remembered_session(self.beta, 'sw-dormant', windows=[dict(directory=str(self.beta), name='shell')])])
         rs = self.open_palette()
         key = 'palette-row-topic-sw-dormant'
@@ -183,7 +183,7 @@ class CommandPalette(unittest.TestCase):
         self.assertFalse(self.s.has('reopen-choice-reopen'), '↩ on a Dormant row showed the Reopen choice')
 
     def test_typing_sett_finds_a_settled_topic_by_its_title_and_return_shows_its_reopen_choice(self):
-        self.write_topic('sw-settled', 'Sw settled', self.alpha, settled_at='2031-01-01T10:00:00Z',
+        self.write_topic('sw-settled', 'Sw settled', settled_at='2031-01-01T10:00:00Z',
                          sessions=[remembered_session(self.alpha, 'sw-settled', windows=[dict(directory=str(self.alpha), name='shell')])])
         key = 'palette-row-topic-sw-settled'
         self.open_palette()
@@ -275,7 +275,7 @@ class CommandPalette(unittest.TestCase):
 
     def test_move_into_a_topic_with_a_session_in_the_same_folder_joins_it_under_the_sessions_own_name(self):
         """ADR 0047: a Topic groups Sessions, so a Session in the same folder as a member does not block the move."""
-        self.write_topic('sw-occupied', 'Sw occupied', self.beta)
+        self.write_topic('sw-occupied', 'Sw occupied')
         self.new_session('beta/sw-occupied', self.beta, topic='sw-occupied')
         sid = self.new_session('sw-move-joins', self.beta)
         self.select_window(self.window_of(sid))
@@ -328,7 +328,7 @@ class CommandPalette(unittest.TestCase):
         outside.mkdir(exist_ok=True)
         cards = lambda rs: [key for key in s.ids(rs) if key.startswith('no-topic') and not key.endswith('-more')]
         for topic_id, title, fields in [('sw-slot-open', 'Sw slot open', {}), ('sw-slot-settled', 'Sw slot settled', dict(settled_at='2031-01-01T10:00:00Z'))]:
-            self.write_topic(topic_id, title, self.beta, **fields)
+            self.write_topic(topic_id, title, **fields)
             self.addCleanup(self.store.remove, topic_id)
         topic_sid = self.new_session('beta/sw-slot-open', self.beta, topic='sw-slot-open')
         topic_window = self.window_of(topic_sid)
@@ -361,7 +361,7 @@ class CommandPalette(unittest.TestCase):
 
     def test_add_session_names_the_selected_windows_topic_and_moves_a_running_session_into_it(self):
         sid = self.new_session('sw-add-candidate', self.alpha)
-        self.write_topic('sw-add-running', 'Sw add running', self.beta)
+        self.write_topic('sw-add-running', 'Sw add running')
         self.addCleanup(self.store.remove, 'sw-add-running')
         self.select_window(self.window_of(self.new_session('beta/sw-add-running', self.beta, topic='sw-add-running')))
         # The menu follows the selected Window about a second later; a press that lands earlier does nothing.
@@ -379,7 +379,7 @@ class CommandPalette(unittest.TestCase):
     def test_visit_order_survives_an_app_restart(self):
         windows = {}
         for name in ['sw-first', 'sw-second']:
-            self.write_topic(name, 'Sw ' + name[3:], self.beta)
+            self.write_topic(name, 'Sw ' + name[3:])
             windows[name] = self.window_of(self.new_session('beta/' + name, self.beta, topic=name))
         self.select_window(windows['sw-first'])
         self.select_window(windows['sw-second'])
