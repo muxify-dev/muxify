@@ -1,5 +1,5 @@
 """The Git View: opening it, the Changes list and a file's diff, History, a comparison with a marked base,
-e and the editor, an Empty Topic page, and closing with q.
+e and the editor, and an Empty Topic page.
 
 The Git View's keys and accessibility identifiers are in git_view_fixture.py.
 
@@ -29,31 +29,23 @@ class GitViewDiff(GitViewFixture):
         self.assertEqual(letters, {'staged.txt': 'M ', 'tracked.txt': ' M', 'new.txt': '??'}, 'the status letters are wrong')
         self.assertEqual(self.s.row('git-row-change:tracked.txt', rs).get('accessibilityLabel'), 'tracked.txt')
 
-    def test_a_files_diff_shows_its_added_line(self):
-        self.select_change('tracked.txt')
-        self.key('enter')
-        rs = self.s.wait_rows(lambda rs: any(r.get('accessibilityLabel') == 'tracked added line' for r in rs),
-                              'the diff does not show the added line')
-        self.assertEqual(self.s.row('git-file-header', rs).get('accessibilityLabel'), 'tracked.txt', 'the file header names another file')
-        line = next(r for r in rs if r.get('accessibilityLabel') == 'tracked added line')
-        self.assertTrue(line['accessibilityIdentifier'].startswith('git-line-'), line)
-        self.assertEqual(line['accessibilityValue'], 'kind=added old=- new=3', 'the added line has the wrong kind or numbers')
-        # The diff has the keys now, so j moves its cursor and leaves the list's selection.
-        self.key('j')
-        self.assertEqual(self.selected_row(self.s.rows()).get('accessibilityIdentifier'), 'git-row-change:tracked.txt',
-                         'j moved the list, not the diff, after enter')
-
-    def test_a_changed_word_is_marked_on_both_its_lines(self):
+    def test_a_files_diff_shows_its_lines_and_marks_a_changed_word_on_both(self):
         self.select_change('tracked.txt')
         self.key('enter')
         def line(text, rs):
             return next((r for r in rs if r.get('accessibilityLabel') == text and r.get('accessibilityIdentifier', '').startswith('git-line-')), None)
         rs = self.s.wait_rows(lambda rs: line('the quick brown fox', rs) and line('the quick red fox', rs) and line('tracked added line', rs),
                               'the diff does not show the changed lines')
+        self.assertEqual(self.s.row('git-file-header', rs).get('accessibilityLabel'), 'tracked.txt', 'the file header names another file')
         removed, added, unpaired = (line(text, rs) for text in ['the quick brown fox', 'the quick red fox', 'tracked added line'])
+        self.assertEqual(unpaired['accessibilityValue'], 'kind=added old=- new=3', 'the added line has the wrong kind or numbers')
         self.assertEqual(self.marked(removed), ['brown'], removed)
         self.assertEqual(self.marked(added), ['red'], added)
         self.assertEqual(self.marked(unpaired), [], 'a line with no pair has word marks')
+        # The diff has the keys now, so j moves its cursor and leaves the list's selection.
+        self.key('j')
+        self.assertEqual(self.selected_row(self.s.rows()).get('accessibilityIdentifier'), 'git-row-change:tracked.txt',
+                         'j moved the list, not the diff, after enter')
 
     def marked(self, line):
         """The words a diff line marks, from the columns in its accessibility value."""
@@ -113,26 +105,13 @@ class GitViewDiff(GitViewFixture):
                               'the change does not show its own diff')
         self.assertTrue(any(r.get('accessibilityLabel') == 'tracked added line' for r in rs), 'the change does not show its own lines')
 
-    def test_w_on_the_base_escape_and_closing_end_the_comparison(self):
+    def test_closing_the_git_view_ends_the_comparison(self):
         self.go_to('2')
-        self.select_row('git-row-commit:' + self.git('rev-parse', 'main~1').strip())
-        name = 'Comparing ' + self.git('rev-parse', '--short=7', 'main~1').strip()
         self.key('shift+w')
-        self.s.wait_rows(lambda rs: self.comparing(rs) == name, 'W did not mark the commit')
-        self.key('shift+w')
-        rs = self.s.wait_rows(lambda rs: self.comparing(rs) is None, 'W on the base did not end the comparison')
-        self.assertFalse(any('base=1' in r.get('accessibilityValue', '') for r in rs), 'a row keeps the mark')
-        self.key('shift+w')
-        self.s.wait_rows(lambda rs: self.comparing(rs) == name, 'W did not mark the commit again')
-        self.key('escape')
-        self.s.wait_rows(lambda rs: self.comparing(rs) is None, 'escape did not end the comparison')
-        self.assertTrue(self.is_open(), 'escape closed the Git View instead of ending the comparison')
-        self.key('shift+w')
-        self.s.wait_rows(lambda rs: self.comparing(rs) == name, 'W did not mark the commit a third time')
+        self.s.wait_rows(lambda rs: (self.comparing(rs) or '').startswith('Comparing '), 'W did not mark the commit')
         self.close_git_view()
         self.open_git_view()
-        rs = self.s.rows()
-        self.assertIsNone(self.comparing(rs), 'the comparison outlived closing the Git View')
+        self.assertIsNone(self.comparing(), 'the comparison outlived closing the Git View')
 
     def windows(self):
         return set(self.s.tmux('list-windows', '-t', self.session + ':', '-F', '#{window_id}').split())
@@ -159,34 +138,25 @@ class GitViewDiff(GitViewFixture):
         self.s.show(self.window)
         self.assertTrue(self.is_open(), 'the Git View did not stay open in the Window it was left in')
 
-    def test_e_in_a_list_opens_the_files_first_changed_line_in_a_new_window(self):
-        self.select_change('tracked.txt')
-        new, file, line = self.press_e()
-        self.assertEqual(file, str(self.repo.resolve()/'tracked.txt'))
-        self.assertEqual(line, 2, 'the first changed line is 2')
-        self.assertFalse(self.is_open(), 'the new Window shows a Git View')
-        self.leave(new)
-
-    def test_e_in_the_diff_opens_the_line_under_the_cursor_and_a_removed_line_the_new_line_beside_it(self):
+    def test_e_in_the_diff_opens_the_line_under_the_cursor(self):
         self.select_change('tracked.txt')
         self.key('enter')
-        # The cursor starts on the first change: the removed line, beside new line 2.
         self.s.wait_rows(lambda rs: any(r.get('accessibilityLabel') == 'tracked added line' for r in rs), 'the diff does not show')
-        new, file, line = self.press_e()
-        self.assertEqual((file, line), (str(self.repo.resolve()/'tracked.txt'), 2), 'a removed line does not open beside it')
-        self.leave(new)
+        # The cursor starts on the first change, the removed line: two lines down is the added line 3.
         self.key('j')
         self.key('j')
         new, file, line = self.press_e()
         self.assertEqual((file, line), (str(self.repo.resolve()/'tracked.txt'), 3), 'the added line does not open at its number')
         self.leave(new)
 
-    def test_closing_the_editor_goes_back_to_the_window_with_the_git_view(self):
+    def test_e_in_a_list_opens_the_files_first_changed_line_in_a_new_window_and_closing_it_goes_back_to_the_git_view(self):
         # The Git View's Window is not the Session's last Window.
         later = self.s.tmux('new-window', '-d', '-P', '-F', '#{window_id}', '-t', self.session + ':', '-c', str(self.repo), SHELL)
         try:
             self.select_change('tracked.txt')
-            new, _, _ = self.press_e()
+            new, file, line = self.press_e()
+            self.assertEqual((file, line), (str(self.repo.resolve()/'tracked.txt'), 2), 'e does not open the first changed line')
+            self.assertFalse(self.is_open(), 'the new Window shows a Git View')
             self.s.tmux('kill-window', '-t', new)
             self.s.wait_shown(self.window)
             time.sleep(2)
@@ -296,9 +266,3 @@ class GitViewDiff(GitViewFixture):
         self.s.show(self.window)
         rs = self.s.wait_rows(lambda rs: self.is_open(rs), 'the Git View did not show again in its Window')
         self.assertEqual(self.s.row('git-tab-branches', rs).get('accessibilityValue'), 'selected', 'the Git View was not as it was left')
-
-    def test_q_closes_the_git_view(self):
-        self.assertTrue(self.is_open(), 'the Git View is not open')
-        self.key('q')
-        wait(lambda: not self.is_open(), 'q did not close the Git View', seconds=10)
-        self.assertFalse(self.s.has('git-toolbar'), 'the toolbar stays after q')

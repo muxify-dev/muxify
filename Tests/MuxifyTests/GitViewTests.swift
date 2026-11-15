@@ -892,6 +892,13 @@ final class GitScriptTests: XCTestCase {
         XCTAssertEqual(snapshot.stashes.first?.ref, "stash@{0}")
     }
 
+    func testASnapshotOfADetachedHeadReadsAsDetachedAtItsShortCommit() throws {
+        try run("cd \"$1\" && git checkout -q --detach", repository)
+        let snapshot = try GitReads.parseSnapshot(run(GitReads.snapshotScript, repository)).get()
+        XCTAssertTrue(snapshot.isDetached)
+        XCTAssertEqual(snapshot.head, try git("rev-parse --short HEAD").trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
     func testALinkedWorktreeIsNamedAfterItsFolderAndComparedWithMain() throws {
         let linked = directory.url.appendingPathComponent("linked").path
         let snapshot = try GitReads.parseSnapshot(run(GitReads.snapshotScript, linked)).get()

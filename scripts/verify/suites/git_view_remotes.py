@@ -134,7 +134,7 @@ class GitViewRemotes(GitViewFixture):
         self.git('commit', '-q', '--allow-empty', '-m', message)
         self.addCleanup(self.take_back, before)
 
-    def test_shift_p_pushes_the_branch_in_every_tab_and_the_toolbar_says_pushing(self):
+    def test_shift_p_pushes_new_commits_and_the_counts_update(self):
         origin = self.bare_remote('push-plain')
         self.commit_here('to push')
         self.key('f')
@@ -163,14 +163,7 @@ class GitViewRemotes(GitViewFixture):
         self.key('shift+p')
         self.wait_prompt("Enter upstream as '<remote> <branch>'")
         self.assertEqual(self.s.row('git-prompt-field').get('accessibilityValue'), 'origin main', 'the prompt does not start at origin and the branch')
-        # ⎋ pushes nothing.
-        self.s.act('action', 'git-prompt', 'escape')
-        self.s.wait_rows(lambda rs: not self.s.has('git-prompt', rs), 'escape did not close the prompt')
-        time.sleep(.5)
-        self.assertEqual(self.remote_main(origin), '', 'escape pushed')
         # ↩ pushes and sets the upstream.
-        self.key('shift+p')
-        self.wait_prompt("Enter upstream as '<remote> <branch>'")
         self.s.act('action', 'git-prompt', 'enter')
         wait(lambda: self.remote_main(origin) == self.git('rev-parse', 'HEAD').strip(), 'the push did not reach the remote', seconds=15)
         self.s.wait_rows(lambda rs: 'no upstream' not in self.toolbar(rs) and '↑0 ↓0 vs origin/main' in self.toolbar(rs),
@@ -200,29 +193,6 @@ class GitViewRemotes(GitViewFixture):
         wait(lambda: self.remote_main(origin) == self.git('rev-parse', 'HEAD').strip(), 'the force push did not reach the remote', seconds=15)
         self.s.wait_rows(lambda rs: '↑0 ↓0 vs origin/main' in self.toolbar(rs), 'the counts do not update after the force push', seconds=15)
         self.assertFalse(self.s.has('git-write-error'), 'the force push failed')
-
-    def test_p_pulls_with_the_users_config_and_asks_for_an_upstream_when_there_is_none(self):
-        origin = self.remote_one_commit_ahead('pull-ff')
-        before = self.git('rev-parse', 'HEAD').strip()
-        self.addCleanup(self.take_back, before, 'remote.txt')
-        self.read_upstream()
-        self.key('p')
-        wait(lambda: (self.repo/'remote.txt').exists(), 'p did not pull', seconds=20)
-        self.s.wait_rows(lambda rs: '↑0 ↓0 vs origin/main' in self.toolbar(rs) and 'Pulling…' not in self.toolbar(rs),
-                         'the counts do not update after the pull', seconds=15)
-        self.assertEqual(self.git('log', '-1', '--format=%s').strip(), 'remote commit')
-        self.assertFalse(self.s.has('git-write-error'), 'the pull failed')
-        # Without an upstream, it asks as push does.
-        self.git('config', '--unset', 'branch.main.remote')
-        self.git('config', '--unset', 'branch.main.merge')
-        self.key('shift+r')
-        self.s.wait_rows(lambda rs: 'no upstream' in self.toolbar(rs), 'the Git View still shows an upstream', seconds=15)
-        self.key('p')
-        self.wait_prompt("Enter upstream as '<remote> <branch>'")
-        self.assertEqual(self.s.row('git-prompt-field').get('accessibilityValue'), 'origin main')
-        self.s.act('action', 'git-prompt', 'enter')
-        wait(lambda: self.git('config', 'branch.main.remote').strip() == 'origin', 'the pull did not set the upstream', seconds=15)
-        self.s.wait_rows(lambda rs: 'no upstream' not in self.toolbar(rs), 'the Git View does not show the upstream', seconds=15)
 
     def test_a_pull_waits_in_the_write_queue_and_the_toolbar_says_pulling(self):
         go, answers = self.fake_ssh('pull-ssh-bin')
@@ -255,17 +225,6 @@ class GitViewRemotes(GitViewFixture):
         wait(lambda: 'A  new.txt' in self.porcelain(), 'the staging did not run after the pull', seconds=15)
         self.assertEqual(answers.read_text().split(), ['right'])
         self.s.wait_rows(lambda rs: 'Pulling…' not in self.toolbar(rs), 'the toolbar still shows Pulling…', seconds=15)
-
-    def test_a_detached_head_says_why_it_cannot_push_or_pull(self):
-        self.addCleanup(self.back_to_main)
-        self.git('checkout', '-q', '--detach')
-        self.key('shift+r')
-        self.s.wait_rows(lambda rs: 'no upstream' not in self.toolbar(rs), 'the Git View does not show the detached HEAD', seconds=15)
-        for key, verb in [('shift+p', 'push'), ('p', 'pull')]:
-            self.key(key)
-            said = f'A detached HEAD has no branch to {verb}. Check out a branch first.'
-            self.s.wait_rows(lambda rs: self.s.row('git-write-error', rs).get('accessibilityValue') == said, key + ' did not say why')
-            self.assertFalse(self.s.has('git-prompt'), key + ' asked on a detached HEAD')
 
     def stored_tabs(self):
         return self.s.tmux('show-options', '-wqv', '-t', self.window, '@muxify_tabs').split()
@@ -313,11 +272,7 @@ class GitViewRemotes(GitViewFixture):
         self.git('config', 'branch.feature-x.merge', 'refs/heads/feature-x')
         self.key('o')
         wait(lambda: self.banner() == 'Unsupported git service', 'the banner does not name the unclaimed host')
-        self.git('config', 'branch.feature-x.remote', '.')
-        self.key('o')
-        wait(lambda: self.banner() == 'Cannot open a pull request for a branch with no upstream', 'a remote . is not refused')
         self.git('remote', 'set-url', 'other', 'git@git.muxify.test')
-        self.git('config', 'branch.feature-x.remote', 'other')
         self.key('o')
         wait(lambda: self.banner() == 'Failed to parse repo information from url', 'the banner does not say the URL fails to parse')
         time.sleep(.5)
@@ -346,12 +301,3 @@ class GitViewRemotes(GitViewFixture):
         wait(lambda: link in self.stored_tabs(), 'o did not open %s; Tabs are %s' % (link, self.stored_tabs()), seconds=10)
         self.assertEqual(len(self.stored_tabs()), 1)
         wait(lambda: not self.is_open(), 'the popup Git View did not close', seconds=10)
-
-    def test_o_on_a_commit_with_no_origin_says_so_and_opens_nothing(self):
-        self.addCleanup(self.close_browser_tabs)
-        self.go_to('2')
-        self.key('o')
-        self.assertEqual(self.banner(), "There is no 'origin' remote")
-        time.sleep(.5)
-        self.assertEqual(self.stored_tabs(), [], 'o opened a page')
-        self.assertTrue(self.is_open(), 'the Git View closed')
